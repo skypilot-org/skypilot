@@ -61,7 +61,7 @@ class SpotController:
 
     def _run(self):
         """Busy loop monitoring spot cluster status and handling recovery.
-        
+
         Raises:
             exceptions.ResourcesUnavailableError: if the spot cluster fails
                 to be launched or the job fails to be submitted to the cluster.
@@ -201,8 +201,9 @@ class SpotController:
                 failover_err = e.failover_history[0]
                 # Only show the first failover error, as it would be too verbose
                 # to show all the failover errors, and it is likely that the
-                # first failover error is similar to the others, e.g. the cluster
-                # name is invalid or cloud user identity is invalid, etc.
+                # first failover error is similar to the others, e.g. the
+                # cluster name is invalid or cloud user identity is invalid,
+                # etc.
                 spot_state.set_failed(
                     self._job_id,
                     failure_type=spot_state.SpotStatus.FAILED_OTHER_REASON,
