@@ -131,8 +131,9 @@ class StrategyExecutor:
 
     def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
         """Wait until the job starts on the cluster.
-        
-        Returns: The timestamp job submitted, or None if failed.
+
+        Returns:
+            The timestamp job submitted, or None if failed.
         """
         status = None
         job_checking_retry_cnt = 0
@@ -232,10 +233,12 @@ class StrategyExecutor:
                 if not any(
                         isinstance(err, exceptions.ResourcesUnavailableError)
                         for err in e.failover_history):
-                    # _launch() (this function) should fail/exit directly, if none of the
-                    # failover reasons were because of resource unavailability.
-                    # Failing directly avoids the infinite loop of retrying the launch when, e.g.,
-                    # an invalid cluster name is used and --retry-until-up is specified.
+                    # _launch() (this function) should fail/exit directly, if
+                    # none of the failover reasons were because of resource
+                    # unavailability.
+                    # Failing directly avoids the infinite loop of retrying
+                    # the launch when, e.g., an invalid cluster name is used
+                    # and --retry-until-up is specified.
 
                     if raise_on_failure:
                         raise
