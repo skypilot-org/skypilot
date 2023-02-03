@@ -200,7 +200,7 @@ Here are some commands for managed spot jobs. Check :code:`sky spot --help` for 
     $ sky spot cancel -n bert-qa
 
 .. note::
-  If any failure happens for the spot job, you can check :code:`sky spot queue -a` for the brief reason
+  If any failure happens for a spot job, you can check :code:`sky spot queue -a` for the brief reason
   of the failure. For more details, it would be helpful to check :code:`sky spot logs --controller <job_id>`.
 
 
