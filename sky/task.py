@@ -448,6 +448,7 @@ class Task:
         """
         if isinstance(resources, sky.Resources):
             resources = {resources}
+        # TODO(woosuk): Check if the resources are None.
         self.resources = resources
         return self
 
