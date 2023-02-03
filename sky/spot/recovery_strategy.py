@@ -130,6 +130,10 @@ class StrategyExecutor:
                         f'\n  Detailed exception: {e}')
 
     def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
+        """Wait until the job starts on the cluster.
+        
+        Returns: The timestamp job submitted, or None if failed.
+        """
         status = None
         job_checking_retry_cnt = 0
         while job_checking_retry_cnt < MAX_JOB_CHECKING_RETRY:
@@ -203,7 +207,8 @@ class StrategyExecutor:
             and raise_on_failure is False.
 
         Raises:
-            exceptions.ResourceUnavailableError: If the launch fails.
+            exceptions.ResourcesUnavailableError: If the launch fails and
+                `raise_on_failure` is True.
         """
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
@@ -225,14 +230,13 @@ class StrategyExecutor:
                 # This is raised when the launch fails after failing over
                 # through all the candidates.
                 if not any(
-                        isinstance(err, exceptions.SpotResourceUnavailableError)
+                        isinstance(err, exceptions.ResourcesUnavailableError)
                         for err in e.failover_history):
-                    # The _launch should fail directly, if the none of the
-                    # failover candidates fails because of resource
-                    # unavailability.
-                    # That avoids the infinite loop of retrying the launch when
-                    # the invalid cluster name is used and --retry-until-up is
-                    # specified.
+                    # _launch() (this function) should fail/exit directly, if none of the
+                    # failover reasons were because of resource unavailability.
+                    # Failing directly avoids the infinite loop of retrying the launch when, e.g.,
+                    # an invalid cluster name is used and --retry-until-up is specified.
+
                     if raise_on_failure:
                         raise
                     return None
@@ -247,7 +251,7 @@ class StrategyExecutor:
                 import traceback  # pylint: disable=import-outside-toplevel
                 logger.info(f'  Traceback: {traceback.format_exc()}')
                 exception = e
-            else:
+            else:  # No exception, the launch succeeds.
                 # At this point, a sky.launch() has succeeded. Cluster may be
                 # UP (no preemption since) or DOWN (newly preempted).
                 job_submitted_at = self._wait_until_job_starts_on_cluster()
@@ -256,8 +260,10 @@ class StrategyExecutor:
                 # The job fails to start on the spot cluster, retry the launch.
                 # TODO(zhwu): log the unexpected error to usage collection
                 # for future debugging.
-                logger.info('Failed to get the job status, due to unexpected '
-                            'job submission error.')
+                logger.info(
+                    'Failed to successfully submit the job to the '
+                    'launched cluster, due to unexpected submission errors or '
+                    'the cluster being preempted during job submission.')
 
             self.terminate_cluster()
             if max_retry is not None and retry_cnt >= max_retry:

@@ -103,7 +103,7 @@ class Optimizer:
             quiet: whether to suppress logging.
 
         Raises:
-            exceptions.ResourceUnavailableError: if no resources are available
+            exceptions.ResourcesUnavailableError: if no resources are available
                 for a task.
         """
         # This function is effectful: mutates every node in 'dag' by setting

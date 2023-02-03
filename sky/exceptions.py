@@ -20,10 +20,12 @@ class ResourcesUnavailableError(Exception):
         # Mapping from exception type to reason for failover.
         if failover_history is None:
             failover_history = []
-        self.failover_history: List[Exception] = failover_history
+        # Copy the list to avoid modifying from outside.
+        self.failover_history: List[Exception] = list(failover_history)
 
     def with_failover_history(self, failover_history: List[Exception]) -> None:
-        self.failover_history = failover_history
+        # Copy the list to avoid modifying from outside.
+        self.failover_history = list(failover_history)
         return self
 
 

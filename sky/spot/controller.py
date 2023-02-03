@@ -139,15 +139,15 @@ class SpotController:
                                             None,
                                             spot_job_id=self._job_id)
                     logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
-                    status_to_set = spot_state.SpotStatus.FAILED
+                    spot_status_to_set = spot_state.SpotStatus.FAILED
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
-                        status_to_set = spot_state.SpotStatus.FAILED_SETUP
+                        spot_status_to_set = spot_state.SpotStatus.FAILED_SETUP
                     failure_reason = (
                         'To see the details, run: '
                         f'sky spot logs --controller {self._job_id}')
 
                     spot_state.set_failed(self._job_id,
-                                          failure_type=status_to_set,
+                                          failure_type=spot_status_to_set,
                                           failure_reason=failure_reason,
                                           end_time=end_time)
                     break
@@ -188,15 +188,15 @@ class SpotController:
             # The exception will be caught when:
             # 1. The strategy_executor fails to launch/recover the cluster
             #    after the max number of retries when retry_until_up is not set.
-            # 2. None the failovers are caused by resource unavailability, i.e.
-            #    the job is configured incorrectly, e.g.,
-            #    InvalidClusterNameError, NotSupportedError,
+            # 2. None of the failovers are caused by resource unavailability;
+            #    i.e., they are caused by errors before actual provisioning,
+            #    e.g., InvalidClusterNameError, NotSupportedError,
             #    CloudUserIdentityError, etc.
             logger.error(f'{common_utils.class_fullname(e.__class__)}: '
                          f'{colorama.Fore.RED}{e}{colorama.Style.RESET_ALL}')
-            if any(
+            if (not e.failover_history or any(
                     isinstance(err, exceptions.ResourcesUnavailableError)
-                    for err in e.failover_history):
+                    for err in e.failover_history)):
                 # If any of the failover fails due to resource unavailability,
                 # the spot job should be marked as FAILED_NO_RESOURCE, as the
                 # spot job may be able to launch next time.
@@ -234,7 +234,8 @@ class SpotController:
                 spot_state.set_failed(
                     self._job_id,
                     failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
-                    failure_reason='Unexpected error occurred.')
+                    failure_reason='Unexpected error occurred. For details, '
+                    f'run: sky spot logs --controller {self._job_id}')
 
             # Clean up Storages with persistent=False.
             self._backend.teardown_ephemeral_storage(self._task)
