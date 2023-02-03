@@ -3,10 +3,23 @@
 # pylint: disable=import-outside-toplevel
 
 import functools
+import threading
 
 boto3 = None
 botocore = None
+func_lock = threading.RLock()
 
+def _synchronized(func):
+    """Decorator to synchronize a function.
+
+    This decorator is used to synchronize a function across threads.
+    """
+    @functools.wraps(func)
+    def synced_func(*args, **kwargs):
+        with func_lock:
+            return func(*args, **kwargs)
+
+    return synced_func
 
 def import_package(func):
 
@@ -27,6 +40,10 @@ def import_package(func):
     return wrapper
 
 
+# Creating the session object is not thread-safe for boto3,
+# so we add a reentrant lock to synchronize the session creation.
+# Reference: https://github.com/boto/boto3/issues/1592
+@_synchronized
 @functools.lru_cache()
 @import_package
 def session():
