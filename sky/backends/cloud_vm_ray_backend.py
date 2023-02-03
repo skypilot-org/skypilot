@@ -1752,7 +1752,9 @@ class RetryingVmProvisioner(object):
                     blocked_resources=self._blocked_resources)
             except exceptions.ResourcesUnavailableError as e:
                 # Optimizer failed to find a feasible resources for the task,
-                # as all resources are blocked. The failover finally gives up.
+                # either because the previous failovers has blocked all the
+                # possible resources or the requested resources is too
+                # restrictive. The failover finally gives up here.
                 raise e.with_failover_history(failover_history)
             to_provision = task.best_resources
             assert task in self._dag.tasks, 'Internal logic error.'

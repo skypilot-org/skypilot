@@ -60,7 +60,12 @@ class SpotController:
             self._cluster_name, self._backend, self._task, retry_until_up)
 
     def _run(self):
-        """Busy loop monitoring spot cluster status and handling recovery."""
+        """Busy loop monitoring spot cluster status and handling recovery.
+        
+        Raises:
+            exceptions.ResourcesUnavailableError: if the spot cluster fails
+                to be launched or the job fails to be submitted to the cluster.
+        """
         logger.info(f'Started monitoring spot task {self._task_name} '
                     f'(id: {self._job_id})')
         spot_state.set_starting(self._job_id)
