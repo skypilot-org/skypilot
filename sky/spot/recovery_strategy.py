@@ -230,9 +230,9 @@ class StrategyExecutor:
             except exceptions.ResourcesUnavailableError as e:
                 # This is raised when the launch fails after failing over
                 # through all the candidates.
-                if not any(
+                if (e.failover_history and not any(
                         isinstance(err, exceptions.ResourcesUnavailableError)
-                        for err in e.failover_history):
+                        for err in e.failover_history)):
                     # _launch() (this function) should fail/exit directly, if
                     # none of the failover reasons were because of resource
                     # unavailability.
@@ -272,10 +272,15 @@ class StrategyExecutor:
             if max_retry is not None and retry_cnt >= max_retry:
                 # Retry forever if max_retry is None.
                 if raise_on_failure:
+                    failover_history = []
+                    if isinstance(exception,
+                                  exceptions.ResourcesUnavailableError):
+                        failover_history = exception.failover_history
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
                             'Failed to launch the spot cluster after '
-                            f'{max_retry} retries.') from exception
+                            f'{max_retry} retries.',
+                            failover_history=failover_history) from exception
                 else:
                     return None
             gap_seconds = backoff.current_backoff()
