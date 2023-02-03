@@ -14,17 +14,16 @@ Install SkyPilot using pip:
   $ pip install skypilot
   $ # pip install "skypilot[gcp]"
   $ # pip install "skypilot[azure]"
+  $ # pip install "skypilot[lambda]"
   $ # pip install "skypilot[all]"
 
 
-SkyPilot currently supports three major cloud providers: AWS, GCP, and Azure.  If you
-only have access to certain clouds, use any combination of
-:code:`"[aws,azure,gcp]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
+SkyPilot currently supports four cloud providers: AWS, GCP, Azure, and Lambda Cloud.
+If you only have access to certain clouds, use any combination of
+:code:`"[aws,azure,gcp,lambda]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
 dependencies installed.
 
-SkyPilot also supports a fourth cloud provider, `Lambda <https://lambdalabs.com/>`_, if you install SkyPilot from source.
-
-To install SkyPilot from source:
+You may also install SkyPilot from source.
 
 .. code-block:: console
 
@@ -94,19 +93,22 @@ Note: if you encounter *Authorization Error (Error 400: invalid_request)* with t
 
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
-**Lambda**
+**Lambda Cloud**
 
-Create the file :code:`~/.lambda_cloud/lambda_keys`, go to `API Keys <https://cloud.lambdalabs.com/api-keys>`_ to generate a key, and then add the line
+Lambda Labs GPU Cloud is a cloud provider offering low-cost GPUs. You can learn more about them `here <https://lambdalabs.com/>`__.
 
-.. code-block:: text
+To configure Lambda Cloud access, go to `API Keys <https://cloud.lambdalabs.com/api-keys>`_ to generate a key and then add it to :code:`~/.lambda_cloud/lambda_keys` by running:
 
-  api_key = your_api_key_here
+.. code-block:: console
 
-to :code:`~/.lambda_cloud/lambda_keys`.
+  $ # Create directory if required
+  $ mkdir -p ~/.lambda_cloud
+  $ # Add the line "api_key = <your_api_key_here>" to lambda_keys file
+  $ echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
 
 .. note::
 
-  Currently, SkyPilot does not support multi-node clusters or stopping instances on Lambda Cloud.
+  Multi-node clusters and stopping instances are currently not supported on Lambda Cloud.
 
 **Verifying cloud setup**
 
