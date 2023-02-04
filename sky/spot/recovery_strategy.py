@@ -209,8 +209,21 @@ class StrategyExecutor:
             and raise_on_failure is False.
 
         Raises:
-            exceptions.ResourcesUnavailableError: If the launch fails and
-                `raise_on_failure` is True.
+            exceptions.ProvisionPrechecksError: This will be raised when the
+                underlying `sky.launch` fails due to any error happens during
+                the prechecks for all the clouds, i.e. none of the failover, if
+                any, is due to the resources unavailability. It includes the
+                following cases:
+                1. The optimizer cannot find a feasible solution.
+                2. Invalid cluster name, failure in getting cloud user identity,
+                or unsupported feature happens.
+            exceptions.SpotJobReachedMaxRetryError: This will be raised when the
+                maximum number of retries is reached for `sky.launch`. The
+                failure of `sky.launch` can be due to:
+                1. Any of the underyling failover is due to the resources
+                unavailability.
+                2. The cluster is preempted before the job is submitted.
+                3. Any unexpected error happens during the `sky.launch`.
         """
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
@@ -228,8 +241,10 @@ class StrategyExecutor:
                            _is_launched_by_spot_controller=True)
                 logger.info('Spot cluster launched.')
             except exceptions.ResourcesUnavailableError as e:
-                # This is raised when the launch fails after failing over
-                # through all the candidates.
+                # This is raised when the launch fails due to prechecks or
+                # after failing over through all the candidates.
+                # Please refer to the docstring of `sky.launch` for more
+                # details of how the exception will be structured.
                 if not any(
                         isinstance(err, exceptions.ResourcesUnavailableError)
                         for err in e.failover_history):
@@ -241,25 +256,16 @@ class StrategyExecutor:
                     # Failing directly avoids the infinite loop of retrying
                     # the launch when, e.g., an invalid cluster name is used
                     # and --retry-until-up is specified.
-                    reason = common_utils.format_exception(e)
-                    if e.failover_history:
-                        reason = common_utils.format_exception(
-                            e.failover_history[0])
+                    reasons = (e.failover_history
+                               if e.failover_history else [e])
+                    reasons_str = ', '.join(
+                        common_utils.format_exception(err) for err in reasons)
                     logger.error(
                         'Failure happened before provisioning. Failover '
-                        f'reasons: {reason}')
+                        f'reasons: {reasons_str}')
                     if raise_on_failure:
-                        if e.failover_history:
-                            # Only use the first failover error, as it would be
-                            # too verbose to show all the failover errors, and
-                            # it is likely that the first failover error is
-                            # similar to the others, e.g. the cluster name is
-                            # invalid or cloud user identity is invalid, etc.
-                            reason_err = e.failover_history[0]
-                        else:
-                            reason_err = e
-                        raise exceptions.SpotJobFailedBeforeProvisionError(
-                            reason=reason_err)
+                        raise exceptions.ProvisionPrechecksError(
+                            reasons=reasons)
                     return None
                 logger.info('Failed to launch the spot cluster with error: '
                             f'{common_utils.format_exception(e)})')
@@ -289,9 +295,9 @@ class StrategyExecutor:
                 # Retry forever if max_retry is None.
                 if raise_on_failure:
                     with ux_utils.print_exception_no_traceback():
-                        raise exceptions.ResourcesUnavailableError(
-                            'Failed to launch the spot cluster after '
-                            f'{max_retry} retries.')
+                        raise exceptions.SpotJobReachedMaxRetriesError(
+                            'Resources unavailable: failed to launch the spot '
+                            f'cluster after {max_retry} retries.')
                 else:
                     return None
             gap_seconds = backoff.current_backoff()

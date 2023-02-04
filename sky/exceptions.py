@@ -9,7 +9,12 @@ RSYNC_FILE_NOT_FOUND_CODE = 23
 
 
 class ResourcesUnavailableError(Exception):
-    """Raised when resources are unavailable."""
+    """Raised when resources are unavailable.
+
+    This is mainly used for the APIs in sky.execution, please refer to
+    the docstring of sky.launch for more details about how the
+    failover_history will be set.
+    """
 
     def __init__(self,
                  *args: object,
@@ -17,7 +22,6 @@ class ResourcesUnavailableError(Exception):
                  failover_history: Optional[List[Exception]] = None) -> None:
         super().__init__(*args)
         self.no_failover = no_failover
-        # Mapping from exception type to reason for failover.
         if failover_history is None:
             failover_history = []
         # Copy the list to avoid modifying from outside.
@@ -29,16 +33,21 @@ class ResourcesUnavailableError(Exception):
         return self
 
 
-class SpotJobFailedBeforeProvisionError(Exception):
+class ProvisionPrechecksError(Exception):
     """Raised when a spot job fails before provision.
 
     Args:
-        reason: (Exception) The reason why the job fails.
+        reasons: (List[Exception]) The reasons why the prechecks failed.
     """
 
-    def __init__(self, *args: object, reason: Exception) -> None:
+    def __init__(self, *args: object, reasons: List[Exception]) -> None:
         super().__init__(*args)
-        self.reason = reason
+        self.reasons = reasons
+
+
+class SpotJobReachedMaxRetriesError(Exception):
+    """Raised when a spot job fails to be launched after maximum retries."""
+    pass
 
 
 class ResourcesMismatchError(Exception):
