@@ -10,6 +10,7 @@ import time
 import typing
 from typing import Any, Dict, List, Optional
 
+import colorama
 import filelock
 
 from sky import sky_logging
@@ -73,10 +74,13 @@ _CONN = _DB.conn
 
 class JobStatus(enum.Enum):
     """Job status"""
+
     # 3 in-flux states: each can transition to any state below it.
     # The `job_id` has been generated, but the generated ray program has
     # not started yet. skylet can transit the state from INIT to FAILED
     # directly, if the ray program fails to start.
+    # In the 'jobs' table, the `submitted_at` column will be set to the current
+    # time, when the job is firstly created (in the INIT state).
     INIT = 'INIT'
     # Running the user's setup script (only in effect if --detach-setup is
     # set). Our update_job_status() can temporarily (for a short period) set
@@ -88,6 +92,8 @@ class JobStatus(enum.Enum):
     # by the placement constraints.)
     PENDING = 'PENDING'
     # The job is running.
+    # In the 'jobs' table, the `start_at` column will be set to the current
+    # time, when the job is firstly transitioned to RUNNING.
     RUNNING = 'RUNNING'
     # 3 terminal states below: once reached, they do not transition.
     # The job finished successfully.
@@ -114,6 +120,21 @@ class JobStatus(enum.Enum):
     def __lt__(self, other):
         return list(JobStatus).index(self) < list(JobStatus).index(other)
 
+    def colored_str(self):
+        color = _JOB_STATUS_TO_COLOR[self]
+        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
+
+_JOB_STATUS_TO_COLOR = {
+    JobStatus.INIT: colorama.Fore.BLUE,
+    JobStatus.SETTING_UP: colorama.Fore.BLUE,
+    JobStatus.PENDING: colorama.Fore.BLUE,
+    JobStatus.RUNNING: colorama.Fore.GREEN,
+    JobStatus.SUCCEEDED: colorama.Fore.GREEN,
+    JobStatus.FAILED: colorama.Fore.RED,
+    JobStatus.FAILED_SETUP: colorama.Fore.RED,
+    JobStatus.CANCELLED: colorama.Fore.YELLOW,
+}
 
 _RAY_TO_JOB_STATUS_MAP = {
     # These are intentionally set to one status before, because:
@@ -273,12 +294,26 @@ def get_latest_job_id() -> Optional[int]:
         return job_id
 
 
-def get_job_time_payload(job_id: int, is_end: bool) -> Optional[int]:
-    field = 'end_at' if is_end else 'start_at'
+def get_job_submitted_or_ended_timestamp_payload(job_id: int,
+                                                 get_ended_time: bool) -> str:
+    """Get the job submitted/ended timestamp.
+
+    This function should only be called by the spot controller,
+    which is ok to use `submitted_at` instead of `start_at`,
+    because the spot job duration need to include both setup
+    and running time and the job will not stay in PENDING
+    state.
+
+    The normal job duration will use `start_at` instead of
+    `submitted_at` (in `format_job_queue()`), because the job
+    may stay in PENDING if the cluster is busy.
+    """
+    field = 'end_at' if get_ended_time else 'submitted_at'
     rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
                            (job_id,))
     for (timestamp,) in rows:
         return common_utils.encode_payload(timestamp)
+    return common_utils.encode_payload(None)
 
 
 def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
@@ -345,17 +380,14 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
 def update_job_status(job_owner: str,
                       job_ids: List[int],
                       silent: bool = False) -> List[JobStatus]:
-    """Updates and returns the job statuses matching our `JobStatus` semantics
+    """Updates and returns the job statuses matching our `JobStatus` semantics.
 
-    "True" statuses: this function queries `ray job status` and processes
-    those results to match our semantics.
+    This function queries `ray job status` and processes those results to match
+    our semantics.
 
-    This function queries `ray job status` and processes those results to
-    match our semantics.
-
-    Though we update job status actively in ray program and job cancelling,
-    we still need this to handle staleness problem, caused by instance
-    restarting and other corner cases (if any).
+    Though we update job status actively in the generated ray program and
+    during job cancelling, we still need this to handle the staleness problem,
+    caused by instance restarting and other corner cases (if any).
 
     This function should only be run on the remote instance with ray==2.0.1.
     """
@@ -396,7 +428,8 @@ def update_job_status(job_owner: str,
             if status is None:
                 original_status = get_status_no_lock(job_id)
                 status = original_status
-                if not original_status.is_terminal():
+                if (original_status is not None and
+                        not original_status.is_terminal()):
                     # The job may be stale, when the instance is restarted
                     # (the ray redis is volatile). We need to reset the
                     # status of the task to FAILED if its original status
@@ -488,7 +521,7 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
                                              job['end_at'],
                                              absolute=True),
             job['resources'],
-            job['status'].value,
+            job['status'].colored_str(),
             job['log_path'],
         ])
     return job_table
@@ -648,14 +681,12 @@ class JobLibCodeGen:
                   job_id: Optional[int],
                   spot_job_id: Optional[int],
                   follow: bool = True) -> str:
+        # pylint: disable=line-too-long
         code = [
-            f'job_id = {job_id} if {job_id} is not None '
-            'else job_lib.get_latest_job_id()',
+            f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',
             'run_timestamp = job_lib.get_run_timestamp(job_id)',
-            (f'log_dir = os.path.join({constants.SKY_LOGS_DIRECTORY!r}, '
-             'run_timestamp)'),
-            (f'log_lib.tail_logs({job_owner!r},'
-             f'job_id, log_dir, {spot_job_id!r}, follow={follow})'),
+            f'log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)',
+            f'log_lib.tail_logs({job_owner!r}, job_id, log_dir, {spot_job_id!r}, follow={follow})',
         ]
         return cls._build(code)
 
@@ -671,13 +702,16 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_job_time_payload(cls,
-                             job_id: Optional[int] = None,
-                             is_end: bool = False) -> str:
+    def get_job_submitted_or_ended_timestamp_payload(
+            cls,
+            job_id: Optional[int] = None,
+            get_ended_time: bool = False) -> str:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
-            f'job_time = job_lib.get_job_time_payload(job_id, {is_end})',
+            'job_time = '
+            'job_lib.get_job_submitted_or_ended_timestamp_payload('
+            f'job_id, {get_ended_time})',
             'print(job_time, flush=True)',
         ]
         return cls._build(code)

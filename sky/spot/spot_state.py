@@ -7,6 +7,8 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
+import colorama
+
 from sky import sky_logging
 from sky.backends import backend_utils
 
@@ -33,8 +35,9 @@ _CURSOR.execute("""\
     recovery_count INTEGER DEFAULT 0,
     job_duration FLOAT DEFAULT 0)""")
 
-# job_duration is the time a job actually runs before last_recover,
-# excluding the provision and recovery time.
+# job_duration is the time a job actually runs (including the
+# setup duration) before last_recover, excluding the provision
+# and recovery time.
 # If the job is not finished:
 # total_job_duration = now() - last_recovered_at + job_duration
 # If the job is not finished:
@@ -49,17 +52,66 @@ columns = [
 
 
 class SpotStatus(enum.Enum):
-    """Spot job status, designed to be in serverless style"""
+    """Spot job status, designed to be in serverless style.
+
+    The SpotStatus is a higher level status than the JobStatus.
+    Each spot job submitted to the spot cluster, will have a JobStatus
+    on that spot cluster:
+        JobStatus = [INIT, SETTING_UP, PENDING, RUNNING, ...]
+    Whenever the spot cluster is preempted and recovered, the JobStatus
+    will go through the statuses above again.
+    That means during the lifetime of a spot job, its JobsStatus could be
+    reset to INIT or SETTING_UP multiple times (depending on the preemptions).
+
+    However, a spot job only has one SpotStatus on the spot controller.
+        SpotStatus = [PENDING, SUBMITTED, STARTING, RUNNING, ...]
+    Mapping from JobStatus to SpotStatus:
+        INIT            ->  STARTING/RECOVERING
+        SETTING_UP      ->  RUNNING
+        PENDING         ->  RUNNING
+        RUNNING         ->  RUNNING
+        SUCCEEDED       ->  SUCCEEDED
+        FAILED          ->  FAILED
+        FAILED_SETUP    ->  FAILED_SETUP
+    Note that the JobStatus will not be stuck in PENDING, because each spot
+    cluster is dedicated to a spot job, i.e. there should always be enough
+    resource to run the job and the job will be immediately transitioned to
+    RUNNING.
+    """
+    # PENDING: Waiting for the spot controller to have a slot to run the
+    # controller process.
+    # The submitted_at timestamp of the spot job in the 'spot' table will be
+    # set to the time when the job is firstly submitted by the user (set to
+    # PENDING).
     PENDING = 'PENDING'
+    # SUBMITTED: The spot controller starts the controller process.
     SUBMITTED = 'SUBMITTED'
+    # STARTING: The controller process is launching the spot cluster for
+    # the spot job.
     STARTING = 'STARTING'
+    # RUNNING: The job is submitted to the spot cluster, and is setting up
+    # or running.
+    # The start_at timestamp of the spot job in the 'spot' table will be set
+    # to the time when the job is firstly transitioned to RUNNING.
     RUNNING = 'RUNNING'
+    # RECOVERING: The spot cluster is preempted, and the controller process
+    # is recovering the spot cluster (relaunching/failover).
     RECOVERING = 'RECOVERING'
     # Terminal statuses
+    # SUCCEEDED: The job is finished successfully.
     SUCCEEDED = 'SUCCEEDED'
+    # FAILED: The job is finished with failure from the user's program.
     FAILED = 'FAILED'
+    # FAILED_SETUP: The job is finished with failure from the user's setup
+    # script.
+    FAILED_SETUP = 'FAILED_SETUP'
+    # FAILED_NO_RESOURCE: The job is finished with failure because there is no
+    # resource available in the cloud provider(s) to launch the spot cluster.
     FAILED_NO_RESOURCE = 'FAILED_NO_RESOURCE'
+    # FAILED_CONTROLLER: The job is finished with failure because of unexpected
+    # error in the controller process.
     FAILED_CONTROLLER = 'FAILED_CONTROLLER'
+    # CANCELLED: The job is cancelled by the user.
     CANCELLED = 'CANCELLED'
 
     def is_terminal(self) -> bool:
@@ -68,14 +120,38 @@ class SpotStatus(enum.Enum):
     def is_failed(self) -> bool:
         return self in self.failure_statuses()
 
+    def colored_str(self):
+        color = _SPOT_STATUS_TO_COLOR[self]
+        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
     @classmethod
     def terminal_statuses(cls) -> List['SpotStatus']:
-        return (cls.SUCCEEDED, cls.FAILED, cls.FAILED_NO_RESOURCE,
-                cls.FAILED_CONTROLLER, cls.CANCELLED)
+        return [
+            cls.SUCCEEDED, cls.FAILED, cls.FAILED_SETUP, cls.FAILED_NO_RESOURCE,
+            cls.FAILED_CONTROLLER, cls.CANCELLED
+        ]
 
     @classmethod
     def failure_statuses(cls) -> List['SpotStatus']:
-        return (cls.FAILED, cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER)
+        return [
+            cls.FAILED, cls.FAILED_SETUP, cls.FAILED_NO_RESOURCE,
+            cls.FAILED_CONTROLLER
+        ]
+
+
+_SPOT_STATUS_TO_COLOR = {
+    SpotStatus.PENDING: colorama.Fore.BLUE,
+    SpotStatus.SUBMITTED: colorama.Fore.BLUE,
+    SpotStatus.STARTING: colorama.Fore.BLUE,
+    SpotStatus.RUNNING: colorama.Fore.GREEN,
+    SpotStatus.RECOVERING: colorama.Fore.CYAN,
+    SpotStatus.SUCCEEDED: colorama.Fore.GREEN,
+    SpotStatus.FAILED: colorama.Fore.RED,
+    SpotStatus.FAILED_SETUP: colorama.Fore.RED,
+    SpotStatus.FAILED_NO_RESOURCE: colorama.Fore.RED,
+    SpotStatus.FAILED_CONTROLLER: colorama.Fore.RED,
+    SpotStatus.CANCELLED: colorama.Fore.YELLOW,
+}
 
 
 # === Status transition functions ===
@@ -188,8 +264,9 @@ def set_failed(job_id: int,
         WHERE job_id=(?) AND end_at IS null""",
         (*list(fields_to_set.values()), job_id))
     _CONN.commit()
-    if failure_type == SpotStatus.FAILED:
-        logger.info('Job failed due to user code.')
+    if failure_type in [SpotStatus.FAILED, SpotStatus.FAILED_SETUP]:
+        logger.info(
+            f'Job failed due to user code (status: {failure_type.value}).')
     elif failure_type == SpotStatus.FAILED_NO_RESOURCE:
         logger.info('Job failed due to failing to find available resources '
                     'after retries.')
@@ -265,3 +342,4 @@ def get_latest_job_id() -> Optional[int]:
         SELECT job_id FROM spot ORDER BY submitted_at DESC LIMIT 1""")
     for (job_id,) in rows:
         return job_id
+    return None

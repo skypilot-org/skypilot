@@ -8,7 +8,6 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import yaml
 
 import sky
-from sky import check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
@@ -382,6 +381,10 @@ class Task:
     def need_spot_recovery(self) -> bool:
         return any(r.spot_recovery is not None for r in self.resources)
 
+    @property
+    def use_spot(self) -> bool:
+        return any(r.use_spot for r in self.resources)
+
     @num_nodes.setter
     def num_nodes(self, num_nodes: Optional[int]) -> None:
         if num_nodes is None:
@@ -445,6 +448,7 @@ class Task:
         """
         if isinstance(resources, sky.Resources):
             resources = {resources}
+        # TODO(woosuk): Check if the resources are None.
         self.resources = resources
         return self
 
@@ -677,12 +681,8 @@ class Task:
             storage_cloud = resources.cloud
             if storage_cloud is None:
                 # Get the first enabled cloud.
+                backend_utils.check_public_cloud_enabled()
                 enabled_clouds = global_user_state.get_enabled_clouds()
-                if len(enabled_clouds) == 0:
-                    check.check(quiet=True)
-                    enabled_clouds = global_user_state.get_enabled_clouds()
-                if len(enabled_clouds) == 0:
-                    raise ValueError('No enabled clouds.')
 
                 for cloud in storage_lib.STORE_ENABLED_CLOUDS:
                     for enabled_cloud in enabled_clouds:

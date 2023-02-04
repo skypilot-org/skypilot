@@ -44,7 +44,7 @@ class SpotController:
         #   Example value: sky-2022-10-04-22-46-52-467694_id-17
         task_envs = self._task.envs or {}
         job_id_env_var = common_utils.get_global_job_id(
-            self._backend.run_timestamp, 'spot', self._job_id)
+            self._backend.run_timestamp, 'spot', str(self._job_id))
         task_envs[constants.JOB_ID_ENV_VAR] = job_id_env_var
         self._task.set_envs(task_envs)
 
@@ -64,9 +64,9 @@ class SpotController:
         logger.info(f'Started monitoring spot task {self._task_name} '
                     f'(id: {self._job_id})')
         spot_state.set_starting(self._job_id)
-        start_at = self._strategy_executor.launch()
+        job_submitted_at = self._strategy_executor.launch()
 
-        spot_state.set_started(self._job_id, start_time=start_at)
+        spot_state.set_started(self._job_id, start_time=job_submitted_at)
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
@@ -120,7 +120,9 @@ class SpotController:
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.
                     continue
-                elif job_status == job_lib.JobStatus.FAILED:
+                elif job_status in [
+                        job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
+                ]:
                     # The user code has probably crashed, fail immediately.
                     end_time = spot_utils.get_job_timestamp(self._backend,
                                                             self._cluster_name,
@@ -132,10 +134,12 @@ class SpotController:
                                             None,
                                             spot_job_id=self._job_id)
                     logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
-                    spot_state.set_failed(
-                        self._job_id,
-                        failure_type=spot_state.SpotStatus.FAILED,
-                        end_time=end_time)
+                    status_to_set = spot_state.SpotStatus.FAILED
+                    if job_status == job_lib.JobStatus.FAILED_SETUP:
+                        status_to_set = spot_state.SpotStatus.FAILED_SETUP
+                    spot_state.set_failed(self._job_id,
+                                          failure_type=status_to_set,
+                                          end_time=end_time)
                     break
                 # Although the cluster is healthy, we fail to access the
                 # job status. Try to recover the job (will not restart the
@@ -145,12 +149,15 @@ class SpotController:
                             'cluster is healthy. Try to recover the job '
                             '(the cluster will not be restarted).')
 
-            resources = list(self._task.resources)[0]
-            if resources.need_cleanup_after_preemption():
-                # Some spot resource (e.g., Spot TPU VM) may need to be
-                # cleaned up after preemption.
-                logger.info('Cleaning up the preempted spot cluster...')
-                self._strategy_executor.terminate_cluster()
+            # When the handle is None, the cluster should be cleaned up already.
+            if handle is not None:
+                resources = handle.launched_resources
+                assert resources is not None, handle
+                if resources.need_cleanup_after_preemption():
+                    # Some spot resource (e.g., Spot TPU VM) may need to be
+                    # cleaned up after preemption.
+                    logger.info('Cleaning up the preempted spot cluster...')
+                    self._strategy_executor.terminate_cluster()
 
             # Try to recover the spot jobs, when the cluster is preempted
             # or the job status is failed to be fetched.
@@ -168,14 +175,15 @@ class SpotController:
             subprocess_utils.kill_children_processes()
             spot_state.set_cancelled(self._job_id)
         except exceptions.ResourcesUnavailableError as e:
-            logger.error(f'Resources unavailable: {colorama.Fore.RED}{e}'
-                         f'{colorama.Style.RESET_ALL}')
+            logger.error(f'{common_utils.class_fullname(e.__class__)}: '
+                         f'{colorama.Fore.RED}{e}{colorama.Style.RESET_ALL}')
             spot_state.set_failed(
                 self._job_id,
                 failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.error(traceback.format_exc())
-            logger.error(f'Unexpected error occurred: {type(e).__name__}: {e}')
+            logger.error('Unexpected error occurred: '
+                         f'{common_utils.format_exception(e)}')
         finally:
             self._strategy_executor.terminate_cluster()
             job_status = spot_state.get_status(self._job_id)

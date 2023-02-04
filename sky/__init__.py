@@ -21,12 +21,14 @@ from sky.global_user_state import ClusterStatus
 from sky.skylet.job_lib import JobStatus
 from sky.core import (status, start, stop, down, autostop, queue, cancel,
                       tail_logs, download_logs, job_status, spot_queue,
-                      spot_status, spot_cancel, storage_ls, storage_delete)
+                      spot_status, spot_cancel, storage_ls, storage_delete,
+                      cost_report)
 
 # Aliases.
 AWS = clouds.AWS
 Azure = clouds.Azure
 GCP = clouds.GCP
+Lambda = clouds.Lambda
 Local = clouds.Local
 optimize = Optimizer.optimize
 
@@ -35,6 +37,7 @@ __all__ = [
     'AWS',
     'Azure',
     'GCP',
+    'Lambda',
     'Local',
     'Optimizer',
     'OptimizeTarget',
@@ -61,6 +64,7 @@ __all__ = [
     'stop',
     'down',
     'autostop',
+    'cost_report',
     # core APIs Job Management
     'queue',
     'cancel',

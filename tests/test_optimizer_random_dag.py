@@ -12,7 +12,7 @@ CLOUDS = {
     'Azure': sky.Azure(),
 }
 ALL_INSTANCE_TYPES = sum(sky.list_accelerators(gpus_only=True).values(), [])
-GCP_DEFAULT_INSTANCE_TYPE = sky.GCP.get_default_instance_type()
+GCP_HOST_VM = 'n1-highmem-8'
 
 DUMMY_NODES = [
     sky.optimizer._DUMMY_SOURCE_NAME,
@@ -67,7 +67,7 @@ def generate_random_dag(
             for candidate in candidate_instance_types:
                 instance_type = candidate.instance_type
                 if pd.isna(instance_type):
-                    instance_type = GCP_DEFAULT_INSTANCE_TYPE
+                    instance_type = GCP_HOST_VM
                 resources = sky.Resources(
                     cloud=CLOUDS[candidate.cloud],
                     instance_type=instance_type,

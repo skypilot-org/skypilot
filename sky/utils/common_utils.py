@@ -2,11 +2,12 @@
 
 import functools
 import getpass
-import inspect
 import hashlib
+import inspect
 import json
-import random
 import os
+import platform
+import random
 import re
 import socket
 import sys
@@ -15,10 +16,14 @@ from typing import Any, Dict, Optional
 import uuid
 import yaml
 
+import colorama
+
 from sky import sky_logging
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
+
+_COLOR_PATTERN = re.compile(r'\x1b[^m]*m')
 
 _PAYLOAD_PATTERN = re.compile(r'<sky-payload>(.*)</sky-payload>')
 _PAYLOAD_STR = '<sky-payload>{}</sky-payload>'
@@ -49,6 +54,8 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
     """
 
     def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
+        if user_hash is None:
+            return False
         try:
             int(user_hash, 16)
         except (TypeError, ValueError):
@@ -57,6 +64,7 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
 
     user_hash = default_value
     if _is_valid_user_hash(user_hash):
+        assert user_hash is not None
         return user_hash
 
     if os.path.exists(_USER_HASH_FILE):
@@ -94,7 +102,7 @@ class Backoff:
 
     def __init__(self, initial_backoff: int = 5, max_backoff_factor: int = 5):
         self._initial = True
-        self._backoff = None
+        self._backoff = 0.0
         self._inital_backoff = initial_backoff
         self._max_backoff = max_backoff_factor * self._inital_backoff
 
@@ -291,3 +299,66 @@ def decode_payload(payload_str: str) -> Any:
     payload_str = matched[0]
     payload = json.loads(payload_str)
     return payload
+
+
+def class_fullname(cls):
+    """Get the full name of a class.
+
+    Example:
+        >>> e = sky.exceptions.FetchIPError()
+        >>> class_fullname(e.__class__)
+        'sky.exceptions.FetchIPError'
+
+    Args:
+        cls: The class to get the full name.
+
+    Returns:
+        The full name of the class.
+    """
+    return f'{cls.__module__}.{cls.__name__}'
+
+
+def format_exception(e: Exception, use_bracket: bool = False) -> str:
+    """Format an exception to a string.
+
+    Args:
+        e: The exception to format.
+
+    Returns:
+        A string that represents the exception.
+    """
+    bright = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
+    if use_bracket:
+        return f'{bright}[{class_fullname(e.__class__)}]:{reset} {e}'
+    return f'{bright}{class_fullname(e.__class__)}:{reset} {e}'
+
+
+def remove_color(s: str):
+    """Remove color from a string.
+
+    Args:
+        s: The string to remove color.
+
+    Returns:
+        A string without color.
+    """
+    return _COLOR_PATTERN.sub('', s)
+
+
+def remove_file_if_exists(path: str):
+    """Delete a file if it exists.
+
+    Args:
+        path: The path to the file.
+    """
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        logger.debug(f'Tried to remove {path} but failed to find it. Skip.')
+        pass
+
+
+def is_wsl() -> bool:
+    """Detect if running under Windows Subsystem for Linux (WSL)."""
+    return 'microsoft' in platform.uname()[3].lower()

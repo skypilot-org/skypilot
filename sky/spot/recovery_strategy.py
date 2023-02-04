@@ -1,7 +1,7 @@
 """The strategy to handle launching/recovery/termination of spot clusters."""
 import time
 import typing
-from typing import Optional
+from typing import Optional, Tuple
 
 import sky
 from sky import exceptions
@@ -61,9 +61,9 @@ class StrategyExecutor:
     def make(cls, cluster_name: str, backend: 'backends.Backend',
              task: 'task_lib.Task', retry_until_up: bool) -> 'StrategyExecutor':
         """Create a strategy from a task."""
-        resources = task.resources
-        assert len(resources) == 1, 'Only one resource is supported.'
-        resources: 'sky.Resources' = list(resources)[0]
+        task_resources = task.resources
+        assert len(task_resources) == 1, 'Only one resource is supported.'
+        resources: 'sky.Resources' = list(task_resources)[0]
 
         spot_recovery = resources.spot_recovery
         assert spot_recovery is not None, (
@@ -80,7 +80,7 @@ class StrategyExecutor:
         It can fail if resource is not available. Need to check the cluster
         status, after calling.
 
-        Returns: The job's start timestamp, or None if failed to start.
+        Returns: The job's submit timestamp, or None if failed.
         """
         if self.retry_until_up:
             return self._launch(max_retry=None)
@@ -118,6 +118,8 @@ class StrategyExecutor:
     def _try_cancel_all_jobs(self):
         handle = global_user_state.get_handle_from_cluster_name(
             self.cluster_name)
+        if handle is None:
+            return
         try:
             self.backend.cancel_jobs(handle, jobs=None)
         except Exception as e:  # pylint: disable=broad-except
@@ -138,8 +140,9 @@ class StrategyExecutor:
             raise_on_failure: Whether to raise an exception if the launch fails.
 
         Returns:
-            The job's start timestamp, or None if failed to start and
-            raise_on_failure is False.
+            The job's submit timestamp, or None if failed to submit the job
+            (either provisioning fails or any error happens in job submission)
+            and raise_on_failure is False.
         """
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
@@ -150,9 +153,13 @@ class StrategyExecutor:
             exception = None
             try:
                 usage_lib.messages.usage.set_internal()
+                # Detach setup, so that the setup failure can be detected
+                # by the controller process (job_status -> FAILED_SETUP).
                 sky.launch(self.dag,
                            cluster_name=self.cluster_name,
-                           detach_run=True)
+                           detach_setup=True,
+                           detach_run=True,
+                           _is_launched_by_spot_controller=True)
                 logger.info('Spot cluster launched.')
             except exceptions.InvalidClusterNameError as e:
                 # The cluster name is too long.
@@ -161,7 +168,9 @@ class StrategyExecutor:
                 # If the launch fails, it will be recovered by the following
                 # code.
                 logger.info('Failed to launch the spot cluster with error: '
-                            f'{type(e)}: {e}')
+                            f'{common_utils.format_exception(e)})')
+                import traceback  # pylint: disable=import-outside-toplevel
+                logger.info(f'  Traceback: {traceback.format_exc()}')
                 retry_launch = True
                 exception = e
 
@@ -197,7 +206,7 @@ class StrategyExecutor:
                     # The cluster can be preempted before the job is launched.
                     # Break to let the retry launch kick in.
                     logger.info('The cluster is preempted before the job '
-                                'starts.')
+                                'is submitted.')
                     # TODO(zhwu): we should recover the preemption with the
                     # recovery strategy instead of the current while loop.
                     retry_launch = True
@@ -218,11 +227,11 @@ class StrategyExecutor:
                     continue
 
                 # Check the job status until it is not in initialized status
-                if status is not None and job_lib.JobStatus.PENDING < status:
+                if status is not None and status > job_lib.JobStatus.INIT:
                     try:
-                        launch_time = spot_utils.get_job_timestamp(
+                        job_submitted_at = spot_utils.get_job_timestamp(
                             self.backend, self.cluster_name, get_end_time=False)
-                        return launch_time
+                        return job_submitted_at
                     except Exception as e:  # pylint: disable=broad-except
                         # If we failed to get the job timestamp, we will retry
                         # job checking loop.
@@ -262,11 +271,12 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is
         # preempted.)
-        self._launched_cloud_region = None
+        self._launched_cloud_region: Optional[Tuple['sky.clouds.Cloud',
+                                                    'sky.clouds.Region']] = None
 
     def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
-        launch_time = super()._launch(max_retry, raise_on_failure)
-        if launch_time is not None:
+        job_submitted_at = super()._launch(max_retry, raise_on_failure)
+        if job_submitted_at is not None:
             # Only record the cloud/region if the launch is successful.
             handle = global_user_state.get_handle_from_cluster_name(
                 self.cluster_name)
@@ -274,7 +284,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             launched_resources = handle.launched_resources
             self._launched_cloud_region = (launched_resources.cloud,
                                            launched_resources.region)
-        return launch_time
+        return job_submitted_at
 
     def recover(self) -> float:
         # 1. Cancel the jobs and launch the cluster with the STOPPED status,
@@ -302,11 +312,11 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
                                                region=launched_region)
                 task.set_resources({new_resources})
                 # Not using self.launch to avoid the retry until up logic.
-                launched_time = self._launch(raise_on_failure=False)
+                job_submitted_at = self._launch(raise_on_failure=False)
                 # Restore the original dag, i.e. reset the region constraint.
                 task.set_resources({original_resources})
-                if launched_time is not None:
-                    return launched_time
+                if job_submitted_at is not None:
+                    return job_submitted_at
 
             # Step 2
             logger.debug('Terminating unhealthy spot cluster and '
@@ -318,9 +328,9 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             logger.debug('Relaunch the cluster  without constraining to prior '
                          'cloud/region.')
             # Not using self.launch to avoid the retry until up logic.
-            launched_time = self._launch(max_retry=self._MAX_RETRY_CNT,
-                                         raise_on_failure=False)
-            if launched_time is None:
+            job_submitted_at = self._launch(max_retry=self._MAX_RETRY_CNT,
+                                            raise_on_failure=False)
+            if job_submitted_at is None:
                 # Failed to launch the cluster.
                 if self.retry_until_up:
                     gap_seconds = self.RETRY_INIT_GAP_SECONDS
@@ -333,4 +343,4 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
                         f'Failed to recover the spot cluster after retrying '
                         f'{self._MAX_RETRY_CNT} times.')
 
-            return launched_time
+            return job_submitted_at

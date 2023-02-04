@@ -70,6 +70,8 @@ file_mounts:
 
   /s3-data-test: s3://fah-public-data-covid19-cryptic-pockets/human/il6/PROJ14534/RUN999/CLONE0/results0
   /s3-data-file: s3://fah-public-data-covid19-cryptic-pockets/human/il6/PROJ14534/RUN999/CLONE0/results0/frame0.xtc
+  # Test access to private bucket
+  # /my-bucket: s3://sky-detectron2-outputs
   # /test-my-gcs: gs://cloud-storage-test-zhwu-2
 
   # If a source path points to a "directory", its contents will be recursively
@@ -79,7 +81,7 @@ file_mounts:
 
 setup: |
   sudo apt update
-  sudo apt install tree
+  sudo apt install -y tree
 
 run: |
   set -ex

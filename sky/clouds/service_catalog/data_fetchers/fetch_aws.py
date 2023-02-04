@@ -5,7 +5,7 @@ import argparse
 import datetime
 import os
 import subprocess
-from typing import Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -58,7 +58,7 @@ USEFUL_COLUMNS = [
 # regions.
 PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv'  # pylint: disable=line-too-long
 
-regions_enabled: Set[str] = None
+regions_enabled: Optional[Set[str]] = None
 
 
 def get_enabled_regions() -> Set[str]:
@@ -66,8 +66,8 @@ def get_enabled_regions() -> Set[str]:
     global regions_enabled
     if regions_enabled is None:
         aws_client = aws.client('ec2', region_name='us-east-1')
-        regions_enabled = aws_client.describe_regions()['Regions']
-        regions_enabled = {r['RegionName'] for r in regions_enabled}
+        user_cloud_regions = aws_client.describe_regions()['Regions']
+        regions_enabled = {r['RegionName'] for r in user_cloud_regions}
         regions_enabled = regions_enabled.intersection(set(ALL_REGIONS))
     return regions_enabled
 
@@ -90,7 +90,7 @@ def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
     zones = []
     try:
         response = client.describe_availability_zones()
-    except aws.client_exception():
+    except aws.botocore_exceptions().ClientError:
         # The user's AWS account may not have access to this region.
         # The error looks like:
         # botocore.exceptions.ClientError: An error occurred
@@ -138,7 +138,7 @@ def _get_spot_pricing_table(region: str) -> pd.DataFrame:
     paginator = client.get_paginator('describe_spot_price_history')
     response_iterator = paginator.paginate(ProductDescriptions=['Linux/UNIX'],
                                            StartTime=datetime.datetime.utcnow())
-    ret = []
+    ret: List[Dict[str, str]] = []
     for response in response_iterator:
         # response['SpotPriceHistory'] is a list of dicts, each dict is like:
         # {
@@ -171,7 +171,7 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         ])
         print(f'{region} Processing dataframes')
 
-        def get_acc_info(row) -> Tuple[str, float]:
+        def get_acc_info(row) -> Tuple[Optional[str], float]:
             accelerator = None
             for col, info_key in [('GpuInfo', 'Gpus'),
                                   ('InferenceAcceleratorInfo', 'Accelerators'),
@@ -251,69 +251,71 @@ def get_all_regions_instance_types_df(regions: Set[str]) -> pd.DataFrame:
 
 
 # Fetch Images
-_GPU_TO_IMAGE_DATE = {
-    # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
-    # Current AMIs:
-    # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20220308
-    #   Nvidia driver: 510.47.03, CUDA Version: 11.6 (does not support torch==1.13.0+cu117)
-    #
-    # Use a list to fallback to newer AMI, as some regions like ap-southeast-3 does not have
-    # the older AMI.
-    'gpu': ['20220308', '20221101'],
-    # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
-    # Downgrade the AMI for K80 due as it is only compatible with
-    # NVIDIA driver lower than 470.
-    'k80': ['20211208']
-}
-_UBUNTU_VERSION = ['18.04', '20.04']
+# https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
+# Current AMIs (we have to use different PyTorch versions for different OS as Ubuntu 18.04
+# does not have the latest PyTorch version):
+# GPU:
+# Deep Learning AMI GPU PyTorch 1.13.1 (Ubuntu 20.04) 20230103
+#   Nvidia driver: 515.65.01, CUDA Version: 11.7
+#
+# Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 18.04) 20221114
+#   Nvidia driver: 510.47.03, CUDA Version: 11.6
+#
+# K80:
+# Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
+#   Nvidia driver: 470.57.02, CUDA Version: 11.4
+#
+# Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 18.04) 20211208
+#   Nvidia driver: 470.57.02, CUDA Version: 11.4
+_GPU_UBUNTU_DATE_PYTORCH = [
+    ('gpu', '20.04', '20230103', '1.13.1'),
+    ('gpu', '18.04', '20221114', '1.10.0'),
+    ('k80', '20.04', '20211208', '1.10.0'),
+    ('k80', '18.04', '20211208', '1.10.0'),
+]
 
 
-def _get_image_id(region: str, ubuntu_version: str, creation_date: str) -> str:
+def _fetch_image_id(region: str, ubuntu_version: str, creation_date: str,
+                    pytorch_version: str) -> Optional[str]:
     try:
-        image_id = subprocess.check_output(f"""\
+        image = subprocess.check_output(f"""\
             aws ec2 describe-images --region {region} --owners amazon \\
-                --filters 'Name=name,Values="Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu {ubuntu_version}) {creation_date}"' \\
+                --filters 'Name=name,Values="Deep Learning AMI GPU PyTorch {pytorch_version} (Ubuntu {ubuntu_version}) {creation_date}"' \\
                     'Name=state,Values=available' --query 'Images[:1].ImageId' --output text
             """,
-                                           shell=True)
+                                        shell=True)
     except subprocess.CalledProcessError as e:
         print(f'Failed {region}, {ubuntu_version}, {creation_date}. '
               'Trying next date.')
         print(f'{type(e)}: {e}')
         image_id = None
     else:
-        image_id = image_id.decode('utf-8').strip()
+        assert image is not None
+        image_id = image.decode('utf-8').strip()
     return image_id
 
 
 @ray.remote
-def _get_image_row(region: str, ubuntu_version: str,
-                   cpu_or_gpu: str) -> Tuple[str, str, str, str, str, str]:
-    print(f'Getting image for {region}, {ubuntu_version}, {cpu_or_gpu}')
-    creation_date = _GPU_TO_IMAGE_DATE[cpu_or_gpu]
-    date = None
-    for date in creation_date:
-        image_id = _get_image_id(region, ubuntu_version, date)
-        if image_id:
-            break
-    else:
+def _get_image_row(
+        region: str, gpu: str, ubuntu_version: str, date: str,
+        pytorch_version) -> Tuple[str, str, str, str, Optional[str], str]:
+    print(f'Getting image for {region}, {ubuntu_version}, {gpu}')
+    image_id = _fetch_image_id(region, ubuntu_version, date, pytorch_version)
+    if image_id is None:
         # not found
-        print(
-            f'Failed to find image for {region}, {ubuntu_version}, {cpu_or_gpu}'
-        )
-    if date is None:
-        raise ValueError(f'Could not find the creation date for {cpu_or_gpu}.')
-    tag = f'skypilot:{cpu_or_gpu}-ubuntu-{ubuntu_version.replace(".", "")}'
+        print(f'Failed to find image for {region}, {ubuntu_version}, {gpu}')
+    tag = f'skypilot:{gpu}-ubuntu-{ubuntu_version.replace(".", "")}'
     return tag, region, 'ubuntu', ubuntu_version, image_id, date
 
 
 def get_all_regions_images_df(regions: Set[str]) -> pd.DataFrame:
     workers = []
-    for cpu_or_gpu in _GPU_TO_IMAGE_DATE:
-        for ubuntu_version in _UBUNTU_VERSION:
-            for region in regions:
-                workers.append(
-                    _get_image_row.remote(region, ubuntu_version, cpu_or_gpu))
+    for (gpu, ubuntu_version, date,
+         pytorch_version) in _GPU_UBUNTU_DATE_PYTORCH:
+        for region in regions:
+            workers.append(
+                _get_image_row.remote(region, gpu, ubuntu_version, date,
+                                      pytorch_version))
 
     results = ray.get(workers)
     results = pd.DataFrame(
@@ -331,7 +333,7 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
         use1-az1          us-east-1b
         use1-az2          us-east-1a
     """
-    regions = get_enabled_regions()
+    regions = list(get_enabled_regions())
     az_mappings = [_get_availability_zones.remote(r) for r in regions]
     az_mappings = ray.get(az_mappings)
     missing_regions = {

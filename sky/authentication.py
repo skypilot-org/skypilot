@@ -21,6 +21,7 @@ from sky.adaptors import gcp
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.skylet.providers.lambda_cloud import lambda_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -77,7 +78,12 @@ def get_or_generate_keys() -> Tuple[str, str]:
         _save_key_pair(private_key_path, public_key_path, private_key,
                        public_key)
     else:
-        assert os.path.exists(public_key_path)
+        # FIXME(skypilot): ran into failing this assert once, but forgot the
+        # reproduction (has private key; but has not generated public key).
+        #   AssertionError: /home/ubuntu/.ssh/sky-key.pub
+        assert os.path.exists(public_key_path), (
+            'Private key found, but associated public key '
+            f'{public_key_path} does not exist.')
     return private_key_path, public_key_path
 
 
@@ -88,12 +94,16 @@ def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Use cloud init in UserData to set up the authorized_keys to get
     # around the number of keys limit and permission issues with
     # ec2.describe_key_pairs.
+    # Note that sudo and shell need to be specified to ensure setup works.
+    # Reference: https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups  # pylint: disable=line-too-long
     for node_type in config['available_node_types']:
         config['available_node_types'][node_type]['node_config']['UserData'] = (
             textwrap.dedent(f"""\
             #cloud-config
             users:
             - name: {config['auth']['ssh_user']}
+              shell: /bin/bash
+              sudo: ALL=(ALL) NOPASSWD:ALL
               ssh-authorized-keys:
                 - {public_key}
             """))
@@ -166,12 +176,13 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             logger.error(
                 f'{yellow}Certain GCP APIs are disabled for the GCP project '
                 f'{project_id}.{reset}')
-            logger.error(f'{yellow}Enable them by running:{reset} '
-                         f'{bright}sky check{reset}')
             logger.error('Details:')
             logger.error(f'{dim}{match.group(1)}{reset}\n'
                          f'{dim}    {match.group(2)}{reset}\n'
                          f'{dim}{match.group(3)}{reset}')
+            logger.error(
+                f'{yellow}To fix, enable these APIs by running:{reset} '
+                f'{bright}sky check{reset}')
             sys.exit(1)
         else:
             raise
@@ -240,7 +251,8 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # OS Login is not enabled for the project. Add the ssh key directly to the
     # metadata.
     # TODO(zhwu): Use cloud init to add ssh public key, to avoid the permission
-    # issue.
+    # issue. A blocker is that the cloud init is not installed in the debian
+    # image by default.
     project_keys = next(
         (item for item in project['commonInstanceMetadata'].get('items', [])
          if item['key'] == 'ssh-keys'), {}).get('value', '')
@@ -290,6 +302,29 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     get_or_generate_keys()
+    # Need to use ~ relative path because Ray uses the same
+    # path for finding the public key path on both local and head node.
+    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
+
+    file_mounts = config['file_mounts']
+    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
+    config['file_mounts'] = file_mounts
+
+    return config
+
+
+def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    get_or_generate_keys()
+
+    # Ensure ssh key is registered with Lambda Cloud
+    lambda_client = lambda_utils.LambdaCloudClient()
+    if lambda_client.ssh_key_name is None:
+        public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
+        with open(public_key_path, 'r') as f:
+            public_key = f.read()
+        name = f'sky-key-{common_utils.get_user_hash()}'
+        lambda_client.set_ssh_key(name, public_key)
+
     # Need to use ~ relative path because Ray uses the same
     # path for finding the public key path on both local and head node.
     config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH

@@ -1,6 +1,3 @@
-resources:
-  cloud: aws
-
 num_nodes: 2  
 
 workdir: .

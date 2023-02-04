@@ -34,6 +34,7 @@ class InstanceTypeInfo(NamedTuple):
     - memory: Instance memory in GiB.
     - price: Regular instance price per hour (cheapest across all regions).
     - spot_price: Spot instance price per hour (cheapest across all regions).
+    - region: Region where this instance type belongs to.
     """
     cloud: str
     instance_type: Optional[str]
@@ -43,6 +44,7 @@ class InstanceTypeInfo(NamedTuple):
     memory: Optional[float]
     price: float
     spot_price: float
+    region: str
 
 
 def get_catalog_path(filename: str) -> str:
@@ -144,10 +146,14 @@ def _get_instance_type(
     df: pd.DataFrame,
     instance_type: str,
     region: Optional[str],
+    zone: Optional[str] = None,
 ) -> pd.DataFrame:
     idx = df['InstanceType'] == instance_type
     if region is not None:
         idx &= df['Region'] == region
+    if zone is not None:
+        # NOTE: For Azure instances, zone must be None.
+        idx &= df['AvailabilityZone'] == zone
     return df[idx]
 
 
@@ -157,11 +163,11 @@ def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
 
 
 def validate_region_zone_impl(
-        df: pd.DataFrame, region: Optional[str],
+        cloud_name: str, df: pd.DataFrame, region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Validates whether region and zone exist in the catalog."""
 
-    def _get_candidate_str(loc: str, all_loc: List[str]) -> List[str]:
+    def _get_candidate_str(loc: str, all_loc: List[str]) -> str:
         candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.9)
         candidate_loc = sorted(candidate_loc)
         candidate_strs = ''
@@ -169,6 +175,11 @@ def validate_region_zone_impl(
             candidate_strs = ', '.join(candidate_loc)
             candidate_strs = f'\nDid you mean one of these: {candidate_strs!r}?'
         return candidate_strs
+
+    def _get_all_supported_regions_str() -> str:
+        all_regions: List[str] = sorted(df['Region'].unique().tolist())
+        return \
+        f'\nList of supported {cloud_name} regions: {", ".join(all_regions)!r}'
 
     validated_region, validated_zone = region, zone
 
@@ -178,7 +189,12 @@ def validate_region_zone_impl(
         if len(filter_df) == 0:
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid region {region!r}')
-                error_msg += _get_candidate_str(region, df['Region'].unique())
+                candidate_strs = _get_candidate_str(region,
+                                                    df['Region'].unique())
+                if not candidate_strs:
+                    error_msg += _get_all_supported_regions_str()
+                    raise ValueError(error_msg)
+                error_msg += candidate_strs
                 raise ValueError(error_msg)
 
     if zone is not None:
@@ -201,20 +217,38 @@ def validate_region_zone_impl(
 def get_hourly_cost_impl(
     df: pd.DataFrame,
     instance_type: str,
+    use_spot: bool,
     region: Optional[str],
-    use_spot: bool = False,
+    zone: Optional[str],
 ) -> float:
-    """Returns the cost, or the cheapest cost among all zones for spot."""
-    df = _get_instance_type(df, instance_type, region)
-    assert pd.isnull(
-        df['Price'].iloc[0]) is False, (f'Missing price for "{instance_type}, '
-                                        f'Spot: {use_spot}" in the catalog.')
-    # TODO(zhwu): We should handle the price difference among different regions.
-    price_str = 'SpotPrice' if use_spot else 'Price'
-    assert region is None or len(set(df[price_str])) == 1, df
+    """Returns the hourly price of a VM instance in the given region and zone.
+
+    Refer to get_hourly_cost in service_catalog/__init__.py for the docstring.
+    """
+    df = _get_instance_type(df, instance_type, region, zone)
+    if df.empty:
+        if zone is None:
+            if region is None:
+                region_or_zone = 'all regions'
+            else:
+                region_or_zone = f'region {region!r}'
+        else:
+            region_or_zone = f'zone {zone!r}'
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Instance type {instance_type!r} not found '
+                             f'in {region_or_zone}.')
+
+    # If the zone is specified, only one row should be found by the query.
+    assert zone is None or len(df) == 1, df
+    if use_spot:
+        price_str = 'SpotPrice'
+    else:
+        price_str = 'Price'
+        # For AWS/Azure/GCP on-demand instances, the price is the same across
+        # all the zones in the same region.
+        assert region is None or len(set(df[price_str])) == 1, df
 
     cheapest_idx = df[price_str].idxmin()
-
     cheapest = df.loc[cheapest_idx]
     return cheapest[price_str]
 
@@ -236,6 +270,39 @@ def get_vcpus_from_instance_type_impl(
     return float(vcpus)
 
 
+def _filter_with_cpus(df: pd.DataFrame, cpus: Optional[str]) -> pd.DataFrame:
+    if cpus is None:
+        return df
+
+    # The following code is redundant with the code in resources.py::_set_cpus()
+    # but we add it here for safety.
+    if cpus.endswith('+'):
+        num_cpus_str = cpus[:-1]
+    else:
+        num_cpus_str = cpus
+    try:
+        num_cpus = float(num_cpus_str)
+    except ValueError:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'The "cpus" field should be either a number or '
+                             f'a string "<number>+". Found: {cpus!r}') from None
+
+    if cpus.endswith('+'):
+        return df[df['vCPUs'] >= num_cpus]
+    else:
+        return df[df['vCPUs'] == num_cpus]
+
+
+def get_instance_type_for_cpus_impl(
+        df: pd.DataFrame, cpus: Optional[str] = None) -> Optional[str]:
+    df = _filter_with_cpus(df, cpus)
+    if df.empty:
+        return None
+    # Sort by the number of vCPUs and then by the price.
+    df = df.sort_values(by=['vCPUs', 'Price'], ascending=True)
+    return df['InstanceType'].iloc[0]
+
+
 def get_accelerators_from_instance_type_impl(
     df: pd.DataFrame,
     instance_type: str,
@@ -255,6 +322,10 @@ def get_instance_type_for_accelerator_impl(
     df: pd.DataFrame,
     acc_name: str,
     acc_count: int,
+    cpus: Optional[str] = None,
+    use_spot: bool = False,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """
     Returns a list of instance types satisfying the required count of
@@ -275,8 +346,19 @@ def get_instance_type_for_accelerator_impl(
                 fuzzy_candidate_list.append(f'{row["AcceleratorName"]}:'
                                             f'{int(row["AcceleratorCount"])}')
         return (None, fuzzy_candidate_list)
+
+    result = _filter_with_cpus(result, cpus)
+    if region is not None:
+        result = result[result['Region'] == region]
+    if zone is not None:
+        # NOTE: For Azure regions, zone must be None.
+        result = result[result['AvailabilityZone'] == zone]
+    if len(result) == 0:
+        return ([], [])
+
     # Current strategy: choose the cheapest instance
-    result = result.sort_values('Price', ascending=True)
+    price_str = 'SpotPrice' if use_spot else 'Price'
+    result = result.sort_values(price_str, ascending=True)
     instance_types = list(result['InstanceType'].drop_duplicates())
     return (instance_types, [])
 
@@ -286,6 +368,7 @@ def list_accelerators_impl(
     df: pd.DataFrame,
     gpus_only: bool,
     name_filter: Optional[str],
+    region_filter: Optional[str],
     case_sensitive: bool = True,
 ) -> Dict[str, List[InstanceTypeInfo]]:
     """Lists accelerators offered in a cloud service catalog.
@@ -306,11 +389,16 @@ def list_accelerators_impl(
         'MemoryGiB',
         'Price',
         'SpotPrice',
+        'Region',
     ]].dropna(subset=['AcceleratorName']).drop_duplicates()
     if name_filter is not None:
         df = df[df['AcceleratorName'].str.contains(name_filter,
                                                    case=case_sensitive,
                                                    regex=True)]
+    if region_filter is not None:
+        df = df[df['Region'].str.contains(region_filter,
+                                          case=case_sensitive,
+                                          regex=True)]
     df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
     grouped = df.groupby('AcceleratorName')
 
@@ -331,6 +419,7 @@ def list_accelerators_impl(
                 row['MemoryGiB'],
                 row['Price'],
                 row['SpotPrice'],
+                row['Region'],
             ),
             axis='columns',
         ).tolist()
@@ -387,6 +476,7 @@ def accelerator_in_region_or_zone_impl(
     assert region is not None or zone is not None, (
         'Both region and zone are None.')
     if zone is None:
+        assert region is not None
         return _accelerator_in_region(df, accelerator_name, acc_count, region)
     else:
         return _accelerator_in_zone(df, accelerator_name, acc_count, zone)
