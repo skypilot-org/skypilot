@@ -101,11 +101,11 @@ class StrategyExecutor:
         retry_cnt = 0
         while True:
             try:
-                handle = global_user_state.get_handle_from_cluster_name(
-                    self.cluster_name)
-                if handle is None:
-                    return
-                self.backend.teardown(handle, terminate=True)
+                usage_lib.messages.usage.set_internal()
+                sky.down(self.cluster_name)
+                return
+            except ValueError:
+                # The cluster is already down.
                 return
             except Exception as e:  # pylint: disable=broad-except
                 retry_cnt += 1
@@ -121,7 +121,8 @@ class StrategyExecutor:
         if handle is None:
             return
         try:
-            self.backend.cancel_jobs(handle, jobs=None)
+            usage_lib.messages.usage.set_internal()
+            sky.cancel(cluster_name=self.cluster_name, all=True)
         except Exception as e:  # pylint: disable=broad-except
             # Ignore the failure as the cluster can be totally stopped, and the
             # job canceling can get connection error.
