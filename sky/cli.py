@@ -2218,7 +2218,8 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
                 'resources will not be terminated and require manual cleanup.')
     click.echo(msg)
     if cluster_status == global_user_state.ClusterStatus.UP:
-        with backend_utils.safe_console_status('[bold cyan]Checking spot jobs on the controller[/]'):
+        with backend_utils.safe_console_status(
+                '[bold cyan]Checking spot jobs on the controller[/]'):
             try:
                 spot_jobs = core.spot_queue(refresh=False)
             except exceptions.ClusterNotUpError:
@@ -2238,8 +2239,10 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
                 non_terminal_jobs):
             job_table = spot_lib.format_job_table(non_terminal_jobs,
                                                   show_all=False)
-            msg = (f'Following in-progress spot jobs found, to avoid resources'
-                   ' leakage, run: sky spot cancel -a\n')
+            msg = (f'{colorama.Fore.RED}In-progress spot jobs found, '
+                   'to avoid resources leakage, firstly run: '
+                   f'{colorama.Style.BRIGHT}sky spot cancel -a'
+                   f'{colorama.Style.RESET_ALL}\n')
             # Add prefix to each line to align with the bullet point.
             msg += '\n'.join(
                 ['   ' + line for line in job_table.split('\n') if line != ''])
