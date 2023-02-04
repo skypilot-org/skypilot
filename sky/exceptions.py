@@ -36,6 +36,9 @@ class ResourcesUnavailableError(Exception):
 class ProvisionPrechecksError(Exception):
     """Raised when a spot job fails before provision.
 
+    Please refer to the docstring of `spot.recovery_strategy._launch` for
+    more details about when the error will be raised.
+
     Args:
         reasons: (List[Exception]) The reasons why the prechecks failed.
     """
@@ -46,7 +49,11 @@ class ProvisionPrechecksError(Exception):
 
 
 class SpotJobReachedMaxRetriesError(Exception):
-    """Raised when a spot job fails to be launched after maximum retries."""
+    """Raised when a spot job fails to be launched after maximum retries.
+
+    Please refer to the docstring of `spot.recovery_strategy._launch` for
+    more details about when the error will be raised.
+    """
     pass
 
 
