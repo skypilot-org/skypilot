@@ -240,7 +240,6 @@ class StrategyExecutor:
                     # Failing directly avoids the infinite loop of retrying
                     # the launch when, e.g., an invalid cluster name is used
                     # and --retry-until-up is specified.
-
                     reason = common_utils.format_exception(e)
                     if e.failover_history:
                         reason = common_utils.format_exception(
