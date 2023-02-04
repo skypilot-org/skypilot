@@ -9,17 +9,20 @@ boto3 = None
 botocore = None
 func_lock = threading.RLock()
 
+
 def _synchronized(func):
     """Decorator to synchronize a function.
 
     This decorator is used to synchronize a function across threads.
     """
+
     @functools.wraps(func)
     def synced_func(*args, **kwargs):
         with func_lock:
             return func(*args, **kwargs)
 
     return synced_func
+
 
 def import_package(func):
 
