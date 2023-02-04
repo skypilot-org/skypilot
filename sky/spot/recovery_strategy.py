@@ -129,6 +129,70 @@ class StrategyExecutor:
                         'the spot cluster is likely completely stopped.'
                         f'\n  Detailed exception: {e}')
 
+    def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
+        """Wait for MAX_JOB_CHECKING_RETRY times until job starts on the cluster
+
+        Returns:
+            The timestamp of when the job is submitted, or None if failed to
+            submit.
+        """
+        status = None
+        job_checking_retry_cnt = 0
+        while job_checking_retry_cnt < MAX_JOB_CHECKING_RETRY:
+            # Avoid the infinite loop, if any bug happens.
+            job_checking_retry_cnt += 1
+            try:
+                cluster_status, _ = (
+                    backend_utils.refresh_cluster_status_handle(
+                        self.cluster_name, force_refresh=True))
+            except Exception as e:  # pylint: disable=broad-except
+                # If any unexpected error happens, retry the job checking
+                # loop.
+                # TODO(zhwu): log the unexpected error to usage collection
+                # for future debugging.
+                logger.info(f'Unexpected exception: {e}\nFailed to get the '
+                            'refresh the cluster status. Retrying.')
+                continue
+            if cluster_status != global_user_state.ClusterStatus.UP:
+                # The cluster can be preempted before the job is
+                # launched.
+                # Break to let the retry launch kick in.
+                logger.info('The cluster is preempted before the job '
+                            'is submitted.')
+                # TODO(zhwu): we should recover the preemption with the
+                # recovery strategy instead of the current while loop.
+                break
+
+            try:
+                status = spot_utils.get_job_status(self.backend,
+                                                   self.cluster_name)
+            except Exception as e:  # pylint: disable=broad-except
+                # If any unexpected error happens, retry the job checking
+                # loop.
+                # Note: the CommandError is already handled in the
+                # get_job_status, so it should not happen here.
+                # TODO(zhwu): log the unexpected error to usage collection
+                # for future debugging.
+                logger.info(f'Unexpected exception: {e}\nFailed to get the '
+                            'job status. Retrying.')
+                continue
+
+            # Check the job status until it is not in initialized status
+            if status is not None and status > job_lib.JobStatus.INIT:
+                try:
+                    job_submitted_at = spot_utils.get_job_timestamp(
+                        self.backend, self.cluster_name, get_end_time=False)
+                    return job_submitted_at
+                except Exception as e:  # pylint: disable=broad-except
+                    # If we failed to get the job timestamp, we will retry
+                    # job checking loop.
+                    logger.info(f'Unexpected Exception: {e}\nFailed to get '
+                                'the job start timestamp. Retrying.')
+                    continue
+            # Wait for the job to be started
+            time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
+        return None
+
     def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
         """Implementation of launch().
 
@@ -143,14 +207,16 @@ class StrategyExecutor:
             The job's submit timestamp, or None if failed to submit the job
             (either provisioning fails or any error happens in job submission)
             and raise_on_failure is False.
+
+        Raises:
+            exceptions.ResourcesUnavailableError: If the launch fails and
+                `raise_on_failure` is True.
         """
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
         backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)
         while True:
             retry_cnt += 1
-            retry_launch = False
-            exception = None
             try:
                 usage_lib.messages.usage.set_internal()
                 # Detach setup, so that the setup failure can be detected
@@ -161,9 +227,42 @@ class StrategyExecutor:
                            detach_run=True,
                            _is_launched_by_spot_controller=True)
                 logger.info('Spot cluster launched.')
-            except exceptions.InvalidClusterNameError as e:
-                # The cluster name is too long.
-                raise exceptions.ResourcesUnavailableError(str(e)) from e
+            except exceptions.ResourcesUnavailableError as e:
+                # This is raised when the launch fails after failing over
+                # through all the candidates.
+                if not any(
+                        isinstance(err, exceptions.ResourcesUnavailableError)
+                        for err in e.failover_history):
+                    # _launch() (this function) should fail/exit directly, if
+                    # none of the failover reasons were because of resource
+                    # unavailability or no failover was attempted (the optimizer
+                    # cannot find feasible resources for requested resources),
+                    # i.e., e.failover_history is empty.
+                    # Failing directly avoids the infinite loop of retrying
+                    # the launch when, e.g., an invalid cluster name is used
+                    # and --retry-until-up is specified.
+                    reason = common_utils.format_exception(e)
+                    if e.failover_history:
+                        reason = common_utils.format_exception(
+                            e.failover_history[0])
+                    logger.error(
+                        'Failure happened before provisioning. Failover '
+                        f'reasons: {reason}')
+                    if raise_on_failure:
+                        if e.failover_history:
+                            # Only use the first failover error, as it would be
+                            # too verbose to show all the failover errors, and
+                            # it is likely that the first failover error is
+                            # similar to the others, e.g. the cluster name is
+                            # invalid or cloud user identity is invalid, etc.
+                            reason_err = e.failover_history[0]
+                        else:
+                            reason_err = e
+                        raise exceptions.SpotJobFailedBeforeProvisionError(
+                            reason=reason_err)
+                    return None
+                logger.info('Failed to launch the spot cluster with error: '
+                            f'{common_utils.format_exception(e)})')
             except Exception as e:  # pylint: disable=broad-except
                 # If the launch fails, it will be recovered by the following
                 # code.
@@ -171,77 +270,19 @@ class StrategyExecutor:
                             f'{common_utils.format_exception(e)})')
                 import traceback  # pylint: disable=import-outside-toplevel
                 logger.info(f'  Traceback: {traceback.format_exc()}')
-                retry_launch = True
-                exception = e
-
-            # At this point, a sky.launch() has succeeded. Cluster may be
-            # UP (no preemption since) or DOWN (newly preempted).
-            status = None
-            job_checking_retry_cnt = 0
-            while not retry_launch:
-                job_checking_retry_cnt += 1
-                if job_checking_retry_cnt >= MAX_JOB_CHECKING_RETRY:
-                    # Avoid the infinite loop, if any bug happens.
-                    retry_launch = True
-                    # TODO(zhwu): log the unexpected error to usage collection
-                    # for future debugging.
-                    logger.info(
-                        'Failed to get the job status, due to unexpected '
-                        'job submission error.')
-                    break
-
-                try:
-                    cluster_status, _ = (
-                        backend_utils.refresh_cluster_status_handle(
-                            self.cluster_name, force_refresh=True))
-                except Exception as e:  # pylint: disable=broad-except
-                    # If any unexpected error happens, retry the job checking
-                    # loop.
-                    # TODO(zhwu): log the unexpected error to usage collection
-                    # for future debugging.
-                    logger.info(f'Unexpected exception: {e}\nFailed to get the '
-                                'refresh the cluster status. Retrying.')
-                    continue
-                if cluster_status != global_user_state.ClusterStatus.UP:
-                    # The cluster can be preempted before the job is launched.
-                    # Break to let the retry launch kick in.
-                    logger.info('The cluster is preempted before the job '
-                                'is submitted.')
-                    # TODO(zhwu): we should recover the preemption with the
-                    # recovery strategy instead of the current while loop.
-                    retry_launch = True
-                    break
-
-                try:
-                    status = spot_utils.get_job_status(self.backend,
-                                                       self.cluster_name)
-                except Exception as e:  # pylint: disable=broad-except
-                    # If any unexpected error happens, retry the job checking
-                    # loop.
-                    # Note: the CommandError is already handled in the
-                    # get_job_status, so it should not happen here.
-                    # TODO(zhwu): log the unexpected error to usage collection
-                    # for future debugging.
-                    logger.info(f'Unexpected exception: {e}\nFailed to get the '
-                                'job status. Retrying.')
-                    continue
-
-                # Check the job status until it is not in initialized status
-                if status is not None and status > job_lib.JobStatus.INIT:
-                    try:
-                        job_submitted_at = spot_utils.get_job_timestamp(
-                            self.backend, self.cluster_name, get_end_time=False)
-                        return job_submitted_at
-                    except Exception as e:  # pylint: disable=broad-except
-                        # If we failed to get the job timestamp, we will retry
-                        # job checking loop.
-                        logger.info(f'Unexpected Exception: {e}\nFailed to get '
-                                    'the job start timestamp. Retrying.')
-                        continue
-                # Wait for the job to be started
-                time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
-
-            assert retry_launch
+            else:  # No exception, the launch succeeds.
+                # At this point, a sky.launch() has succeeded. Cluster may be
+                # UP (no preemption since) or DOWN (newly preempted).
+                job_submitted_at = self._wait_until_job_starts_on_cluster()
+                if job_submitted_at is not None:
+                    return job_submitted_at
+                # The job fails to start on the spot cluster, retry the launch.
+                # TODO(zhwu): log the unexpected error to usage collection
+                # for future debugging.
+                logger.info(
+                    'Failed to successfully submit the job to the '
+                    'launched cluster, due to unexpected submission errors or '
+                    'the cluster being preempted during job submission.')
 
             self.terminate_cluster()
             if max_retry is not None and retry_cnt >= max_retry:
@@ -250,7 +291,7 @@ class StrategyExecutor:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
                             'Failed to launch the spot cluster after '
-                            f'{max_retry} retries.') from exception
+                            f'{max_retry} retries.')
                 else:
                     return None
             gap_seconds = backoff.current_backoff()

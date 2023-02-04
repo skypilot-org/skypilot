@@ -6,7 +6,6 @@ import signal
 import time
 import traceback
 
-import colorama
 import filelock
 
 import sky
@@ -60,7 +59,15 @@ class SpotController:
             self._cluster_name, self._backend, self._task, retry_until_up)
 
     def _run(self):
-        """Busy loop monitoring spot cluster status and handling recovery."""
+        """Busy loop monitoring spot cluster status and handling recovery.
+
+        Raises:
+            exceptions.ResourcesUnavailableError: if the spot cluster fails
+                to be launched or the job fails to be submitted to the cluster.
+                This will happen iff none of the failover are due to resources
+                unavailability, or retry_until_up is False and we've reached the
+                maximum number of retries.
+        """
         logger.info(f'Started monitoring spot task {self._task_name} '
                     f'(id: {self._job_id})')
         spot_state.set_starting(self._job_id)
@@ -134,11 +141,16 @@ class SpotController:
                                             None,
                                             spot_job_id=self._job_id)
                     logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
-                    status_to_set = spot_state.SpotStatus.FAILED
+                    spot_status_to_set = spot_state.SpotStatus.FAILED
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
-                        status_to_set = spot_state.SpotStatus.FAILED_SETUP
+                        spot_status_to_set = spot_state.SpotStatus.FAILED_SETUP
+                    failure_reason = (
+                        'To see the details, run: '
+                        f'sky spot logs --controller {self._job_id}')
+
                     spot_state.set_failed(self._job_id,
-                                          failure_type=status_to_set,
+                                          failure_type=spot_status_to_set,
+                                          failure_reason=failure_reason,
                                           end_time=end_time)
                     break
                 # Although the cluster is healthy, we fail to access the
@@ -174,16 +186,37 @@ class SpotController:
             # Kill the children processes launched by log_lib.run_with_log.
             subprocess_utils.kill_children_processes()
             spot_state.set_cancelled(self._job_id)
-        except exceptions.ResourcesUnavailableError as e:
-            logger.error(f'{common_utils.class_fullname(e.__class__)}: '
-                         f'{colorama.Fore.RED}{e}{colorama.Style.RESET_ALL}')
+        except exceptions.SpotJobFailedBeforeProvisionError as e:
+            # The exception will be caught when:
+            # None of the failovers are caused by resource unavailability;
+            # i.e., they are caused by errors before actual provisioning,
+            # e.g., InvalidClusterNameError, NotSupportedError,
+            # CloudUserIdentityError, etc.
+            logger.error(common_utils.format_exception(e.reason))
             spot_state.set_failed(
                 self._job_id,
-                failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE)
+                failure_type=spot_state.SpotStatus.FAILED_OTHER_REASON,
+                failure_reason=common_utils.format_exception(e.reason))
+        except exceptions.ResourcesUnavailableError as e:
+            # The exception will be caught when:
+            # The strategy_executor fails to launch/recover the cluster
+            # after the max number of retries when retry_until_up is not set.
+            logger.error(common_utils.format_exception(e))
+            # The spot job should be marked as FAILED_NO_RESOURCE, as the
+            # spot job may be able to launch next time.
+            spot_state.set_failed(
+                self._job_id,
+                failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE,
+                failure_reason=common_utils.format_exception(e))
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.error(traceback.format_exc())
-            logger.error('Unexpected error occurred: '
-                         f'{common_utils.format_exception(e)}')
+            msg = ('Unexpected error occurred: '
+                   f'{common_utils.format_exception(e, use_bracket=True)}')
+            logger.error(msg)
+            spot_state.set_failed(
+                self._job_id,
+                failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
+                failure_reason=msg)
         finally:
             self._strategy_executor.terminate_cluster()
             job_status = spot_state.get_status(self._job_id)
@@ -193,7 +226,10 @@ class SpotController:
                 logger.info(f'Previous spot job status: {job_status.value}')
                 spot_state.set_failed(
                     self._job_id,
-                    failure_type=spot_state.SpotStatus.FAILED_CONTROLLER)
+                    failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
+                    failure_reason=(
+                        'Unexpected error occurred. For details, '
+                        f'run: sky spot logs --controller {self._job_id}'))
 
             # Clean up Storages with persistent=False.
             self._backend.teardown_ephemeral_storage(self._task)

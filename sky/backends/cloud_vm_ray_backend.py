@@ -953,8 +953,8 @@ class RetryingVmProvisioner(object):
             except FileNotFoundError:
                 # Happens if no previous cluster.yaml exists.
                 pass
-        if region is not None and cluster_exists:
 
+        if region is not None and cluster_exists:
             region = clouds.Region(name=region)
             if zones is not None:
                 zones = [clouds.Zone(name=zone) for zone in zones.split(',')]
@@ -1662,6 +1662,8 @@ class RetryingVmProvisioner(object):
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
 
+        failover_history: List[Exception] = list()
+
         style = colorama.Style
         # Retrying launchable resources.
         while True:
@@ -1699,16 +1701,18 @@ class RetryingVmProvisioner(object):
                 logger.warning(common_utils.format_exception(e))
                 self._blocked_resources.add(
                     resources_lib.Resources(cloud=to_provision.cloud))
+                failover_history.append(e)
             except exceptions.ResourcesUnavailableError as e:
+                failover_history.append(e)
                 if e.no_failover:
-                    raise e
+                    raise e.with_failover_history(failover_history)
                 if launchable_retries_disabled:
                     logger.warning(
                         'DAG and optimize_target needs to be registered first '
                         'to enable cross-cloud retry. '
                         'To fix, call backend.register_info(dag=dag, '
                         'optimize_target=sky.OptimizeTarget.COST)')
-                    raise e
+                    raise e.with_failover_history(failover_history)
 
                 logger.warning(common_utils.format_exception(e))
             else:
@@ -1741,9 +1745,18 @@ class RetryingVmProvisioner(object):
             # (otherwise will skip re-optimizing this task).
             # TODO: set all remaining tasks' best_resources to None.
             task.best_resources = None
-            self._dag = sky.optimize(self._dag,
-                                     minimize=self._optimize_target,
-                                     blocked_resources=self._blocked_resources)
+            try:
+                self._dag = sky.optimize(
+                    self._dag,
+                    minimize=self._optimize_target,
+                    blocked_resources=self._blocked_resources)
+            except exceptions.ResourcesUnavailableError as e:
+                # Optimizer failed to find a feasible resources for the task,
+                # either because the previous failovers have blocked all the
+                # possible resources or the requested resources is too
+                # restrictive. If we reach here, our failover logic finally
+                # ends here.
+                raise e.with_failover_history(failover_history)
             to_provision = task.best_resources
             assert task in self._dag.tasks, 'Internal logic error.'
             assert to_provision is not None, task
@@ -2177,7 +2190,8 @@ class CloudVmRayBackend(backends.Backend):
                         '`--retry-until-up` flag.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
-                            error_message) from None
+                            error_message,
+                            failover_history=e.failover_history) from None
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
@@ -2517,20 +2531,21 @@ class CloudVmRayBackend(backends.Backend):
         finally:
             name = handle.cluster_name
             if name == spot_lib.SPOT_CONTROLLER_NAME:
-                logger.info(f'{fore.CYAN}Spot Job ID: '
-                            f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
-                            '\nTo cancel the job:\t\t'
-                            f'{backend_utils.BOLD}sky spot cancel {job_id}'
-                            f'{backend_utils.RESET_BOLD}'
-                            '\nTo stream job logs:\t\t'
-                            f'{backend_utils.BOLD}sky spot logs {job_id}'
-                            f'{backend_utils.RESET_BOLD}'
-                            f'\nTo stream controller logs:\t'
-                            f'{backend_utils.BOLD}sky logs {name} {job_id}'
-                            f'{backend_utils.RESET_BOLD}'
-                            '\nTo view all spot jobs:\t\t'
-                            f'{backend_utils.BOLD}sky spot queue'
-                            f'{backend_utils.RESET_BOLD}')
+                logger.info(
+                    f'{fore.CYAN}Spot Job ID: '
+                    f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                    '\nTo cancel the job:\t\t'
+                    f'{backend_utils.BOLD}sky spot cancel {job_id}'
+                    f'{backend_utils.RESET_BOLD}'
+                    '\nTo stream job logs:\t\t'
+                    f'{backend_utils.BOLD}sky spot logs {job_id}'
+                    f'{backend_utils.RESET_BOLD}'
+                    f'\nTo stream controller logs:\t'
+                    f'{backend_utils.BOLD}sky spot logs --controller {job_id}'
+                    f'{backend_utils.RESET_BOLD}'
+                    '\nTo view all spot jobs:\t\t'
+                    f'{backend_utils.BOLD}sky spot queue'
+                    f'{backend_utils.RESET_BOLD}')
             else:
                 logger.info(f'{fore.CYAN}Job ID: '
                             f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
