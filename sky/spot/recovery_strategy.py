@@ -130,7 +130,7 @@ class StrategyExecutor:
                         f'\n  Detailed exception: {e}')
 
     def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
-        """Wait until the job starts on the cluster.
+        """Wait for MAX_JOB_CHECKING_RETRY times until the job starts on the cluster.
 
         Returns:
             The timestamp job submitted, or None if failed.
