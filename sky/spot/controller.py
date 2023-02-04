@@ -65,7 +65,7 @@ class SpotController:
             exceptions.ResourcesUnavailableError: if the spot cluster fails
                 to be launched or the job fails to be submitted to the cluster.
                 This will happen iff none of the failover are due to resources
-                unavailability or retry_until_up is False and we've reached the
+                unavailability, or retry_until_up is False and we've reached the
                 maximum number of retries.
         """
         logger.info(f'Started monitoring spot task {self._task_name} '
@@ -227,8 +227,8 @@ class SpotController:
                 spot_state.set_failed(
                     self._job_id,
                     failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
-                    failure_reason='Unexpected error occurred. For details, '
-                    f'run: sky spot logs --controller {self._job_id}')
+                    failure_reason=('Unexpected error occurred. For details, '
+                    f'run: sky spot logs --controller {self._job_id}'))
 
             # Clean up Storages with persistent=False.
             self._backend.teardown_ephemeral_storage(self._task)
