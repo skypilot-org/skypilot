@@ -133,7 +133,7 @@ class StrategyExecutor:
         """Wait for MAX_JOB_CHECKING_RETRY times until job starts on the cluster
 
         Returns:
-            The timestamp job submitted, or None if failed.
+            The timestamp of when the job is submitted, or None if failed to submit.
         """
         status = None
         job_checking_retry_cnt = 0

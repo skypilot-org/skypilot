@@ -227,8 +227,9 @@ class SpotController:
                 spot_state.set_failed(
                     self._job_id,
                     failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
-                    failure_reason=('Unexpected error occurred. For details, '
-                    f'run: sky spot logs --controller {self._job_id}'))
+                    failure_reason=(
+                        'Unexpected error occurred. For details, '
+                        f'run: sky spot logs --controller {self._job_id}'))
 
             # Clean up Storages with persistent=False.
             self._backend.teardown_ephemeral_storage(self._task)
