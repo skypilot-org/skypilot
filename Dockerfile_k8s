@@ -1,0 +1,45 @@
+# docker build -t skypilot:latest -f Dockerfile_k8s ./sky
+FROM continuumio/miniconda3:4.11.0
+
+# Initialize conda for root user, install ssh and other local dependencies
+RUN apt update -y && \
+    apt install rsync sudo patch openssh-server pciutils nano -y && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt remove -y python3 && \
+    conda init
+
+# Setup SSH and generate hostkeys
+RUN mkdir -p /var/run/sshd && \
+    sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd && \
+    cd /etc/ssh/ && \
+    ssh-keygen -A
+
+# Setup new user named sky and add to sudoers. Also add /opt/conda/bin to sudo path.
+RUN useradd -m -s /bin/bash sky && \
+    echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
+    echo 'Defaults        secure_path="/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' > /etc/sudoers.d/sky
+
+# Switch to sky user
+USER sky
+
+# Install SkyPilot pip dependencies
+# Hack: we only install SkyPilot[aws] to optimize build time
+RUN pip install wheel Click colorama cryptography jinja2 jsonschema && \
+    pip install networkx oauth2client pandas pendulum PrettyTable && \
+    pip install ray[default]==2.01 rich tabulate filelock 'grpcio<=1.43.0' && \
+    pip install packaging 'protobuf<4.0.0' psutil pulp && \
+    pip install awscli boto3 pycryptodome==3.12.0 && \
+    pip install docker
+
+# Install SkyPilot. This is purposely separate from installing SkyPilot
+# dependencies to optimize rebuild time
+COPY . /skypilot/sky/
+
+RUN cd /skypilot/ && \
+    sudo mv -v sky/setup_files/* . && \
+    pip install ".[aws]"
+
+# Set WORKDIR and initialize conda for sky user
+WORKDIR /home/sky
+RUN conda init

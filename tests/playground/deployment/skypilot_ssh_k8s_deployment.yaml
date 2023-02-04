@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skypilot-deployment
+  labels:
+    app: skypilot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: skypilot
+  template:
+    metadata:
+      labels:
+        app: skypilot
+    spec:
+      volumes:
+        - name: secret-volume
+          secret:
+            secretName: ssh-key-secret
+      containers:
+      - name: skypilot
+        image: skypilot:latest
+        imagePullPolicy: Never
+        env:
+          - name: SECRET_THING
+            valueFrom:
+              secretKeyRef:
+                name: ssh-key-secret
+                key: ssh-publickey
+        ports:
+        - containerPort: 22
+        command: ["/bin/bash", "-c", "sleep 1000000000"]
+        volumeMounts:
+          - name: secret-volume
+            readOnly: true
+            mountPath: "/etc/secret-volume"
+        lifecycle:
+          postStart:
+            exec:
+              command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && sudo service ssh restart"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: skypilot-service
+spec:
+    type: NodePort
+    selector:
+        app: skypilot
+    ports:
+        - protocol: TCP
+          port: 22
+          targetPort: 22
