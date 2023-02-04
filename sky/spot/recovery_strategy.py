@@ -82,26 +82,7 @@ class StrategyExecutor:
 
         Returns: The job's submit timestamp, or None if failed.
 
-        Raises:
-            exceptions.ProvisionPrechecksError: This will be raised when the
-                underlying `sky.launch` fails due to any error happens during
-                the prechecks for all the clouds, i.e. none of the failover, if
-                any, is due to the resources unavailability. It includes the
-                following cases:
-                1. The optimizer cannot find a feasible solution. (The
-                ResourcesUnavailabilityError from sky.launch has empty
-                `failover_history`.)
-                2. Invalid cluster name, failure in getting cloud user identity,
-                or unsupported feature happens. (None of the
-                ResourcesUnavailabilityError.failover_history is due to
-                resources unavailability.)
-            exceptions.SpotJobReachedMaxRetryError: This will be raised when the
-                maximum number of retries is reached for `sky.launch`. The
-                failure of `sky.launch` can be due to:
-                1. Any of the underyling failover is due to the resources
-                unavailability.
-                2. The cluster is preempted before the job is submitted.
-                3. Any unexpected error happens during the `sky.launch`.
+        Raises: Please refer to the docstring of self._launch().
         """
         if self.retry_until_up:
             return self._launch(max_retry=None)
