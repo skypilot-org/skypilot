@@ -6,7 +6,6 @@ import signal
 import time
 import traceback
 
-import colorama
 import filelock
 
 import sky
@@ -187,41 +186,32 @@ class SpotController:
             # Kill the children processes launched by log_lib.run_with_log.
             subprocess_utils.kill_children_processes()
             spot_state.set_cancelled(self._job_id)
+        except exceptions.SpotJobFailBeforeProvisionError as e:
+            # The exception will be caught when:
+            # None of the failovers are caused by resource unavailability;
+            # i.e., they are caused by errors before actual provisioning,
+            # e.g., InvalidClusterNameError, NotSupportedError,
+            # CloudUserIdentityError, etc.
+            logger.error(common_utils.format_exception(e.reason))
+            spot_state.set_failed(
+                self._job_id,
+                failure_type=spot_state.SpotStatus.FAILED_OTHER_REASON,
+                failure_reason=common_utils.format_exception(e.reason))
         except exceptions.ResourcesUnavailableError as e:
             # The exception will be caught when:
-            # 1. The strategy_executor fails to launch/recover the cluster
-            #    after the max number of retries when retry_until_up is not set.
-            # 2. None of the failovers are caused by resource unavailability;
-            #    i.e., they are caused by errors before actual provisioning,
-            #    e.g., InvalidClusterNameError, NotSupportedError,
-            #    CloudUserIdentityError, etc.
-            logger.error(f'{common_utils.class_fullname(e.__class__)}: '
-                         f'{colorama.Fore.RED}{e}{colorama.Style.RESET_ALL}')
-            if (not e.failover_history or any(
-                    isinstance(err, exceptions.ResourcesUnavailableError)
-                    for err in e.failover_history)):
-                # If any of the failover fails due to resource unavailability,
-                # the spot job should be marked as FAILED_NO_RESOURCE, as the
-                # spot job may be able to launch next time.
-                spot_state.set_failed(
-                    self._job_id,
-                    failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE,
-                    failure_reason=str(e))
-            else:
-                failover_err = e.failover_history[0]
-                # Only show the first failover error, as it would be too verbose
-                # to show all the failover errors, and it is likely that the
-                # first failover error is similar to the others, e.g. the
-                # cluster name is invalid or cloud user identity is invalid,
-                # etc.
-                spot_state.set_failed(
-                    self._job_id,
-                    failure_type=spot_state.SpotStatus.FAILED_OTHER_REASON,
-                    failure_reason=str(failover_err))
+            # The strategy_executor fails to launch/recover the cluster
+            # after the max number of retries when retry_until_up is not set.
+            logger.error(common_utils.format_exception(e))
+            # The spot job should be marked as FAILED_NO_RESOURCE, as the
+            # spot job may be able to launch next time.
+            spot_state.set_failed(
+                self._job_id,
+                failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE,
+                failure_reason=common_utils.format_exception(e))
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.error(traceback.format_exc())
             msg = ('Unexpected error occurred: '
-                   f'{common_utils.format_exception(e)}')
+                   f'{common_utils.format_exception(e, use_bracket=True)}')
             logger.error(msg)
             spot_state.set_failed(
                 self._job_id,

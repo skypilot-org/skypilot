@@ -29,6 +29,18 @@ class ResourcesUnavailableError(Exception):
         return self
 
 
+class SpotJobFailBeforeProvisionError(Exception):
+    """Raised when a spot job fails before provision.
+
+    Args:
+        reason: (Exception) The reason why the job fails.
+    """
+
+    def __init__(self, *args: object, reason: Exception) -> None:
+        super().__init__(*args)
+        self.reason = reason
+
+
 class ResourcesMismatchError(Exception):
     """Raised when resources are mismatched."""
     pass

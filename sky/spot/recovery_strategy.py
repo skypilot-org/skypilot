@@ -130,7 +130,7 @@ class StrategyExecutor:
                         f'\n  Detailed exception: {e}')
 
     def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
-        """Wait for MAX_JOB_CHECKING_RETRY times until the job starts on the cluster.
+        """Wait for MAX_JOB_CHECKING_RETRY times until job starts on the cluster
 
         Returns:
             The timestamp job submitted, or None if failed.
@@ -216,7 +216,6 @@ class StrategyExecutor:
         backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)
         while True:
             retry_cnt += 1
-            exception = None
             try:
                 usage_lib.messages.usage.set_internal()
                 # Detach setup, so that the setup failure can be detected
@@ -230,22 +229,40 @@ class StrategyExecutor:
             except exceptions.ResourcesUnavailableError as e:
                 # This is raised when the launch fails after failing over
                 # through all the candidates.
-                if (e.failover_history and not any(
+                if not any(
                         isinstance(err, exceptions.ResourcesUnavailableError)
-                        for err in e.failover_history)):
+                        for err in e.failover_history):
                     # _launch() (this function) should fail/exit directly, if
                     # none of the failover reasons were because of resource
-                    # unavailability.
+                    # unavailability or no failover was attempted (the optimizer
+                    # cannot find feasible resources for requested resources),
+                    # i.e., e.failover_history is empty.
                     # Failing directly avoids the infinite loop of retrying
                     # the launch when, e.g., an invalid cluster name is used
                     # and --retry-until-up is specified.
 
+                    reason = common_utils.format_exception(e)
+                    if e.failover_history:
+                        reason = common_utils.format_exception(
+                            e.failover_history[0])
+                    logger.error(
+                        'Failure happened before provisioning. Failover '
+                        f'reasons: {reason}')
                     if raise_on_failure:
-                        raise
+                        if e.failover_history:
+                            # Only use the first failover error, as it would be
+                            # too verbose to show all the failover errors, and
+                            # it is likely that the first failover error is
+                            # similar to the others, e.g. the cluster name is
+                            # invalid or cloud user identity is invalid, etc.
+                            reason_err = e.failover_history[0]
+                        else:
+                            reason_err = e
+                        raise exceptions.SpotJobFailBeforeProvisionError(
+                            reason=reason_err)
                     return None
                 logger.info('Failed to launch the spot cluster with error: '
                             f'{common_utils.format_exception(e)})')
-                exception = e
             except Exception as e:  # pylint: disable=broad-except
                 # If the launch fails, it will be recovered by the following
                 # code.
@@ -253,7 +270,6 @@ class StrategyExecutor:
                             f'{common_utils.format_exception(e)})')
                 import traceback  # pylint: disable=import-outside-toplevel
                 logger.info(f'  Traceback: {traceback.format_exc()}')
-                exception = e
             else:  # No exception, the launch succeeds.
                 # At this point, a sky.launch() has succeeded. Cluster may be
                 # UP (no preemption since) or DOWN (newly preempted).
@@ -272,15 +288,10 @@ class StrategyExecutor:
             if max_retry is not None and retry_cnt >= max_retry:
                 # Retry forever if max_retry is None.
                 if raise_on_failure:
-                    failover_history = []
-                    if isinstance(exception,
-                                  exceptions.ResourcesUnavailableError):
-                        failover_history = exception.failover_history
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
                             'Failed to launch the spot cluster after '
-                            f'{max_retry} retries.',
-                            failover_history=failover_history) from exception
+                            f'{max_retry} retries.')
                 else:
                     return None
             gap_seconds = backoff.current_backoff()
