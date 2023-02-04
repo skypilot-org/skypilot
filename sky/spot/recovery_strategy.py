@@ -93,8 +93,8 @@ class StrategyExecutor:
                 `failover_history`.)
                 2. Invalid cluster name, failure in getting cloud user identity,
                 or unsupported feature happens. (None of the
-                ResourcesUnavailabilityError.failover_history is due to resources
-                unavailability.)
+                ResourcesUnavailabilityError.failover_history is due to
+                resources unavailability.)
             exceptions.SpotJobReachedMaxRetryError: This will be raised when the
                 maximum number of retries is reached for `sky.launch`. The
                 failure of `sky.launch` can be due to:
