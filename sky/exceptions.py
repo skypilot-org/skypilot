@@ -29,7 +29,7 @@ class ResourcesUnavailableError(Exception):
         return self
 
 
-class SpotJobFailBeforeProvisionError(Exception):
+class SpotJobFailedBeforeProvisionError(Exception):
     """Raised when a spot job fails before provision.
 
     Args:

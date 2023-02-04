@@ -186,7 +186,7 @@ class SpotController:
             # Kill the children processes launched by log_lib.run_with_log.
             subprocess_utils.kill_children_processes()
             spot_state.set_cancelled(self._job_id)
-        except exceptions.SpotJobFailBeforeProvisionError as e:
+        except exceptions.SpotJobFailedBeforeProvisionError as e:
             # The exception will be caught when:
             # None of the failovers are caused by resource unavailability;
             # i.e., they are caused by errors before actual provisioning,

@@ -258,7 +258,7 @@ class StrategyExecutor:
                             reason_err = e.failover_history[0]
                         else:
                             reason_err = e
-                        raise exceptions.SpotJobFailBeforeProvisionError(
+                        raise exceptions.SpotJobFailedBeforeProvisionError(
                             reason=reason_err)
                     return None
                 logger.info('Failed to launch the spot cluster with error: '
