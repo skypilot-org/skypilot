@@ -14,6 +14,7 @@ _CLOUDS = [
     clouds.Azure(),
     clouds.GCP(),
     clouds.Lambda(),
+    clouds.Kubernetes(),
 ]
 
 

@@ -334,3 +334,23 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['file_mounts'] = file_mounts
 
     return config
+
+
+def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    get_or_generate_keys()
+
+    # Run kubectl command to add the public key to the cluster.
+    public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
+    # TODO(romilb): Change 'ssh-key-secret' to a unique name.
+    cmd = f"kubectl create secret generic ssh-key-secret --from-file=ssh-publickey={public_key_path}"
+    subprocess.run(cmd, shell=True, check=True)
+
+    # Need to use ~ relative path because Ray uses the same
+    # path for finding the public key path on both local and head node.
+    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
+
+    file_mounts = config['file_mounts']
+    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
+    config['file_mounts'] = file_mounts
+
+    return config

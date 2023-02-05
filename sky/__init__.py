@@ -30,6 +30,7 @@ Azure = clouds.Azure
 GCP = clouds.GCP
 Lambda = clouds.Lambda
 Local = clouds.Local
+Kubernetes = clouds.Kubernetes
 optimize = Optimizer.optimize
 
 __all__ = [
@@ -43,6 +44,7 @@ __all__ = [
     'OptimizeTarget',
     'backends',
     'benchmark',
+    'Kubernetes',
     'list_accelerators',
     '__root_dir__',
     'Storage',
