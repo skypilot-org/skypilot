@@ -142,7 +142,6 @@ def cost_report(cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
         A list of dicts, with each dict containing the cost information of a
         cluster.
     """
-
     # aggregate records for spot controller
     if cluster_name is not None:
         cluster_reports = cost_utils.aggregate_all_records(verbose=False)

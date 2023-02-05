@@ -3640,6 +3640,12 @@ _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 
 
 @spot.command('cost', cls=_DocumentedCodeCommand)
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
 @click.option(
     '--refresh',
     '-r',
