@@ -1589,68 +1589,6 @@ def _process_cli_query(
     ]
 
 
-def _ray_launch_hash(cluster_name: str,
-                     ray_config: Dict[str, Any]) -> Optional[Set[str]]:
-    """Returns a set of Ray launch config hashes, one per node type.
-
-    This returns None if ray's _bootstrap_config() failed to return, which can
-    happen if node providers' bootstrapping phase (config.py) raises an error
-    (which *should* only happen on errors prior to nodes launching, e.g.,
-    VPC/subnet setup).
-    """
-    # Use the cached Ray launch hashes if they exist.
-    metadata = global_user_state.get_cluster_metadata(cluster_name)
-    assert metadata is not None, cluster_name
-    ray_launch_hashes = metadata.get('ray_launch_hashes', None)
-    if ray_launch_hashes is not None:
-        logger.debug('Using cached launch_hashes.')
-        return set(ray_launch_hashes)
-    try:
-        with ux_utils.suppress_output():
-            ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
-    except RuntimeError as e:
-        # TODO(zongheng): is this safe? Could it be node(s) are live but somehow a
-        # separate status refresh hits such errors?
-        if 'SKYPILOT_ERROR_NO_NODES_LAUNCHED' in str(e):
-            logger.error(f'Error found when refreshing cluster status: {e}')
-            return None
-        raise e
-    # Adopted from https://github.com/ray-project/ray/blob/ray-2.0.1/python/ray/autoscaler/_private/node_launcher.py#L87-L97
-    # TODO(zhwu): this logic is duplicated from the ray code above (keep in
-    # sync).
-    launch_hashes = set()
-    head_node_type = ray_config['head_node_type']
-    for node_type, node_config in ray_config['available_node_types'].items():
-        if node_type == head_node_type:
-            launch_config = ray_config.get('head_node', {})
-            auth_config = ray_config['auth']
-        else:
-            launch_config = ray_config.get('worker_nodes', {})
-            auth_config = dict(ray_config['auth'])
-        # Why pop ssh_proxy_command for both head and workers:
-        #
-        # When we launch the head node from the local client: our call to `ray
-        # up` has a monkey-patched version of hash_launch_conf(), which drops
-        # this field.
-        #
-        # When the head node launches worker nodes: On the head node,
-        # ~/ray_bootstrap_config.yaml, which has any ssh_proxy_command field
-        # removed (see Ray's autoscaler/_private/commands.py), is passed to the
-        # autoscaler. Therefore when Ray calculates the hash for workers,
-        # ssh_proxy_command is not included. Here we follow this (otherwise our
-        # hash here would not match with what's on the console for workers).
-        auth_config.pop('ssh_proxy_command', None)
-        launch_config = copy.deepcopy(launch_config)
-        launch_config.update(node_config['node_config'])
-        with ux_utils.suppress_output():
-            current_hash = ray_autoscaler_private_util.hash_launch_conf(
-                launch_config, auth_config)
-        launch_hashes.add(current_hash)
-    # Cache the launch hashes for the cluster.
-    metadata['ray_launch_hashes'] = list(launch_hashes)
-    global_user_state.set_cluster_metadata(cluster_name, metadata)
-    return launch_hashes
-
 
 def _query_status_aws(
     cluster: str,
@@ -1667,16 +1605,8 @@ def _query_status_aws(
         'terminated': None,
     }
     region = ray_config['provider']['region']
-    launch_hashes = _ray_launch_hash(cluster, ray_config)
-    if launch_hashes is not None:
-        hash_filter_str = ','.join(launch_hashes)
-        hash_filter_line = (
-            f'Name=tag:ray-launch-config,Values={hash_filter_str} ')
-    else:
-        hash_filter_line = ''
     query_cmd = ('aws ec2 describe-instances --filters '
                  f'Name=tag:ray-cluster-name,Values={cluster} '
-                 f'{hash_filter_line}'
                  f'--region {region} '
                  '--query "Reservations[].Instances[].State.Name" '
                  '--output text')
@@ -1690,9 +1620,6 @@ def _query_status_gcp(
     # Note: we use ":" for filtering labels for gcloud, as the latest gcloud (v393.0)
     # fails to filter labels with "=".
     # Reference: https://cloud.google.com/sdk/gcloud/reference/topic/filters
-    launch_hashes = _ray_launch_hash(cluster, ray_config)
-    assert launch_hashes is not None
-    hash_filter_str = ' '.join(launch_hashes)
 
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     zone = ray_config['provider'].get('availability_zone', '')
@@ -1734,8 +1661,7 @@ def _query_status_gcp(
         # TODO(zhwu): The status of the TPU attached to the cluster should also
         # be checked, since TPUs are not part of the VMs.
         query_cmd = ('gcloud compute instances list '
-                     f'--filter="(labels.ray-cluster-name={cluster} AND '
-                     f'labels.ray-launch-config=({hash_filter_str}))" '
+                     f'--filter="(labels.ray-cluster-name={cluster})" '
                      '--format="value(status)"')
     status_list = _process_cli_query('GCP', cluster, query_cmd, '\n',
                                      status_map)
@@ -1777,13 +1703,9 @@ def _query_status_azure(
         'VM deallocating': global_user_state.ClusterStatus.STOPPED,
         'VM deallocated': global_user_state.ClusterStatus.STOPPED,
     }
-    launch_hashes = _ray_launch_hash(cluster, ray_config)
-    assert launch_hashes is not None
-    hash_filter_str = ', '.join(f'\\"{h}\\"' for h in launch_hashes)
     query_cmd = (
         'az vm show -d --ids $(az vm list --query '
-        f'"[?tags.\\"ray-cluster-name\\" == \'{cluster}\' && '
-        f'contains(\'[{hash_filter_str}]\', tags.\\"ray-launch-config\\")].id" '
+        f'"[?tags.\\"ray-cluster-name\\" == \'{cluster}\']\', tags.\\"ray-launch-config\\")].id" '
         '-o tsv) --query "powerState" -o tsv')
     # NOTE: Azure cli should be handled carefully. The query command above
     # takes about 1 second to run.
