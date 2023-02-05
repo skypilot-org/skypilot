@@ -144,10 +144,13 @@ def cost_report(cluster_names: List[str],
         cluster.
     """
 <<<<<<< HEAD
+<<<<<<< HEAD
     if aggregate_by_cluster_name:
         cluster_reports = cost_utils.aggregate_all_records(condensed=True)
 =======
 
+=======
+>>>>>>> 8fa31ba9 (add spot cost report)
     # aggregate records for spot controller
     if cluster_name is not None:
         cluster_reports = cost_utils.aggregate_all_records(verbose=False)

@@ -3680,7 +3680,17 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
 _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 
 
+<<<<<<< HEAD
 @spot.command('cost-report', cls=_DocumentedCodeCommand)
+=======
+@spot.command('cost', cls=_DocumentedCodeCommand)
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
+>>>>>>> 8fa31ba9 (add spot cost report)
 @click.option(
     '--refresh',
     '-r',

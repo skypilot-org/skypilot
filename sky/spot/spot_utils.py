@@ -502,6 +502,7 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
         job['status'] = spot_state.SpotStatus(job['status'])
     return jobs
 
+
 def format_job_table(jobs: List[Dict[str, Any]],
                      show_all: bool,
                      return_rows: Literal[False] = False,
