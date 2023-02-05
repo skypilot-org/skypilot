@@ -35,8 +35,57 @@ def monkey_patch_hash_launch_conf(node_conf, auth):
         json.dumps([node_conf, full_auth], sort_keys=True).encode('utf-8'))
     return hasher.hexdigest()
 
+# Ref: https://github.com/ray-project/ray/blob/840215bc09e942b50cad0ab2db96a8fdc79217c1/python/ray/autoscaler/_private/commands.py#L854-L912
+def monkey_patch_should_create_new_head(
+    head_node_id,
+    new_launch_hash,
+    new_head_node_type,
+    provider,
+) -> bool:
+    if not head_node_id:
+        # No head node exists, need to create it.
+        return True
+
+    # SkyPilot: We don't need to check if the head node has the same launch hash, as
+    # the upper-level code of SkyPilot will guarantee that the head node is always
+    # up-to-date.
+    return False
+    # Pull existing head's data.
+    # head_tags = provider.node_tags(head_node_id)
+    # current_launch_hash = head_tags.get(TAG_RAY_LAUNCH_CONFIG)
+    # current_head_type = head_tags.get(TAG_RAY_USER_NODE_TYPE)
+
+    # # Compare to current head
+    # hashes_mismatch = new_launch_hash != current_launch_hash
+    # types_mismatch = new_head_node_type != current_head_type
+
+    # new_head_required = hashes_mismatch or types_mismatch
+
+    # # Warn user
+    # if new_head_required:
+    #     with cli_logger.group(
+    #         "Currently running head node is out-of-date with cluster configuration"
+    #     ):
+
+    #         if hashes_mismatch:
+    #             cli_logger.print(
+    #                 "Current hash is {}, expected {}",
+    #                 cf.bold(current_launch_hash),
+    #                 cf.bold(new_launch_hash),
+    #             )
+
+    #         if types_mismatch:
+    #             cli_logger.print(
+    #                 "Current head node type is {}, expected {}",
+    #                 cf.bold(current_head_type),
+    #                 cf.bold(new_head_node_type),
+    #             )
+
+    # return new_head_required
+
 
 # Since hash_launch_conf is imported this way, we must patch this imported
 # version.
 sdk.sdk.commands.hash_launch_conf = monkey_patch_hash_launch_conf
+sdk.sdk.commands._should_create_new_head = monkey_patch_should_create_new_head
 sdk.create_or_update_cluster({ray_yaml_path}, **{ray_up_kwargs})
