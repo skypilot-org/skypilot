@@ -118,6 +118,7 @@ extras_require = {
     'azure': ['azure-cli>=2.31.0', 'azure-core', 'azure-identity'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],
+    'lambda': [],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

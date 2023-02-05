@@ -110,9 +110,13 @@ class SpotStatus(enum.Enum):
     # FAILED_SETUP: The job is finished with failure from the user's setup
     # script.
     FAILED_SETUP = 'FAILED_SETUP'
-    # FAILED_OTHER_REASON: The job is finished with failure because of other
-    # reasons, such as invalid cluster name or cloud user identity error.
-    FAILED_OTHER_REASON = 'FAILED_OTHER_REASON'
+    # FAILED_PRECHECKS: the underlying `sky.launch` fails due to precheck
+    # errors only. I.e., none of the failover exceptions, if any, is due to
+    # resources unavailability. This exception includes the following cases:
+    # 1. The optimizer cannot find a feasible solution.
+    # 2. Precheck errors: invalid cluster name, failure in getting cloud user
+    #    identity, or unsupported feature.
+    FAILED_PRECHECKS = 'FAILED_PRECHECKS'
     # FAILED_NO_RESOURCE: The job is finished with failure because there is no
     # resource available in the cloud provider(s) to launch the spot cluster.
     FAILED_NO_RESOURCE = 'FAILED_NO_RESOURCE'
@@ -133,15 +137,19 @@ class SpotStatus(enum.Enum):
     @classmethod
     def terminal_statuses(cls) -> List['SpotStatus']:
         return [
-            cls.SUCCEEDED, cls.FAILED, cls.FAILED_SETUP,
-            cls.FAILED_OTHER_REASON, cls.FAILED_NO_RESOURCE,
-            cls.FAILED_CONTROLLER, cls.CANCELLED
+            cls.SUCCEEDED,
+            cls.FAILED,
+            cls.FAILED_SETUP,
+            cls.FAILED_PRECHECKS,
+            cls.FAILED_NO_RESOURCE,
+            cls.FAILED_CONTROLLER,
+            cls.CANCELLED,
         ]
 
     @classmethod
     def failure_statuses(cls) -> List['SpotStatus']:
         return [
-            cls.FAILED, cls.FAILED_SETUP, cls.FAILED_OTHER_REASON,
+            cls.FAILED, cls.FAILED_SETUP, cls.FAILED_PRECHECKS,
             cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER
         ]
 
@@ -154,7 +162,7 @@ _SPOT_STATUS_TO_COLOR = {
     SpotStatus.RECOVERING: colorama.Fore.CYAN,
     SpotStatus.SUCCEEDED: colorama.Fore.GREEN,
     SpotStatus.FAILED: colorama.Fore.RED,
-    SpotStatus.FAILED_OTHER_REASON: colorama.Fore.RED,
+    SpotStatus.FAILED_PRECHECKS: colorama.Fore.RED,
     SpotStatus.FAILED_SETUP: colorama.Fore.RED,
     SpotStatus.FAILED_NO_RESOURCE: colorama.Fore.RED,
     SpotStatus.FAILED_CONTROLLER: colorama.Fore.RED,

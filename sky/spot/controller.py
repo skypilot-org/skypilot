@@ -62,11 +62,23 @@ class SpotController:
         """Busy loop monitoring spot cluster status and handling recovery.
 
         Raises:
-            exceptions.ResourcesUnavailableError: if the spot cluster fails
-                to be launched or the job fails to be submitted to the cluster.
-                This will happen iff none of the failover are due to resources
-                unavailability, or retry_until_up is False and we've reached the
-                maximum number of retries.
+            exceptions.ProvisionPrechecksError: This will be raised when the
+                underlying `sky.launch` fails due to precheck errors only.
+                I.e., none of the failover exceptions, if
+                any, is due to resources unavailability. This exception
+                includes the following cases:
+                1. The optimizer cannot find a feasible solution.
+                2. Precheck errors: invalid cluster name, failure in getting
+                cloud user identity, or unsupported feature.
+            exceptions.SpotJobReachedMaxRetryError: This will be raised when
+                all prechecks passed but the maximum number of retries is
+                reached for `sky.launch`. The failure of `sky.launch` can be
+                due to:
+                1. Any of the underlying failover exceptions is due to resources
+                unavailability.
+                2. The cluster is preempted before the job is submitted.
+                3. Any unexpected error happens during the `sky.launch`.
+        Other exceptions may be raised depending on the backend.
         """
         logger.info(f'Started monitoring spot task {self._task_name} '
                     f'(id: {self._job_id})')
@@ -186,21 +198,20 @@ class SpotController:
             # Kill the children processes launched by log_lib.run_with_log.
             subprocess_utils.kill_children_processes()
             spot_state.set_cancelled(self._job_id)
-        except exceptions.SpotJobFailedBeforeProvisionError as e:
-            # The exception will be caught when:
-            # None of the failovers are caused by resource unavailability;
-            # i.e., they are caused by errors before actual provisioning,
-            # e.g., InvalidClusterNameError, NotSupportedError,
-            # CloudUserIdentityError, etc.
-            logger.error(common_utils.format_exception(e.reason))
+        except exceptions.ProvisionPrechecksError as e:
+            # Please refer to the docstring of self._run for the cases when
+            # this exception can occur.
+            failure_reason = ('; '.join(
+                common_utils.format_exception(reason, use_bracket=True)
+                for reason in e.reasons))
+            logger.error(failure_reason)
             spot_state.set_failed(
                 self._job_id,
-                failure_type=spot_state.SpotStatus.FAILED_OTHER_REASON,
-                failure_reason=common_utils.format_exception(e.reason))
-        except exceptions.ResourcesUnavailableError as e:
-            # The exception will be caught when:
-            # The strategy_executor fails to launch/recover the cluster
-            # after the max number of retries when retry_until_up is not set.
+                failure_type=spot_state.SpotStatus.FAILED_PRECHECKS,
+                failure_reason=failure_reason)
+        except exceptions.SpotJobReachedMaxRetriesError as e:
+            # Please refer to the docstring of self._run for the cases when
+            # this exception can occur.
             logger.error(common_utils.format_exception(e))
             # The spot job should be marked as FAILED_NO_RESOURCE, as the
             # spot job may be able to launch next time.
