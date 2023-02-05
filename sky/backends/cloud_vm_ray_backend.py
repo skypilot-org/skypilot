@@ -2101,12 +2101,12 @@ class CloudVmRayBackend(backends.Backend):
         """Provisions using 'ray up'.
 
         Raises:
-            exceptions.ClusterOwnerIdentityMismatchError: if the cluster is
-                owned by another user.
+            exceptions.ClusterOwnerIdentityMismatchError: if the cluster
+                'cluster_name' exists and is owned by another user.
             exceptions.ResourcesUnavailableError: if the requested resources
                 cannot be satisfied. The failover_history of the exception
                 will be set as at least 1 exception from either our pre-checks
-                (e.g., cluster name invalid) or a region/zone suffers from
+                (e.g., cluster name invalid) or a region/zone throwing
                 resource unavailability.
         """
         # FIXME: ray up for Azure with different cluster_names will overwrite

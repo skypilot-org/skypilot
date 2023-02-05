@@ -210,23 +210,20 @@ class StrategyExecutor:
             (either provisioning fails or any error happens in job submission)
             and raise_on_failure is False.
 
-        Raises:
+        Raises (non-exhaustive):
             exceptions.ProvisionPrechecksError: This will be raised when the
-                underlying `sky.launch` fails due to any error happens during
-                the prechecks for all the clouds, i.e. none of the failover, if
-                any, is due to the resources unavailability. It includes the
-                following cases:
-                1. The optimizer cannot find a feasible solution. (The
-                ResourcesUnavailabilityError from sky.launch has empty
-                `failover_history`.)
-                2. Invalid cluster name, failure in getting cloud user identity,
-                or unsupported feature happens. (None of the
-                ResourcesUnavailabilityError.failover_history is due to
-                resources unavailability.)
-            exceptions.SpotJobReachedMaxRetryError: This will be raised when the
-                maximum number of retries is reached for `sky.launch`. The
-                failure of `sky.launch` can be due to:
-                1. Any of the underyling failover is due to the resources
+                underlying `sky.launch` fails due to precheck errors only.
+                I.e., none of the failover exceptions, if
+                any, is due to resources unavailability. This exception
+                includes the following cases:
+                1. The optimizer cannot find a feasible solution.
+                2. Precheck errors: invalid cluster name, failure in getting
+                cloud user identity, or unsupported feature.
+            exceptions.SpotJobReachedMaxRetryError: This will be raised when
+                all prechecks passed but the maximum number of retries is
+                reached for `sky.launch`. The failure of `sky.launch` can be
+                due to:
+                1. Any of the underlying failover exceptions is due to resources
                 unavailability.
                 2. The cluster is preempted before the job is submitted.
                 3. Any unexpected error happens during the `sky.launch`.
@@ -264,7 +261,7 @@ class StrategyExecutor:
                     # and --retry-until-up is specified.
                     reasons = (e.failover_history
                                if e.failover_history else [e])
-                    reasons_str = ', '.join(
+                    reasons_str = '; '.join(
                         common_utils.format_exception(err) for err in reasons)
                     logger.error(
                         'Failure happened before provisioning. Failover '

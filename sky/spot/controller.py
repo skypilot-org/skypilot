@@ -63,17 +63,18 @@ class SpotController:
 
         Raises (non-exhaustive):
             exceptions.ProvisionPrechecksError: This will be raised when the
-                underlying `sky.launch` fails due to any error happens during
-                the prechecks for all the clouds, i.e. none of the failover, if
-                any, is due to the resources unavailability. It includes the
-                following cases:
+                underlying `sky.launch` fails due to precheck errors only.
+                I.e., none of the failover exceptions, if
+                any, is due to resources unavailability. This exception
+                includes the following cases:
                 1. The optimizer cannot find a feasible solution.
-                2. Invalid cluster name, failure in getting cloud user identity,
-                or unsupported feature happens.
-            exceptions.SpotJobReachedMaxRetryError: This will be raised when the
-                maximum number of retries is reached for `sky.launch`. The
-                failure of `sky.launch` can be due to:
-                1. Any of the underyling failover is due to the resources
+                2. Precheck errors: invalid cluster name, failure in getting
+                cloud user identity, or unsupported feature.
+            exceptions.SpotJobReachedMaxRetryError: This will be raised when
+                all prechecks passed but the maximum number of retries is
+                reached for `sky.launch`. The failure of `sky.launch` can be
+                due to:
+                1. Any of the underlying failover exceptions is due to resources
                 unavailability.
                 2. The cluster is preempted before the job is submitted.
                 3. Any unexpected error happens during the `sky.launch`.
@@ -199,7 +200,7 @@ class SpotController:
         except exceptions.ProvisionPrechecksError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
-            failure_reason = (';'.join(
+            failure_reason = ('; '.join(
                 common_utils.format_exception(reason, use_bracket=True)
                 for reason in e.reasons))
             logger.error(failure_reason)
