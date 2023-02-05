@@ -97,7 +97,7 @@ Hint: run ``az account subscription list`` to get a list of subscription IDs und
 
 Lambda Labs GPU Cloud is a cloud provider offering low-cost GPUs. You can learn more about them `here <https://lambdalabs.com/>`__.
 
-To configure Lambda Cloud access, go to `API Keys <https://cloud.lambdalabs.com/api-keys>`_ to generate a key and then add it to :code:`~/.lambda_cloud/lambda_keys` by running:
+To configure Lambda Cloud access, go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambda console to generate a key and then add it to :code:`~/.lambda_cloud/lambda_keys` by running:
 
 .. code-block:: console
 
