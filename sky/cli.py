@@ -3628,6 +3628,42 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
 _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 
 
+@spot.command('cost', cls=_DocumentedCodeCommand)
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
+@click.option(
+    '--refresh',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Query the latest statuses, restarting the spot controller if stopped.'
+)
+@usage_lib.entrypoint
+# pylint: disable=redefined-builtin
+def spot_cost_report(refresh: bool):
+    """Show cost report of managed spot jobs.
+    """
+    click.secho('Fetching managed spot job statuses...', fg='yellow')
+    no_jobs_found_str = '  No jobs found.'
+    try:
+        cost_table = core.spot_cost_report(refresh=refresh)
+    except exceptions.ClusterNotUpError:
+        return
+
+    if not cost_table:
+        cost_table = no_jobs_found_str
+    else:
+        cost_table = spot_lib.format_cost_table(cost_table)
+
+    in_progress_only_hint = ' (showing in-progress jobs only)'
+    click.echo(f'Managed spot jobs{in_progress_only_hint}:\n{cost_table}')
+
+
 @spot.command('cancel', cls=_DocumentedCodeCommand)
 @click.option('--name',
               '-n',

@@ -517,6 +517,8 @@ def format_job_table(
     Returns: A formatted string of spot jobs, if not `return_rows`; otherwise a
       list of "rows" (each of which is a list of str).
     """
+
+
     columns = [
         'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
         'JOB DURATION', '#RECOVERIES', 'STATUS'
@@ -657,6 +659,58 @@ def format_job_table(
         return job_table.rows
     return output
 
+def load_spot_cost_report(payload: str) -> List[Dict[str, Any]]:
+    """Load job costs from json string."""
+    cost_report = common_utils.decode_payload(payload)
+    return cost_report
+
+def format_cost_table(reports: List[Dict[str, Any]]) -> str:
+    """Show all spot costs."""
+    columns = [
+        'NAME',
+        'RESOURCES',
+        'NODES',
+        'REGION',
+        'TOT. DURATION',
+        'TOT. COST',
+    ]
+
+    cost_table = log_utils.create_table(columns)
+
+    for report in reports:
+        # The job['job_duration'] is already calculated in
+        # dump_spot_job_queue().
+        duration = log_utils.readable_time_duration(0,
+                                                    report['duration'],
+                                                    absolute=True)
+        cost = report['total_cost']
+        values = [
+            report['name'],
+            report['resources'],
+            report['num_nodes'],
+            report['region'],
+            duration,
+            f'${cost:.3f}',
+        ]
+
+        cost_table.add_row(values)
+
+    return str(cost_table)
+
+
+def spot_cost_report() -> str:
+    cluster_reports = global_user_state.aggregate_all_records()
+
+    for cluster_report in cluster_reports:
+        cluster_report['total_cost'] = global_user_state.get_total_cost(
+            cluster_report)
+        launched_resources = cluster_report['resources']
+
+        cluster_report['resources'] = f'{launched_resources}'
+        cluster_report['region'] = launched_resources.region
+
+    return common_utils.encode_payload(cluster_reports)
+
 
 class SpotCodeGen:
     """Code generator for managed spot job utility functions.
@@ -730,6 +784,14 @@ class SpotCodeGen:
                 f'{job_id}, {task_id}, {task.name!r}, '
                 f'{resources_str!r})',
             ]
+        return cls._build(code)
+
+    @classmethod
+    def get_cost_report(cls) -> str:
+        code = [
+            'spot_cost_report_table = spot_utils.spot_cost_report()',
+            'print(spot_cost_report_table, flush=True)',
+        ]
         return cls._build(code)
 
     @classmethod

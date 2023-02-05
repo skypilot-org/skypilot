@@ -741,3 +741,12 @@ def get_storage() -> List[Dict[str, Any]]:
             'status': status_lib.StorageStatus[status],
         })
     return records
+
+
+def get_total_cost(cluster_report: dict) -> float:
+    duration = cluster_report['duration']
+    launched_nodes = cluster_report['num_nodes']
+    launched_resources = cluster_report['resources']
+
+    cost = (launched_resources.get_cost(duration) * launched_nodes)
+    return cost

@@ -141,18 +141,14 @@ def cost_report() -> List[Dict[str, Any]]:
         A list of dicts, with each dict containing the cost information of a
         cluster.
     """
+
     cluster_reports = global_user_state.get_clusters_from_history()
 
-    def get_total_cost(cluster_report: dict) -> float:
-        duration = cluster_report['duration']
-        launched_nodes = cluster_report['num_nodes']
-        launched_resources = cluster_report['resources']
-
-        cost = (launched_resources.get_cost(duration) * launched_nodes)
-        return cost
+    # cluster_reports = global_user_state.aggregate_all_records()
 
     for cluster_report in cluster_reports:
-        cluster_report['total_cost'] = get_total_cost(cluster_report)
+        cluster_report['total_cost'] = global_user_state.get_total_cost(
+            cluster_report)
 
     return cluster_reports
 
@@ -926,6 +922,74 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
     assert isinstance(backend, backends.CloudVmRayBackend), backend
     # Stream the realtime logs
     backend.tail_spot_logs(handle, job_id=job_id, job_name=name, follow=follow)
+
+
+@usage_lib.entrypoint
+def spot_cost_report(refresh: bool) -> List[Dict[str, Any]]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Get statuses of managed spot jobs.
+
+    Please refer to the sky.cli.spot_queue for the documentation.
+
+    Returns:
+        [
+            {
+                'job_id': int,
+                'job_name': str,
+                'resources': str,
+                'submitted_at': (float) timestamp of submission,
+                'end_at': (float) timestamp of end,
+                'duration': (float) duration in seconds,
+                'retry_count': int Number of retries,
+                'status': sky.JobStatus status of the job,
+                'cluster_resources': (str) resources of the cluster,
+                'region': (str) region of the cluster,
+            }
+        ]
+    Raises:
+        sky.exceptions.ClusterNotUpError: the spot controller is not up.
+    """
+
+    stop_msg = ''
+    if not refresh:
+        stop_msg = 'To view the latest job table: sky spot queue --refresh'
+    controller_status, handle = spot.is_spot_controller_up(stop_msg)
+
+    if controller_status is None:
+        return []
+
+    if (refresh and controller_status in [
+            global_user_state.ClusterStatus.STOPPED,
+            global_user_state.ClusterStatus.INIT
+    ]):
+        print(f'{colorama.Fore.YELLOW}'
+              'Restarting controller for latest status...'
+              f'{colorama.Style.RESET_ALL}')
+
+        handle = _start(spot.SPOT_CONTROLLER_NAME)
+
+    if handle is None or handle.head_ip is None:
+        raise exceptions.ClusterNotUpError('Spot controller is not up.')
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+
+    code = spot.SpotCodeGen.get_cost_report()
+    returncode, job_costs_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+    try:
+        subprocess_utils.handle_returncode(
+            returncode, code, 'Failed to fetch managed job cost report', stderr)
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
+
+    job_costs = spot.load_spot_cost_report(job_costs_payload)
+
+    return job_costs
 
 
 # ======================
