@@ -24,8 +24,6 @@ from packaging import version
 import requests
 from requests import adapters
 from requests.packages.urllib3.util import retry as retry_lib
-from ray.autoscaler._private import commands as ray_commands
-from ray.autoscaler._private import util as ray_autoscaler_private_util
 import rich.console as rich_console
 import rich.progress as rich_progress
 import yaml
