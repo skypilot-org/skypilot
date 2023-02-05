@@ -199,13 +199,14 @@ class SpotController:
         except exceptions.ProvisionPrechecksError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
-            logger.error(common_utils.format_exception(e.reasons))
+            failure_reason = (';'.join(
+                common_utils.format_exception(reason, use_bracket=True)
+                for reason in e.reasons))
+            logger.error(failure_reason)
             spot_state.set_failed(
                 self._job_id,
                 failure_type=spot_state.SpotStatus.FAILED_PRECHECKS,
-                failure_reason=';'.join(
-                    common_utils.format_exception(reason)
-                    for reason in e.reasons))
+                failure_reason=failure_reason)
         except exceptions.SpotJobReachedMaxRetriesError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
