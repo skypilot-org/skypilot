@@ -90,7 +90,8 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_marks['slow'])
         for cloud in all_clouds_in_smoke_tests:
             cloud_keyword = cloud_to_pytest_keyword[cloud]
-            if (f'no_{cloud_keyword}' in item.keywords or
+            if ((f'no_{cloud_keyword}' in item.keywords and
+                 cloud in cloud_to_run) or
                 (cloud_keyword in item.keywords and cloud not in cloud_to_run)):
                 item.add_marker(skip_marks[cloud])
 
