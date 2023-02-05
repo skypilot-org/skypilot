@@ -385,6 +385,7 @@ def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
+<<<<<<< HEAD
 def get_distinct_cluster_names_from_history() -> List[Optional[str]]:
     rows = _DB.cursor.execute(
         'SELECT DISTINCT name from cluster_history').fetchall()
@@ -395,6 +396,49 @@ def get_cluster_from_history_by_name(cluster_name: str) -> List[Optional[Any]]:
     rows = _DB.cursor.execute('SELECT * from cluster_history WHERE name=(?)',
                               (cluster_name,)).fetchall()
     return rows
+=======
+def aggregate_all_records() -> List[Optional[Dict[str, Any]]]:
+    rows = _DB.cursor.execute('SELECT name from cluster_history').fetchall()
+
+    records = {}
+
+    for (cluster_name,) in rows:
+        record = aggregate_records_by_name(cluster_name)
+        if cluster_name not in records:
+            records[cluster_name] = record
+
+    return list(records.values())
+
+
+def aggregate_records_by_name(cluster_name: str) -> Optional[Dict[str, Any]]:
+
+    rows = _DB.cursor.execute('SELECT * from cluster_history WHERE name=(?)',
+                              (cluster_name,)).fetchall()
+
+    record = {}
+
+    for row in rows:
+        # TODO: use namedtuple instead of dict
+
+        (cluster_hash, name, num_nodes, _, launched_resources,
+         usage_intervals) = row[:6]
+
+        if not record:
+            record = {
+                'name': name,
+                'launched_at': _get_cluster_launch_time(cluster_hash),
+                'duration': _get_cluster_duration(cluster_hash),
+                'num_nodes': num_nodes,
+                'resources': pickle.loads(launched_resources),
+                'cluster_hash': cluster_hash,
+                'usage_intervals': pickle.loads(usage_intervals),
+            }
+        else:
+            record['duration'] += _get_cluster_duration(cluster_hash)
+            record['usage_intervals'] += pickle.loads(usage_intervals)
+
+    return record
+>>>>>>> 61c23eae (add spot cost report)
 
 
 def get_distinct_cluster_names_from_history() -> List[Optional[str]]:
