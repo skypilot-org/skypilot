@@ -120,7 +120,7 @@ def _get_cluster_config_template(cloud):
     return cloud_to_template[type(cloud)]
 
 
-def _write_ray_up_script_with_patched_launch_hash_fn(
+def write_ray_up_script_with_patched_launch_hash_fn(
     cluster_config_path: str,
     ray_up_kwargs: Dict[str, bool],
 ) -> str:
@@ -1401,7 +1401,7 @@ class RetryingVmProvisioner(object):
             # (which may be ok with the semantics of 'sky launch' twice).
             # Tracked in https://github.com/ray-project/ray/issues/20402.
             # Ref: https://github.com/ray-project/ray/blob/releases/2.2.0/python/ray/autoscaler/sdk/sdk.py#L16-L49  # pylint: disable=line-too-long
-            script_path = _write_ray_up_script_with_patched_launch_hash_fn(
+            script_path = write_ray_up_script_with_patched_launch_hash_fn(
                 cluster_config_file, ray_up_kwargs={'no_restart': True})
 
             # Redirect stdout/err to the file and streaming (if stream_logs).
@@ -1630,7 +1630,7 @@ class RetryingVmProvisioner(object):
 
         # Runs `ray up <kwargs>` with our monkey-patched launch hash
         # calculation. See the monkey patch file for why.
-        script_path = _write_ray_up_script_with_patched_launch_hash_fn(
+        script_path = write_ray_up_script_with_patched_launch_hash_fn(
             handle.cluster_yaml, ray_up_kwargs={'restart_only': True})
         log_lib.run_with_log(
             [sys.executable, script_path],

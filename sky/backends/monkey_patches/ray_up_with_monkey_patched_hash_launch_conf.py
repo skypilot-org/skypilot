@@ -35,6 +35,7 @@ def monkey_patch_hash_launch_conf(node_conf, auth):
         json.dumps([node_conf, full_auth], sort_keys=True).encode('utf-8'))
     return hasher.hexdigest()
 
+
 # Ref: https://github.com/ray-project/ray/blob/840215bc09e942b50cad0ab2db96a8fdc79217c1/python/ray/autoscaler/_private/commands.py#L854-L912
 def monkey_patch_should_create_new_head(
     head_node_id,

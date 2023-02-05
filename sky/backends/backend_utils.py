@@ -1,5 +1,4 @@
 """Util constants/functions for the backends."""
-import copy
 from datetime import datetime
 import difflib
 import enum
@@ -1589,7 +1588,6 @@ def _process_cli_query(
     ]
 
 
-
 def _query_status_aws(
     cluster: str,
     ray_config: Dict[str, Any],
@@ -1641,8 +1639,7 @@ def _query_status_gcp(
         tpu_utils.check_gcp_cli_include_tpu_vm()
         query_cmd = ('gcloud compute tpus tpu-vm list '
                      f'--zone {zone} '
-                     f'--filter="(labels.ray-cluster-name={cluster} AND '
-                     f'labels.ray-launch-config=({hash_filter_str}))" '
+                     f'--filter="(labels.ray-cluster-name={cluster})" '
                      '--format="value(state)"')
     else:
         status_map = {
@@ -1691,6 +1688,7 @@ def _query_status_azure(
     cluster: str,
     ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
+    del ray_config  # Unused.
     status_map = {
         'VM starting': global_user_state.ClusterStatus.INIT,
         'VM running': global_user_state.ClusterStatus.UP,
