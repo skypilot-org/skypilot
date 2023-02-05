@@ -397,7 +397,7 @@ def launch(
                 sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
             sky.launch(task, cluster_name='my-cluster')
 
-    Raises (non-exhaustive):
+    Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the cluster is
             owned by another user.
         exceptions.ResourcesUnavailableError: if the requested resources
@@ -409,7 +409,8 @@ def launch(
                 2. Non-empty: iff at least 1 exception from either
                 our pre-checks (e.g., cluster name invalid) or a region/zone
                 throwing resource unavailability.
-            exceptions.NotSupportedError: if the cluster name is reserved.
+        exceptions.NotSupportedError: if the cluster name is reserved.
+    Other exceptions may be raised depending on the backend.
     """
     entrypoint = task
     backend_utils.check_cluster_name_not_reserved(cluster_name,

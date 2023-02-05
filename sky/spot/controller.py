@@ -61,7 +61,7 @@ class SpotController:
     def _run(self):
         """Busy loop monitoring spot cluster status and handling recovery.
 
-        Raises (non-exhaustive):
+        Raises:
             exceptions.ProvisionPrechecksError: This will be raised when the
                 underlying `sky.launch` fails due to precheck errors only.
                 I.e., none of the failover exceptions, if
@@ -78,6 +78,7 @@ class SpotController:
                 unavailability.
                 2. The cluster is preempted before the job is submitted.
                 3. Any unexpected error happens during the `sky.launch`.
+        Other exceptions may be raised depending on the backend.
         """
         logger.info(f'Started monitoring spot task {self._task_name} '
                     f'(id: {self._job_id})')

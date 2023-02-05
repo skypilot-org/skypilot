@@ -210,7 +210,8 @@ class StrategyExecutor:
             (either provisioning fails or any error happens in job submission)
             and raise_on_failure is False.
 
-        Raises (non-exhaustive):
+        Raises:
+            non-exhaustive list of exceptions:
             exceptions.ProvisionPrechecksError: This will be raised when the
                 underlying `sky.launch` fails due to precheck errors only.
                 I.e., none of the failover exceptions, if
@@ -227,6 +228,7 @@ class StrategyExecutor:
                 unavailability.
                 2. The cluster is preempted before the job is submitted.
                 3. Any unexpected error happens during the `sky.launch`.
+        Other exceptions may be raised depending on the backend.
         """
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
