@@ -928,6 +928,7 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
 
 @usage_lib.entrypoint
 def spot_cost_report(refresh: bool, split: bool) -> List[Dict[str, Any]]:
+
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get statuses of managed spot jobs.
 
@@ -955,6 +956,7 @@ def spot_cost_report(refresh: bool, split: bool) -> List[Dict[str, Any]]:
     stop_msg = ''
     if not refresh:
         stop_msg = 'To view the latest job table: sky spot cost --refresh'
+
     controller_status, handle = spot.is_spot_controller_up(stop_msg)
 
     if controller_status is None:
@@ -977,6 +979,7 @@ def spot_cost_report(refresh: bool, split: bool) -> List[Dict[str, Any]]:
     assert isinstance(backend, backends.CloudVmRayBackend)
 
     code = spot.SpotCodeGen.get_cost_report(split)
+
     returncode, job_costs_payload, stderr = backend.run_on_head(
         handle,
         code,

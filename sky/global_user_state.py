@@ -109,7 +109,7 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'cluster_hash',
                                  'TEXT DEFAULT null')
-                                 
+
     conn.commit()
 
 
