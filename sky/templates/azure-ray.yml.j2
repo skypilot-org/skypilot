@@ -6,74 +6,75 @@ upscaling_speed: {{num_nodes - 1}}
 idle_timeout_minutes: 60
 
 provider:
-  type: external
-  module: sky.skylet.providers.azure.AzureNodeProvider
-  location: {{region}}
-  # Ref: https://github.com/ray-project/ray/blob/2367a2cb9033913b68b1230316496ae273c25b54/python/ray/autoscaler/_private/_azure/node_provider.py#L87
-  # For Azure, ray distinguishes different instances by the resource_group,
-  # instead of the cluster_name. This ensures that ray creates new instances
-  # for different cluster_name.
-  resource_group: {{resource_group}}
-  # Keep (otherwise cannot reuse when re-provisioning).
-  # teardown(terminate=True) will override this.
-  cache_stopped_nodes: True
-  # subscription id of the azure user
-  subscription_id: {{azure_subscription_id}}
-  # Disable launch config check for worker nodes as it can cause resource
-  # leakage.
-  # Reference: https://github.com/ray-project/ray/blob/840215bc09e942b50cad0ab2db96a8fdc79217c1/python/ray/autoscaler/_private/autoscaler.py#L1101
-  # The upper-level SkyPilot code has make sure there will not be resource
-  # leakage.
-  disable_launch_config_check: true
+    type: external
+    module: sky.skylet.providers.azure.AzureNodeProvider
+    location: {{region}}
+    # Ref: https://github.com/ray-project/ray/blob/2367a2cb9033913b68b1230316496ae273c25b54/python/ray/autoscaler/_private/_azure/node_provider.py#L87
+    # For Azure, ray distinguishes different instances by the resource_group,
+    # instead of the cluster_name. This ensures that ray creates new instances
+    # for different cluster_name.
+    resource_group: {{resource_group}}
+    # Keep (otherwise cannot reuse when re-provisioning).
+    # teardown(terminate=True) will override this.
+    cache_stopped_nodes: True
+    # subscription id of the azure user
+    subscription_id: {{azure_subscription_id}}
+    # Disable launch config check for worker nodes as it can cause resource
+    # leakage.
+    # Reference: https://github.com/ray-project/ray/blob/840215bc09e942b50cad0ab2db96a8fdc79217c1/python/ray/autoscaler/_private/autoscaler.py#L1101
+    # The upper-level SkyPilot code has make sure there will not be resource
+    # leakage.
+    disable_launch_config_check: true
+
 
 auth:
-  ssh_user: azureuser
-  ssh_private_key: {{ssh_private_key}}
+    ssh_user: azureuser
+    ssh_private_key: {{ssh_private_key}}
 
 available_node_types:
-  ray.head.default:
-    resources: {}
-    node_config:
-      tags:
-        skypilot-user: {{ user }}
-      azure_arm_parameters:
-          vmSize: {{instance_type}}
-          # List images https://docs.microsoft.com/en-us/azure/virtual-machines/linux/cli-ps-findimage
-          imagePublisher: {{image_publisher}}
-          imageOffer: {{image_offer}}
-          imageSku: "{{image_sku}}"
-          imageVersion: {{image_version}}
-          osDiskSizeGB: {{disk_size}}
-          # optionally set priority to use Spot instances
-          {%- if use_spot %}
-          priority: Spot
-          # set a maximum price for spot instances if desired
-          # billingProfile:
-          #     maxPrice: -1
-          {%- endif %}
-      # TODO: attach disk
+    ray.head.default:
+      resources: {}
+      node_config:
+        tags:
+          skypilot-user: {{ user }}
+        azure_arm_parameters:
+            vmSize: {{instance_type}}
+            # List images https://docs.microsoft.com/en-us/azure/virtual-machines/linux/cli-ps-findimage
+            imagePublisher: {{image_publisher}}
+            imageOffer: {{image_offer}}
+            imageSku: "{{image_sku}}"
+            imageVersion: {{image_version}}
+            osDiskSizeGB: {{disk_size}}
+            # optionally set priority to use Spot instances
+            {%- if use_spot %}
+            priority: Spot
+            # set a maximum price for spot instances if desired
+            # billingProfile:
+            #     maxPrice: -1
+            {%- endif %}
+        # TODO: attach disk
 {% if num_nodes > 1 %}
-  ray.worker.default:
-    min_workers: {{num_nodes - 1}}
-    max_workers: {{num_nodes - 1}}
-    resources: {}
-    node_config:
-      tags:
-        skypilot-user: {{ user }}
-      azure_arm_parameters:
-          vmSize: {{instance_type}}
-          # List images https://docs.microsoft.com/en-us/azure/virtual-machines/linux/cli-ps-findimage
-          imagePublisher: {{image_publisher}}
-          imageOffer: {{image_offer}}
-          imageSku: "{{image_sku}}"
-          imageVersion: {{image_version}}
-          osDiskSizeGB: {{disk_size}}
-        {%- if use_spot %}
-          priority: Spot
-          # set a maximum price for spot instances if desired
-          # billingProfile:
-          #     maxPrice: -1
-        {%- endif %}
+    ray.worker.default:
+      min_workers: {{num_nodes - 1}}
+      max_workers: {{num_nodes - 1}}
+      resources: {}
+      node_config:
+        tags:
+          skypilot-user: {{ user }}
+        azure_arm_parameters:
+            vmSize: {{instance_type}}
+            # List images https://docs.microsoft.com/en-us/azure/virtual-machines/linux/cli-ps-findimage
+            imagePublisher: {{image_publisher}}
+            imageOffer: {{image_offer}}
+            imageSku: "{{image_sku}}"
+            imageVersion: {{image_version}}
+            osDiskSizeGB: {{disk_size}}
+          {%- if use_spot %}
+            priority: Spot
+            # set a maximum price for spot instances if desired
+            # billingProfile:
+            #     maxPrice: -1
+          {%- endif %}
 {%- endif %}
 
 head_node_type: ray.head.default
