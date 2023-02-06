@@ -717,7 +717,7 @@ class Task:
                 store_type = storage_plans[storage]
                 if store_type is storage_lib.StoreType.S3:
                     # TODO: allow for Storage mounting of different clouds
-                    if storage.source is not None and storage.source.startswith(
+                    if storage.source is not None and not isinstance(storage.source, list) and storage.source.startswith(
                             's3://'):
                         blob_path = storage.source
                     else:
@@ -726,7 +726,7 @@ class Task:
                         mnt_path: blob_path,
                     })
                 elif store_type is storage_lib.StoreType.GCS:
-                    if storage.source.startswith('gs://'):
+                    if not storage.source is not None and not isinstance(storage.source, list) and storage.source.startswith('gs://'):
                         blob_path = storage.source
                     else:
                         blob_path = 'gs://' + storage.name

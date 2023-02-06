@@ -39,7 +39,8 @@ LAMBDA_TYPE = '--cloud lambda --gpus A100'
 
 storage_setup_commands = [
     'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
-    'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/foo',
+    'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/tmp\ file2',
+    'touch ~/tmp-workdir/foo',
     'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
     'touch ~/.ssh/id_rsa.pub'
 ]
