@@ -1853,12 +1853,13 @@ def _update_cluster_status_no_lock(
         # We have not experienced the above; adding as a safeguard.
         #
         # Since we failed to refresh, raise the status fetching error.
-        raise exceptions.ClusterStatusFetchingError(
-            f'Found {len(node_statuses)} node(s) with the same tag in the cloud '
-            f'provider for cluster {cluster_name!r} (should have '
-            f'{handle.launched_nodes} nodes). {colorama.Fore.RED}Please check the'
-            f' cloud console to fix any possible resources leakage.'
-            f'{colorama.Style.RESET_ALL}')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterStatusFetchingError(
+                f'Found {len(node_statuses)} node(s) with the same tag in the '
+                'cloud provider for cluster {cluster_name!r} (should have '
+                f'{handle.launched_nodes} nodes). {colorama.Fore.RED}Please '
+                'check the cloud console to fix any possible resources leakage.'
+                f'{colorama.Style.RESET_ALL}')
     assert len(node_statuses) <= handle.launched_nodes
 
     # If the node_statuses is empty, all the nodes are terminated. We can
