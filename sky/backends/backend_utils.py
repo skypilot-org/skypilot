@@ -1701,7 +1701,7 @@ def _query_status_azure(
     }
     query_cmd = (
         'az vm show -d --ids $(az vm list --query '
-        f'"[?tags.\\"ray-cluster-name\\" == \'{cluster}\']\', tags.\\"ray-launch-config\\")].id" '
+        f'"[?tags.\\"ray-cluster-name\\" == \'{cluster}\']\'].id" '
         '-o tsv) --query "powerState" -o tsv')
     # NOTE: Azure cli should be handled carefully. The query command above
     # takes about 1 second to run.
