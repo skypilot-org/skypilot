@@ -189,7 +189,6 @@ class AzureNodeProvider(NodeProvider):
             VALIDITY_TAGS = [
                 TAG_RAY_CLUSTER_NAME,
                 TAG_RAY_NODE_KIND,
-                TAG_RAY_LAUNCH_CONFIG,
                 TAG_RAY_USER_NODE_TYPE,
             ]
             filters = {tag: tags[tag] for tag in VALIDITY_TAGS if tag in tags}

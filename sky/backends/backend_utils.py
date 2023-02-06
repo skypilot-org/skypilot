@@ -1853,13 +1853,13 @@ def _update_cluster_status_no_lock(
         #
         # We have not experienced the above; adding as a safeguard.
         #
-        # Since we failed to refresh, warn and return old record.
-        logger.warning(
-            f'Failed to refresh status for cluster {cluster_name!r} '
-            f'due to {len(node_statuses)} nodes being found with the '
-            'same name tag, but the cluster should have '
-            f'{handle.launched_nodes} nodes. Keeping the old status.')
-        return record
+        # Since we failed to refresh, raise the status fetching error.
+        raise exceptions.ClusterStatusFetchingError(
+            f'Found {len(node_statuses)} node(s) with the same tag in the cloud '
+            f'provider for cluster {cluster_name!r} (should have '
+            f'{handle.launched_nodes} nodes). {colorama.Fore.RED}Please check the'
+            f' cloud console to fix any possible resources leakage.'
+            f'{colorama.Style.RESET_ALL}')
     assert len(node_statuses) <= handle.launched_nodes
 
     # If the node_statuses is empty, all the nodes are terminated. We can
@@ -2223,8 +2223,7 @@ def get_clusters(
                 acquire_per_cluster_status_lock=True)
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.CloudUserIdentityError,
-                exceptions.ClusterOwnerIdentityMismatchError,
-                exceptions.ClusterStatusFetchingError) as e:
+                exceptions.ClusterOwnerIdentityMismatchError) as e:
             record = {'status': 'UNKNOWN', 'error': e}
         progress.update(task, advance=1)
         return record

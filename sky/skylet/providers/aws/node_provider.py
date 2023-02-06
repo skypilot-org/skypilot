@@ -281,10 +281,9 @@ class AWSNodeProvider(NodeProvider):
                     "Name": "tag:{}".format(TAG_RAY_NODE_KIND),
                     "Values": [tags[TAG_RAY_NODE_KIND]],
                 },
-                {
-                    "Name": "tag:{}".format(TAG_RAY_LAUNCH_CONFIG),
-                    "Values": [tags[TAG_RAY_LAUNCH_CONFIG]],
-                },
+                # SkyPilot: removed TAG_RAY_LAUNCH_CONFIG to allow reusing nodes
+                # with different launch configs.
+                # Reference: https://github.com/skypilot-org/skypilot/pull/1671
             ]
             # This tag may not always be present.
             if TAG_RAY_USER_NODE_TYPE in tags:

@@ -194,7 +194,9 @@ class GCPNodeProvider(NodeProvider):
             if self.cache_stopped_nodes:
                 filters = {
                     TAG_RAY_NODE_KIND: labels[TAG_RAY_NODE_KIND],
-                    TAG_RAY_LAUNCH_CONFIG: labels[TAG_RAY_LAUNCH_CONFIG]
+                    # SkyPilot: removed TAG_RAY_LAUNCH_CONFIG to allow reusing nodes
+                    # with different launch configs.
+                    # Reference: https://github.com/skypilot-org/skypilot/pull/1671
                 }
                 # This tag may not always be present.
                 if TAG_RAY_USER_NODE_TYPE in labels:
