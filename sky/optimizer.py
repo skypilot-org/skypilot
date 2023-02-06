@@ -151,6 +151,7 @@ class Optimizer:
             dummy = Task(name)
             dummy.set_resources({DummyResources(DummyCloud(), None)})
             dummy.set_time_estimator(lambda _: 0)
+            dummy.set_disk_estimator(lambda _: 0)
             return dummy
 
         with dag:
@@ -221,7 +222,8 @@ class Optimizer:
         Note that the egress cost/time is not considered in this function.
         The estimated run time of a task running on a resource is given by
         `task.estimate_runtime(resources)` or 1 hour by default.
-        The estimated cost is `task.num_nodes * resources.get_cost(runtime)`.
+        The estimated cost is `task.num_nodes * (resources.get_cost(runtime)
+        + resources.get_disk_cost(runtime, disk_usage))`.
         """
         # Cost/time of running the task on the resources.
         # node -> {resources -> cost/time}
@@ -298,8 +300,8 @@ class Optimizer:
 
                     if minimize_cost:
                         cost_per_node = resources.get_cost(estimated_runtime) \
-                        + resources.get_disk_cost(estimated_disk_usage)
-                        print('disk considered')
+                        + resources.get_disk_cost(estimated_runtime,
+                                                  estimated_disk_usage)
                         estimated_cost_or_time = cost_per_node * node.num_nodes
                     else:
                         # Minimize run time.
@@ -570,8 +572,13 @@ class Optimizer:
                 # The execution time of dummy nodes is always 0,
                 # as they have a time estimator lambda _: 0.
                 execution_time = node.estimate_runtime(resources)
-
-            cost_per_node = resources.get_cost(execution_time)
+            if node.disk_estimator_func is None:
+                execution_disk_usage = 1 * (1024**3)
+            else:
+                execution_disk_usage = node.estimate_disk_usage(resources)
+            cost_per_node = resources.get_cost(execution_time) \
+                        + resources.get_disk_cost(execution_time,
+                                                  execution_disk_usage)
             total_cost += cost_per_node * node.num_nodes
 
             for pred in graph.predecessors(node):
@@ -841,6 +848,9 @@ class DummyResources(resources_lib.Resources):
     def get_cost(self, seconds):
         return 0
 
+    def get_disk_cost(self, seconds, num_bytes):
+        return 0
+
 
 class DummyCloud(clouds.Cloud):
     """A dummy Cloud that has zero egress cost from/to."""
@@ -963,7 +973,7 @@ def _fill_in_launchable_resources(
                 ]
             all_fuzzy_candidates = set()
             for cloud in clouds_list:
-                # ignore disk price here 
+                # ignore disk price here since don't know runtime here
                 (feasible_resources, fuzzy_candidate_list) = (
                     cloud.get_feasible_launchable_resources(resources))
                 if len(feasible_resources) > 0:
