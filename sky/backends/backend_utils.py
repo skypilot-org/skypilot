@@ -1699,10 +1699,9 @@ def _query_status_azure(
         'VM deallocating': global_user_state.ClusterStatus.STOPPED,
         'VM deallocated': global_user_state.ClusterStatus.STOPPED,
     }
-    query_cmd = (
-        'az vm show -d --ids $(az vm list --query '
-        f'"[?tags.\\"ray-cluster-name\\" == \'{cluster}\'].id" '
-        '-o tsv) --query "powerState" -o tsv')
+    query_cmd = ('az vm show -d --ids $(az vm list --query '
+                 f'"[?tags.\\"ray-cluster-name\\" == \'{cluster}\'].id" '
+                 '-o tsv) --query "powerState" -o tsv')
     # NOTE: Azure cli should be handled carefully. The query command above
     # takes about 1 second to run.
     # An alternative is the following command, but it will take more than
