@@ -155,6 +155,7 @@ class Task:
         # Default to CPUNode
         self.resources = {sky.Resources()}
         self.time_estimator_func = None
+        self.disk_estimator_func = None
         self.file_mounts = None
 
         # Only set when 'self' is a spot controller task: 'self.spot_task' is
@@ -471,9 +472,29 @@ class Task:
         """
         if self.time_estimator_func is None:
             raise NotImplementedError(
-                'Node [{}] does not have a cost model set; '
+                'Node [{}] does not have a time cost model set; '
                 'call set_time_estimator() first'.format(self))
         return self.time_estimator_func(resources)
+
+    def set_disk_estimator(self, func: Callable[['sky.Resources'],
+                                                int]) -> 'Task':
+        """Sets a func mapping resources to estimated disk usage (bytes).
+
+        This is EXPERIMENTAL.
+        """
+        self.disk_estimator_func = func
+        return self
+
+    def estimate_disk_usage(self, resources):
+        """Returns a func mapping resources to estimated disk usage (bytes).
+
+        This is EXPERIMENTAL.
+        """
+        if self.disk_estimator_func is None:
+            raise NotImplementedError(
+                'Node [{}] does not have a disk cost model set; '
+                'call set_disk_estimator() first'.format(self))
+        return self.disk_estimator_func(resources)
 
     def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> 'Task':
         """Sets the file mounts for this task.

@@ -96,6 +96,14 @@ def get_hourly_cost(instance_type: str,
                                        zone)
 
 
+def get_hourly_disk_cost(instance_type: str,
+                         use_spot: bool = False,
+                         region: Optional[str] = None,
+                         zone: Optional[str] = None) -> float:
+    return common.get_hourly_disk_cost_impl(_df, instance_type, use_spot,
+                                            region, zone)
+
+
 def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
     return common.get_vcpus_from_instance_type_impl(_df, instance_type)
 

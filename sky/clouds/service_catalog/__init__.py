@@ -152,6 +152,19 @@ def get_hourly_cost(instance_type: str,
                                use_spot, region, zone)
 
 
+def get_hourly_disk_cost(instance_type: str,
+                         use_spot: bool,
+                         region: Optional[str],
+                         zone: Optional[str],
+                         clouds: CloudFilter = None) -> float:
+    """
+    Returns the hourly disk price of a VM instance in the given region and zone.
+    * (region, zone) is same with get_hourly_cost.
+    """
+    return _map_clouds_catalog(clouds, 'get_hourly_disk_cost', instance_type,
+                               use_spot, region, zone)
+
+
 def get_vcpus_from_instance_type(instance_type: str,
                                  clouds: CloudFilter = None) -> Optional[float]:
     """Returns the number of virtual CPUs from a instance type."""
@@ -300,6 +313,7 @@ __all__ = [
     'list_accelerator_counts',
     'get_region_zones_for_instance_type',
     'get_hourly_cost',
+    'get_hourly_disk_cost',
     'get_accelerators_from_instance_type',
     'get_instance_type_for_accelerator',
     'get_accelerator_hourly_cost',

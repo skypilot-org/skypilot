@@ -97,6 +97,12 @@ class Local(clouds.Cloud):
         # Hourly cost of accelerators is 0 for local cloud.
         return 0.0
 
+    def instance_type_to_hourly_disk_cost(self, instance_type: str,
+                                          use_spot: bool, region: Optional[str],
+                                          zone: Optional[str]) -> float:
+        # Disk cost is 0 for local cloud
+        return 0.0
+
     def get_egress_cost(self, num_gigabytes: float) -> float:
         # Egress cost from a local cluster is assumed to be 0.
         return 0.0

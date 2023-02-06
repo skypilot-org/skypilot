@@ -284,12 +284,22 @@ class Optimizer:
                     # account. It may be another reason to treat num_nodes as
                     # part of a Resources.
                     estimated_runtime = node.estimate_runtime(orig_resources)
+                if num_resources == 1 and node.disk_estimator_func is None:
+                    logger.debug(
+                        'Defaulting the task\'s estimated disk to 1 GB.')
+                    estimated_disk_usage = 1 * (1024**3)
+                else:
+                    # same assumption above
+                    estimated_disk_usage = node.estimate_disk_usage(
+                        orig_resources)
                 for resources in launchable_list:
                     if do_print:
                         logger.debug(f'resources: {resources}')
 
                     if minimize_cost:
-                        cost_per_node = resources.get_cost(estimated_runtime)
+                        cost_per_node = resources.get_cost(estimated_runtime) \
+                        + resources.get_disk_cost(estimated_disk_usage)
+                        print('disk considered')
                         estimated_cost_or_time = cost_per_node * node.num_nodes
                     else:
                         # Minimize run time.
@@ -953,6 +963,7 @@ def _fill_in_launchable_resources(
                 ]
             all_fuzzy_candidates = set()
             for cloud in clouds_list:
+                # ignore disk price here 
                 (feasible_resources, fuzzy_candidate_list) = (
                     cloud.get_feasible_launchable_resources(resources))
                 if len(feasible_resources) > 0:

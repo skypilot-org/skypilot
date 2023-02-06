@@ -239,6 +239,17 @@ class GCP(clouds.Cloud):
                                                zone=zone,
                                                clouds='gcp')
 
+    def instance_type_to_hourly_disk_cost(self,
+                                          instance_type: str,
+                                          use_spot: bool,
+                                          region: Optional[str] = None,
+                                          zone: Optional[str] = None) -> float:
+        return service_catalog.get_hourly_disk_cost(instance_type,
+                                                    use_spot=use_spot,
+                                                    region=region,
+                                                    zone=zone,
+                                                    clouds='gcp')
+
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
                                     use_spot: bool,

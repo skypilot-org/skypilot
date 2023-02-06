@@ -253,6 +253,45 @@ def get_hourly_cost_impl(
     return cheapest[price_str]
 
 
+def get_hourly_disk_cost_impl(
+    df: pd.DataFrame,
+    instance_type: str,
+    use_spot: bool,
+    region: Optional[str],
+    zone: Optional[str],
+) -> float:
+    """Returns the hourly price of a VM instance in the given region and zone.
+
+    Refer to get_hourly_cost in service_catalog/__init__.py for the docstring.
+    """
+    # TODO(tian): remove `use_spot` argument after double check it won't affect
+    # disk price
+    # assert default value here
+    assert not use_spot
+    df = _get_instance_type(df, instance_type, region, zone)
+    if df.empty:
+        if zone is None:
+            if region is None:
+                region_or_zone = 'all regions'
+            else:
+                region_or_zone = f'region {region!r}'
+        else:
+            region_or_zone = f'zone {zone!r}'
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Instance type {instance_type!r} not found '
+                             f'in {region_or_zone}.')
+
+    # If the zone is specified, only one row should be found by the query.
+    assert zone is None or len(df) == 1, df
+    # TODO(tian): add a column in skypilot-org/skypilot-catalog named
+    # 'DiskPrice' that specify hourly disk price
+    disk_price_str = 'DiskPrice'
+
+    cheapest_idx = df[disk_price_str].idxmin()
+    cheapest = df.loc[cheapest_idx]
+    return cheapest[disk_price_str]
+
+
 def get_vcpus_from_instance_type_impl(
     df: pd.DataFrame,
     instance_type: str,

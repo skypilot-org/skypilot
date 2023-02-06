@@ -598,6 +598,19 @@ class Resources:
                 self.accelerators, self.use_spot, self._region, self._zone)
         return hourly_cost * hours
 
+    def get_disk_cost(self, seconds: float, num_bytes: float) -> float:
+        """
+        Returns cost in USD for the disk usage in bytes and rumtime
+        in seconds.
+        """
+        gbs = num_bytes / (1024**3)
+        hours = seconds / 3600
+        # Instance.
+        hourly_cost = self.cloud.instance_type_to_hourly_disk_cost(
+            self._instance_type, self.use_spot, self._region, self._zone)
+        # Accelerators won't change disk cost.
+        return hourly_cost * gbs * hours
+
     def less_demanding_than(self,
                             other: Union[List['Resources'], 'Resources'],
                             requested_num_nodes: int = 1) -> bool:
