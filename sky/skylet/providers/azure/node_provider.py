@@ -224,7 +224,7 @@ class AzureNodeProvider(NodeProvider):
                 # stopped nodes with the different launch config before update to #1671,
                 # and the total number of the leaked nodes is greater than the number of
                 # nodes to be created. With this, we will make sure we will reuse the
-                # most recently used nodes.
+                # nodes in a deterministic order.
                 # This can be removed in the future when we are sure all the users
                 # have updated to #1671.
                 nodes_non_matching_launch_config.sort(reverse=True)
