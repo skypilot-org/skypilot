@@ -26,13 +26,14 @@ def wait_for_ssh(public_ips: List[str]):
 
 
 @contextlib.contextmanager
-def check_cache_hash_or_update(cluster_name: str, stage_name: str, hash: str):
+def check_cache_hash_or_update(cluster_name: str, stage_name: str,
+                               hash_str: str):
     dirname = SKY_CLUSTER_PATH / cluster_name / 'cache'
     dirname.mkdir(parents=True, exist_ok=True)
     path = dirname / stage_name
     if path.exists():
         with open(path) as f:
-            updated = f.read() != hash
+            updated = f.read() != hash_str
     else:
         updated = True
 
@@ -45,4 +46,4 @@ def check_cache_hash_or_update(cluster_name: str, stage_name: str, hash: str):
     finally:
         if not errored and (not path.exists() or updated):
             with open(path, 'w') as f:
-                f.write(hash)
+                f.write(hash_str)

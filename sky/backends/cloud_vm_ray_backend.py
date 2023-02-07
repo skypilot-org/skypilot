@@ -1444,7 +1444,9 @@ class RetryingVmProvisioner(object):
         }
         raw_config['provider']['num_nodes'] = original_config['max_workers'] + 1
 
-        # TODO(suquark): check cluster status with 'cluster_exists'
+        # TODO(suquark): Should we just check the cluster status
+        #  if 'cluster_exists' is true? Then we can skip bootstrapping
+        #  etc if all nodes are ready. This is a known issue before.
 
         with backend_utils.safe_console_status(
                 f'[bold cyan]Bootstrapping configurations for '
@@ -1496,7 +1498,7 @@ class RetryingVmProvisioner(object):
         head_ip = ip_tuples[0][1]
         return self.GangSchedulingStatus.CLUSTER_READY, '', '', head_ip
 
-    # TODO: deprecating this method
+    # TODO(suquark): Deprecate this method in future PRs.
     @timeline.event
     def _gang_schedule_ray_up(
             self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,

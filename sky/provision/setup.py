@@ -57,8 +57,9 @@ def start_ray(ssh_runners: List[command_runner.SSHCommandRunner],
 
 def start_skylet(ssh_runner: command_runner.SSHCommandRunner):
     # "source ~/.bashrc" has side effects similar to
-    #  https://stackoverflow.com/questions/29709790/scripts-with-nohup-inside-dont-exit-correctly
-    # This side effects blocks SSH from exiting. We address it by nesting bash commands.
+    # https://stackoverflow.com/questions/29709790/scripts-with-nohup-inside-dont-exit-correctly
+    # This side effects blocks SSH from exiting. We address it by nesting
+    # bash commands.
     ssh_runner.run(
         '(ps aux | grep -v nohup | grep -v grep | grep -q '
         '-- "python3 -m sky.skylet.skylet") || (bash -c \'source ~/.bashrc '

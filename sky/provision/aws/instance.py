@@ -44,7 +44,9 @@ logger = logging.getLogger(__name__)
 # ======================== Instance state and lifecycle ========================
 # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-lifecycle.html
 
-# Data transfer within the same region but different availability zone costs $0.01/GB:
+# ======================== About AWS availability zone ========================
+# Data transfer within the same region but different availability zone
+#  costs $0.01/GB:
 # https://aws.amazon.com/ec2/pricing/on-demand/#Data_Transfer_within_the_same_AWS_Region
 
 
@@ -88,11 +90,9 @@ def _merge_tag_specs(tag_specs: List[Dict[str, Any]],
             tag_specs += [user_tag_spec]
 
 
-def create_instances(region: str, cluster_name: str, node_config: Dict[str,
-                                                                       Any],
-                     tags: Dict[str, str], count: int) -> Dict[str, Any]:
-    ec2_fail_fast = utils.create_ec2_resource(region=region, max_attempts=0)
-
+def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
+                                                                          Any],
+                      tags: Dict[str, str], count: int) -> Dict[str, Any]:
     tags = {'Name': cluster_name, TAG_RAY_CLUSTER_NAME: cluster_name, **tags}
     conf = node_config.copy()
 
@@ -141,11 +141,16 @@ def create_instances(region: str, cluster_name: str, node_config: Dict[str,
                     f'create_instances: Attempt failed with {exc}, retrying.')
 
 
-def resume_instances(region: str,
-                     cluster_name: str,
-                     tags: Dict[str, str],
-                     count: Optional[int] = None) -> Dict[str, Any]:
-    ec2 = utils.create_ec2_resource(region=region)
+def create_instances(region: str, cluster_name: str, node_config: Dict[str,
+                                                                       Any],
+                     tags: Dict[str, str], count: int) -> Dict[str, Any]:
+    ec2_fail_fast = utils.create_ec2_resource(region=region, max_attempts=0)
+    return _create_instances(ec2_fail_fast, cluster_name, node_config, tags,
+                             count)
+
+
+def _resume_instances(ec2, cluster_name: str, tags: Dict[str, str],
+                      count: Optional[int]) -> Dict[str, Any]:
     filters = [
         {
             'Name': 'instance-state-name',
@@ -175,6 +180,14 @@ def resume_instances(region: str,
     return {n.id: n for n in reuse_nodes}
 
 
+def resume_instances(region: str,
+                     cluster_name: str,
+                     tags: Dict[str, str],
+                     count: Optional[int] = None) -> Dict[str, Any]:
+    ec2 = utils.create_ec2_resource(region=region)
+    return _resume_instances(ec2, cluster_name, tags, count)
+
+
 def create_or_resume_instances(region: str, cluster_name: str,
                                node_config: Dict[str, Any],
                                tags: Dict[str, str], count: int,
@@ -184,14 +197,46 @@ def create_or_resume_instances(region: str, cluster_name: str,
     Returns dict mapping instance id to ec2.Instance object for the created
     instances.
     """
-    # TODO(suquark): should we also check if there are running instances?
+    ec2 = utils.create_ec2_resource(region=region)
+
+    # TODO(suquark): If there are existing instances (already running or
+    #  resumed), then we cannot guarantee that they will be in the same
+    #  availability zone (when there are multiple zones specified).
+    #  This is a known issue before.
+    filters = [
+        {
+            'Name': 'instance-state-name',
+            'Values': ['running'],
+        },
+        {
+            'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
+            'Values': [cluster_name],
+        },
+    ]
+    running_instances = list(ec2.instances.filter(Filters=filters))
+
+    if count == len(running_instances):
+        # The cluster is up
+        return {n.id: n for n in running_instances}
+    elif len(running_instances) != 0:
+        # TODO(suquark): Maybe in the future, users could adjust the number
+        #  of instances dynamically. Then this case would not be an error.
+        raise RuntimeError('There are already running instances in cluster '
+                           f'"{cluster_name}". However, the number of '
+                           f'running instances ({len(running_instances)}) '
+                           'does not match the number requested by the user '
+                           f'({count}). This is likely a resource leak '
+                           '(e.g., interrupted when stopping/terminating a '
+                           'cluster). Use "sky down" to terminate the '
+                           'cluster first.')
+
     # sort tags by key to support deterministic unit test stubbing
     tags = dict(sorted(copy.deepcopy(tags).items()))
 
     all_created_nodes = {}
     # Try to reuse previously stopped nodes with compatible configs
     if resume_stopped_nodes:
-        all_created_nodes = resume_instances(region, cluster_name, tags, count)
+        all_created_nodes = _resume_instances(ec2, cluster_name, tags, count)
 
     remaining_count = count - len(all_created_nodes)
     if remaining_count > 0:
@@ -288,7 +333,8 @@ def wait_instances(region: str, cluster_name: str, state: str):
     ]
 
     if state != 'terminated':
-        # NOTE: there could be a terminated AWS cluster with the same cluster name.
+        # NOTE: there could be a terminated AWS cluster with the same
+        # cluster name.
         # Wait the cluster result in errors (cannot wait for 'terminated').
         # So here we exclude terminated instances.
         filters.append({
@@ -299,15 +345,15 @@ def wait_instances(region: str, cluster_name: str, state: str):
         })
 
     if state == 'running':
-        waiter = client.get_waiter("instance_running")
+        waiter = client.get_waiter('instance_running')
     elif state == 'stopped':
-        waiter = client.get_waiter("instance_stopped")
+        waiter = client.get_waiter('instance_stopped')
     elif state == 'terminated':
-        waiter = client.get_waiter("instance_terminated")
+        waiter = client.get_waiter('instance_terminated')
     else:
         raise ValueError(f'Unsupported state to wait: {state}')
     # See https://github.com/boto/botocore/blob/develop/botocore/waiter.py
-    waiter.wait(WaiterConfig={"Delay": 5}, Filters=filters)
+    waiter.wait(WaiterConfig={'Delay': 5}, Filters=filters)
 
 
 def get_instance_ips(region: str, cluster_name: str):

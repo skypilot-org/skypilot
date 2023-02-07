@@ -53,8 +53,8 @@ def bootstrap(config):
     # If NetworkInterfaces are provided, extract the necessary fields for the
     # config stages below.
     if 'NetworkInterfaces' in node_cfg:
-        subnet_ids, security_group_ids = _configure_subnets_and_groups_from_network_interfaces(
-            node_cfg)
+        subnet_ids, security_group_ids = (
+            _configure_subnets_and_groups_from_network_interfaces(node_cfg))
     else:
         subnet_ids = node_cfg.get('SubnetIds')
         security_group_ids = node_cfg.get('SecurityGroupIds')
@@ -106,7 +106,7 @@ def bootstrap(config):
     node_ami = config['node_config'].get('ImageId')
     if not node_ami:
         raise RuntimeError(
-            f'No ImageId found in the node_config. '
+            'No ImageId found in the node_config. '
             'ImageId will need to be set manually in your cluster config.')
 
     return config
@@ -143,7 +143,8 @@ def _configure_iam_role(iam):
             else:
                 utils.handle_boto_error(
                     exc,
-                    'Failed to fetch IAM instance profile data for {} from AWS.',
+                    'Failed to fetch IAM instance profile data for '
+                    '{} from AWS.',
                     cf.bold(profile_name),
                 )
                 raise exc
@@ -186,7 +187,8 @@ def _configure_iam_role(iam):
         role = _get_role(DEFAULT_RAY_IAM_ROLE)
         if role is None:
             cli_logger.verbose(
-                'Creating new IAM role {} for use as the default instance role.',
+                'Creating new IAM role {} for use as the default '
+                'instance role.',
                 cf.bold(role_name),
             )
             policy_doc = {
@@ -317,7 +319,7 @@ def _usable_subnet_ids(
 
     if not subnets:
         raise RuntimeError(
-            f'No usable subnets found, try '
+            'No usable subnets found, try '
             'manually creating an instance in your specified region to '
             'populate the list of subnets and trying this again. '
             'Note that the subnet must map public IPs '
@@ -361,11 +363,9 @@ def _usable_subnet_ids(
     if _are_user_subnets_pruned(subnets):
         subnet_vpcs = {s.subnet_id: s.vpc_id for s in user_specified_subnets}
         raise RuntimeError(
-            f'Subnets specified in more than one VPC! '
-            f'Please ensure that all subnets share the same VPC and retry your '
-            'request. Subnet VPCs: {}',
-            subnet_vpcs,
-        )
+            'Subnets specified in more than one VPC! '
+            'Please ensure that all subnets share the same VPC and retry your '
+            f'request. Subnet VPCs: {subnet_vpcs}')
     return subnets, first_subnet_vpc_id
 
 
@@ -566,7 +566,7 @@ def _configure_subnets_and_groups_from_network_interfaces(
             'If NetworkInterfaces are defined, subnets and security groups '
             'must ONLY be given in each NetworkInterface.')
 
-    subnets = [ni.get('SubnetId', "") for ni in net_ifs]
+    subnets = [ni.get('SubnetId', '') for ni in net_ifs]
     if not all(subnets):
         raise ValueError(
             'NetworkInterfaces are defined but at least one is missing a '
