@@ -144,9 +144,7 @@ def cost_report(cluster_name: str = None) -> List[Dict[str, Any]]:
 
     # aqgregate records for spot controller
     if cluster_name is not None:
-        cluster_reports = [
-            global_user_state.aggregate_records_by_name(cluster_name)
-        ]
+        cluster_reports = global_user_state.aggregate_all_records(split=False)
     else:
         cluster_reports = global_user_state.get_clusters_from_history()
 
@@ -929,7 +927,7 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
 
 
 @usage_lib.entrypoint
-def spot_cost_report(refresh: bool) -> List[Dict[str, Any]]:
+def spot_cost_report(refresh: bool, split: bool) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get statuses of managed spot jobs.
 
@@ -978,7 +976,7 @@ def spot_cost_report(refresh: bool) -> List[Dict[str, Any]]:
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = spot.SpotCodeGen.get_cost_report()
+    code = spot.SpotCodeGen.get_cost_report(split)
     returncode, job_costs_payload, stderr = backend.run_on_head(
         handle,
         code,

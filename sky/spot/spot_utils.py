@@ -698,8 +698,8 @@ def format_cost_table(reports: List[Dict[str, Any]]) -> str:
     return str(cost_table)
 
 
-def spot_cost_report() -> str:
-    cluster_reports = global_user_state.aggregate_all_records()
+def spot_cost_report(split: bool) -> str:
+    cluster_reports = global_user_state.aggregate_all_records(split)
 
     for cluster_report in cluster_reports:
         cluster_report['total_cost'] = global_user_state.get_total_cost(
@@ -789,8 +789,8 @@ class SpotCodeGen:
     @classmethod
     def get_cost_report(cls) -> str:
         code = [
-            'spot_cost_report_table = spot_utils.spot_cost_report()',
-            'print(spot_cost_report_table, flush=True)',
+            f'spot_cost_table = spot_utils.spot_cost_report(split={split})',
+            'print(spot_cost_table, flush=True)',
         ]
         return cls._build(code)
 

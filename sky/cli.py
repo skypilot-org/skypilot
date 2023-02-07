@@ -3639,15 +3639,23 @@ _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
     required=False,
     help='Query the latest statuses, restarting the spot controller if stopped.'
 )
+@click.option(
+    '--split',
+    '-s',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Query the latest statuses, restarting the spot controller if stopped.'
+)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def spot_cost_report(refresh: bool):
+def spot_cost_report(refresh: bool, split: bool):
     """Show cost report of managed spot jobs.
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     no_costs_found_str = '  No job costs found.'
     try:
-        cost_table = core.spot_cost_report(refresh=refresh)
+        cost_table = core.spot_cost_report(refresh, split)
     except exceptions.ClusterNotUpError:
 
         return
