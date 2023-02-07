@@ -224,7 +224,7 @@ class GCPNodeProvider(NodeProvider):
                     # nodes.
                     def get_order_key(node):
                         import datetime
-                        timestamp = node.get('creationTimestamp')
+                        timestamp = node.get('lastStartTimestamp')
                         if timestamp is not None:
                             return datetime.datetime.strptime(timestamp, '%Y-%m-%dT%H:%M:%S.%f%z')
                         return node.id
