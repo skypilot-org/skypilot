@@ -52,6 +52,7 @@ def monkey_patch_should_create_new_head(
     provider,
 ) -> bool:
     if not head_node_id:
+        # The print will be piped into a log file and not directly shown to the user.
         print('No head exists, need to create one. (skypilot monkey patch)')
         # No head node exists, need to create it.
         return True
