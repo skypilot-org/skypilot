@@ -1791,10 +1791,12 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
         if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
             cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
                 cluster_name]
+                
             # to display most recent entry for each reserved cluster
             # TODO(sgurram): fix assumption of sorted order of clusters
             if cluster_group_name not in reserved_clusters:
-                reserved_clusters[cluster_group_name] = cluster_record
+                for aggregated_record in core.cost_report(cluster_name):
+                    reserved_clusters[cluster_group_name] = aggregated_record
         else:
             nonreserved_cluster_records.append(cluster_record)
 
@@ -3629,12 +3631,6 @@ _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 
 
 @spot.command('cost', cls=_DocumentedCodeCommand)
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all information in full.')
 @click.option(
     '--refresh',
     '-r',
@@ -3649,14 +3645,15 @@ def spot_cost_report(refresh: bool):
     """Show cost report of managed spot jobs.
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
-    no_jobs_found_str = '  No jobs found.'
+    no_costs_found_str = '  No job costs found.'
     try:
         cost_table = core.spot_cost_report(refresh=refresh)
     except exceptions.ClusterNotUpError:
+
         return
 
     if not cost_table:
-        cost_table = no_jobs_found_str
+        cost_table = no_costs_found_str
     else:
         cost_table = spot_lib.format_cost_table(cost_table)
 

@@ -110,7 +110,7 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
 
 
 @usage_lib.entrypoint
-def cost_report() -> List[Dict[str, Any]]:
+def cost_report(cluster_name: str = None) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
@@ -142,9 +142,13 @@ def cost_report() -> List[Dict[str, Any]]:
         cluster.
     """
 
-    cluster_reports = global_user_state.get_clusters_from_history()
-
-    # cluster_reports = global_user_state.aggregate_all_records()
+    # aqgregate records for spot controller
+    if cluster_name is not None:
+        cluster_reports = [
+            global_user_state.aggregate_records_by_name(cluster_name)
+        ]
+    else:
+        cluster_reports = global_user_state.get_clusters_from_history()
 
     for cluster_report in cluster_reports:
         cluster_report['total_cost'] = global_user_state.get_total_cost(
@@ -952,7 +956,7 @@ def spot_cost_report(refresh: bool) -> List[Dict[str, Any]]:
 
     stop_msg = ''
     if not refresh:
-        stop_msg = 'To view the latest job table: sky spot queue --refresh'
+        stop_msg = 'To view the latest job table: sky spot cost --refresh'
     controller_status, handle = spot.is_spot_controller_up(stop_msg)
 
     if controller_status is None:
