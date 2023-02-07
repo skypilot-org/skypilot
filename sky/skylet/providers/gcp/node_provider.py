@@ -213,10 +213,24 @@ class GCPNodeProvider(NodeProvider):
                     STOPPED_STATUS = ["STOPPED", "STOPPING"]
 
                 def _filter_nodes(filters, priortized_nodes=[]):
-                    nodes = resource._list_instances(filters, STOPPED_STATUS)
+                    remaining_nodes = resource._list_instances(filters, STOPPED_STATUS)
                     if priortized_nodes:
                         priortized_node_ids = {n.id for n in priortized_nodes}
-                        nodes.sort(key=lambda n: n.id in priortized_node_ids, reverse=True)
+                        remaining_nodes = [n for n in remaining_nodes if n.id not in priortized_node_ids]
+                    # This is just for the case where the uesr already has leaked stopped
+                    # nodes with the different launch config and the total number of the
+                    # leaked nodes is greater than the number of nodes to be created.
+                    # With this, we will make sure we will reuse the most recently used
+                    # nodes.
+                    def get_order_key(node):
+                        import datetime
+                        timestamp = node.get('creationTimestamp')
+                        if timestamp is not None:
+                            return datetime.datetime.strptime(timestamp, '%Y-%m-%dT%H:%M:%S.%f%z')
+                        return node.id
+                    print([(n.id, get_order_key(n)) for n in remaining_nodes])
+                    remaining_nodes.sort(key=lambda n: get_order_key(n), reverse=True)
+                    nodes = priortized_nodes + remaining_nodes
                     return nodes[:count]
                 
                 # SkyPilot: Try to reuse nodes with the same launch config first,

@@ -300,10 +300,17 @@ class AWSNodeProvider(NodeProvider):
                 })
 
             def _filter_nodes(filters, priortized_nodes=[]):
-                nodes = list(self.ec2.instances.filter(Filters=filters))
+                remaining_nodes = list(self.ec2.instances.filter(Filters=filters))
                 if priortized_nodes:
                     priortized_node_ids = {n.id for n in priortized_nodes}
-                    nodes.sort(key=lambda n: n.id in priortized_node_ids, reverse=True)
+                    remaining_nodes = [n for n in remaining_nodes if n.id not in priortized_node_ids]
+                # This is just for the case where the uesr already has leaked stopped
+                # nodes with the different launch config and the total number of the
+                # leaked nodes is greater than the number of nodes to be created.
+                # With this, we will make sure we will reuse the most recently used
+                # nodes.
+                remaining_nodes.sort(key=lambda n: n.launch_time, reverse=True)
+                nodes = priortized_nodes + remaining_nodes
                 return nodes[:count]
 
             # SkyPilot: Try to reuse nodes with the same launch config first,
