@@ -151,7 +151,6 @@ class Optimizer:
             dummy = Task(name)
             dummy.set_resources({DummyResources(DummyCloud(), None)})
             dummy.set_time_estimator(lambda _: 0)
-            dummy.set_disk_estimator(lambda _: 0)
             return dummy
 
         with dag:
@@ -286,14 +285,8 @@ class Optimizer:
                     # account. It may be another reason to treat num_nodes as
                     # part of a Resources.
                     estimated_runtime = node.estimate_runtime(orig_resources)
-                if num_resources == 1 and node.disk_estimator_func is None:
-                    logger.debug(
-                        'Defaulting the task\'s estimated disk to 1 GB.')
-                    estimated_disk_usage = 1 * (1024**3)
-                else:
-                    # same assumption above
-                    estimated_disk_usage = node.estimate_disk_usage(
-                        orig_resources)
+                # Directly use resource's disk size here.
+                estimated_disk_usage = orig_resources.disk_size
                 for resources in launchable_list:
                     if do_print:
                         logger.debug(f'resources: {resources}')
@@ -572,10 +565,7 @@ class Optimizer:
                 # The execution time of dummy nodes is always 0,
                 # as they have a time estimator lambda _: 0.
                 execution_time = node.estimate_runtime(resources)
-            if node.disk_estimator_func is None:
-                execution_disk_usage = 1 * (1024**3)
-            else:
-                execution_disk_usage = node.estimate_disk_usage(resources)
+            execution_disk_usage = resources.disk_size
             cost_per_node = resources.get_cost(execution_time) \
                         + resources.get_disk_cost(execution_time,
                                                   execution_disk_usage)
@@ -848,7 +838,7 @@ class DummyResources(resources_lib.Resources):
     def get_cost(self, seconds):
         return 0
 
-    def get_disk_cost(self, seconds, num_bytes):
+    def get_disk_cost(self, seconds, num_gbs):
         return 0
 
 
