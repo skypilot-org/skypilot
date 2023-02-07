@@ -38,7 +38,8 @@ from sky.data import storage as storage_lib
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
 from sky.backends import wheel_utils
-from sky.provision import setup as provision_setup_lib
+from sky.provision import setup as provision_setup
+from sky.provision import utils as provision_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -1244,7 +1245,7 @@ class RetryingVmProvisioner(object):
                     cluster_yaml)
                 runners = command_runner.SSHCommandRunner.make_runner_list(
                     [t[1] for t in ip_tuples], **ssh_credentials)
-                provision_setup_lib.start_ray(runners, ip_tuples[0][0], True)
+                provision_setup.start_ray(runners, ip_tuples[0][0], True)
 
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 if cluster_exists:
@@ -1428,7 +1429,6 @@ class RetryingVmProvisioner(object):
 
         import yaml
         from sky.provision import aws
-        from sky.provision import utils
 
         provider = aws
 
@@ -1491,7 +1491,7 @@ class RetryingVmProvisioner(object):
         with backend_utils.safe_console_status(
                 f'[bold cyan]Waiting SSH connection for '
                 f'[green]{cluster_name}[white] ...'):
-            utils.wait_for_ssh([t[1] for t in ip_tuples])
+            provision_utils.wait_for_ssh([t[1] for t in ip_tuples])
 
         head_ip = ip_tuples[0][1]
         return self.GangSchedulingStatus.CLUSTER_READY, '', '', head_ip
@@ -2342,52 +2342,13 @@ class CloudVmRayBackend(backends.Backend):
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
 
             if isinstance(handle.launched_resources.cloud, clouds.AWS):
-                from sky.provision import aws as aws_provisioner
-                from sky.provision import setup as provisioner_setup
-                from sky.provision import utils as provision_utils
-
-                region = handle.launched_resources.region
-                ip_dict = aws_provisioner.get_instance_ips(region, cluster_name)
-                ip_tuples = list(ip_dict.values())
-                handle.stable_internal_external_ips = ip_tuples
-                ip_list = [t[1] for t in ip_tuples]
-                # TODO(suquark): skip mounting setup again when running
-                #  "sky launch" over an existing cluster.
-                #  check 'to_provision_config.cluster_exists'
-                # mount skylet wheels here
-                with provision_utils.check_cache_hash_or_update(
-                        cluster_name, 'upload_wheels', wheel_hash) as updated:
-                    if updated:
-                        self._execute_file_mounts(
-                            handle,
-                            file_mounts={
-                                backend_utils.SKY_REMOTE_PATH + '/' + wheel_hash:
-                                    str(local_wheel_path)
-                            })
-                ssh_credentials = backend_utils.ssh_credential_from_yaml(
-                    handle.cluster_yaml)
-                runners = command_runner.SSHCommandRunner.make_runner_list(
-                    ip_list, **ssh_credentials)
-
-                config_from_yaml = common_utils.read_yaml(cluster_config_file)
-
-                with backend_utils.safe_console_status(
-                        f'[bold cyan]Running setup commands for '
-                        f'[green]{cluster_name}[white] ...'):
-                    provisioner_setup.setup_dependencies(
-                        cluster_name, config_from_yaml['setup_commands'],
-                        runners)
-
-                if not to_provision_config.cluster_exists:
-                    with backend_utils.safe_console_status(
-                            f'[bold cyan]Starting Ray for '
-                            f'[green]{cluster_name}[white] ...'):
-                        provisioner_setup.start_ray(runners, ip_tuples[0][0])
-
-                    with backend_utils.safe_console_status(
-                            f'[bold cyan]Starting Skylet for '
-                            f'[green]{cluster_name}[white] ...'):
-                        provisioner_setup.start_skylet(runners[0])
+                self._post_provision_setup(
+                    cluster_name,
+                    to_provision_config,
+                    handle,
+                    local_wheel_path=local_wheel_path,
+                    wheel_hash=wheel_hash,
+                    cluster_config_file=cluster_config_file)
             else:
                 ip_list = handle.external_ips(
                     max_attempts=_FETCH_IP_MAX_ATTEMPTS, use_cached_ips=False)
@@ -2396,6 +2357,7 @@ class CloudVmRayBackend(backends.Backend):
                 self._set_tpu_name(handle, config_dict['tpu_name'])
 
             if isinstance(handle.launched_resources.cloud, clouds.AWS):
+                # TODO(suquark): make sure zone is set during provisioning
                 # zone is set during provisioning
                 assert handle.launched_resources.region is not None
             else:
@@ -2481,6 +2443,57 @@ class CloudVmRayBackend(backends.Backend):
 
                 common_utils.remove_file_if_exists(lock_path)
                 return handle
+
+    def _post_provision_setup(
+            self, cluster_name: str,
+            to_provision_config: RetryingVmProvisioner.ToProvisionConfig,
+            handle: ResourceHandle, local_wheel_path: pathlib.Path,
+            wheel_hash: str, cluster_config_file: str):
+        # TODO(suquark): Move wheel build here in future PRs.
+        from sky.provision import aws as aws_provisioner
+
+        region = handle.launched_resources.region
+        ip_dict = aws_provisioner.get_instance_ips(region, cluster_name)
+        ip_tuples = list(ip_dict.values())
+        handle.stable_internal_external_ips = ip_tuples
+        ip_list = [t[1] for t in ip_tuples]
+        # TODO(suquark): skip mounting setup again when running
+        #  "sky launch" over an existing cluster.
+        #  check 'to_provision_config.cluster_exists'
+        # mount skylet wheels here
+        with provision_utils.check_cache_hash_or_update(cluster_name,
+                                                        'upload_wheels',
+                                                        wheel_hash) as updated:
+            if updated:
+                self._execute_file_mounts(
+                    handle,
+                    file_mounts={
+                        backend_utils.SKY_REMOTE_PATH + '/' + wheel_hash:
+                            str(local_wheel_path)
+                    })
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml)
+        runners = command_runner.SSHCommandRunner.make_runner_list(
+            ip_list, **ssh_credentials)
+
+        config_from_yaml = common_utils.read_yaml(cluster_config_file)
+
+        with backend_utils.safe_console_status(
+                f'[bold cyan]Running setup commands for '
+                f'[green]{cluster_name}[white] ...'):
+            provision_setup.setup_dependencies(
+                cluster_name, config_from_yaml['setup_commands'], runners)
+
+        if not to_provision_config.cluster_exists:
+            with backend_utils.safe_console_status(
+                    f'[bold cyan]Starting Ray for '
+                    f'[green]{cluster_name}[white] ...'):
+                provision_setup.start_ray(runners, ip_tuples[0][0])
+
+            with backend_utils.safe_console_status(
+                    f'[bold cyan]Starting Skylet for '
+                    f'[green]{cluster_name}[white] ...'):
+                provision_setup.start_skylet(runners[0])
 
     def _sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
