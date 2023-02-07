@@ -5,6 +5,7 @@ import colorama
 
 from sky import backends
 from sky import spot
+from sky import global_user_state
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import log_utils
@@ -277,6 +278,8 @@ def _get_status(cluster_status):
 
 def _get_status_for_cost_report(cluster_status):
     status = cluster_status['status']
+    if status is None:
+        status = global_user_state.ClusterStatus.TERMINATED
     return status.colored_str()
 
 

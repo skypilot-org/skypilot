@@ -139,7 +139,7 @@ _STATUS_TO_COLOR = {
     ClusterStatus.INIT: colorama.Fore.BLUE,
     ClusterStatus.UP: colorama.Fore.GREEN,
     ClusterStatus.STOPPED: colorama.Fore.YELLOW,
-    ClusterStatus.TERMINATED: colorama.Fore.BLACK,
+    ClusterStatus.TERMINATED: colorama.Style.DIM,
 }
 
 
@@ -550,8 +550,6 @@ def get_clusters() -> List[Dict[str, Any]]:
 
 
 def get_clusters_from_history() -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute('SELECT * from cluster_history')
-
     rows = _DB.cursor.execute(
         'SELECT ch.cluster_hash, ch.name, ch.num_nodes, '
         'ch.launched_resources, ch.usage_intervals, clusters.status  '
@@ -575,8 +573,8 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             status,
         ) = row[:6]
 
-        if status is None:
-            status = 'TERMINATED'
+        if status is not None:
+            status = ClusterStatus[status]
 
         record = {
             'name': name,
@@ -586,7 +584,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             'resources': pickle.loads(launched_resources),
             'cluster_hash': cluster_hash,
             'usage_intervals': pickle.loads(usage_intervals),
-            'status': ClusterStatus[status],
+            'status': status,
         }
 
         records.append(record)
