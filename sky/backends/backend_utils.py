@@ -1838,11 +1838,11 @@ def _update_cluster_status_no_lock(
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
 
     if len(node_statuses) > handle.launched_nodes:
-        # Unexpected: this could mean ray launch hash is not calculated and we
-        # used the cluster name as the only filter when querying the cloud
-        # provider, and in the queried region more than 1 cluster with the same
+        # Unexpected: in the queried region more than 1 cluster with the same
         # constructed name tag returned. This will typically not happen unless
-        # users manually create a cluster with that constructed name.
+        # users manually create a cluster with that constructed name or there
+        # was a resource leak caused by different launch hash before #1671
+        # was merged.
         #
         # (Technically speaking, even if returned num nodes <= num
         # handle.launched_nodes), not including the launch hash could mean the
@@ -1855,11 +1855,13 @@ def _update_cluster_status_no_lock(
         # Since we failed to refresh, raise the status fetching error.
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterStatusFetchingError(
-                f'Found {len(node_statuses)} node(s) with the same tag in the '
-                'cloud provider for cluster {cluster_name!r} (should have '
-                f'{handle.launched_nodes} nodes). {colorama.Fore.RED}Please '
-                'check the cloud console to fix any possible resources leakage.'
-                f'{colorama.Style.RESET_ALL}')
+                f'Found {len(node_statuses)} node(s) with the same cluster name tag in the '
+                f'cloud provider for cluster {cluster_name!r}, which should have '
+                f'{handle.launched_nodes} nodes. This normally should not happen. '
+                f'{colorama.Fore.RED}Please check the cloud console and fix any possible '
+                'resources leakage (e.g., if there are any stopped nodes and they do not '
+                f'have data or are unhealthy, terminate them).{colorama.Style.RESET_ALL}'
+            )
     assert len(node_statuses) <= handle.launched_nodes
 
     # If the node_statuses is empty, all the nodes are terminated. We can

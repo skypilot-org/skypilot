@@ -141,7 +141,15 @@ class AutostopEvent(SkyletEvent):
                       write_ray_up_script_with_patched_launch_hash_fn(
                           self._ray_yaml_path,
                           ray_up_kwargs={'restart_only': True}))
-            subprocess.run([sys.executable, script], check=True)
+            subprocess.run(
+                [sys.executable, script],
+                check=True,
+                # Use environment variables to disable the ray usage collection
+                # (avoid the 10 second wait for usage collection confirmation),
+                # as the ray version on the user's machine may be lower version
+                # that does not support the `--disable-usage-stats` flag.
+                env=dict(os.environ, RAY_USAGE_STATS_ENABLED='0'),
+            )
 
             logger.info('Running ray down.')
             # Stop the workers first to avoid orphan workers.

@@ -293,8 +293,25 @@ class AWSNodeProvider(NodeProvider):
                         "Values": [tags[TAG_RAY_USER_NODE_TYPE]],
                     }
                 )
+            filters_with_launch_config = copy.copy(filters)
+            filters_with_launch_config.append({
+                    "Name": "tag:{}".format(TAG_RAY_LAUNCH_CONFIG),
+                    "Values": [tags[TAG_RAY_LAUNCH_CONFIG]],
+                })
 
-            reuse_nodes = list(self.ec2.instances.filter(Filters=filters))[:count]
+            def _filter_nodes(filters, priortized_nodes=[]):
+                nodes = list(self.ec2.instances.filter(Filters=filters))
+                if priortized_nodes:
+                    priortized_node_ids = {n.id for n in priortized_nodes}
+                    nodes.sort(key=lambda n: n.id in priortized_node_ids, reverse=True)
+                return nodes[:count]
+
+            # SkyPilot: Try to reuse nodes with the same launch config first,
+            # then fall back to nodes with any launch config.
+            reuse_nodes = _filter_nodes(filters_with_launch_config)
+            if len(reuse_nodes) < count:
+                reuse_nodes = _filter_nodes(filters, priortized_nodes=reuse_nodes)
+
             reuse_node_ids = [n.id for n in reuse_nodes]
             reused_nodes_dict = {n.id: n for n in reuse_nodes}
             if reuse_nodes:

@@ -1,16 +1,22 @@
-"""Runs `ray up` while not using ssh_proxy_command in launch hash.
+"""Runs `ray up` while not checking the launch hash and not using ssh_proxy_command in launch hash.
 
-This monkey patches the hash_launch_conf() function inside Ray autoscaler to
-exclude any ssh_proxy_command in hash calculation.
+This monkey patches:
+1. The hash_launch_conf() function inside Ray autoscaler to exclude any ssh_proxy_command
+in hash calculation.
 
 Reasons:
- - In the future, we want to support changing the ssh_proxy_command field for
-   an existing cluster. If the launch hash included this field, then this would
-   mean upon such a change a new cluster would've been launched, causing
-   leakage.
  - With our patch, ssh_proxy_command will be excluded from the launch hash when
    a cluster is first created. This then makes it possible for us to support
-   changing the proxy command in the future.
+   changing the proxy command without changing the launch hash in the future.
+
+2. The _should_create_new_head() function inside Ray autoscaler to avoid the ray up 
+checking the launch hash when creating the head node.
+
+Reasons:
+ - With our patch, the ray up will always reuse the existing head node with the same cluster
+ name, even if the launch hash is different to avoid resources leakage. The outer-level
+ SkyPilot code will guarantee that reusing the existing head node is safe.
+
 """
 import hashlib
 import json

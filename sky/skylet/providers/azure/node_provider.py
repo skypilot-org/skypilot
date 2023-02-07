@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 from pathlib import Path
@@ -192,7 +193,20 @@ class AzureNodeProvider(NodeProvider):
                 TAG_RAY_USER_NODE_TYPE,
             ]
             filters = {tag: tags[tag] for tag in VALIDITY_TAGS if tag in tags}
-            reuse_nodes = self.stopped_nodes(filters)[:count]
+            filters_with_launch_config = copy.copy(filters)
+            filters_with_launch_config[TAG_RAY_LAUNCH_CONFIG] = tags[TAG_RAY_LAUNCH_CONFIG]
+            def _filter_nodes(filters, priortized_nodes=[]):
+                nodes = self.stopped_nodes(filters)
+                if priortized_nodes:
+                    nodes.sort(key=lambda node: node in priortized_nodes, reverse=True)
+                return nodes[:count]
+
+            # SkyPilot: Try to reuse nodes with the same launch config first,
+            # then fall back to nodes with any launch config.
+            reuse_nodes = _filter_nodes(filters_with_launch_config)
+            if len(reuse_nodes) < count:
+                reuse_nodes = _filter_nodes(filters, priortized_nodes=reuse_nodes)
+
             logger.info(
                 f"Reusing nodes {list(reuse_nodes)}. "
                 "To disable reuse, set `cache_stopped_nodes: False` "

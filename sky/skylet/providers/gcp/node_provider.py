@@ -201,6 +201,9 @@ class GCPNodeProvider(NodeProvider):
                 # This tag may not always be present.
                 if TAG_RAY_USER_NODE_TYPE in labels:
                     filters[TAG_RAY_USER_NODE_TYPE] = labels[TAG_RAY_USER_NODE_TYPE]
+                filters_with_launch_config = copy.copy(filters)
+                filters_with_launch_config[TAG_RAY_LAUNCH_CONFIG] = labels[TAG_RAY_LAUNCH_CONFIG]
+
                 # SKY: "TERMINATED" for compute VM, "STOPPED" for TPU VM
                 # "STOPPING" means the VM is being stopped, which needs
                 # to be included to avoid creating a new VM.
@@ -208,8 +211,20 @@ class GCPNodeProvider(NodeProvider):
                     STOPPED_STATUS = ["TERMINATED", "STOPPING"]
                 else:
                     STOPPED_STATUS = ["STOPPED", "STOPPING"]
-                reuse_nodes = resource._list_instances(
-                    filters, STOPPED_STATUS)[:count]
+
+                def _filter_nodes(filters, priortized_nodes=[]):
+                    nodes = resource._list_instances(filters, STOPPED_STATUS)
+                    if priortized_nodes:
+                        priortized_node_ids = {n.id for n in priortized_nodes}
+                        nodes.sort(key=lambda n: n.id in priortized_node_ids, reverse=True)
+                    return nodes[:count]
+                
+                # SkyPilot: Try to reuse nodes with the same launch config first,
+                # then fall back to nodes with any launch config.
+                reuse_nodes = _filter_nodes(filters_with_launch_config)
+                if len(reuse_nodes) < count:
+                    reuse_nodes = _filter_nodes(filters, priortized_nodes=reuse_nodes)
+                
                 reuse_node_ids = [n.id for n in reuse_nodes]
                 if reuse_nodes:
                     # TODO(suquark): Some instances could still be stopping.

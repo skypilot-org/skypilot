@@ -1,0 +1,82 @@
+auth_enabled: false
+
+server:
+  http_listen_port: 9090
+  http_server_read_timeout: 300s
+  http_server_write_timeout: 300s
+
+schema_config:
+  configs:
+    - from: 2020-11-13
+      store: boltdb-shipper
+      object_store: gcs
+      schema: v11
+      index:
+        prefix: loki_index_
+        period: 24h
+
+ingester:
+  chunk_idle_period: 3m
+  chunk_block_size: 262144
+  chunk_retain_period: 1m
+  max_transfer_retries: 0
+  wal:
+    enabled: true
+    dir: /loki/wal
+  lifecycler:
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+
+storage_config:
+  gcs:
+    bucketnames: sky-host-loki
+    service_account: "{
+      \"type\": \"service_account\",
+      \"project_id\": \"intercloud-320520\",
+      \"private_key_id\": \"6febd48528d003c1b7bf8d049475c4e4280b0c86\",
+      \"private_key\": \"-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCiK4/rf5lG4eBf\nQBVXXIj+qiHrWAy1t3DGfpTEg0d9juBQeLpOlOJvbE4ykmliXrW7iPqp7m1amDu5\nKWvpy50FMa+rkAjgEwVrU6qu2zl9qHNVoGN9eBz+vHvnkfnMKg5TYSwhbrQYIJoT\n7e8BiZwX5DLReLzDyevbLDLnR1+4PBrR9GQvEScwPcKhordgvnMIx0Yrx14Hs9ic\ntzWsj7rRbRuUXPTDpKxTR4oq5TcXteXN2r5TV6UtqfAalbbDp8uhs+bAloDzwcB/\ngnKmZd6rM6V1zRxgLLcKe/mPriJKrL4++jWoi+2SX/lI3qmG2pbczcOtAchfb0V8\nwvAnGWdbAgMBAAECggEACyQwBo9lIewJxLF75d0bIlfg7bDGasOYEWMH6HpWcoda\n3Nx2fEiZR+tqceoCKHp2RNST2BHj3GoCDGYOnmjZOE6iEYjbOz3DTQzZ+JpiGEJ2\n7gaPX0Ldxxh+8LlkLoUjJ9JQvFlFMTUoML9TgMkJ+tA4N5DycwcP16ZxNtd9+YO3\nb113ctoTVodS3udeqZlBLPCNMF8comqnPNqXnYLe8QZZws+7hylwUdn8JT7AaHEm\nXLi/lloBQv/vQHm7FGmhIhWmR8JMNXO3JZSediSiUo96G+S63tI5u6KKqPQH4S8w\nplyVAYJk7VnOs529PMU1k0hng8XPdEQjDq9Cx3Lg4QKBgQDjdCpGhQCMIkW4N8P5\n2fG9wmvdvRwVqVgLdg2ZJw/H8UQA0TM6qNXYz5oYsYOMDR5c7dVZ2WJV4u/5YXGR\n8DJPDBL04OzV3nHF/TMMEnEgbp+eOogf/N+eHysZuvoIRAVBKmHzDRcmTuBjq5sA\nPa4fwTVuKbfRT4NbRQLKwwC6uwKBgQC2hehucMBXPw5Vn3HFAU2sXZlKMEeN/R3C\n40vbAHRaP4Wm6AkLDA4qkydfuLn1dOIkgDXRPR2deG20LUXxP4+qtkbyiGHjRcJX\nZaOTVpK5G8EpzuFUFl4mxZqZ+2JSaoxvFzJvsJzdyyzMFoQPfH2NdAJiaM2pgSXO\nQQ6cd3nL4QKBgD+IeS6NhCOghxz35rPpns7EeeDMLAYY8VDyPsYi1ROiXr5jsQ2X\nj3QqOP7gxr/eAjcu78NTJ1aaNzHPeCutjj/qPXlNQppSsjD9kr6ygArxG4DVFKTq\nu4OtbRqY0bJxXY5gSk/bvjWjHqZ4jqk4kWSpUUVePcwni6d41VjRs2h1AoGARSku\nbpK4vxZ8lwMot+6LgRGiYRM0OeA8Y7l+58gfTocdXKY1rwLtZ0KFO+ciR5j3i78t\nJVDUJPQaFZjGFOjxxkz1SzdUaCrpvfYcalr2k7+pjO8AQL2NBYIA1/ICSppnBj0y\n9lFkz0IKgnbRqZCRfoUD1khCDcWLDsFmCPHYq+ECgYABOMFSxwu+/CNzgTUz7skx\nrk5AdusxyYuBBo0+0N9j4YQn7+NizHHfH5PgN+m5009ryobTK3f2PyVbzECCN3Vo\n9f67oFuTyDh24YPYFkuStt2hjCK0+wlnNn23aM+MMccPsTmFDLuYXCK6IUgGfZhr\nAXM4dDCguDJaxxbvcuOCVw==\n-----END PRIVATE KEY-----\n\",
+      \"client_email\": \"sky-host-loki@intercloud-320520.iam.gserviceaccount.com\",
+      \"client_id\": \"101539127025628913818\",
+      \"auth_uri\": \"https://accounts.google.com/o/oauth2/auth\",
+      \"token_uri\": \"https://oauth2.googleapis.com/token\",
+      \"auth_provider_x509_cert_url\": \"https://www.googleapis.com/oauth2/v1/certs\",
+      \"client_x509_cert_url\": \"https://www.googleapis.com/robot/v1/metadata/x509/sky-host-loki%40intercloud-320520.iam.gserviceaccount.com\"
+    }"
+  boltdb_shipper:
+    active_index_directory: /loki/index
+    shared_store: gcs
+    cache_location: /loki/boltdb-cache
+
+querier:
+  query_timeout: 10m
+  max_concurrent: 32
+query_scheduler:
+  max_outstanding_requests_per_tenant: 4096
+frontend:
+  max_outstanding_per_tenant: 4096
+query_range:
+  parallelise_shardable_queries: true
+
+limits_config:
+  ingestion_rate_strategy: local # Default: global
+  max_global_streams_per_user: 5000
+  max_query_length: 0h # Default: 721h
+  max_query_parallelism: 32 # Old Default: 14
+  max_entries_limit_per_query: 1000000
+  max_streams_per_user: 0 # Old Default: 10000
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+
+compactor:
+  working_directory: /loki/boltdb-shipper-compactor
+  shared_store: gcs
+
+chunk_store_config:
+  max_look_back_period: 0s
+
+table_manager:
+  retention_deletes_enabled: false
+  retention_period: 0s
+
