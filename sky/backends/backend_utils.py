@@ -358,7 +358,7 @@ class SSHConfigHelper(object):
     @classmethod
     def _get_generated_config(cls, autogen_comment: str, host_name: str,
                               ip: str, username: str, ssh_key_path: str,
-                              proxy_command: Optional[str]):
+                              proxy_command: Optional[str], port: int):
         if proxy_command is not None:
             proxy = f'ProxyCommand {proxy_command}'
         else:
@@ -380,7 +380,7 @@ class SSHConfigHelper(object):
               StrictHostKeyChecking no
               UserKnownHostsFile=/dev/null
               GlobalKnownHostsFile=/dev/null
-              Port 22
+              Port {port}
               {proxy}
             """.rstrip())
         return codegen
@@ -392,6 +392,7 @@ class SSHConfigHelper(object):
         cluster_name: str,
         ips: List[str],
         auth_config: Dict[str, str],
+        ports: List[int]
     ):
         """Add authentication information for cluster to local SSH config file.
 
@@ -448,8 +449,10 @@ class SSHConfigHelper(object):
             os.chmod(config_path, 0o644)
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
+        head_port = ports[0]
         codegen = cls._get_generated_config(sky_autogen_comment, host_name, ip,
-                                            username, key_path, proxy_command)
+                                            username, key_path, proxy_command,
+                                            head_port)
 
         # Add (or overwrite) the new config.
         if overwrite:
@@ -483,6 +486,7 @@ class SSHConfigHelper(object):
         external_worker_ips: List[str],
         auth_config: Dict[str, str],
     ):
+        # TODO(romilb): Make this work with multinode!
         username = auth_config['ssh_user']
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
@@ -549,7 +553,7 @@ class SSHConfigHelper(object):
                 logger.warning(f'Using {host_name} to identify host instead.')
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, host_name, external_worker_ips[idx],
-                    username, key_path, proxy_command)
+                    username, key_path, proxy_command, port = 22)
 
         # All workers go to SKY_USER_FILE_PATH/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
@@ -562,14 +566,14 @@ class SSHConfigHelper(object):
                     overwrite_begin_idxs[idx] = i - 1
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, host_name, external_worker_ips[idx],
-                    username, key_path, proxy_command)
+                    username, key_path, proxy_command, port = 22)
 
         # This checks if all codegens have been created.
         for idx, ip in enumerate(external_worker_ips):
             if not codegens[idx]:
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, worker_names[idx], ip, username,
-                    key_path, proxy_command)
+                    key_path, proxy_command, port = 22)
 
         for idx in range(len(external_worker_ips)):
             # Add (or overwrite) the new config.
@@ -1423,6 +1427,53 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
         all_ips.extend(ips)
 
     return all_ips
+
+
+@timeline.event
+def get_head_ip(
+    handle: backends.Backend.ResourceHandle,
+    use_cached_head_ip: bool = True,
+    max_attempts: int = 1,
+) -> str:
+    """Returns the ip of the head node."""
+    if use_cached_head_ip:
+        if handle.head_ip is None:
+            # This happens for INIT clusters (e.g., exit 1 in setup).
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cluster\'s head IP not found; is it up? To fix: '
+                    'run a successful launch first (`sky launch`) to ensure'
+                    ' the cluster status is UP (`sky status`).')
+        head_ip = handle.head_ip
+    else:
+        head_ip = _query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
+    return head_ip
+
+
+@timeline.event
+def get_head_ssh_port(
+    handle: backends.Backend.ResourceHandle,
+    use_cache: bool = True,
+    max_attempts: int = 1,
+) -> str:
+    """Returns the ip of the head node."""
+    # Use port 22 for everything except Kubernetes
+    if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+        return 22
+    if use_cache:
+        if handle.head_ssh_port is None:
+            # This happens for INIT clusters (e.g., exit 1 in setup).
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cluster\'s head SSH oirt not found; is it up? To fix: '
+                    'run a successful launch first (`sky launch`) to ensure'
+                    ' the cluster status is UP (`sky status`).')
+        head_ssh_port = handle.head_ssh_port
+    else:
+        # TODO(romilb): Only supports headnode for now! No multinode!
+        svc_name = f'{handle.get_cluster_name()}-ray-head-ssh'
+        head_ssh_port = clouds.Kubernetes.get_port(svc_name, 'default')
+    return head_ssh_port
 
 
 @timeline.event

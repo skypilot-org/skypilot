@@ -967,7 +967,7 @@ class RetryingVmProvisioner(object):
                         zones = None
                     elif cloud.is_same_cloud(clouds.Kubernetes()):
                         regions = clouds.Kubernetes.regions()
-                        region = regions[0].name
+                        region = regions[0]
                         zones = None
                     else:
                         assert False, cloud
@@ -1816,6 +1816,7 @@ class CloudVmRayBackend(backends.Backend):
                 cluster_yaml: str,
                 stable_internal_external_ips: Optional[List[Tuple[str,
                                                                   str]]] = None,
+                stable_ssh_ports: Optional[List[int]] = None,
                 launched_nodes: Optional[int] = None,
                 launched_resources: Optional[resources_lib.Resources] = None,
                 tpu_create_script: Optional[str] = None,
@@ -1827,6 +1828,7 @@ class CloudVmRayBackend(backends.Backend):
             # List of (internal_ip, external_ip) tuples for all the nodes
             # in the cluster, sorted by the external ips.
             self.stable_internal_external_ips = stable_internal_external_ips
+            self.stable_ssh_ports = stable_ssh_ports
             self.launched_nodes = launched_nodes
             self.launched_resources = launched_resources
             self.tpu_create_script = tpu_create_script
@@ -1839,6 +1841,8 @@ class CloudVmRayBackend(backends.Backend):
                     f'\n\thead_ip={self.head_ip},'
                     '\n\tstable_internal_external_ips='
                     f'{self.stable_internal_external_ips},'
+                    '\n\tstable_ssh_ports='
+                    f'{self.stable_ssh_ports},'
                     '\n\tcluster_yaml='
                     f'{self.cluster_yaml}, '
                     f'\n\tlaunched_resources={self.launched_nodes}x '
@@ -1911,6 +1915,17 @@ class CloudVmRayBackend(backends.Backend):
             self.launched_resources = self.launched_resources.copy(
                 region=region)
 
+        def _update_stable_ssh_ports(self):
+            if isinstance(self.launched_resources.cloud, clouds.Kubernetes):
+                head_port = backend_utils.get_head_ssh_port(self, use_cache=False)
+                # TODO(romilb): Multinode doesn't work with Kubernetes yet.
+                worker_ports = [22] * self.launched_nodes
+                ports = [head_port] + worker_ports
+            else:
+                # Use port 22 for other clouds
+                ports = [22] * len(self.external_ips())
+            self.stable_ssh_ports = ports
+
         def _update_stable_cluster_ips(self,
                                        max_attempts: int = 1) -> List[str]:
             cluster_external_ips = backend_utils.get_node_ips(
@@ -1979,6 +1994,15 @@ class CloudVmRayBackend(backends.Backend):
                 return [ips[1] for ips in self.stable_internal_external_ips]
             return None
 
+        def external_ssh_ports(self,
+                         max_attempts: int = _FETCH_IP_MAX_ATTEMPTS,
+                         use_cached_ports: bool = True) -> Optional[List[str]]:
+            if not use_cached_ports:
+                self._update_stable_ssh_ports()
+            if self.stable_ssh_ports is not None:
+                return self.stable_ssh_ports
+            return None
+
         def get_hourly_price(self) -> float:
             hourly_cost = (self.launched_resources.get_cost(3600) *
                            self.launched_nodes)
@@ -1993,6 +2017,13 @@ class CloudVmRayBackend(backends.Backend):
             external_ips = self.external_ips()
             if external_ips is not None:
                 return external_ips[0]
+            return None
+
+        @property
+        def head_ssh_port(self):
+            external_ssh_ports = self.external_ssh_ports()
+            if external_ssh_ports is not None:
+                return external_ssh_ports[0]
             return None
 
         def __setstate__(self, state):
@@ -2227,6 +2258,8 @@ class CloudVmRayBackend(backends.Backend):
 
             ip_list = handle.external_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
                                           use_cached_ips=False)
+            ssh_port_list = handle.external_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
+                                          use_cached_ports=False)
 
             if 'tpu_name' in config_dict:
                 self._set_tpu_name(handle, config_dict['tpu_name'])
@@ -2307,7 +2340,7 @@ class CloudVmRayBackend(backends.Backend):
                 auth_config = common_utils.read_yaml(
                     handle.cluster_yaml)['auth']
                 backend_utils.SSHConfigHelper.add_cluster(
-                    cluster_name, ip_list, auth_config)
+                    cluster_name, ip_list, auth_config, ssh_port_list)
 
                 common_utils.remove_file_if_exists(lock_path)
                 return handle
@@ -3189,9 +3222,11 @@ class CloudVmRayBackend(backends.Backend):
         """Runs 'cmd' on the cluster's head node."""
         head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip,
                                             _FETCH_IP_MAX_ATTEMPTS)
+        head_ssh_port = backend_utils.get_head_ssh_port(handle, use_cached_head_ip,
+                                            _FETCH_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
-        runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
+        runner = command_runner.SSHCommandRunner(head_ip, port=head_ssh_port, **ssh_credentials)
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 

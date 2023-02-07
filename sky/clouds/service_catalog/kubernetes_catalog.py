@@ -33,9 +33,10 @@ def instance_type_exists(instance_type: str) -> bool:
 def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    if zone is not None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Kubernetes does not support zones.')
+    # if zone is not None:
+    #     breakpoint()
+    #     with ux_utils.print_exception_no_traceback():
+    #         raise ValueError('Kubernetes does not support zones.')
     return common.validate_region_zone_impl('kubernetes', _df, region, zone)
 
 

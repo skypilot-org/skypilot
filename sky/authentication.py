@@ -342,8 +342,18 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Run kubectl command to add the public key to the cluster.
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     # TODO(romilb): Change 'ssh-key-secret' to a unique name.
-    cmd = f"kubectl create secret generic ssh-key-secret --from-file=ssh-publickey={public_key_path}"
-    subprocess.run(cmd, shell=True, check=True)
+    key_label = 'ssh-key-secret'
+    cmd = f"kubectl create secret generic {key_label} --from-file=ssh-publickey={public_key_path}"
+    try:
+        subprocess.check_output(cmd, stderr=subprocess.STDOUT, shell=True)
+    except subprocess.CalledProcessError as e:
+        output = e.output.decode('utf-8')
+        print(output)
+        if 'already exists' in output:
+            logger.warning(f'Key {key_label} already exists in Kubernetes cluster, continuing...')
+            pass
+        else:
+            raise e
 
     # Need to use ~ relative path because Ray uses the same
     # path for finding the public key path on both local and head node.

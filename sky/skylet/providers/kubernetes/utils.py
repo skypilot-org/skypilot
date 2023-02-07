@@ -54,5 +54,13 @@ def custom_objects_api():
 
     return _custom_objects_api
 
+def get_head_ssh_port(cluster_name, namespace):
+    svc_name = f'{cluster_name}-ray-head-ssh'
+    return get_port(svc_name, namespace)
+
+def get_port(svc_name, namespace):
+    head_service = core_api().read_namespaced_service(
+        svc_name, namespace)
+    return head_service.spec.ports[0].node_port
 
 log_prefix = "KubernetesNodeProvider: "

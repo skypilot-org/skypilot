@@ -8,13 +8,12 @@ from uuid import uuid4
 
 from kubernetes.client.rest import ApiException
 
-from sky.skylet.providers.kubernetes import core_api, log_prefix, networking_api
+from sky.skylet.providers.kubernetes import core_api, log_prefix, networking_api, get_head_ssh_port
 from sky.skylet.providers.kubernetes.config import (
     bootstrap_kubernetes,
     fillout_resources_kubernetes,
 )
-from ray.autoscaler._private.command_runner import KubernetesCommandRunner, \
-    SSHCommandRunner
+from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler._private.cli_logger import cli_logger
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import NODE_KIND_HEAD, TAG_RAY_CLUSTER_NAME, TAG_RAY_NODE_KIND
@@ -106,11 +105,11 @@ class KubernetesNodeProvider(NodeProvider):
     def external_port(self, node_id):
         # Extract the NodePort of the head node's SSH service
         # TODO(romilb): Implement caching here for performance
-        # TODO(romilb): !!! Service name is hardcoded here !!!
-        SVC_NAME = 'example-cluster-ray-head-ssh'
-        head_service = core_api().read_namespaced_service(
-            SVC_NAME, self.namespace)
-        return head_service.spec.ports[0].node_port
+        #
+        # Node id is str e.g., example-cluster-ray-head-v89lb
+        cli_logger.print("GETTING HEAD NODE SSH! MULTINODE WOULD FAIL!")
+        cluster_name = node_id.split('-ray-head')[0]
+        return get_head_ssh_port(cluster_name, self.namespace)
 
     def internal_ip(self, node_id):
         pod = core_api().read_namespaced_pod(node_id, self.namespace)

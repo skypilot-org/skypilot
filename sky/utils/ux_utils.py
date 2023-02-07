@@ -29,10 +29,10 @@ def print_exception_no_traceback():
             if error():
                 raise ValueError('...')
     """
-    original_tracelimit = getattr(sys, 'tracebacklimit', 1000)
-    sys.tracebacklimit = 0
+    # original_tracelimit = getattr(sys, 'tracebacklimit', 1000)
+    # sys.tracebacklimit = 0
     yield
-    sys.tracebacklimit = original_tracelimit
+    # sys.tracebacklimit = original_tracelimit
 
 
 @contextlib.contextmanager

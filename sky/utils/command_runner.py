@@ -43,11 +43,14 @@ def ssh_options_list(ssh_private_key: Optional[str],
                      ssh_control_name: Optional[str],
                      *,
                      ssh_proxy_command: Optional[str] = None,
-                     timeout: int = 30) -> List[str]:
+                     timeout: int = 30,
+                     port: int = 22) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     # Forked from Ray SSHOptions:
     # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
     arg_dict = {
+        # SSH port
+        'Port': port,
         # Supresses initial fingerprint verification.
         'StrictHostKeyChecking': 'no',
         # SSH IP and fingerprint pairs no longer added to known_hosts.
@@ -118,6 +121,7 @@ class SSHCommandRunner:
         ssh_private_key: str,
         ssh_control_name: Optional[str] = '__default__',
         ssh_proxy_command: Optional[str] = None,
+        port: int = 22,
     ):
         """Initialize SSHCommandRunner.
 
@@ -145,6 +149,7 @@ class SSHCommandRunner:
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
+        self.port = port
 
     @staticmethod
     def make_runner_list(
@@ -180,6 +185,7 @@ class SSHCommandRunner:
             self.ssh_private_key,
             self.ssh_control_name,
             ssh_proxy_command=self._ssh_proxy_command,
+            port = self.port,
         ) + [f'{self.ssh_user}@{self.ip}']
 
     def run(
@@ -331,6 +337,7 @@ class SSHCommandRunner:
                 self.ssh_private_key,
                 self.ssh_control_name,
                 ssh_proxy_command=self._ssh_proxy_command,
+                port = self.port,
             ))
         rsync_command.append(f'-e "ssh {ssh_options}"')
         # To support spaces in the path, we need to quote source and target.

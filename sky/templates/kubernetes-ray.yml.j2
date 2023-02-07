@@ -73,11 +73,11 @@ provider:
         metadata:
           labels:
             parent: skypilot
-          name: example-cluster-ray-head-ssh
+          name: {{cluster_name}}-ray-head-ssh
         spec:
           type: NodePort
           selector:
-            component: example-cluster-ray-head
+            component: {{cluster_name}}-ray-head
           ports:
             - protocol: TCP
               port: 22
@@ -91,11 +91,11 @@ provider:
             # NOTE: If you're running multiple Ray clusters with services
             # on one Kubernetes cluster, they must have unique service
             # names.
-            name: example-cluster-ray-head
+            name: {{cluster_name}}-ray-head
         spec:
             # This selector must match the head node pod's selector below.
             selector:
-                component: example-cluster-ray-head
+                component: {{cluster_name}}-ray-head
             ports:
                 - name: client
                   protocol: TCP
@@ -125,7 +125,7 @@ available_node_types:
         labels:
           parent: skypilot
         # Automatically generates a name for the pod with this prefix.
-        generateName: example-cluster-ray-worker-
+        generateName: {{cluster_name}}-ray-worker-
       spec:
         restartPolicy: Never
         volumes:
@@ -175,12 +175,12 @@ available_node_types:
       kind: Pod
       metadata:
         # Automatically generates a name for the pod with this prefix.
-        generateName: example-cluster-ray-head-
+        generateName: {{cluster_name}}-ray-head-
         # Must match the head node service selector above if a head node
         # service is required.
         labels:
             parent: skypilot
-            component: example-cluster-ray-head
+            component: {{cluster_name}}-ray-head
       spec:
         # Change this if you altered the autoscaler_service_account above
         # or want to provide your own.

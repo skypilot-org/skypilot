@@ -20,6 +20,16 @@ class Kubernetes(clouds.Cloud):
 
     _REPR = 'Kubernetes'
     _regions: List[clouds.Region] = ['kubernetes']
+    _CLOUD_UNSUPPORTED_FEATURES = {
+        clouds.CloudImplementationFeatures.STOP: 'Kubernetes does not support stopping VMs.',
+        clouds.CloudImplementationFeatures.AUTOSTOP: 'Kubernetes does not support stopping VMs.',
+        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the Kubernetes implementation yet.',
+    }
+
+    @classmethod
+    def _cloud_unsupported_features(
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+        return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
@@ -87,6 +97,11 @@ class Kubernetes(clouds.Cloud):
 
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
         return isinstance(other, Kubernetes)
+
+    @classmethod
+    def get_port(cls, svc_name, namespace):
+        from sky.skylet.providers.kubernetes.utils import get_port
+        return get_port(svc_name, namespace)
 
     @classmethod
     def get_default_instance_type(cls) -> str:
@@ -178,15 +193,19 @@ class Kubernetes(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         # TODO(romilb): Check credential validity using k8s api
-        return (os.path.exists(os.path.expanduser(f'~/.kube/config')),
-                              "Kubeconfig doesn't exist")
+        if os.path.exists(os.path.expanduser(f'~/.kube/config')):
+            return True, None
+        else:
+            return False, "Kubeconfig doesn't exist"
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {
-            f'~/.kube/{filename}': f'~/.kube/{filename}'
-            for filename in _CREDENTIAL_FILES
-            if os.path.exists(os.path.expanduser(f'~/.kube/{filename}'))
-        }
+        return {}
+        # TODO(romilb): Fix the file mounts optimization ('config' here clashes with azure config file)
+        # return {
+        #     f'~/.kube/{filename}': f'~/.kube/{filename}'
+        #     for filename in _CREDENTIAL_FILES
+        #     if os.path.exists(os.path.expanduser(f'~/.kube/{filename}'))
+        # }
 
     def instance_type_exists(self, instance_type: str) -> bool:
         return service_catalog.instance_type_exists(instance_type, 'kubernetes')
