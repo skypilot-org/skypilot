@@ -1960,7 +1960,8 @@ def _update_cluster_status(
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
-          fetched from the cloud provider.
+          fetched from the cloud provider or there are leaked nodes causing
+          the node number larger than expected.
     """
     if not acquire_per_cluster_status_lock:
         return _update_cluster_status_no_lock(cluster_name)
@@ -2006,7 +2007,8 @@ def _refresh_cluster_record(
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
-          fetched from the cloud provider.
+          fetched from the cloud provider or there are leaked nodes causing
+          the node number larger than expected
     """
 
     record = global_user_state.get_cluster_from_name(cluster_name)
