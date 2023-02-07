@@ -53,10 +53,10 @@ def monkey_patch_should_create_new_head(
 ) -> bool:
     if not head_node_id:
         # The print will be piped into a log file and not directly shown to the user.
-        print('No head exists, need to create one. (skypilot monkey patch)')
+        print('No head node exists, need to create it.')
         # No head node exists, need to create it.
         return True
-    print('Do not create a new head node. (skypilot monkey patch)')
+    print('Skipped creating a new head node.')
     # SkyPilot: We don't need to check if the head node has the same launch hash, as
     # the upper-level code of SkyPilot will guarantee that the head node is always
     # up-to-date.
