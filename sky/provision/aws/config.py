@@ -30,6 +30,11 @@ BOTO_MAX_RETRIES = 12
 # Hash of the node launch config, used to identify out-of-date nodes
 TAG_RAY_LAUNCH_CONFIG = 'ray-launch-config'
 
+# TODO(suquark): use SkyPilot instance profile name in future PRs
+# SKYPILOT = 'skypilot'
+# DEFAULT_SKYPILOT_INSTANCE_PROFILE = SKYPILOT + '-v1'
+# DEFAULT_SKYPILOT_IAM_ROLE = SKYPILOT + '-v1'
+
 # todo: cli_logger should handle this assert properly
 # this should probably also happens somewhere else
 assert version.StrictVersion(boto3.__version__) >= version.StrictVersion(
@@ -72,8 +77,10 @@ def bootstrap(config):
         subnet_ids, vpc_id = _create_subnet(
             ec2,
             security_group_ids,
+            config['provider']['region'],
             availability_zone=config['provider'].get('availability_zone'),
-            use_internal_ips=config['provider'].get('use_internal_ips', False))
+            use_internal_ips=config['provider'].get('use_internal_ips', False),
+            vpc_name=config['provider'].get('vpc_name'))
 
     # Cluster workers should be in a security group that permits traffic within
     # the group, and also SSH access from outside.
@@ -98,7 +105,7 @@ def bootstrap(config):
     # NOTE(skypilot): skypilot uses the default AMIs in aws.py.
     node_ami = config['node_config'].get('ImageId')
     if not node_ami:
-        cli_logger.abort(
+        raise RuntimeError(
             f'No ImageId found in the node_config. '
             'ImageId will need to be set manually in your cluster config.')
 
@@ -243,6 +250,14 @@ def _usable_subnet_ids(
         }
         return user_specified_subnet_ids - current_subnet_ids
 
+    def _subnet_name_tag_contains(subnet, substr: str) -> bool:
+        tags = subnet.meta.data['Tags']
+        for tag in tags:
+            if tag['Key'] == 'Name':
+                name = tag['Value']
+                return substr in name
+        return False
+
     try:
         candidate_subnets = (user_specified_subnets if user_specified_subnets
                              is not None else all_subnets)
@@ -250,9 +265,48 @@ def _usable_subnet_ids(
             candidate_subnets = [
                 s for s in candidate_subnets if s.vpc_id == vpc_id_of_sg
             ]
+
         subnets = sorted(
-            (s for s in candidate_subnets if s.state == 'available' and
-             (use_internal_ips or s.map_public_ip_on_launch)),
+            (
+                s for s in candidate_subnets if s.state == 'available' and (
+                    # If using internal IPs, the subnets must not assign public
+                    # IPs. Additionally, requires that each eligible subnet
+                    # contain a name tag which includes the substring
+                    # 'private'. This is a HACK; see below.
+                    #
+                    # Reason: the first two checks alone are not enough. For
+                    # example, the VPC creation helper from AWS will create a
+                    # "public" and a "private" subnet per AZ. However, the
+                    # created "public" subnet by default has
+                    # map_public_ip_on_launch set to False as well. This means
+                    # we could've launched in that subnet, which will make any
+                    # instances not able to send outbound traffic to the
+                    # Internet, due to the way route tables/gateways are set up
+                    # for that public subnet. The "public" subnets are NOT
+                    # intended to host data plane VMs, while the "private"
+                    # subnets are.
+                    #
+                    # An alternative to the subnet name hack is to ensure
+                    # there's a route (dest=0.0.0.0/0, target=nat-*) in the
+                    # subnet's route table so that outbound connections
+                    # work. This seems hard to do, given a ec2.Subnet
+                    # object. (Easy to see in console though.) So we opt for
+                    # the subnet name requirement for now.
+                    (use_internal_ips and not s.map_public_ip_on_launch and
+                     _subnet_name_tag_contains(s, 'private')) or
+                    # Or if using public IPs, the subnets must assign public
+                    # IPs.
+                    (not use_internal_ips and s.map_public_ip_on_launch)
+                    # NOTE: SkyPilot also changes the semantics of
+                    # 'use_internal_ips' through the above two conditions.
+                    # Previously, this flag by itself does not enforce only
+                    # choosing subnets that do not assign public IPs.  Now we
+                    # do so.
+                    #
+                    # In both before and now, this flag makes Ray communicate
+                    # between the client and the head node using the latter's
+                    # private ip.
+                )),
             reverse=True,  # sort from Z-A
             key=lambda subnet: subnet.availability_zone,
         )
@@ -262,16 +316,16 @@ def _usable_subnet_ids(
         raise exc
 
     if not subnets:
-        cli_logger.abort(
+        raise RuntimeError(
             f'No usable subnets found, try '
             'manually creating an instance in your specified region to '
-            'populate the list of subnets and trying this again.\n'
+            'populate the list of subnets and trying this again. '
             'Note that the subnet must map public IPs '
             'on instance launch unless you set `use_internal_ips: true` in '
             'the `provider` config.')
     elif _are_user_subnets_pruned(subnets):
-        cli_logger.abort(f'The specified subnets are not '
-                         f'usable: {_get_pruned_subnets(subnets)}')
+        raise RuntimeError(f'The specified subnets are not '
+                           f'usable: {_get_pruned_subnets(subnets)}')
 
     if azs is not None:
         azs = [az.strip() for az in azs.split(',')]
@@ -280,17 +334,20 @@ def _usable_subnet_ids(
             for s in subnets if s.availability_zone == az
         ]
         if not subnets:
-            cli_logger.abort(
+            raise RuntimeError(
                 f'No usable subnets matching availability zone {azs} found. '
-                f'\nChoose a different '
-                'availability zone or try manually creating an instance in '
-                'your specified region to populate the list of subnets and '
-                'trying this again.')
+                'Choose a different availability zone or try manually '
+                'creating an instance in your specified region to populate '
+                'the list of subnets and trying this again. If you have set '
+                '`use_internal_ips`, check that this zone has a subnet that '
+                '(1) has the substring "private" in its name tag and '
+                '(2) does not assign public IPs (`map_public_ip_on_launch` '
+                'is False).')
         elif _are_user_subnets_pruned(subnets):
-            cli_logger.abort(
+            raise RuntimeError(
                 f'MISMATCH between specified subnets and Availability Zones! '
                 'The following Availability Zones were specified in the '
-                f'`provider section`: {azs}.\n The following subnets '
+                f'`provider section`: {azs}. The following subnets '
                 f'have no matching availability zone: '
                 f'{list(_get_pruned_subnets(subnets))}.')
 
@@ -303,7 +360,7 @@ def _usable_subnet_ids(
     subnets = [s.subnet_id for s in subnets if s.vpc_id == subnets[0].vpc_id]
     if _are_user_subnets_pruned(subnets):
         subnet_vpcs = {s.subnet_id: s.vpc_id for s in user_specified_subnets}
-        cli_logger.abort(
+        raise RuntimeError(
             f'Subnets specified in more than one VPC! '
             f'Please ensure that all subnets share the same VPC and retry your '
             'request. Subnet VPCs: {}',
@@ -321,7 +378,9 @@ def _vpc_id_from_security_group_ids(ec2, sg_ids: List[str]):
     vpc_ids = list(set(vpc_ids))
 
     multiple_vpc_msg = ('All security groups specified in the cluster config '
-                        'should belong to the same VPC.')
+                        'should belong to the same VPC.\n'
+                        f'Security group IDs: {sg_ids}\n'
+                        f'Their VPC IDs (expected 1 element): {vpc_ids}\n')
     cli_logger.doassert(len(vpc_ids) <= 1, multiple_vpc_msg)
     assert len(vpc_ids) <= 1, multiple_vpc_msg
 
@@ -331,6 +390,29 @@ def _vpc_id_from_security_group_ids(ec2, sg_ids: List[str]):
     assert len(vpc_ids) > 0, no_sg_msg
 
     return vpc_ids[0]
+
+
+def _get_vpc_id_by_name(ec2, vpc_name: str, region: str) -> str:
+    """Returns the VPC ID of the unique VPC with a given name.
+
+    Exits with code 1 if:
+      - No VPC with the given name is found in the current region.
+      - More than 1 VPC with the given name are found in the current region.
+    """
+    # Look in the 'Name' tag (shown as Name column in console).
+    filters = [{'Name': 'tag:Name', 'Values': [vpc_name]}]
+    vpcs = [vpc for vpc in ec2.vpcs.filter(Filters=filters)]
+    if not vpcs:
+        raise RuntimeError(f'No VPC with name {vpc_name!r} is found in '
+                           f'{region}. To fix: specify a correct VPC name.')
+    elif len(vpcs) > 1:
+        raise RuntimeError(
+            f'Multiple VPCs with name {vpc_name!r} '
+            f'found in {region}: {vpcs}. '
+            'It is ambiguous as to which VPC to use. To fix: specify a '
+            'VPC name that is uniquely identifying.')
+    assert len(vpcs) == 1, vpcs
+    return vpcs[0].id
 
 
 def _validate_subnet(ec2, subnet_ids: List[str], security_group_ids: List[str]):
@@ -352,9 +434,12 @@ def _validate_subnet(ec2, subnet_ids: List[str], security_group_ids: List[str]):
     return subnets[0].vpc_id
 
 
-def _create_subnet(ec2, security_group_ids: List[str], availability_zone: str,
-                   use_internal_ips: bool):
-    if security_group_ids:
+def _create_subnet(ec2, security_group_ids: List[str], region: str,
+                   availability_zone: str, use_internal_ips: bool,
+                   vpc_name: Optional[str]):
+    if vpc_name is not None:
+        vpc_id_of_sg = _get_vpc_id_by_name(ec2, vpc_name, region)
+    elif security_group_ids:
         vpc_id_of_sg = _vpc_id_from_security_group_ids(ec2, security_group_ids)
     else:
         vpc_id_of_sg = None
