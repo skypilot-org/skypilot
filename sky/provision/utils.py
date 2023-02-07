@@ -1,5 +1,7 @@
+"""Utils for provisioning"""
 import contextlib
 import pathlib
+import shutil
 import time
 from typing import List
 
@@ -47,3 +49,11 @@ def check_cache_hash_or_update(cluster_name: str, stage_name: str,
         if not errored and (not path.exists() or updated):
             with open(path, 'w') as f:
                 f.write(hash_str)
+
+
+def remove_cluster_profile(cluster_name: str) -> None:
+    """Remove profiles of a cluster. This is called when terminating
+    the cluster.
+    """
+    dirname = SKY_CLUSTER_PATH / cluster_name
+    shutil.rmtree(dirname)

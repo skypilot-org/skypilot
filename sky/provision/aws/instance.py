@@ -1,4 +1,4 @@
-"""The module for AWS"""
+"""AWS instance provisioning."""
 from typing import Dict, List, Any, Optional
 
 import copy

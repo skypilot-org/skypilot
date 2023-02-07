@@ -1,3 +1,4 @@
+"""AWS configuration bootstrapping."""
 import copy
 import itertools
 import json

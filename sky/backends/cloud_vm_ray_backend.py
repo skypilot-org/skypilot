@@ -3131,6 +3131,7 @@ class CloudVmRayBackend(backends.Backend):
             region = config['provider']['region']
             if terminate:
                 aws.terminate_instances(region, cluster_name)
+                provision_utils.remove_cluster_profile(cluster_name)
             else:
                 aws.stop_instances(region, cluster_name)
             try:
