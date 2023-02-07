@@ -2342,7 +2342,7 @@ class CloudVmRayBackend(backends.Backend):
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
 
             if isinstance(handle.launched_resources.cloud, clouds.AWS):
-                self._post_provision_setup(
+                ip_list = self._post_provision_setup(
                     cluster_name,
                     to_provision_config,
                     handle,
@@ -2494,6 +2494,7 @@ class CloudVmRayBackend(backends.Backend):
                     f'[bold cyan]Starting Skylet for '
                     f'[green]{cluster_name}[white] ...'):
                 provision_setup.start_skylet(runners[0])
+        return ip_list
 
     def _sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
