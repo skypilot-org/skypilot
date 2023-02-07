@@ -2226,6 +2226,9 @@ def get_clusters(
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
+            # Do not fail the entire refresh process. The caller will
+            # handle the 'UNKNOWN' status, and collect the errors into
+            # a table.
             record = {'status': 'UNKNOWN', 'error': e}
         progress.update(task, advance=1)
         return record
