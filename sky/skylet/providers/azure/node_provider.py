@@ -63,6 +63,7 @@ class AzureNodeProvider(NodeProvider):
         # group after tearing down the cluster. To comfort the autoscaler, we need
         # to create/update it here, so the resource group always exists.
         from sky.skylet.providers.azure.config import _configure_resource_group
+
         _configure_resource_group({"provider": provider_config})
         subscription_id = provider_config["subscription_id"]
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
@@ -195,23 +196,9 @@ class AzureNodeProvider(NodeProvider):
             filters = {tag: tags[tag] for tag in VALIDITY_TAGS if tag in tags}
             filters_with_launch_config = copy.copy(filters)
             if TAG_RAY_LAUNCH_CONFIG in tags:
-                filters_with_launch_config[TAG_RAY_LAUNCH_CONFIG] = tags[TAG_RAY_LAUNCH_CONFIG]
-            def _filter_nodes(filters, priortized_nodes=None):
-                remaining_nodes = self.stopped_nodes(filters)
-                if priortized_nodes is None:
-                    priortized_nodes = []
-                else:
-                    remaining_nodes = [node for node in remaining_nodes if node not in priortized_nodes]
-                # This is for backward compatibility, where the uesr already has leaked
-                # stopped nodes with the different launch config before update to #1671,
-                # and the total number of the leaked nodes is greater than the number of
-                # nodes to be created. With this, we will make sure we will reuse the
-                # most recently used nodes.
-                # This can be removed in the future when we are sure all the users
-                # have updated to #1671.
-                remaining_nodes.sort(reverse=True)
-                nodes = priortized_nodes + remaining_nodes
-                return nodes[:count]
+                filters_with_launch_config[TAG_RAY_LAUNCH_CONFIG] = tags[
+                    TAG_RAY_LAUNCH_CONFIG
+                ]
 
             # SkyPilot: We try to use the instances with the same matching launch_config first. If
             # there is not enough instances with matching launch_config, we then use all the
@@ -221,6 +208,33 @@ class AzureNodeProvider(NodeProvider):
             assert len(reuse_nodes) <= count, len(reuse_nodes)
             if len(reuse_nodes) < count:
                 reuse_nodes = _filter_nodes(filters, priortized_nodes=reuse_nodes)
+
+            nodes_matching_launch_config = self.stopped_nodes(
+                filters_with_launch_config
+            )
+            nodes_matching_launch_config.sort(reverse=True)
+            if len(nodes_matching_launch_config) >= count:
+                reuse_nodes = nodes_matching_launch_config[:count]
+            else:
+                nodes_all = self.stopped_nodes(filters)
+                nodes_non_matching_launch_config = [
+                    n for n in nodes_all if n not in nodes_matching_launch_config
+                ]
+                # This is for backward compatibility, where the uesr already has leaked
+                # stopped nodes with the different launch config before update to #1671,
+                # and the total number of the leaked nodes is greater than the number of
+                # nodes to be created. With this, we will make sure we will reuse the
+                # most recently used nodes.
+                # This can be removed in the future when we are sure all the users
+                # have updated to #1671.
+                nodes_non_matching_launch_config.sort(reverse=True)
+                reuse_nodes = (
+                    nodes_matching_launch_config + nodes_non_matching_launch_config
+                )
+                # The total number of reusable nodes can be less than the number of nodes to be created.
+                # This `[:count]` is fine, as it will get all the reusable nodes, even if there are
+                # less nodes.
+                reuse_nodes = reuse_nodes[:count]
 
             logger.info(
                 f"Reusing nodes {list(reuse_nodes)}. "

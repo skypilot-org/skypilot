@@ -2008,7 +2008,7 @@ def _refresh_cluster_record(
           identity.
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
           fetched from the cloud provider or there are leaked nodes causing
-          the node number larger than expected
+          the node number larger than expected.
     """
 
     record = global_user_state.get_cluster_from_name(cluster_name)

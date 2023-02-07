@@ -294,18 +294,28 @@ class AWSNodeProvider(NodeProvider):
                     }
                 )
             filters_with_launch_config = copy.copy(filters)
-            filters_with_launch_config.append({
+            filters_with_launch_config.append(
+                {
                     "Name": "tag:{}".format(TAG_RAY_LAUNCH_CONFIG),
                     "Values": [tags[TAG_RAY_LAUNCH_CONFIG]],
-                })
+                }
+            )
 
-            def _filter_nodes(filters, priortized_nodes=None):
-                remaining_nodes = list(self.ec2.instances.filter(Filters=filters))
-                if priortized_nodes is None:
-                    priortized_nodes = []
-                else:
-                    priortized_node_ids = {n.id for n in priortized_nodes}
-                    remaining_nodes = [n for n in remaining_nodes if n.id not in priortized_node_ids]
+            # SkyPilot: We try to use the instances with the same matching launch_config first. If
+            # there is not enough instances with matching launch_config, we then use all the
+            # instances with the same matching launch_config plus some instances with wrong
+            # launch_config.
+            nodes_matching_launch_config = list(
+                self.ec2.instances.filter(Filters=filters_with_launch_config)
+            )
+            nodes_matching_launch_config.sort(key=lambda n: n.launch_time, reverse=True)
+            if len(nodes_matching_launch_config) >= count:
+                reuse_nodes = nodes_matching_launch_config[:count]
+            else:
+                nodes_all = list(self.ec2.instances.filter(Filters=filters))
+                nodes_non_matching_launch_config = [
+                    n for n in nodes_all if n not in nodes_matching_launch_config
+                ]
                 # This is for backward compatibility, where the uesr already has leaked
                 # stopped nodes with the different launch config before update to #1671,
                 # and the total number of the leaked nodes is greater than the number of
@@ -313,18 +323,16 @@ class AWSNodeProvider(NodeProvider):
                 # most recently used nodes.
                 # This can be removed in the future when we are sure all the users
                 # have updated to #1671.
-                remaining_nodes.sort(key=lambda n: n.launch_time, reverse=True)
-                nodes = priortized_nodes + remaining_nodes
-                return nodes[:count]
-
-            # SkyPilot: We try to use the instances with the same matching launch_config first. If
-            # there is not enough instances with matching launch_config, we then use all the
-            # instances with the same matching launch_config plus some instances with wrong
-            # launch_config.
-            reuse_nodes = _filter_nodes(filters_with_launch_config)
-            assert len(reuse_nodes) <= count, len(reuse_nodes)
-            if len(reuse_nodes) < count:
-                reuse_nodes = _filter_nodes(filters, priortized_nodes=reuse_nodes)
+                nodes_non_matching_launch_config.sort(
+                    key=lambda n: n.launch_time, reverse=True
+                )
+                reuse_nodes = (
+                    nodes_matching_launch_config + nodes_non_matching_launch_config
+                )
+                # The total number of reusable nodes can be less than the number of nodes to be created.
+                # This `[:count]` is fine, as it will get all the reusable nodes, even if there are
+                # less nodes.
+                reuse_nodes = reuse_nodes[:count]
 
             reuse_node_ids = [n.id for n in reuse_nodes]
             reused_nodes_dict = {n.id: n for n in reuse_nodes}
