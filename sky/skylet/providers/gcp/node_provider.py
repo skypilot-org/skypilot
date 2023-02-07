@@ -212,30 +212,36 @@ class GCPNodeProvider(NodeProvider):
                 else:
                     STOPPED_STATUS = ["STOPPED", "STOPPING"]
 
-                def _filter_nodes(filters, priortized_nodes=[]):
+                def _filter_nodes(filters, priortized_nodes=None):
                     remaining_nodes = resource._list_instances(filters, STOPPED_STATUS)
-                    if priortized_nodes:
+                    if priortized_nodes is None:
+                        priortized_nodes = []
+                    else:
                         priortized_node_ids = {n.id for n in priortized_nodes}
                         remaining_nodes = [n for n in remaining_nodes if n.id not in priortized_node_ids]
-                    # This is just for the case where the uesr already has leaked stopped
-                    # nodes with the different launch config and the total number of the
-                    # leaked nodes is greater than the number of nodes to be created.
-                    # With this, we will make sure we will reuse the most recently used
-                    # nodes.
+                    # This is for backward compatibility, where the uesr already has leaked
+                    # stopped nodes with the different launch config before update to #1671,
+                    # and the total number of the leaked nodes is greater than the number of
+                    # nodes to be created. With this, we will make sure we will reuse the
+                    # most recently used nodes.
+                    # This can be removed in the future when we are sure all the users
+                    # have updated to #1671.
                     def get_order_key(node):
                         import datetime
                         timestamp = node.get('lastStartTimestamp')
                         if timestamp is not None:
                             return datetime.datetime.strptime(timestamp, '%Y-%m-%dT%H:%M:%S.%f%z')
                         return node.id
-                    print([(n.id, get_order_key(n)) for n in remaining_nodes])
                     remaining_nodes.sort(key=lambda n: get_order_key(n), reverse=True)
                     nodes = priortized_nodes + remaining_nodes
                     return nodes[:count]
                 
-                # SkyPilot: Try to reuse nodes with the same launch config first,
-                # then fall back to nodes with any launch config.
+                # SkyPilot: We try to use the instances with the same matching launch_config first. If
+                # there is not enough instances with matching launch_config, we then use all the
+                # instances with the same matching launch_config plus some instances with wrong
+                # launch_config.
                 reuse_nodes = _filter_nodes(filters_with_launch_config)
+                assert len(reuse_nodes) <= count, len(reuse_nodes)
                 if len(reuse_nodes) < count:
                     reuse_nodes = _filter_nodes(filters, priortized_nodes=reuse_nodes)
                 

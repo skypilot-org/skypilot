@@ -194,16 +194,31 @@ class AzureNodeProvider(NodeProvider):
             ]
             filters = {tag: tags[tag] for tag in VALIDITY_TAGS if tag in tags}
             filters_with_launch_config = copy.copy(filters)
-            filters_with_launch_config[TAG_RAY_LAUNCH_CONFIG] = tags[TAG_RAY_LAUNCH_CONFIG]
-            def _filter_nodes(filters, priortized_nodes=[]):
-                nodes = self.stopped_nodes(filters)
-                if priortized_nodes:
-                    nodes.sort(key=lambda node: node in priortized_nodes, reverse=True)
+            if TAG_RAY_LAUNCH_CONFIG in tags:
+                filters_with_launch_config[TAG_RAY_LAUNCH_CONFIG] = tags[TAG_RAY_LAUNCH_CONFIG]
+            def _filter_nodes(filters, priortized_nodes=None):
+                remaining_nodes = self.stopped_nodes(filters)
+                if priortized_nodes is None:
+                    priortized_nodes = []
+                else:
+                    remaining_nodes = [node for node in remaining_nodes if node not in priortized_nodes]
+                # This is for backward compatibility, where the uesr already has leaked
+                # stopped nodes with the different launch config before update to #1671,
+                # and the total number of the leaked nodes is greater than the number of
+                # nodes to be created. With this, we will make sure we will reuse the
+                # most recently used nodes.
+                # This can be removed in the future when we are sure all the users
+                # have updated to #1671.
+                remaining_nodes.sort(reverse=True)
+                nodes = priortized_nodes + remaining_nodes
                 return nodes[:count]
 
-            # SkyPilot: Try to reuse nodes with the same launch config first,
-            # then fall back to nodes with any launch config.
+            # SkyPilot: We try to use the instances with the same matching launch_config first. If
+            # there is not enough instances with matching launch_config, we then use all the
+            # instances with the same matching launch_config plus some instances with wrong
+            # launch_config.
             reuse_nodes = _filter_nodes(filters_with_launch_config)
+            assert len(reuse_nodes) <= count, len(reuse_nodes)
             if len(reuse_nodes) < count:
                 reuse_nodes = _filter_nodes(filters, priortized_nodes=reuse_nodes)
 

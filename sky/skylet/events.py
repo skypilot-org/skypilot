@@ -145,7 +145,6 @@ class AutostopEvent(SkyletEvent):
                 [sys.executable, script],
                 check=True,
                 # Use environment variables to disable the ray usage collection
-                # (avoid the 10 second wait for usage collection confirmation),
                 # as the ray version on the user's machine may be lower version
                 # that does not support the `--disable-usage-stats` flag.
                 env=dict(os.environ, RAY_USAGE_STATS_ENABLED='0'),
