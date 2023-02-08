@@ -360,7 +360,7 @@ class SSHConfigHelper(object):
                               ip: str, username: str, ssh_key_path: str,
                               proxy_command: Optional[str]):
         if proxy_command is not None:
-            proxy = f'  ProxyCommand {proxy_command}\n'
+            proxy = f'ProxyCommand {proxy_command}'
         else:
             proxy = ''
         # StrictHostKeyChecking=no skips the host key check for the first
@@ -381,7 +381,9 @@ class SSHConfigHelper(object):
               UserKnownHostsFile=/dev/null
               GlobalKnownHostsFile=/dev/null
               Port 22
-            {proxy}""")
+              {proxy}
+            """.rstrip())
+        codegen = codegen + '\n'
         return codegen
 
     @classmethod
