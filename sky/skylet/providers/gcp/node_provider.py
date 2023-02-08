@@ -13,8 +13,11 @@ from sky.skylet.providers.gcp.config import (
     get_node_type,
 )
 
-from ray.autoscaler.tags import (TAG_RAY_LAUNCH_CONFIG, TAG_RAY_NODE_KIND,
-                                 TAG_RAY_USER_NODE_TYPE)
+from ray.autoscaler.tags import (
+    TAG_RAY_LAUNCH_CONFIG,
+    TAG_RAY_NODE_KIND,
+    TAG_RAY_USER_NODE_TYPE,
+)
 from ray.autoscaler._private.cli_logger import cf, cli_logger
 
 
@@ -75,8 +78,7 @@ class GCPNodeProvider(NodeProvider):
         # Cache of node objects from the last nodes() call. This avoids
         # excessive DescribeInstances requests.
         self.cached_nodes: Dict[str, GCPNode] = {}
-        self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes",
-                                                       True)
+        self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
 
     def _construct_clients(self):
         _, _, compute, tpu = construct_clients_from_provider_config(
@@ -186,7 +188,6 @@ class GCPNodeProvider(NodeProvider):
             labels = tags  # gcp uses "labels" instead of aws "tags"
             labels = dict(sorted(copy.deepcopy(labels).items()))
 
-
             node_type = get_node_type(base_config)
             resource = self.resources[node_type]
 
@@ -194,7 +195,7 @@ class GCPNodeProvider(NodeProvider):
             if self.cache_stopped_nodes:
                 filters = {
                     TAG_RAY_NODE_KIND: labels[TAG_RAY_NODE_KIND],
-                    TAG_RAY_LAUNCH_CONFIG: labels[TAG_RAY_LAUNCH_CONFIG]
+                    TAG_RAY_LAUNCH_CONFIG: labels[TAG_RAY_LAUNCH_CONFIG],
                 }
                 # This tag may not always be present.
                 if TAG_RAY_USER_NODE_TYPE in labels:
@@ -206,8 +207,7 @@ class GCPNodeProvider(NodeProvider):
                     STOPPED_STATUS = ["TERMINATED", "STOPPING"]
                 else:
                     STOPPED_STATUS = ["STOPPED", "STOPPING"]
-                reuse_nodes = resource._list_instances(
-                    filters, STOPPED_STATUS)[:count]
+                reuse_nodes = resource._list_instances(filters, STOPPED_STATUS)[:count]
                 reuse_node_ids = [n.id for n in reuse_nodes]
                 if reuse_nodes:
                     # TODO(suquark): Some instances could still be stopping.
@@ -226,9 +226,10 @@ class GCPNodeProvider(NodeProvider):
                     count -= len(reuse_node_ids)
             if count:
                 results = resource.create_instances(base_config, labels, count)
-                result_dict.update({instance_id: result for result, instance_id in results})
+                result_dict.update(
+                    {instance_id: result for result, instance_id in results}
+                )
             return result_dict
-
 
     @_retry
     def terminate_node(self, node_id: str):
@@ -257,14 +258,17 @@ class GCPNodeProvider(NodeProvider):
                         elif instance.is_stopping():
                             time.sleep(POLL_INTERVAL)
                         else:
-                            raise RuntimeError(f"Unexpected instance status."
-                                               " Details: {instance}")
+                            raise RuntimeError(
+                                f"Unexpected instance status." " Details: {instance}"
+                            )
 
                     if instance.is_stopping():
-                        raise RuntimeError(f"Maximum number of polls: "
-                                           f"{MAX_POLLS_STOP} reached. "
-                                           f"Instance {node_id} is still in "
-                                           "STOPPING status.")
+                        raise RuntimeError(
+                            f"Maximum number of polls: "
+                            f"{MAX_POLLS_STOP} reached. "
+                            f"Instance {node_id} is still in "
+                            "STOPPING status."
+                        )
                 else:
                     result = resource.delete_instance(
                         node_id=node_id,
