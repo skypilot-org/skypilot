@@ -56,4 +56,4 @@ def remove_cluster_profile(cluster_name: str) -> None:
     the cluster.
     """
     dirname = SKY_CLUSTER_PATH / cluster_name
-    shutil.rmtree(dirname)
+    shutil.rmtree(dirname, ignore_errors=True)
