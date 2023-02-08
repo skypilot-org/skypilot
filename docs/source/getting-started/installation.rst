@@ -14,12 +14,13 @@ Install SkyPilot using pip:
   $ pip install skypilot
   $ # pip install "skypilot[gcp]"
   $ # pip install "skypilot[azure]"
+  $ # pip install "skypilot[lambda]"
   $ # pip install "skypilot[all]"
 
 
-SkyPilot currently supports three major cloud providers: AWS, GCP, and Azure.  If you
-only have access to certain clouds, use any combination of
-:code:`"[aws,azure,gcp]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
+SkyPilot currently supports four cloud providers: AWS, GCP, Azure, and Lambda Cloud.
+If you only have access to certain clouds, use any combination of
+:code:`"[aws,azure,gcp,lambda]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
 dependencies installed.
 
 You may also install SkyPilot from source.
@@ -92,6 +93,23 @@ Note: if you encounter *Authorization Error (Error 400: invalid_request)* with t
 
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
+**Lambda Cloud**
+
+Lambda Labs GPU Cloud is a cloud provider offering low-cost GPUs. You can learn more about them `here <https://lambdalabs.com/>`__.
+
+To configure Lambda Cloud access, go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambda console to generate a key and then add it to :code:`~/.lambda_cloud/lambda_keys` by running:
+
+.. code-block:: console
+
+  $ # Create directory if required
+  $ mkdir -p ~/.lambda_cloud
+  $ # Add the line "api_key = <your_api_key_here>" to lambda_keys file
+  $ echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
+
+.. note::
+
+  Multi-node clusters and stopping instances are currently not supported on Lambda Cloud.
+
 **Verifying cloud setup**
 
 After configuring the desired clouds, you can optionally run :code:`sky check` to verify that credentials are correctly set up:
@@ -108,6 +126,7 @@ This will produce a summary like:
     AWS: enabled
     GCP: enabled
     Azure: enabled
+    Lambda: enabled
 
   SkyPilot will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
 

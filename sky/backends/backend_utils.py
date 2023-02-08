@@ -383,6 +383,7 @@ class SSHConfigHelper(object):
               Port 22
               {proxy}
             """.rstrip())
+        codegen = codegen + '\n'
         return codegen
 
     @classmethod
@@ -743,17 +744,17 @@ def write_cluster_config(
         - 'tpu-create-script' (if TPU is requested)
         - 'tpu-delete-script' (if TPU is requested)
     Raises:
-        ResourceUnavailableError: if the region/zones requested does not appear
+        exceptions.ResourcesUnavailableError: if the region/zones requested does not appear
             in the catalog, or an ssh_proxy_command is specified but not for the given region.
     """
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
-    # This can raise a ResourceUnavailableError, when the region/zones requested
+    # This can raise a ResourcesUnavailableError, when the region/zones requested
     # does not appear in the catalog. It can be triggered when the user changed
     # the catalog file, while there is a cluster in the removed region/zone.
     # TODO(zhwu): We should change the exception type to a more specific one,
-    # as the ResourceUnavailableError is overly used. Also, it would be better
+    # as the ResourcesUnavailableError is overly used. Also, it would be better
     # to move the check out of this function, i.e. the caller should be
     # responsible for the validation.
     resources_vars = cloud.make_deploy_resources_variables(
