@@ -383,6 +383,7 @@ class SSHConfigHelper(object):
               Port 22
               {proxy}
             """.rstrip())
+        codegen = codegen + '\n'
         return codegen
 
     @classmethod
