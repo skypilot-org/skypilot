@@ -15,20 +15,22 @@ FIREWALL_RULES_REQUIRED = [
     {
         "direction": "INGRESS",
         "allowed": [
-            {'IPProtocol': 'tcp', 'ports': ['0-65535']},
-            {'IPProtocol': 'udp', 'ports': ['0-65535']},
+            {"IPProtocol": "tcp", "ports": ["0-65535"]},
+            {"IPProtocol": "udp", "ports": ["0-65535"]},
         ],
         "sourceRanges": ["10.128.0.0/9"],
     },
     # Allow ssh connection from anywhere.
     {
         "direction": "INGRESS",
-        "allowed": [{
-            "IPProtocol": "tcp",
-            "ports": ["22"],
-        }],
+        "allowed": [
+            {
+                "IPProtocol": "tcp",
+                "ports": ["22"],
+            }
+        ],
         "sourceRanges": ["0.0.0.0/0"],
-    }
+    },
 ]
 # Template when creating firewall rules for a new VPC.
 FIREWALL_RULES_TEMPLATE = [
@@ -40,9 +42,9 @@ FIREWALL_RULES_TEMPLATE = [
         "direction": "INGRESS",
         "priority": 65534,
         "allowed": [
-            {'IPProtocol': 'tcp', 'ports': ['0-65535']},
-            {'IPProtocol': 'udp', 'ports': ['0-65535']},
-            {'IPProtocol': 'icmp'}
+            {"IPProtocol": "tcp", "ports": ["0-65535"]},
+            {"IPProtocol": "udp", "ports": ["0-65535"]},
+            {"IPProtocol": "icmp"},
         ],
         "sourceRanges": ["10.128.0.0/9"],
     },
@@ -53,10 +55,12 @@ FIREWALL_RULES_TEMPLATE = [
         "selfLink": "projects/{PROJ_ID}/global/firewalls/{VPC_NAME}-allow-ssh",
         "direction": "INGRESS",
         "priority": 65534,
-        "allowed": [{
-            "IPProtocol": "tcp",
-            "ports": ["22"],
-        }],
+        "allowed": [
+            {
+                "IPProtocol": "tcp",
+                "ports": ["22"],
+            }
+        ],
         "sourceRanges": ["0.0.0.0/0"],
     },
     {
@@ -66,9 +70,11 @@ FIREWALL_RULES_TEMPLATE = [
         "selfLink": "projects/{PROJ_ID}/global/firewalls/{VPC_NAME}-allow-icmp",
         "direction": "INGRESS",
         "priority": 65534,
-        "allowed": [{
-            "IPProtocol": "icmp",
-        }],
+        "allowed": [
+            {
+                "IPProtocol": "icmp",
+            }
+        ],
         "sourceRanges": ["0.0.0.0/0"],
     },
 ]
