@@ -204,11 +204,6 @@ class AzureNodeProvider(NodeProvider):
             # there is not enough instances with matching launch_config, we then use all the
             # instances with the same matching launch_config plus some instances with wrong
             # launch_config.
-            reuse_nodes = _filter_nodes(filters_with_launch_config)
-            assert len(reuse_nodes) <= count, len(reuse_nodes)
-            if len(reuse_nodes) < count:
-                reuse_nodes = _filter_nodes(filters, priortized_nodes=reuse_nodes)
-
             nodes_matching_launch_config = self.stopped_nodes(
                 filters_with_launch_config
             )
