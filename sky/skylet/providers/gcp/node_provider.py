@@ -239,8 +239,13 @@ class GCPNodeProvider(NodeProvider):
                     reuse_nodes = nodes_matching_launch_config[:count]
                 else:
                     nodes_all = resource._list_instances(filters, STOPPED_STATUS)
+                    nodes_matching_launch_config_ids = {
+                        n.id for n in nodes_matching_launch_config
+                    }
                     nodes_non_matching_launch_config = [
-                        n for n in nodes_all if n not in nodes_matching_launch_config
+                        n
+                        for n in nodes_all
+                        if n.id not in nodes_matching_launch_config_ids
                     ]
                     # This is for backward compatibility, where the uesr already has leaked
                     # stopped nodes with the different launch config before update to #1671,

@@ -308,13 +308,18 @@ class AWSNodeProvider(NodeProvider):
             nodes_matching_launch_config = list(
                 self.ec2.instances.filter(Filters=filters_with_launch_config)
             )
+            # launch_time is the latest launch time of the node, rather than the
+            # initial launch time.
             nodes_matching_launch_config.sort(key=lambda n: n.launch_time, reverse=True)
             if len(nodes_matching_launch_config) >= count:
                 reuse_nodes = nodes_matching_launch_config[:count]
             else:
                 nodes_all = list(self.ec2.instances.filter(Filters=filters))
+                nodes_matching_launch_config_ids = {
+                    n.id for n in nodes_matching_launch_config
+                }
                 nodes_non_matching_launch_config = [
-                    n for n in nodes_all if n not in nodes_matching_launch_config
+                    n for n in nodes_all if n.id not in nodes_matching_launch_config_ids
                 ]
                 # This `sort` is for backward compatibility, where the uesr already has leaked
                 # stopped nodes with the different launch config before update to #1671,
@@ -330,8 +335,6 @@ class AWSNodeProvider(NodeProvider):
                     nodes_matching_launch_config + nodes_non_matching_launch_config
                 )
                 # The total number of reusable nodes can be less than the number of nodes to be created.
-                # This `[:count]` is fine, as it will get all the reusable nodes, even if there are
-                # less nodes.
                 reuse_nodes = reuse_nodes[:count]
 
             reuse_node_ids = [n.id for n in reuse_nodes]

@@ -145,8 +145,9 @@ class AutostopEvent(SkyletEvent):
                 [sys.executable, script],
                 check=True,
                 # Use environment variables to disable the ray usage collection
-                # as the ray version on the user's machine may be lower version
-                # that does not support the `--disable-usage-stats` flag.
+                # (to avoid overheads and potential issues with the usage)
+                # as sdk does not take the argument for disabling the usage
+                # collection.
                 env=dict(os.environ, RAY_USAGE_STATS_ENABLED='0'),
             )
 

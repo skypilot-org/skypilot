@@ -1421,8 +1421,9 @@ class RetryingVmProvisioner(object):
                     os.environ,
                     BOTO_MAX_RETRIES='5',
                     # Use environment variables to disable the ray usage collection
-                    # as the ray version on the user's machine may be lower version
-                    # that does not support the `--disable-usage-stats` flag.
+                    # (to avoid overheads and potential issues with the usage)
+                    # as sdk does not take the argument for disabling the usage
+                    # collection.
                     RAY_USAGE_STATS_ENABLED='0'),
                 require_outputs=True,
                 # Disable stdin to avoid ray outputs mess up the terminal with
@@ -1635,8 +1636,9 @@ class RetryingVmProvisioner(object):
             log_abs_path,
             stream_logs=False,
             # Use environment variables to disable the ray usage collection
-            # as the ray version on the user's machine may be lower version
-            # that does not support the `--disable-usage-stats` flag.
+            # (to avoid overheads and potential issues with the usage)
+            # as sdk does not take the argument for disabling the usage
+            # collection.
             env=dict(os.environ, RAY_USAGE_STATS_ENABLED='0'),
             # Disable stdin to avoid ray outputs mess up the terminal with
             # misaligned output when multithreading/multiprocessing is used.
