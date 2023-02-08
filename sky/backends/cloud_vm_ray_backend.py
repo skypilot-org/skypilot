@@ -2523,7 +2523,9 @@ class CloudVmRayBackend(backends.Backend):
         fore = colorama.Fore
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
+        head_ssh_port = backend_utils.get_head_ssh_port(handle)
         runner = command_runner.SSHCommandRunner(handle.head_ip,
+                                                 port=head_ssh_port,
                                                  **ssh_credentials)
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(codegen)
