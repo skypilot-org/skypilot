@@ -23,6 +23,7 @@ import colorama
 
 import sky
 from sky import backends
+from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
@@ -176,8 +177,23 @@ def _execute(
         existing_handle = global_user_state.get_handle_from_cluster_name(
             cluster_name)
         cluster_exists = existing_handle is not None
+    if cluster_exists:
+        assert len(task.resources) == 1
+        task_resources = list(task.resources)[0]
+        if task_resources.cpus is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify CPU when using an existing cluster. '
+                    'CPU is only used for selecting the instance type when '
+                    'creating a new cluster.')
 
     stages = stages if stages is not None else list(Stage)
+
+    # Requested features that some clouds support and others don't.
+    requested_features = set()
+
+    if task.num_nodes > 1:
+        requested_features.add(clouds.CloudImplementationFeatures.MULTI_NODE)
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     if isinstance(backend, backends.CloudVmRayBackend):
@@ -199,6 +215,11 @@ def _execute(
                             f'{colorama.Style.RESET_ALL}')
                 idle_minutes_to_autostop = 1
             stages.remove(Stage.DOWN)
+
+            if not down:
+                requested_features.add(
+                    clouds.CloudImplementationFeatures.AUTOSTOP)
+
     elif idle_minutes_to_autostop is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
         with ux_utils.print_exception_no_traceback():
@@ -232,7 +253,9 @@ def _execute(
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
-    backend.register_info(dag=dag, optimize_target=optimize_target)
+    backend.register_info(dag=dag,
+                          optimize_target=optimize_target,
+                          requested_features=requested_features)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
@@ -374,6 +397,20 @@ def launch(
                 sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
             sky.launch(task, cluster_name='my-cluster')
 
+    Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the cluster is
+            owned by another user.
+        exceptions.ResourcesUnavailableError: if the requested resources
+            cannot be satisfied. The failover_history of the exception
+            will be set as:
+                1. Empty: iff the first-ever sky.optimize() fails to
+                find a feasible resource; no pre-check or actual launch is
+                attempted.
+                2. Non-empty: iff at least 1 exception from either
+                our pre-checks (e.g., cluster name invalid) or a region/zone
+                throwing resource unavailability.
+        exceptions.NotSupportedError: if the cluster name is reserved.
+    Other exceptions may be raised depending on the backend.
     """
     entrypoint = task
     backend_utils.check_cluster_name_not_reserved(cluster_name,

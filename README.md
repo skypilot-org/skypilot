@@ -28,7 +28,7 @@
 SkyPilot is a framework for easily and cost effectively running ML workloads[^1] on any cloud. 
 
 SkyPilot abstracts away the cloud infra burden:
-- Launch jobs & clusters on any cloud (AWS, Azure, GCP)
+- Launch jobs & clusters on any cloud (AWS, Azure, GCP, Lambda Cloud)
 - Find scarce resources across zones/regions/clouds
 - Queue jobs & use cloud object stores
 
@@ -42,7 +42,7 @@ SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code change
 
 Install with pip (choose your clouds) or [from source](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html):
 ```
-pip install "skypilot[aws,gcp,azure]"
+pip install "skypilot[aws,gcp,azure,lambda]"
 ```
 
 ## Getting Started

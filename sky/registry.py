@@ -13,6 +13,7 @@ _CLOUDS = [
     clouds.AWS(),
     clouds.Azure(),
     clouds.GCP(),
+    clouds.Lambda(),
 ]
 
 

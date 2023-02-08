@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from functools import partial
+from typing import Dict, List, Set, Tuple
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -13,7 +14,7 @@ from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient import discovery, errors
 
 from sky.skylet.providers.gcp.node import MAX_POLLS, POLL_INTERVAL, GCPNodeType, GCPCompute
-from sky.skylet.providers.gcp.constants import SKYPILOT_VPC_NAME, VPC_TEMPLATE, FIREWALL_RULES_TEMPLATE
+from sky.skylet.providers.gcp.constants import SKYPILOT_VPC_NAME, VPC_TEMPLATE, FIREWALL_RULES_TEMPLATE, FIREWALL_RULES_REQUIRED
 from ray.autoscaler._private.util import check_legacy_fields
 
 logger = logging.getLogger(__name__)
@@ -490,7 +491,7 @@ def _configure_key_pair(config, compute):
 
 def _check_firewall_rules(vpc_name, config, compute):
     """Check if the firewall rules in the VPC are sufficient."""
-    required_rules = FIREWALL_RULES_TEMPLATE.copy()
+    required_rules = FIREWALL_RULES_REQUIRED.copy()
 
     operation = (
         compute.networks().
@@ -504,24 +505,90 @@ def _check_firewall_rules(vpc_name, config, compute):
         return False
     effective_rules = response["firewalls"]
 
-    def _get_refined_rule(rule):
-        KEY_TO_COMPARE = {"sourceRanges", "allowed", "direction"}
-        refined_rule = {}
-        for k in KEY_TO_COMPARE:
-            if k not in rule:
-                continue
-            if k == "allowed":
-                refined_rule[k] = sorted(rule[k], key=lambda x: x["IPProtocol"])
-            else:
-                refined_rule[k] = rule[k]
-        return refined_rule
+    def _merge_and_refine_rule(rules):
+        """Returns the reformatted rules from the firewall rules
 
-    required_rules = list(map(_get_refined_rule, required_rules))
-    effective_rules = list(map(_get_refined_rule, effective_rules))
+        The function translates firewall rules fetched from the cloud provider
+        to a format for simple comparison.
 
-    for rule in required_rules:
-        if rule not in effective_rules:
+        Example of firewall rules from the cloud:
+        [
+            {
+                ...
+                "direction": "INGRESS",
+                "allowed": [
+                    {"IPProtocol": "tcp", "ports": ['80', '443']},
+                    {"IPProtocol": "udp", "ports": ['53']},
+                ],
+                "sourceRanges": ["10.128.0.0/9"],
+            },
+            {
+                ...
+                "direction": "INGRESS",
+                "allowed": [{
+                    "IPProtocol": "tcp",
+                    "ports": ["22"],
+                }],
+                "sourceRanges": ["0.0.0.0/0"],
+            },
+        ]
+
+        Returns:
+            source2rules: Dict[(direction, sourceRanges) -> Dict(protocol -> Set[ports])]
+                Example {
+                    ("INGRESS", "10.128.0.0/9"): {"tcp": {80, 443}, "udp": {53}},
+                    ("INGRESS", "0.0.0.0/0"): {"tcp": {22}},
+                }
+        """
+        source2rules : Dict[Tuple[str, str], Dict[str, Set[int]]] = {}
+        source2allowed_list : Dict[Tuple[str, str], List[Dict[str, str]]] = {}
+        for rule in rules:
+            direction = rule.get("direction", "")
+            sources = rule.get("sourceRanges", [])
+            allowed = rule.get("allowed", [])
+            for source in sources:
+                key = (direction, source)
+                source2allowed_list[key] = source2allowed_list.get(key, []) + allowed
+        for direction_source, allowed_list in source2allowed_list.items():
+            source2rules[direction_source] = {}
+            for allowed in allowed_list:
+                # Example of port_list: ["20", "50-60"]
+                # If list is empty, it means all ports
+                port_list = allowed.get("ports", [])
+                port_set = set()
+                if port_list == []:
+                    port_set.update(set(range(1, 65536)))
+                else:
+                    for port_range in port_list:
+                        parse_ports = port_range.split('-')
+                        if len(parse_ports) == 1:
+                            port_set.add(int(parse_ports[0]))
+                        else:
+                            assert (
+                                len(parse_ports) == 2
+                            ), f"Failed to parse the port range: {port_range}"
+                            port_set.update(
+                                set(range(int(parse_ports[0]), int(parse_ports[1]) + 1)))
+                if allowed["IPProtocol"] not in source2rules[direction_source]:
+                    source2rules[direction_source][allowed["IPProtocol"]] = set()
+                source2rules[direction_source][allowed["IPProtocol"]].update(port_set)
+        return source2rules
+
+    effective_rules = _merge_and_refine_rule(effective_rules)
+    required_rules = _merge_and_refine_rule(required_rules)
+
+    for direction_source, allowed_req in required_rules.items():
+        if direction_source not in effective_rules:
             return False
+        allowed_eff = effective_rules[direction_source]
+        # Special case: "all" means allowing all traffic
+        if "all" in allowed_eff:
+            continue
+        # Check if the required ports are a subset of the effective ports
+        for protocol, ports_req in allowed_req.items():
+            ports_eff = allowed_eff.get(protocol, set())
+            if not ports_req.issubset(ports_eff):
+                return False
     return True
 
 
@@ -557,19 +624,32 @@ def get_usable_vpc(config):
     if usable_vpc_name is None:
         logger.info(f"Creating a default VPC network, {SKYPILOT_VPC_NAME}...")
 
-        # Create a default VPC network
         proj_id = config["provider"]["project_id"]
-        body = VPC_TEMPLATE.copy()
-        body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
-        body["selfLink"] = body["selfLink"].format(PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
-        _create_vpcnet(config, compute, body)
+        # Create a SkyPilot VPC network if it doesn't exist
+        vpc_list = _list_vpcnets(config, compute, filter=f"name={SKYPILOT_VPC_NAME}")
+        if len(vpc_list) == 0:
+            body = VPC_TEMPLATE.copy()
+            body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
+            body["selfLink"] = body["selfLink"].format(
+                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
+            _create_vpcnet(config, compute, body)
 
         # Create firewall rules
         for rule in FIREWALL_RULES_TEMPLATE:
+            # Query firewall rule by its name (unique in a project).
+            # If the rule already exists, delete it first.
+            rule_name = rule["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
+            rule_list = _list_firewall_rules(
+                config, compute, filter=f"(name={rule_name})")
+            if len(rule_list) > 0:
+                _delete_firewall_rule(config, compute, rule_name)
+
             body = rule.copy()
             body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
-            body["network"] = body["network"].format(PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
-            body["selfLink"] = body["selfLink"].format(PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
+            body["network"] = body["network"].format(
+                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
+            body["selfLink"] = body["selfLink"].format(
+                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
             _create_firewall_rule(config, compute, body)
 
         usable_vpc_name = SKYPILOT_VPC_NAME
@@ -639,6 +719,30 @@ def _create_firewall_rule(config, compute, body):
     return response
 
 
+def _delete_firewall_rule(config, compute, name):
+    operation = (
+        compute.firewalls()
+        .delete(project=config["provider"]["project_id"], firewall=name)
+        .execute()
+    )
+    response = wait_for_compute_global_operation(
+        config["provider"]["project_id"], operation, compute
+    )
+    return response
+
+
+def _list_firewall_rules(config, compute, filter=None):
+    response = (
+        compute.firewalls()
+        .list(
+            project=config["provider"]["project_id"],
+            filter=filter,
+        )
+        .execute()
+    )
+    return response["items"] if "items" in response else []
+
+
 def _create_vpcnet(config, compute, body):
     operation = (
         compute.networks()
@@ -651,11 +755,12 @@ def _create_vpcnet(config, compute, body):
     return response
 
 
-def _list_vpcnets(config, compute):
+def _list_vpcnets(config, compute, filter=None):
     response = (
         compute.networks()
         .list(
             project=config["provider"]["project_id"],
+            filter=filter,
         )
         .execute()
     )

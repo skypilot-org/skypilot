@@ -1,5 +1,6 @@
 """Exceptions."""
 import enum
+from typing import List, Optional
 
 # Return code for keyboard interruption and SIGTSTP
 KEYBOARD_INTERRUPT_CODE = 130
@@ -8,11 +9,55 @@ RSYNC_FILE_NOT_FOUND_CODE = 23
 
 
 class ResourcesUnavailableError(Exception):
-    """Raised when resources are unavailable."""
+    """Raised when resources are unavailable.
 
-    def __init__(self, *args: object, no_failover: bool = False) -> None:
+    This is mainly used for the APIs in sky.execution; please refer to
+    the docstring of sky.launch for more details about how the
+    failover_history will be set.
+    """
+
+    def __init__(self,
+                 *args: object,
+                 no_failover: bool = False,
+                 failover_history: Optional[List[Exception]] = None) -> None:
         super().__init__(*args)
         self.no_failover = no_failover
+        if failover_history is None:
+            failover_history = []
+        # Copy the list to avoid modifying from outside.
+        self.failover_history: List[Exception] = list(failover_history)
+
+    def with_failover_history(self, failover_history: List[Exception]) -> None:
+        # Copy the list to avoid modifying from outside.
+        self.failover_history = list(failover_history)
+        return self
+
+
+class ProvisionPrechecksError(Exception):
+    """Raised when a spot job fails prechecks before provision.
+    Developer note: For now this should only be used by managed
+    spot code path (technically, this can/should be raised by the
+    lower-level sky.launch()). Please refer to the docstring of
+    `spot.recovery_strategy._launch` for more details about when
+    the error will be raised.
+
+    Args:
+        reasons: (List[Exception]) The reasons why the prechecks failed.
+    """
+
+    def __init__(self, *args: object, reasons: List[Exception]) -> None:
+        super().__init__(*args)
+        self.reasons = list(reasons)
+
+
+class SpotJobReachedMaxRetriesError(Exception):
+    """Raised when a spot job fails to be launched after maximum retries.
+
+    Developer note: For now this should only be used by managed spot code
+    path. Please refer to the docstring of `spot.recovery_strategy._launch`
+    for more details about when the error will be raised.
+    """
+    pass
 
 
 class ResourcesMismatchError(Exception):
