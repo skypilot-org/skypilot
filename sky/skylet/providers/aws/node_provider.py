@@ -321,7 +321,7 @@ class AWSNodeProvider(NodeProvider):
                 nodes_non_matching_launch_config = [
                     n for n in nodes_all if n.id not in nodes_matching_launch_config_ids
                 ]
-                # This `sort` is for backward compatibility, where the uesr already has leaked
+                # This `sort` is for backward compatibility, where the user already has leaked
                 # stopped nodes with the different launch config before update to #1671,
                 # and the total number of the leaked nodes is greater than the number of
                 # nodes to be created. With this, we will make sure we will reuse the
