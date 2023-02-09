@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 def synchronized(f):
+
     def wrapper(self, *args, **kwargs):
         self.lock.acquire()
         try:
@@ -43,8 +44,7 @@ class LambdaNodeProvider(NodeProvider):
     This provider assumes Lambda Cloud credentials are set.
     """
 
-    def __init__(self,
-                 provider_config: Dict[str, Any],
+    def __init__(self, provider_config: Dict[str, Any],
                  cluster_name: str) -> None:
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
@@ -79,27 +79,25 @@ class LambdaNodeProvider(NodeProvider):
             launch_hash = hash_launch_conf(head_node_config, config['auth'])
             # Populate tags
             for node in vms:
-                self.metadata[node['id']] = {'tags':
-                    {
+                self.metadata[node['id']] = {
+                    'tags': {
                         TAG_RAY_CLUSTER_NAME: cluster_name,
                         TAG_RAY_NODE_STATUS: STATUS_UP_TO_DATE,
                         TAG_RAY_NODE_KIND: NODE_KIND_HEAD,
                         TAG_RAY_USER_NODE_TYPE: 'ray_head_default',
                         TAG_RAY_NODE_NAME: f'ray-{cluster_name}-head',
                         TAG_RAY_LAUNCH_CONFIG: launch_hash,
-                    }}
+                    }
+                }
 
     def _list_instances_in_cluster(self) -> Dict[str, Any]:
         """List running instances in cluster."""
         vms = self.lambda_client.list_instances()
-        return [
-            node for node in vms
-            if node['name'] == self.cluster_name
-        ]
+        return [node for node in vms if node['name'] == self.cluster_name]
 
     @synchronized
-    def _get_filtered_nodes(self,
-                            tag_filters: Dict[str, str]) -> Dict[str, Any]:
+    def _get_filtered_nodes(self, tag_filters: Dict[str,
+                                                    str]) -> Dict[str, Any]:
 
         def match_tags(vm):
             vm_info = self.metadata[vm['id']]
@@ -163,12 +161,10 @@ class LambdaNodeProvider(NodeProvider):
         """Returns the internal ip (Ray ip) of the given node."""
         return self._get_cached_node(node_id=node_id)['internal_ip']
 
-    def create_node(self,
-                    node_config: Dict[str, Any],
-                    tags: Dict[str, str],
+    def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str],
                     count: int) -> None:
         """Creates a number of nodes within the namespace."""
-        assert count == 1, count   # Only support 1-node clusters for now
+        assert count == 1, count  # Only support 1-node clusters for now
 
         # get the tags
         config_tags = node_config.get('tags', {}).copy()
