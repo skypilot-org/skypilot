@@ -215,12 +215,12 @@ class AzureNodeProvider(NodeProvider):
                 nodes_non_matching_launch_config = [
                     n for n in nodes_all if n not in nodes_matching_launch_config
                 ]
-                # This sort is for backward compatibility, where the uesr already has
+                # This sort is for backward compatibility, where the user already has
                 # leaked stopped nodes with the different launch config before update
                 # to #1671, and the total number of the leaked nodes is greater than
                 # the number of nodes to be created. With this, we make sure the nodes
-                # are reused in a deterministic order (sorting by str IDs; We cannot
-                # get the launch time info here, otherwise, sort by the launch time
+                # are reused in a deterministic order (sorting by str IDs; we cannot
+                # get the launch time info here; otherwise, sort by the launch time
                 # is more accurate.)
                 # This can be removed in the future when we are sure all the users
                 # have updated to #1671.
