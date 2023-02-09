@@ -4,6 +4,10 @@ import tempfile
 import textwrap
 from typing import List
 
+import sky
+from sky import spot
+from sky.utils import env_options
+
 # Usage: use
 #   @pytest.mark.slow
 # to mark a test as slow and to skip by default.
@@ -11,12 +15,15 @@ from typing import List
 
 # By default, only run generic tests and cloud-specific tests for GCP and Azure,
 # due to the cloud credit limit for the development account.
-# To only run tests for a specific cloud (as well as generic tests), use
-# --aws, --gcp, --azure, or --lambda.
-# To only run tests for managed spot (without generic tests), use --managed-spot.
+#
 # A "generic test" tests a generic functionality (e.g., autostop) that
 # should work on any cloud we support. The cloud used for such a test
 # is controlled by `--generic-cloud` (typically you do not need to set it).
+#
+# To only run tests for a specific cloud (as well as generic tests), use
+# --aws, --gcp, --azure, or --lambda.
+#
+# To only run tests for managed spot (without generic tests), use --managed-spot.
 all_clouds_in_smoke_tests = ['aws', 'gcp', 'azure', 'lambda']
 default_clouds_to_run = ['gcp', 'azure']
 
@@ -69,9 +76,6 @@ def pytest_configure(config):
             'markers', f'{cloud_keyword}: mark test as {cloud} specific')
 
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
-    import sky
-    from sky import spot
-    from sky.utils import env_options
     generic_cloud = _generic_cloud(config)
     cluster = sky.status(spot.SPOT_CONTROLLER_NAME)
     if not cluster:
