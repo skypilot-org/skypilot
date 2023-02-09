@@ -106,7 +106,7 @@ _JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
 # (so import would fail).
 _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
     pathlib.Path(sky.__file__).resolve().parent / 'backends' /
-    'monkey_patches' / 'ray_up_with_monkey_patched_hash_launch_conf.py')
+    'monkey_patches' / 'monkey_patch_ray_up.py')
 
 
 def _get_cluster_config_template(cloud):
@@ -120,7 +120,7 @@ def _get_cluster_config_template(cloud):
     return cloud_to_template[type(cloud)]
 
 
-def _write_ray_up_script_with_patched_launch_hash_fn(
+def write_ray_up_script_with_patched_launch_hash_fn(
     cluster_config_path: str,
     ray_up_kwargs: Dict[str, bool],
 ) -> str:
@@ -1401,7 +1401,7 @@ class RetryingVmProvisioner(object):
             # (which may be ok with the semantics of 'sky launch' twice).
             # Tracked in https://github.com/ray-project/ray/issues/20402.
             # Ref: https://github.com/ray-project/ray/blob/releases/2.2.0/python/ray/autoscaler/sdk/sdk.py#L16-L49  # pylint: disable=line-too-long
-            script_path = _write_ray_up_script_with_patched_launch_hash_fn(
+            script_path = write_ray_up_script_with_patched_launch_hash_fn(
                 cluster_config_file, ray_up_kwargs={'no_restart': True})
 
             # Redirect stdout/err to the file and streaming (if stream_logs).
@@ -1420,11 +1420,10 @@ class RetryingVmProvisioner(object):
                 env=dict(
                     os.environ,
                     BOTO_MAX_RETRIES='5',
-                    # Use environment variables to disable the ray usage stats
-                    # (to avoid the 10 second wait for usage collection
-                    # confirmation), as the ray version on the user's machine
-                    # may be lower version that does not support the
-                    # `--disable-usage-stats` flag.
+                    # Use environment variables to disable the ray usage collection
+                    # (to avoid overheads and potential issues with the usage)
+                    # as sdk does not take the argument for disabling the usage
+                    # collection.
                     RAY_USAGE_STATS_ENABLED='0'),
                 require_outputs=True,
                 # Disable stdin to avoid ray outputs mess up the terminal with
@@ -1630,16 +1629,16 @@ class RetryingVmProvisioner(object):
 
         # Runs `ray up <kwargs>` with our monkey-patched launch hash
         # calculation. See the monkey patch file for why.
-        script_path = _write_ray_up_script_with_patched_launch_hash_fn(
+        script_path = write_ray_up_script_with_patched_launch_hash_fn(
             handle.cluster_yaml, ray_up_kwargs={'restart_only': True})
         log_lib.run_with_log(
             [sys.executable, script_path],
             log_abs_path,
             stream_logs=False,
             # Use environment variables to disable the ray usage collection
-            # (avoid the 10 second wait for usage collection confirmation),
-            # as the ray version on the user's machine may be lower version
-            # that does not support the `--disable-usage-stats` flag.
+            # (to avoid overheads and potential issues with the usage)
+            # as sdk does not take the argument for disabling the usage
+            # collection.
             env=dict(os.environ, RAY_USAGE_STATS_ENABLED='0'),
             # Disable stdin to avoid ray outputs mess up the terminal with
             # misaligned output when multithreading/multiprocessing is used.
@@ -3146,6 +3145,10 @@ class CloudVmRayBackend(backends.Backend):
             that the cluster is still autostopping when False is returned,
             due to errors like transient network issues.
         """
+        if handle.head_ip is None:
+            # The head node of the cluster is not UP or in an abnormal state.
+            # We cannot check if the cluster is autostopping.
+            return False
         code = autostop_lib.AutostopCodeGen.is_autostopping()
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       code,
