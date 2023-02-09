@@ -114,35 +114,28 @@ class LambdaCloudClient:
         # launch requests are rate limited at ~1 request every 10 seconds.
         # So don't use launch requests to check availability.
         # See https://docs.lambdalabs.com/cloud/rate-limiting/ for more.
-        available_regions = self.list_catalog()[instance_type][
-            "regions_with_capacity_available"
-        ]
+        available_regions = self.list_catalog(
+        )[instance_type]["regions_with_capacity_available"]
         available_regions = [reg["name"] for reg in available_regions]
         if region not in available_regions:
             if len(available_regions) > 0:
                 aval_reg = " ".join(available_regions)
             else:
                 aval_reg = "None"
-            raise LambdaCloudError(
-                (
-                    "instance-operations/launch/"
-                    "insufficient-capacity: Not enough "
-                    "capacity to fulfill launch request. "
-                    "Regions with capacity available: "
-                    f"{aval_reg}"
-                )
-            )
+            raise LambdaCloudError(("instance-operations/launch/"
+                                    "insufficient-capacity: Not enough "
+                                    "capacity to fulfill launch request. "
+                                    "Regions with capacity available: "
+                                    f"{aval_reg}"))
 
         # Try to launch instance
-        data = json.dumps(
-            {
-                "region_name": region,
-                "instance_type_name": instance_type,
-                "ssh_key_names": [self.ssh_key_name],
-                "quantity": quantity,
-                "name": name,
-            }
-        )
+        data = json.dumps({
+            "region_name": region,
+            "instance_type_name": instance_type,
+            "ssh_key_names": [self.ssh_key_name],
+            "quantity": quantity,
+            "name": name,
+        })
         response = requests.post(
             f"{API_ENDPOINT}/instance-operations/launch",
             data=data,
@@ -153,9 +146,9 @@ class LambdaCloudClient:
 
     def remove_instances(self, *instance_ids: str) -> Dict[str, Any]:
         """Terminate instances."""
-        data = json.dumps(
-            {"instance_ids": [instance_ids[0]]}  # TODO(ewzeng) don't hardcode
-        )
+        data = json.dumps({"instance_ids": [instance_ids[0]]
+                          }  # TODO(ewzeng) don't hardcode
+                         )
         response = requests.post(
             f"{API_ENDPOINT}/instance-operations/terminate",
             data=data,
@@ -166,16 +159,17 @@ class LambdaCloudClient:
 
     def list_instances(self) -> Dict[str, Any]:
         """List existing instances."""
-        response = requests.get(f"{API_ENDPOINT}/instances", headers=self.headers)
+        response = requests.get(f"{API_ENDPOINT}/instances",
+                                headers=self.headers)
         raise_lambda_error(response)
         return response.json().get("data", [])
 
     def set_ssh_key(self, name: str, pub_key: str) -> None:
         """Set ssh key."""
         data = json.dumps({"name": name, "public_key": pub_key})
-        response = requests.post(
-            f"{API_ENDPOINT}/ssh-keys", data=data, headers=self.headers
-        )
+        response = requests.post(f"{API_ENDPOINT}/ssh-keys",
+                                 data=data,
+                                 headers=self.headers)
         raise_lambda_error(response)
         self.ssh_key_name = name
         with open(self.credentials, "w") as f:
@@ -184,6 +178,7 @@ class LambdaCloudClient:
 
     def list_catalog(self) -> Dict[str, Any]:
         """List offered instances and their availability."""
-        response = requests.get(f"{API_ENDPOINT}/instance-types", headers=self.headers)
+        response = requests.get(f"{API_ENDPOINT}/instance-types",
+                                headers=self.headers)
         raise_lambda_error(response)
         return response.json().get("data", [])

@@ -1,4 +1,4 @@
-name: yapf
+name: format
 
 on:
   # Trigger the workflow on push or pull request,
@@ -12,7 +12,7 @@ on:
       - master
       - 'releases/**'
 jobs:
-  yapf:
+  format:
     # Need to specify 20.04, because ubuntu-latest does not work with
     # python 3.6: https://github.com/actions/setup-python/issues/355#issuecomment-1335042510
     runs-on: ubuntu-20.04
@@ -30,6 +30,15 @@ jobs:
         python -m pip install --upgrade pip
         pip install yapf==0.32.0
         pip install toml==0.10.2
+        pip install black==22.10.0
     - name: Running yapf
       run: |
-        yapf --diff --recursive ./ --exclude 'sky/skylet/ray_patches/**' --exclude 'sky/skylet/providers/**'
+        yapf --diff --recursive ./ --exclude 'sky/skylet/ray_patches/**' \
+            --exclude 'sky/skylet/providers/aws/**' \
+            --exclude 'sky/skylet/providers/gcp/**' \
+            --exclude 'sky/skylet/providers/azure/**'
+    - name: Running black
+      run: |
+        black --diff --check sky/skylet/providers/aws/ \
+            sky/skylet/providers/gcp/ \
+            sky/skylet/providers/azure/

@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 def synchronized(f):
+
     def wrapper(self, *args, **kwargs):
         self.lock.acquire()
         try:
@@ -43,7 +44,8 @@ class LambdaNodeProvider(NodeProvider):
     This provider assumes Lambda Cloud credentials are set.
     """
 
-    def __init__(self, provider_config: Dict[str, Any], cluster_name: str) -> None:
+    def __init__(self, provider_config: Dict[str, Any],
+                 cluster_name: str) -> None:
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
         self.lambda_client = lambda_utils.LambdaCloudClient()
@@ -62,7 +64,8 @@ class LambdaNodeProvider(NodeProvider):
         # important tags.
         # TODO(ewzeng): change when Lambda Cloud adds tag support.
         ray_yaml_path = os.path.expanduser(REMOTE_RAY_YAML)
-        if os.path.exists(ray_yaml_path) and not os.path.exists(self.metadata.path):
+        if os.path.exists(ray_yaml_path) and not os.path.exists(
+                self.metadata.path):
             config = common_utils.read_yaml(ray_yaml_path)
             # Ensure correct cluster so sky launch on head node works correctly
             if config["cluster_name"] != cluster_name:
@@ -93,7 +96,9 @@ class LambdaNodeProvider(NodeProvider):
         return [node for node in vms if node["name"] == self.cluster_name]
 
     @synchronized
-    def _get_filtered_nodes(self, tag_filters: Dict[str, str]) -> Dict[str, Any]:
+    def _get_filtered_nodes(self, tag_filters: Dict[str,
+                                                    str]) -> Dict[str, Any]:
+
         def match_tags(vm):
             vm_info = self.metadata[vm["id"]]
             tags = {} if vm_info is None else vm_info["tags"]
@@ -156,9 +161,8 @@ class LambdaNodeProvider(NodeProvider):
         """Returns the internal ip (Ray ip) of the given node."""
         return self._get_cached_node(node_id=node_id)["internal_ip"]
 
-    def create_node(
-        self, node_config: Dict[str, Any], tags: Dict[str, str], count: int
-    ) -> None:
+    def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str],
+                    count: int) -> None:
         """Creates a number of nodes within the namespace."""
         assert count == 1, count  # Only support 1-node clusters for now
 
@@ -170,9 +174,10 @@ class LambdaNodeProvider(NodeProvider):
         # create the node
         ttype = node_config["InstanceType"]
         region = self.provider_config["region"]
-        vm_list = self.lambda_client.create_instances(
-            instance_type=ttype, region=region, quantity=1, name=self.cluster_name
-        )
+        vm_list = self.lambda_client.create_instances(instance_type=ttype,
+                                                      region=region,
+                                                      quantity=1,
+                                                      name=self.cluster_name)
         assert len(vm_list) == 1, len(vm_list)
         vm_id = vm_list[0]
         self.metadata[vm_id] = {"tags": config_tags}
