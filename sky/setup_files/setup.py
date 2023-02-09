@@ -47,11 +47,19 @@ def find_version(*filepath):
         raise RuntimeError('Unable to find version string.')
 
 
-def parse_footnote(readme: str) -> str:
-    """Parse the footnote from the README.md file."""
+def parse_readme(readme: str) -> str:
+    """Parse the README.md file to be pypi compatible."""
+    # Replace the footnotes.
     readme = readme.replace('<!-- Footnote -->', '#')
     footnote_re = re.compile(r'\[\^([0-9]+)\]')
-    return footnote_re.sub(r'<sup>[\1]</sup>', readme)
+    readme = footnote_re.sub(r'<sup>[\1]</sup>', readme)
+
+    # Remove the dark mode switcher
+    mode_re = re.compile(
+        r'<picture>[\n ]*<source media=.*>[\n ]*<img(.*)>[\n ]*</picture>',
+        re.MULTILINE)
+    readme = mode_re.sub(r'<img\1>', readme)
+    return readme
 
 
 install_requires = [
@@ -63,16 +71,21 @@ install_requires = [
     # the latest version.
     'colorama<0.4.5',
     'cryptography',
-    'jinja2',
+    # Jinja has a bug in older versions because of the lack of pinning
+    # the version of the underlying markupsafe package. See:
+    # https://github.com/pallets/jinja/issues/1585
+    'jinja2>=3.0',
     'jsonschema',
     'networkx',
     'oauth2client',
     'pandas',
     'pendulum',
-    'PrettyTable',
+    # PrettyTable with version >=2.0.0 is required for the support of
+    # `add_rows` method.
+    'PrettyTable>=2.0.0',
     # Lower local ray version is not fully supported, due to the
     # autoscaler issues (also tracked in #537).
-    'ray[default]>=1.9.0,<=2.0.1',
+    'ray[default]>=1.9.0,<=2.2.0',
     'rich',
     'tabulate',
     'filelock',  # TODO(mraheja): Enforce >=3.6.0 when python version is >= 3.7
@@ -93,6 +106,7 @@ install_requires = [
 # packages dependencies are changed.
 extras_require = {
     'aws': [
+        # awscli>=1.27.10 is required for SSO support.
         'awscli',
         'boto3',
         # 'Crypto' module used in authentication.py for AWS.
@@ -100,11 +114,11 @@ extras_require = {
     ],
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
-    # azure-cli need to be pinned to 2.31.0 due to later versions
-    # do not have azure-identity (used in node_provider) installed
-    'azure': ['azure-cli==2.31.0', 'azure-core'],
+    # azure-identity is needed in node_provider.
+    'azure': ['azure-cli>=2.31.0', 'azure-core', 'azure-identity'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],
+    'lambda': [],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])
@@ -119,7 +133,7 @@ readme_filepath = 'README.md'
 # README.  Skip the description for that case.
 if os.path.exists(readme_filepath):
     long_description = io.open(readme_filepath, 'r', encoding='utf-8').read()
-    long_description = parse_footnote(long_description)
+    long_description = parse_readme(long_description)
 
 setuptools.setup(
     # NOTE: this affects the package.whl wheel name. When changing this (if

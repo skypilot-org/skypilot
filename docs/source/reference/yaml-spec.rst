@@ -47,6 +47,15 @@ Available fields:
       # Format: <name>:<count> (or simply <name>, short for a count of 1).
       accelerators: V100:4
 
+      # Number of vCPUs per node (optional).
+      #
+      # Format: <count> (exactly <count> vCPUs) or <count>+
+      # (at least <count> vCPUs).
+      #
+      # E.g., 4+ would first try to find an instance type with 4 vCPUs. If not
+      # found, it will use the next cheapest instance with more than 4 vCPUs.
+      cpus: 32
+
       # Instance type to use (optional). If 'accelerators' is specified,
       # the corresponding instance type is automatically inferred.
       instance_type: p3.8xlarge
@@ -96,6 +105,11 @@ Available fields:
       #   image_id: skypilot:k80-ubuntu-2004
       #   image_id: skypilot:gpu-ubuntu-1804
       #   image_id: skypilot:k80-ubuntu-1804
+      # It is also possible to specify a per-region image id (failover will only go through the regions sepcified as keys; 
+      # useful when you have the custom images in multiple regions):
+      #   image_id:
+      #     us-east-1: ami-0729d913a335efca7
+      #     us-west-2: ami-050814f384259894c
       image_id: ami-0868a20f5a3bf9702
       # GCP
       # To find GCP images: https://cloud.google.com/compute/docs/images

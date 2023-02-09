@@ -36,11 +36,35 @@ class Local(clouds.Cloud):
     """
     _DEFAULT_INSTANCE_TYPE = 'on-prem'
     LOCAL_REGION = clouds.Region('Local')
+    _CLOUD_UNSUPPORTED_FEATURES = {
+        clouds.CloudImplementationFeatures.STOP:
+            ('Local cloud does not support stopping instances.'),
+        clouds.CloudImplementationFeatures.AUTOSTOP:
+            ('Local cloud does not support stopping instances.')
+    }
     _regions: List[clouds.Region] = [LOCAL_REGION]
+
+    @classmethod
+    def _cloud_unsupported_features(
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+        return cls._CLOUD_UNSUPPORTED_FEATURES
+
+    @classmethod
+    def _max_cluster_name_length(cls) -> Optional[int]:
+        return None
 
     @classmethod
     def regions(cls):
         return cls._regions
+
+    @classmethod
+    def regions_with_offering(cls, instance_type: Optional[str],
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> List[clouds.Region]:
+        """Local cloud resources are placed in only one region."""
+        del instance_type, accelerators, use_spot, region, zone
+        return cls.regions()
 
     @classmethod
     def region_zones_provision_loop(
@@ -48,24 +72,28 @@ class Local(clouds.Cloud):
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: bool,
+        use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        del instance_type
-        del use_spot
-        del accelerators  # unused
-        for region in cls.regions():
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot=use_spot,
+                                            region=None,
+                                            zone=None)
+        for region in regions:
             yield region, region.zones
 
     #### Normal methods ####
 
-    def instance_type_to_hourly_cost(self, instance_type: str,
-                                     use_spot: bool) -> float:
+    def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool,
+                                     region: Optional[str],
+                                     zone: Optional[str]) -> float:
         # On-prem machines on Sky are assumed free
         # (minus electricity/utility bills).
         return 0.0
 
-    def accelerators_to_hourly_cost(self, accelerators,
-                                    use_spot: bool) -> float:
+    def accelerators_to_hourly_cost(self, accelerators, use_spot: bool,
+                                    region: Optional[str],
+                                    zone: Optional[str]) -> float:
         # Hourly cost of accelerators is 0 for local cloud.
         return 0.0
 
@@ -81,8 +109,9 @@ class Local(clouds.Cloud):
         return isinstance(other, Local)
 
     @classmethod
-    def get_default_instance_type(cls) -> str:
+    def get_default_instance_type(cls, cpus: Optional[str] = None) -> str:
         # There is only "1" instance type for local cloud: on-prem
+        del cpus  # Unused.
         return Local._DEFAULT_INSTANCE_TYPE
 
     @classmethod
@@ -103,7 +132,7 @@ class Local(clouds.Cloud):
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
             region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         return {}
 
     def get_feasible_launchable_resources(self,
@@ -157,3 +186,4 @@ class Local(clouds.Cloud):
         if region is None or region != Local.LOCAL_REGION.name:
             raise ValueError(f'Region {region!r} does not match the Local'
                              ' cloud region {Local.LOCAL_REGION.name!r}.')
+        return region, zone

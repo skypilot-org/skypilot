@@ -23,9 +23,11 @@ import colorama
 
 import sky
 from sky import backends
+from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
+from sky import skypilot_config
 from sky import sky_logging
 from sky import spot
 from sky import task as task_lib
@@ -114,9 +116,13 @@ def _execute(
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
     stages: Optional[List[Stage]] = None,
     cluster_name: Optional[str] = None,
+    detach_setup: bool = False,
     detach_run: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _is_launched_by_spot_controller: bool = False,
 ) -> None:
     """Execute a entrypoint.
 
@@ -146,7 +152,12 @@ def _execute(
         skipping all setup steps.
       cluster_name: Name of the cluster to create/reuse.  If None,
         auto-generate a name.
-      detach_run: bool; whether to detach the process after the job submitted.
+      detach_setup: If True, run setup in non-interactive mode as part of the
+        job itself. You can safely ctrl-c to detach from logging, and it will
+        not interrupt the setup process. To see the logs again after detaching,
+        use `sky logs`. To cancel setup, cancel the job via `sky cancel`.
+      detach_run: If True, as soon as a job is submitted, return from this
+        function and do not stream execution logs.
       idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
@@ -166,8 +177,23 @@ def _execute(
         existing_handle = global_user_state.get_handle_from_cluster_name(
             cluster_name)
         cluster_exists = existing_handle is not None
+    if cluster_exists:
+        assert len(task.resources) == 1
+        task_resources = list(task.resources)[0]
+        if task_resources.cpus is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify CPU when using an existing cluster. '
+                    'CPU is only used for selecting the instance type when '
+                    'creating a new cluster.')
 
     stages = stages if stages is not None else list(Stage)
+
+    # Requested features that some clouds support and others don't.
+    requested_features = set()
+
+    if task.num_nodes > 1:
+        requested_features.add(clouds.CloudImplementationFeatures.MULTI_NODE)
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     if isinstance(backend, backends.CloudVmRayBackend):
@@ -189,6 +215,11 @@ def _execute(
                             f'{colorama.Style.RESET_ALL}')
                 idle_minutes_to_autostop = 1
             stages.remove(Stage.DOWN)
+
+            if not down:
+                requested_features.add(
+                    clouds.CloudImplementationFeatures.AUTOSTOP)
+
     elif idle_minutes_to_autostop is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
         with ux_utils.print_exception_no_traceback():
@@ -196,20 +227,35 @@ def _execute(
                 f'Backend {backend.NAME} does not support autostop, please try '
                 f'{backends.CloudVmRayBackend.NAME}')
 
-    if not cluster_exists and Stage.OPTIMIZE in stages:
-        if task.best_resources is None:
-            # TODO: fix this for the situation where number of requested
-            # accelerators is not an integer.
-            if isinstance(backend, backends.CloudVmRayBackend):
-                # TODO: adding this check because docker backend on a
-                # no-credential machine should not enter optimize(), which
-                # would directly error out ('No cloud is enabled...').  Fix by
-                # moving `sky check` checks out of optimize()?
-                dag = sky.optimize(dag, minimize=optimize_target)
-                task = dag.tasks[0]  # Keep: dag may have been deep-copied.
-                assert task.best_resources is not None, task
+    if not cluster_exists:
+        if (Stage.PROVISION in stages and task.use_spot and
+                not _is_launched_by_spot_controller):
+            yellow = colorama.Fore.YELLOW
+            bold = colorama.Style.BRIGHT
+            reset = colorama.Style.RESET_ALL
+            logger.info(
+                f'{yellow}Launching an unmanaged spot task, which does not '
+                f'automatically recover from preemptions.{reset}\n{yellow}To '
+                'get automatic recovery, use managed spot instead: '
+                f'{reset}{bold}sky spot launch{reset} {yellow}or{reset} '
+                f'{bold}sky.spot_launch(){reset}.')
 
-    backend.register_info(dag=dag, optimize_target=optimize_target)
+        if Stage.OPTIMIZE in stages:
+            if task.best_resources is None:
+                # TODO: fix this for the situation where number of requested
+                # accelerators is not an integer.
+                if isinstance(backend, backends.CloudVmRayBackend):
+                    # TODO: adding this check because docker backend on a
+                    # no-credential machine should not enter optimize(), which
+                    # would directly error out ('No cloud is enabled...').  Fix
+                    # by moving `sky check` checks out of optimize()?
+                    dag = sky.optimize(dag, minimize=optimize_target)
+                    task = dag.tasks[0]  # Keep: dag may have been deep-copied.
+                    assert task.best_resources is not None, task
+
+    backend.register_info(dag=dag,
+                          optimize_target=optimize_target,
+                          requested_features=requested_features)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
@@ -240,7 +286,7 @@ def _execute(
         if no_setup:
             logger.info('Setup commands skipped.')
         elif Stage.SETUP in stages:
-            backend.setup(handle, task)
+            backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages:
             if idle_minutes_to_autostop is not None:
@@ -289,8 +335,12 @@ def launch(
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
+    detach_setup: bool = False,
     detach_run: bool = False,
     no_setup: bool = False,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _is_launched_by_spot_controller: bool = False,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a task.
@@ -311,12 +361,12 @@ def launch(
             up.
         idle_minutes_to_autostop: automatically stop the cluster after this
             many minute of idleness, i.e., no running or pending jobs in the
-            cluster's job queue. Idleness starts counting after
-            setup/file_mounts are done; the clock gets reset whenever there
-            are running/pending jobs in the job queue. Setting this flag is
-            equivalent to running ``sky.launch(..., detach_run=True, ...)``
-            and then ``sky.autostop(idle_minutes=<minutes>)``. If not set,
-            the cluster will not be autostopped.
+            cluster's job queue. Idleness gets reset whenever setting-up/
+            running/pending jobs are found in the job queue. Setting this
+            flag is equivalent to running
+            ``sky.launch(..., detach_run=True, ...)`` and then
+            ``sky.autostop(idle_minutes=<minutes>)``. If not set, the cluster
+            will not be autostopped.
         down: Tear down the cluster after all jobs finish (successfully or
             abnormally). If --idle-minutes-to-autostop is also set, the
             cluster will be torn down after the specified idle time.
@@ -328,8 +378,14 @@ def launch(
             (CloudVMRayBackend).
         optimize_target: target to optimize for. Choices: OptimizeTarget.COST,
             OptimizeTarget.TIME.
-        detach_run: If True, run setup first (blocking), then detach from the
-            job's execution.
+        detach_setup: If True, run setup in non-interactive mode as part of the
+            job itself. You can safely ctrl-c to detach from logging, and it
+            will not interrupt the setup process. To see the logs again after
+            detaching, use `sky logs`. To cancel setup, cancel the job via
+            `sky cancel`. Useful for long-running setup
+            commands.
+        detach_run: If True, as soon as a job is submitted, return from this
+            function and do not stream execution logs.
         no_setup: if True, do not re-run setup commands.
 
     Example:
@@ -341,6 +397,20 @@ def launch(
                 sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
             sky.launch(task, cluster_name='my-cluster')
 
+    Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the cluster is
+            owned by another user.
+        exceptions.ResourcesUnavailableError: if the requested resources
+            cannot be satisfied. The failover_history of the exception
+            will be set as:
+                1. Empty: iff the first-ever sky.optimize() fails to
+                find a feasible resource; no pre-check or actual launch is
+                attempted.
+                2. Non-empty: iff at least 1 exception from either
+                our pre-checks (e.g., cluster name invalid) or a region/zone
+                throwing resource unavailability.
+        exceptions.NotSupportedError: if the cluster name is reserved.
+    Other exceptions may be raised depending on the backend.
     """
     entrypoint = task
     backend_utils.check_cluster_name_not_reserved(cluster_name,
@@ -355,9 +425,11 @@ def launch(
         retry_until_up=retry_until_up,
         optimize_target=optimize_target,
         cluster_name=cluster_name,
+        detach_setup=detach_setup,
         detach_run=detach_run,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
+        _is_launched_by_spot_controller=_is_launched_by_spot_controller,
     )
 
 
@@ -413,6 +485,8 @@ def exec(  # pylint: disable=redefined-builtin
     Raises:
         ValueError: if the specified cluster does not exist or is not in UP
             status.
+        sky.exceptions.NotSupportedError: if the specified cluster is a
+            reserved cluster that does not support this operation.
     """
     entrypoint = task
     if isinstance(entrypoint, sky.Dag):
@@ -423,14 +497,10 @@ def exec(  # pylint: disable=redefined-builtin
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.exec')
 
-    status, handle = backend_utils.refresh_cluster_status_handle(cluster_name)
-    with ux_utils.print_exception_no_traceback():
-        if handle is None:
-            raise ValueError(f'Cluster {cluster_name!r} not found.  '
-                             'Use `sky launch` to provision first.')
-        if status != global_user_state.ClusterStatus.UP:
-            raise ValueError(f'Cluster {cluster_name!r} is not up.  '
-                             'Use `sky status` to check the status.')
+    handle = backend_utils.check_cluster_available(
+        cluster_name,
+        operation='executing tasks',
+        check_cloud_vm_ray_backend=False)
     _execute(entrypoint=entrypoint,
              dryrun=dryrun,
              down=down,
@@ -502,18 +572,63 @@ def spot_launch(
         common_utils.dump_yaml(f.name, task_config)
 
         controller_name = spot.SPOT_CONTROLLER_NAME
+        vars_to_fill = {
+            'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
+            'user_yaml_path': f.name,
+            'user_config_path': None,
+            'spot_controller': controller_name,
+            'cluster_name': name,
+            'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
+            'is_dev': env_options.Options.IS_DEVELOPER.get(),
+            'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
+            'logging_user_hash': common_utils.get_user_hash(),
+            'retry_until_up': retry_until_up,
+            'user': os.environ.get('USER', None),
+        }
+        if skypilot_config.loaded():
+            # Look up the contents of the already loaded configs via the
+            # 'skypilot_config' module. Don't simply read the on-disk file as
+            # it may have changed since this process started.
+            #
+            # Pop any proxy command, because the controller would've been
+            # launched behind the proxy, and in general any nodes we launch may
+            # not have or need the proxy setup. (If the controller needs to
+            # launch spot clusters in another region/VPC, the user should
+            # properly set up VPC peering, which will allow the
+            # cross-region/VPC communication. The proxy command is orthogonal
+            # to this scenario.)
+            #
+            # This file will be uploaded to the controller node and will be
+            # used throughout the spot job's recovery attempts (i.e., if it
+            # relaunches due to preemption, we make sure the same config is
+            # used).
+            #
+            # NOTE: suppose that we have a controller in old VPC, then user
+            # changes 'vpc_name' in the config and does a 'spot launch'. In
+            # general, the old controller may not successfully launch the job
+            # in the new VPC. This happens if the two VPCs don’t have peering
+            # set up. Like other places in the code, we assume properly setting
+            # up networking is user's responsibilities.
+            # TODO(zongheng): consider adding a basic check that checks
+            # controller VPC (or name) == the spot job's VPC (or name). It may
+            # not be a sufficient check (as it's always possible that peering
+            # is not set up), but it may catch some obvious errors.
+            # TODO(zhwu): hacky. We should pop the proxy command of the cloud
+            # where the controller is launched (currently, only aws user uses
+            # proxy_command).
+            config_dict = skypilot_config.pop_nested(
+                ('aws', 'ssh_proxy_command'))
+            with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
+                common_utils.dump_yaml(tmpfile.name, config_dict)
+                vars_to_fill.update({
+                    'user_config_path': tmpfile.name,
+                    'env_var_skypilot_config':
+                        skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                })
+
         yaml_path = backend_utils.fill_template(
-            spot.SPOT_CONTROLLER_TEMPLATE, {
-                'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
-                'user_yaml_path': f.name,
-                'spot_controller': controller_name,
-                'cluster_name': name,
-                'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
-                'is_dev': env_options.Options.IS_DEVELOPER.get(),
-                'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
-                'logging_user_hash': common_utils.get_user_hash(),
-                'retry_until_up': retry_until_up,
-            },
+            spot.SPOT_CONTROLLER_TEMPLATE,
+            vars_to_fill,
             output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
         controller_task = task_lib.Task.from_yaml(yaml_path)
         controller_task.spot_task = task
@@ -548,7 +663,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     # Translate the workdir and local file mounts to cloud file mounts.
     # ================================================================
     task = copy.deepcopy(task)
-    run_id = common_utils.get_run_id()[:8]
+    run_id = common_utils.get_usage_run_id()[:8]
     original_file_mounts = task.file_mounts if task.file_mounts else {}
     original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
 

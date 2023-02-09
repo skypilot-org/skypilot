@@ -69,7 +69,6 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
                      trunc_length=70 if not show_all else 0),
         StatusColumn('REGION', _get_region, show_by_default=False),
         StatusColumn('ZONE', _get_zone, show_by_default=False),
-        StatusColumn('HOURLY_PRICE', _get_price, show_by_default=False),
         StatusColumn('STATUS', _get_status),
         StatusColumn('AUTOSTOP', _get_autostop),
         StatusColumn('COMMAND',
@@ -97,9 +96,13 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
             autostop_minutes = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'{reserved_group_name}{colorama.Style.RESET_ALL}'
-                       f'{colorama.Style.DIM} (will be autostopped if idle for '
+                       f'{colorama.Style.DIM} (autostopped if idle for '
                        f'{autostop_minutes}min)'
                        f'{colorama.Style.RESET_ALL}')
+            reset = backend_utils.RESET_BOLD
+            click.echo('Use spot jobs CLI: '
+                       f'{colorama.Style.BRIGHT}sky spot --help{reset}')
+
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
@@ -107,6 +110,54 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
     else:
         click.echo('No existing clusters.')
     return pending_autostop
+
+
+def show_cost_report_table(cluster_records: List[Dict[str, Any]],
+                           show_all: bool,
+                           reserved_group_name: Optional[str] = None):
+    """Compute cluster table values and display for cost report.
+
+    Returns:
+        Number of pending auto{stop,down} clusters.
+    """
+    # TODO(zhwu): Update the information for autostop clusters.
+
+    status_columns = [
+        StatusColumn('NAME', _get_name),
+        StatusColumn('LAUNCHED', _get_launched),
+        StatusColumn('DURATION', _get_duration, trunc_length=20),
+        StatusColumn('RESOURCES',
+                     _get_resources_for_cost_report,
+                     trunc_length=70 if not show_all else 0),
+        StatusColumn('HOURLY_PRICE', _get_price, show_by_default=True),
+        StatusColumn('COST (est.)', get_cost_report, show_by_default=True),
+    ]
+
+    columns = []
+    for status_column in status_columns:
+        if status_column.show_by_default or show_all:
+            columns.append(status_column.name)
+    cluster_table = log_utils.create_table(columns)
+
+    for record in cluster_records:
+        row = []
+        for status_column in status_columns:
+            if status_column.show_by_default or show_all:
+                row.append(status_column.calc(record))
+        cluster_table.add_row(row)
+
+    if cluster_records:
+        if reserved_group_name is not None:
+            autostop_minutes = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'{reserved_group_name}{colorama.Style.RESET_ALL}'
+                       f'{colorama.Style.DIM} (will be autostopped if idle for '
+                       f'{autostop_minutes}min)'
+                       f'{colorama.Style.RESET_ALL}')
+        else:
+            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+                       f'{colorama.Style.RESET_ALL}')
+        click.echo(cluster_table)
 
 
 def show_local_status_table(local_clusters: List[str]):
@@ -211,8 +262,14 @@ _get_launched = (lambda cluster_status: log_utils.readable_time_duration(
     cluster_status['launched_at']))
 _get_region = (
     lambda clusters_status: clusters_status['handle'].launched_resources.region)
-_get_status = (lambda cluster_status: cluster_status['status'].value)
 _get_command = (lambda cluster_status: cluster_status['last_use'])
+_get_duration = (lambda cluster_status: log_utils.readable_time_duration(
+    0, cluster_status['duration'], absolute=True))
+
+
+def _get_status(cluster_status):
+    status = cluster_status['status']
+    return status.colored_str()
 
 
 def _get_resources(cluster_status):
@@ -231,11 +288,31 @@ def _get_resources(cluster_status):
     return resources_str
 
 
+def _get_resources_for_cost_report(cluster_status):
+    launched_nodes = cluster_status['num_nodes']
+    launched_resources = cluster_status['resources']
+
+    launched_resource_str = str(launched_resources)
+    resources_str = (f'{launched_nodes}x '
+                     f'{launched_resource_str}')
+
+    return resources_str
+
+
 def _get_zone(cluster_status):
     zone_str = cluster_status['handle'].launched_resources.zone
     if zone_str is None:
         zone_str = '-'
     return zone_str
+
+
+def _get_price(cluster_status):
+    launched_nodes = cluster_status['num_nodes']
+    launched_resources = cluster_status['resources']
+
+    hourly_cost = (launched_resources.get_cost(3600) * launched_nodes)
+    price_str = f'$ {hourly_cost:.3f}'
+    return price_str
 
 
 def _get_autostop(cluster_status):
@@ -253,12 +330,13 @@ def _get_autostop(cluster_status):
     return autostop_str
 
 
-def _get_price(cluster_status):
-    handle = cluster_status['handle']
-    hourly_cost = (handle.launched_resources.get_cost(3600) *
-                   handle.launched_nodes)
-    price_str = f'$ {hourly_cost:.3f}'
-    return price_str
+def get_cost_report(cluster_status):
+    cost = cluster_status['total_cost']
+
+    if not cost:
+        return '-'
+
+    return f'${cost:.3f}'
 
 
 def _is_pending_autostop(cluster_status):

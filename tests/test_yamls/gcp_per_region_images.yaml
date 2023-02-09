@@ -1,0 +1,12 @@
+resources:
+  cloud: gcp
+  image_id: 
+    us-central1: skypilot:cpu-debian-10
+    us-west3: projects/ubuntu-os-cloud/global/images/ubuntu-1804-bionic-v20230112
+
+
+setup: |
+  echo "running setup"
+
+run: |
+  conda env list

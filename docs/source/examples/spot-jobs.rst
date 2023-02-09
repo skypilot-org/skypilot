@@ -42,7 +42,7 @@ We can launch it with the following:
 
   # Assume your working directory is under `~/transformers`.
   # To make this example work, please run the following command:
-  # git clone https://github.com/huggingface/transformers.git ~/transformers
+  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.18.0
   workdir: ~/transformers
 
   setup: |
@@ -51,7 +51,6 @@ We can launch it with the following:
     # to pass the key in the command line, during `sky spot launch`.
     echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
 
-    git checkout v4.18.0
     pip install -e .
     cd examples/pytorch/question-answering/
     pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
@@ -117,7 +116,7 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
 
   # Assume your working directory is under `~/transformers`.
   # To make this example work, please run the following command:
-  # git clone https://github.com/huggingface/transformers.git ~/transformers
+  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.18.0
   workdir: ~/transformers
 
   file_mounts:
@@ -131,7 +130,6 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
     # to pass the key in the command line, during `sky spot launch`.
     echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
 
-    git checkout v4.18.0
     pip install -e .
     cd examples/pytorch/question-answering/
     pip install -r requirements.txt
@@ -150,7 +148,7 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
     --max_seq_length 384 \
     --doc_stride 128 \
     --report_to wandb \
-    --run_name $SKYPILOT_RUN_ID \
+    --run_name $SKYPILOT_JOB_ID \
     --output_dir /checkpoint/bert_qa/ \
     --save_total_limit 10 \
     --save_steps 1000
@@ -162,11 +160,11 @@ the output directory and frequency of checkpointing (see more
 on `Huggingface API <https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments.save_steps>`_).
 You may also refer to another example `here <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`_ for periodically checkpointing with PyTorch.
 
-We also set :code:`--run_name` to :code:`$SKYPILOT_RUN_ID` so that the loggings will be saved
+We also set :code:`--run_name` to :code:`$SKYPILOT_JOB_ID` so that the loggings will be saved
 to the same run in Weights & Biases.
 
 .. note::
-  The environment variable :code:`$SKYPILOT_RUN_ID` can be used to identify the same job, i.e., it is kept identical across all
+  The environment variable :code:`$SKYPILOT_JOB_ID` (example: "sky-2022-10-06-05-17-09-750781_spot_id-22") can be used to identify the same job, i.e., it is kept identical across all
   recoveries of the job.
   It can be accessed in the task's :code:`run` commands or directly in the program itself (e.g., access
   via :code:`os.environ` and pass to Weights & Biases for tracking purposes in your training script). It is made available to
@@ -200,6 +198,10 @@ Here are some commands for managed spot jobs. Check :code:`sky spot --help` for 
 
     # Cancel a spot job by name
     $ sky spot cancel -n bert-qa
+
+.. note::
+  If any failure happens for a spot job, you can check :code:`sky spot queue -a` for the brief reason
+  of the failure. For more details, it would be helpful to check :code:`sky spot logs --controller <job_id>`.
 
 
 Spot controller (Advanced)
