@@ -55,6 +55,11 @@ def pytest_addoption(parser):
         'not within the clouds to be run, it will be reset to the first '
         'cloud in the list of the clouds to be run.')
 
+    parser.addoption('--terminate-on-failure',
+                     action='store_true',
+                     default=False,
+                     help='Terminate test VMs on failure.')
+
 
 def pytest_configure(config):
     config.addinivalue_line('markers', 'slow: mark test as slow to run')
@@ -62,6 +67,11 @@ def pytest_configure(config):
         cloud_keyword = cloud_to_pytest_keyword[cloud]
         config.addinivalue_line(
             'markers', f'{cloud_keyword}: mark test as {cloud} specific')
+
+    pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
+    from sky.utils import env_options
+    os.environ[env_options.SPOT_CONTROLLER_CLOUD_ENV_VAR] = str(
+        _generic_cloud(config))
 
 
 def _get_cloud_to_run(config) -> List[str]:

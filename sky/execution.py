@@ -633,6 +633,18 @@ def spot_launch(
         controller_task = task_lib.Task.from_yaml(yaml_path)
         controller_task.spot_task = task
         assert len(controller_task.resources) == 1
+
+        # Override the spot controller cloud if the user has specified it.
+        controller_cloud_str = os.getenv(
+            env_options.SPOT_CONTROLLER_CLOUD_ENV_VAR)
+        if controller_cloud_str is not None:
+            controller_cloud = clouds.CLOUD_REGISTRY.from_str(
+                controller_cloud_str)
+            logger.info(f'Override spot controller cloud to {controller_cloud}')
+            controller_resources = list(controller_task.resources)[0]
+            controller_task.set_resources(
+                {controller_resources.copy(cloud=controller_cloud)})
+
         print(f'{colorama.Fore.YELLOW}'
               f'Launching managed spot job {name} from spot controller...'
               f'{colorama.Style.RESET_ALL}')

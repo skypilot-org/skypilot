@@ -133,7 +133,8 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
            f'\nLog: less {log_file.name}\n')
     test.echo(msg)
     log_file.write(msg)
-    if proc.returncode == 0 and test.teardown is not None:
+    if (proc.returncode == 0 or
+            pytest.terminate_on_failure) and test.teardown is not None:
         subprocess_utils.run(
             test.teardown,
             stdout=log_file,
