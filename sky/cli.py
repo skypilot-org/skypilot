@@ -2208,14 +2208,19 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
         click.echo('Managed spot controller has already been torn down.')
         return
 
+    if cluster_status == global_user_state.ClusterStatus.INIT:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Tearing down the spot controller while it is in INIT state is '
+                'not supported, as we cannot guarantee that all the spot jobs '
+                'are finished. Please wait until the spot controller is UP '
+                f'or fix it with {colorama.Style.BRIGHT}sky start '
+                f'{spot_lib.SPOT_CONTROLLER_NAME}{colorama.Style.RESET_ALL}.')
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            f'spot controller ({cluster_status.value}). Please be '
            f'aware of the following:{colorama.Style.RESET_ALL}'
            '\n * All logs and status information of the spot '
            'jobs (output of `sky spot queue`) will be lost.')
-    if cluster_status == global_user_state.ClusterStatus.INIT:
-        msg += ('\n * If there are pending/in-progress spot jobs, those '
-                'resources will not be terminated and require manual cleanup.')
     click.echo(msg)
     if cluster_status == global_user_state.ClusterStatus.UP:
         with backend_utils.safe_console_status(
@@ -2239,8 +2244,8 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
                 non_terminal_jobs):
             job_table = spot_lib.format_job_table(non_terminal_jobs,
                                                   show_all=False)
-            msg = (f'{colorama.Fore.RED}In-progress spot jobs found, '
-                   'to avoid resources leakage, firstly run: '
+            msg = (f'{colorama.Fore.RED}In-progress spot jobs found. '
+                   'To avoid resource leakage, cancel all jobs first: '
                    f'{colorama.Style.BRIGHT}sky spot cancel -a'
                    f'{colorama.Style.RESET_ALL}\n')
             # Add prefix to each line to align with the bullet point.
@@ -2248,6 +2253,10 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
                 ['   ' + line for line in job_table.split('\n') if line != ''])
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(msg)
+        else:
+            click.echo('No in-progress spot jobs found. It should be safe to '
+                       'terminate, but please check the warning above before '
+                       'proceeding.')
 
 
 def _down_or_stop_clusters(
