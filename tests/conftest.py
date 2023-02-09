@@ -74,7 +74,7 @@ def pytest_configure(config):
     from sky.utils import env_options
     generic_cloud = _generic_cloud(config)
     cluster = sky.status(spot.SPOT_CONTROLLER_NAME)
-    if cluster is None:
+    if not cluster:
         # Set the spot controller cloud to the generic cloud if it does not
         # exist.
         os.environ[env_options.SPOT_CONTROLLER_CLOUD_ENV_VAR] = str(
