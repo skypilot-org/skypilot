@@ -315,9 +315,9 @@ class AWSNodeProvider(NodeProvider):
                 reuse_nodes = nodes_matching_launch_config[:count]
             else:
                 nodes_all = list(self.ec2.instances.filter(Filters=filters))
-                nodes_matching_launch_config_ids = {
+                nodes_matching_launch_config_ids = set(
                     n.id for n in nodes_matching_launch_config
-                }
+                )
                 nodes_non_matching_launch_config = [
                     n for n in nodes_all if n.id not in nodes_matching_launch_config_ids
                 ]
