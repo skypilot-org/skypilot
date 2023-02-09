@@ -84,15 +84,18 @@ def pytest_collection_modifyitems(config, items):
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
 
     cloud_to_run = _get_cloud_to_run(config)
+    generic_cloud = _generic_cloud(config)
+    generic_cloud_keyword = cloud_to_pytest_keyword[generic_cloud]
 
     for item in items:
         if 'slow' in item.keywords and not config.getoption('--runslow'):
             item.add_marker(skip_marks['slow'])
+        if _is_generic_test(
+                item) and f'no_{generic_cloud_keyword}' in item.keywords:
+            item.add_marker(skip_marks[generic_cloud])
         for cloud in all_clouds_in_smoke_tests:
             cloud_keyword = cloud_to_pytest_keyword[cloud]
-            if ((f'no_{cloud_keyword}' in item.keywords and
-                 cloud in cloud_to_run) or
-                (cloud_keyword in item.keywords and cloud not in cloud_to_run)):
+            if (cloud_keyword in item.keywords and cloud not in cloud_to_run):
                 item.add_marker(skip_marks[cloud])
 
         if (not 'managed_spot'
@@ -103,7 +106,7 @@ def pytest_collection_modifyitems(config, items):
     # launch API to one launch every 10 seconds.
     serial_mark = pytest.mark.xdist_group(name='serial_lambda_cloud')
     # Handle generic tests
-    if _generic_cloud(config) == 'lambda':
+    if generic_cloud == 'lambda':
         for item in items:
             if (_is_generic_test(item) and
                     'no_lambda_cloud' not in item.keywords):

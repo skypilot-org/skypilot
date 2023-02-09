@@ -40,7 +40,7 @@ class Metadata:
         # Update metadata
         if value is None:
             if instance_id in metadata:
-                metadata.pop(instance_id) # del entry
+                metadata.pop(instance_id)  # del entry
             if len(metadata) == 0:
                 if os.path.exists(self.path):
                     os.remove(self.path)
@@ -93,8 +93,7 @@ class LambdaCloudClient:
         with open(self.credentials, 'r') as f:
             lines = [line.strip() for line in f.readlines() if ' = ' in line]
             self._credentials = {
-                line.split(' = ')[0]: line.split(' = ')[1]
-                for line in lines
+                line.split(' = ')[0]: line.split(' = ')[1] for line in lines
             }
         self.api_key = self._credentials['api_key']
         self.ssh_key_name = self._credentials.get('ssh_key_name', None)
@@ -122,21 +121,19 @@ class LambdaCloudClient:
             else:
                 aval_reg = 'None'
             raise LambdaCloudError(('instance-operations/launch/'
-                                   'insufficient-capacity: Not enough '
-                                   'capacity to fulfill launch request. '
-                                   'Regions with capacity available: '
-                                   f'{aval_reg}'))
+                                    'insufficient-capacity: Not enough '
+                                    'capacity to fulfill launch request. '
+                                    'Regions with capacity available: '
+                                    f'{aval_reg}'))
 
         # Try to launch instance
         data = json.dumps({
-                    'region_name': region,
-                    'instance_type_name': instance_type,
-                    'ssh_key_names': [
-                        self.ssh_key_name
-                    ],
-                    'quantity': quantity,
-                    'name': name
-                })
+            'region_name': region,
+            'instance_type_name': instance_type,
+            'ssh_key_names': [self.ssh_key_name],
+            'quantity': quantity,
+            'name': name
+        })
         response = requests.post(f'{API_ENDPOINT}/instance-operations/launch',
                                  data=data,
                                  headers=self.headers)
@@ -147,27 +144,26 @@ class LambdaCloudClient:
         """Terminate instances."""
         data = json.dumps({
             'instance_ids': [
-                instance_ids[0] # TODO(ewzeng) don't hardcode
+                instance_ids[0]  # TODO(ewzeng) don't hardcode
             ]
         })
-        response = requests.post(f'{API_ENDPOINT}/instance-operations/terminate',
-                                 data=data,
-                                 headers=self.headers)
+        response = requests.post(
+            f'{API_ENDPOINT}/instance-operations/terminate',
+            data=data,
+            headers=self.headers)
         raise_lambda_error(response)
         return response.json().get('data', []).get('terminated_instances', [])
 
     def list_instances(self) -> Dict[str, Any]:
         """List existing instances."""
-        response = requests.get(f'{API_ENDPOINT}/instances', headers=self.headers)
+        response = requests.get(f'{API_ENDPOINT}/instances',
+                                headers=self.headers)
         raise_lambda_error(response)
         return response.json().get('data', [])
 
     def set_ssh_key(self, name: str, pub_key: str) -> None:
         """Set ssh key."""
-        data = json.dumps({
-            'name': name,
-            'public_key': pub_key
-        })
+        data = json.dumps({'name': name, 'public_key': pub_key})
         response = requests.post(f'{API_ENDPOINT}/ssh-keys',
                                  data=data,
                                  headers=self.headers)

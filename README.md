@@ -42,7 +42,7 @@ SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code change
 
 Install with pip (choose your clouds) or [from source](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html):
 ```
-pip install "skypilot[aws,gcp,azure]"
+pip install "skypilot[aws,gcp,azure,lambda]"
 ```
 
 ## Getting Started
