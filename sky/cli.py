@@ -1380,6 +1380,7 @@ def exec(
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
+
 def _get_in_progress_spot_jobs():
     try:
         with ux_utils.suppress_output():
@@ -1391,11 +1392,10 @@ def _get_in_progress_spot_jobs():
             msg = 'Spot jobs are not available until the controller is up.'
         else:
             assert controller_status != global_user_state.ClusterStatus.UP
-            msg = f'No in-progress spot jobs.'
+            msg = 'No in-progress spot jobs.'
     else:
         msg = spot_lib.format_job_table(spot_jobs, show_all=False)
     return msg
-    
 
 
 @cli.command()
@@ -1501,22 +1501,20 @@ def status(all: bool, refresh: bool, clusters: List[str]):  # pylint: disable=re
             if num_pending_autostop > 1:
                 plural = 's have'
             click.echo('\n'
-                    f'{num_pending_autostop} cluster{plural} '
-                    'auto{stop,down} scheduled. Refresh statuses with: '
-                    f'{colorama.Style.BRIGHT}sky status --refresh'
-                    f'{colorama.Style.RESET_ALL}')
+                       f'{num_pending_autostop} cluster{plural} '
+                       'auto{stop,down} scheduled. Refresh statuses with: '
+                       f'{colorama.Style.BRIGHT}sky status --refresh'
+                       f'{colorama.Style.RESET_ALL}')
         status_utils.show_local_status_table(local_clusters)
 
         click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                    f'Managed spot jobs{colorama.Style.RESET_ALL}')
-        with backend_utils.safe_console_status(
-                '[cyan] Checking spot jobs[/]'):
+                   f'Managed spot jobs{colorama.Style.RESET_ALL}')
+        with backend_utils.safe_console_status('[cyan] Checking spot jobs[/]'):
             # wait() is needed to avoid multiprocess complaining about
             # unhandled SIGTERM.
             spot_jobs_future.wait()
             msg = spot_jobs_future.get()
         click.echo(msg)
-    
 
 
 @cli.command()
