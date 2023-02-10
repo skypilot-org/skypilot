@@ -181,9 +181,13 @@ def _resume_instances(ec2, cluster_name: str, tags: Dict[str, str],
                 Resources=reuse_node_ids,
                 Tags=_format_tags(tags),
             )
+    if reuse_nodes:
+        zone = reuse_nodes[0].placement['AvailabilityZone']
+    else:
+        zone = None
     return {
         'region': ec2.meta.client.meta.region_name,
-        'zone': reuse_nodes[0].placement['AvailabilityZone'],
+        'zone': zone,
         'instances': {n.id: n for n in reuse_nodes}
     }
 
@@ -206,11 +210,6 @@ def create_or_resume_instances(region: str, cluster_name: str,
     instances.
     """
     ec2 = utils.create_ec2_resource(region=region)
-
-    # TODO(suquark): If there are existing instances (already running or
-    #  resumed), then we cannot guarantee that they will be in the same
-    #  availability zone (when there are multiple zones specified).
-    #  This is a known issue before.
     filters = [
         {
             'Name': 'instance-state-name',
@@ -249,12 +248,18 @@ def create_or_resume_instances(region: str, cluster_name: str,
         resumed_instances_metadata = _resume_instances(ec2, cluster_name, tags,
                                                        count)
 
-    remaining_count = count - len(resumed_instances_metadata['instances'])
+    resumed_instances = resumed_instances_metadata['instances']
+    remaining_count = count - len(resumed_instances)
     if remaining_count > 0:
         create_instances_metadata = create_instances(region, cluster_name,
                                                      node_config, tags,
                                                      remaining_count)
     if create_instances_metadata:
+        # TODO(suquark): If there are existing instances (already running or
+        #  resumed), then we cannot guarantee that they will be in the same
+        #  availability zone (when there are multiple zones specified).
+        #  This is a known issue before.
+        create_instances_metadata['instances'].update(resumed_instances)
         return create_instances_metadata
     return resumed_instances_metadata
 
