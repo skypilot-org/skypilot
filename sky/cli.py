@@ -1506,446 +1506,6 @@ def _get_spot_jobs(
     return num_in_progress_jobs, msg
 
 
-@cli.command()
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all information in full.')
-@click.option(
-    '--refresh',
-    '-r',
-    default=False,
-    is_flag=True,
-    required=False,
-    help='Query the latest cluster statuses from the cloud provider(s).')
-@click.option('--show-spot-jobs/--no-show-spot-jobs',
-              default=True,
-              is_flag=True,
-              required=False,
-              help='Also show recent in-progress spot jobs, if any.')
-@click.argument('clusters',
-                required=False,
-                type=str,
-                nargs=-1,
-                **_get_shell_complete_args(_complete_cluster_name))
-@usage_lib.entrypoint
-# pylint: disable=redefined-builtin
-def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
-    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Show clusters.
-
-    If CLUSTERS is given, show those clusters. Otherwise, show all clusters.
-
-    The following fields for each cluster are recorded: cluster name, time
-    since last launch, resources, region, zone, hourly price, status, autostop,
-    command.
-
-    Display all fields using ``sky status -a``.
-
-    Each cluster can have one of the following statuses:
-
-    - ``INIT``: The cluster may be live or down. It can happen in the following
-      cases:
-
-      - Ongoing provisioning or runtime setup. (A ``sky launch`` has started
-        but has not completed.)
-
-      - Or, the cluster is in an abnormal state, e.g., some cluster nodes are
-        down, or the SkyPilot runtime is unhealthy. (To recover the cluster,
-        try ``sky launch`` again on it.)
-
-    - ``UP``: Provisioning and runtime setup have succeeded and the cluster is
-      live.  (The most recent ``sky launch`` has completed successfully.)
-
-    - ``STOPPED``: The cluster is stopped and the storage is persisted. Use
-      ``sky start`` to restart the cluster.
-
-    Autostop column:
-
-    - Indicates after how many minutes of idleness (no in-progress jobs) the
-      cluster will be autostopped. '-' means disabled.
-
-    - If the time is followed by '(down)', e.g., '1m (down)', the cluster will
-      be autodowned, rather than autostopped.
-
-    Getting up-to-date cluster statuses:
-
-    - In normal cases where clusters are entirely managed by SkyPilot (i.e., no
-      manual operations in cloud consoles) and no autostopping is used, the
-      table returned by this command will accurately reflect the cluster
-      statuses.
-
-    - In cases where clusters are changed outside of SkyPilot (e.g., manual
-      operations in cloud consoles; unmanaged spot clusters getting preempted)
-      or for autostop-enabled clusters, use ``--refresh`` to query the latest
-      cluster statuses from the cloud providers.
-    """
-    # Using a pool with 1 worker to run the spot job query in parallel to speed
-    # up. The pool provides a AsyncResult object that can be used as a future.
-    with multiprocessing.Pool(1) as pool:
-        # Do not show spot queue if user specifies clusters.
-        show_spot_jobs = show_spot_jobs and not clusters
-        if show_spot_jobs:
-            # Run the spot job query in parallel to speed up the status query.
-            spot_jobs_future = pool.apply_async(
-                _get_spot_jobs,
-                kwds=dict(refresh=False,
-                          skip_finished=True,
-                          show_all=False,
-                          limit_num_jobs_to_show=not all))
-        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
-                   f'{colorama.Style.RESET_ALL}')
-        query_clusters: Optional[List[str]] = None
-        if clusters:
-            query_clusters = _get_glob_clusters(clusters)
-        cluster_records = core.status(cluster_names=query_clusters,
-                                      refresh=refresh)
-        nonreserved_cluster_records = []
-        reserved_clusters = []
-        for cluster_record in cluster_records:
-            cluster_name = cluster_record['name']
-            if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
-                reserved_clusters.append(cluster_record)
-            else:
-                nonreserved_cluster_records.append(cluster_record)
-        local_clusters = onprem_utils.check_and_get_local_clusters(
-            suppress_error=True)
-
-        num_pending_autostop = 0
-        num_pending_autostop += status_utils.show_status_table(
-            nonreserved_cluster_records + reserved_clusters, all)
-        status_utils.show_local_status_table(local_clusters)
-
-        hints = []
-        if show_spot_jobs:
-            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'Managed spot jobs{colorama.Style.RESET_ALL}')
-            with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
-                try:
-                    num_in_progress_jobs, msg = spot_jobs_future.get()
-                except KeyboardInterrupt:
-                    pool.terminate()
-                    # Set to -1, so that the controller is not considered
-                    # down, and the hint for showing sky spot queue
-                    # will still be shown.
-                    num_in_progress_jobs = -1
-                    msg = 'KeyboardInterrupt'
-
-                try:
-                    pool.close()
-                    pool.join()
-                except SystemExit as e:
-                    # This is to avoid a "Exception ignored" problem caused by
-                    # ray worker setting the sigterm handler to sys.exit(15)
-                    # (see ray/_private/worker.py).
-                    # TODO (zhwu): Remove any importing of ray in SkyPilot.
-                    if e.code != 15:
-                        raise
-
-            click.echo(msg)
-            if num_in_progress_jobs is not None:
-                # spot controller is UP.
-                job_info = ''
-                if num_in_progress_jobs > 0:
-                    plural_and_verb = ' is'
-                    if num_in_progress_jobs > 1:
-                        plural_and_verb = 's are'
-                    job_info = (
-                        f'{num_in_progress_jobs} spot job{plural_and_verb} '
-                        'in progress')
-                    if num_in_progress_jobs > _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS:
-                        job_info += (
-                            f' ({_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS} latest ones '
-                            'shown)')
-                    job_info += '. '
-                hints.append(
-                    f'* {job_info}To see all spot jobs: {colorama.Style.BRIGHT}'
-                    f'sky spot queue{colorama.Style.RESET_ALL}')
-
-        if num_pending_autostop > 0:
-            plural_and_verb = ' has'
-            if num_pending_autostop > 1:
-                plural_and_verb = 's have'
-            hints.append(f'* {num_pending_autostop} cluster{plural_and_verb} '
-                         'auto{stop,down} scheduled. Refresh statuses with: '
-                         f'{colorama.Style.BRIGHT}sky status --refresh'
-                         f'{colorama.Style.RESET_ALL}')
-        if hints:
-            click.echo('\n' + '\n'.join(hints))
-
-
-@cli.command()
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all information in full.')
-@usage_lib.entrypoint
-def cost_report(all: bool):  # pylint: disable=redefined-builtin
-    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Show cost reports for each cluster.
-
-    The following fields for each cluster are recorded: cluster name,
-    resources, launched time, duration that cluster was up,
-    and total cost.
-
-    The estimated cost column indicates the price for the cluster based on the
-    type of resources being used and the duration of use up until the call
-    to status. This means if the cluster is UP, successive calls to report
-    will show increasing price. The estimated cost is calculated based on
-    the local cache of the cluster status, and may not be accurate for
-    the cluster with autostop/use_spot set or terminated/stopped
-    on the cloud console.
-    """
-    cluster_records = core.cost_report()
-    nonreserved_cluster_records = []
-    reserved_clusters = dict()
-    for cluster_record in cluster_records:
-        cluster_name = cluster_record['name']
-        if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
-            cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
-                cluster_name]
-            reserved_clusters[cluster_group_name] = cluster_record
-        else:
-            nonreserved_cluster_records.append(cluster_record)
-
-    status_utils.show_cost_report_table(nonreserved_cluster_records, all)
-
-    for cluster_group_name, cluster_record in reserved_clusters.items():
-        status_utils.show_cost_report_table(
-            [cluster_record], all, reserved_group_name=cluster_group_name)
-    click.secho(
-        'NOTE: This feature is experimental. '
-        'Costs for clusters with auto{stop,down} '
-        'scheduled may not be accurate.',
-        fg='yellow')
-
-
-@cli.command()
-@click.option('--all-users',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all users\' information in full.')
-@click.option('--skip-finished',
-              '-s',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show only pending/running jobs\' information.')
-@click.argument('clusters',
-                required=False,
-                type=str,
-                nargs=-1,
-                **_get_shell_complete_args(_complete_cluster_name))
-@usage_lib.entrypoint
-def queue(clusters: Sequence[str], skip_finished: bool, all_users: bool):
-    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Show the job queue for cluster(s)."""
-    click.secho('Fetching and parsing job queue...', fg='yellow')
-    show_local_clusters = False
-    if clusters:
-        clusters = _get_glob_clusters(clusters)
-    else:
-        show_local_clusters = True
-        cluster_infos = global_user_state.get_clusters()
-        clusters = [c['name'] for c in cluster_infos]
-
-    unsupported_clusters = []
-    for cluster in clusters:
-        try:
-            job_table = core.queue(cluster, skip_finished, all_users)
-        except (RuntimeError, exceptions.NotSupportedError,
-                exceptions.ClusterNotUpError, exceptions.CloudUserIdentityError,
-                exceptions.ClusterOwnerIdentityMismatchError) as e:
-            if isinstance(e, exceptions.NotSupportedError):
-                unsupported_clusters.append(cluster)
-            click.echo(f'{colorama.Fore.YELLOW}Failed to get the job queue for '
-                       f'cluster {cluster!r}.{colorama.Style.RESET_ALL}\n'
-                       f'  {common_utils.class_fullname(e.__class__)}: '
-                       f'{common_utils.remove_color(str(e))}')
-            continue
-        job_table = job_lib.format_job_queue(job_table)
-        click.echo(f'\nJob queue of cluster {cluster}\n{job_table}')
-
-    local_clusters = onprem_utils.check_and_get_local_clusters()
-    for local_cluster in local_clusters:
-        if local_cluster not in clusters and show_local_clusters:
-            click.secho(
-                f'Local cluster {local_cluster} is uninitialized;'
-                ' skipped.',
-                fg='yellow')
-
-    if unsupported_clusters:
-        click.secho(
-            f'Note: Job queues are not supported on clusters: '
-            f'{", ".join(unsupported_clusters)}',
-            fg='yellow')
-
-
-@cli.command()
-@click.option(
-    '--sync-down',
-    '-s',
-    is_flag=True,
-    default=False,
-    help='Sync down the logs of a job to the local machine. For a distributed'
-    ' job, a separate log file from each worker will be downloaded.')
-@click.option(
-    '--status',
-    is_flag=True,
-    default=False,
-    help=('If specified, do not show logs but exit with a status code for the '
-          'job\'s status: 0 for succeeded, or 1 for all other statuses.'))
-@click.option(
-    '--follow/--no-follow',
-    is_flag=True,
-    default=True,
-    help=('Follow the logs of a job. '
-          'If --no-follow is specified, print the log so far and exit. '
-          '[default: --follow]'))
-@click.argument('cluster',
-                required=True,
-                type=str,
-                **_get_shell_complete_args(_complete_cluster_name))
-@click.argument('job_ids', type=str, nargs=-1)
-# TODO(zhwu): support logs by job name
-@usage_lib.entrypoint
-def logs(
-    cluster: str,
-    job_ids: Tuple[str],
-    sync_down: bool,
-    status: bool,  # pylint: disable=redefined-outer-name
-    follow: bool,
-):
-    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Tail the log of a job.
-
-    If JOB_ID is not provided, the latest job on the cluster will be used.
-
-    1. If no flags are provided, tail the logs of the job_id specified. At most
-    one job_id can be provided.
-
-    2. If ``--status`` is specified, print the status of the job and exit with
-    returncode 0 if the job succeeded, or 1 otherwise. At most one job_id can
-    be specified.
-
-    3. If ``--sync-down`` is specified, the logs of the job will be downloaded
-    from the cluster and saved to the local machine under
-    ``~/sky_logs``. Mulitple job_ids can be specified.
-    """
-    if sync_down and status:
-        raise click.UsageError(
-            'Both --sync_down and --status are specified '
-            '(ambiguous). To fix: specify at most one of them.')
-
-    if len(job_ids) > 1 and not sync_down:
-        raise click.UsageError(
-            f'Cannot stream logs of multiple jobs (IDs: {", ".join(job_ids)}).'
-            '\nPass -s/--sync-down to download the logs instead.')
-
-    job_ids = None if not job_ids else job_ids
-
-    if sync_down:
-        core.download_logs(cluster, job_ids)
-        return
-
-    assert job_ids is None or len(job_ids) <= 1, job_ids
-    job_id = None
-    if job_ids:
-        job_id = job_ids[0]
-        if not job_id.isdigit():
-            raise click.UsageError(f'Invalid job ID {job_id}. '
-                                   'Job ID must be integers.')
-    if status:
-        job_statuses = core.job_status(cluster, job_ids)
-        job_id = list(job_statuses.keys())[0]
-        job_status = list(job_statuses.values())[0]
-        job_status_str = job_status.value if job_status is not None else 'None'
-        click.echo(f'Job {job_id}: {job_status_str}')
-        if job_status == job_lib.JobStatus.SUCCEEDED:
-            return
-        else:
-            if job_status is None:
-                id_str = '' if job_id is None else f'{job_id} '
-                click.secho(f'Job {id_str}not found', fg='red')
-            sys.exit(1)
-
-    core.tail_logs(cluster, job_id, follow)
-
-
-@cli.command()
-@click.argument('cluster',
-                required=True,
-                type=str,
-                **_get_shell_complete_args(_complete_cluster_name))
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Cancel all jobs on the specified cluster.')
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
-@click.argument('jobs', required=False, type=int, nargs=-1)
-@usage_lib.entrypoint
-def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disable=redefined-builtin
-    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Cancel job(s)."""
-    bold = colorama.Style.BRIGHT
-    reset = colorama.Style.RESET_ALL
-    if not jobs and not all:
-        # Friendly message for usage like 'sky cancel 1' / 'sky cancel myclus'.
-        message = textwrap.dedent(f"""\
-          Use:
-            {bold}sky cancel <cluster_name> <job IDs>{reset}   -- cancel one or more jobs on a cluster
-            {bold}sky cancel <cluster_name> -a / --all{reset}  -- cancel all jobs on a cluster
-
-          Job IDs can be looked up by {bold}sky queue{reset}.""")
-        raise click.UsageError(message)
-
-    if not yes:
-        job_ids = ' '.join(map(str, jobs))
-        plural = 's' if len(job_ids) > 1 else ''
-        job_identity_str = f'job{plural} {job_ids}'
-        if all:
-            job_identity_str = 'all jobs'
-        job_identity_str += f' on cluster {cluster!r}'
-        click.confirm(f'Cancelling {job_identity_str}. Proceed?',
-                      default=True,
-                      abort=True,
-                      show_default=True)
-
-    try:
-        core.cancel(cluster, all, jobs)
-    except exceptions.NotSupportedError:
-        # Friendly message for usage like 'sky cancel <spot controller> -a/<job
-        # id>'.
-        if all:
-            arg_str = '--all'
-        else:
-            arg_str = ' '.join(map(str, jobs))
-        error_str = ('Cancelling the spot controller\'s jobs is not allowed.'
-                     f'\nTo cancel spot jobs, use: sky spot cancel <spot '
-                     f'job IDs> [--all]'
-                     f'\nDo you mean: {bold}sky spot cancel {arg_str}{reset}')
-        click.echo(error_str)
-        sys.exit(1)
-    except ValueError as e:
-        raise click.UsageError(str(e))
-    except exceptions.ClusterNotUpError as e:
-        click.echo(str(e))
-        sys.exit(1)
-
-
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('clusters',
                 nargs=-1,
@@ -2395,6 +1955,398 @@ def down(
                            down=True,
                            no_confirm=yes,
                            purge=purge)
+
+
+@cli.command()
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
+@click.option(
+    '--refresh',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Query the latest cluster statuses from the cloud provider(s).')
+@click.option('--show-spot-jobs/--no-show-spot-jobs',
+              default=True,
+              is_flag=True,
+              required=False,
+              help='Also show recent in-progress spot jobs, if any.')
+@click.argument('clusters',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_cluster_name))
+@usage_lib.entrypoint
+# pylint: disable=redefined-builtin
+def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Show clusters.
+
+    If CLUSTERS is given, show those clusters. Otherwise, show all clusters.
+
+    The following fields for each cluster are recorded: cluster name, time
+    since last launch, resources, region, zone, hourly price, status, autostop,
+    command.
+
+    Display all fields using ``sky status -a``.
+
+    Each cluster can have one of the following statuses:
+
+    - ``INIT``: The cluster may be live or down. It can happen in the following
+      cases:
+
+      - Ongoing provisioning or runtime setup. (A ``sky launch`` has started
+        but has not completed.)
+
+      - Or, the cluster is in an abnormal state, e.g., some cluster nodes are
+        down, or the SkyPilot runtime is unhealthy. (To recover the cluster,
+        try ``sky launch`` again on it.)
+
+    - ``UP``: Provisioning and runtime setup have succeeded and the cluster is
+      live.  (The most recent ``sky launch`` has completed successfully.)
+
+    - ``STOPPED``: The cluster is stopped and the storage is persisted. Use
+      ``sky start`` to restart the cluster.
+
+    Autostop column:
+
+    - Indicates after how many minutes of idleness (no in-progress jobs) the
+      cluster will be autostopped. '-' means disabled.
+
+    - If the time is followed by '(down)', e.g., '1m (down)', the cluster will
+      be autodowned, rather than autostopped.
+
+    Getting up-to-date cluster statuses:
+
+    - In normal cases where clusters are entirely managed by SkyPilot (i.e., no
+      manual operations in cloud consoles) and no autostopping is used, the
+      table returned by this command will accurately reflect the cluster
+      statuses.
+
+    - In cases where clusters are changed outside of SkyPilot (e.g., manual
+      operations in cloud consoles; unmanaged spot clusters getting preempted)
+      or for autostop-enabled clusters, use ``--refresh`` to query the latest
+      cluster statuses from the cloud providers.
+    """
+    # Using a pool with 1 worker to run the spot job query in parallel to speed
+    # up. The pool provides a AsyncResult object that can be used as a future.
+    with multiprocessing.Pool(1) as pool:
+        # Do not show spot queue if user specifies clusters.
+        show_spot_jobs = show_spot_jobs and not clusters
+        if show_spot_jobs:
+            # Run the spot job query in parallel to speed up the status query.
+            spot_jobs_future = pool.apply_async(
+                _get_spot_jobs,
+                kwds=dict(refresh=False,
+                          skip_finished=True,
+                          show_all=False,
+                          limit_num_jobs_to_show=not all))
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+                   f'{colorama.Style.RESET_ALL}')
+        query_clusters: Optional[List[str]] = None
+        if clusters:
+            query_clusters = _get_glob_clusters(clusters)
+        cluster_records = core.status(cluster_names=query_clusters,
+                                      refresh=refresh)
+        nonreserved_cluster_records = []
+        reserved_clusters = []
+        for cluster_record in cluster_records:
+            cluster_name = cluster_record['name']
+            if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+                reserved_clusters.append(cluster_record)
+            else:
+                nonreserved_cluster_records.append(cluster_record)
+        local_clusters = onprem_utils.check_and_get_local_clusters(
+            suppress_error=True)
+
+        num_pending_autostop = 0
+        num_pending_autostop += status_utils.show_status_table(
+            nonreserved_cluster_records + reserved_clusters, all)
+        status_utils.show_local_status_table(local_clusters)
+
+        hints = []
+        if show_spot_jobs:
+            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Managed spot jobs{colorama.Style.RESET_ALL}')
+            with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
+                try:
+                    num_in_progress_jobs, msg = spot_jobs_future.get()
+                except KeyboardInterrupt:
+                    pool.terminate()
+                    # Set to -1, so that the controller is not considered
+                    # down, and the hint for showing sky spot queue
+                    # will still be shown.
+                    num_in_progress_jobs = -1
+                    msg = 'KeyboardInterrupt'
+
+                try:
+                    pool.close()
+                    pool.join()
+                except SystemExit as e:
+                    # This is to avoid a "Exception ignored" problem caused by
+                    # ray worker setting the sigterm handler to sys.exit(15)
+                    # (see ray/_private/worker.py).
+                    # TODO (zhwu): Remove any importing of ray in SkyPilot.
+                    if e.code != 15:
+                        raise
+
+            click.echo(msg)
+            if num_in_progress_jobs is not None:
+                # spot controller is UP.
+                job_info = ''
+                if num_in_progress_jobs > 0:
+                    plural_and_verb = ' is'
+                    if num_in_progress_jobs > 1:
+                        plural_and_verb = 's are'
+                    job_info = (
+                        f'{num_in_progress_jobs} spot job{plural_and_verb} '
+                        'in progress')
+                    if num_in_progress_jobs > _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS:
+                        job_info += (
+                            f' ({_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS} latest ones '
+                            'shown)')
+                    job_info += '. '
+                hints.append(
+                    f'* {job_info}To see all spot jobs: {colorama.Style.BRIGHT}'
+                    f'sky spot queue{colorama.Style.RESET_ALL}')
+
+        if num_pending_autostop > 0:
+            plural_and_verb = ' has'
+            if num_pending_autostop > 1:
+                plural_and_verb = 's have'
+            hints.append(f'* {num_pending_autostop} cluster{plural_and_verb} '
+                         'auto{stop,down} scheduled. Refresh statuses with: '
+                         f'{colorama.Style.BRIGHT}sky status --refresh'
+                         f'{colorama.Style.RESET_ALL}')
+        if hints:
+            click.echo('\n' + '\n'.join(hints))
+
+
+@cli.command()
+@click.option('--all-users',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all users\' information in full.')
+@click.option('--skip-finished',
+              '-s',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show only pending/running jobs\' information.')
+@click.argument('clusters',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_cluster_name))
+@usage_lib.entrypoint
+def queue(clusters: Sequence[str], skip_finished: bool, all_users: bool):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Show the job queue for cluster(s)."""
+    click.secho('Fetching and parsing job queue...', fg='yellow')
+    show_local_clusters = False
+    if clusters:
+        clusters = _get_glob_clusters(clusters)
+    else:
+        show_local_clusters = True
+        cluster_infos = global_user_state.get_clusters()
+        clusters = [c['name'] for c in cluster_infos]
+
+    unsupported_clusters = []
+    for cluster in clusters:
+        try:
+            job_table = core.queue(cluster, skip_finished, all_users)
+        except (RuntimeError, exceptions.NotSupportedError,
+                exceptions.ClusterNotUpError, exceptions.CloudUserIdentityError,
+                exceptions.ClusterOwnerIdentityMismatchError) as e:
+            if isinstance(e, exceptions.NotSupportedError):
+                unsupported_clusters.append(cluster)
+            click.echo(f'{colorama.Fore.YELLOW}Failed to get the job queue for '
+                       f'cluster {cluster!r}.{colorama.Style.RESET_ALL}\n'
+                       f'  {common_utils.class_fullname(e.__class__)}: '
+                       f'{common_utils.remove_color(str(e))}')
+            continue
+        job_table = job_lib.format_job_queue(job_table)
+        click.echo(f'\nJob queue of cluster {cluster}\n{job_table}')
+
+    local_clusters = onprem_utils.check_and_get_local_clusters()
+    for local_cluster in local_clusters:
+        if local_cluster not in clusters and show_local_clusters:
+            click.secho(
+                f'Local cluster {local_cluster} is uninitialized;'
+                ' skipped.',
+                fg='yellow')
+
+    if unsupported_clusters:
+        click.secho(
+            f'Note: Job queues are not supported on clusters: '
+            f'{", ".join(unsupported_clusters)}',
+            fg='yellow')
+
+
+@cli.command()
+@click.option(
+    '--sync-down',
+    '-s',
+    is_flag=True,
+    default=False,
+    help='Sync down the logs of a job to the local machine. For a distributed'
+    ' job, a separate log file from each worker will be downloaded.')
+@click.option(
+    '--status',
+    is_flag=True,
+    default=False,
+    help=('If specified, do not show logs but exit with a status code for the '
+          'job\'s status: 0 for succeeded, or 1 for all other statuses.'))
+@click.option(
+    '--follow/--no-follow',
+    is_flag=True,
+    default=True,
+    help=('Follow the logs of a job. '
+          'If --no-follow is specified, print the log so far and exit. '
+          '[default: --follow]'))
+@click.argument('cluster',
+                required=True,
+                type=str,
+                **_get_shell_complete_args(_complete_cluster_name))
+@click.argument('job_ids', type=str, nargs=-1)
+# TODO(zhwu): support logs by job name
+@usage_lib.entrypoint
+def logs(
+    cluster: str,
+    job_ids: Tuple[str],
+    sync_down: bool,
+    status: bool,  # pylint: disable=redefined-outer-name
+    follow: bool,
+):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Tail the log of a job.
+
+    If JOB_ID is not provided, the latest job on the cluster will be used.
+
+    1. If no flags are provided, tail the logs of the job_id specified. At most
+    one job_id can be provided.
+
+    2. If ``--status`` is specified, print the status of the job and exit with
+    returncode 0 if the job succeeded, or 1 otherwise. At most one job_id can
+    be specified.
+
+    3. If ``--sync-down`` is specified, the logs of the job will be downloaded
+    from the cluster and saved to the local machine under
+    ``~/sky_logs``. Mulitple job_ids can be specified.
+    """
+    if sync_down and status:
+        raise click.UsageError(
+            'Both --sync_down and --status are specified '
+            '(ambiguous). To fix: specify at most one of them.')
+
+    if len(job_ids) > 1 and not sync_down:
+        raise click.UsageError(
+            f'Cannot stream logs of multiple jobs (IDs: {", ".join(job_ids)}).'
+            '\nPass -s/--sync-down to download the logs instead.')
+
+    job_ids = None if not job_ids else job_ids
+
+    if sync_down:
+        core.download_logs(cluster, job_ids)
+        return
+
+    assert job_ids is None or len(job_ids) <= 1, job_ids
+    job_id = None
+    if job_ids:
+        job_id = job_ids[0]
+        if not job_id.isdigit():
+            raise click.UsageError(f'Invalid job ID {job_id}. '
+                                   'Job ID must be integers.')
+    if status:
+        job_statuses = core.job_status(cluster, job_ids)
+        job_id = list(job_statuses.keys())[0]
+        job_status = list(job_statuses.values())[0]
+        job_status_str = job_status.value if job_status is not None else 'None'
+        click.echo(f'Job {job_id}: {job_status_str}')
+        if job_status == job_lib.JobStatus.SUCCEEDED:
+            return
+        else:
+            if job_status is None:
+                id_str = '' if job_id is None else f'{job_id} '
+                click.secho(f'Job {id_str}not found', fg='red')
+            sys.exit(1)
+
+    core.tail_logs(cluster, job_id, follow)
+
+
+@cli.command()
+@click.argument('cluster',
+                required=True,
+                type=str,
+                **_get_shell_complete_args(_complete_cluster_name))
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Cancel all jobs on the specified cluster.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+@click.argument('jobs', required=False, type=int, nargs=-1)
+@usage_lib.entrypoint
+def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disable=redefined-builtin
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Cancel job(s)."""
+    bold = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
+    if not jobs and not all:
+        # Friendly message for usage like 'sky cancel 1' / 'sky cancel myclus'.
+        message = textwrap.dedent(f"""\
+          Use:
+            {bold}sky cancel <cluster_name> <job IDs>{reset}   -- cancel one or more jobs on a cluster
+            {bold}sky cancel <cluster_name> -a / --all{reset}  -- cancel all jobs on a cluster
+
+          Job IDs can be looked up by {bold}sky queue{reset}.""")
+        raise click.UsageError(message)
+
+    if not yes:
+        job_ids = ' '.join(map(str, jobs))
+        plural = 's' if len(job_ids) > 1 else ''
+        job_identity_str = f'job{plural} {job_ids}'
+        if all:
+            job_identity_str = 'all jobs'
+        job_identity_str += f' on cluster {cluster!r}'
+        click.confirm(f'Cancelling {job_identity_str}. Proceed?',
+                      default=True,
+                      abort=True,
+                      show_default=True)
+
+    try:
+        core.cancel(cluster, all, jobs)
+    except exceptions.NotSupportedError:
+        # Friendly message for usage like 'sky cancel <spot controller> -a/<job
+        # id>'.
+        if all:
+            arg_str = '--all'
+        else:
+            arg_str = ' '.join(map(str, jobs))
+        error_str = ('Cancelling the spot controller\'s jobs is not allowed.'
+                     f'\nTo cancel spot jobs, use: sky spot cancel <spot '
+                     f'job IDs> [--all]'
+                     f'\nDo you mean: {bold}sky spot cancel {arg_str}{reset}')
+        click.echo(error_str)
+        sys.exit(1)
+    except ValueError as e:
+        raise click.UsageError(str(e))
+    except exceptions.ClusterNotUpError as e:
+        click.echo(str(e))
+        sys.exit(1)
 
 
 def _hint_or_raise_for_down_spot_controller(controller_name: str):
@@ -2858,6 +2810,11 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     for cluster_group_name, cluster_record in reserved_clusters.items():
         status_utils.show_cost_report_table(
             [cluster_record], all, reserved_group_name=cluster_group_name)
+    click.secho(
+        'NOTE: This feature is experimental. '
+        'Costs for clusters with auto{stop,down} '
+        'scheduled may not be accurate.',
+        fg='yellow')
 
 
 @cli.group(cls=_NaturalOrderGroup)
