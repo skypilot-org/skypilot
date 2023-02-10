@@ -11,12 +11,15 @@ from typing import List
 
 # By default, only run generic tests and cloud-specific tests for GCP and Azure,
 # due to the cloud credit limit for the development account.
-# To only run tests for a specific cloud (as well as generic tests), use
-# --aws, --gcp, --azure, or --lambda.
-# To only run tests for managed spot (without generic tests), use --managed-spot.
+#
 # A "generic test" tests a generic functionality (e.g., autostop) that
 # should work on any cloud we support. The cloud used for such a test
 # is controlled by `--generic-cloud` (typically you do not need to set it).
+#
+# To only run tests for a specific cloud (as well as generic tests), use
+# --aws, --gcp, --azure, or --lambda.
+#
+# To only run tests for managed spot (without generic tests), use --managed-spot.
 all_clouds_in_smoke_tests = ['aws', 'gcp', 'azure', 'lambda']
 default_clouds_to_run = ['gcp', 'azure']
 
@@ -55,6 +58,11 @@ def pytest_addoption(parser):
         'not within the clouds to be run, it will be reset to the first '
         'cloud in the list of the clouds to be run.')
 
+    parser.addoption('--terminate-on-failure',
+                     action='store_true',
+                     default=False,
+                     help='Terminate test VMs on failure.')
+
 
 def pytest_configure(config):
     config.addinivalue_line('markers', 'slow: mark test as slow to run')
@@ -62,6 +70,8 @@ def pytest_configure(config):
         cloud_keyword = cloud_to_pytest_keyword[cloud]
         config.addinivalue_line(
             'markers', f'{cloud_keyword}: mark test as {cloud} specific')
+
+    pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 
 
 def _get_cloud_to_run(config) -> List[str]:

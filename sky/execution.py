@@ -633,6 +633,7 @@ def spot_launch(
         controller_task = task_lib.Task.from_yaml(yaml_path)
         controller_task.spot_task = task
         assert len(controller_task.resources) == 1
+
         print(f'{colorama.Fore.YELLOW}'
               f'Launching managed spot job {name} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
