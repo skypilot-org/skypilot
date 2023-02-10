@@ -2,8 +2,6 @@
 import enum
 import os
 
-SPOT_CONTROLLER_CLOUD_ENV_VAR = 'SKYPILOT_SPOT_CONTROLLER_CLOUD'
-
 
 class Options(enum.Enum):
     """Environment variables for SkyPilot."""
