@@ -2211,10 +2211,11 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
     if cluster_status == global_user_state.ClusterStatus.INIT:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
-                'Tearing down the spot controller while it is in INIT state is '
-                'not supported, as we cannot guarantee that all the spot jobs '
-                'are finished. Please wait until the spot controller is UP '
-                f'or fix it with {colorama.Style.BRIGHT}sky start '
+                f'{colorama.Fore.RED}Tearing down the spot controller while '
+                'it is in INIT state is not supported, as we cannot '
+                'guarantee that all the spot jobs are finished. Please wait '
+                'until the spot controller is UP or fix it with '
+                f'{colorama.Style.BRIGHT}sky start '
                 f'{spot_lib.SPOT_CONTROLLER_NAME}{colorama.Style.RESET_ALL}.')
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            f'spot controller ({cluster_status.value}). Please be '
@@ -2254,9 +2255,8 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(msg)
         else:
-            click.echo('No in-progress spot jobs found. It should be safe to '
-                       'terminate, but please check the warning above before '
-                       'proceeding.')
+            click.echo(' * No in-progress spot jobs found. It should be safe '
+                       'to terminate.')
 
 
 def _down_or_stop_clusters(
@@ -2332,13 +2332,15 @@ def _down_or_stop_clusters(
                 # controller).
                 assert len(reserved_clusters) == 1, reserved_clusters
                 _hint_or_raise_for_down_spot_controller(reserved_clusters[0])
-
-                if not no_confirm:
-                    click.confirm('Proceed?',
-                                  default=False,
-                                  abort=True,
-                                  show_default=True)
-                    no_confirm = True
+                confirm_str = 'I understand and down'
+                user_input = click.prompt(
+                    f'To proceed, please check the warning above and type '
+                    f'{colorama.Style.BRIGHT}{confirm_str!r}'
+                    f'{colorama.Style.RESET_ALL}',
+                    type=str)
+                if user_input != confirm_str:
+                    raise click.Abort()
+                no_confirm = True
         names += reserved_clusters
 
     if apply_to_all:
