@@ -4,10 +4,6 @@ import tempfile
 import textwrap
 from typing import List
 
-import sky
-from sky import spot
-from sky.utils import env_options
-
 # Usage: use
 #   @pytest.mark.slow
 # to mark a test as slow and to skip by default.
