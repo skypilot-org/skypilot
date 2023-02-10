@@ -448,7 +448,7 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
         f'{count} {status}' for status, count in sorted(status_counts.items())
     ])
     if status_str:
-        status_str = f'In progress jobs: {status_str}\n\n'
+        status_str = f'In progress jobs: {status_str}\n'
     return status_str + str(job_table)
 
 

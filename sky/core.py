@@ -743,7 +743,8 @@ def spot_queue(refresh: bool,
         handle = _start(spot.SPOT_CONTROLLER_NAME)
 
     if handle is None or handle.head_ip is None:
-        raise exceptions.ClusterNotUpError('Spot controller is not up.')
+        raise exceptions.ClusterNotUpError('Spot controller is not up.',
+                                           cluster_status=controller_status)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -782,12 +783,12 @@ def spot_cancel(name: Optional[str] = None,
         RuntimeError: failed to cancel the job.
     """
     job_ids = [] if job_ids is None else job_ids
-    _, handle = spot.is_spot_controller_up(
+    cluster_status, handle = spot.is_spot_controller_up(
         'All managed spot jobs should have finished.')
     if handle is None or handle.head_ip is None:
         # The error message is already printed in spot.is_spot_controller_up.
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError()
+            raise exceptions.ClusterNotUpError(cluster_status=cluster_status)
 
     job_id_str = ','.join(map(str, job_ids))
     if sum([len(job_ids) > 0, name is not None, all]) != 1:
@@ -845,7 +846,8 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
         if controller_status == global_user_state.ClusterStatus.INIT:
             msg = ''
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(msg)
+            raise exceptions.ClusterNotUpError(msg,
+                                               cluster_status=controller_status)
 
     if name is not None and job_id is not None:
         raise ValueError('Cannot specify both name and job_id.')

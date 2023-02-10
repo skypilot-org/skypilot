@@ -1,6 +1,10 @@
 """Exceptions."""
 import enum
+import typing
 from typing import List, Optional
+
+if typing.TYPE_CHECKING:
+    from sky import global_user_state
 
 # Return code for keyboard interruption and SIGTSTP
 KEYBOARD_INTERRUPT_CODE = 130
@@ -85,7 +89,11 @@ class CommandError(Exception):
 
 class ClusterNotUpError(Exception):
     """Raised when a cluster is not up."""
-    pass
+
+    def __init__(self, *args: object,
+                 cluster_status: 'global_user_state.ClusterStatus') -> None:
+        super().__init__(*args)
+        self.cluster_status = cluster_status
 
 
 class ClusterSetUpError(Exception):
