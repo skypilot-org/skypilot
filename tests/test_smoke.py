@@ -3,22 +3,22 @@
 # Example usage:
 # Run all tests except for AWS and Lambda Cloud
 # > pytest tests/test_smoke.py
-
+#
 # Terminate failed clusetrs after test finishes
 # > pytest tests/test_smoke.py --terminate-on-failure
-
+#
 # Re-run last failed tests
 # > pytest --lf
-
+#
 # Run one of the smoke tests
 # > pytest tests/test_smoke.py::test_minimal
-
+#
 # Only run managed spot tests
 # > pytest tests/test_smoke.py --managed-spot
-
+#
 # Only run test for AWS + generic tests
 # > pytest tests/test_smoke.py --aws
-
+#
 # Change cloud for generic tests to aws
 # > pytest tests/test_smoke.py --generic-cloud aws
 
