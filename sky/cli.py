@@ -1393,6 +1393,8 @@ def _get_in_progress_spot_jobs():
         else:
             assert controller_status != global_user_state.ClusterStatus.UP
             msg = 'No in-progress spot jobs.'
+    except RuntimeError:
+        msg = 'Failed to query spot jobs due to connection issue.'
     else:
         msg = spot_lib.format_job_table(spot_jobs, show_all=False)
     return msg

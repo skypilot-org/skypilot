@@ -722,6 +722,7 @@ def spot_queue(refresh: bool,
         ]
     Raises:
         sky.exceptions.ClusterNotUpError: the spot controller is not up.
+        RuntimeError: if failed to get the spot jobs with ssh.
     """
 
     stop_msg = ''
@@ -757,8 +758,9 @@ def spot_queue(refresh: bool,
         stream_logs=False,
         separate_stderr=True)
     try:
-        subprocess_utils.handle_returncode(
-            returncode, code, 'Failed to fetch managed job statuses', stderr)
+        subprocess_utils.handle_returncode(returncode, code,
+                                           'Failed to fetch managed spot jobs',
+                                           stderr)
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
