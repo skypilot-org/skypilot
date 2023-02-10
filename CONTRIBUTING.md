@@ -29,7 +29,7 @@ To run smoke tests (NOTE: Running all smoke tests launches ~20 clusters):
 # Run all tests except for AWS and Lambda Cloud
 pytest tests/test_smoke.py
 
-# Terminate failed clusetrs after test finishes
+# Terminate a test's cluster even if the test failed (default is to keep it around for debugging)
 pytest tests/test_smoke.py --terminate-on-failure
 
 # Re-run last failed tests
