@@ -2373,8 +2373,8 @@ class CloudVmRayBackend(backends.Backend):
                 r = config_dict['handle'].launched_resources
                 assert r.region is not None
                 assert r.zone is not None
-                handle.launched_resources.region = r.region
-                handle.launched_resources.zone = r.zone
+                handle.launched_resources = handle.launched_resources.copy(
+                    region=r.region, zone=r.zone)
             else:
                 # Get actual zone info and save it into handle.
                 # NOTE: querying zones is expensive, observed 1node GCP >=4s.
