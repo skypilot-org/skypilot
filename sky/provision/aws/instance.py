@@ -130,7 +130,11 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
                 conf['SubnetId'] = subnet_id
 
             created = ec2_fail_fast.create_instances(**conf)
-            return {n.id: n for n in created}
+            return {
+                'region': ec2_fail_fast.meta.client.meta.region_name,
+                'zone': created[0].placement['AvailabilityZone'],
+                'instances': {n.id: n for n in created}
+            }
         except botocore.exceptions.ClientError as exc:
             if (i + 1) >= max_tries:
                 raise RuntimeError(
@@ -177,7 +181,11 @@ def _resume_instances(ec2, cluster_name: str, tags: Dict[str, str],
                 Resources=reuse_node_ids,
                 Tags=_format_tags(tags),
             )
-    return {n.id: n for n in reuse_nodes}
+    return {
+        'region': ec2.meta.client.meta.region_name,
+        'zone': reuse_nodes[0].placement['AvailabilityZone'],
+        'instances': {n.id: n for n in reuse_nodes}
+    }
 
 
 def resume_instances(region: str,
@@ -233,17 +241,22 @@ def create_or_resume_instances(region: str, cluster_name: str,
     # sort tags by key to support deterministic unit test stubbing
     tags = dict(sorted(copy.deepcopy(tags).items()))
 
-    all_created_nodes = {}
+    resumed_instances_metadata = {}
+    create_instances_metadata = {}
+
     # Try to reuse previously stopped nodes with compatible configs
     if resume_stopped_nodes:
-        all_created_nodes = _resume_instances(ec2, cluster_name, tags, count)
+        resumed_instances_metadata = _resume_instances(ec2, cluster_name, tags,
+                                                       count)
 
-    remaining_count = count - len(all_created_nodes)
+    remaining_count = count - len(resumed_instances_metadata['instances'])
     if remaining_count > 0:
-        created_nodes_dict = create_instances(region, cluster_name, node_config,
-                                              tags, remaining_count)
-        all_created_nodes.update(created_nodes_dict)
-    return all_created_nodes
+        create_instances_metadata = create_instances(region, cluster_name,
+                                                     node_config, tags,
+                                                     remaining_count)
+    if create_instances_metadata:
+        return create_instances_metadata
+    return resumed_instances_metadata
 
 
 def stop_instances(region: str, cluster_name: str):

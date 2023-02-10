@@ -1458,12 +1458,16 @@ class RetryingVmProvisioner(object):
                 with backend_utils.safe_console_status(
                         f'[bold cyan]Starting instances for '
                         f'[green]{cluster_name}[white] ...'):
-                    provider.create_or_resume_instances(
+                    metadata = provider.create_or_resume_instances(
                         region_name,
                         cluster_name,
                         config['node_config'], {},
                         count=config['provider']['num_nodes'],
                         resume_stopped_nodes=True)
+
+                # update launched resources
+                cluster_handle.launched_resources = cluster_handle.launched_resources.copy(
+                    region=metadata['region'], zone=metadata['zone'])
                 break
             except Exception as e:
                 if retry_cnt >= _MAX_RAY_UP_RETRY - 1:
@@ -1483,6 +1487,7 @@ class RetryingVmProvisioner(object):
                      f'{retry_cnt} retries.')
 
         resources = cluster_handle.launched_resources
+        # TODO(suquark): Handle TPU VMs when dealing with GCP later.
         if tpu_utils.is_tpu_vm_pod(resources):
             logger.info(f'{style.BRIGHT}Setting up TPU VM Pod workers...'
                         f'{style.RESET_ALL}')
@@ -2359,9 +2364,9 @@ class CloudVmRayBackend(backends.Backend):
                 self._set_tpu_name(handle, config_dict['tpu_name'])
 
             if isinstance(handle.launched_resources.cloud, clouds.AWS):
-                # TODO(suquark): make sure zone is set during provisioning
-                # zone is set during provisioning
+                # zone & region is set during provisioning
                 assert handle.launched_resources.region is not None
+                assert handle.launched_resources.zone is not None
             else:
                 # Get actual zone info and save it into handle.
                 # NOTE: querying zones is expensive, observed 1node GCP >=4s.

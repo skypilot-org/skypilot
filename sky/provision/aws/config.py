@@ -72,10 +72,10 @@ def bootstrap(config):
     ec2 = _resource('ec2', config)
 
     if subnet_ids is not None:
-        vpc_id = _validate_subnet(ec2, subnet_ids, security_group_ids)
+        subnets, vpc_id = _validate_subnet(ec2, subnet_ids, security_group_ids)
     else:
         # Pick a reasonable subnet if not specified by the user.
-        subnet_ids, vpc_id = _create_subnet(
+        subnets, vpc_id = _create_subnet(
             ec2,
             security_group_ids,
             config['provider']['region'],
@@ -99,7 +99,8 @@ def bootstrap(config):
                                                        extended_ip_rules)
 
     # store updated subnet and security group configs in node config
-    node_cfg['SubnetIds'] = subnet_ids
+    # NOTE: "SubnetIds" is not a real config key for AWS instance.
+    node_cfg['SubnetIds'] = [s.subnet_id for s in subnets]
     node_cfg['SecurityGroupIds'] = security_group_ids
 
     # Provide helpful message for missing ImageId for node configuration.
@@ -228,7 +229,7 @@ def _usable_subnet_ids(
     azs: Optional[str],
     vpc_id_of_sg: Optional[str],
     use_internal_ips: bool,
-) -> Tuple[List[str], str]:
+) -> Tuple[List, str]:
     """Prunes subnets down to those that meet the following criteria.
 
     Subnets must be:
@@ -360,7 +361,7 @@ def _usable_subnet_ids(
     # rules to allow traffic between these groups.
     # See https://github.com/ray-project/ray/pull/14868.
     first_subnet_vpc_id = subnets[0].vpc_id
-    subnets = [s.subnet_id for s in subnets if s.vpc_id == subnets[0].vpc_id]
+    subnets = [s for s in subnets if s.vpc_id == first_subnet_vpc_id]
     if _are_user_subnets_pruned(subnets):
         subnet_vpcs = {s.subnet_id: s.vpc_id for s in user_specified_subnets}
         raise RuntimeError(
@@ -432,7 +433,7 @@ def _validate_subnet(ec2, subnet_ids: List[str], security_group_ids: List[str]):
         subnet_ids)
     assert len(subnets) == len(subnet_ids), 'Subnet ID not found: {}'.format(
         subnet_ids)
-    return subnets[0].vpc_id
+    return subnets, subnets[0].vpc_id
 
 
 def _create_subnet(ec2, security_group_ids: List[str], region: str,
@@ -446,14 +447,14 @@ def _create_subnet(ec2, security_group_ids: List[str], region: str,
         vpc_id_of_sg = None
 
     all_subnets = list(ec2.subnets.all())
-    subnet_ids, vpc_id = _usable_subnet_ids(
+    subnets, vpc_id = _usable_subnet_ids(
         None,
         all_subnets,
         azs=availability_zone,
         vpc_id_of_sg=vpc_id_of_sg,
         use_internal_ips=use_internal_ips,
     )
-    return subnet_ids, vpc_id
+    return subnets, vpc_id
 
 
 def _configure_security_group(ec2, vpc_id: str, expected_sg_name: str,
