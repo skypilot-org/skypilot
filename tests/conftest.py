@@ -76,13 +76,6 @@ def pytest_configure(config):
             'markers', f'{cloud_keyword}: mark test as {cloud} specific')
 
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
-    generic_cloud = _generic_cloud(config)
-    cluster = sky.status(spot.SPOT_CONTROLLER_NAME)
-    if not cluster:
-        # Set the spot controller cloud to the generic cloud if it does not
-        # exist.
-        os.environ[env_options.SPOT_CONTROLLER_CLOUD_ENV_VAR] = str(
-            generic_cloud)
 
 
 def _get_cloud_to_run(config) -> List[str]:
