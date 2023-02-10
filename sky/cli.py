@@ -2224,7 +2224,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
     click.echo(msg)
     if cluster_status == global_user_state.ClusterStatus.UP:
         with backend_utils.safe_console_status(
-                '[bold cyan]Checking spot jobs on the controller[/]'):
+                '[bold cyan]Checking for in-progress spot jobs[/]'):
             try:
                 spot_jobs = core.spot_queue(refresh=False)
             except exceptions.ClusterNotUpError:
