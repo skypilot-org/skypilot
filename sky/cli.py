@@ -2256,7 +2256,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
                 raise exceptions.NotSupportedError(msg)
         else:
             click.echo(' * No in-progress spot jobs found. It should be safe '
-                       'to terminate.')
+                       'to terminate (see caveats above).')
 
 
 def _down_or_stop_clusters(
