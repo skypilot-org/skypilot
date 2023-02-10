@@ -1273,6 +1273,11 @@ class RetryingVmProvisioner(object):
                 # the latter case, the caller doesn't need to query them again.
                 config_dict['head_ip'] = head_ip
                 config_dict['zones'] = zones
+                # We ship the cluster handle to reuse some configurations.
+                # TODO(suquark): we should gradually use the handle (which
+                #  includes latest cluster launch results) instead of other
+                #  fields.
+                config_dict['handle'] = handle
                 plural = '' if num_nodes == 1 else 's'
                 if not isinstance(to_provision.cloud, clouds.Local):
                     logger.info(f'{fore.GREEN}Successfully provisioned or found'
@@ -2365,8 +2370,11 @@ class CloudVmRayBackend(backends.Backend):
 
             if isinstance(handle.launched_resources.cloud, clouds.AWS):
                 # zone & region is set during provisioning
-                assert handle.launched_resources.region is not None
-                assert handle.launched_resources.zone is not None
+                r = config_dict['handle'].launched_resources
+                assert r.region is not None
+                assert r.zone is not None
+                handle.launched_resources.region = r.region
+                handle.launched_resources.zone = r.zone
             else:
                 # Get actual zone info and save it into handle.
                 # NOTE: querying zones is expensive, observed 1node GCP >=4s.
