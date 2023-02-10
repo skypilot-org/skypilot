@@ -1110,6 +1110,21 @@ def cli():
     pass
 
 
+@cli.command()
+@usage_lib.entrypoint
+def check():
+    """Check what clouds are available to use.
+
+    This checks access credentials for all clouds supported by SkyPilot. If we
+    detect a cloud to be unavailable, the reason and correction steps will be
+    shown.
+
+    The enabled clouds will be cached and they form the "search space" to be
+    considered for each task.
+    """
+    sky_check.check()
+
+
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('entrypoint',
                 required=False,
@@ -1778,8 +1793,8 @@ def queue(clusters: Sequence[str], skip_finished: bool, all_users: bool):
     '-s',
     is_flag=True,
     default=False,
-    help='Sync down the logs of the job (this is useful for distributed jobs to'
-    'download a separate log for each job from all the workers).')
+    help='Sync down the logs of a job to the local machine. For a distributed'
+    ' job, a separate log file from each worker will be downloaded.')
 @click.option(
     '--status',
     is_flag=True,
@@ -1790,8 +1805,9 @@ def queue(clusters: Sequence[str], skip_finished: bool, all_users: bool):
     '--follow/--no-follow',
     is_flag=True,
     default=True,
-    help=('Follow the logs of the job. [default: --follow] '
-          'If --no-follow is specified, print the log so far and exit.'))
+    help=('Follow the logs of a job. '
+          'If --no-follow is specified, print the log so far and exit. '
+          '[default: --follow]'))
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -1813,12 +1829,14 @@ def logs(
 
     1. If no flags are provided, tail the logs of the job_id specified. At most
     one job_id can be provided.
-    2. If --status is specified, print the status of the job and exit with
-    returncode 0 if the job is succeeded, or 1 otherwise. At most one job_id can
+
+    2. If ``--status`` is specified, print the status of the job and exit with
+    returncode 0 if the job succeeded, or 1 otherwise. At most one job_id can
     be specified.
-    3. If --sync-down is specified, the logs of the job will be downloaded from
-    the cluster and saved to the local machine under `~/sky_logs`. Mulitple
-    job_ids can be specified.
+
+    3. If ``--sync-down`` is specified, the logs of the job will be downloaded
+    from the cluster and saved to the local machine under
+    ``~/sky_logs``. Mulitple job_ids can be specified.
     """
     if sync_down and status:
         raise click.UsageError(
@@ -2631,6 +2649,223 @@ def _down_or_stop_clusters(
         progress.refresh()
 
 
+@cli.command()
+@click.argument('gpu_name', required=False)
+@click.option('--all',
+              '-a',
+              is_flag=True,
+              default=False,
+              help='Show details of all GPU/TPU/accelerator offerings.')
+@click.option('--cloud',
+              default=None,
+              type=str,
+              help='Cloud provider to query.')
+@click.option(
+    '--region',
+    required=False,
+    type=str,
+    help=
+    ('The region to use. If not specified, shows accelerators from all regions.'
+    ),
+)
+@usage_lib.entrypoint
+def show_gpus(
+        gpu_name: Optional[str],
+        all: bool,  # pylint: disable=redefined-builtin
+        cloud: Optional[str],
+        region: Optional[str]):
+    """Show supported GPU/TPU/accelerators and their prices.
+
+    The names and counts shown can be set in the ``accelerators`` field in task
+    YAMLs, or in the ``--gpus`` flag in CLI commands. For example, if this
+    table shows 8x V100s are supported, then the string ``V100:8`` will be
+    accepted by the above.
+
+    To show the detailed information of a GPU/TPU type (which clouds offer it,
+    the quantity in each VM type, etc.), use ``sky show-gpus <gpu>``.
+
+    To show all accelerators, including less common ones and their detailed
+    information, use ``sky show-gpus --all``.
+
+    NOTE: If region is not specified, the price displayed for each instance type
+    is the lowest across all regions for both on-demand and spot instances.
+    """
+    # validation for the --region flag
+    if region is not None and cloud is None:
+        raise click.UsageError(
+            'The --region flag is only valid when the --cloud flag is set.')
+    service_catalog.validate_region_zone(region, None, clouds=cloud)
+    show_all = all
+    if show_all and gpu_name is not None:
+        raise click.UsageError('--all is only allowed without a GPU name.')
+
+    def _list_to_str(lst):
+        return ', '.join([str(e) for e in lst])
+
+    def _output():
+        gpu_table = log_utils.create_table(
+            ['NVIDIA_GPU', 'AVAILABLE_QUANTITIES'])
+        tpu_table = log_utils.create_table(
+            ['GOOGLE_TPU', 'AVAILABLE_QUANTITIES'])
+        other_table = log_utils.create_table(
+            ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
+
+        if gpu_name is None:
+            result = service_catalog.list_accelerator_counts(
+                gpus_only=True,
+                clouds=cloud,
+                region_filter=region,
+            )
+            # NVIDIA GPUs
+            for gpu in service_catalog.get_common_gpus():
+                if gpu in result:
+                    gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
+            yield from gpu_table.get_string()
+
+            # Google TPUs
+            for tpu in service_catalog.get_tpus():
+                if tpu in result:
+                    tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
+            if len(tpu_table.get_string()) > 0:
+                yield '\n\n'
+            yield from tpu_table.get_string()
+
+            # Other GPUs
+            if show_all:
+                yield '\n\n'
+                for gpu, qty in sorted(result.items()):
+                    other_table.add_row([gpu, _list_to_str(qty)])
+                yield from other_table.get_string()
+                yield '\n\n'
+            else:
+                return
+
+        # Show detailed accelerator information
+        result = service_catalog.list_accelerators(gpus_only=True,
+                                                   name_filter=gpu_name,
+                                                   region_filter=region,
+                                                   clouds=cloud)
+        if len(result) == 0:
+            yield f'Resources \'{gpu_name}\' not found. '
+            yield 'Try \'sky show-gpus --all\' '
+            yield 'to show available accelerators.'
+            return
+
+        yield '*NOTE*: for most GCP accelerators, '
+        yield 'INSTANCE_TYPE == (attachable) means '
+        yield 'the host VM\'s cost is not included.\n\n'
+        import pandas as pd  # pylint: disable=import-outside-toplevel
+        for i, (gpu, items) in enumerate(result.items()):
+            accelerator_table_headers = [
+                'GPU',
+                'QTY',
+                'CLOUD',
+                'INSTANCE_TYPE',
+                'vCPUs',
+                'HOST_MEMORY',
+                'HOURLY_PRICE',
+                'HOURLY_SPOT_PRICE',
+            ]
+            if not show_all:
+                accelerator_table_headers.append('REGION')
+            accelerator_table = log_utils.create_table(
+                accelerator_table_headers)
+            for item in items:
+                instance_type_str = item.instance_type if not pd.isna(
+                    item.instance_type) else '(attachable)'
+                cpu_count = item.cpu_count
+                if pd.isna(cpu_count):
+                    cpu_str = '-'
+                elif isinstance(cpu_count, float):
+                    if cpu_count.is_integer():
+                        cpu_str = str(int(cpu_count))
+                    else:
+                        cpu_str = f'{cpu_count:.1f}'
+                mem_str = f'{item.memory:.0f}GB' if not pd.isna(
+                    item.memory) else '-'
+                price_str = f'$ {item.price:.3f}' if not pd.isna(
+                    item.price) else '-'
+                spot_price_str = f'$ {item.spot_price:.3f}' if not pd.isna(
+                    item.spot_price) else '-'
+                region_str = item.region if not pd.isna(item.region) else '-'
+                accelerator_table_vals = [
+                    item.accelerator_name,
+                    item.accelerator_count,
+                    item.cloud,
+                    instance_type_str,
+                    cpu_str,
+                    mem_str,
+                    price_str,
+                    spot_price_str,
+                ]
+                if not show_all:
+                    accelerator_table_vals.append(region_str)
+                accelerator_table.add_row(accelerator_table_vals)
+
+            if i != 0:
+                yield '\n\n'
+            yield from accelerator_table.get_string()
+
+    if show_all:
+        click.echo_via_pager(_output())
+    else:
+        for out in _output():
+            click.echo(out, nl=False)
+        click.echo()
+
+
+@cli.command()
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
+@usage_lib.entrypoint
+def cost_report(all: bool):  # pylint: disable=redefined-builtin
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Show estimated costs for launched clusters.
+
+    For each cluster, we show: cluster name, resources, launched time, duration
+    that cluster was up, and total estimated cost.
+
+    The estimated cost column indicates the price for the cluster based on the
+    type of resources being used and the duration of use up until now. This
+    means if the cluster is UP, successive calls to cost-report will show
+    increasing price.
+
+    The estimated cost is calculated based on the local cache of the cluster
+    status, and may not be accurate for:
+
+      - clusters with autostop/use_spot set; or
+
+      - clusters that were terminated/stopped on the cloud console.
+    """
+    cluster_records = core.cost_report()
+    nonreserved_cluster_records = []
+    reserved_clusters = dict()
+    for cluster_record in cluster_records:
+        cluster_name = cluster_record['name']
+        if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+            cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
+                cluster_name]
+            reserved_clusters[cluster_group_name] = cluster_record
+        else:
+            nonreserved_cluster_records.append(cluster_record)
+
+    status_utils.show_cost_report_table(nonreserved_cluster_records, all)
+
+    for cluster_group_name, cluster_record in reserved_clusters.items():
+        status_utils.show_cost_report_table(
+            [cluster_record], all, reserved_group_name=cluster_group_name)
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def spot():
+    """Managed Spot commands (spot instances with auto-recovery)."""
+    pass
+
+
 @_interactive_node_cli_command
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
@@ -2878,187 +3113,9 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     )
 
 
-@cli.command()
-@usage_lib.entrypoint
-def check():
-    """Determine the set of clouds available to use.
-
-    This checks access credentials for AWS, Azure and GCP; on failure, it shows
-    the reason and suggests correction steps. Tasks will only run on clouds
-    that you have access to.
-    """
-    sky_check.check()
-
-
-@cli.command()
-@click.argument('gpu_name', required=False)
-@click.option('--all',
-              '-a',
-              is_flag=True,
-              default=False,
-              help='Show details of all GPU/TPU/accelerator offerings.')
-@click.option('--cloud',
-              default=None,
-              type=str,
-              help='Cloud provider to query.')
-@click.option(
-    '--region',
-    required=False,
-    type=str,
-    help=
-    ('The region to use. If not specified, shows accelerators from all regions.'
-    ),
-)
-@service_catalog.use_default_catalog
-@usage_lib.entrypoint
-def show_gpus(
-        gpu_name: Optional[str],
-        all: bool,  # pylint: disable=redefined-builtin
-        cloud: Optional[str],
-        region: Optional[str]):
-    """Show supported GPU/TPU/accelerators.
-
-    The names and counts shown can be set in the ``accelerators`` field in task
-    YAMLs, or in the ``--gpus`` flag in CLI commands. For example, if this
-    table shows 8x V100s are supported, then the string ``V100:8`` will be
-    accepted by the above.
-
-    To show the detailed information of a GPU/TPU type (which clouds offer it,
-    the quantity in each VM type, etc.), use ``sky show-gpus <gpu>``.
-
-    To show all accelerators, including less common ones and their detailed
-    information, use ``sky show-gpus --all``.
-
-    NOTE: If region is not specified, the price displayed for each instance type
-    is the lowest across all regions for both on-demand and spot instances.
-    """
-    # validation for the --region flag
-    if region is not None and cloud is None:
-        raise click.UsageError(
-            'The --region flag is only valid when the --cloud flag is set.')
-    service_catalog.validate_region_zone(region, None, clouds=cloud)
-    show_all = all
-    if show_all and gpu_name is not None:
-        raise click.UsageError('--all is only allowed without a GPU name.')
-
-    def _list_to_str(lst):
-        return ', '.join([str(e) for e in lst])
-
-    def _output():
-        gpu_table = log_utils.create_table(
-            ['NVIDIA_GPU', 'AVAILABLE_QUANTITIES'])
-        tpu_table = log_utils.create_table(
-            ['GOOGLE_TPU', 'AVAILABLE_QUANTITIES'])
-        other_table = log_utils.create_table(
-            ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
-
-        if gpu_name is None:
-            result = service_catalog.list_accelerator_counts(
-                gpus_only=True,
-                clouds=cloud,
-                region_filter=region,
-            )
-            # NVIDIA GPUs
-            for gpu in service_catalog.get_common_gpus():
-                if gpu in result:
-                    gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
-            yield from gpu_table.get_string()
-
-            # Google TPUs
-            for tpu in service_catalog.get_tpus():
-                if tpu in result:
-                    tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
-            if len(tpu_table.get_string()) > 0:
-                yield '\n\n'
-            yield from tpu_table.get_string()
-
-            # Other GPUs
-            if show_all:
-                yield '\n\n'
-                for gpu, qty in sorted(result.items()):
-                    other_table.add_row([gpu, _list_to_str(qty)])
-                yield from other_table.get_string()
-                yield '\n\n'
-            else:
-                return
-
-        # Show detailed accelerator information
-        result = service_catalog.list_accelerators(gpus_only=True,
-                                                   name_filter=gpu_name,
-                                                   region_filter=region,
-                                                   clouds=cloud)
-        if len(result) == 0:
-            yield f'Resources \'{gpu_name}\' not found. '
-            yield 'Try \'sky show-gpus --all\' '
-            yield 'to show available accelerators.'
-            return
-
-        yield '*NOTE*: for most GCP accelerators, '
-        yield 'INSTANCE_TYPE == (attachable) means '
-        yield 'the host VM\'s cost is not included.\n\n'
-        import pandas as pd  # pylint: disable=import-outside-toplevel
-        for i, (gpu, items) in enumerate(result.items()):
-            accelerator_table_headers = [
-                'GPU',
-                'QTY',
-                'CLOUD',
-                'INSTANCE_TYPE',
-                'vCPUs',
-                'HOST_MEMORY',
-                'HOURLY_PRICE',
-                'HOURLY_SPOT_PRICE',
-            ]
-            if not show_all:
-                accelerator_table_headers.append('REGION')
-            accelerator_table = log_utils.create_table(
-                accelerator_table_headers)
-            for item in items:
-                instance_type_str = item.instance_type if not pd.isna(
-                    item.instance_type) else '(attachable)'
-                cpu_count = item.cpu_count
-                if pd.isna(cpu_count):
-                    cpu_str = '-'
-                elif isinstance(cpu_count, float):
-                    if cpu_count.is_integer():
-                        cpu_str = str(int(cpu_count))
-                    else:
-                        cpu_str = f'{cpu_count:.1f}'
-                mem_str = f'{item.memory:.0f}GB' if not pd.isna(
-                    item.memory) else '-'
-                price_str = f'$ {item.price:.3f}' if not pd.isna(
-                    item.price) else '-'
-                spot_price_str = f'$ {item.spot_price:.3f}' if not pd.isna(
-                    item.spot_price) else '-'
-                region_str = item.region if not pd.isna(item.region) else '-'
-                accelerator_table_vals = [
-                    item.accelerator_name,
-                    item.accelerator_count,
-                    item.cloud,
-                    instance_type_str,
-                    cpu_str,
-                    mem_str,
-                    price_str,
-                    spot_price_str,
-                ]
-                if not show_all:
-                    accelerator_table_vals.append(region_str)
-                accelerator_table.add_row(accelerator_table_vals)
-
-            if i != 0:
-                yield '\n\n'
-            yield from accelerator_table.get_string()
-
-    if show_all:
-        click.echo_via_pager(_output())
-    else:
-        for out in _output():
-            click.echo(out, nl=False)
-        click.echo()
-
-
 @cli.group(cls=_NaturalOrderGroup)
 def storage():
-    """Storage related commands."""
+    """SkyPilot Storage CLI."""
     pass
 
 
@@ -3115,7 +3172,7 @@ def storage_delete(names: Sequence[str], all: bool):  # pylint: disable=redefine
 
 @cli.group(cls=_NaturalOrderGroup)
 def admin():
-    """Sky administrator commands for local clusters."""
+    """SkyPilot On-prem administrator CLI."""
     pass
 
 
@@ -3187,12 +3244,6 @@ def admin_deploy(clusterspec_yaml: str):
     click.secho(f'Saved in {sanitized_yaml_path} \n', fg='yellow', nl=False)
     click.secho(f'Successfully deployed local cluster {local_cluster_name!r}\n',
                 fg='green')
-
-
-@cli.group(cls=_NaturalOrderGroup)
-def spot():
-    """Commands for managed spot jobs."""
-    pass
 
 
 @spot.command('launch', cls=_DocumentedCodeCommand)
@@ -3354,32 +3405,56 @@ def spot_launch(
 def spot_queue(all: bool, refresh: bool, skip_finished: bool):
     """Show statuses of managed spot jobs.
 
-    \b
     Each spot job can have one of the following statuses:
 
-    \b
-    - SUBMITTED: The job is submitted to the spot controller.
-    - STARTING: The job is starting (starting a spot cluster).
-    - RUNNING: The job is running.
-    - RECOVERING: The spot cluster is recovering from a preemption.
-    - SUCCEEDED: The job succeeded.
-    - FAILED: The job failed due to an error from the job itself.
-    - FAILED_NO_RESOURCES: The job failed due to resources being unavailable
-        after a maximum number of retry attempts.
-    - FAILED_CONTROLLER: The job failed due to an unexpected error in the spot
-        controller.
-    - CANCELLING: The job was requested to be cancelled by the user, and the
-        cancellation is in progress.
-    - CANCELLED: The job was cancelled by the user.
+    - ``PENDING``: Job is waiting for a free slot on the spot controller to be
+      accepted.
 
-    If the job failed, either due to user code or spot unavailability, the error
-    log can be found with ``sky spot logs --controller job_id``.
+    - ``SUBMITTED``: Job is submitted to and accepted by the spot controller.
+
+    - ``STARTING``: Job is starting (provisioning a spot cluster).
+
+    - ``RUNNING``: Job is running.
+
+    - ``RECOVERING``: The spot cluster is recovering from a preemption.
+
+    - ``SUCCEEDED``: Job succeeded.
+
+    - ``CANCELLING``: Job was requested to be cancelled by the user, and
+        the cancellation is in progress.
+
+    - ``CANCELLED``: Job was cancelled by the user.
+
+    - ``FAILED``: Job failed due to an error from the job itself.
+
+    - ``FAILED_SETUP``: Job failed due to an error from the job's ``setup``
+      commands.
+
+    - ``FAILED_PRECHECKS``: Job failed due to an error from our prechecks such
+      as invalid cluster names or an infeasible resource is specified.
+
+    - ``FAILED_NO_RESOURCE``: Job failed due to resources being unavailable
+      after a maximum number of retries.
+
+    - ``FAILED_CONTROLLER``: Job failed due to an unexpected error in the spot
+      controller.
+
+    If the job failed, either due to user code or spot unavailability, the
+    error log can be found with ``sky spot logs --controller``, e.g.:
+
+    .. code-block:: bash
+
+      sky spot logs --controller job_id
+
+    This also shows the logs for provisioning and any preemption and recovery
+    attempts.
 
     (Tip) To fetch job statuses every 60 seconds, use ``watch``:
 
     .. code-block:: bash
 
       watch -n60 sky spot queue
+
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
@@ -3422,20 +3497,19 @@ _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     """Cancel managed spot jobs.
 
-    You can provide either a job name or a list of job ids to be cancelled.
+    You can provide either a job name or a list of job IDs to be cancelled.
     They are exclusive options.
+
     Examples:
 
     .. code-block:: bash
 
-        # Cancel managed spot job with name 'my-job'
-        $ sky spot cancel -n my-job
-
-        # Cancel managed spot jobs with IDs 1, 2, 3
-        $ sky spot cancel 1 2 3
-
+      # Cancel managed spot job with name 'my-job'
+      $ sky spot cancel -n my-job
+      \b
+      # Cancel managed spot jobs with IDs 1, 2, 3
+      $ sky spot cancel 1 2 3
     """
-
     _, handle = spot_lib.is_spot_controller_up(
         'All managed spot jobs should have finished.')
     if handle is None:
@@ -3544,7 +3618,7 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
 
 @cli.group(cls=_NaturalOrderGroup)
 def bench():
-    """Sky Benchmark related commands."""
+    """SkyPilot Benchmark CLI."""
     pass
 
 
