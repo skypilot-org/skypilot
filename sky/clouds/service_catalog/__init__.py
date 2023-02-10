@@ -133,6 +133,7 @@ def get_region_zones_for_instance_type(
 
 
 def get_hourly_cost(instance_type: str,
+                    disk_size: int,
                     use_spot: bool,
                     region: Optional[str],
                     zone: Optional[str],
@@ -149,7 +150,7 @@ def get_hourly_cost(instance_type: str,
         function returns the hourly price of the instance type in the zone.
     """
     return _map_clouds_catalog(clouds, 'get_hourly_cost', instance_type,
-                               use_spot, region, zone)
+                               disk_size, use_spot, region, zone)
 
 
 def get_hourly_disk_cost(instance_type: str,

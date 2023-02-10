@@ -221,8 +221,9 @@ class Optimizer:
         Note that the egress cost/time is not considered in this function.
         The estimated run time of a task running on a resource is given by
         `task.estimate_runtime(resources)` or 1 hour by default.
-        The estimated cost is `task.num_nodes * (resources.get_cost(runtime)
-        + resources.get_disk_cost(runtime, disk_usage))`.
+        The estimated cost is `task.num_nodes * resources.get_cost(runtime)`,
+        in which `get_cost` included storage cost, with disk_size specified
+        in `resources` object.
         """
         # Cost/time of running the task on the resources.
         # node -> {resources -> cost/time}
@@ -285,16 +286,12 @@ class Optimizer:
                     # account. It may be another reason to treat num_nodes as
                     # part of a Resources.
                     estimated_runtime = node.estimate_runtime(orig_resources)
-                # Directly use resource's disk size here.
-                estimated_disk_usage = orig_resources.disk_size
                 for resources in launchable_list:
                     if do_print:
                         logger.debug(f'resources: {resources}')
 
                     if minimize_cost:
-                        cost_per_node = resources.get_cost(estimated_runtime) \
-                        + resources.get_disk_cost(estimated_runtime,
-                                                  estimated_disk_usage)
+                        cost_per_node = resources.get_cost(estimated_runtime)
                         estimated_cost_or_time = cost_per_node * node.num_nodes
                     else:
                         # Minimize run time.
@@ -565,10 +562,7 @@ class Optimizer:
                 # The execution time of dummy nodes is always 0,
                 # as they have a time estimator lambda _: 0.
                 execution_time = node.estimate_runtime(resources)
-            execution_disk_usage = resources.disk_size
-            cost_per_node = resources.get_cost(execution_time) \
-                        + resources.get_disk_cost(execution_time,
-                                                  execution_disk_usage)
+            cost_per_node = resources.get_cost(execution_time)
             total_cost += cost_per_node * node.num_nodes
 
             for pred in graph.predecessors(node):
@@ -836,9 +830,6 @@ class DummyResources(resources_lib.Resources):
         return DummyResources._REPR
 
     def get_cost(self, seconds):
-        return 0
-
-    def get_disk_cost(self, seconds, num_gbs):
         return 0
 
 

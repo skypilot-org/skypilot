@@ -214,17 +214,35 @@ def validate_region_zone_impl(
     return validated_region, validated_zone
 
 
+def get_region_cheapest_hourly_storage_cost(
+    storage_df: pd.DataFrame,
+    region: str,
+    disk_size: int,
+) -> float:
+    """Returns the cheapest hourly storage price of a specify region."""
+    df = storage_df[storage_df['Region'] == region]
+    cheapest_idx = df['Price'].idxmin()  # GB per month
+    # Suppose one month have 30 days here.
+    return df.loc[cheapest_idx]['Price'] * disk_size / (30 * 24)
+
+
+# TODO(tian): Change function call for get_hourly_cost in other clouds
+# (only GCP are using this newer version interface now).
 def get_hourly_cost_impl(
     df: pd.DataFrame,
+    storage_df: pd.DataFrame,
     instance_type: str,
+    disk_size: int,
     use_spot: bool,
     region: Optional[str],
     zone: Optional[str],
 ) -> float:
     """Returns the hourly price of a VM instance in the given region and zone.
 
+    This implenemtation considered both vm price and storage price.
     Refer to get_hourly_cost in service_catalog/__init__.py for the docstring.
     """
+    # total_hourly_cost = instance_price + disk_size * storage_price
     df = _get_instance_type(df, instance_type, region, zone)
     if df.empty:
         if zone is None:
@@ -248,9 +266,17 @@ def get_hourly_cost_impl(
         # all the zones in the same region.
         assert region is None or len(set(df[price_str])) == 1, df
 
-    cheapest_idx = df[price_str].idxmin()
-    cheapest = df.loc[cheapest_idx]
-    return cheapest[price_str]
+    # TODO(tian): Make this more efficient.
+    cheapest_price = None
+    for _, row in df[['Region', price_str]].iterrows():
+        instance_region, price = row['Region'], row[price_str]
+        storage_price = get_region_cheapest_hourly_storage_cost(
+            storage_df, instance_region, disk_size)
+        cur_price = price + storage_price
+        if cheapest_price is None or cur_price < cheapest_price:
+            cheapest_price = cur_price
+    assert cheapest_price is not None
+    return cheapest_price
 
 
 def get_hourly_disk_cost_impl(
@@ -260,32 +286,24 @@ def get_hourly_disk_cost_impl(
     region: Optional[str],
     zone: Optional[str],
 ) -> float:
-    """Returns the hourly price of a VM instance in the given region and zone.
+    """Returns the hourly price in the given region.
 
     Refer to get_hourly_cost in service_catalog/__init__.py for the docstring.
     """
-    # TODO(tian): remove `use_spot` argument after double check it won't affect
-    # disk price
-    # assert default value here
-    assert not use_spot
-    df = _get_instance_type(df, instance_type, region, zone)
+    # Cheapest storage might not locate in the same region as instance are
+    # launched. So if region is not specified, considering sum of storage and
+    # instance price together.
+    if region is not None:
+        df = df[df['Region'] == region]
     if df.empty:
-        if zone is None:
-            if region is None:
-                region_or_zone = 'all regions'
-            else:
-                region_or_zone = f'region {region!r}'
+        if region is None:
+            pos = 'all regions'
         else:
-            region_or_zone = f'zone {zone!r}'
+            pos = f'region {region!r}'
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Instance type {instance_type!r} not found '
-                             f'in {region_or_zone}.')
+            raise ValueError(f'Storage not found in {pos}.')
 
-    # If the zone is specified, only one row should be found by the query.
-    assert zone is None or len(df) == 1, df
-    # TODO(tian): add a column in skypilot-org/skypilot-catalog named
-    # 'DiskPrice' that specify hourly disk price
-    disk_price_str = 'DiskPrice'
+    disk_price_str = 'Price'
 
     cheapest_idx = df[disk_price_str].idxmin()
     cheapest = df.loc[cheapest_idx]

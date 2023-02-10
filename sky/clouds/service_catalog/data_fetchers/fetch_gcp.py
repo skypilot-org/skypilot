@@ -6,7 +6,7 @@ and queries the GCP API to get the real-time prices of the VMs, GPUs, and TPUs.
 
 import argparse
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Tuple, Optional
 
 from googleapiclient import discovery
 import pandas as pd
@@ -47,24 +47,7 @@ SERIES_TO_DISCRIPTION = {
 }
 
 
-def get_skus(service_id: str) -> List[Dict[str, Any]]:
-    # Get the SKUs from the GCP API.
-    cb = discovery.build('cloudbilling', 'v1')
-    service_name = 'services/' + service_id
-
-    skus = []
-    page_token = ''
-    while True:
-        if page_token == '':
-            response = cb.services().skus().list(parent=service_name).execute()
-        else:
-            response = cb.services().skus().list(
-                parent=service_name, pageToken=page_token).execute()
-        skus += response['skus']
-        page_token = response['nextPageToken']
-        if not page_token:
-            break
-
+def filter_compute_skus(skus: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     # Prune unnecessary SKUs.
     new_skus = []
     for sku in skus:
@@ -94,12 +77,74 @@ def get_skus(service_id: str) -> List[Dict[str, Any]]:
     return new_skus
 
 
+def filter_storage_skus(skus: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    # Prune unnecessary SKUs.
+    new_skus = []
+    for sku in skus:
+        # Prune SKUs that are not Storage (i.e., Compute, Network, and License).
+        if sku['category']['resourceFamily'] != 'Storage':
+            continue
+        # Prune non-standard storage SKUs.
+        if sku['category']['resourceGroup'] != 'PDStandard':
+            continue
+        assert sku['category']['usageType'] == 'OnDemand'
+        assert sku['pricingInfo'][0]['pricingExpression'][
+            'usageUnit'] == 'GiBy.mo'
+        new_skus.append(sku)
+    return new_skus
+
+
+def get_all_skus(service_id: str) -> List[Dict[str, Any]]:
+    # Get the SKUs from the GCP API.
+    cb = discovery.build('cloudbilling', 'v1')
+    service_name = 'services/' + service_id
+
+    skus = []
+    page_token = ''
+    while True:
+        if page_token == '':
+            response = cb.services().skus().list(parent=service_name).execute()
+        else:
+            response = cb.services().skus().list(
+                parent=service_name, pageToken=page_token).execute()
+        skus += response['skus']
+        page_token = response['nextPageToken']
+        if not page_token:
+            break
+    return skus
+
+
+def get_skus(service_id: str) -> List[Dict[str, Any]]:
+    skus = get_all_skus(service_id)
+    return filter_compute_skus(skus)
+
+
+def get_storage_skus(service_id: str) -> List[Dict[str, Any]]:
+    skus = get_all_skus(service_id)
+    return filter_storage_skus(skus)
+
+
 def _get_unit_price(sku: Dict[str, Any]) -> float:
     pricing_info = sku['pricingInfo'][0]['pricingExpression']
     unit_price = pricing_info['tieredRates'][0]['unitPrice']
     units = int(unit_price['units'])
     nanos = unit_price['nanos'] / 1e9
     return units + nanos
+
+
+def _get_tired_unit_price(sku: Dict[str, Any]) -> float:
+    pricing_info = sku['pricingInfo'][0]['pricingExpression']
+
+    def _get_tired_price(tier: int) -> float:
+        unit_price = pricing_info['tieredRates'][tier]['unitPrice']
+        units = int(unit_price['units'])
+        nanos = unit_price['nanos'] / 1e9
+        return units + nanos
+
+    # TODO(tian): Ignore first tier for now since it only applies to
+    # first 30 GiBy.mo.
+    return _get_tired_price(0) if len(
+        pricing_info['tieredRates']) == 1 else _get_tired_price(1)
 
 
 def get_vm_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
@@ -305,6 +350,25 @@ def get_catalog_df(region_prefix: str) -> pd.DataFrame:
     return df
 
 
+def get_storage_df() -> pd.DataFrame:
+    # TODO(tian): is TPU machine use same storage SKUs as GCE?
+    storage_skus = get_storage_skus(GCE_SERVICE_ID)
+    storage_df = pd.DataFrame(columns=['Name', 'Region', 'Price'])
+    for sku in storage_skus:
+        name = sku['name']
+        regions = sku['serviceRegions']
+        price = _get_tired_unit_price(sku)
+        for region in regions:
+            storage_df = storage_df.append(
+                {
+                    'Name': name,
+                    'Region': region,
+                    'Price': price
+                },
+                ignore_index=True)
+    return storage_df
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -319,3 +383,7 @@ if __name__ == '__main__':
     os.makedirs('gcp', exist_ok=True)
     catalog_df.to_csv('gcp/vms.csv', index=False)
     print('GCP Service Catalog saved to gcp/vms.csv')
+
+    storage_df = get_storage_df()
+    storage_df.to_csv('gcp/storage.csv', index=False)
+    print('GCP Storage Catalog saved to gcp/storage.csv')

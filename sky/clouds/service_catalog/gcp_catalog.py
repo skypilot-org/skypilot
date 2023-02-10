@@ -17,6 +17,7 @@ if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
 _df = common.read_catalog('gcp/vms.csv')
+_storage_df = common.read_catalog('gcp/storage.csv')
 _image_df = common.read_catalog('gcp/images.csv')
 
 _TPU_REGIONS = [
@@ -153,6 +154,7 @@ def instance_type_exists(instance_type: str) -> bool:
 
 def get_hourly_cost(
     instance_type: str,
+    disk_size: int,
     use_spot: bool = False,
     region: Optional[str] = None,
     zone: Optional[str] = None,
@@ -160,8 +162,8 @@ def get_hourly_cost(
     if instance_type == 'TPU-VM':
         # Currently the host VM of TPU does not cost extra.
         return 0
-    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
-                                       zone)
+    return common.get_hourly_cost_impl(_df, _storage_df, instance_type,
+                                       disk_size, use_spot, region, zone)
 
 
 def get_hourly_disk_cost(
