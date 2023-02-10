@@ -2332,7 +2332,7 @@ def _down_or_stop_clusters(
                 # controller).
                 assert len(reserved_clusters) == 1, reserved_clusters
                 _hint_or_raise_for_down_spot_controller(reserved_clusters[0])
-                confirm_str = 'I understand and down'
+                confirm_str = 'delete'
                 user_input = click.prompt(
                     f'To proceed, please check the warning above and type '
                     f'{colorama.Style.BRIGHT}{confirm_str!r}'
