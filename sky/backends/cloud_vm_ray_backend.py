@@ -2355,6 +2355,7 @@ class CloudVmRayBackend(backends.Backend):
 
             if isinstance(handle.launched_resources.cloud, clouds.AWS):
                 ip_list = self._post_provision_setup(
+                    repr(handle.launched_resources.cloud),
                     cluster_name,
                     to_provision_config,
                     handle,
@@ -2460,7 +2461,7 @@ class CloudVmRayBackend(backends.Backend):
                 return handle
 
     def _post_provision_setup(
-            self, cluster_name: str,
+            self, cloud_name: str, cluster_name: str,
             to_provision_config: RetryingVmProvisioner.ToProvisionConfig,
             handle: ResourceHandle, local_wheel_path: pathlib.Path,
             wheel_hash: str, cluster_config_file: str):
@@ -2480,11 +2481,16 @@ class CloudVmRayBackend(backends.Backend):
                                                         'upload_wheels',
                                                         wheel_hash) as updated:
             if updated:
+                # we mount the metadata with sky wheel for speedup
+                metadata_path = provision_utils.generate_metadata(
+                    cloud_name, cluster_name)
                 self._execute_file_mounts(
                     handle,
                     file_mounts={
                         backend_utils.SKY_REMOTE_PATH + '/' + wheel_hash:
-                            str(local_wheel_path)
+                            str(local_wheel_path),
+                        backend_utils.SKY_REMOTE_METADATA_PATH:
+                            str(metadata_path)
                     })
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)

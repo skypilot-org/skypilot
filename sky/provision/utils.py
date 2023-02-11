@@ -1,9 +1,10 @@
 """Utils for provisioning"""
 import contextlib
+import json
 import pathlib
 import shutil
 import time
-from typing import List
+from typing import List, Dict, Optional
 
 import socket
 from sky.backends import backend_utils
@@ -57,3 +58,22 @@ def remove_cluster_profile(cluster_name: str) -> None:
     """
     dirname = SKY_CLUSTER_PATH / cluster_name
     shutil.rmtree(dirname, ignore_errors=True)
+
+
+def generate_metadata(cloud_name: str, cluster_name: str) -> pathlib.Path:
+    metadata = {
+        'cloud': cloud_name,
+        'cluster_name': cluster_name,
+    }
+    path = SKY_CLUSTER_PATH / cluster_name / 'metadata.json'
+    with open(path, 'w') as f:
+        json.dump(metadata, f)
+    return path
+
+
+def get_metadata_in_cluster() -> Optional[Dict]:
+    try:
+        with open(pathlib.Path.home() / '.sky' / 'metadata.json') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
