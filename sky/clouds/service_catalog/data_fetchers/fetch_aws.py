@@ -161,7 +161,9 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         if zone_df is None:
             raise RuntimeError(f'No access to region {region}')
 
-        df, pricing_df, spot_pricing_df = asyncio.get_event_loop().run_until_complete(
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        df, pricing_df, spot_pricing_df = loop.run_until_complete(
             asyncio.gather(_get_instance_types(region),
                            _get_pricing_table(region),
                            _get_spot_pricing_table(region)))
