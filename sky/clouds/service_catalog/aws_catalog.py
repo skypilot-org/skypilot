@@ -48,12 +48,9 @@ def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
     if not os.path.exists(az_mapping_path):
         # Fetch az mapping from AWS.
         # pylint: disable=import-outside-toplevel
-        import ray
         from sky.clouds.service_catalog.data_fetchers import fetch_aws
         logger.info(f'{colorama.Style.DIM}Fetching availability zones mapping '
                     f'for AWS...{colorama.Style.RESET_ALL}')
-        with ux_utils.suppress_output():
-            ray.init()
         az_mappings = fetch_aws.fetch_availability_zone_mappings()
         az_mappings.to_csv(az_mapping_path, index=False)
     else:
