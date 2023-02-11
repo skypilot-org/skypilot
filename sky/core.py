@@ -758,9 +758,11 @@ def spot_queue(refresh: bool,
         stream_logs=False,
         separate_stderr=True)
     try:
-        subprocess_utils.handle_returncode(returncode, code,
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
                                            'Failed to fetch managed spot jobs',
-                                           stderr)
+                                           stderr,
+                                           stream_logs=False)
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 

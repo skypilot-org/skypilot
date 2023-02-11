@@ -12,7 +12,6 @@ import pandas as pd
 
 from sky import sky_logging
 from sky.clouds.service_catalog import common
-from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud

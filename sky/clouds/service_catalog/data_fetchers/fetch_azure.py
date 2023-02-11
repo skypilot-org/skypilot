@@ -3,7 +3,6 @@
 This script takes about 1 minute to finish.
 """
 import argparse
-import asyncio
 import json
 import multiprocessing
 import os
@@ -91,12 +90,6 @@ def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
               (df['unitPrice'] > 0)]
 
 
-def get_all_regions_pricing_df(regions: Set[str]) -> pd.DataFrame:
-    with multiprocessing.Pool() as pool:
-        dfs = pool.map(get_pricing_df, regions)
-    return pd.concat(dfs)
-
-
 def get_sku_df(region_set: Set[str]) -> pd.DataFrame:
     print('Fetching SKU list')
     # To get a complete list, --all option is necessary.
@@ -149,8 +142,14 @@ def get_gpu_name(family: str) -> Optional[str]:
 
 
 def get_all_regions_instance_types_df(region_set: Set[str]):
-    df = get_all_regions_pricing_df(region_set)
-    df_sku = get_sku_df(region_set)
+    with multiprocessing.Pool() as pool:
+        dfs = pool.map_async(get_pricing_df, region_set)
+        df_sku = pool.apply_async(get_sku_df, (region_set,))
+        dfs.wait()
+        dfs = dfs.get()
+        df = pd.concat(dfs)
+        df_sku.wait()
+        df_sku = df_sku.get()
 
     print('Processing dataframes')
     df.drop_duplicates(inplace=True)

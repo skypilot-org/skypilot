@@ -307,14 +307,16 @@ def _get_image_row(
 
 
 def get_all_regions_images_df(regions: Set[str]) -> pd.DataFrame:
-    args = [(r, *i) for r, i in itertools.product(regions, _GPU_UBUNTU_DATE_PYTORCH)]
+    image_metas = [
+        (r, *i) for r, i in itertools.product(regions, _GPU_UBUNTU_DATE_PYTORCH)
+    ]
     with multiprocessing.Pool() as pool:
-        results = pool.starmap(_get_image_row, args)
-    results = pd.DataFrame(
+        results = pool.starmap(_get_image_row, image_metas)
+    result_df = pd.DataFrame(
         results,
         columns=['Tag', 'Region', 'OS', 'OSVersion', 'ImageId', 'CreationDate'])
-    results.sort_values(['Tag', 'Region'], inplace=True)
-    return results
+    result_df.sort_values(['Tag', 'Region'], inplace=True)
+    return result_df
 
 
 def fetch_availability_zone_mappings() -> pd.DataFrame:
