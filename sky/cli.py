@@ -1517,8 +1517,9 @@ def status(all: bool, refresh: bool, clusters: List[str]):  # pylint: disable=re
                 pool.close()
                 pool.join()
             except SystemExit as e:
-                # This is to avoid a problem caused by ray worker setting the
-                # sigterm handler to sys.exit(15) (see ray/worker.py).
+                # This is to avoid a "Exception ignored" problem caused by ray
+                # worker setting the sigterm handler to sys.exit(15) (see
+                # ray/worker.py).
                 if e.code != 15:
                     raise
     click.echo(msg)

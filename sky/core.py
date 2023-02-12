@@ -742,8 +742,10 @@ def spot_queue(refresh: bool,
               f'{colorama.Style.RESET_ALL}')
 
         handle = _start(spot.SPOT_CONTROLLER_NAME)
+        controller_status = global_user_state.ClusterStatus.UP
 
-    if handle is None or handle.head_ip is None:
+    if (controller_status == global_user_state.ClusterStatus.STOPPED or
+        (handle is None or handle.head_ip is None)):
         raise exceptions.ClusterNotUpError('Spot controller is not up.',
                                            cluster_status=controller_status)
 
