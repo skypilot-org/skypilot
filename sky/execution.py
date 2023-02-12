@@ -318,7 +318,7 @@ def _execute(
             # Disable the usage collection for this status command.
             env = dict(os.environ,
                        **{env_options.Options.DISABLE_LOGGING.value: '1'})
-            subprocess_utils.run('sky status', env=env)
+            subprocess_utils.run('sky status --no-show-spot-queue', env=env)
         print()
         print('\x1b[?25h', end='')  # Show cursor.
 

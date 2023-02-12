@@ -1414,13 +1414,19 @@ def _get_in_progress_spot_jobs():
     is_flag=True,
     required=False,
     help='Query the latest cluster statuses from the cloud provider(s).')
+@click.option('--show-spot-queue/--no-show-spot-queue',
+              default=True,
+              is_flag=True,
+              required=False,
+              help='Show spot queue information.')
 @click.argument('clusters',
                 required=False,
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
-def status(all: bool, refresh: bool, clusters: List[str]):  # pylint: disable=redefined-builtin
+def status(all: bool, refresh: bool, show_spot_queue: bool,
+           clusters: List[str]):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1472,7 +1478,8 @@ def status(all: bool, refresh: bool, clusters: List[str]):  # pylint: disable=re
     """
     with multiprocessing.Pool(1) as pool:
         # Run the spot job query in parallel to speed up the status query.
-        spot_jobs_future = pool.apply_async(_get_in_progress_spot_jobs, ())
+        if show_spot_queue:
+            spot_jobs_future = pool.apply_async(_get_in_progress_spot_jobs, ())
 
         if clusters:
             clusters = _get_glob_clusters(clusters)
@@ -1509,20 +1516,22 @@ def status(all: bool, refresh: bool, clusters: List[str]):  # pylint: disable=re
                        f'{colorama.Style.RESET_ALL}')
         status_utils.show_local_status_table(local_clusters)
 
-        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Managed spot jobs{colorama.Style.RESET_ALL}')
-        with backend_utils.safe_console_status('[cyan] Checking spot jobs[/]'):
-            msg = spot_jobs_future.get()
-            try:
-                pool.close()
-                pool.join()
-            except SystemExit as e:
-                # This is to avoid a "Exception ignored" problem caused by ray
-                # worker setting the sigterm handler to sys.exit(15) (see
-                # ray/worker.py).
-                if e.code != 15:
-                    raise
-    click.echo(msg)
+        if show_spot_queue:
+            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Managed spot jobs{colorama.Style.RESET_ALL}')
+            with backend_utils.safe_console_status(
+                    '[cyan] Checking spot jobs[/]'):
+                msg = spot_jobs_future.get()
+                try:
+                    pool.close()
+                    pool.join()
+                except SystemExit as e:
+                    # This is to avoid a "Exception ignored" problem caused by ray
+                    # worker setting the sigterm handler to sys.exit(15) (see
+                    # ray/_private/worker.py).
+                    if e.code != 15:
+                        raise
+            click.echo(msg)
 
 
 @cli.command()
