@@ -1425,8 +1425,9 @@ def _get_in_progress_spot_jobs():
                 nargs=-1,
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
+# pylint: disable=redefined-builtin
 def status(all: bool, refresh: bool, show_spot_queue: bool,
-           clusters: List[str]):  # pylint: disable=redefined-builtin
+           clusters: List[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1526,9 +1527,9 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
                     pool.close()
                     pool.join()
                 except SystemExit as e:
-                    # This is to avoid a "Exception ignored" problem caused by ray
-                    # worker setting the sigterm handler to sys.exit(15) (see
-                    # ray/_private/worker.py).
+                    # This is to avoid a "Exception ignored" problem caused by
+                    # ray worker setting the sigterm handler to sys.exit(15)
+                    # (see ray/_private/worker.py).
                     if e.code != 15:
                         raise
             click.echo(msg)
