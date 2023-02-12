@@ -1512,11 +1512,16 @@ def status(all: bool, refresh: bool, clusters: List[str]):  # pylint: disable=re
         click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Managed spot jobs{colorama.Style.RESET_ALL}')
         with backend_utils.safe_console_status('[cyan] Checking spot jobs[/]'):
-            # wait() is needed to avoid multiprocess complaining about
-            # unhandled SIGTERM.
-            spot_jobs_future.wait()
             msg = spot_jobs_future.get()
-        click.echo(msg)
+            try:
+                pool.close()
+                pool.join()
+            except SystemExit as e:
+                # This is to avoid a problem caused by ray worker setting the
+                # sigterm handler to sys.exit(15) (see ray/worker.py).
+                if e.code != 15:
+                    raise
+    click.echo(msg)
 
 
 @cli.command()
