@@ -226,7 +226,7 @@ class IBMVPCNodeProvider(NodeProvider):
         self.deleted_nodes = []  # ids of nodes scheduled for deletion.
 
         # if cache_stopped_nodes == true, nodes will be stopped
-        #   instead of deleted to accommodate future rise in demand
+        #   instead of deleted to better accommodate future rise in demand
         self.cache_stopped_nodes = provider_config.get(
             "cache_stopped_nodes", True)
 
@@ -725,10 +725,6 @@ class IBMVPCNodeProvider(NodeProvider):
             self.vpc_tags = self.vpc_provider.create_or_fetch_vpc(
                 self.region, self.zone)
 
-        logger.debug(
-            f"""create_node: count:{count}\n
-            tags:{tags}\n
-            base_config:{base_config}\n""")
         stopped_nodes_dict = {}
         futures = []
 
@@ -796,6 +792,13 @@ class IBMVPCNodeProvider(NodeProvider):
         vpc_id_to_delete = None
         if self._get_node_type(node["name"]) == NODE_KIND_HEAD and node["status"] != "failed":
             vpc_id_to_delete = self.ibm_vpc_client.get_instance(node_id).get_result()["vpc"]["id"]
+
+            # if the request is executed by the remote head like in `sky autostop --down`
+            # , in contrast to `sky down`, use cloud functions to delete the VPC
+            # with its associated resources. 
+            hostname = socket.gethostname()  # returns the instance's (VSI) name
+            if self._get_node_type(hostname) == NODE_KIND_HEAD:
+                self.vpc_provider.remote_cluster_removal(vpc_id_to_delete, self.region)
 
         try:
             floating_ips = []

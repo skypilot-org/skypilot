@@ -10,7 +10,7 @@ def get_logger(caller_name):
     logs of level DEBUG and higher will be directed to file under LOGS_FOLDER.
     logs of level INFO and higher will be directed to console output.
     """
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger(caller_name)
     LOGS_FOLDER = "/tmp/connector_logs/" # this node_provider's logs location.
     logger.setLevel(logging.DEBUG)
 

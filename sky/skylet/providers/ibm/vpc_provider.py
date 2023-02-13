@@ -7,9 +7,13 @@ nodes under the same subnet, tagged by the same cluster name.
 import uuid
 import copy
 import time
+import requests
+import json
+import textwrap
 from sky.adaptors import ibm
 from sky.skylet.providers.ibm.utils import get_logger
 from ibm_cloud_sdk_core import ApiException
+from ray.autoscaler._private.cli_logger import cli_logger
 
 # pylint: disable=line-too-long
 logger = get_logger('vpc_provider_')
@@ -70,7 +74,7 @@ class IBMVPCProvider():
                         reused_vpc_data['id'], self.zone, subnet_in_zone)
             else:  # create new subnet and gateway
                 subnet_data = self.create_subnet(
-                    reused_vpc_data['id'], self.region)
+                    reused_vpc_data['id'], self.zone)
                 subnet_id = subnet_data['id']
                 public_gateway = self.create_public_gateway(
                     reused_vpc_data['id'], self.zone, subnet_data)
@@ -116,10 +120,14 @@ class IBMVPCProvider():
         # searching for the CIDR block (internal ip range) matching the
         # specified zone of a VPC (whose region has already been set)
         address_prefixes = res['address_prefixes']
-        for address_prefix in address_prefixes:
-            if address_prefix['zone']['name'] == zone_name:
-                ipv4_cidr_block = address_prefix['cidr']
-                break
+        ipv4_cidr_block = next((address_prefix['cidr'] for address_prefix
+                                 in address_prefixes if 
+                                 address_prefix['zone']['name'] == zone_name),
+                                  None)
+        if not ipv4_cidr_block:
+            raise Exception("Failed to locate a cidr block "
+                f"Matching the zone name: {zone_name} to create "
+                "a subnet")
 
         subnet_prototype = {}
         subnet_prototype['zone'] = {'name': zone_name}
@@ -315,6 +323,15 @@ class IBMVPCProvider():
                         unsatisfied_rules.pop('inbound_tcp_sg', None)
 
         return unsatisfied_rules
+    
+    def remote_cluster_removal(self, vpc_id, region):
+        """deletes the vpc and its associated resources 
+        using the FaaS service: ibm cloud functions. 
+        Used only when cluster is set to be deleted 
+        remotely, e.g. by `sky autostop --down` """
+        cc = ClusterCleaner(self.resource_group_id,
+                    vpc_id, region)
+        cc.delete_cluster()
 
 
 def _build_security_group_rule_prototype_model(missing_rule, sg_id=None):
@@ -344,3 +361,272 @@ def _build_security_group_rule_prototype_model(missing_rule, sg_id=None):
         'port_min': port_min,
         'port_max': port_max
     }
+
+class ClusterCleaner:
+    """Responsible for deleting a cluster with all its associated
+    resources. Used when the remote cluster head is requested to
+    dismantle its cluster. """
+
+    namespace_region = "us-east"
+    namespace_name = "skypilot-namespace"
+    action_name = "skypilot-vpc-cleaner-action"
+
+    def __init__(self, resource_group_id, vpc_id, vpc_region) -> None:
+        self.resource_group_id = resource_group_id
+        self.vpc_id = vpc_id
+        self.vpc_region = vpc_region
+
+    function_code = textwrap.dedent("""
+    import subprocess
+    import os
+    import time
+
+    ibm_vpc_client = None
+    # modules installed and imported entry point
+    ibm_vpc = None
+    ibm_cloud_sdk_core = None
+        
+    def get_vpc_data(vpc_id):
+        
+        if not vpc_id: return None
+        try:
+            vpc_data = ibm_vpc_client.get_vpc(vpc_id).result
+            return vpc_data
+        except ibm_cloud_sdk_core.ApiException as e:
+            if e.code == 404:
+                print(("VPC doesn't exist."))
+                return None
+            else: raise 
+
+    def delete_subnets(vpc_data):
+        def _poll_subnet_exists(subnet_id):
+            tries = 30 # waits up to 5 min with 10 sec interval
+            sleep_interval = 10
+            while tries:
+                try:
+                    subnet_data = ibm_vpc_client.get_subnet(subnet_id).result
+                except Exception:
+                    print('Deleted subnet id: {}'.format(subnet_id))
+                    return True
+                tries -= 1
+                time.sleep(sleep_interval)
+            print(f"Failed to delete instance within expected time frame of {tries*sleep_interval/60} minutes.")
+            return False
+
+        subnets_attached_to_routing_table = ibm_vpc_client.list_subnets(routing_table_id = vpc_data['default_routing_table']['id']).get_result()['subnets']
+        subnets_ids = [subnet['id'] for subnet in subnets_attached_to_routing_table]
+        for id in subnets_ids:
+            try:
+                ibm_vpc_client.delete_subnet(id).get_result()
+                _poll_subnet_exists(id)
+            except ibm_cloud_sdk_core.ApiException as e:
+                if e.code == 404:
+                    print("subnet doesn't exist.")
+
+    def delete_gateways(vpc_id):
+        gateways = ibm_vpc_client.list_public_gateways(resource_group_id=RESOURCE_GROUP_ID).get_result()['public_gateways']
+        gateways_ids_of_vpc = [gateway['id'] for gateway in gateways if gateway['vpc']['id']== vpc_id]
+        for gateway_id in gateways_ids_of_vpc:
+            deleting_resource = True
+            while deleting_resource:
+                try:
+                    ibm_vpc_client.delete_public_gateway(gateway_id).get_result()
+                    deleting_resource = False
+                except ibm_cloud_sdk_core.ApiException as e:
+                    if e.code == 404:
+                        print("gateway doesn't exist.") 
+                        deleting_resource = False
+                    if e.code == 409:
+                        print("gateway still in use.")
+                        # will retry until cloud functions timeout. 
+                        time.sleep(10) 
+
+    def delete_instances(vpc_id):
+        def _poll_instance_exists(instance_id):
+            tries = 20
+            sleep_interval = 3
+            while tries:
+                try:
+                    instance_data = ibm_vpc_client.get_instance(instance_id).get_result()
+                except Exception:
+                    print(f'Deleted VM instance with id: {instance_id}')
+                    return True
+                tries -= 1
+                time.sleep(sleep_interval)
+            print(f"Failed to delete instance within expected time frame of {(tries*sleep_interval)/60} minutes.")
+            return False
+
+        instances = ibm_vpc_client.list_instances(vpc_id=vpc_id).get_result()['instances']
+        instances_ids = [instance['id'] for instance in instances]
+        for id in instances_ids:
+            ibm_vpc_client.delete_instance(id=id).get_result()
+            _poll_instance_exists(id)
+
+    def delete_vpc(vpc_id):
+        vpc_data = get_vpc_data(vpc_id)
+        if not vpc_data:
+            print((f"Failed to find a VPC with id={vpc_id}"))
+            return
+        print(f"Deleting vpc:{vpc_data['name']} with id:{vpc_id}")
+        delete_instances(vpc_data['id'])
+        delete_subnets(vpc_data)
+        delete_gateways(vpc_id)
+        ibm_vpc_client.delete_vpc(vpc_id)
+        print(f"VPC {vpc_data['name']} and its attached resources were deleted successfully")
+
+
+    def main(dict):
+        global ibm_vpc_client, RESOURCE_GROUP_ID, ibm_cloud_sdk_core, ibm_vpc
+        def install_package(package):
+            pip_location_stdout = subprocess.run(['which', 'pip'], capture_output=True, text=True)
+            pip_location = pip_location_stdout.stdout.strip()
+            subprocess.call([pip_location, 'install', package], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+                
+        for package in ["ibm-vpc", "ibm-cloud-sdk-core"]:
+            install_package(package)
+
+        import ibm_vpc as _ibm_vpc
+        import ibm_cloud_sdk_core as _ibm_cloud_sdk_core
+        ibm_vpc = _ibm_vpc
+        ibm_cloud_sdk_core = _ibm_cloud_sdk_core
+
+        iam_api_key, RESOURCE_GROUP_ID, vpc_id, region = dict['iam_api_key'], dict['resource_group_id'], dict['vpc_id'], dict['region']
+
+        authenticator = ibm_cloud_sdk_core.authenticators.IAMAuthenticator(iam_api_key, url=None)
+        ibm_vpc_client = ibm_vpc.VpcV1('2022-06-30',authenticator=authenticator)
+
+        if not region:
+            raise Exception("VPC not found in any region")
+
+        ibm_vpc_client.set_service_url(f'https://{region}.iaas.cloud.ibm.com/v1')
+        
+        delete_vpc(vpc_id=vpc_id)
+        return {"Status": "Success"}
+        """)
+
+    def get_headers(self):
+        return {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": "Bearer " + ibm.get_oauth_token()
+        }
+
+    def create_or_fetch_namespace(self):
+        """returns namespace id.
+        creates a namespace with given name in specified region. 
+        if namespace exists returns its id instead. """
+
+        def _create_new_namespace():
+            cli_logger.print(f"Creating a new namespace: {self.namespace_name} in {self.namespace_region}")
+           
+            data = {"name": self.namespace_name, "resource_group_id": self.resource_group_id,
+                "resource_plan_id": "functions-base-plan"}
+        
+            res = requests.post(f'https://{self.namespace_region}.functions.cloud.ibm.com/api/v1/namespaces',
+                                    headers=self.get_headers(), json=data).json()
+            if res.status_code!=200:
+                cli_logger.error(res.text)                                    
+            namespace_id = res['id']                            
+            cli_logger.print(f'Created new namespace with id: {namespace_id}')
+            return namespace_id
+
+        def _get_cloud_function_namespaces_metadata(offset=0):
+            """returns meta data on namespaces of ibm cloud functions within a specified region
+            :param offset - offset from the beginning of the list of results attained from the GET request,
+                            which may contain up to 200 namespaces per http response"""
+
+            res = requests.get(f"https://{self.namespace_region}.functions.cloud.ibm.com/api/v1/namespaces?limit=200&offset={offset}",
+                 headers=self.get_headers())
+            return json.loads(res.text)
+            
+        def _get_cloud_function_namespaces():
+            """returns relevant metadata on existing namespaces within a given region."""
+            cli_logger.print(f'Obtaining Cloud Function namespaces in {self.namespace_region}')
+
+            namespaces = []
+            
+            collecting_namespaces = True
+            max_limit = 200
+            offset = 0
+
+            #  request for namespaces is limited to 200 at a time, thus the request is fulfilled in increments of 200s.
+            while collecting_namespaces:
+                namespace_metadata = _get_cloud_function_namespaces_metadata(offset)
+                if namespace_metadata['total_count'] == max_limit:
+                    offset += max_limit
+                else:
+                    collecting_namespaces = False
+
+                for name_space in namespace_metadata['namespaces']:
+                    if 'name' in name_space:  # API based namespace
+                        namespaces.append({'name': name_space['name'], 'type': 'API_based', 'id': name_space['id'],
+                                            'region': name_space['location']})
+
+                    else:  # cloud foundry based namespace
+                        namespaces.append(
+                            {'name': name_space['id'], 'type': 'CF_based', 'region': name_space['location']})
+
+            return namespaces
+
+        
+        namespaces_in_region = _get_cloud_function_namespaces()
+        target_namespace_id = None
+        if namespaces_in_region:
+            target_namespace_id = next((namespace['id'] for namespace in
+                namespaces_in_region if namespace['name']==self.namespace_name),None)
+        if not target_namespace_id:
+            target_namespace_id = _create_new_namespace()
+        else:
+            cli_logger.print(f"Reusing namespace: {target_namespace_id}")
+        return target_namespace_id
+        
+    def _get_cloud_functions_actions(self, namespace_id):
+        """returns meta data on namespaces of ibm cloud functions within a specified region
+        :param offset - offset from the beginning of the list of results attained from the GET request,
+                        which may contain up to 200 namespaces per http response"""
+
+        res = requests.get(f"https://{self.namespace_region}.functions.cloud.ibm.com/api/v1/namespaces/{namespace_id}/actions?limit=200", headers=self.get_headers())
+        return json.loads(res.text)
+
+    def create_action(self, namespace_id):
+        cli_logger.print(f"creating action on namespace: {namespace_id}")
+        # Define the function parameters
+        function_params = {
+            "exec": {
+                "kind": "python:3.9",
+                "code": self.function_code
+            },
+            "limits":{
+                "timeout":600000
+            }
+        }
+        res = requests.put(f"https://{self.namespace_region}.functions.cloud.ibm.com/api/v1/namespaces/{namespace_id}/actions/{self.action_name}?blocking=true&overwrite=true", headers=self.get_headers(), data=json.dumps(function_params))
+        if res.status_code!=200:
+            cli_logger.error(res.text)        
+        return json.loads(res.text)
+
+    def delete_action(self, namespace_id):
+        """return the deleted function's metadata if it existed."""
+        cli_logger.print(f"deleting action on namespace: {namespace_id}")
+        res = requests.delete(f"https://{self.namespace_region}.functions.cloud.ibm.com/api/v1/namespaces/{namespace_id}/actions/{self.action_name}?blocking=true", headers=self.get_headers())
+        if res.status_code!=200:
+            cli_logger.error(res.text)
+        return json.loads(res.text)
+
+    def invoke_action(self, namespace_id:str):
+        cli_logger.print(f"invoking action on namespace: {namespace_id}")
+        payload = {'iam_api_key':ibm.get_api_key(),'resource_group_id':self.resource_group_id, 'vpc_id':self.vpc_id, 'region': self.vpc_region}
+        res = requests.post(f"https://{self.namespace_region}.functions.cloud.ibm.com/api/v1/namespaces/{namespace_id}/actions/{self.action_name}?blocking=true", headers=self.get_headers(), data=json.dumps(payload))
+        if res.status_code!=200:
+            cli_logger.error(res.text)
+        return json.loads(res.text)
+
+    def delete_cluster(self):
+        """Deletes the VPC who's id==self.vpc_id.
+        1. creates a namespace named ClusterCleaner.namespace_name if doesn't exists.
+        2. using idempotent function that deletes an action named ClusterCleaner.action_name if exists.
+        3. invokes the action to delete the VPC and all its resources."""
+        namespace_id = self.create_or_fetch_namespace()
+        self.delete_action(namespace_id)
+        self.create_action(namespace_id)
+        self.invoke_action(namespace_id)
