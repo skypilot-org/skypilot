@@ -1723,6 +1723,7 @@ def _query_status_ibm(
         'stopped': global_user_state.ClusterStatus.STOPPED,
         'deleting': None,
         'failed': None,
+        'cluster_deleted': []
     }
 
     client = ibm.client(region=ray_config['provider']['region'])
@@ -1734,9 +1735,12 @@ def _query_status_ibm(
         fields=['tags', 'region', 'type'],
         limit=1000).get_result()['items']
     if not vpcs_filtered_by_tags_and_region:
-        logger.error('No instances were found for a vpc in'
-                     f' in {ray_config["provider"]["region"]}'
-                     f'with tag: {cluster}')
+        # a vpc could have been removed unkownlingly to skypilot, such as
+        # via `sky autostop --down`, or simply manually (e.g. via console).
+        logger.warning('No vpc exists in '
+                       f'{ray_config["provider"]["region"]} '
+                       f'with tag: {cluster}')
+        return status_map['cluster_deleted']
     vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(':', 1)[-1]
     instances = client.list_instances(vpc_id=vpc_id).get_result()['instances']
 
