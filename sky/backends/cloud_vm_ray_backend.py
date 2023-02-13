@@ -881,7 +881,7 @@ class RetryingVmProvisioner(object):
         cloud_type = type(cloud)
         if cloud_type not in handlers:
             raise NotImplementedError(
-                'Cloud {cloud} unknown, or has not added '
+                f'Cloud {cloud} unknown, or has not added '
                 'support for parsing and handling provision failures.')
         handler = handlers[cloud_type]
         handler(launchable_resources, region, zones, stdout, stderr)
