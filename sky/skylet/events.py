@@ -4,6 +4,7 @@ import math
 import os
 import re
 import subprocess
+import sys
 import time
 import traceback
 
@@ -136,11 +137,19 @@ class AutostopEvent(SkyletEvent):
             # workers. Otherwise, `ray down --workers-only` will continuously
             # scale down and up.
             logger.info('Running ray up.')
-            subprocess.run([
-                'ray', 'up', '-y', '--restart-only', '--disable-usage-stats',
-                self._ray_yaml_path
-            ],
-                           check=True)
+            script = (cloud_vm_ray_backend.
+                      write_ray_up_script_with_patched_launch_hash_fn(
+                          self._ray_yaml_path,
+                          ray_up_kwargs={'restart_only': True}))
+            subprocess.run(
+                [sys.executable, script],
+                check=True,
+                # Use environment variables to disable the ray usage collection
+                # (to avoid overheads and potential issues with the usage)
+                # as sdk does not take the argument for disabling the usage
+                # collection.
+                env=dict(os.environ, RAY_USAGE_STATS_ENABLED='0'),
+            )
 
             logger.info('Running ray down.')
             # Stop the workers first to avoid orphan workers.

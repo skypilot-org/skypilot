@@ -129,6 +129,9 @@ def show_cost_report_table(cluster_records: List[Dict[str, Any]],
         StatusColumn('RESOURCES',
                      _get_resources_for_cost_report,
                      trunc_length=70 if not show_all else 0),
+        StatusColumn('STATUS',
+                     _get_status_for_cost_report,
+                     show_by_default=True),
         StatusColumn('HOURLY_PRICE', _get_price, show_by_default=True),
         StatusColumn('COST (est.)', get_cost_report, show_by_default=True),
     ]
@@ -269,6 +272,13 @@ _get_duration = (lambda cluster_status: log_utils.readable_time_duration(
 
 def _get_status(cluster_status):
     status = cluster_status['status']
+    return status.colored_str()
+
+
+def _get_status_for_cost_report(cluster_status):
+    status = cluster_status['status']
+    if status is None:
+        return f'{colorama.Style.DIM}{"TERMINATED"}{colorama.Style.RESET_ALL}'
     return status.colored_str()
 
 

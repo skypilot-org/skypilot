@@ -94,6 +94,18 @@ class Optimizer:
             minimize=OptimizeTarget.COST,
             blocked_resources: Optional[List[resources_lib.Resources]] = None,
             quiet: bool = False):
+        """Find the best execution plan for the given DAG.
+
+        Args:
+            dag: the DAG to optimize.
+            minimize: whether to minimize cost or time.
+            blocked_resources: a list of resources that should not be used.
+            quiet: whether to suppress logging.
+
+        Raises:
+            exceptions.ResourcesUnavailableError: if no resources are available
+                for a task.
+        """
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
         Optimizer._add_dummy_source_sink_nodes(dag)
