@@ -61,7 +61,10 @@ class AzureNodeProvider(NodeProvider):
         # group after tearing down the cluster. To comfort the autoscaler, we need
         # to create/update it here, so the resource group always exists.
         from sky.skylet.providers.azure.config import _configure_resource_group
-        _configure_resource_group({"cluster_name": cluster_name, "provider": provider_config})
+
+        _configure_resource_group(
+            {"cluster_name": cluster_name, "provider": provider_config}
+        )
         subscription_id = provider_config["subscription_id"]
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
         # Sky only supports Azure CLI credential for now.
