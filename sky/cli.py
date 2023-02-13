@@ -1525,7 +1525,7 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
         if show_spot_queue:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed spot jobs{colorama.Style.RESET_ALL} '
-                       f'{colorama.Style.DIM}(for more details, run: '
+                       f'{colorama.Style.DIM}(To see all spot jobs, run: '
                        f'sky spot queue){colorama.Style.RESET_ALL}')
             with backend_utils.safe_console_status(
                     '[cyan] Checking spot jobs[/]'):
