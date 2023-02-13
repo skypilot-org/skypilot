@@ -99,6 +99,8 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              use_spot=False),
 }
 
+_SPOT_JOBS_IN_STATUS = 5
+
 
 def _get_glob_clusters(clusters: List[str]) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
@@ -1381,11 +1383,13 @@ def exec(
     sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
-def _get_in_progress_spot_jobs():
+def _get_in_progress_spot_jobs(show_all_in_progress: bool = False):
     try:
         with ux_utils.suppress_output():
             # Make the call slient
             spot_jobs = core.spot_queue(refresh=False, skip_finished=True)
+            if not show_all_in_progress:
+                spot_jobs = spot_jobs[:_SPOT_JOBS_IN_STATUS]
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         if controller_status == global_user_state.ClusterStatus.INIT:
@@ -1480,7 +1484,8 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
     with multiprocessing.Pool(1) as pool:
         # Run the spot job query in parallel to speed up the status query.
         if show_spot_queue:
-            spot_jobs_future = pool.apply_async(_get_in_progress_spot_jobs, ())
+            spot_jobs_future = pool.apply_async(_get_in_progress_spot_jobs,
+                                                (all,))
 
         if clusters:
             clusters = _get_glob_clusters(clusters)
@@ -1519,7 +1524,9 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
 
         if show_spot_queue:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'Managed spot jobs{colorama.Style.RESET_ALL}')
+                       f'Managed spot jobs{colorama.Style.RESET_ALL} '
+                       f'{colorama.Style.DIM}(for more details, run: '
+                       f'sky spot queue){colorama.Style.RESET_ALL}')
             with backend_utils.safe_console_status(
                     '[cyan] Checking spot jobs[/]'):
                 msg = spot_jobs_future.get()
