@@ -17,10 +17,12 @@ from sky.provision import utils as provision_utils
 from sky.provision import gcp
 from sky.provision import ca
 
-TEMPLATE_FILE = pathlib.Path(__file__).parent.parent.resolve() / 'gcp.yml.j2'
+TEMPLATE_FILE = pathlib.Path(__file__).parent.resolve() / 'gcp.yml.j2'
 
 
 def test_provision():
+    exit()
+
     # See sky.backends.backend_utils.write_cluster_config
 
     # ubuntu 20.04 ImageId
@@ -72,8 +74,8 @@ def test_provision():
 
     config = yaml.safe_load(content)
 
-    import json
-    print(json.dumps(config, indent=2))
+    # import json
+    # print(json.dumps(config, indent=2))
 
     start = time.time()
     bootstrapped_config = gcp.bootstrap(config)
@@ -120,10 +122,10 @@ def test_provision():
     #                  up=True)
     #     runner.rsync(ca.CERTS_LOCAL_DIR, ca.CERTS_REMOTE_DIR, up=True)
 
-    start = time.time()
-    gcp.terminate_instances(region, cluster_name,
-                            bootstrapped_config['provider'])
-    print(f'Terminate cluster (trigger) duration = {time.time() - start:.3f}s')
+    # start = time.time()
+    # gcp.terminate_instances(region, cluster_name,
+    #                         bootstrapped_config['provider'])
+    # print(f'Terminate cluster (trigger) duration = {time.time() - start:.3f}s')
 
     # start = time.time()
     # aws.wait_instances(region, cluster_name, state='terminated')

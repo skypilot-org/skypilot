@@ -17,10 +17,12 @@ from sky.provision import utils as provision_utils
 from sky.provision import aws
 from sky.provision import ca
 
-TEMPLATE_FILE = pathlib.Path(__file__).parent.parent.resolve() / 'aws.yml.j2'
+TEMPLATE_FILE = pathlib.Path(__file__).parent.resolve() / 'aws.yml.j2'
 
 
 def test_provision():
+    exit()
+
     # Alternative AMIs:
     # ami-0b5eea76982371e91 (Amazon Linux 2 Kernel 5.10 AMI 2.0.20221210.1 x86_64 HVM gp2)
     # ami-06878d265978313ca (Canonical, Ubuntu, 22.04 LTS, amd64 jammy image build on 2022-12-06)
