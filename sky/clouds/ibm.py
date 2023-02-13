@@ -5,6 +5,7 @@ import json
 from sky import clouds
 from sky.clouds import service_catalog
 from sky.adaptors import ibm
+from sky import sky_logging
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 from sky.adaptors.ibm import CREDENTIAL_FILE
@@ -14,6 +15,7 @@ if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
 
+logger = sky_logging.init_logger(__name__)
 
 @clouds.CLOUD_REGISTRY.register
 class IBM(clouds.Cloud):
@@ -252,10 +254,8 @@ class IBM(clouds.Cloud):
                                                    r.instance_type)
         worker_instance_resources = _get_profile_resources(worker_instance_type)
 
-        if r.image_id is not None:
-            image_id = r.image_id
-        else:
-            image_id = self.get_default_image(region_name)
+        image_id = r.image_id if r.image_id else self.get_default_image(
+            region_name)
 
         return {
             'instance_type': r.instance_type,
@@ -367,8 +367,12 @@ class IBM(clouds.Cloud):
                 images.extend(res['images'])
             return images
 
-        if get_cred_file_field('image_id'):
-            return get_cred_file_field('image_id')
+        # if user specified an image id for the region, return it.
+        user_image = get_cred_file_field('image_id')
+        if user_image and region in user_image:
+            logger.debug(f'using user image: {user_image[region]} '
+                         f'in region: {region}.')
+            return user_image[region]
 
         client = ibm.client(region=region)
         # returns default image: "ibm-ubuntu-22-04" with amd architecture
@@ -379,25 +383,31 @@ class IBM(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
-
-        help_str = (f""" Run the following command:
-            a configuration script that asks for
-            api key and stores it in {CREDENTIAL_FILE}""")
-        if not os.path.isfile(os.path.expanduser(CREDENTIAL_FILE)):
-            return (False, f"""
-            {os.path.expanduser(CREDENTIAL_FILE)} does not exist.""" + help_str)
+        # IBM-TODO - create a configuration script.
+        required_fields = ['iam_api_key', 'resource_group_id']
+        help_str = ('\tStore your API key and Resource Group id '
+                    f'in {CREDENTIAL_FILE} in the following format:\n'
+                    '\tiam_api_key: <IAM_API_KEY>\n'
+                    '\tresource_group_id: <RESOURCE_GROUP_ID>')
 
         base_config = _read_credential_file()
-        if base_config and 'iam_api_key' in base_config:
-            try:
-                ibm.client()
-                return True, None
-            # pylint: disable=W0703
-            except Exception as e:
-                return False, str(e)
-        else:
-            return False, f"""Missing iam_api_key in
-             {os.path.expanduser(CREDENTIAL_FILE)}"""
+        if not base_config:
+            return (False, 'Missing credential file at '
+                    f'{os.path.expanduser(CREDENTIAL_FILE)}.\n' + help_str)
+
+        for field in required_fields:
+            if field not in base_config:
+                return (False, f'Missing field "{field}" in '
+                        f'{os.path.expanduser(CREDENTIAL_FILE)}.\n' + help_str)
+
+        # verify ability of user to create a client,
+        # e.g. bad API KEY.
+        try:
+            ibm.client()
+            return True, None
+        # pylint: disable=W0703
+        except Exception as e:
+            return (False, f'{str(e)}' + help_str)
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a {remote:local} credential path mapping
@@ -425,11 +435,19 @@ class IBM(clouds.Cloud):
 
 
 def _read_credential_file():
-    with open(os.path.expanduser(CREDENTIAL_FILE), 'r', encoding='utf-8') as f:
-        return yaml.safe_load(f)
+    try:
+        with open(os.path.expanduser(CREDENTIAL_FILE), 'r',
+                  encoding='utf-8') as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        return False
 
 
 def get_cred_file_field(field, default_val=None) -> str:
     """returns a the value of a field from the user's
      credentials file if exists, else default_val"""
-    return _read_credential_file().get(field, default_val)
+    base_config = _read_credential_file()
+    if not base_config:
+        raise FileNotFoundError('Missing '
+                                f'credential file at {CREDENTIAL_FILE}')
+    return base_config.get(field, default_val)
