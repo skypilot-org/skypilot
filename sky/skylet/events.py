@@ -3,7 +3,6 @@ import getpass
 import math
 import os
 import re
-import shutil
 import subprocess
 import sys
 import time
@@ -14,7 +13,7 @@ import yaml
 
 from sky import sky_logging
 from sky.backends import backend_utils, cloud_vm_ray_backend
-from sky.skylet import autostop_lib, job_lib, constants
+from sky.skylet import autostop_lib, job_lib
 from sky.spot import spot_utils
 from sky.utils import common_utils
 

@@ -30,8 +30,8 @@ logger = sky_logging.init_logger(__name__)
 class SpotController:
     """Each spot controller manages the life cycle of one spot cluster (job)."""
 
-    def __init__(self, job_id: int, task_yaml: str,
-                 retry_until_up: bool, sync_log: bool) -> None:
+    def __init__(self, job_id: int, task_yaml: str, retry_until_up: bool,
+                 sync_log: bool) -> None:
         self._job_id = job_id
         self._task_name = pathlib.Path(task_yaml).stem
         self._task = sky.Task.from_yaml(task_yaml)
@@ -257,7 +257,8 @@ class SpotController:
             self._backend.teardown_ephemeral_storage(self._task)
 
 
-def _run_controller(job_id: int, task_yaml: str, retry_until_up: bool, sync_log: bool):
+def _run_controller(job_id: int, task_yaml: str, retry_until_up: bool,
+                    sync_log: bool):
     """Runs the controller in a remote process for interruption."""
 
     # Override the SIGTERM handler to gracefully terminate the controller.
@@ -271,7 +272,8 @@ def _run_controller(job_id: int, task_yaml: str, retry_until_up: bool, sync_log:
 
     # The controller needs to be instantiated in the remote process, since
     # the controller is not serializable.
-    spot_controller = SpotController(job_id, task_yaml, retry_until_up, sync_log)
+    spot_controller = SpotController(job_id, task_yaml, retry_until_up,
+                                     sync_log)
     spot_controller.run()
 
 
@@ -312,7 +314,8 @@ def start(job_id, task_yaml, retry_until_up, sync_log):
         _handle_signal(job_id)
         controller_process = multiprocessing.Process(target=_run_controller,
                                                      args=(job_id, task_yaml,
-                                                           retry_until_up, sync_log))
+                                                           retry_until_up,
+                                                           sync_log))
         controller_process.start()
         while controller_process.is_alive():
             _handle_signal(job_id)
