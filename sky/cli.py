@@ -3032,6 +3032,11 @@ def spot():
           'if we fail to launch the cluster on any possible region/cloud due '
           'to unavailability errors. This applies to launching the the spot '
           'clusters (both initial and recovery attempts).'))
+@click.option('--logging',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Whether to upload logs to cloud buckets.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3058,6 +3063,7 @@ def spot_launch(
     disk_size: Optional[int],
     detach_run: bool,
     retry_until_up: bool,
+    logging: bool,
     yes: bool,
 ):
     """Launch a managed spot job from a YAML or a command.
@@ -3108,7 +3114,8 @@ def spot_launch(
     sky.spot_launch(task,
                     name,
                     detach_run=detach_run,
-                    retry_until_up=retry_until_up)
+                    retry_until_up=retry_until_up,
+                    logging=logging)
 
 
 @spot.command('queue', cls=_DocumentedCodeCommand)

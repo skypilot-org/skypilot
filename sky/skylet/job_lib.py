@@ -14,7 +14,7 @@ import colorama
 import filelock
 
 from sky import sky_logging
-from sky.skylet import constants
+from sky.skylet import constants, configs
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
@@ -622,6 +622,12 @@ def run_timestamp_with_globbing_payload(
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
         run_timestamps[str(job_id)] = run_timestamp
     return common_utils.encode_payload(run_timestamps)
+
+
+def set_job_sync_log() -> None:
+    logger.debug(f'set job logging')
+    _JOB_SYNC_LOG_CONFIG_KEY = 'job_sync_log'
+    configs.set_config(_JOB_SYNC_LOG_CONFIG_KEY, True)
 
 
 class JobLibCodeGen:

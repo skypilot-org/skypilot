@@ -8,6 +8,7 @@ SPOT_CONTROLLER_YAML_PREFIX = '~/.sky/spot_controller'
 SPOT_TASK_YAML_PREFIX = '~/.sky/spot_tasks'
 
 SPOT_WORKDIR_BUCKET_NAME = 'skypilot-workdir-{username}-{id}'
+SPOT_LOGGING_BUCKET_NAME = 'skypilot-spot-logging-{username}'
 SPOT_FM_BUCKET_NAME = 'skypilot-filemounts-folder-{username}-{id}'
 SPOT_FM_FILE_ONLY_BUCKET_NAME = 'skypilot-filemounts-files-{username}-{id}'
 SPOT_FM_LOCAL_TMP_DIR = 'skypilot-filemounts-files-{id}'

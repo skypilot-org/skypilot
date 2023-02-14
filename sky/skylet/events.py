@@ -3,6 +3,7 @@ import getpass
 import math
 import os
 import re
+import shutil
 import subprocess
 import time
 import traceback
@@ -12,7 +13,7 @@ import yaml
 
 from sky import sky_logging
 from sky.backends import backend_utils, cloud_vm_ray_backend
-from sky.skylet import autostop_lib, job_lib
+from sky.skylet import autostop_lib, job_lib, constants
 from sky.spot import spot_utils
 from sky.utils import common_utils
 
@@ -74,6 +75,23 @@ class SpotJobUpdateEvent(SkyletEvent):
 
     def _run(self):
         spot_utils.update_spot_job_status()
+
+
+class SpotLogSyncEvent(SkyletEvent):
+    """Skylet event for syncing spot job logs."""
+    EVENT_INTERVAL_SECONDS = 40
+
+    def _run(self):
+        job_id = job_lib.get_latest_job_id()
+        run_timestamp = job_lib.get_run_timestamp(job_id)
+        log_dir = os.path.expanduser(os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp))
+        log_path = os.path.join(log_dir, 'tasks/run.log')
+
+        target_dir = os.path.expanduser(f'~/.sky/logs/{job_id}/')
+        os.makedirs(target_dir, exist_ok=True)
+        target_path = os.path.join(target_dir, 'run.log')
+
+        shutil.copy(log_path, target_path)
 
 
 class AutostopEvent(SkyletEvent):

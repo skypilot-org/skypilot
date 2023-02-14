@@ -508,6 +508,7 @@ def spot_launch(
     stream_logs: bool = True,
     detach_run: bool = False,
     retry_until_up: bool = False,
+    logging: bool = False,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed spot job.
@@ -670,6 +671,13 @@ def _maybe_translate_local_file_mounts_and_sync_up(
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = dict()
+    new_storage_mounts['~/.sky/logs'] = storage_lib.Storage.from_yaml_config({
+        'name': spot.constants.SPOT_LOGGING_BUCKET_NAME.format(
+            username=getpass.getuser()),
+        'persistent': True,
+        'mode': 'MOUNT',
+    })
+
     if task.workdir is not None:
         bucket_name = spot.constants.SPOT_WORKDIR_BUCKET_NAME.format(
             username=getpass.getuser(), id=run_id)
