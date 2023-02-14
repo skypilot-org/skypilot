@@ -22,7 +22,7 @@ import pandas as pd
 # and will be joined with the price table to create the full catalog.
 GCP_METADATA_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/fix-gcp/metadata/gcp/'  # pylint: disable=line-too-long
 
-# Service IDs found in https://cloud.google.com/skus 
+# Service IDs found in https://cloud.google.com/skus
 GCE_SERVICE_ID = '6F81-5844-456A'
 TPU_SERVICE_ID = 'E000-3F24-B8AA'
 
