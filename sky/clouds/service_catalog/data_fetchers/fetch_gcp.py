@@ -17,6 +17,8 @@ import pandas as pd
 # GPU pricing: https://cloud.google.com/compute/gpus-pricing
 # TPU pricing: https://cloud.google.com/tpu/pricing
 
+# Metadata is a partial catalog of GCP resources.
+# It contains all information except for the on-demand and spot prices.
 GCP_METADATA_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/fix-gcp/metadata/gcp/'  # pylint: disable=line-too-long
 
 # Service IDs found in https://cloud.google.com/skus 
