@@ -1258,8 +1258,7 @@ class RetryingVmProvisioner(object):
                     cluster_yaml)
                 runners = command_runner.SSHCommandRunner.make_runner_list(
                     [t[1] for t in ip_tuples], **ssh_credentials)
-                provision_setup.start_ray(runners, ip_tuples[0][0],
-                                          log_abs_path, True)
+                provision_setup.start_ray(runners, ip_tuples[0][0], True)
 
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 if cluster_exists:
