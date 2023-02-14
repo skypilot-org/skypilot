@@ -553,11 +553,6 @@ def spot_launch(
     change_default_value = dict()
     if not resources.use_spot_specified:
         change_default_value['use_spot'] = True
-    elif not resources.use_spot:
-        print(f'{colorama.Fore.RED}'
-              'User specify --no-use-spot. '
-              'This task will be run by on-demand instances.'
-              f'{colorama.Style.RESET_ALL}')
     if resources.spot_recovery is None:
         change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
 
