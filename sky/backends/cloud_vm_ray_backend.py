@@ -869,7 +869,7 @@ class RetryingVmProvisioner(object):
             # Gang scheduling failure (head node is definitely up, but some
             # workers' provisioning failed).  Simply block the zones.
             assert stderr is None, stderr
-            if zones:
+            if zones is not None:
                 for zone in zones:
                     self._blocked_resources.add(
                         launchable_resources.copy(zone=zone.name))
