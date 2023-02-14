@@ -304,7 +304,7 @@ def _get_self_and_other_instances(states_filter: List[str]):
     self = ec2.Instance(self_instance_id)
     tags = {}
     for t in self.tags:
-        tags[t['Name']] = t['Value']
+        tags[t['Key']] = t['Value']
     cluster_name = tags[TAG_RAY_CLUSTER_NAME]
     filters = [
         {
