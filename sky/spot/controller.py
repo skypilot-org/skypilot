@@ -2,6 +2,7 @@
 import argparse
 import multiprocessing
 import pathlib
+import os
 import signal
 import time
 import traceback
@@ -19,6 +20,7 @@ from sky.skylet import job_lib
 from sky.spot import recovery_strategy
 from sky.spot import spot_state
 from sky.spot import spot_utils
+from sky.spot import constants as spot_constants
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
@@ -29,12 +31,13 @@ class SpotController:
     """Each spot controller manages the life cycle of one spot cluster (job)."""
 
     def __init__(self, job_id: int, task_yaml: str,
-                 retry_until_up: bool) -> None:
+                 retry_until_up: bool, sync_log: bool) -> None:
         self._job_id = job_id
         self._task_name = pathlib.Path(task_yaml).stem
         self._task = sky.Task.from_yaml(task_yaml)
 
         self._retry_until_up = retry_until_up
+        self._sync_log = sync_log
         # TODO(zhwu): this assumes the specific backend.
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
@@ -117,15 +120,23 @@ class SpotController:
             # For multi-node jobs, since the job may not be set to FAILED
             # immediately (depending on user program) when only some of the
             # nodes are preempted, need to check the actual cluster status.
-            if (job_status is not None and not job_status.is_terminal() and
-                    self._task.num_nodes == 1):
-                continue
+            # if (job_status is not None and not job_status.is_terminal() and
+            #         self._task.num_nodes == 1):
+            #     continue
 
             # Pull the actual cluster status from the cloud provider to
             # determine whether the cluster is preempted.
             (cluster_status,
              handle) = backend_utils.refresh_cluster_status_handle(
                  self._cluster_name, force_refresh=True)
+
+            if self._sync_log:
+                # sync down logs
+                target_dir = os.path.join(
+                    spot_constants.SPOT_CONTROLLER_LOGS_BUCKET_PATH,
+                    self._task.envs[constants.JOB_ID_ENV_VAR])
+                os.makedirs(os.path.expanduser(target_dir), exist_ok=True)
+                self._backend.sync_down_logs(handle, None, target_dir)
 
             if cluster_status != global_user_state.ClusterStatus.UP:
                 # The cluster is (partially) preempted. It can be down, INIT
@@ -246,7 +257,7 @@ class SpotController:
             self._backend.teardown_ephemeral_storage(self._task)
 
 
-def _run_controller(job_id: int, task_yaml: str, retry_until_up: bool):
+def _run_controller(job_id: int, task_yaml: str, retry_until_up: bool, sync_log: bool):
     """Runs the controller in a remote process for interruption."""
 
     # Override the SIGTERM handler to gracefully terminate the controller.
@@ -260,7 +271,7 @@ def _run_controller(job_id: int, task_yaml: str, retry_until_up: bool):
 
     # The controller needs to be instantiated in the remote process, since
     # the controller is not serializable.
-    spot_controller = SpotController(job_id, task_yaml, retry_until_up)
+    spot_controller = SpotController(job_id, task_yaml, retry_until_up, sync_log)
     spot_controller.run()
 
 
@@ -294,14 +305,14 @@ def _handle_signal(job_id):
         f'User sent {user_signal.value} signal.')
 
 
-def start(job_id, task_yaml, retry_until_up):
+def start(job_id, task_yaml, retry_until_up, sync_log):
     """Start the controller."""
     controller_process = None
     try:
         _handle_signal(job_id)
         controller_process = multiprocessing.Process(target=_run_controller,
                                                      args=(job_id, task_yaml,
-                                                           retry_until_up))
+                                                           retry_until_up, sync_log))
         controller_process.start()
         while controller_process.is_alive():
             _handle_signal(job_id)
@@ -328,9 +339,13 @@ if __name__ == '__main__':
     parser.add_argument('--retry-until-up',
                         action='store_true',
                         help='Retry until the spot cluster is up.')
+    parser.add_argument('--sync-log',
+                        action='store_true',
+                        default=False,
+                        help='Whther to periodically sync down the logs.')
     parser.add_argument('task_yaml',
                         type=str,
                         help='The path to the user spot task yaml file. '
                         'The file name is the spot task name.')
     args = parser.parse_args()
-    start(args.job_id, args.task_yaml, args.retry_until_up)
+    start(args.job_id, args.task_yaml, args.retry_until_up, args.sync_log)

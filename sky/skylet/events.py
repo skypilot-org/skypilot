@@ -78,23 +78,6 @@ class SpotJobUpdateEvent(SkyletEvent):
         spot_utils.update_spot_job_status()
 
 
-class SpotLogSyncEvent(SkyletEvent):
-    """Skylet event for syncing spot job logs."""
-    EVENT_INTERVAL_SECONDS = 40
-
-    def _run(self):
-        job_id = job_lib.get_latest_job_id()
-        run_timestamp = job_lib.get_run_timestamp(job_id)
-        log_dir = os.path.expanduser(os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp))
-        log_path = os.path.join(log_dir, 'tasks/run.log')
-
-        target_dir = os.path.expanduser(f'~/.sky/logs/{job_id}/')
-        os.makedirs(target_dir, exist_ok=True)
-        target_path = os.path.join(target_dir, 'run.log')
-
-        shutil.copy(log_path, target_path)
-
-
 class AutostopEvent(SkyletEvent):
     """Skylet event for autostop.
 

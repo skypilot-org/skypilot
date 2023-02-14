@@ -15,7 +15,6 @@ EVENTS = [
     # Otherwise, the abnormal spot job status update will be delayed
     # until the next job update event.
     events.SpotJobUpdateEvent(),
-    events.SpotLogSyncEvent(),
 ]
 
 while True:

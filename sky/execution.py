@@ -522,7 +522,7 @@ def spot_launch(
     stream_logs: bool = True,
     detach_run: bool = False,
     retry_until_up: bool = False,
-    logging: bool = False,
+    sync_log: bool = False,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed spot job.
@@ -589,6 +589,7 @@ def spot_launch(
             'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
             'logging_user_hash': common_utils.get_user_hash(),
             'retry_until_up': retry_until_up,
+            'sync_log': sync_log,
             'user': os.environ.get('USER', None),
         }
         if skypilot_config.loaded():
@@ -637,6 +638,20 @@ def spot_launch(
             vars_to_fill,
             output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
         controller_task = task_lib.Task.from_yaml(yaml_path)
+
+        if sync_log:
+            cloud = list(controller_task.resources)[0].cloud
+            store_type = None if cloud is None else storage_lib.get_storetype_from_cloud(cloud).value
+            log_dir_mount = dict()
+            log_dir_mount[spot.constants.SPOT_CONTROLLER_LOGS_BUCKET_PATH] = storage_lib.Storage.from_yaml_config({
+                'name': spot.constants.SPOT_LOGS_BUCKET_NAME.format(
+                    username=getpass.getuser()),
+                'persistent': True,
+                'mode': 'MOUNT',
+                'store': store_type,
+            })
+            controller_task.update_storage_mounts(log_dir_mount)
+
         controller_task.spot_task = task
         assert len(controller_task.resources) == 1
 
@@ -686,13 +701,6 @@ def _maybe_translate_local_file_mounts_and_sync_up(
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = dict()
-    new_storage_mounts['~/.sky/logs'] = storage_lib.Storage.from_yaml_config({
-        'name': spot.constants.SPOT_LOGGING_BUCKET_NAME.format(
-            username=getpass.getuser()),
-        'persistent': True,
-        'mode': 'MOUNT',
-    })
-
     if task.workdir is not None:
         bucket_name = spot.constants.SPOT_WORKDIR_BUCKET_NAME.format(
             username=getpass.getuser(), id=run_id)
