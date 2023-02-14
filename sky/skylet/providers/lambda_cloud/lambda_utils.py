@@ -66,6 +66,13 @@ class Metadata:
         with open(self.path, 'w') as f:
             json.dump(metadata, f)
 
+    def exists(self, instance_id: str) -> bool:
+        if not os.path.exists(self.path):
+            return False
+        with open(self.path, 'r') as f:
+            metadata = json.load(f)
+        return instance_id in metadata
+
 
 def raise_lambda_error(response: requests.Response) -> None:
     """Raise LambdaCloudError if appropriate. """

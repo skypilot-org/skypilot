@@ -66,7 +66,7 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
 # Timeout (seconds) for provision progress: if in this duration no new nodes
 # are launched, abort and failover.
-_NODES_LAUNCHING_PROGRESS_TIMEOUT = 90
+_NODES_LAUNCHING_PROGRESS_TIMEOUT = 200
 
 # Time gap between retries after failing to provision in all possible places.
 # Used only if --retry-until-up is set.
