@@ -101,6 +101,7 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'cluster_hash',
                                  'TEXT DEFAULT null')
+
     conn.commit()
 
 
@@ -544,15 +545,31 @@ def get_clusters() -> List[Dict[str, Any]]:
 
 
 def get_clusters_from_history() -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute('SELECT * from cluster_history').fetchall()
+    rows = _DB.cursor.execute(
+        'SELECT ch.cluster_hash, ch.name, ch.num_nodes, '
+        'ch.launched_resources, ch.usage_intervals, clusters.status  '
+        'FROM cluster_history ch '
+        'LEFT OUTER JOIN clusters '
+        'ON ch.cluster_hash=clusters.cluster_hash ').fetchall()
 
+    # '(cluster_hash, name, num_nodes, requested_resources, '
+    #         'launched_resources, usage_intervals) '
     records = []
 
     for row in rows:
         # TODO: use namedtuple instead of dict
 
-        (cluster_hash, name, num_nodes, _, launched_resources,
-         usage_intervals) = row[:6]
+        (
+            cluster_hash,
+            name,
+            num_nodes,
+            launched_resources,
+            usage_intervals,
+            status,
+        ) = row[:6]
+
+        if status is not None:
+            status = ClusterStatus[status]
 
         record = {
             'name': name,
@@ -562,6 +579,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             'resources': pickle.loads(launched_resources),
             'cluster_hash': cluster_hash,
             'usage_intervals': pickle.loads(usage_intervals),
+            'status': status,
         }
 
         records.append(record)

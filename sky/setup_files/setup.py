@@ -80,7 +80,9 @@ install_requires = [
     'oauth2client',
     'pandas',
     'pendulum',
-    'PrettyTable',
+    # PrettyTable with version >=2.0.0 is required for the support of
+    # `add_rows` method.
+    'PrettyTable>=2.0.0',
     # Lower local ray version is not fully supported, due to the
     # autoscaler issues (also tracked in #537).
     'ray[default]>=1.9.0,<=2.2.0',
@@ -116,6 +118,7 @@ extras_require = {
     'azure': ['azure-cli>=2.31.0', 'azure-core', 'azure-identity'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],
+    'lambda': [],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

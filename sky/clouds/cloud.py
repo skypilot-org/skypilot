@@ -401,13 +401,14 @@ class Cloud:
                     'ensure it is fully matched by regex (e.g., '
                     'only contains lower letters, numbers and dash): '
                     f'{valid_regex}')
-        if max_cluster_name_len_limit is not None and len(
-                cluster_name) > max_cluster_name_len_limit:
+        if (max_cluster_name_len_limit is not None and
+                len(cluster_name) > max_cluster_name_len_limit):
+            cloud_name = '' if cls is Cloud else f' on {cls._REPR}'
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InvalidClusterNameError(
                     f'Cluster name {cluster_name!r} has {len(cluster_name)} '
                     'chars; maximum length is '
-                    f'{max_cluster_name_len_limit} chars.')
+                    f'{max_cluster_name_len_limit} chars{cloud_name}.')
 
     def __repr__(self):
         return self._REPR
