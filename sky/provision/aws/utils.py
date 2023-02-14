@@ -118,12 +118,26 @@ def get_self_instance_metadata() -> Dict[str, str]:
     # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
     prefix = 'http://169.254.169.254/latest/meta-data'
     http = urllib3.PoolManager()
-    instance_id = http.request('GET', f'{prefix}/instance-id').data.decode()
-    region = http.request('GET', f'{prefix}/region').data.decode()
-    availability_zone = http.request(
-        'GET', f'{prefix}/availability-zone').data.decode()
+    instance_req = http.request('GET', f'{prefix}/instance-id')
+    region_req = http.request('GET', f'{prefix}/placement/region')
+    availability_zone_req = http.request(
+        'GET', f'{prefix}/placement/availability-zone')
+    instance_id = instance_req.data.decode()
+    region = region_req.data.decode()
+    availability_zone = availability_zone_req.data.decode()
+
+    if instance_req.status != 200:
+        raise ValueError('Get "instance-id" from metadata with status '
+                         f'{instance_req.status}. Message: {instance_id}')
+    if region_req.status != 200:
+        raise ValueError('Get "region" from metadata with status '
+                         f'{region_req.status}. Message: {region}')
+    if availability_zone_req.status != 200:
+        raise ValueError(f'Get "availability_zone" from metadata with status '
+                         f'{availability_zone_req.status}. Message: '
+                         f'{availability_zone}')
     return {
+        'instance_id': instance_id,
         'region': region,
         'availability_zone': availability_zone,
-        'instance_id': instance_id,
     }

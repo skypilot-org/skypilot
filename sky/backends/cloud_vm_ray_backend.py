@@ -4,6 +4,7 @@ import copy
 import enum
 import getpass
 import inspect
+import logging
 import math
 import json
 import os
@@ -15,6 +16,7 @@ import sys
 import tempfile
 import textwrap
 import time
+import traceback
 import typing
 from typing import Dict, List, Optional, Tuple, Union, Set
 
@@ -1227,9 +1229,20 @@ class RetryingVmProvisioner(object):
                 'zone_str': zone_str,
             }
             if isinstance(to_provision.cloud, clouds.AWS):
-                status, stdout, stderr, head_ip = self._bulk_provision(
-                    to_provision.cloud, cluster_config_file, handle,
-                    logging_info, cluster_exists)
+                os.makedirs(self.log_dir, exist_ok=True)
+                fh = logging.FileHandler(log_abs_path)
+                fh.setLevel(logging.DEBUG)
+                try:
+                    logger.addHandler(fh)
+                    status, stdout, stderr, head_ip = self._bulk_provision(
+                        to_provision.cloud, cluster_config_file, handle,
+                        logging_info)
+                except Exception:
+                    logger.exception('Provision failed.')
+                    raise
+                finally:
+                    logger.removeHandler(fh)
+                    fh.close()
             else:
                 status, stdout, stderr, head_ip = self._gang_schedule_ray_up(
                     to_provision.cloud, cluster_config_file, handle,
@@ -1245,7 +1258,8 @@ class RetryingVmProvisioner(object):
                     cluster_yaml)
                 runners = command_runner.SSHCommandRunner.make_runner_list(
                     [t[1] for t in ip_tuples], **ssh_credentials)
-                provision_setup.start_ray(runners, ip_tuples[0][0], True)
+                provision_setup.start_ray(runners, ip_tuples[0][0],
+                                          log_abs_path, True)
 
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 if cluster_exists:
@@ -1405,7 +1419,6 @@ class RetryingVmProvisioner(object):
         cluster_config_file: str,
         cluster_handle: 'backends.Backend.ResourceHandle',
         logging_info: dict,
-        cluster_exists: bool,
     ) -> Tuple[GangSchedulingStatus, str, str, Optional[str]]:
         """Provisions a cluster and wait until fully provisioned.
 
@@ -1475,6 +1488,8 @@ class RetryingVmProvisioner(object):
                     region=metadata['region'], zone=metadata['zone'])
                 break
             except Exception as e:
+                logger.debug(f'Starting instances for "{cluster_name}" '
+                             f'failed. Stacktrace:\n{traceback.format_exc()}')
                 if retry_cnt >= _MAX_RAY_UP_RETRY - 1:
                     return self.GangSchedulingStatus.GANG_FAILED, '', str(
                         e), None
@@ -1483,6 +1498,7 @@ class RetryingVmProvisioner(object):
                     'Retrying launching in {:.1f} seconds.'.format(sleep))
                 time.sleep(sleep)
 
+        logger.debug(f'Waiting "{cluster_name}" to be started...')
         with backend_utils.safe_console_status(
                 f'[bold cyan]Waiting '
                 f'[green]{cluster_name}[bold cyan] to be started...'):
@@ -1500,6 +1516,7 @@ class RetryingVmProvisioner(object):
 
         ip_dict = provider.get_instance_ips(region_name, cluster_name)
         ip_tuples = list(ip_dict.values())
+        logger.debug(f'Waiting SSH connection for "{cluster_name}" ...')
         with backend_utils.safe_console_status(
                 f'[bold cyan]Waiting SSH connection for '
                 f'[green]{cluster_name}[white] ...'):
@@ -2354,6 +2371,8 @@ class CloudVmRayBackend(backends.Backend):
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
 
             if isinstance(handle.launched_resources.cloud, clouds.AWS):
+                log_path = os.path.join(self.log_dir, 'provision.log')
+                log_abs_path = os.path.abspath(log_path)
                 ip_list = self._post_provision_setup(
                     repr(handle.launched_resources.cloud),
                     cluster_name,
@@ -2361,7 +2380,8 @@ class CloudVmRayBackend(backends.Backend):
                     handle,
                     local_wheel_path=local_wheel_path,
                     wheel_hash=wheel_hash,
-                    cluster_config_file=cluster_config_file)
+                    cluster_config_file=cluster_config_file,
+                    log_abs_path=log_abs_path)
             else:
                 ip_list = handle.external_ips(
                     max_attempts=_FETCH_IP_MAX_ATTEMPTS, use_cached_ips=False)
@@ -2464,7 +2484,9 @@ class CloudVmRayBackend(backends.Backend):
             self, cloud_name: str, cluster_name: str,
             to_provision_config: RetryingVmProvisioner.ToProvisionConfig,
             handle: ResourceHandle, local_wheel_path: pathlib.Path,
-            wheel_hash: str, cluster_config_file: str):
+            wheel_hash: str, cluster_config_file: str, log_abs_path: str):
+        # TODO(suquark): make use of log path
+        del log_abs_path
         # TODO(suquark): Move wheel build here in future PRs.
         from sky.provision import aws as aws_provisioner
 
