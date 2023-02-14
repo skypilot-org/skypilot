@@ -1266,6 +1266,13 @@ def get_node_ips(cluster_yaml: str,
     # won't work and we need to query the node IPs with gcloud as
     # implmented in _get_tpu_vm_pod_ips.
     ray_config = common_utils.read_yaml(cluster_yaml)
+    if ray_config['provider']['module'].startswith('sky.skylet.providers.aws'):
+        from sky.provision import aws
+        ip_dict = aws.get_instance_ips(handle.launched_resources.region,
+                                       handle.get_cluster_name())
+        if get_internal_ips:
+            return [pair[0] for k, pair in ip_dict.items()]
+        return [pair[1] for k, pair in ip_dict.items()]
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
         assert expected_num_nodes == 1, (
@@ -1668,7 +1675,11 @@ def _query_status_aws(
         'terminated': None,
     }
     region = ray_config['provider']['region']
-    launch_hashes = _ray_launch_hash(cluster, ray_config)
+    # TODO(suquark): We do not use launch config hash for our new provisioner,
+    #  because it is the logic of Ray autoscaler and sometimes would result in
+    #  resource leak. Instead, we keep caches of setup commands etc to make
+    #  sure that changes will be applied to the instances.
+    launch_hashes = None  # _ray_launch_hash(cluster, ray_config)
     if launch_hashes is not None:
         hash_filter_str = ','.join(launch_hashes)
         hash_filter_line = (

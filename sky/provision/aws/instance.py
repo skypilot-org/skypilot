@@ -324,7 +324,7 @@ def _get_self_and_other_instances(states_filter: List[str]):
     other_ids = []
     for inst in instances:
         if inst.id != self_instance_id:
-            other_ids.append(inst)
+            other_ids.append(inst.id)
     others = instances.filter(InstanceIds=other_ids)
     return self, others
 
