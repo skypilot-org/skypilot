@@ -21,7 +21,7 @@ GPU_CSV_URL = 'https://raw.githubusercontent.com/Cyclenerd/google-cloud-pricing-
 GCP_VM_ZONES_URL = 'https://cloud.google.com/compute/docs/regions-zones'
 
 # Regions that do not exist in https://cloud.google.com/compute/docs/regions-zones
-INVALID_REGIONS = [
+PRIVATE_REGIONS = [
     'us-east2',
     'us-east7',
     'us-central2',  # NOTE: us-central2-b has TPU v4.
@@ -29,7 +29,7 @@ INVALID_REGIONS = [
 ]
 
 # Zones that do not exist in https://cloud.google.com/compute/docs/regions-zones
-INVALID_ZONES = [
+PRIVATE_ZONES = [
     'us-east1-a',
     'us-central1-d',
 ]
@@ -59,11 +59,11 @@ GPU_TYPES_TO_COUNTS = {
 }
 
 
-def drop_invalid_zones(df: pd.DataFrame) -> pd.DataFrame:
-    # Remove invalid regions.
-    df = df[~df['Region'].isin(INVALID_REGIONS)]
-    # Remove invalid zones.
-    df = df[~df['AvailabilityZone'].isin(INVALID_ZONES)]
+def drop_private_zones(df: pd.DataFrame) -> pd.DataFrame:
+    # Remove private regions.
+    df = df[~df['Region'].isin(PRIVATE_REGIONS)]
+    # Remove private zones.
+    df = df[~df['AvailabilityZone'].isin(PRIVATE_ZONES)]
     return df
 
 
@@ -92,8 +92,8 @@ def get_vm_df() -> Tuple[pd.DataFrame, List[str]]:
     # Add the Region column.
     vm_df['Region'] = vm_df['AvailabilityZone'].apply(lambda zone: zone[:-2])
 
-    # Drop invalid zones.
-    vm_df = drop_invalid_zones(vm_df)
+    # Drop private regions and zones.
+    vm_df = drop_private_zones(vm_df)
 
     # Convert vCPUs and MemoryGiB to float.
     vm_df['vCPUs'] = vm_df['vCPUs'].astype(float)
@@ -134,8 +134,8 @@ def get_gpu_df(a2_megagpu_16g_zones: List[str]) -> pd.DataFrame:
     gpu_df['AcceleratorName'] = gpu_df['AcceleratorName'].apply(
         lambda name: GPU_NAMES[name])
 
-    # Drop invalid zones.
-    gpu_df = drop_invalid_zones(gpu_df)
+    # Drop private regions and zones.
+    gpu_df = drop_private_zones(gpu_df)
 
     # Add the AcceleratorCount column.
     gpu_df['AcceleratorCount'] = gpu_df['AcceleratorName'].apply(
