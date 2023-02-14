@@ -13,8 +13,18 @@ from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient import discovery, errors
 
-from sky.skylet.providers.gcp.node import MAX_POLLS, POLL_INTERVAL, GCPNodeType, GCPCompute
-from sky.skylet.providers.gcp.constants import SKYPILOT_VPC_NAME, VPC_TEMPLATE, FIREWALL_RULES_TEMPLATE, FIREWALL_RULES_REQUIRED
+from sky.skylet.providers.gcp.node import (
+    MAX_POLLS,
+    POLL_INTERVAL,
+    GCPNodeType,
+    GCPCompute,
+)
+from sky.skylet.providers.gcp.constants import (
+    SKYPILOT_VPC_NAME,
+    VPC_TEMPLATE,
+    FIREWALL_RULES_TEMPLATE,
+    FIREWALL_RULES_REQUIRED,
+)
 from ray.autoscaler._private.util import check_legacy_fields
 
 logger = logging.getLogger(__name__)
@@ -48,6 +58,7 @@ HAS_TPU_PROVIDER_FIELD = "_has_tpus"
 # NOTE: iam.serviceAccountUser allows the Head Node to create worker nodes
 # with ServiceAccounts.
 
+
 def get_node_type(node: dict) -> GCPNodeType:
     """Returns node type based on the keys in ``node``.
 
@@ -65,7 +76,8 @@ def get_node_type(node: dict) -> GCPNodeType:
             "required. "
             "For a TPU instance, 'acceleratorType' and no 'machineType' "
             "is required. "
-            f"Got {list(node)}")
+            f"Got {list(node)}"
+        )
 
     if "machineType" not in node and "acceleratorType" in node:
         return GCPNodeType.TPU
@@ -280,7 +292,6 @@ def bootstrap_gcp(config):
     if _has_tpus_in_node_configs(config):
         config["provider"][HAS_TPU_PROVIDER_FIELD] = True
 
-
     crm, iam, compute, tpu = construct_clients_from_provider_config(config["provider"])
 
     config = _configure_project(config, crm)
@@ -365,7 +376,7 @@ def _configure_iam_role(config, crm, iam):
         # role of the service account. Even if the cloud-platform scope
         # gives (scope) access to the whole cloud-platform, the service
         # account is limited by the IAM rights specified below.
-        "scopes": ["https://www.googleapis.com/auth/cloud-platform"]
+        "scopes": ["https://www.googleapis.com/auth/cloud-platform"],
     }
     if _is_head_node_a_tpu(config):
         # SKY: The API for TPU VM is slightly different from normal compute instances.
@@ -493,12 +504,8 @@ def _check_firewall_rules(vpc_name, config, compute):
     """Check if the firewall rules in the VPC are sufficient."""
     required_rules = FIREWALL_RULES_REQUIRED.copy()
 
-    operation = (
-        compute.networks().
-        getEffectiveFirewalls(
-            project=config["provider"]["project_id"],
-            network=vpc_name
-        )
+    operation = compute.networks().getEffectiveFirewalls(
+        project=config["provider"]["project_id"], network=vpc_name
     )
     response = operation.execute()
     if len(response) == 0:
@@ -540,8 +547,8 @@ def _check_firewall_rules(vpc_name, config, compute):
                     ("INGRESS", "0.0.0.0/0"): {"tcp": {22}},
                 }
         """
-        source2rules : Dict[Tuple[str, str], Dict[str, Set[int]]] = {}
-        source2allowed_list : Dict[Tuple[str, str], List[Dict[str, str]]] = {}
+        source2rules: Dict[Tuple[str, str], Dict[str, Set[int]]] = {}
+        source2allowed_list: Dict[Tuple[str, str], List[Dict[str, str]]] = {}
         for rule in rules:
             direction = rule.get("direction", "")
             sources = rule.get("sourceRanges", [])
@@ -560,7 +567,7 @@ def _check_firewall_rules(vpc_name, config, compute):
                     port_set.update(set(range(1, 65536)))
                 else:
                     for port_range in port_list:
-                        parse_ports = port_range.split('-')
+                        parse_ports = port_range.split("-")
                         if len(parse_ports) == 1:
                             port_set.add(int(parse_ports[0]))
                         else:
@@ -568,7 +575,8 @@ def _check_firewall_rules(vpc_name, config, compute):
                                 len(parse_ports) == 2
                             ), f"Failed to parse the port range: {port_range}"
                             port_set.update(
-                                set(range(int(parse_ports[0]), int(parse_ports[1]) + 1)))
+                                set(range(int(parse_ports[0]), int(parse_ports[1]) + 1))
+                            )
                 if allowed["IPProtocol"] not in source2rules[direction_source]:
                     source2rules[direction_source][allowed["IPProtocol"]] = set()
                 source2rules[direction_source][allowed["IPProtocol"]].update(port_set)
@@ -631,7 +639,8 @@ def get_usable_vpc(config):
             body = VPC_TEMPLATE.copy()
             body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
             body["selfLink"] = body["selfLink"].format(
-                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
+                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME
+            )
             _create_vpcnet(config, compute, body)
 
         # Create firewall rules
@@ -640,16 +649,19 @@ def get_usable_vpc(config):
             # If the rule already exists, delete it first.
             rule_name = rule["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
             rule_list = _list_firewall_rules(
-                config, compute, filter=f"(name={rule_name})")
+                config, compute, filter=f"(name={rule_name})"
+            )
             if len(rule_list) > 0:
                 _delete_firewall_rule(config, compute, rule_name)
 
             body = rule.copy()
             body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
             body["network"] = body["network"].format(
-                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
+                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME
+            )
             body["selfLink"] = body["selfLink"].format(
-                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
+                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME
+            )
             _create_firewall_rule(config, compute, body)
 
         usable_vpc_name = SKYPILOT_VPC_NAME
@@ -678,7 +690,7 @@ def _configure_subnet(config, compute):
 
     # SkyPilot: make sure there's a usable VPC
     usable_vpc_name = get_usable_vpc(config)
-    subnets = _list_subnets(config, compute, filter=f"(name=\"{usable_vpc_name}\")")
+    subnets = _list_subnets(config, compute, filter=f'(name="{usable_vpc_name}")')
     default_subnet = subnets[0]
 
     default_interfaces = [

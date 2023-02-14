@@ -397,6 +397,20 @@ def launch(
                 sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
             sky.launch(task, cluster_name='my-cluster')
 
+    Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the cluster is
+            owned by another user.
+        exceptions.ResourcesUnavailableError: if the requested resources
+            cannot be satisfied. The failover_history of the exception
+            will be set as:
+                1. Empty: iff the first-ever sky.optimize() fails to
+                find a feasible resource; no pre-check or actual launch is
+                attempted.
+                2. Non-empty: iff at least 1 exception from either
+                our pre-checks (e.g., cluster name invalid) or a region/zone
+                throwing resource unavailability.
+        exceptions.NotSupportedError: if the cluster name is reserved.
+    Other exceptions may be raised depending on the backend.
     """
     entrypoint = task
     backend_utils.check_cluster_name_not_reserved(cluster_name,
@@ -625,6 +639,7 @@ def spot_launch(
         controller_task = task_lib.Task.from_yaml(yaml_path)
         controller_task.spot_task = task
         assert len(controller_task.resources) == 1
+
         print(f'{colorama.Fore.YELLOW}'
               f'Launching managed spot job {name} from spot controller...'
               f'{colorama.Style.RESET_ALL}')

@@ -2200,7 +2200,7 @@ def down(
                            purge=purge)
 
 
-def _hint_for_down_spot_controller(controller_name: str):
+def _hint_or_raise_for_down_spot_controller(controller_name: str):
     # spot_jobs will be empty when the spot cluster is not running.
     cluster_status, _ = backend_utils.refresh_cluster_status_handle(
         controller_name)
@@ -2208,22 +2208,34 @@ def _hint_for_down_spot_controller(controller_name: str):
         click.echo('Managed spot controller has already been torn down.')
         return
 
+    if cluster_status == global_user_state.ClusterStatus.INIT:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                f'{colorama.Fore.RED}Tearing down the spot controller while '
+                'it is in INIT state is not supported, as we cannot '
+                'guarantee that all the spot jobs are finished. Please wait '
+                'until the spot controller is UP or fix it with '
+                f'{colorama.Style.BRIGHT}sky start '
+                f'{spot_lib.SPOT_CONTROLLER_NAME}{colorama.Style.RESET_ALL}.')
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            f'spot controller ({cluster_status.value}). Please be '
            f'aware of the following:{colorama.Style.RESET_ALL}'
            '\n * All logs and status information of the spot '
            'jobs (output of `sky spot queue`) will be lost.')
+    click.echo(msg)
     if cluster_status == global_user_state.ClusterStatus.UP:
-        try:
-            spot_jobs = core.spot_queue(refresh=False)
-        except exceptions.ClusterNotUpError:
-            # The spot controller cluster status changed during querying
-            # the spot jobs, use the latest cluster status, so that the
-            # message for INIT and STOPPED states will be correctly
-            # added to the message.
-            cluster_status = backend_utils.refresh_cluster_status_handle(
-                controller_name)
-            spot_jobs = []
+        with backend_utils.safe_console_status(
+                '[bold cyan]Checking for in-progress spot jobs[/]'):
+            try:
+                spot_jobs = core.spot_queue(refresh=False)
+            except exceptions.ClusterNotUpError:
+                # The spot controller cluster status changed during querying
+                # the spot jobs, use the latest cluster status, so that the
+                # message for INIT and STOPPED states will be correctly
+                # added to the message.
+                cluster_status = backend_utils.refresh_cluster_status_handle(
+                    controller_name)
+                spot_jobs = []
 
         # Find in-progress spot jobs, and hint users to cancel them.
         non_terminal_jobs = [
@@ -2231,17 +2243,20 @@ def _hint_for_down_spot_controller(controller_name: str):
         ]
         if (cluster_status == global_user_state.ClusterStatus.UP and
                 non_terminal_jobs):
-            msg += ('\n * In-progress spot jobs found, their resources '
-                    'will not be terminated and require manual cleanup:\n')
             job_table = spot_lib.format_job_table(non_terminal_jobs,
                                                   show_all=False)
+            msg = (f'{colorama.Fore.RED}In-progress spot jobs found. '
+                   'To avoid resource leakage, cancel all jobs first: '
+                   f'{colorama.Style.BRIGHT}sky spot cancel -a'
+                   f'{colorama.Style.RESET_ALL}\n')
             # Add prefix to each line to align with the bullet point.
             msg += '\n'.join(
                 ['   ' + line for line in job_table.split('\n') if line != ''])
-    if cluster_status == global_user_state.ClusterStatus.INIT:
-        msg += ('\n * If there are pending/in-progress spot jobs, those '
-                'resources will not be terminated and require manual cleanup.')
-    click.echo(msg)
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(msg)
+        else:
+            click.echo(' * No in-progress spot jobs found. It should be safe '
+                       'to terminate (see caveats above).')
 
 
 def _down_or_stop_clusters(
@@ -2316,14 +2331,16 @@ def _down_or_stop_clusters(
                 # TODO(zhwu): We can only have one reserved cluster (spot
                 # controller).
                 assert len(reserved_clusters) == 1, reserved_clusters
-                _hint_for_down_spot_controller(reserved_clusters[0])
-
-                if not no_confirm:
-                    click.confirm('Proceed?',
-                                  default=False,
-                                  abort=True,
-                                  show_default=True)
-                    no_confirm = True
+                _hint_or_raise_for_down_spot_controller(reserved_clusters[0])
+                confirm_str = 'delete'
+                user_input = click.prompt(
+                    f'To proceed, please check the warning above and type '
+                    f'{colorama.Style.BRIGHT}{confirm_str!r}'
+                    f'{colorama.Style.RESET_ALL}',
+                    type=str)
+                if user_input != confirm_str:
+                    raise click.Abort()
+                no_confirm = True
         names += reserved_clusters
 
     if apply_to_all:
@@ -3082,11 +3099,6 @@ def spot_launch(
     """
     if name is None:
         name = backend_utils.generate_cluster_name()
-    else:
-        # This does the basic regex check for the cluster name, while the name
-        # length check will be done by the controller when it starts
-        # provisioning the cluster.
-        clouds.Cloud.check_cluster_name_is_valid(name)
 
     task = _make_task_from_entrypoint_with_overrides(
         entrypoint,
@@ -3110,6 +3122,15 @@ def spot_launch(
         prompt = f'Launching a new spot task {name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
+
+    # We try our best to validate the cluster name before we launch the task.
+    # If the cloud is not specified, this will only validate the cluster name
+    # against the regex, and the cloud-specific validation will be done by
+    # the spot controller when actually launching the spot cluster.
+    resources = list(task.resources)[0]
+    task_cloud = (resources.cloud
+                  if resources.cloud is not None else clouds.Cloud)
+    task_cloud.check_cluster_name_is_valid(name)
 
     sky.spot_launch(task,
                     name,
@@ -3161,8 +3182,7 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
     - CANCELLED: The job was cancelled by the user.
 
     If the job failed, either due to user code or spot unavailability, the error
-    log can be found with ``sky logs sky-spot-controller-<user_hash> job_id``.
-    Please find your exact spot controller name with ``sky status``.
+    log can be found with ``sky spot logs --controller job_id``.
 
     (Tip) To fetch job statuses every 60 seconds, use ``watch``:
 
@@ -3295,12 +3315,24 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     default=True,
     help=('Follow the logs of the job. [default: --follow] '
           'If --no-follow is specified, print the log so far and exit.'))
+@click.option(
+    '--controller',
+    is_flag=True,
+    default=False,
+    help=('Show the controller logs of this job; useful for debugging '
+          'launching/recoveries, etc.'))
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
-def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool):
+def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool,
+              controller: bool):
     """Tail the log of a managed spot job."""
     try:
-        core.spot_tail_logs(name=name, job_id=job_id, follow=follow)
+        if controller:
+            core.tail_logs(spot_lib.SPOT_CONTROLLER_NAME,
+                           job_id=job_id,
+                           follow=follow)
+        else:
+            core.spot_tail_logs(name=name, job_id=job_id, follow=follow)
     except exceptions.ClusterNotUpError:
         # Hint messages already printed by the call above.
         sys.exit(1)

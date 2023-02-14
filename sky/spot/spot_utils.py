@@ -119,8 +119,12 @@ def update_spot_job_status(job_id: Optional[int] = None):
             # The controller job for this spot job is not running: it must
             # have exited abnormally, and we should set the job status to
             # FAILED_CONTROLLER.
-            spot_state.set_failed(job_id_,
-                                  spot_state.SpotStatus.FAILED_CONTROLLER)
+            spot_state.set_failed(
+                job_id_,
+                spot_state.SpotStatus.FAILED_CONTROLLER,
+                failure_reason=
+                'Controller process has exited abnormally. For more details,'
+                f' run: sky spot logs --controller {job_id_}')
 
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
@@ -241,12 +245,13 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         if job_status.is_terminal():
             job_msg = ''
             if job_status.is_failed():
-                job_msg = ('\nFor detailed error message, please check: '
-                           f'{colorama.Style.BRIGHT}sky logs '
-                           f'{SPOT_CONTROLLER_NAME} {job_id}'
-                           f'{colorama.Style.RESET_ALL}')
-            return (f'Job {job_id} is already in terminal state '
-                    f'{job_status.value}. Logs will not be shown.{job_msg}')
+                job_msg = (
+                    f'\nFailure reason: {spot_state.get_failure_reason(job_id)}'
+                )
+            return (f'{colorama.Fore.YELLOW}'
+                    f'Job {job_id} is already in terminal state '
+                    f'{job_status.value}. Logs will not be shown.'
+                    f'{colorama.Style.RESET_ALL}{job_msg}')
         task_name = spot_state.get_task_name_by_job_id(job_id)
         cluster_name = generate_spot_cluster_name(task_name, job_id)
         backend = backends.CloudVmRayBackend()
@@ -402,7 +407,7 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
         '#RECOVERIES', 'STATUS'
     ]
     if show_all:
-        columns += ['STARTED', 'CLUSTER', 'REGION']
+        columns += ['STARTED', 'CLUSTER', 'REGION', 'FAILURE']
     job_table = log_utils.create_table(columns)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
@@ -430,12 +435,13 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
         if not job['status'].is_terminal():
             status_counts[job['status'].value] += 1
         if show_all:
-            # STARTED
-            started = log_utils.readable_time_duration(job['start_at'])
-            values.append(started)
             values.extend([
+                # STARTED
+                log_utils.readable_time_duration(job['start_at']),
                 job['cluster_resources'],
                 job['region'],
+                job['failure_reason']
+                if job['failure_reason'] is not None else '-',
             ])
         job_table.add_row(values)
     status_str = ', '.join([
