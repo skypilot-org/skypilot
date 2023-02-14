@@ -1,5 +1,4 @@
 """Util constants/functions for the backends."""
-import copy
 from datetime import datetime
 import difflib
 import enum
@@ -26,8 +25,6 @@ from packaging import version
 import requests
 from requests import adapters
 from requests.packages.urllib3.util import retry as retry_lib
-from ray.autoscaler._private import commands as ray_commands
-from ray.autoscaler._private import util as ray_autoscaler_private_util
 import rich.console as rich_console
 import rich.progress as rich_progress
 import yaml
@@ -45,6 +42,7 @@ from sky import spot as spot_lib
 from sky.backends import onprem_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import env_options
@@ -91,15 +89,6 @@ WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 # with no internet connection.
 # Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
 _TEST_IP = 'https://8.8.8.8'
-
-# GCP has a 63 char limit; however, Ray autoscaler adds many
-# characters. Through testing, this is the maximum length for the Sky cluster
-# name on GCP.  Ref:
-# https://cloud.google.com/compute/docs/naming-resources#resource-name-format
-# NOTE: actually 37 is maximum for a single-node cluster which gets the suffix
-# '-head', but 35 for a multinode cluster because workers get the suffix
-# '-worker'. Here we do not distinguish these cases and take the lower limit.
-_MAX_CLUSTER_NAME_LEN_FOR_GCP = 35
 
 # Allow each CPU thread take 2 tasks.
 # Note: This value cannot be too small, otherwise OOM issue may occur.
@@ -374,6 +363,12 @@ class SSHConfigHelper(object):
             proxy = f'ProxyCommand {proxy_command}'
         else:
             proxy = ''
+        # StrictHostKeyChecking=no skips the host key check for the first
+        # time. UserKnownHostsFile=/dev/null and GlobalKnownHostsFile/dev/null
+        # prevent the host key from being added to the known_hosts file and
+        # always return an empty file for known hosts, making the ssh think
+        # this is a first-time connection, and thus skipping the host key
+        # check.
         codegen = textwrap.dedent(f"""\
             {autogen_comment}
             Host {host_name}
@@ -383,9 +378,12 @@ class SSHConfigHelper(object):
               IdentitiesOnly yes
               ForwardAgent yes
               StrictHostKeyChecking no
+              UserKnownHostsFile=/dev/null
+              GlobalKnownHostsFile=/dev/null
               Port 22
               {proxy}
             """.rstrip())
+        codegen = codegen + '\n'
         return codegen
 
     @classmethod
@@ -747,17 +745,17 @@ def write_cluster_config(
         - 'tpu-create-script' (if TPU is requested)
         - 'tpu-delete-script' (if TPU is requested)
     Raises:
-        ResourceUnavailableError: if the region/zones requested does not appear
+        exceptions.ResourcesUnavailableError: if the region/zones requested does not appear
             in the catalog, or an ssh_proxy_command is specified but not for the given region.
     """
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
-    # This can raise a ResourceUnavailableError, when the region/zones requested
+    # This can raise a ResourcesUnavailableError, when the region/zones requested
     # does not appear in the catalog. It can be triggered when the user changed
     # the catalog file, while there is a cluster in the removed region/zone.
     # TODO(zhwu): We should change the exception type to a more specific one,
-    # as the ResourceUnavailableError is overly used. Also, it would be better
+    # as the ResourcesUnavailableError is overly used. Also, it would be better
     # to move the check out of this function, i.e. the caller should be
     # responsible for the validation.
     resources_vars = cloud.make_deploy_resources_variables(
@@ -907,6 +905,11 @@ def write_cluster_config(
             tpu_name = cluster_name
 
         user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
+
+        from sky.skylet.providers.gcp import config as gcp_config  # pylint: disable=import-outside-toplevel
+        config = common_utils.read_yaml(os.path.expanduser(config_dict['ray']))
+        vpc_name = gcp_config.get_usable_vpc(config)
+
         scripts = tuple(
             fill_template(
                 template_name,
@@ -914,6 +917,7 @@ def write_cluster_config(
                     resources_vars, **{
                         'tpu_name': tpu_name,
                         'gcp_project_id': gcp_project_id,
+                        'vpc_name': vpc_name,
                     }),
                 # Use new names for TPU scripts so that different runs can use
                 # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
@@ -941,6 +945,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_gcp_authentication(config)
     elif isinstance(cloud, clouds.Azure):
         config = auth.setup_azure_authentication(config)
+    elif isinstance(cloud, clouds.Lambda):
+        config = auth.setup_lambda_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
@@ -1332,17 +1338,17 @@ def get_node_ips(cluster_yaml: str,
                     break
         if len(worker_ips) != expected_num_nodes - 1:
             n = expected_num_nodes - 1
-            # This could be triggered if e.g., some logging is added in
-            # skypilot_config, a module that has some code executed whenever
-            # `sky` is imported.
-            logger.warning(
-                f'Expected {n} worker IP(s); found '
-                f'{len(worker_ips)}: {worker_ips}'
-                '\nThis could happen if there is extra output from '
-                '`ray get-worker-ips`, which should be inspected below.'
-                f'\n== Output ==\n{out}'
-                f'\n== Output ends ==')
             if len(worker_ips) > n:
+                # This could be triggered if e.g., some logging is added in
+                # skypilot_config, a module that has some code executed whenever
+                # `sky` is imported.
+                logger.warning(
+                    f'Expected {n} worker IP(s); found '
+                    f'{len(worker_ips)}: {worker_ips}'
+                    '\nThis could happen if there is extra output from '
+                    '`ray get-worker-ips`, which should be inspected below.'
+                    f'\n== Output ==\n{out}'
+                    f'\n== Output ends ==')
                 logger.warning(f'\nProceeding with the last {n} '
                                f'detected IP(s): {worker_ips[-n:]}.')
                 worker_ips = worker_ips[-n:]
@@ -1400,10 +1406,11 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
         tpuvm_json = json.loads(stdout)
         if tpuvm_json['state'] != 'READY':
             # May be a leaked preempted resource, or terminated by user in the
-            # console.
+            # console, or still in the process of being created.
             ux_utils.console_newline()
-            logger.warning(f'TPU VM {tpu_id} is not in READY state. '
-                           'Skipping...')
+            logger.debug(f'TPU VM {tpu_id} is in {tpuvm_json["state"]} '
+                         'state. Skipping IP query... '
+                         'Hint: make sure it is not leaked.')
             continue
 
         if not get_internal_ips:
@@ -1506,69 +1513,6 @@ def _process_cli_query(
     ]
 
 
-def _ray_launch_hash(cluster_name: str,
-                     ray_config: Dict[str, Any]) -> Optional[Set[str]]:
-    """Returns a set of Ray launch config hashes, one per node type.
-
-    This returns None if ray's _bootstrap_config() failed to return, which can
-    happen if node providers' bootstrapping phase (config.py) raises an error
-    (which *should* only happen on errors prior to nodes launching, e.g.,
-    VPC/subnet setup).
-    """
-    # Use the cached Ray launch hashes if they exist.
-    metadata = global_user_state.get_cluster_metadata(cluster_name)
-    assert metadata is not None, cluster_name
-    ray_launch_hashes = metadata.get('ray_launch_hashes', None)
-    if ray_launch_hashes is not None:
-        logger.debug('Using cached launch_hashes.')
-        return set(ray_launch_hashes)
-    try:
-        with ux_utils.suppress_output():
-            ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
-    except RuntimeError as e:
-        # TODO(zongheng): is this safe? Could it be node(s) are live but somehow a
-        # separate status refresh hits such errors?
-        if 'SKYPILOT_ERROR_NO_NODES_LAUNCHED' in str(e):
-            logger.error(f'Error found when refreshing cluster status: {e}')
-            return None
-        raise e
-    # Adopted from https://github.com/ray-project/ray/blob/ray-2.0.1/python/ray/autoscaler/_private/node_launcher.py#L87-L97
-    # TODO(zhwu): this logic is duplicated from the ray code above (keep in
-    # sync).
-    launch_hashes = set()
-    head_node_type = ray_config['head_node_type']
-    for node_type, node_config in ray_config['available_node_types'].items():
-        if node_type == head_node_type:
-            launch_config = ray_config.get('head_node', {})
-            auth_config = ray_config['auth']
-        else:
-            launch_config = ray_config.get('worker_nodes', {})
-            auth_config = dict(ray_config['auth'])
-        # Why pop ssh_proxy_command for both head and workers:
-        #
-        # When we launch the head node from the local client: our call to `ray
-        # up` has a monkey-patched version of hash_launch_conf(), which drops
-        # this field.
-        #
-        # When the head node launches worker nodes: On the head node,
-        # ~/ray_bootstrap_config.yaml, which has any ssh_proxy_command field
-        # removed (see Ray's autoscaler/_private/commands.py), is passed to the
-        # autoscaler. Therefore when Ray calculates the hash for workers,
-        # ssh_proxy_command is not included. Here we follow this (otherwise our
-        # hash here would not match with what's on the console for workers).
-        auth_config.pop('ssh_proxy_command', None)
-        launch_config = copy.deepcopy(launch_config)
-        launch_config.update(node_config['node_config'])
-        with ux_utils.suppress_output():
-            current_hash = ray_autoscaler_private_util.hash_launch_conf(
-                launch_config, auth_config)
-        launch_hashes.add(current_hash)
-    # Cache the launch hashes for the cluster.
-    metadata['ray_launch_hashes'] = list(launch_hashes)
-    global_user_state.set_cluster_metadata(cluster_name, metadata)
-    return launch_hashes
-
-
 def _query_status_aws(
     cluster: str,
     ray_config: Dict[str, Any],
@@ -1584,16 +1528,8 @@ def _query_status_aws(
         'terminated': None,
     }
     region = ray_config['provider']['region']
-    launch_hashes = _ray_launch_hash(cluster, ray_config)
-    if launch_hashes is not None:
-        hash_filter_str = ','.join(launch_hashes)
-        hash_filter_line = (
-            f'Name=tag:ray-launch-config,Values={hash_filter_str} ')
-    else:
-        hash_filter_line = ''
     query_cmd = ('aws ec2 describe-instances --filters '
                  f'Name=tag:ray-cluster-name,Values={cluster} '
-                 f'{hash_filter_line}'
                  f'--region {region} '
                  '--query "Reservations[].Instances[].State.Name" '
                  '--output text')
@@ -1607,9 +1543,6 @@ def _query_status_gcp(
     # Note: we use ":" for filtering labels for gcloud, as the latest gcloud (v393.0)
     # fails to filter labels with "=".
     # Reference: https://cloud.google.com/sdk/gcloud/reference/topic/filters
-    launch_hashes = _ray_launch_hash(cluster, ray_config)
-    assert launch_hashes is not None
-    hash_filter_str = ' '.join(launch_hashes)
 
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     zone = ray_config['provider'].get('availability_zone', '')
@@ -1631,8 +1564,7 @@ def _query_status_gcp(
         tpu_utils.check_gcp_cli_include_tpu_vm()
         query_cmd = ('gcloud compute tpus tpu-vm list '
                      f'--zone {zone} '
-                     f'--filter="(labels.ray-cluster-name={cluster} AND '
-                     f'labels.ray-launch-config=({hash_filter_str}))" '
+                     f'--filter="(labels.ray-cluster-name={cluster})" '
                      '--format="value(state)"')
     else:
         status_map = {
@@ -1651,8 +1583,7 @@ def _query_status_gcp(
         # TODO(zhwu): The status of the TPU attached to the cluster should also
         # be checked, since TPUs are not part of the VMs.
         query_cmd = ('gcloud compute instances list '
-                     f'--filter="(labels.ray-cluster-name={cluster} AND '
-                     f'labels.ray-launch-config=({hash_filter_str}))" '
+                     f'--filter="(labels.ray-cluster-name={cluster})" '
                      '--format="value(status)"')
     status_list = _process_cli_query('GCP', cluster, query_cmd, '\n',
                                      status_map)
@@ -1682,6 +1613,7 @@ def _query_status_azure(
     cluster: str,
     ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
+    del ray_config  # Unused.
     status_map = {
         'VM starting': global_user_state.ClusterStatus.INIT,
         'VM running': global_user_state.ClusterStatus.UP,
@@ -1694,14 +1626,9 @@ def _query_status_azure(
         'VM deallocating': global_user_state.ClusterStatus.STOPPED,
         'VM deallocated': global_user_state.ClusterStatus.STOPPED,
     }
-    launch_hashes = _ray_launch_hash(cluster, ray_config)
-    assert launch_hashes is not None
-    hash_filter_str = ', '.join(f'\\"{h}\\"' for h in launch_hashes)
-    query_cmd = (
-        'az vm show -d --ids $(az vm list --query '
-        f'"[?tags.\\"ray-cluster-name\\" == \'{cluster}\' && '
-        f'contains(\'[{hash_filter_str}]\', tags.\\"ray-launch-config\\")].id" '
-        '-o tsv) --query "powerState" -o tsv')
+    query_cmd = ('az vm show -d --ids $(az vm list --query '
+                 f'"[?tags.\\"ray-cluster-name\\" == \'{cluster}\'].id" '
+                 '-o tsv) --query "powerState" -o tsv')
     # NOTE: Azure cli should be handled carefully. The query command above
     # takes about 1 second to run.
     # An alternative is the following command, but it will take more than
@@ -1714,10 +1641,29 @@ def _query_status_azure(
     return _process_cli_query('Azure', cluster, query_cmd, '\t', status_map)
 
 
+def _query_status_lambda(
+        cluster: str,
+        ray_config: Dict[str, Any],  # pylint: disable=unused-argument
+) -> List[global_user_state.ClusterStatus]:
+    status_map = {
+        'booting': global_user_state.ClusterStatus.INIT,
+        'active': global_user_state.ClusterStatus.UP,
+        'unhealthy': global_user_state.ClusterStatus.INIT,
+        'terminated': None,
+    }
+    # TODO(ewzeng): filter by hash_filter_string to be safe
+    vms = lambda_utils.LambdaCloudClient().list_instances()
+    for node in vms:
+        if node['name'] == cluster:
+            return [status_map[node['status']]]
+    return []
+
+
 _QUERY_STATUS_FUNCS = {
     'AWS': _query_status_aws,
     'GCP': _query_status_gcp,
     'Azure': _query_status_azure,
+    'Lambda': _query_status_lambda,
 }
 
 
@@ -1819,11 +1765,11 @@ def _update_cluster_status_no_lock(
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
 
     if len(node_statuses) > handle.launched_nodes:
-        # Unexpected: this could mean ray launch hash is not calculated and we
-        # used the cluster name as the only filter when querying the cloud
-        # provider, and in the queried region more than 1 cluster with the same
+        # Unexpected: in the queried region more than 1 cluster with the same
         # constructed name tag returned. This will typically not happen unless
-        # users manually create a cluster with that constructed name.
+        # users manually create a cluster with that constructed name or there
+        # was a resource leak caused by different launch hash before #1671
+        # was merged.
         #
         # (Technically speaking, even if returned num nodes <= num
         # handle.launched_nodes), not including the launch hash could mean the
@@ -1833,13 +1779,16 @@ def _update_cluster_status_no_lock(
         #
         # We have not experienced the above; adding as a safeguard.
         #
-        # Since we failed to refresh, warn and return old record.
-        logger.warning(
-            f'Failed to refresh status for cluster {cluster_name!r} '
-            f'due to {len(node_statuses)} nodes being found with the '
-            'same name tag, but the cluster should have '
-            f'{handle.launched_nodes} nodes. Keeping the old status.')
-        return record
+        # Since we failed to refresh, raise the status fetching error.
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterStatusFetchingError(
+                f'Found {len(node_statuses)} node(s) with the same cluster name tag in the '
+                f'cloud provider for cluster {cluster_name!r}, which should have '
+                f'{handle.launched_nodes} nodes. This normally should not happen. '
+                f'{colorama.Fore.RED}Please check the cloud console and fix any possible '
+                'resources leakage (e.g., if there are any stopped nodes and they do not '
+                f'have data or are unhealthy, terminate them).{colorama.Style.RESET_ALL}'
+            )
     assert len(node_statuses) <= handle.launched_nodes
 
     # If the node_statuses is empty, all the nodes are terminated. We can
@@ -1862,24 +1811,34 @@ def _update_cluster_status_no_lock(
     #     abnormal.
     #
     # An abnormal cluster will transition to INIT and have any autostop setting
-    # reset.
+    # reset (unless it's autostopping/autodowning.).
     is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or
                    any(status != global_user_state.ClusterStatus.STOPPED
                        for status in node_statuses))
     if is_abnormal:
-        # Reset the autostop to avoid false information with best effort.
-        # Side effect: if the status is refreshed during autostopping, the
-        # autostop field in the local cache will be reset, even though the
-        # cluster will still be correctly stopped.
-        try:
-            backend = backends.CloudVmRayBackend()
-            backend.set_autostop(handle, -1, stream_logs=False)
-        except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to reset autostop. Due to '
-                         f'{common_utils.format_exception(e)}')
-        global_user_state.set_cluster_autostop_value(handle.cluster_name,
-                                                     -1,
-                                                     to_down=False)
+        backend = get_backend_from_handle(handle)
+        if isinstance(backend,
+                      backends.CloudVmRayBackend) and record['autostop'] >= 0:
+            if not backend.is_definitely_autostopping(handle,
+                                                      stream_logs=False):
+                # Reset the autostopping as the cluster is abnormal, and may
+                # not correctly autostop. Resetting the autostop will let
+                # the user know that the autostop may not happen to avoid
+                # leakages from the assumption that the cluster will autostop.
+                try:
+                    backend.set_autostop(handle, -1, stream_logs=False)
+                except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+                    logger.debug(f'Failed to reset autostop. Due to '
+                                 f'{common_utils.format_exception(e)}')
+                global_user_state.set_cluster_autostop_value(
+                    handle.cluster_name, -1, to_down=False)
+            else:
+                ux_utils.console_newline()
+                operation_str = 'autodowning' if record[
+                    'to_down'] else 'autostopping'
+                logger.info(
+                    f'Cluster {cluster_name!r} is {operation_str}. Setting to '
+                    'INIT status; try refresh again in a while.')
 
         # If the user starts part of a STOPPED cluster, we still need a status
         # to represent the abnormal status. For spot cluster, it can also
@@ -1928,7 +1887,8 @@ def _update_cluster_status(
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
-          fetched from the cloud provider.
+          fetched from the cloud provider or there are leaked nodes causing
+          the node number larger than expected.
     """
     if not acquire_per_cluster_status_lock:
         return _update_cluster_status_no_lock(cluster_name)
@@ -1974,7 +1934,8 @@ def _refresh_cluster_record(
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
-          fetched from the cloud provider.
+          fetched from the cloud provider or there are leaked nodes causing
+          the node number larger than expected.
     """
 
     record = global_user_state.get_cluster_from_name(cluster_name)
@@ -2213,8 +2174,10 @@ def get_clusters(
                 acquire_per_cluster_status_lock=True)
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.CloudUserIdentityError,
-                exceptions.ClusterOwnerIdentityMismatchError,
-                exceptions.ClusterStatusFetchingError) as e:
+                exceptions.ClusterOwnerIdentityMismatchError) as e:
+            # Do not fail the entire refresh process. The caller will
+            # handle the 'UNKNOWN' status, and collect the errors into
+            # a table.
             record = {'status': 'UNKNOWN', 'error': e}
         progress.update(task, advance=1)
         return record
@@ -2334,35 +2297,6 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
         resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
     resources_str = f'{task.num_nodes}x [{resources_str}]'
     return resources_str
-
-
-def check_cluster_name_is_valid(cluster_name: str,
-                                cloud: Optional[clouds.Cloud] = None) -> None:
-    """Errors out on invalid cluster names not supported by cloud providers.
-
-    Bans (including but not limited to) names that:
-    - are digits-only
-    - contain underscore (_)
-    """
-    if cluster_name is None:
-        return
-    # GCP errors return this exact regex.  An informal description is at:
-    # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
-    valid_regex = '[a-z]([-a-z0-9]{0,61}[a-z0-9])?'
-    if re.fullmatch(valid_regex, cluster_name) is None:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.InvalidClusterNameError(
-                f'Cluster name "{cluster_name}" is invalid; '
-                f'ensure it is fully matched by regex: {valid_regex}')
-    if isinstance(cloud, clouds.GCP):
-        # GCP has too restrictive of a length limit. Don't check for other
-        # clouds.
-        if len(cluster_name) > _MAX_CLUSTER_NAME_LEN_FOR_GCP:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InvalidClusterNameError(
-                    f'Cluster name {cluster_name!r} has {len(cluster_name)} '
-                    f'chars; maximum length is {_MAX_CLUSTER_NAME_LEN_FOR_GCP} '
-                    'chars.')
 
 
 def check_cluster_name_not_reserved(

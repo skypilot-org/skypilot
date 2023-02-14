@@ -174,6 +174,13 @@ def _interactive_node_cli_command(cli_func):
                                         default=None,
                                         type=str,
                                         help='Instance type to use.')
+    cpus = click.option(
+        '--cpus',
+        default=None,
+        type=str,
+        help=('Number of vCPUs each instance must have '
+              '(e.g., ``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
+              'This is used to automatically select the instance type.'))
     gpus = click.option('--gpus',
                         default=None,
                         type=str,
@@ -268,6 +275,7 @@ def _interactive_node_cli_command(cli_func):
         region_option,
         zone_option,
         instance_type_option,
+        cpus,
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
         spot_option,
@@ -561,6 +569,7 @@ def _parse_override_params(cloud: Optional[str] = None,
                            region: Optional[str] = None,
                            zone: Optional[str] = None,
                            gpus: Optional[str] = None,
+                           cpus: Optional[str] = None,
                            instance_type: Optional[str] = None,
                            use_spot: Optional[bool] = None,
                            image_id: Optional[str] = None,
@@ -587,6 +596,11 @@ def _parse_override_params(cloud: Optional[str] = None,
             override_params['accelerators'] = None
         else:
             override_params['accelerators'] = gpus
+    if cpus is not None:
+        if cpus.lower() == 'none':
+            override_params['cpus'] = None
+        else:
+            override_params['cpus'] = cpus
     if instance_type is not None:
         if instance_type.lower() == 'none':
             override_params['instance_type'] = None
@@ -916,6 +930,7 @@ def _make_task_from_entrypoint_with_overrides(
     region: Optional[str] = None,
     zone: Optional[str] = None,
     gpus: Optional[str] = None,
+    cpus: Optional[str] = None,
     instance_type: Optional[str] = None,
     num_nodes: Optional[int] = None,
     use_spot: Optional[bool] = None,
@@ -958,6 +973,7 @@ def _make_task_from_entrypoint_with_overrides(
                                              region=region,
                                              zone=zone,
                                              gpus=gpus,
+                                             cpus=cpus,
                                              instance_type=instance_type,
                                              use_spot=use_spot,
                                              image_id=image_id,
@@ -1099,6 +1115,13 @@ def cli():
               default=False,
               help='If used, runs locally inside a docker container.')
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@click.option('--cpus',
+              default=None,
+              type=str,
+              required=False,
+              help=('Number of vCPUs each instance must have (e.g., '
+                    '``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
+                    'This is used to automatically select the instance type.'))
 @click.option('--disk-size',
               default=None,
               type=int,
@@ -1163,6 +1186,7 @@ def launch(
     region: Optional[str],
     zone: Optional[str],
     gpus: Optional[str],
+    cpus: Optional[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -1207,6 +1231,7 @@ def launch(
         region=region,
         zone=zone,
         gpus=gpus,
+        cpus=cpus,
         instance_type=instance_type,
         num_nodes=num_nodes,
         use_spot=use_spot,
@@ -1352,6 +1377,7 @@ def exec(
         region=region,
         zone=zone,
         gpus=gpus,
+        cpus=None,
         instance_type=instance_type,
         use_spot=use_spot,
         image_id=image_id,
@@ -2182,7 +2208,7 @@ def down(
                            purge=purge)
 
 
-def _hint_for_down_spot_controller(controller_name: str):
+def _hint_or_raise_for_down_spot_controller(controller_name: str):
     # spot_jobs will be empty when the spot cluster is not running.
     cluster_status, _ = backend_utils.refresh_cluster_status_handle(
         controller_name)
@@ -2190,22 +2216,34 @@ def _hint_for_down_spot_controller(controller_name: str):
         click.echo('Managed spot controller has already been torn down.')
         return
 
+    if cluster_status == global_user_state.ClusterStatus.INIT:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                f'{colorama.Fore.RED}Tearing down the spot controller while '
+                'it is in INIT state is not supported, as we cannot '
+                'guarantee that all the spot jobs are finished. Please wait '
+                'until the spot controller is UP or fix it with '
+                f'{colorama.Style.BRIGHT}sky start '
+                f'{spot_lib.SPOT_CONTROLLER_NAME}{colorama.Style.RESET_ALL}.')
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            f'spot controller ({cluster_status.value}). Please be '
            f'aware of the following:{colorama.Style.RESET_ALL}'
            '\n * All logs and status information of the spot '
            'jobs (output of `sky spot queue`) will be lost.')
+    click.echo(msg)
     if cluster_status == global_user_state.ClusterStatus.UP:
-        try:
-            spot_jobs = core.spot_queue(refresh=False)
-        except exceptions.ClusterNotUpError:
-            # The spot controller cluster status changed during querying
-            # the spot jobs, use the latest cluster status, so that the
-            # message for INIT and STOPPED states will be correctly
-            # added to the message.
-            cluster_status = backend_utils.refresh_cluster_status_handle(
-                controller_name)
-            spot_jobs = []
+        with backend_utils.safe_console_status(
+                '[bold cyan]Checking for in-progress spot jobs[/]'):
+            try:
+                spot_jobs = core.spot_queue(refresh=False)
+            except exceptions.ClusterNotUpError:
+                # The spot controller cluster status changed during querying
+                # the spot jobs, use the latest cluster status, so that the
+                # message for INIT and STOPPED states will be correctly
+                # added to the message.
+                cluster_status = backend_utils.refresh_cluster_status_handle(
+                    controller_name)
+                spot_jobs = []
 
         # Find in-progress spot jobs, and hint users to cancel them.
         non_terminal_jobs = [
@@ -2213,17 +2251,20 @@ def _hint_for_down_spot_controller(controller_name: str):
         ]
         if (cluster_status == global_user_state.ClusterStatus.UP and
                 non_terminal_jobs):
-            msg += ('\n * In-progress spot jobs found, their resources '
-                    'will not be terminated and require manual cleanup:\n')
             job_table = spot_lib.format_job_table(non_terminal_jobs,
                                                   show_all=False)
+            msg = (f'{colorama.Fore.RED}In-progress spot jobs found. '
+                   'To avoid resource leakage, cancel all jobs first: '
+                   f'{colorama.Style.BRIGHT}sky spot cancel -a'
+                   f'{colorama.Style.RESET_ALL}\n')
             # Add prefix to each line to align with the bullet point.
             msg += '\n'.join(
                 ['   ' + line for line in job_table.split('\n') if line != ''])
-    if cluster_status == global_user_state.ClusterStatus.INIT:
-        msg += ('\n * If there are pending/in-progress spot jobs, those '
-                'resources will not be terminated and require manual cleanup.')
-    click.echo(msg)
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(msg)
+        else:
+            click.echo(' * No in-progress spot jobs found. It should be safe '
+                       'to terminate (see caveats above).')
 
 
 def _down_or_stop_clusters(
@@ -2298,14 +2339,16 @@ def _down_or_stop_clusters(
                 # TODO(zhwu): We can only have one reserved cluster (spot
                 # controller).
                 assert len(reserved_clusters) == 1, reserved_clusters
-                _hint_for_down_spot_controller(reserved_clusters[0])
-
-                if not no_confirm:
-                    click.confirm('Proceed?',
-                                  default=False,
-                                  abort=True,
-                                  show_default=True)
-                    no_confirm = True
+                _hint_or_raise_for_down_spot_controller(reserved_clusters[0])
+                confirm_str = 'delete'
+                user_input = click.prompt(
+                    f'To proceed, please check the warning above and type '
+                    f'{colorama.Style.BRIGHT}{confirm_str!r}'
+                    f'{colorama.Style.RESET_ALL}',
+                    type=str)
+                if user_input != confirm_str:
+                    raise click.Abort()
+                no_confirm = True
         names += reserved_clusters
 
     if apply_to_all:
@@ -2422,11 +2465,11 @@ def _down_or_stop_clusters(
 # pylint: disable=redefined-outer-name
 def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], region: Optional[str], zone: Optional[str],
-            instance_type: Optional[str], gpus: Optional[str],
-            use_spot: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool], disk_size: Optional[int],
-            idle_minutes_to_autostop: Optional[int], down: bool,
-            retry_until_up: bool):
+            instance_type: Optional[str], cpus: Optional[str],
+            gpus: Optional[str], use_spot: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
 
     Examples:
@@ -2465,7 +2508,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
     user_requested_resources = not (cloud is None and region is None and
                                     zone is None and instance_type is None and
-                                    gpus is None and use_spot is None)
+                                    cpus is None and gpus is None and
+                                    use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
     if gpus is None and instance_type is None:
@@ -2478,6 +2522,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               region=region,
                               zone=zone,
                               instance_type=instance_type,
+                              cpus=cpus,
                               accelerators=gpus,
                               use_spot=use_spot,
                               disk_size=disk_size)
@@ -2501,10 +2546,11 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 # pylint: disable=redefined-outer-name
 def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], region: Optional[str], zone: Optional[str],
-            instance_type: Optional[str], use_spot: Optional[bool],
-            screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
-            down: bool, retry_until_up: bool):
+            instance_type: Optional[str], cpus: Optional[str],
+            use_spot: Optional[bool], screen: Optional[bool],
+            tmux: Optional[bool], disk_size: Optional[int],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
 
     Examples:
@@ -2542,7 +2588,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
     user_requested_resources = not (cloud is None and region is None and
                                     zone is None and instance_type is None and
-                                    use_spot is None)
+                                    cpus is None and use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
     if instance_type is None:
@@ -2553,6 +2599,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               region=region,
                               zone=zone,
                               instance_type=instance_type,
+                              cpus=cpus,
                               use_spot=use_spot,
                               disk_size=disk_size)
 
@@ -2575,11 +2622,12 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 # pylint: disable=redefined-outer-name
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             region: Optional[str], zone: Optional[str],
-            instance_type: Optional[str], tpus: Optional[str],
-            use_spot: Optional[bool], tpu_vm: Optional[bool],
-            screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
-            down: bool, retry_until_up: bool):
+            instance_type: Optional[str], cpus: Optional[str],
+            tpus: Optional[str], use_spot: Optional[bool],
+            tpu_vm: Optional[bool], screen: Optional[bool],
+            tmux: Optional[bool], disk_size: Optional[int],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
 
     Examples:
@@ -2616,8 +2664,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         name = _default_interactive_node_name('tpunode')
 
     user_requested_resources = not (region is None and zone is None and
-                                    instance_type is None and tpus is None and
-                                    use_spot is None)
+                                    instance_type is None and cpus is None and
+                                    tpus is None and use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
     accelerator_args = default_resources.accelerator_args
     if tpu_vm:
@@ -2633,6 +2681,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               region=region,
                               zone=zone,
                               instance_type=instance_type,
+                              cpus=cpus,
                               accelerators=tpus,
                               accelerator_args=accelerator_args,
                               use_spot=use_spot,
@@ -2976,6 +3025,13 @@ def spot():
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@click.option('--cpus',
+              default=None,
+              type=str,
+              required=False,
+              help=('Number of vCPUs each instance must have (e.g., '
+                    '``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
+                    'This is used to automatically select the instance type.'))
 @click.option('--spot-recovery',
               default=None,
               type=str,
@@ -3018,6 +3074,7 @@ def spot_launch(
     region: Optional[str],
     zone: Optional[str],
     gpus: Optional[str],
+    cpus: Optional[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -3045,8 +3102,6 @@ def spot_launch(
     """
     if name is None:
         name = backend_utils.generate_cluster_name()
-    else:
-        backend_utils.check_cluster_name_is_valid(name)
 
     task = _make_task_from_entrypoint_with_overrides(
         entrypoint,
@@ -3056,6 +3111,7 @@ def spot_launch(
         region=region,
         zone=zone,
         gpus=gpus,
+        cpus=cpus,
         instance_type=instance_type,
         num_nodes=num_nodes,
         use_spot=use_spot,
@@ -3069,6 +3125,15 @@ def spot_launch(
         prompt = f'Launching a new spot task {name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
+
+    # We try our best to validate the cluster name before we launch the task.
+    # If the cloud is not specified, this will only validate the cluster name
+    # against the regex, and the cloud-specific validation will be done by
+    # the spot controller when actually launching the spot cluster.
+    resources = list(task.resources)[0]
+    task_cloud = (resources.cloud
+                  if resources.cloud is not None else clouds.Cloud)
+    task_cloud.check_cluster_name_is_valid(name)
 
     sky.spot_launch(task,
                     name,
@@ -3119,8 +3184,7 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
     - CANCELLED: The job was cancelled by the user.
 
     If the job failed, either due to user code or spot unavailability, the error
-    log can be found with ``sky logs sky-spot-controller-<user_hash> job_id``.
-    Please find your exact spot controller name with ``sky status``.
+    log can be found with ``sky spot logs --controller job_id``.
 
     (Tip) To fetch job statuses every 60 seconds, use ``watch``:
 
@@ -3253,12 +3317,24 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     default=True,
     help=('Follow the logs of the job. [default: --follow] '
           'If --no-follow is specified, print the log so far and exit.'))
+@click.option(
+    '--controller',
+    is_flag=True,
+    default=False,
+    help=('Show the controller logs of this job; useful for debugging '
+          'launching/recoveries, etc.'))
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
-def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool):
+def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool,
+              controller: bool):
     """Tail the log of a managed spot job."""
     try:
-        core.spot_tail_logs(name=name, job_id=job_id, follow=follow)
+        if controller:
+            core.tail_logs(spot_lib.SPOT_CONTROLLER_NAME,
+                           job_id=job_id,
+                           follow=follow)
+        else:
+            core.spot_tail_logs(name=name, job_id=job_id, follow=follow)
     except exceptions.ClusterNotUpError:
         # Hint messages already printed by the call above.
         sys.exit(1)

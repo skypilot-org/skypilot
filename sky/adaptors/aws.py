@@ -3,9 +3,11 @@
 # pylint: disable=import-outside-toplevel
 
 import functools
+import threading
 
 boto3 = None
 botocore = None
+_session_creation_lock = threading.RLock()
 
 
 def import_package(func):
@@ -27,13 +29,20 @@ def import_package(func):
     return wrapper
 
 
+# lru_cache() is thread-safe and it will return the same session object
+# for different threads.
+# Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache # pylint: disable=line-too-long
 @functools.lru_cache()
 @import_package
 def session():
     """Create an AWS session."""
-    # functools.lru_cache() is used to cache the session object
-    # for each thread.
-    return boto3.session.Session()
+    # Creating the session object is not thread-safe for boto3,
+    # so we add a reentrant lock to synchronize the session creation.
+    # Reference: https://github.com/boto/boto3/issues/1592
+    # However, the session object itself is thread-safe, so we are
+    # able to use lru_cache() to cache the session object.
+    with _session_creation_lock:
+        return boto3.session.Session()
 
 
 @functools.lru_cache()

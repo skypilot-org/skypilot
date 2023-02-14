@@ -28,6 +28,7 @@ from sky.core import (status, start, stop, down, autostop, queue, cancel,
 AWS = clouds.AWS
 Azure = clouds.Azure
 GCP = clouds.GCP
+Lambda = clouds.Lambda
 Local = clouds.Local
 optimize = Optimizer.optimize
 
@@ -36,6 +37,7 @@ __all__ = [
     'AWS',
     'Azure',
     'GCP',
+    'Lambda',
     'Local',
     'Optimizer',
     'OptimizeTarget',

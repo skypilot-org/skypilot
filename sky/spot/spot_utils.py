@@ -43,6 +43,12 @@ _JOB_WAITING_STATUS_MESSAGE = ('[bold cyan]Waiting for the job to start'
 _JOB_CANCELLED_MESSAGE = ('[bold cyan]Waiting for the job status to be updated.'
                           '[/] It may take a minute.')
 
+# The maximum time to wait for the spot job status to transition to terminal
+# state, after the job finished. This is a safeguard to avoid the case where
+# the spot job status fails to be updated and keep the `sky spot logs` blocking
+# for a long time.
+_FINAL_SPOT_STATUS_WAIT_TIMEOUT_SECONDS = 20
+
 
 class UserSignal(enum.Enum):
     """The signal to be sent to the user."""
@@ -56,7 +62,7 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
                    cluster_name: str) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on the spot cluster.
 
-    It can be None, INIT, RUNNING, SUCCEEDED, FAILED or CANCELLED.
+    It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_SETUP or CANCELLED.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     status = None
@@ -113,15 +119,19 @@ def update_spot_job_status(job_id: Optional[int] = None):
             # The controller job for this spot job is not running: it must
             # have exited abnormally, and we should set the job status to
             # FAILED_CONTROLLER.
-            spot_state.set_failed(job_id_,
-                                  spot_state.SpotStatus.FAILED_CONTROLLER)
+            spot_state.set_failed(
+                job_id_,
+                spot_state.SpotStatus.FAILED_CONTROLLER,
+                failure_reason=
+                'Controller process has exited abnormally. For more details,'
+                f' run: sky spot logs --controller {job_id_}')
 
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
                       get_end_time: bool) -> float:
-    """Get the started/ended time of the job."""
-    code = job_lib.JobLibCodeGen.get_job_time_payload(job_id=None,
-                                                      is_end=get_end_time)
+    """Get the submitted/ended time of the job."""
+    code = job_lib.JobLibCodeGen.get_job_submitted_or_ended_timestamp_payload(
+        job_id=None, get_ended_time=get_end_time)
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     returncode, stdout, stderr = backend.run_on_head(handle,
                                                      code,
@@ -235,13 +245,13 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         if spot_job_status.is_terminal():
             job_msg = ''
             if spot_job_status.is_failed():
-                job_msg = ('\nFor detailed error message, please check: '
-                           f'{colorama.Style.BRIGHT}sky logs '
-                           f'{SPOT_CONTROLLER_NAME} {job_id}'
-                           f'{colorama.Style.RESET_ALL}')
-            return (
-                f'Job {job_id} is already in terminal state '
-                f'{spot_job_status.value}. Logs will not be shown.{job_msg}')
+                job_msg = (
+                    f'\nFailure reason: {spot_state.get_failure_reason(job_id)}'
+                )
+            return (f'{colorama.Fore.YELLOW}'
+                    f'Job {job_id} is already in terminal state '
+                    f'{spot_job_status.value}. Logs will not be shown.'
+                    f'{colorama.Style.RESET_ALL}{job_msg}')
         task_name = spot_state.get_task_name_by_job_id(job_id)
         cluster_name = generate_spot_cluster_name(task_name, job_id)
         backend = backends.CloudVmRayBackend()
@@ -318,10 +328,13 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     # The spot_status may not be in terminal status yet, since the controllerhas
     # not updated the spot state yet. We wait for a while, until the spot state
     # is updated.
+    wait_seconds = 0
     spot_status = spot_state.get_status(job_id)
     assert spot_status is not None, job_id
-    while not spot_status.is_terminal() and follow:
+    while (not spot_status.is_terminal() and follow and
+           wait_seconds < _FINAL_SPOT_STATUS_WAIT_TIMEOUT_SECONDS):
         time.sleep(1)
+        wait_seconds += 1
         spot_status = spot_state.get_status(job_id)
         assert spot_status is not None, job_id
 
@@ -352,12 +365,12 @@ def dump_spot_job_queue() -> str:
         if end_at is None:
             end_at = time.time()
 
-        job_start_at = job['last_recovered_at'] - job['job_duration']
+        job_submitted_at = job['last_recovered_at'] - job['job_duration']
         if job['status'] == spot_state.SpotStatus.RECOVERING:
             # When job is recovering, the duration is exact job['job_duration']
             job_duration = job['job_duration']
-        elif job_start_at > 0:
-            job_duration = end_at - job_start_at
+        elif job_submitted_at > 0:
+            job_duration = end_at - job_submitted_at
         else:
             # When job_start_at <= 0, that means the last_recovered_at is not
             # set yet, i.e. the job is not started.
@@ -394,7 +407,7 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
         '#RECOVERIES', 'STATUS'
     ]
     if show_all:
-        columns += ['STARTED', 'CLUSTER', 'REGION']
+        columns += ['STARTED', 'CLUSTER', 'REGION', 'FAILURE']
     job_table = log_utils.create_table(columns)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
@@ -422,12 +435,13 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
         if not job['status'].is_terminal():
             status_counts[job['status'].value] += 1
         if show_all:
-            # STARTED
-            started = log_utils.readable_time_duration(job['start_at'])
-            values.append(started)
             values.extend([
+                # STARTED
+                log_utils.readable_time_duration(job['start_at']),
                 job['cluster_resources'],
                 job['region'],
+                job['failure_reason']
+                if job['failure_reason'] is not None else '-',
             ])
         job_table.add_row(values)
     status_str = ', '.join([

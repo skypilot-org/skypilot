@@ -386,14 +386,14 @@ def tail_logs(job_owner: str,
     job_str = f'job {job_id}'
     if spot_job_id is not None:
         job_str = f'spot job {spot_job_id}'
-    logger.debug(f'Tailing logs for job, real job_id {job_id}, spot_job_id '
-                 f'{spot_job_id}.')
-    logger.info(f'{colorama.Fore.YELLOW}Start streaming logs for {job_str}.'
-                f'{colorama.Style.RESET_ALL}')
     if log_dir is None:
         print(f'{job_str.capitalize()} not found (see `sky queue`).',
               file=sys.stderr)
         return
+    logger.debug(f'Tailing logs for job, real job_id {job_id}, spot_job_id '
+                 f'{spot_job_id}.')
+    logger.info(f'{colorama.Fore.YELLOW}Start streaming logs for {job_str}.'
+                f'{colorama.Style.RESET_ALL}')
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
 

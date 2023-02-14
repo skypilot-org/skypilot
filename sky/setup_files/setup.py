@@ -18,6 +18,7 @@ import os
 import platform
 import re
 import warnings
+from typing import Dict, List
 
 import setuptools
 
@@ -71,13 +72,18 @@ install_requires = [
     # the latest version.
     'colorama<0.4.5',
     'cryptography',
-    'jinja2',
+    # Jinja has a bug in older versions because of the lack of pinning
+    # the version of the underlying markupsafe package. See:
+    # https://github.com/pallets/jinja/issues/1585
+    'jinja2>=3.0',
     'jsonschema',
     'networkx',
     'oauth2client',
     'pandas',
     'pendulum',
-    'PrettyTable',
+    # PrettyTable with version >=2.0.0 is required for the support of
+    # `add_rows` method.
+    'PrettyTable>=2.0.0',
     # Lower local ray version is not fully supported, due to the
     # autoscaler issues (also tracked in #537).
     'ray[default]>=1.9.0,<=2.2.0',
@@ -99,7 +105,7 @@ install_requires = [
 
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the following
 # packages dependencies are changed.
-extras_require = {
+extras_require: Dict[str, List[str]] = {
     'aws': [
         # awscli>=1.27.10 is required for SSO support.
         'awscli',
@@ -113,6 +119,7 @@ extras_require = {
     'azure': ['azure-cli>=2.31.0', 'azure-core', 'azure-identity'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],
+    'lambda': [],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

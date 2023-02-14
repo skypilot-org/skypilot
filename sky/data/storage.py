@@ -5,7 +5,6 @@ import subprocess
 import time
 import typing
 from typing import Any, Dict, Optional, Tuple, Type, Union, List
-from typing_extensions import TypeAlias
 import urllib.parse
 
 import colorama
@@ -31,15 +30,12 @@ logger = sky_logging.init_logger(__name__)
 
 StorageHandle = Any
 StorageStatus = global_user_state.StorageStatus
-Path: TypeAlias = str
-SourceType: TypeAlias = Union[Path, List[Path]]
+Path = str
+SourceType = Union[Path, List[Path]]
 
 # Clouds with object storage implemented in this module. Azure Blob
 # Storage isn't supported yet (even though Azure is).
 STORE_ENABLED_CLOUDS = [clouds.AWS(), clouds.GCP()]
-
-# Max number of objects a GCS bucket can be directly deleted with
-_GCS_RM_MAX_OBJS = 256
 
 # Maximum number of concurrent rsync upload processes
 _MAX_CONCURRENT_UPLOADS = 32
@@ -91,6 +87,9 @@ def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
     elif isinstance(cloud, clouds.Azure):
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure Blob Storage is not supported yet.')
+    elif isinstance(cloud, clouds.Lambda):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Lambda Cloud does not provide cloud storage.')
     else:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Unknown cloud type: {cloud}')
