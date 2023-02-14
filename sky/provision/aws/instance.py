@@ -224,7 +224,11 @@ def create_or_resume_instances(region: str, cluster_name: str,
 
     if count == len(running_instances):
         # The cluster is up
-        return {n.id: n for n in running_instances}
+        return {
+            'region': region,
+            'zone': running_instances[0].placement['AvailabilityZone'],
+            'instances': {n.id: n for n in running_instances}
+        }
     elif len(running_instances) != 0:
         # TODO(suquark): Maybe in the future, users could adjust the number
         #  of instances dynamically. Then this case would not be an error.

@@ -2485,10 +2485,14 @@ class CloudVmRayBackend(backends.Backend):
             to_provision_config: RetryingVmProvisioner.ToProvisionConfig,
             handle: ResourceHandle, local_wheel_path: pathlib.Path,
             wheel_hash: str, cluster_config_file: str, log_abs_path: str):
+        # TODO(suquark): in the future, we only need to mount credentials
+        #  for controllers.
         # TODO(suquark): make use of log path
         del log_abs_path
         # TODO(suquark): Move wheel build here in future PRs.
         from sky.provision import aws as aws_provisioner
+
+        config_from_yaml = common_utils.read_yaml(cluster_config_file)
 
         region = handle.launched_resources.region
         ip_dict = aws_provisioner.get_instance_ips(region, cluster_name)
@@ -2512,14 +2516,13 @@ class CloudVmRayBackend(backends.Backend):
                         backend_utils.SKY_REMOTE_PATH + '/' + wheel_hash:
                             str(local_wheel_path),
                         backend_utils.SKY_REMOTE_METADATA_PATH:
-                            str(metadata_path)
+                            str(metadata_path),
+                        **config_from_yaml.get('file_mounts', {}),
                     })
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, **ssh_credentials)
-
-        config_from_yaml = common_utils.read_yaml(cluster_config_file)
 
         with backend_utils.safe_console_status(
                 f'[bold cyan]Running setup commands for '
