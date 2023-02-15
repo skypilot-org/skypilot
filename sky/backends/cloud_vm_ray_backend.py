@@ -2447,7 +2447,7 @@ class CloudVmRayBackend(backends.Backend):
                            f'> {remote_log_path} 2>&1')
             job_submit_cmd = self._setup_and_create_job_cmd_on_local_head(
                 handle, ray_command, ray_job_id)
-        else:   
+        else:
             job_submit_cmd = (
                 f'{cd} && ray job submit '
                 f'--address=http://127.0.0.1:8265 --submission-id {ray_job_id} '
@@ -3387,10 +3387,15 @@ class CloudVmRayBackend(backends.Backend):
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id,
                              spot_task=task.spot_task,
-                             
                              is_local=is_local)
         codegen.add_gang_scheduling_placement_group(
-            1, accelerator_dict, stable_cluster_internal_ips=internal_ips, setup_cmd=self._setup_cmd, setup_log_path=os.path.join(log_dir, 'setup.log'), envs=task.envs,)
+            1,
+            accelerator_dict,
+            stable_cluster_internal_ips=internal_ips,
+            setup_cmd=self._setup_cmd,
+            setup_log_path=os.path.join(log_dir, 'setup.log'),
+            envs=task.envs,
+        )
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
@@ -3452,7 +3457,10 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_gang_scheduling_placement_group(
             num_actual_nodes,
             accelerator_dict,
-            stable_cluster_internal_ips=internal_ips, setup_cmd=self._setup_cmd, setup_log_path=os.path.join(log_dir, 'setup.log'), envs=task.envs)
+            stable_cluster_internal_ips=internal_ips,
+            setup_cmd=self._setup_cmd,
+            setup_log_path=os.path.join(log_dir, 'setup.log'),
+            envs=task.envs)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
