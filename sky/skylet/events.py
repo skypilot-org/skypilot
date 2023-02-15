@@ -131,7 +131,10 @@ class AutostopEvent(SkyletEvent):
         if metadata is not None and metadata['cloud'] == 'AWS':
             from sky.provision import aws
 
-            aws.terminate_instances_with_self()
+            if autostop_config.down:
+                aws.terminate_instances_with_self()
+            else:
+                aws.stop_instances_with_self()
             return
 
         if (autostop_config.backend ==
