@@ -13,7 +13,6 @@ import textwrap
 from sky.adaptors import ibm
 from sky.skylet.providers.ibm.utils import get_logger
 from ibm_cloud_sdk_core import ApiException
-from ray.autoscaler._private.cli_logger import cli_logger
 
 # pylint: disable=line-too-long
 logger = get_logger('vpc_provider_')
@@ -439,7 +438,7 @@ class ClusterCleaner:
                     if e.code == 409:
                         print("gateway still in use.")
                         # will retry until cloud functions timeout. 
-                        time.sleep(10) 
+                        time.sleep(5) 
 
     def delete_instances(vpc_id):
         def _poll_instance_exists(instance_id):
@@ -462,6 +461,21 @@ class ClusterCleaner:
             ibm_vpc_client.delete_instance(id=id).get_result()
             _poll_instance_exists(id)
 
+    def delete_unbound_vpc(vpc_id):
+        deleting_resource = True
+        while deleting_resource:
+            try:
+                ibm_vpc_client.delete_vpc(vpc_id).get_result()
+                deleting_resource = False
+            except ibm_cloud_sdk_core.ApiException as e:
+                if e.code == 404:
+                    print("VPC doesn't exist.") 
+                    deleting_resource = False
+                if e.code == 409:
+                    print("VPC still in use.")
+                    # will retry until cloud functions timeout. 
+                    time.sleep(5) 
+
     def delete_vpc(vpc_id):
         vpc_data = get_vpc_data(vpc_id)
         if not vpc_data:
@@ -471,7 +485,7 @@ class ClusterCleaner:
         delete_instances(vpc_data['id'])
         delete_subnets(vpc_data)
         delete_gateways(vpc_id)
-        ibm_vpc_client.delete_vpc(vpc_id)
+        delete_unbound_vpc(vpc_id)
         print(f"VPC {vpc_data['name']} and its attached resources were deleted successfully")
 
 
@@ -517,7 +531,7 @@ class ClusterCleaner:
         if namespace exists returns its id instead. """
 
         def _create_new_namespace():
-            cli_logger.print(f"Creating a new namespace: {self.namespace_name} in {self.namespace_region}")
+            logger.info(f"Creating a new namespace: {self.namespace_name} in {self.namespace_region}")
            
             data = {"name": self.namespace_name, "resource_group_id": self.resource_group_id,
                 "resource_plan_id": "functions-base-plan"}
@@ -525,9 +539,9 @@ class ClusterCleaner:
             res = requests.post(f'https://{self.namespace_region}.functions.cloud.ibm.com/api/v1/namespaces',
                                     headers=self.get_headers(), json=data).json()
             if res.status_code!=200:
-                cli_logger.error(res.text)                                    
+                logger.error(res.text)                                    
             namespace_id = res['id']                            
-            cli_logger.print(f'Created new namespace with id: {namespace_id}')
+            logger.info(f'Created new namespace with id: {namespace_id}')
             return namespace_id
 
         def _get_cloud_function_namespaces_metadata(offset=0):
@@ -541,7 +555,7 @@ class ClusterCleaner:
             
         def _get_cloud_function_namespaces():
             """returns relevant metadata on existing namespaces within a given region."""
-            cli_logger.print(f'Obtaining Cloud Function namespaces in {self.namespace_region}')
+            logger.info(f'Obtaining Cloud Function namespaces in {self.namespace_region}')
 
             namespaces = []
             
@@ -577,7 +591,7 @@ class ClusterCleaner:
         if not target_namespace_id:
             target_namespace_id = _create_new_namespace()
         else:
-            cli_logger.print(f"Reusing namespace: {target_namespace_id}")
+            logger.info(f"Reusing namespace: {target_namespace_id}")
         return target_namespace_id
         
     def _get_cloud_functions_actions(self, namespace_id):
@@ -589,7 +603,7 @@ class ClusterCleaner:
         return json.loads(res.text)
 
     def create_action(self, namespace_id):
-        cli_logger.print(f"creating action on namespace: {namespace_id}")
+        logger.info(f"creating action on namespace: {namespace_id}")
         # Define the function parameters
         function_params = {
             "exec": {
@@ -602,31 +616,31 @@ class ClusterCleaner:
         }
         res = requests.put(f"https://{self.namespace_region}.functions.cloud.ibm.com/api/v1/namespaces/{namespace_id}/actions/{self.action_name}?blocking=true&overwrite=true", headers=self.get_headers(), data=json.dumps(function_params))
         if res.status_code!=200:
-            cli_logger.error(res.text)        
+            logger.error(res.text)        
         return json.loads(res.text)
 
     def delete_action(self, namespace_id):
         """return the deleted function's metadata if it existed."""
-        cli_logger.print(f"deleting action on namespace: {namespace_id}")
+        logger.info(f"deleting action on namespace: {namespace_id}")
         res = requests.delete(f"https://{self.namespace_region}.functions.cloud.ibm.com/api/v1/namespaces/{namespace_id}/actions/{self.action_name}?blocking=true", headers=self.get_headers())
         if res.status_code!=200:
-            cli_logger.error(res.text)
+            logger.warn(res.text)
         return json.loads(res.text)
 
     def invoke_action(self, namespace_id:str):
-        cli_logger.print(f"invoking action on namespace: {namespace_id}")
+        logger.info(f"invoking action on namespace: {namespace_id}")
         payload = {'iam_api_key':ibm.get_api_key(),'resource_group_id':self.resource_group_id, 'vpc_id':self.vpc_id, 'region': self.vpc_region}
         res = requests.post(f"https://{self.namespace_region}.functions.cloud.ibm.com/api/v1/namespaces/{namespace_id}/actions/{self.action_name}?blocking=true", headers=self.get_headers(), data=json.dumps(payload))
         if res.status_code!=200:
-            cli_logger.error(res.text)
+            logger.error(res.text)
         return json.loads(res.text)
 
     def delete_cluster(self):
-        """Deletes the VPC who's id==self.vpc_id.
-        1. creates a namespace named ClusterCleaner.namespace_name if doesn't exists.
+        """Deletes VPC with id==self.vpc_id.
+        1. creates a CloudFunctions namespace named ClusterCleaner.namespace_name if doesn't exists.
         2. using idempotent function that deletes an action named ClusterCleaner.action_name if exists.
         3. invokes the action to delete the VPC and all its resources."""
-        namespace_id = self.create_or_fetch_namespace()
-        self.delete_action(namespace_id)
-        self.create_action(namespace_id)
-        self.invoke_action(namespace_id)
+        cf_namespace_id = self.create_or_fetch_namespace()
+        self.delete_action(cf_namespace_id)
+        self.create_action(cf_namespace_id)
+        self.invoke_action(cf_namespace_id)
