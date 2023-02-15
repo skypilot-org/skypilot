@@ -20,13 +20,25 @@ def setup_dependencies(cluster_name: str, setup_commands: List[str],
 
     def _setup_node(runner: command_runner.SSHCommandRunner):
         for cmd in setup_commands:
-            runner.run(cmd, stream_logs=False)
+            returncode, stdout, stderr = runner.run(cmd,
+                                                    stream_logs=False,
+                                                    require_outputs=True)
+            if returncode:
+                return returncode, stdout, stderr
+        return 0, '', ''
 
-    with provision_utils.check_cache_hash_or_update(cluster_name,
-                                                    'setup_dependencies',
-                                                    digest) as updated:
-        if updated:
-            subprocess_utils.run_in_parallel(_setup_node, ssh_runners)
+    @provision_utils.cache_func(cluster_name, 'setup_dependencies', digest)
+    def _run_setup(runners):
+        results = subprocess_utils.run_in_parallel(_setup_node, runners)
+        for returncode, stdout, stderr in results:
+            if returncode:
+                raise RuntimeError(
+                    'Failed to run setup commands on an instance. '
+                    f'(exit code {returncode}). Error: '
+                    f'===== stdout ===== \n{stdout}\n'
+                    f'===== stderr ====={stderr}')
+
+    _run_setup(ssh_runners)
 
 
 def start_ray(ssh_runners: List[command_runner.SSHCommandRunner],
@@ -41,19 +53,34 @@ def start_ray(ssh_runners: List[command_runner.SSHCommandRunner],
         'which prlimit && for id in $(pgrep -f raylet/raylet); '
         'do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;')
 
-    ssh_runners[0].run('ray stop; ray start --disable-usage-stats --head '
-                       '--port=6379 --object-manager-port=8076;' + ray_prlimit,
-                       stream_logs=False)
+    returncode, stdout, stderr = ssh_runners[0].run(
+        'ray stop; ray start --disable-usage-stats --head '
+        '--port=6379 --object-manager-port=8076;' + ray_prlimit,
+        stream_logs=False,
+        require_outputs=True)
+    if returncode:
+        raise RuntimeError('Failed to start ray on the head node '
+                           f'(exit code {returncode}). Error: '
+                           f'===== stdout ===== \n{stdout}\n'
+                           f'===== stderr ====={stderr}')
 
     def _setup_ray_worker(runner: command_runner.SSHCommandRunner):
         # for cmd in config_from_yaml['worker_start_ray_commands']:
         #     cmd = cmd.replace('$RAY_HEAD_IP', ip_list[0][0])
         #     runner.run(cmd)
-        runner.run(f'ray stop; ray start --disable-usage-stats '
-                   f'--address={head_private_ip}:6379;' + ray_prlimit,
-                   stream_logs=False)
+        return runner.run(f'ray stop; ray start --disable-usage-stats '
+                          f'--address={head_private_ip}:6379;' + ray_prlimit,
+                          stream_logs=False,
+                          require_outputs=True)
 
-    subprocess_utils.run_in_parallel(_setup_ray_worker, ssh_runners[1:])
+    results = subprocess_utils.run_in_parallel(_setup_ray_worker,
+                                               ssh_runners[1:])
+    for returncode, stdout, stderr in results:
+        if returncode:
+            raise RuntimeError('Failed to start ray on the worker node '
+                               f'(exit code {returncode}). Error: '
+                               f'===== stdout ===== \n{stdout}\n'
+                               f'===== stderr ====={stderr}')
 
 
 def start_skylet(ssh_runner: command_runner.SSHCommandRunner):
@@ -61,9 +88,15 @@ def start_skylet(ssh_runner: command_runner.SSHCommandRunner):
     # https://stackoverflow.com/questions/29709790/scripts-with-nohup-inside-dont-exit-correctly
     # This side effects blocks SSH from exiting. We address it by nesting
     # bash commands.
-    ssh_runner.run(
+    returncode, stdout, stderr = ssh_runner.run(
         '(ps aux | grep -v nohup | grep -v grep | grep -q '
         '-- "python3 -m sky.skylet.skylet") || (bash -c \'source ~/.bashrc '
         '&& nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &\' '
         '&> /dev/null &)',
-        stream_logs=False)
+        stream_logs=False,
+        require_outputs=True)
+    if returncode:
+        raise RuntimeError('Failed to start skylet on the head node '
+                           f'(exit code {returncode}). Error: '
+                           f'===== stdout ===== \n{stdout}\n'
+                           f'===== stderr ====={stderr}')

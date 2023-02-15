@@ -1,5 +1,6 @@
 """Utils for provisioning"""
 import contextlib
+import functools
 import json
 import pathlib
 import shutil
@@ -26,6 +27,23 @@ def wait_for_ssh(public_ips: List[str]):
                 pass
             except Exception:
                 time.sleep(1)
+
+
+def cache_func(cluster_name: str, stage_name: str, hash_str: str):
+
+    def decorator(function):
+
+        @functools.wraps(function)
+        def wrapper(*args, **kwargs):
+            with check_cache_hash_or_update(cluster_name, stage_name,
+                                            hash_str) as updated:
+                if updated:
+                    return function(*args, **kwargs)
+                return None
+
+        return wrapper
+
+    return decorator
 
 
 @contextlib.contextmanager
