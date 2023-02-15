@@ -1253,6 +1253,31 @@ def _query_head_ip_with_retries(cluster_yaml: str,
     return head_ip
 
 
+def _query_cluster_ips_aws_retries(region: str, cluster_name: str,
+                                   expected_num_nodes: int,
+                                   get_internal_ips: bool, max_attempts: int):
+    from sky.provision import aws
+
+    backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
+    for retry_cnt in range(max_attempts):
+        ip_dict = aws.get_instance_ips(region, cluster_name)
+        if get_internal_ips:
+            ips = [pair[0] for k, pair in ip_dict.items()]
+        else:
+            ips = [pair[1] for k, pair in ip_dict.items()]
+        if len(ips) < expected_num_nodes:
+            backoff_time = backoff.current_backoff()
+            logger.debug('Retrying to get worker ip '
+                         f'[{retry_cnt}/{max_attempts}] in '
+                         f'{backoff_time} seconds.')
+            time.sleep(backoff_time)
+        else:
+            return ips
+
+    # Simulate the case when Ray head node is not up.
+    raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+
+
 @timeline.event
 def get_node_ips(cluster_yaml: str,
                  expected_num_nodes: int,
@@ -1267,12 +1292,10 @@ def get_node_ips(cluster_yaml: str,
     # implmented in _get_tpu_vm_pod_ips.
     ray_config = common_utils.read_yaml(cluster_yaml)
     if ray_config['provider']['module'].startswith('sky.skylet.providers.aws'):
-        from sky.provision import aws
-        ip_dict = aws.get_instance_ips(handle.launched_resources.region,
-                                       handle.get_cluster_name())
-        if get_internal_ips:
-            return [pair[0] for k, pair in ip_dict.items()]
-        return [pair[1] for k, pair in ip_dict.items()]
+        return _query_cluster_ips_aws_retries(
+            handle.launched_resources.region, handle.get_cluster_name(),
+            expected_num_nodes, get_internal_ips,
+            head_ip_max_attempts + worker_ip_max_attempts)
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
         assert expected_num_nodes == 1, (
