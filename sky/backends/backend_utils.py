@@ -117,6 +117,9 @@ _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
     'cluster_name', 'provider', 'auth', 'node_config'
 }
+_RAY_YAML_KEYS_TO_RESTORE_EXCLUDE_FOR_BACK_COMPATIBILITY = [[
+    'provider', 'region'
+], ['provider, availability_zone'], ['provider', 'location']]
 
 
 def is_ip(s: str) -> bool:
@@ -694,7 +697,8 @@ class SSHConfigHelper(object):
 
 
 def _replace_yaml_dicts(new_yaml: str, old_yaml: str,
-                        key_names: Set[str]) -> str:
+                        restore_key_names: Set[str],
+                        exclude_restore_key_names: Set[List[str]]) -> str:
     """Replaces 'new' with 'old' for all keys in key_names.
 
     The replacement will be applied recursively and only for the blocks
@@ -704,7 +708,7 @@ def _replace_yaml_dicts(new_yaml: str, old_yaml: str,
 
     def _restore_block(new_block: Dict[str, Any], old_block: Dict[str, Any]):
         for key, value in new_block.items():
-            if key in key_names:
+            if key in restore_key_names:
                 if key in old_block:
                     new_block[key] = old_block[key]
                 else:
@@ -715,7 +719,32 @@ def _replace_yaml_dicts(new_yaml: str, old_yaml: str,
 
     new_config = yaml.safe_load(new_yaml)
     old_config = yaml.safe_load(old_yaml)
+    exlucded_results = {}
+    # Find all key values excluded from restore
+    for exclude_restore_key_name_list in exclude_restore_key_names:
+        excluded_result = new_config
+        found_excluded_key = True
+        for key in exclude_restore_key_name_list:
+            if not isinstance(excluded_result,
+                              dict) or key not in excluded_result:
+                found_excluded_key = False
+                break
+            excluded_result = excluded_result[key]
+        if found_excluded_key:
+            exlucded_results[json.dumps(
+                exclude_restore_key_name_list)] = excluded_result
+
+    # Restore from old config
     _restore_block(new_config, old_config)
+
+    # Revert the changes for the excluded key values
+    for exclude_restore_key_name_list, value in exlucded_results.items():
+        exclude_restore_key_name_list = json.loads(
+            exclude_restore_key_name_list)
+        curr = new_config
+        for key in exclude_restore_key_name_list[:-1]:
+            curr = curr[key]
+        curr[exclude_restore_key_name_list[-1]] = value
     return common_utils.dump_yaml_str(new_config)
 
 
@@ -885,7 +914,8 @@ def write_cluster_config(
             new_yaml_content = f.read()
         restored_yaml_content = _replace_yaml_dicts(
             new_yaml_content, old_yaml_content,
-            _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY)
+            _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
+            _RAY_YAML_KEYS_TO_RESTORE_EXCLUDE_FOR_BACK_COMPATIBILITY)
         with open(tmp_yaml_path, 'w') as f:
             f.write(restored_yaml_content)
 

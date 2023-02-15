@@ -150,16 +150,17 @@ class AWS(clouds.Cloud):
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
+        region: Optional[str] = None,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
-                                            region=None,
+                                            region=region,
                                             zone=None)
-        for region in regions:
-            yield region, region.zones
+        for r in regions:
+            yield r, r.zones
 
     @classmethod
     def _get_default_ami(cls, region_name: str, instance_type: str) -> str:

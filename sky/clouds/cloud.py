@@ -132,6 +132,7 @@ class Cloud:
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
+        region: Optional[str] = None,
     ) -> Iterator[Tuple[Region, List[Zone]]]:
         """Loops over (region, zones) to retry for provisioning.
 
@@ -146,6 +147,7 @@ class Cloud:
             instance_type: The instance type to provision.
             accelerators: The accelerators to provision.
             use_spot: Whether to use spot instances.
+            region: The region to provision.
 
         Typical usage:
 
