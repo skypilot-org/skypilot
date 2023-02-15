@@ -36,6 +36,8 @@ TAG_RAY_FILE_MOUNTS_CONTENTS = 'ray-file-mounts-contents'
 
 logger = logging.getLogger(__name__)
 
+# ======================== Thread-safe ========================
+# https://boto3.amazonaws.com/v1/documentation/api/latest/guide/resources.html#multithreading-or-multiprocessing-with-resources
 # ======================== About AWS subnet/VPC ========================
 # https://stackoverflow.com/questions/37407492/are-there-differences-in-networking-performance-if-ec2-instances-are-in-differen
 # https://docs.aws.amazon.com/vpc/latest/userguide/how-it-works.html
