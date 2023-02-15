@@ -1249,19 +1249,6 @@ class RetryingVmProvisioner(object):
                     log_abs_path, stream_logs, logging_info,
                     to_provision.use_spot)
 
-            def _check_and_restart_service(region_name: str, cluster_yaml: str):
-                # move the code block here due to the indentation issue
-                from sky.provision import aws
-                ip_dict = aws.get_instance_ips(region_name, cluster_name)
-                ip_tuples = list(ip_dict.values())
-                ssh_credentials = backend_utils.ssh_credential_from_yaml(
-                    cluster_yaml)
-                runners = command_runner.SSHCommandRunner.make_runner_list(
-                    [t[1] for t in ip_tuples], **ssh_credentials)
-                # TODO(suquark): support ssh proxy
-                provision_setup.start_ray(runners, ip_tuples[0][1], True)
-                provision_setup.start_skylet(runners[0])
-
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 if cluster_exists:
                     # Guard against the case where there's an existing cluster
@@ -1276,8 +1263,10 @@ class RetryingVmProvisioner(object):
                     # freshly launched ones (which should have ray runtime
                     # started).
                     if isinstance(to_provision.cloud, clouds.AWS):
-                        _check_and_restart_service(region.name,
-                                                   handle.cluster_yaml)
+                        # TODO(suquark): remove this branch in the future.
+                        #  Currently, we handle the logic in
+                        #  '_post_provision_setup()'.
+                        pass
                     else:
                         self._ensure_cluster_ray_started(handle, log_abs_path)
 
@@ -2521,6 +2510,7 @@ class CloudVmRayBackend(backends.Backend):
 
         _upload_config_and_wheels()
 
+        # TODO(suquark): support ssh proxy
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -2532,12 +2522,20 @@ class CloudVmRayBackend(backends.Backend):
             provision_setup.setup_dependencies(
                 cluster_name, config_from_yaml['setup_commands'], runners)
 
-        if not to_provision_config.cluster_exists:
+        if to_provision_config.cluster_exists:
+            with backend_utils.safe_console_status(
+                    f'[bold cyan]Checking Ray status for '
+                    f'[green]{cluster_name}[white] ...'):
+                provision_setup.start_ray(runners, ip_tuples[0][0], True)
+            with backend_utils.safe_console_status(
+                    f'[bold cyan]Checking Skylet status for '
+                    f'[green]{cluster_name}[white] ...'):
+                provision_setup.start_skylet(runners[0])
+        else:
             with backend_utils.safe_console_status(
                     f'[bold cyan]Starting Ray for '
                     f'[green]{cluster_name}[white] ...'):
                 provision_setup.start_ray(runners, ip_tuples[0][0])
-
             with backend_utils.safe_console_status(
                     f'[bold cyan]Starting Skylet for '
                     f'[green]{cluster_name}[white] ...'):
