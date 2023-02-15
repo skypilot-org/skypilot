@@ -183,13 +183,11 @@ class RayCodeGen:
     def add_prologue(self,
                      job_id: int,
                      spot_task: Optional['task_lib.Task'] = None,
-                     setup_cmd: Optional[str] = None,
-                     envs: Optional[Dict[str, str]] = None,
-                     setup_log_path: Optional[str] = None,
                      is_local: bool = False) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
+        self.is_local = is_local
         # Should use 'auto' or 'ray://<internal_head_ip>:10001' rather than
         # 'ray://localhost:10001', or 'ray://127.0.0.1:10001', for public cloud.
         # Otherwise, it will a bug of ray job failed to get the placement group
@@ -235,7 +233,6 @@ class RayCodeGen:
             inspect.getsource(log_lib.add_ray_env_vars),
             inspect.getsource(log_lib.run_bash_command_with_log),
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
-            f'setup_cmd = {setup_cmd!r}',
         ]
         # Currently, the codegen program is/can only be submitted to the head
         # node, due to using job_lib for updating job statuses, and using
@@ -247,50 +244,9 @@ class RayCodeGen:
               if hasattr(autostop_lib, 'set_last_active_time_to_now'):
                   autostop_lib.set_last_active_time_to_now()
             """))
-        if setup_cmd is not None:
-            self._code += [
-                textwrap.dedent(f"""\
-                _SETUP_CPUS = 0.0001
-                # The setup command will be run as a ray task with num_cpus=_SETUP_CPUS as the
-                # requirement; this means Ray will set CUDA_VISIBLE_DEVICES to an empty string.
-                # We unset it so that user setup command may properly use this env var.
-                setup_cmd = 'unset CUDA_VISIBLE_DEVICES; ' + setup_cmd
-                job_lib.set_status({job_id!r}, job_lib.JobStatus.SETTING_UP)
-                print({_CTRL_C_TIP_MESSAGE!r}, file=sys.stderr, flush=True)
-                total_num_nodes = len(ray.nodes())
-                setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
-                setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
-                ray.get(setup_pg.ready())
-                setup_workers = [run_bash_command_with_log \\
-                    .options(name='setup', num_cpus=_SETUP_CPUS, placement_group=setup_pg, placement_group_bundle_index=i) \\
-                    .remote(
-                        setup_cmd,
-                        os.path.expanduser({setup_log_path!r}),
-                        getpass.getuser(),
-                        job_id={self.job_id},
-                        env_vars={envs!r},
-                        stream_logs=True,
-                        with_ray=True,
-                        use_sudo={is_local},
-                    ) for i in range(total_num_nodes)]
-                setup_returncodes = ray.get(setup_workers)
-                if sum(setup_returncodes) != 0:
-                    job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
-                    # This waits for all streaming logs to finish.
-                    time.sleep(1)
-                    print('ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with '
-                        'return code list:{colorama.Style.RESET_ALL}',
-                        setup_returncodes,
-                        file=sys.stderr,
-                        flush=True)
-                    # Need this to set the job status in ray job to be FAILED.
-                    sys.exit(1)
-                """)
-            ]
-        else:
-            self._code += [
-                f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
-            ]
+        self._code += [
+            f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
+        ]
         if spot_task is not None:
             # Add the spot job to spot queue table.
             resources_str = backend_utils.get_task_resources_str(spot_task)
@@ -305,6 +261,9 @@ class RayCodeGen:
         num_nodes: int,
         accelerator_dict: Dict[str, int],
         stable_cluster_internal_ips: List[str],
+        setup_cmd: Optional[str] = None,
+        setup_log_path: Optional[str] = None,
+        envs: Optional[Dict[str, str]] = None,
     ) -> None:
         """Create the gang scheduling placement group for a Task.
 
@@ -346,7 +305,7 @@ class RayCodeGen:
                 plural = 's' if {num_nodes} > 1 else ''
                 node_str = f'{num_nodes} node{{plural}}'
 
-                message = '' if setup_cmd is not None else {_CTRL_C_TIP_MESSAGE!r} + '\\n'
+                message = {_CTRL_C_TIP_MESSAGE!r} + '\\n'
                 message += f'INFO: Waiting for task resources on {{node_str}}. This will block if the cluster is full.'
                 print(message,
                       file=sys.stderr,
@@ -358,9 +317,56 @@ class RayCodeGen:
                 print('INFO: All task resources reserved.',
                       file=sys.stderr,
                       flush=True)
+                """)
+        ]
+
+        job_id = self.job_id
+        if setup_cmd is not None:
+            self._code += [
+                textwrap.dedent(f"""\
+                setup_cmd = {setup_cmd!r}
+                _SETUP_CPUS = 0.0001
+                # The setup command will be run as a ray task with num_cpus=_SETUP_CPUS as the
+                # requirement; this means Ray will set CUDA_VISIBLE_DEVICES to an empty string.
+                # We unset it so that user setup command may properly use this env var.
+                setup_cmd = 'unset CUDA_VISIBLE_DEVICES; ' + setup_cmd
+                job_lib.set_status({job_id!r}, job_lib.JobStatus.SETTING_UP)
+                print({_CTRL_C_TIP_MESSAGE!r}, file=sys.stderr, flush=True)
+                total_num_nodes = len(ray.nodes())
+                setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
+                setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
+                setup_workers = [run_bash_command_with_log \\
+                    .options(name='setup', num_cpus=_SETUP_CPUS, placement_group=setup_pg, placement_group_bundle_index=i) \\
+                    .remote(
+                        setup_cmd,
+                        os.path.expanduser({setup_log_path!r}),
+                        getpass.getuser(),
+                        job_id={self.job_id},
+                        env_vars={envs!r},
+                        stream_logs=True,
+                        with_ray=True,
+                        use_sudo={self.is_local},
+                    ) for i in range(total_num_nodes)]
+                setup_returncodes = ray.get(setup_workers)
+                if sum(setup_returncodes) != 0:
+                    job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
+                    # This waits for all streaming logs to finish.
+                    time.sleep(1)
+                    print('ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with '
+                        'return code list:{colorama.Style.RESET_ALL}',
+                        setup_returncodes,
+                        file=sys.stderr,
+                        flush=True)
+                    # Need this to set the job status in ray job to be FAILED.
+                    sys.exit(1)
+                """)
+            ]
+
+        self._code += [
+            textwrap.dedent(f"""\
                 job_lib.set_job_started({self.job_id!r})
                 job_lib.scheduler.schedule_step()
-                """)
+                """),
         ]
 
         # Export IP and node rank to the environment variables.
@@ -2441,13 +2447,7 @@ class CloudVmRayBackend(backends.Backend):
                            f'> {remote_log_path} 2>&1')
             job_submit_cmd = self._setup_and_create_job_cmd_on_local_head(
                 handle, ray_command, ray_job_id)
-        elif handle.cluster_name == spot_lib.SPOT_CONTROLLER_NAME:
-            job_submit_cmd = (
-                f'{cd} && mkdir -p {remote_log_dir} && ray job submit '
-                f'--address=http://127.0.0.1:8265 --submission-id {ray_job_id} '
-                '--no-wait '
-                f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
-        else:
+        else:   
             job_submit_cmd = (
                 f'{cd} && ray job submit '
                 f'--address=http://127.0.0.1:8265 --submission-id {ray_job_id} '
@@ -3387,12 +3387,10 @@ class CloudVmRayBackend(backends.Backend):
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id,
                              spot_task=task.spot_task,
-                             setup_cmd=self._setup_cmd,
-                             envs=task.envs,
-                             setup_log_path=os.path.join(log_dir, 'setup.log'),
+                             
                              is_local=is_local)
         codegen.add_gang_scheduling_placement_group(
-            1, accelerator_dict, stable_cluster_internal_ips=internal_ips)
+            1, accelerator_dict, stable_cluster_internal_ips=internal_ips, setup_cmd=self._setup_cmd, setup_log_path=os.path.join(log_dir, 'setup.log'), envs=task.envs,)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
@@ -3450,14 +3448,11 @@ class CloudVmRayBackend(backends.Backend):
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id,
                              spot_task=task.spot_task,
-                             setup_cmd=self._setup_cmd,
-                             envs=task.envs,
-                             setup_log_path=os.path.join(log_dir, 'setup.log'),
                              is_local=is_local)
         codegen.add_gang_scheduling_placement_group(
             num_actual_nodes,
             accelerator_dict,
-            stable_cluster_internal_ips=internal_ips)
+            stable_cluster_internal_ips=internal_ips, setup_cmd=self._setup_cmd, setup_log_path=os.path.join(log_dir, 'setup.log'), envs=task.envs)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
