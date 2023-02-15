@@ -1395,8 +1395,9 @@ def _get_in_progress_spot_jobs(show_all_in_progress: bool = False):
         if controller_status == global_user_state.ClusterStatus.INIT:
             msg = 'Spot jobs are not available until the controller is up.'
         else:
-            assert controller_status != global_user_state.ClusterStatus.UP
-            msg = 'No in-progress spot jobs.'
+            assert controller_status == global_user_state.ClusterStatus.STOPPED
+            # Do not show any spot jobs if the controller is STOPPED
+            msg = ''
     except RuntimeError:
         msg = 'Failed to query spot jobs due to connection issue.'
     else:
@@ -1514,10 +1515,7 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
         status_utils.show_local_status_table(local_clusters)
 
         if show_spot_queue:
-            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'Managed spot jobs{colorama.Style.RESET_ALL} '
-                       f'{colorama.Style.DIM}(To see all spot jobs, run: '
-                       f'sky spot queue){colorama.Style.RESET_ALL}')
+            click.echo()
             with backend_utils.safe_console_status(
                     '[cyan] Checking spot jobs[/]'):
                 msg = spot_jobs_future.get()
@@ -1530,7 +1528,12 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
                     # (see ray/_private/worker.py).
                     if e.code != 15:
                         raise
-            click.echo(msg)
+            if msg:
+                click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                        f'Managed spot jobs{colorama.Style.RESET_ALL} '
+                        f'{colorama.Style.DIM}(To see all spot jobs, run: '
+                        f'sky spot queue){colorama.Style.RESET_ALL}\n'
+                        f'{msg}')
 
         if num_pending_autostop > 0:
             plural = ' has'
