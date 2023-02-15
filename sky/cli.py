@@ -1530,10 +1530,10 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
                         raise
             if msg:
                 click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                        f'Managed spot jobs{colorama.Style.RESET_ALL} '
-                        f'{colorama.Style.DIM}(To see all spot jobs, run: '
-                        f'sky spot queue){colorama.Style.RESET_ALL}\n'
-                        f'{msg}')
+                           f'Managed spot jobs{colorama.Style.RESET_ALL} '
+                           f'{colorama.Style.DIM}(To see all spot jobs, run: '
+                           f'sky spot queue){colorama.Style.RESET_ALL}\n'
+                           f'{msg}')
 
         if num_pending_autostop > 0:
             plural = ' has'
@@ -1544,6 +1544,7 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
                        'auto{stop,down} scheduled. Refresh statuses with: '
                        f'{colorama.Style.BRIGHT}sky status --refresh'
                        f'{colorama.Style.RESET_ALL}')
+
 
 @cli.command()
 @click.option('--all',
