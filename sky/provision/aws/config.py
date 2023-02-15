@@ -9,9 +9,7 @@ from distutils import version
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import botocore
-
 import boto3
-from botocore import config as boto_config
 
 from ray.autoscaler._private.cli_logger import cf, cli_logger
 
@@ -27,9 +25,6 @@ RAY = 'ray-autoscaler'
 DEFAULT_RAY_INSTANCE_PROFILE = RAY + '-v1'
 DEFAULT_RAY_IAM_ROLE = RAY + '-v1'
 SECURITY_GROUP_TEMPLATE = RAY + '-{}'
-BOTO_MAX_RETRIES = 12
-# Hash of the node launch config, used to identify out-of-date nodes
-TAG_RAY_LAUNCH_CONFIG = 'ray-launch-config'
 
 # TODO(suquark): use SkyPilot instance profile name in future PRs
 # SKYPILOT = 'skypilot'
@@ -50,6 +45,8 @@ def bootstrap(config):
     config = copy.deepcopy(config)
 
     node_cfg = config['node_config']
+    region = config['provider']['region']
+    aws_credentials = config['provider'].get('aws_credentials', {})
 
     # If NetworkInterfaces are provided, extract the necessary fields for the
     # config stages below.
@@ -63,13 +60,13 @@ def bootstrap(config):
     # The head node needs to have an IAM role that allows it to create further
     # EC2 instances.
     if 'IamInstanceProfile' not in node_cfg:
-        iam = _resource('iam', config)
+        iam = utils.create_resource('iam', region, **aws_credentials)
         node_cfg['IamInstanceProfile'] = _configure_iam_role(iam)
 
     # Configure SSH access, using an existing key pair if possible.
     node_cfg['UserData'] = _configure_ssh_keypair(config['auth']['ssh_user'])
 
-    ec2 = _resource('ec2', config)
+    ec2 = utils.create_resource('ec2', region, **aws_credentials)
 
     if subnet_ids is not None:
         subnets, vpc_id = _validate_subnet(ec2, subnet_ids, security_group_ids)
@@ -581,17 +578,3 @@ def _configure_subnets_and_groups_from_network_interfaces(
             'group assigned.')
 
     return subnets, list(itertools.chain(*security_groups))
-
-
-def _resource(name, config):
-    region = config['provider']['region']
-    extras = config['provider'].get('aws_credentials', {})
-    extras.setdefault(
-        'config',
-        boto_config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}),
-    )
-    return boto3.resource(
-        name,
-        region,
-        **extras,
-    )

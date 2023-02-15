@@ -1,5 +1,5 @@
 from typing import Dict
-import functools
+import threading
 
 import boto3
 from botocore import config
@@ -9,25 +9,26 @@ from ray.autoscaler._private.cli_logger import cf, cli_logger
 
 BOTO_MAX_RETRIES = 12
 
+# ======================== Thread-safe ========================
+# https://boto3.amazonaws.com/v1/documentation/api/latest/guide/resources.html#multithreading-or-multiprocessing-with-resources
 
-@functools.lru_cache
-def create_ec2_client(
-        region: str,
-        max_attempts: int = BOTO_MAX_RETRIES) -> 'botocore.client.EC2':
-    # overhead: 5.46 ms ± 47.5
-    return boto3.client(
-        'ec2',
-        region,
-        config=config.Config(retries={'max_attempts': max_attempts}))
+_lock = threading.RLock()
 
 
-@functools.lru_cache
-def create_ec2_resource(region: str, max_attempts: int = BOTO_MAX_RETRIES):
+def create_resource(resource: str,
+                    region: str,
+                    max_attempts: int = BOTO_MAX_RETRIES,
+                    **credentials):
     # overhead: 6.69 ms ± 41.5 µs
-    return boto3.resource(
-        'ec2',
-        region,
-        config=config.Config(retries={'max_attempts': max_attempts}))
+    with _lock:
+        # We should prevent caching the resource for thread safety.
+        # Instead, the logic that uses the resource should reuse the same
+        # resource as much as possible.
+        return boto3.resource(
+            resource,
+            region,
+            config=config.Config(retries={'max_attempts': max_attempts}),
+            **credentials)
 
 
 def handle_boto_error(exc, msg, *args, **kwargs):

@@ -1435,13 +1435,11 @@ class RetryingVmProvisioner(object):
         backoff = common_utils.Backoff(initial_backoff=5,
                                        max_backoff_factor=180 // 5)
 
-        import yaml
         from sky.provision import aws
 
         provider = aws
 
-        with open(cluster_config_file) as f:
-            original_config = yaml.safe_load(f)
+        original_config = common_utils.read_yaml(cluster_config_file)
 
         raw_config = {
             'cluster_name': original_config['cluster_name'],

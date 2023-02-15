@@ -11,33 +11,9 @@ BOTO_CREATE_MAX_RETRIES = 5
 
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
-# Tag for the name of the node
-TAG_RAY_NODE_NAME = 'ray-node-name'
-
-# Tag for user defined node types (e.g., m4xl_spot). This is used for multi
-# node type clusters.
-TAG_RAY_USER_NODE_TYPE = 'ray-user-node-type'
-
-# Tag that reports the current state of the node (e.g. Updating, Up-to-date)
-TAG_RAY_NODE_STATUS = 'ray-node-status'
-STATUS_UNINITIALIZED = 'uninitialized'
-STATUS_WAITING_FOR_SSH = 'waiting-for-ssh'
-STATUS_SYNCING_FILES = 'syncing-files'
-STATUS_SETTING_UP = 'setting-up'
-STATUS_UPDATE_FAILED = 'update-failed'
-STATUS_UP_TO_DATE = 'up-to-date'
-
-# Hash of the node runtime config, used to determine if updates are needed
-TAG_RAY_RUNTIME_CONFIG = 'ray-runtime-config'
-# Hash of the contents of the directories specified by the file_mounts config
-# if the node is a worker, this also hashes content of the directories
-# specified by the cluster_synced_files config
-TAG_RAY_FILE_MOUNTS_CONTENTS = 'ray-file-mounts-contents'
 
 logger = logging.getLogger(__name__)
 
-# ======================== Thread-safe ========================
-# https://boto3.amazonaws.com/v1/documentation/api/latest/guide/resources.html#multithreading-or-multiprocessing-with-resources
 # ======================== About AWS subnet/VPC ========================
 # https://stackoverflow.com/questions/37407492/are-there-differences-in-networking-performance-if-ec2-instances-are-in-differen
 # https://docs.aws.amazon.com/vpc/latest/userguide/how-it-works.html
@@ -54,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 def describe_instances(region: str) -> Dict:
     # overhead: 658 ms ± 65.3 ms
-    return utils.create_ec2_client(region).describe_instances()
+    return utils.create_resource('ec2', region).meta.client.describe_instances()
 
 
 def _format_tags(tags: Dict[str, str]) -> List:
@@ -150,7 +126,7 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
 def create_instances(region: str, cluster_name: str, node_config: Dict[str,
                                                                        Any],
                      tags: Dict[str, str], count: int) -> Dict[str, Any]:
-    ec2_fail_fast = utils.create_ec2_resource(region=region, max_attempts=0)
+    ec2_fail_fast = utils.create_resource('ec2', region=region, max_attempts=0)
     return _create_instances(ec2_fail_fast, cluster_name, node_config, tags,
                              count)
 
@@ -198,7 +174,7 @@ def resume_instances(region: str,
                      cluster_name: str,
                      tags: Dict[str, str],
                      count: Optional[int] = None) -> Dict[str, Any]:
-    ec2 = utils.create_ec2_resource(region=region)
+    ec2 = utils.create_resource('ec2', region=region)
     return _resume_instances(ec2, cluster_name, tags, count)
 
 
@@ -211,7 +187,7 @@ def create_or_resume_instances(region: str, cluster_name: str,
     Returns dict mapping instance id to ec2.Instance object for the created
     instances.
     """
-    ec2 = utils.create_ec2_resource(region=region)
+    ec2 = utils.create_resource('ec2', region=region)
     filters = [
         {
             'Name': 'instance-state-name',
@@ -271,7 +247,7 @@ def create_or_resume_instances(region: str, cluster_name: str,
 
 
 def stop_instances(region: str, cluster_name: str):
-    ec2 = utils.create_ec2_resource(region=region)
+    ec2 = utils.create_resource('ec2', region=region)
     filters = [
         {
             'Name': 'instance-state-name',
@@ -286,7 +262,7 @@ def stop_instances(region: str, cluster_name: str):
 
 
 def terminate_instances(region: str, cluster_name: str):
-    ec2 = utils.create_ec2_resource(region=region)
+    ec2 = utils.create_resource('ec2', region=region)
     filters = [
         {
             'Name': 'instance-state-name',
@@ -306,7 +282,7 @@ def _get_self_and_other_instances(states_filter: List[str]):
     metadata = utils.get_self_instance_metadata()
     region = metadata['region']
     self_instance_id = metadata['instance_id']
-    ec2 = utils.create_ec2_resource(region=region)
+    ec2 = utils.create_resource('ec2', region=region)
     self = ec2.Instance(self_instance_id)
     tags = {}
     for t in self.tags:
@@ -346,7 +322,7 @@ def terminate_instances_with_self():
 
 def wait_instances(region: str, cluster_name: str, state: str):
     # possible exceptions: https://github.com/boto/boto3/issues/176
-    ec2 = utils.create_ec2_resource(region=region)
+    ec2 = utils.create_resource('ec2', region=region)
     client = ec2.meta.client
 
     filters = [
@@ -381,7 +357,7 @@ def wait_instances(region: str, cluster_name: str, state: str):
 
 
 def get_instance_ips(region: str, cluster_name: str):
-    ec2 = utils.create_ec2_resource(region=region)
+    ec2 = utils.create_resource('ec2', region=region)
     filters = [
         {
             'Name': 'instance-state-name',
