@@ -1395,8 +1395,9 @@ def _get_in_progress_spot_jobs(show_all_in_progress: bool = False):
         if controller_status == global_user_state.ClusterStatus.INIT:
             msg = 'Spot jobs are not available until the controller is up.'
         else:
-            assert controller_status == global_user_state.ClusterStatus.STOPPED
-            # Do not show any spot jobs if the controller is STOPPED
+            assert controller_status != global_user_state.ClusterStatus.UP
+            # Do not show any spot jobs if the controller is STOPPED or not
+            # exist.
             msg = ''
     except RuntimeError:
         msg = 'Failed to query spot jobs due to connection issue.'
