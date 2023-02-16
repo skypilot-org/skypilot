@@ -2227,10 +2227,11 @@ class CloudVmRayBackend(backends.Backend):
                         ip_list, **ssh_credentials)
 
                     def _get_zone(runner):
-                        returncode, stdout, stderr = runner.run(get_zone_cmd)
+                        returncode, stdout, stderr = runner.run(
+                            get_zone_cmd, require_outputs=True)
                         subprocess_utils.handle_returncode(
                             returncode,
-                            cmd,
+                            get_zone_cmd,
                             'Failed to get zone for ',
                             stderr=stderr,
                             stream_logs=stream_logs)
