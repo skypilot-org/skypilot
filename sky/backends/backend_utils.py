@@ -119,7 +119,7 @@ _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
 }
 _RAY_YAML_KEYS_TO_RESTORE_EXCLUDE_FOR_BACK_COMPATIBILITY = [[
     'provider', 'region'
-], ['provider, availability_zone'], ['provider', 'location']]
+], ['provider', 'availability_zone'], ['provider', 'location']]
 
 
 def is_ip(s: str) -> bool:
@@ -725,8 +725,8 @@ def _replace_yaml_dicts(new_yaml: str, old_yaml: str,
         excluded_result = new_config
         found_excluded_key = True
         for key in exclude_restore_key_name_list:
-            if not isinstance(excluded_result,
-                              dict) or key not in excluded_result:
+            if (not isinstance(excluded_result, dict) or
+                    key not in excluded_result):
                 found_excluded_key = False
                 break
             excluded_result = excluded_result[key]
