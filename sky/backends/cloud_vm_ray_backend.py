@@ -730,7 +730,7 @@ class RetryingVmProvisioner(object):
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Errors occurred during provision; '
                                    'check logs above.')
-        if set(zones) == set(region.zones):
+        if region.zones is None or set(zones) == set(region.zones):
             # The underlying AWS NodeProvider will try all specified zones of a
             # region. (Each boto3 request takes one zone.)
             logger.warning(f'Got error(s) in all zones of {region.name}:')
@@ -1032,21 +1032,23 @@ class RetryingVmProvisioner(object):
             ):
                 if zones is None:
                     yield None
-                # Only retry requested region/zones or all if not specified.
-                zone_names = [zone.name for zone in zones]
-                if not to_provision.valid_on_region_zones(
-                        region.name, zone_names):
-                    continue
-                if to_provision.zone is not None:
-                    zones = [clouds.Zone(name=to_provision.zone)]
-                if zones and num_nodes > 1:
-                    # When num_nodes > 1, we need to try the zones one by one,
-                    # to avoid the nodes of a same cluster being placed in
-                    # different zones. (This is a limitation of ray up)
-                    for zone in zones:
-                        yield [zone]
                 else:
-                    yield zones
+                    # Only retry requested region/zones or all if not specified.
+                    zone_names = [zone.name for zone in zones]
+                    if not to_provision.valid_on_region_zones(
+                            region.name, zone_names):
+                        continue
+                    if to_provision.zone is not None:
+                        zones = [clouds.Zone(name=to_provision.zone)]
+                    if zones and num_nodes > 1:
+                        # When num_nodes > 1, we need to try the zones one by
+                        # one, to avoid the nodes of a same cluster being
+                        # placed in different zones. (This is a limitation of
+                        # ray up)
+                        for zone in zones:
+                            yield [zone]
+                    else:
+                        yield zones
 
     def _try_provision_tpu(self, to_provision: resources_lib.Resources,
                            config_dict: Dict[str, str]) -> bool:
@@ -2216,6 +2218,7 @@ class CloudVmRayBackend(backends.Backend):
 
             ip_list = handle.external_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
                                           use_cached_ips=False)
+            assert ip_list is not None, handle
 
             if 'tpu_name' in config_dict:
                 self._set_tpu_name(handle, config_dict['tpu_name'])

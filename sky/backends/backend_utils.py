@@ -117,9 +117,7 @@ _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
     'cluster_name', 'provider', 'auth', 'node_config'
 }
-_RAY_YAML_KEYS_TO_RESTORE_EXCLUDE_FOR_BACK_COMPATIBILITY = [[
-    'provider', 'region'
-], ['provider', 'availability_zone'], ['provider', 'location']]
+_RAY_YAML_KEYS_TO_RESTORE_EXCLUDE_FOR_BACK_COMPATIBILITY = [['provider', 'availability_zone']]
 
 
 def is_ip(s: str) -> bool:
@@ -698,7 +696,7 @@ class SSHConfigHelper(object):
 
 def _replace_yaml_dicts(new_yaml: str, old_yaml: str,
                         restore_key_names: Set[str],
-                        exclude_restore_key_names: Set[List[str]]) -> str:
+                        exclude_restore_key_names: List[List[str]]) -> str:
     """Replaces 'new' with 'old' for all keys in key_names.
 
     The replacement will be applied recursively and only for the blocks
@@ -719,7 +717,7 @@ def _replace_yaml_dicts(new_yaml: str, old_yaml: str,
 
     new_config = yaml.safe_load(new_yaml)
     old_config = yaml.safe_load(old_yaml)
-    exlucded_results = {}
+    excluded_results = {}
     # Find all key values excluded from restore
     for exclude_restore_key_name_list in exclude_restore_key_names:
         excluded_result = new_config
@@ -731,14 +729,14 @@ def _replace_yaml_dicts(new_yaml: str, old_yaml: str,
                 break
             excluded_result = excluded_result[key]
         if found_excluded_key:
-            exlucded_results[json.dumps(
+            excluded_results[json.dumps(
                 exclude_restore_key_name_list)] = excluded_result
 
     # Restore from old config
     _restore_block(new_config, old_config)
 
     # Revert the changes for the excluded key values
-    for exclude_restore_key_name_list, value in exlucded_results.items():
+    for exclude_restore_key_name_list, value in excluded_results.items():
         exclude_restore_key_name_list = json.loads(
             exclude_restore_key_name_list)
         curr = new_config
