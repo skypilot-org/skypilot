@@ -124,6 +124,7 @@ class LambdaNodeProvider(NodeProvider):
             node['internal_ip'] = out[1].strip()
 
         vms = self._list_instances_in_cluster()
+        self.metadata.refresh([node['id'] for node in vms])
         self._guess_and_add_missing_tags(vms)
         nodes = [_extract_metadata(vm) for vm in filter(_match_tags, vms)]
         subprocess_utils.run_in_parallel(_get_internal_ip, nodes)
