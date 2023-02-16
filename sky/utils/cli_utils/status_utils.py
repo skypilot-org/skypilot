@@ -93,16 +93,10 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
 
     if cluster_records:
         if reserved_group_name is not None:
-            autostop_minutes = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'{reserved_group_name}{colorama.Style.RESET_ALL}'
-                       f'{colorama.Style.DIM} (autostopped if idle for '
-                       f'{autostop_minutes}min)'
+                       f'{colorama.Style.DIM}'
                        f'{colorama.Style.RESET_ALL}')
-            reset = backend_utils.RESET_BOLD
-            click.echo('Use spot jobs CLI: '
-                       f'{colorama.Style.BRIGHT}sky spot --help{reset}')
-
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')

@@ -1495,13 +1495,11 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
             clusters = None
         cluster_records = core.status(cluster_names=clusters, refresh=refresh)
         nonreserved_cluster_records = []
-        reserved_clusters = dict()
+        reserved_clusters = []
         for cluster_record in cluster_records:
             cluster_name = cluster_record['name']
             if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
-                cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
-                    cluster_name]
-                reserved_clusters[cluster_group_name] = cluster_record
+                reserved_clusters.append(cluster_record)
             else:
                 nonreserved_cluster_records.append(cluster_record)
         local_clusters = onprem_utils.check_and_get_local_clusters(
@@ -1509,16 +1507,15 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
 
         num_pending_autostop = 0
         num_pending_autostop += status_utils.show_status_table(
-            nonreserved_cluster_records, all)
-        for cluster_group_name, cluster_record in reserved_clusters.items():
-            num_pending_autostop += status_utils.show_status_table(
-                [cluster_record], all, reserved_group_name=cluster_group_name)
+            nonreserved_cluster_records + reserved_clusters, all)
         status_utils.show_local_status_table(local_clusters)
 
+        hints = []
         if show_spot_queue:
-            click.echo()
+            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Managed Spot Jobs{colorama.Style.RESET_ALL}')
             with backend_utils.safe_console_status(
-                    '[cyan] Checking spot jobs[/]'):
+                    '[cyan]Checking spot jobs[/]'):
                 msg = spot_jobs_future.get()
                 try:
                     pool.close()
@@ -1530,21 +1527,21 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
                     if e.code != 15:
                         raise
             if msg:
-                click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Managed spot jobs{colorama.Style.RESET_ALL} '
-                           f'{colorama.Style.DIM}(To see all spot jobs, run: '
-                           f'sky spot queue){colorama.Style.RESET_ALL}\n'
-                           f'{msg}')
+                click.echo(msg)
+                hints.append(f'* Use spot jobs CLI: {colorama.Style.BRIGHT}'
+                             f'sky spot --help{colorama.Style.RESET_ALL}; '
+                             f'Check all spot jobs: {colorama.Style.BRIGHT}'
+                             f'sky spot queue{colorama.Style.RESET_ALL}')
 
         if num_pending_autostop > 0:
             plural = ' has'
             if num_pending_autostop > 1:
                 plural = 's have'
-            click.echo('\n'
-                       f'{num_pending_autostop} cluster{plural} '
-                       'auto{stop,down} scheduled. Refresh statuses with: '
-                       f'{colorama.Style.BRIGHT}sky status --refresh'
-                       f'{colorama.Style.RESET_ALL}')
+            hints.append(f'* {num_pending_autostop} cluster{plural} '
+                         'auto{stop,down} scheduled. Refresh statuses with: '
+                         f'{colorama.Style.BRIGHT}sky status --refresh'
+                         f'{colorama.Style.RESET_ALL}')
+        click.echo('\n' + '\n'.join(hints))
 
 
 @cli.command()

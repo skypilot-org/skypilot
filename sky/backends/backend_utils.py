@@ -95,7 +95,7 @@ DEFAULT_TASK_CPU_DEMAND = 0.5
 # purpose).
 # NOTE: each group can only have one reserved cluster name for now.
 SKY_RESERVED_CLUSTER_NAMES = {
-    spot_lib.SPOT_CONTROLLER_NAME: 'Managed spot controller'
+    spot_lib.SPOT_CONTROLLER_NAME: 'Managed spot controller',
 }
 
 # Filelocks for the cluster status change.
