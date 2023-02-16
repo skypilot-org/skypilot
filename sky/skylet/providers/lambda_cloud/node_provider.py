@@ -17,12 +17,11 @@ from ray.autoscaler.tags import (
     NODE_KIND_HEAD,
 )
 from sky.skylet.providers.lambda_cloud import lambda_utils
+from sky import authentication as auth
 from sky.utils import command_runner
-from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
 TAG_PATH_PREFIX = '~/.sky/generated/lambda_cloud/metadata'
-REMOTE_RAY_YAML = '~/ray_bootstrap_config.yaml'
 REMOTE_RAY_SSH_KEY = '~/ray_bootstrap_key.pem'
 GET_INTERNAL_IP_CMD = 'ip -4 -br addr show | grep -Eo "10\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"'
 
@@ -54,14 +53,10 @@ class LambdaNodeProvider(NodeProvider):
         self.lambda_client = lambda_utils.LambdaCloudClient()
         self.cached_nodes = {}
         self.metadata = lambda_utils.Metadata(TAG_PATH_PREFIX, cluster_name)
-
-        # Check if running on head node of cluster
-        self.on_head = False
-        ray_yaml_path = os.path.expanduser(REMOTE_RAY_YAML)
-        if os.path.exists(ray_yaml_path):
-            config = common_utils.read_yaml(ray_yaml_path)
-            if config['cluster_name'] == cluster_name:
-                self.on_head = True
+        self.ssh_key_path = os.path.expanduser(auth.PRIVATE_SSH_KEY_PATH)
+        remote_ssh_key = os.path.expanduser(REMOTE_RAY_SSH_KEY)
+        if os.path.exists(remote_ssh_key):
+            self.ssh_key_path = remote_ssh_key
 
     def _guess_and_add_missing_tags(self, vms: Dict[str, Any]) -> None:
         """Adds missing vms to local tag file and guesses their tags."""
@@ -108,10 +103,6 @@ class LambdaNodeProvider(NodeProvider):
                 metadata['tags'] = instance_info['tags']
             ip = vm['ip']
             metadata['external_ip'] = ip
-            # Optimization: it is dificult to get the internal ip, so set
-            # internal ip to external ip. On the head node, where internal ip
-            # actually matters, we run _get_internal_ip()
-            metadata['internal_ip'] = ip
             return metadata
 
         def _match_tags(vm: Dict[str, Any]):
@@ -123,9 +114,9 @@ class LambdaNodeProvider(NodeProvider):
             return True
 
         def _get_internal_ip(node: Dict[str, Any]):
-            runner = command_runner.SSHCommandRunner(
-                node['external_ip'], 'ubuntu',
-                os.path.expanduser(REMOTE_RAY_SSH_KEY))
+            runner = command_runner.SSHCommandRunner(node['external_ip'],
+                                                     'ubuntu',
+                                                     self.ssh_key_path)
             out = runner.run(GET_INTERNAL_IP_CMD, require_outputs=True)
             assert out[0] == 0
             node['internal_ip'] = out[1].strip()
@@ -133,8 +124,7 @@ class LambdaNodeProvider(NodeProvider):
         vms = self._list_instances_in_cluster()
         self._guess_and_add_missing_tags(vms)
         nodes = [_extract_metadata(vm) for vm in filter(_match_tags, vms)]
-        if self.on_head:
-            subprocess_utils.run_in_parallel(_get_internal_ip, nodes)
+        subprocess_utils.run_in_parallel(_get_internal_ip, nodes)
         self.cached_nodes = {node['id']: node for node in nodes}
         return self.cached_nodes
 
