@@ -1798,12 +1798,14 @@ class TestStorageWithCredentials:
         # Run sky storage ls to check if storage object is deleted
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
-    @pytest.mark.parametrize(
-        'store_type', ['S3', 'GCS'])
+
+    @pytest.mark.parametrize('store_type', ['S3', 'GCS'])
     def test_sky_storage_cli(self, tmp_bucket_name, tmp_source, store_type):
         # Creates new bucket with local source
-        subprocess.check_output(
-            ['sky', 'storage', 'create', tmp_bucket_name, '-src', tmp_source, '-s', store_type])
+        subprocess.check_output([
+            'sky', 'storage', 'create', tmp_bucket_name, '-src', tmp_source,
+            '-s', store_type
+        ])
 
         # Run sky storage ls to check if storage object exists in output
         out2 = subprocess.check_output(['sky', 'storage', 'ls'])

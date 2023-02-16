@@ -317,7 +317,7 @@ _TASK_OPTIONS = [
         help=('If specified, sync this dir to the remote working directory, '
               'where the task will be invoked. '
               'Overrides the "workdir" config in the YAML if both are supplied.'
-              )),
+             )),
     click.option(
         '--cloud',
         required=False,
@@ -758,17 +758,17 @@ def _launch_with_confirm(
 
 # TODO: skip installing ray to speed up provisioning.
 def _create_and_ssh_into_node(
-        node_type: str,
-        resources: sky.Resources,
-        cluster_name: str,
-        backend: Optional['backend_lib.Backend'] = None,
-        port_forward: Optional[List[int]] = None,
-        session_manager: Optional[str] = None,
-        user_requested_resources: Optional[bool] = False,
-        no_confirm: bool = False,
-        idle_minutes_to_autostop: Optional[int] = None,
-        down: bool = False,  # pylint: disable=redefined-outer-name
-        retry_until_up: bool = False,
+    node_type: str,
+    resources: sky.Resources,
+    cluster_name: str,
+    backend: Optional['backend_lib.Backend'] = None,
+    port_forward: Optional[List[int]] = None,
+    session_manager: Optional[str] = None,
+    user_requested_resources: Optional[bool] = False,
+    no_confirm: bool = False,
+    idle_minutes_to_autostop: Optional[int] = None,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    retry_until_up: bool = False,
 ):
     """Creates and attaches to an interactive node.
 
@@ -876,7 +876,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, dict]:
     config = None
     shell_splits = shlex.split(entrypoint)
     yaml_file_provided = len(shell_splits) == 1 and \
-                         (shell_splits[0].endswith('yaml') or shell_splits[0].endswith('.yml'))
+        (shell_splits[0].endswith('yaml') or shell_splits[0].endswith('.yml'))
     try:
         with open(entrypoint, 'r') as f:
             try:
@@ -1022,6 +1022,7 @@ class _DocumentedCodeCommand(click.Command):
 
 
 def _with_deprecation_warning(f, original_name, alias_name):
+
     @functools.wraps(f)
     def wrapper(self, *args, **kwargs):
         click.secho(
@@ -1274,20 +1275,20 @@ def launch(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def exec(
-        cluster: str,
-        entrypoint: str,
-        detach_run: bool,
-        name: Optional[str],
-        cloud: Optional[str],
-        region: Optional[str],
-        zone: Optional[str],
-        workdir: Optional[str],
-        gpus: Optional[str],
-        instance_type: Optional[str],
-        num_nodes: Optional[int],
-        use_spot: Optional[bool],
-        image_id: Optional[str],
-        env: List[Dict[str, str]],
+    cluster: str,
+    entrypoint: str,
+    detach_run: bool,
+    name: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    workdir: Optional[str],
+    gpus: Optional[str],
+    instance_type: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env: List[Dict[str, str]],
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or a command on a cluster (skip setup).
@@ -1599,7 +1600,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     is_flag=True,
     default=False,
     help='Sync down the logs of the job (this is useful for distributed jobs to'
-         'download a separate log for each job from all the workers).')
+    'download a separate log for each job from all the workers).')
 @click.option(
     '--status',
     is_flag=True,
@@ -1620,11 +1621,11 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
 # TODO(zhwu): support logs by job name
 @usage_lib.entrypoint
 def logs(
-        cluster: str,
-        job_ids: Tuple[str],
-        sync_down: bool,
-        status: bool,  # pylint: disable=redefined-outer-name
-        follow: bool,
+    cluster: str,
+    job_ids: Tuple[str],
+    sync_down: bool,
+    status: bool,  # pylint: disable=redefined-outer-name
+    follow: bool,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the log of a job.
@@ -1766,9 +1767,9 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 def stop(
-        clusters: Tuple[str],
-        all: Optional[bool],  # pylint: disable=redefined-builtin
-        yes: bool,
+    clusters: Tuple[str],
+    all: Optional[bool],  # pylint: disable=redefined-builtin
+    yes: bool,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Stop cluster(s).
@@ -1835,7 +1836,7 @@ def stop(
     is_flag=True,
     required=False,
     help='Use autodown (tear down the cluster; non-restartable), instead '
-         'of autostop (restartable).')
+    'of autostop (restartable).')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1844,12 +1845,12 @@ def stop(
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 def autostop(
-        clusters: Tuple[str],
-        all: Optional[bool],  # pylint: disable=redefined-builtin
-        idle_minutes: Optional[int],
-        cancel: bool,  # pylint: disable=redefined-outer-name
-        down: bool,  # pylint: disable=redefined-outer-name
-        yes: bool,
+    clusters: Tuple[str],
+    all: Optional[bool],  # pylint: disable=redefined-builtin
+    idle_minutes: Optional[int],
+    cancel: bool,  # pylint: disable=redefined-outer-name
+    down: bool,  # pylint: disable=redefined-outer-name
+    yes: bool,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Schedule an autostop or autodown for cluster(s).
@@ -2153,13 +2154,13 @@ def start(
               default=False,
               required=False,
               help='Ignore cloud provider errors (if any). '
-                   'Useful for cleaning up manually deleted cluster(s).')
+              'Useful for cleaning up manually deleted cluster(s).')
 @usage_lib.entrypoint
 def down(
-        clusters: Tuple[str],
-        all: Optional[bool],  # pylint: disable=redefined-builtin
-        yes: bool,
-        purge: bool,
+    clusters: Tuple[str],
+    all: Optional[bool],  # pylint: disable=redefined-builtin
+    yes: bool,
+    purge: bool,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tear down cluster(s).
@@ -2910,22 +2911,22 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
 
 
 @storage.command('create', cls=_DocumentedCodeCommand)
-@click.argument('name',
+@click.argument('name', required=False, type=str, default=None, nargs=1)
+@click.option('--source',
+              '-src',
               required=False,
               type=str,
               default=None,
-              nargs=1)
-@click.option('--source', '-src',
-              required=False,
-              type=str,
-              default=None,
-              help='File path where data is initially stored; Can be a local path or a cloud URI')
-@click.option('--store', '-s', "stores",
-              required=False,
-              type=str,
-              default=['S3'],
-              multiple=True,
-              help='Specify pre-initialized stores - S3 or GCS by specifying them separately (-s GCS -s S3)')
+              help='Local path or cloud URI where data is initially stored')
+@click.option(
+    '--store',
+    '-s',
+    'stores',
+    required=False,
+    type=str,
+    default=['S3'],
+    multiple=True,
+    help='Specify pre-initialized stores (S3, GCS) separately (-s GCS -s S3)')
 @usage_lib.entrypoint
 def storage_create(name: str, source: str, stores: Tuple[str]):
     """Create a storage object.
@@ -2944,7 +2945,8 @@ def storage_create(name: str, source: str, stores: Tuple[str]):
         # Create an empty storage object named imagenet with GCS and S3 stores
         sky storage create imagenet -s GCS -s S3
 
-        # Create a storage object from bucket URL using source bucket as the backing store
+        # Create a storage object from bucket URI using source bucket
+            as the backing store
         sky storage create -src S3://bucket-name
 
         # Create storage object by uploading contents from local source path to
@@ -3451,21 +3453,21 @@ def bench():
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 def benchmark_launch(
-        entrypoint: str,
-        benchmark: str,
-        name: Optional[str],
-        workdir: Optional[str],
-        cloud: Optional[str],
-        region: Optional[str],
-        zone: Optional[str],
-        gpus: Optional[str],
-        num_nodes: Optional[int],
-        use_spot: Optional[bool],
-        image_id: Optional[str],
-        env: List[Dict[str, str]],
-        disk_size: Optional[int],
-        idle_minutes_to_autostop: Optional[int],
-        yes: bool,
+    entrypoint: str,
+    benchmark: str,
+    name: Optional[str],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    gpus: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env: List[Dict[str, str]],
+    disk_size: Optional[int],
+    idle_minutes_to_autostop: Optional[int],
+    yes: bool,
 ) -> None:
     """Benchmark a task on different resources.
 
@@ -3831,9 +3833,9 @@ def benchmark_show(benchmark: str) -> None:
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 def benchmark_down(
-        benchmark: str,
-        clusters_to_exclude: List[str],
-        yes: bool,
+    benchmark: str,
+    clusters_to_exclude: List[str],
+    yes: bool,
 ) -> None:
     """Tear down all clusters belonging to a benchmark."""
     record = benchmark_state.get_benchmark_from_name(benchmark)

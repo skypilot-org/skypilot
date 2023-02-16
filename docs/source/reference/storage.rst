@@ -244,18 +244,22 @@ To manage persistent Storage objects, the sky CLI provides three useful commands
     NAME               CREATED     STORE  COMMAND                                        STATUS
     sky-dataset-romil  3 mins ago  S3     sky launch -c demo examples/storage_demo.yaml  READY
 
-2.  :code:`sky storage create` allows you to create a sky Storage object. Common use cases include:
+2.  :code:`sky storage create` allows you to create a sky Storage object with the following specifiable parameters.
+   - Name (uses bucket name for non-local sources)
+   - Source (public buckets must be external or a user's publicly accessible bucket)
+   - Stores (GCS or S3)
+ Common use cases include:
    - Create a storage object by uploading contents from local source path to specified stores
         :code:`$ sky storage create imagenet -src /Users/skypilotUser/Project -s S3 -s GCS`
    - Create an empty storage object with GCS stores
         :code:`$ sky storage create emptyStore -s GCS`
    - Create a storage object by uploading local source contents to default S3 store
-        :code:`$ sky storage create cleanedData /Users/skypilotUser/Project/CleanedData`
-   - Create a storage object from bucket URL using source bucket to infer name and as the backing store
-        :code:`$ sky storage -src S3://bucket-name`
+        :code:`$ sky storage create cleanedData -src /Users/skypilotUser/Project/CleanedData`
+   - Create a storage object that is named after the source bucket (bucket-name) and uses the source bucket as the backing store
+        :code:`$ sky storage create -src S3://bucket-name`
 .. code-block:: console
 
-    $ sky storage create imagenet -src S3://bucket-name -s GCS -s AWS
+    $ sky storage create -src S3://bucket-name -s GCS
     Creating storage object
 
 3.  :code:`sky storage delete` allows you to delete any Storage objects managed

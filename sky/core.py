@@ -900,12 +900,13 @@ def storage_delete(name: str) -> None:
                                     sync_on_reconstruction=False)
         store_object.delete()
 
-def add_store(storage: data.Storage,
-              storeType: storage_lib.StoreType):
+
+def add_store(storage: data.Storage, store_type: storage_lib.StoreType):
     """Top level helper function to enable adding store types
     to a storage concurrently
     """
-    storage.add_store(storeType)
+    storage.add_store(store_type)
+
 
 def storage_create(name: Optional[str] = None,
                    source: Optional[str] = None,
@@ -925,4 +926,3 @@ def storage_create(name: Optional[str] = None,
 
     with Pool(2) as p:
         p.starmap(add_store, store_types)
-

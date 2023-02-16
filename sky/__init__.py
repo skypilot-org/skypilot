@@ -21,8 +21,8 @@ from sky.global_user_state import ClusterStatus
 from sky.skylet.job_lib import JobStatus
 from sky.core import (status, start, stop, down, autostop, queue, cancel,
                       tail_logs, download_logs, job_status, spot_queue,
-                      spot_status, spot_cancel, storage_ls, storage_delete, storage_create,
-                      cost_report)
+                      spot_status, spot_cancel, storage_ls, storage_delete,
+                      storage_create, cost_report)
 
 # Aliases.
 AWS = clouds.AWS
