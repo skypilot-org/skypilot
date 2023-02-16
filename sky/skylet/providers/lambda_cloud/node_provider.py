@@ -117,7 +117,9 @@ class LambdaNodeProvider(NodeProvider):
             runner = command_runner.SSHCommandRunner(node['external_ip'],
                                                      'ubuntu',
                                                      self.ssh_key_path)
-            out = runner.run(GET_INTERNAL_IP_CMD, require_outputs=True)
+            out = runner.run(GET_INTERNAL_IP_CMD,
+                             require_outputs=True,
+                             stream_logs=False)
             assert out[0] == 0
             node['internal_ip'] = out[1].strip()
 
