@@ -31,7 +31,7 @@ class CloudImplementationFeatures(enum.Enum):
 class Region(collections.namedtuple('Region', ['name'])):
     """A region."""
     name: str
-    zones: List['Zone'] = []
+    zones: Optional[List['Zone']] = None
 
     def set_zones(self, zones: List['Zone']):
         self.zones = zones
@@ -126,15 +126,15 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def region_zones_provision_loop(
+    def zones_provision_loop(
         cls,
         *,
+        region: str,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-        region: Optional[str] = None,
-    ) -> Iterator[Tuple[Region, List[Zone]]]:
-        """Loops over (region, zones) to retry for provisioning.
+    ) -> Iterator[Optional[List[Zone]]]:
+        """Loops over zones to retry for provisioning in a given region.
 
         Certain clouds' provisioners may handle batched requests, retrying for
         itself a list of zones under a region.  Others may need a specific zone
@@ -144,10 +144,16 @@ class Cloud:
         instance_type, accelerators, and use_spot.
 
         Args:
+            region: The region to provision.
             instance_type: The instance type to provision.
             accelerators: The accelerators to provision.
             use_spot: Whether to use spot instances.
-            region: The region to provision.
+
+        Yields:
+            A list of zones to provision in the given region, in the order of
+            price. If there is no zone that offers the specified resources,
+            nothing is yielded;
+            If the cloud does not support `Zone`s, None will be yielded.
 
         Typical usage:
 

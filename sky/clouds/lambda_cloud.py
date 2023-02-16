@@ -73,6 +73,7 @@ class Lambda(clouds.Cloud):
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
+        assert zone is None, 'Lambda does not support zones.'
         del accelerators, zone  # unused
         if use_spot:
             return []
@@ -88,21 +89,21 @@ class Lambda(clouds.Cloud):
         return regions
 
     @classmethod
-    def region_zones_provision_loop(
+    def zones_provision_loop(
         cls,
         *,
+        region: str,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-        region: Optional[str] = None,
-    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+    ) -> Iterator[Optional[List[clouds.Zone]]]:
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
                                             region=region,
                                             zone=None)
         for r in regions:
-            yield r, r.zones
+            yield r.zones
 
     def instance_type_to_hourly_cost(self,
                                      instance_type: str,

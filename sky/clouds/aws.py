@@ -144,14 +144,14 @@ class AWS(clouds.Cloud):
         return regions
 
     @classmethod
-    def region_zones_provision_loop(
+    def zones_provision_loop(
         cls,
         *,
+        region: str,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-        region: Optional[str] = None,
-    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+    ) -> Iterator[Optional[List[clouds.Zone]]]:
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
         regions = cls.regions_with_offering(instance_type,
@@ -160,7 +160,7 @@ class AWS(clouds.Cloud):
                                             region=region,
                                             zone=None)
         for r in regions:
-            yield r, r.zones
+            yield r.zones
 
     @classmethod
     def _get_default_ami(cls, region_name: str, instance_type: str) -> str:
@@ -324,9 +324,7 @@ class AWS(clouds.Cloud):
                 'Set either both or neither for: region, zones.')
             region = self._get_default_region()
             zones = region.zones
-        else:
-            assert zones is not None, (
-                'Set either both or neither for: region, zones.')
+        assert zones is not None, (region, zones)
 
         region_name = region.name
         zone_names = [zone.name for zone in zones]

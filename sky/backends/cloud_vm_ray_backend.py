@@ -16,7 +16,7 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import Dict, List, Optional, Tuple, Union, Set
+from typing import Dict, Iterable, List, Optional, Tuple, Union, Set
 
 import colorama
 import filelock
@@ -910,15 +910,22 @@ class RetryingVmProvisioner(object):
         return definitely_no_nodes_launched
 
     def _yield_zones(
-            self, to_provision: resources_lib.Resources, num_nodes: int,
-            cluster_name: str,
-            prev_cluster_status: Optional[global_user_state.ClusterStatus]):
+        self, to_provision: resources_lib.Resources, num_nodes: int,
+        cluster_name: str,
+        prev_cluster_status: Optional[global_user_state.ClusterStatus]
+    ) -> Iterable[Optional[List[clouds.Zone]]]:
+        """
+
+        None means the cloud does not support zones.
+        An empty list means the cloud supports zones, but we have no zones
+        to try.
+        """
         assert (to_provision.cloud is not None and
                 to_provision.region is not None), (
                     to_provision,
                     'cloud and region must have been set by optimizer')
         cloud = to_provision.cloud
-        region = to_provision.region
+        region = clouds.Region(to_provision.region)
         zones = None
         # Try loading previously launched region/zones and try them first,
         # because we may have an existing cluster there.
@@ -935,20 +942,21 @@ class RetryingVmProvisioner(object):
                 cluster_name)
             assert handle is not None, cluster_name
             config = common_utils.read_yaml(handle.cluster_yaml)
-            if (cloud.is_same_cloud(clouds.GCP()) or
-                    cloud.is_same_cloud(clouds.AWS()) and zones is None):
-                zones = config['provider']['availability_zone']
-                zones = [clouds.Zone(name=zone) for zone in zones.split(',')]
-
-            region = clouds.Region(name=region)
-            if zones is not None:
-                region.set_zones(zones)
+            if zones is None:
+                # This is for the case when the zone field is not set in the
+                # launched resources in a previous launch (e.g., ctrl-c during
+                # launch and multi-node cluster before this PR).
+                zones_str = config.get('provider', {}).get('availability_zone')
+                if zones_str is not None:
+                    zones = [
+                        clouds.Zone(name=zone) for zone in zones_str.split(',')
+                    ]
 
             if prev_cluster_status != global_user_state.ClusterStatus.UP:
                 logger.info(
-                    f'Cluster {cluster_name!r} (status: {prev_cluster_status.value})'
-                    f' was previously launched in {cloud} '
-                    f'({region.name}). Relaunching in that region.')
+                    f'Cluster {cluster_name!r} (status: '
+                    f'{prev_cluster_status.value}) was previously launched '
+                    f'in {cloud} ({region.name}). Relaunching in that region.')
             # TODO(zhwu): The cluster being killed by cloud provider should
             # be tested whether re-launching a cluster killed spot instance
             # will recover the data.
@@ -981,7 +989,7 @@ class RetryingVmProvisioner(object):
             # Check the *previous* cluster status. If the cluster is previously
             # stopped, we should not retry other regions, since the previously
             # attached volumes are not visible on another region.
-            if prev_cluster_status == global_user_state.ClusterStatus.STOPPED:
+            elif prev_cluster_status == global_user_state.ClusterStatus.STOPPED:
                 message = (
                     'Failed to acquire resources to restart the stopped '
                     f'cluster {cluster_name} in {region.name}. Please retry '
@@ -996,7 +1004,6 @@ class RetryingVmProvisioner(object):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesUnavailableError(message,
                                                                no_failover=True)
-
             assert prev_cluster_status == global_user_state.ClusterStatus.INIT
             message = (f'Failed to launch cluster {cluster_name!r} '
                        f'(previous status: {prev_cluster_status.value}) '
@@ -1016,15 +1023,15 @@ class RetryingVmProvisioner(object):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(message)
         else:
-            # When the cluster exists, all possible region/zones based on the
-            # to_provision should have been tried. If it reaches here, it
-            # means the cluster does not exist.
-            for region, zones in cloud.region_zones_provision_loop(
+            # If it reaches here, it means the cluster does not exist.
+            for zones in cloud.zones_provision_loop(
+                    region=to_provision.region,
                     instance_type=to_provision.instance_type,
                     accelerators=to_provision.accelerators,
                     use_spot=to_provision.use_spot,
-                    region=to_provision.region,
             ):
+                if zones is None:
+                    yield None
                 # Only retry requested region/zones or all if not specified.
                 zone_names = [zone.name for zone in zones]
                 if not to_provision.valid_on_region_zones(
@@ -1032,7 +1039,7 @@ class RetryingVmProvisioner(object):
                     continue
                 if to_provision.zone is not None:
                     zones = [clouds.Zone(name=to_provision.zone)]
-                if num_nodes > 1:
+                if zones and num_nodes > 1:
                     # When num_nodes > 1, we need to try the zones one by one,
                     # to avoid the nodes of a same cluster being placed in
                     # different zones. (This is a limitation of ray up)
@@ -1134,8 +1141,8 @@ class RetryingVmProvisioner(object):
             # yield_region_zones will return zones from a region one by one,
             # but the optimizer that does the filtering will not be involved
             # until the next region.
-            remaining_unblocked_zones = copy.deepcopy(zones)
             if zones is not None:
+                remaining_unblocked_zones = copy.deepcopy(zones)
                 for zone in zones:
                     for blocked_resources in self._blocked_resources:
                         if to_provision.copy(
@@ -1144,12 +1151,12 @@ class RetryingVmProvisioner(object):
                                     blocked_resources):
                             remaining_unblocked_zones.remove(zone)
                             break
-            if zones and not remaining_unblocked_zones:
-                # Skip the region if all zones are blocked.
-                continue
-            zones = remaining_unblocked_zones
+                if not remaining_unblocked_zones:
+                    # Skip the region if all zones are blocked.
+                    continue
+                zones = remaining_unblocked_zones
 
-            if not zones:
+            if zones is None:
                 # For Azure, zones is always an empty list.
                 zone_str = 'all zones'
             else:
