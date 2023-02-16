@@ -1253,29 +1253,19 @@ def _query_head_ip_with_retries(cluster_yaml: str,
     return head_ip
 
 
-def _query_cluster_ips_aws_retries(region: str, cluster_name: str,
-                                   expected_num_nodes: int,
-                                   get_internal_ips: bool, max_attempts: int):
+def _query_cluster_ips_aws(region: str, cluster_name: str,
+                           expected_num_nodes: int, get_internal_ips: bool):
     from sky.provision import aws
 
-    backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
-    for retry_cnt in range(max_attempts):
-        ip_dict = aws.get_instance_ips(region, cluster_name)
-        if get_internal_ips:
-            ips = [pair[0] for k, pair in ip_dict.items()]
-        else:
-            ips = [pair[1] for k, pair in ip_dict.items()]
-        if len(ips) < expected_num_nodes:
-            backoff_time = backoff.current_backoff()
-            logger.debug('Retrying to get worker ip '
-                         f'[{retry_cnt}/{max_attempts}] in '
-                         f'{backoff_time} seconds.')
-            time.sleep(backoff_time)
-        else:
-            return ips
-
-    # Simulate the case when Ray head node is not up.
-    raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+    ip_dict = aws.get_instance_ips(region, cluster_name)
+    if get_internal_ips:
+        ips = [pair[0] for k, pair in ip_dict.items()]
+    else:
+        ips = [pair[1] for k, pair in ip_dict.items()]
+    if len(ips) < expected_num_nodes:
+        # Simulate the case when Ray head node is not up.
+        raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+    return ips
 
 
 @timeline.event
@@ -1292,10 +1282,9 @@ def get_node_ips(cluster_yaml: str,
     # implmented in _get_tpu_vm_pod_ips.
     ray_config = common_utils.read_yaml(cluster_yaml)
     if ray_config['provider']['module'].startswith('sky.skylet.providers.aws'):
-        return _query_cluster_ips_aws_retries(
-            handle.launched_resources.region, handle.get_cluster_name(),
-            expected_num_nodes, get_internal_ips,
-            head_ip_max_attempts + worker_ip_max_attempts)
+        return _query_cluster_ips_aws(handle.launched_resources.region,
+                                      handle.get_cluster_name(),
+                                      expected_num_nodes, get_internal_ips)
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
         assert expected_num_nodes == 1, (
@@ -1939,6 +1928,9 @@ def _update_cluster_status_no_lock(
             if returncode:
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
+        # TODO(suquark): we should handle multi-node clusters properly.
+        #  They may be not be ready even if we have their IPs.
+        #  We should check if cache file for file mounts etc exists.
         # If we get node ips correctly, the cluster is UP. It is safe to
         # set the status to UP, as the `handle.external_ips` function uses ray
         # to fetch IPs and starting ray is the final step of sky launch.

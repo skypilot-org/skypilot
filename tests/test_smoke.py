@@ -1281,6 +1281,9 @@ def test_spot_failed_setup(generic_cloud: str):
 @pytest.mark.managed_spot
 def test_spot_recovery_aws():
     """Test managed spot recovery."""
+    # TODO(suquark): The sleep time is flaky, sometime the test fails due to
+    #  no spot instance available for a long time.
+    #  We should wait status with a timeout instead.
     name = _get_cluster_name()
     region = 'us-west-2'
     test = Test(

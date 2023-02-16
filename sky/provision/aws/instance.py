@@ -353,7 +353,7 @@ def wait_instances(region: str, cluster_name: str, state: str):
     else:
         raise ValueError(f'Unsupported state to wait: {state}')
     # See https://github.com/boto/botocore/blob/develop/botocore/waiter.py
-    waiter.wait(WaiterConfig={'Delay': 5}, Filters=filters)
+    waiter.wait(WaiterConfig={'Delay': 5, 'MaxAttempts': 120}, Filters=filters)
 
 
 def get_instance_ips(region: str, cluster_name: str):
