@@ -1213,11 +1213,20 @@ class RetryingVmProvisioner(object):
                 cluster_name, cloud_user_identity)
 
             if isinstance(to_provision.cloud, clouds.AWS):
-                result_config = self._bulk_provision_wrapper(
-                    to_provision, region.name, zones, handle, config_dict,
-                    is_prev_cluster_healthy, log_abs_path)
-                if result_config is not None:
-                    return result_config
+                success = self._bulk_provision_wrapper(to_provision, region,
+                                                       zones, handle,
+                                                       is_prev_cluster_healthy,
+                                                       log_abs_path)
+                # We ship the cluster handle to reuse some configurations.
+                # TODO(suquark): In the future, we should gradually use the
+                #  handle (which includes latest cluster launch results)
+                #  instead of other fields.
+
+                # NOTE: We handle the logic of '_ensure_cluster_ray_started'
+                # in '_post_provision_setup()'.
+                if success:
+                    config_dict['handle'] = handle
+                    return config_dict
                 continue
                 # NOTE: The code below in the loop should not be reachable
                 # with the new provisioner.
@@ -1391,21 +1400,16 @@ class RetryingVmProvisioner(object):
         region: clouds.Region,
         zones: List[clouds.Zone],
         handle: 'CloudVmRayBackend.ResourceHandle',
-        config_dict: Dict,
         is_prev_cluster_healthy: bool,
         log_abs_path: str,
-    ) -> Optional[Dict]:
+    ) -> bool:
         os.makedirs(self.log_dir, exist_ok=True)
         fh = logging.FileHandler(log_abs_path)
         fh.setLevel(logging.DEBUG)
         try:
             logger.addHandler(fh)
-            return self._bulk_provision(to_provision, region.name, zones,
-                                        handle, config_dict)
-
-            # NOTE: We handle the logic of
-            # '_ensure_cluster_ray_started' in
-            # '_post_provision_setup()'.
+            self._bulk_provision(to_provision, region.name, zones, handle)
+            return True
         except Exception:
             logger.exception(f'Provision cluster {handle.cluster_name} failed.')
             logger.error('*** Failed provisioning the cluster. ***')
@@ -1430,8 +1434,7 @@ class RetryingVmProvisioner(object):
             # cleaning up clusters now if there are not existing nodes.
             CloudVmRayBackend().teardown_no_lock(handle,
                                                  terminate=terminate_or_stop)
-
-            return None
+            return False
         finally:
             logger.removeHandler(fh)
             fh.close()
@@ -1443,13 +1446,8 @@ class RetryingVmProvisioner(object):
         region: str,
         zones: List[clouds.Zone],
         cluster_handle: 'CloudVmRayBackend.ResourceHandle',
-        config_dict: Dict,
-    ) -> Dict:
-        """Provisions a cluster and wait until fully provisioned.
-
-        Returns:
-          (GangSchedulingStatus; stdout; stderr; optional head_ip).
-        """
+    ) -> None:
+        """Provisions a cluster and wait until fully provisioned."""
         from sky.provision import aws
 
         provider = aws
@@ -1553,13 +1551,6 @@ class RetryingVmProvisioner(object):
         if not isinstance(to_provision.cloud, clouds.Local):
             logger.info(f'{colorama.Fore.GREEN}Successfully provisioned '
                         f'or found existing VM{plural}.{style.RESET_ALL}')
-
-        # We ship the cluster handle to reuse some configurations.
-        # TODO(suquark): we should gradually use the handle (which
-        #  includes latest cluster launch results) instead of other
-        #  fields.
-        config_dict['handle'] = cluster_handle
-        return config_dict
 
     # TODO(suquark): Deprecate this method in future PRs.
     @timeline.event
