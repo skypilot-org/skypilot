@@ -1238,7 +1238,6 @@ class RetryingVmProvisioner(object):
                 'region_name': region.name,
                 'zone_str': zone_str,
             }
-
             status, stdout, stderr, head_ip = self._gang_schedule_ray_up(
                 to_provision.cloud, cluster_config_file, handle, log_abs_path,
                 stream_logs, logging_info, to_provision.use_spot)
@@ -1258,6 +1257,7 @@ class RetryingVmProvisioner(object):
                     # started).
                     self._ensure_cluster_ray_started(handle, log_abs_path)
 
+                cluster_name = config_dict['cluster_name']
                 config_dict['launched_resources'] = to_provision.copy(
                     region=region.name)
                 config_dict['launched_nodes'] = num_nodes
@@ -2430,39 +2430,37 @@ class CloudVmRayBackend(backends.Backend):
             if 'tpu_name' in config_dict:
                 self._set_tpu_name(handle, config_dict['tpu_name'])
 
-            # zone & region is set in the new provisioner during provisioning
-            if 'handle' not in config_dict:
-                # Get actual zone info and save it into handle.
-                # NOTE: querying zones is expensive, observed 1node GCP >=4s.
-                zones = config_dict['zones']
-                if zones is not None and len(
-                        zones) == 1:  # zones is None for Azure
-                    # Optimization for if the provision request was for 1 zone
-                    # (currently happens only for GCP since it uses per-zone
-                    # provisioning), then we know the exact zone already.
+            # Get actual zone info and save it into handle.
+            # NOTE: querying zones is expensive, observed 1node GCP >=4s.
+            zones = config_dict['zones']
+            if zones is not None and len(
+                    zones) == 1:  # zones is None for Azure
+                # Optimization for if the provision request was for 1 zone
+                # (currently happens only for GCP since it uses per-zone
+                # provisioning), then we know the exact zone already.
+                handle.launched_resources = handle.launched_resources.copy(
+                    zone=zones[0].name)
+            elif (task.num_nodes == 1 or
+                  handle.launched_resources.zone is not None):
+                # Query zone if the cluster has 1 node, or a zone is
+                # specifically requested for a multinode cluster.  Otherwise
+                # leave the zone field to None because head and worker nodes
+                # can be launched in different zones.
+                get_zone_cmd = (
+                    handle.launched_resources.cloud.get_zone_shell_cmd())
+                if get_zone_cmd is not None:
+                    returncode, stdout, stderr = self.run_on_head(
+                        handle, get_zone_cmd, require_outputs=True)
+                    subprocess_utils.handle_returncode(
+                        returncode,
+                        get_zone_cmd,
+                        'Failed to get zone',
+                        stderr=stderr,
+                        stream_logs=stream_logs)
+                    # zone will be checked during Resources cls
+                    # initialization.
                     handle.launched_resources = handle.launched_resources.copy(
-                        zone=zones[0].name)
-                elif (task.num_nodes == 1 or
-                      handle.launched_resources.zone is not None):
-                    # Query zone if the cluster has 1 node, or a zone is
-                    # specifically requested for a multinode cluster.  Otherwise
-                    # leave the zone field to None because head and worker nodes
-                    # can be launched in different zones.
-                    get_zone_cmd = (
-                        handle.launched_resources.cloud.get_zone_shell_cmd())
-                    if get_zone_cmd is not None:
-                        returncode, stdout, stderr = self.run_on_head(
-                            handle, get_zone_cmd, require_outputs=True)
-                        subprocess_utils.handle_returncode(
-                            returncode,
-                            get_zone_cmd,
-                            'Failed to get zone',
-                            stderr=stderr,
-                            stream_logs=stream_logs)
-                        # zone will be checked during Resources cls
-                        # initialization.
-                        handle.launched_resources = handle.launched_resources.copy(
-                            zone=stdout.strip())
+                        zone=stdout.strip())
 
             self._finalize_provisioning_no_lock(handle, task,
                                                 prev_cluster_status, ip_list,
