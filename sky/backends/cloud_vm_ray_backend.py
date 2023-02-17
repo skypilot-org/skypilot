@@ -2409,7 +2409,8 @@ class CloudVmRayBackend(backends.Backend):
                     local_wheel_path=local_wheel_path,
                     wheel_hash=wheel_hash,
                     log_abs_path=log_abs_path)
-                self._finalize_provisioning_no_lock(handle, task, prev_cluster_status,
+                self._finalize_provisioning_no_lock(handle, task,
+                                                    prev_cluster_status,
                                                     ip_list, lock_path)
                 return handle
 
@@ -2433,8 +2434,7 @@ class CloudVmRayBackend(backends.Backend):
             # Get actual zone info and save it into handle.
             # NOTE: querying zones is expensive, observed 1node GCP >=4s.
             zones = config_dict['zones']
-            if zones is not None and len(
-                    zones) == 1:  # zones is None for Azure
+            if zones is not None and len(zones) == 1:  # zones is None for Azure
                 # Optimization for if the provision request was for 1 zone
                 # (currently happens only for GCP since it uses per-zone
                 # provisioning), then we know the exact zone already.
@@ -2451,12 +2451,11 @@ class CloudVmRayBackend(backends.Backend):
                 if get_zone_cmd is not None:
                     returncode, stdout, stderr = self.run_on_head(
                         handle, get_zone_cmd, require_outputs=True)
-                    subprocess_utils.handle_returncode(
-                        returncode,
-                        get_zone_cmd,
-                        'Failed to get zone',
-                        stderr=stderr,
-                        stream_logs=stream_logs)
+                    subprocess_utils.handle_returncode(returncode,
+                                                       get_zone_cmd,
+                                                       'Failed to get zone',
+                                                       stderr=stderr,
+                                                       stream_logs=stream_logs)
                     # zone will be checked during Resources cls
                     # initialization.
                     handle.launched_resources = handle.launched_resources.copy(
