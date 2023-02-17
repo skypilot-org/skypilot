@@ -1240,9 +1240,8 @@ class RetryingVmProvisioner(object):
             }
 
             status, stdout, stderr, head_ip = self._gang_schedule_ray_up(
-                to_provision.cloud, cluster_config_file, handle,
-                log_abs_path, stream_logs, logging_info,
-                to_provision.use_spot)
+                to_provision.cloud, cluster_config_file, handle, log_abs_path,
+                stream_logs, logging_info, to_provision.use_spot)
 
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 if cluster_exists:
@@ -1548,14 +1547,7 @@ class RetryingVmProvisioner(object):
             self._tpu_pod_setup(cluster_handle.cluster_yaml, cluster_handle)
 
         ip_dict = provider.get_instance_ips(region, cluster_name)
-        ip_tuples = list(ip_dict.values())
-        cluster_handle.stable_internal_external_ips = ip_tuples
-
-        logger.debug(f'Waiting SSH connection for "{cluster_name}" ...')
-        with backend_utils.safe_console_status(
-                f'[bold cyan]Waiting SSH connection for '
-                f'[green]{cluster_name}[white] ...'):
-            provision_utils.wait_for_ssh([t[1] for t in ip_tuples])
+        cluster_handle.stable_internal_external_ips = list(ip_dict.values())
 
         plural = '' if num_nodes == 1 else 's'
         if not isinstance(to_provision.cloud, clouds.Local):
@@ -2417,20 +2409,23 @@ class CloudVmRayBackend(backends.Backend):
                     local_wheel_path=local_wheel_path,
                     wheel_hash=wheel_hash,
                     log_abs_path=log_abs_path)
-            else:
-                cluster_config_file = config_dict['ray']
+                self._finalize_provisioning_no_lock(handle, task, prev_cluster_status,
+                                                    ip_list, lock_path)
+                return handle
 
-                handle = self.ResourceHandle(
-                    cluster_name=cluster_name,
-                    cluster_yaml=cluster_config_file,
-                    launched_nodes=config_dict['launched_nodes'],
-                    launched_resources=config_dict['launched_resources'],
-                    # TPU.
-                    tpu_create_script=config_dict.get('tpu-create-script'),
-                    tpu_delete_script=config_dict.get('tpu-delete-script'))
+            cluster_config_file = config_dict['ray']
 
-                ip_list = handle.external_ips(
-                    max_attempts=_FETCH_IP_MAX_ATTEMPTS, use_cached_ips=False)
+            handle = self.ResourceHandle(
+                cluster_name=cluster_name,
+                cluster_yaml=cluster_config_file,
+                launched_nodes=config_dict['launched_nodes'],
+                launched_resources=config_dict['launched_resources'],
+                # TPU.
+                tpu_create_script=config_dict.get('tpu-create-script'),
+                tpu_delete_script=config_dict.get('tpu-delete-script'))
+
+            ip_list = handle.external_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
+                                          use_cached_ips=False)
 
             if 'tpu_name' in config_dict:
                 self._set_tpu_name(handle, config_dict['tpu_name'])
@@ -2469,56 +2464,66 @@ class CloudVmRayBackend(backends.Backend):
                         handle.launched_resources = handle.launched_resources.copy(
                             zone=stdout.strip())
 
-            usage_lib.messages.usage.update_cluster_resources(
-                handle.launched_nodes, handle.launched_resources)
+            self._finalize_provisioning_no_lock(handle, task,
+                                                prev_cluster_status, ip_list,
+                                                lock_path)
+            return handle
+
+    def _finalize_provisioning_no_lock(
+            self, handle: ResourceHandle, task: task_lib.Task,
+            prev_cluster_status: global_user_state.ClusterStatus,
+            ip_list: List[str], lock_path: str):
+        usage_lib.messages.usage.update_cluster_resources(
+            handle.launched_nodes, handle.launched_resources)
+        usage_lib.messages.usage.update_final_cluster_status(
+            global_user_state.ClusterStatus.UP)
+
+        # Update job queue to avoid stale jobs (when restarted), before
+        # setting the cluster to be ready.
+        if prev_cluster_status == global_user_state.ClusterStatus.INIT:
+            # update_status will query the ray job status for all INIT /
+            # PENDING / RUNNING jobs for the real status, since we do not
+            # know the actual previous status of the cluster.
+            job_owner = onprem_utils.get_job_owner(handle.cluster_yaml)
+            cmd = job_lib.JobLibCodeGen.update_status(job_owner)
+            with backend_utils.safe_console_status(
+                    '[bold cyan]Preparing Job Queue'):
+                returncode, _, stderr = self.run_on_head(handle,
+                                                         cmd,
+                                                         require_outputs=True)
+            subprocess_utils.handle_returncode(returncode, cmd,
+                                               'Failed to update job status.',
+                                               stderr)
+        if prev_cluster_status == global_user_state.ClusterStatus.STOPPED:
+            # Safely set all the previous jobs to FAILED since the cluster
+            # is restarted
+            # An edge case here due to racing:
+            # 1. A job finishes RUNNING, but right before it update itself
+            # to SUCCEEDED, the cluster is STOPPED by `sky stop`.
+            # 2. On next `sky start`, it gets reset to FAILED.
+            cmd = job_lib.JobLibCodeGen.fail_all_jobs_in_progress()
+            returncode, stdout, stderr = self.run_on_head(handle,
+                                                          cmd,
+                                                          require_outputs=True)
+            subprocess_utils.handle_returncode(
+                returncode, cmd,
+                'Failed to set previously in-progress jobs to FAILED',
+                stdout + stderr)
+
+        with timeline.Event('backend.provision.post_process'):
+            global_user_state.add_or_update_cluster(
+                handle.cluster_name,
+                handle,
+                task.resources,
+                ready=True,
+            )
             usage_lib.messages.usage.update_final_cluster_status(
                 global_user_state.ClusterStatus.UP)
+            auth_config = common_utils.read_yaml(handle.cluster_yaml)['auth']
+            backend_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
+                                                      ip_list, auth_config)
 
-            # Update job queue to avoid stale jobs (when restarted), before
-            # setting the cluster to be ready.
-            if prev_cluster_status == global_user_state.ClusterStatus.INIT:
-                # update_status will query the ray job status for all INIT /
-                # PENDING / RUNNING jobs for the real status, since we do not
-                # know the actual previous status of the cluster.
-                job_owner = onprem_utils.get_job_owner(handle.cluster_yaml)
-                cmd = job_lib.JobLibCodeGen.update_status(job_owner)
-                with backend_utils.safe_console_status(
-                        '[bold cyan]Preparing Job Queue'):
-                    returncode, _, stderr = self.run_on_head(
-                        handle, cmd, require_outputs=True)
-                subprocess_utils.handle_returncode(
-                    returncode, cmd, 'Failed to update job status.', stderr)
-            if prev_cluster_status == global_user_state.ClusterStatus.STOPPED:
-                # Safely set all the previous jobs to FAILED since the cluster
-                # is restarted
-                # An edge case here due to racing:
-                # 1. A job finishes RUNNING, but right before it update itself
-                # to SUCCEEDED, the cluster is STOPPED by `sky stop`.
-                # 2. On next `sky start`, it gets reset to FAILED.
-                cmd = job_lib.JobLibCodeGen.fail_all_jobs_in_progress()
-                returncode, stdout, stderr = self.run_on_head(
-                    handle, cmd, require_outputs=True)
-                subprocess_utils.handle_returncode(
-                    returncode, cmd,
-                    'Failed to set previously in-progress jobs to FAILED',
-                    stdout + stderr)
-
-            with timeline.Event('backend.provision.post_process'):
-                global_user_state.add_or_update_cluster(
-                    cluster_name,
-                    handle,
-                    task.resources,
-                    ready=True,
-                )
-                usage_lib.messages.usage.update_final_cluster_status(
-                    global_user_state.ClusterStatus.UP)
-                auth_config = common_utils.read_yaml(
-                    handle.cluster_yaml)['auth']
-                backend_utils.SSHConfigHelper.add_cluster(
-                    cluster_name, ip_list, auth_config)
-
-                common_utils.remove_file_if_exists(lock_path)
-                return handle
+            common_utils.remove_file_if_exists(lock_path)
 
     def _post_provision_setup(
             self, cloud_name: str, cluster_name: str,
@@ -2534,10 +2539,18 @@ class CloudVmRayBackend(backends.Backend):
         config_from_yaml = common_utils.read_yaml(handle.cluster_yaml)
         ip_tuples = handle.stable_internal_external_ips
         ip_list = [t[1] for t in ip_tuples]
-        # TODO(suquark): skip mounting setup again when running
-        #  "sky launch" over an existing cluster.
-        #  check 'to_provision_config.cluster_exists'
-        # mount skylet wheels here
+
+        # TODO(suquark): support ssh proxy
+        logger.debug(f'Waiting SSH connection for "{cluster_name}" ...')
+        with backend_utils.safe_console_status(
+                f'[bold cyan]Waiting SSH connection for '
+                f'[green]{cluster_name}[white] ...'):
+            provision_utils.wait_for_ssh([t[1] for t in ip_tuples])
+
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml)
+        runners = command_runner.SSHCommandRunner.make_runner_list(
+            ip_list, **ssh_credentials)
 
         @provision_utils.cache_func(cluster_name, 'upload_wheels', wheel_hash)
         def _upload_config_and_wheels():
@@ -2554,12 +2567,6 @@ class CloudVmRayBackend(backends.Backend):
                 })
 
         _upload_config_and_wheels()
-
-        # TODO(suquark): support ssh proxy
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml)
-        runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, **ssh_credentials)
 
         with backend_utils.safe_console_status(
                 f'[bold cyan]Running setup commands for '
