@@ -927,22 +927,19 @@ class RetryingVmProvisioner(object):
         cloud = to_provision.cloud
         region = clouds.Region(to_provision.region)
         zones = None
-        # Try loading previously launched region/zones and try them first,
-        # because we may have an existing cluster there.
-        # Get the *previous* cluster status and handle.
 
-        if prev_cluster_status is not None:
+        def _get_previously_launched_zones() -> Optional[List[clouds.Zone]]:
             # When the cluster exists, the to_provision should have been set
             # to the previous cluster's resources.
             zones = [clouds.Zone(name=to_provision.zone)
                     ] if to_provision.zone is not None else None
-            # Reuse the zone field in the ray yaml as the prev_resources.zone
-            # field may not be set before the previous cluster is launched.
-            handle = global_user_state.get_handle_from_cluster_name(
-                cluster_name)
-            assert handle is not None, cluster_name
-            config = common_utils.read_yaml(handle.cluster_yaml)
             if zones is None:
+                # Reuse the zone field in the ray yaml as the prev_resources.zone
+                # field may not be set before the previous cluster is launched.
+                handle = global_user_state.get_handle_from_cluster_name(
+                    cluster_name)
+                assert handle is not None, cluster_name
+                config = common_utils.read_yaml(handle.cluster_yaml)
                 # This is for the case when the zone field is not set in the
                 # launched resources in a previous launch (e.g., ctrl-c during
                 # launch and multi-node cluster before this PR).
@@ -951,6 +948,12 @@ class RetryingVmProvisioner(object):
                     zones = [
                         clouds.Zone(name=zone) for zone in zones_str.split(',')
                     ]
+            return zones
+
+        if prev_cluster_status is not None:
+            # If the cluster is previously launched, we should relaunch in the
+            # same region and zone.
+            zones = _get_previously_launched_zones()
 
             if prev_cluster_status != global_user_state.ClusterStatus.UP:
                 logger.info(
@@ -962,6 +965,12 @@ class RetryingVmProvisioner(object):
             # will recover the data.
             yield zones
 
+            # TODO(zhwu): update the following logics, since we have added
+            # the support for refreshing the cluster status from the cloud
+            # provider.
+            # If it reaches here: the cluster status in the database gets
+            # set to INIT, since a launch request was issued but failed.
+            #
             # Cluster with status UP can reach here, if it was killed by the
             # cloud provider and no available resources in that region to
             # relaunch, which can happen to spot instance.
@@ -983,9 +992,6 @@ class RetryingVmProvisioner(object):
                     raise exceptions.ResourcesUnavailableError(message,
                                                                no_failover=True)
 
-            # If it reaches here: the cluster status gets set to INIT, since
-            # a launch request was issued but failed.
-            #
             # Check the *previous* cluster status. If the cluster is previously
             # stopped, we should not retry other regions, since the previously
             # attached volumes are not visible on another region.

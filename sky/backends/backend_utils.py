@@ -117,7 +117,9 @@ _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
     'cluster_name', 'provider', 'auth', 'node_config'
 }
-_RAY_YAML_KEYS_TO_RESTORE_EXCLUDE_FOR_BACK_COMPATIBILITY = [['provider', 'availability_zone']]
+_RAY_YAML_KEYS_TO_RESTORE_EXCLUDE_FOR_BACK_COMPATIBILITY = [[
+    'provider', 'availability_zone'
+]]
 
 
 def is_ip(s: str) -> bool:
