@@ -1212,6 +1212,16 @@ class RetryingVmProvisioner(object):
             global_user_state.set_owner_identity_for_cluster(
                 cluster_name, cloud_user_identity)
 
+            if isinstance(to_provision.cloud, clouds.AWS):
+                result_config = self._bulk_provision_wrapper(
+                    to_provision, region.name, zones, handle, config_dict,
+                    is_prev_cluster_healthy, log_abs_path)
+                if result_config is not None:
+                    return result_config
+                continue
+                # NOTE: The code below in the loop should not be reachable
+                # with the new provisioner.
+
             tpu_name = config_dict.get('tpu_name')
             if tpu_name is not None:
                 logger.info(
@@ -1228,18 +1238,11 @@ class RetryingVmProvisioner(object):
                 'region_name': region.name,
                 'zone_str': zone_str,
             }
-            if isinstance(to_provision.cloud, clouds.AWS):
-                result_config = self._bulk_provision_wrapper(
-                    to_provision, region.name, zones, handle, config_dict,
-                    is_prev_cluster_healthy, log_abs_path)
-                if result_config is None:
-                    continue
-                return result_config
-            else:
-                status, stdout, stderr, head_ip = self._gang_schedule_ray_up(
-                    to_provision.cloud, cluster_config_file, handle,
-                    log_abs_path, stream_logs, logging_info,
-                    to_provision.use_spot)
+
+            status, stdout, stderr, head_ip = self._gang_schedule_ray_up(
+                to_provision.cloud, cluster_config_file, handle,
+                log_abs_path, stream_logs, logging_info,
+                to_provision.use_spot)
 
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 if cluster_exists:
@@ -1263,11 +1266,6 @@ class RetryingVmProvisioner(object):
                 # the latter case, the caller doesn't need to query them again.
                 config_dict['head_ip'] = head_ip
                 config_dict['zones'] = zones
-                # We ship the cluster handle to reuse some configurations.
-                # TODO(suquark): we should gradually use the handle (which
-                #  includes latest cluster launch results) instead of other
-                #  fields.
-                config_dict['handle'] = handle
                 plural = '' if num_nodes == 1 else 's'
                 if not isinstance(to_provision.cloud, clouds.Local):
                     logger.info(f'{fore.GREEN}Successfully provisioned or found'
