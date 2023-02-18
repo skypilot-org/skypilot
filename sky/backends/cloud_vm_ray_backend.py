@@ -2256,57 +2256,66 @@ class CloudVmRayBackend(backends.Backend):
                     # initialization.
                     handle.launched_resources = handle.launched_resources.copy(
                         zone=stdout.strip())
+            self._finalize_provisioning_no_lock(handle, task,
+                                                prev_cluster_status, ip_list,
+                                                lock_path)
+            return handle
 
-            usage_lib.messages.usage.update_cluster_resources(
-                handle.launched_nodes, handle.launched_resources)
+    def _finalize_provisioning_no_lock(
+            self, handle: ResourceHandle, task: task_lib.Task,
+            prev_cluster_status: global_user_state.ClusterStatus,
+            ip_list: List[str], lock_path: str):
+        usage_lib.messages.usage.update_cluster_resources(
+            handle.launched_nodes, handle.launched_resources)
+        usage_lib.messages.usage.update_final_cluster_status(
+            global_user_state.ClusterStatus.UP)
+
+        # Update job queue to avoid stale jobs (when restarted), before
+        # setting the cluster to be ready.
+        if prev_cluster_status == global_user_state.ClusterStatus.INIT:
+            # update_status will query the ray job status for all INIT /
+            # PENDING / RUNNING jobs for the real status, since we do not
+            # know the actual previous status of the cluster.
+            job_owner = onprem_utils.get_job_owner(handle.cluster_yaml)
+            cmd = job_lib.JobLibCodeGen.update_status(job_owner)
+            with backend_utils.safe_console_status(
+                    '[bold cyan]Preparing Job Queue'):
+                returncode, _, stderr = self.run_on_head(handle,
+                                                         cmd,
+                                                         require_outputs=True)
+            subprocess_utils.handle_returncode(returncode, cmd,
+                                               'Failed to update job status.',
+                                               stderr)
+        if prev_cluster_status == global_user_state.ClusterStatus.STOPPED:
+            # Safely set all the previous jobs to FAILED since the cluster
+            # is restarted
+            # An edge case here due to racing:
+            # 1. A job finishes RUNNING, but right before it update itself
+            # to SUCCEEDED, the cluster is STOPPED by `sky stop`.
+            # 2. On next `sky start`, it gets reset to FAILED.
+            cmd = job_lib.JobLibCodeGen.fail_all_jobs_in_progress()
+            returncode, stdout, stderr = self.run_on_head(handle,
+                                                          cmd,
+                                                          require_outputs=True)
+            subprocess_utils.handle_returncode(
+                returncode, cmd,
+                'Failed to set previously in-progress jobs to FAILED',
+                stdout + stderr)
+
+        with timeline.Event('backend.provision.post_process'):
+            global_user_state.add_or_update_cluster(
+                handle.cluster_name,
+                handle,
+                task.resources,
+                ready=True,
+            )
             usage_lib.messages.usage.update_final_cluster_status(
                 global_user_state.ClusterStatus.UP)
+            auth_config = common_utils.read_yaml(handle.cluster_yaml)['auth']
+            backend_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
+                                                      ip_list, auth_config)
 
-            # Update job queue to avoid stale jobs (when restarted), before
-            # setting the cluster to be ready.
-            if prev_cluster_status == global_user_state.ClusterStatus.INIT:
-                # update_status will query the ray job status for all INIT /
-                # PENDING / RUNNING jobs for the real status, since we do not
-                # know the actual previous status of the cluster.
-                job_owner = onprem_utils.get_job_owner(handle.cluster_yaml)
-                cmd = job_lib.JobLibCodeGen.update_status(job_owner)
-                with backend_utils.safe_console_status(
-                        '[bold cyan]Preparing Job Queue'):
-                    returncode, _, stderr = self.run_on_head(
-                        handle, cmd, require_outputs=True)
-                subprocess_utils.handle_returncode(
-                    returncode, cmd, 'Failed to update job status.', stderr)
-            if prev_cluster_status == global_user_state.ClusterStatus.STOPPED:
-                # Safely set all the previous jobs to FAILED since the cluster
-                # is restarted
-                # An edge case here due to racing:
-                # 1. A job finishes RUNNING, but right before it update itself
-                # to SUCCEEDED, the cluster is STOPPED by `sky stop`.
-                # 2. On next `sky start`, it gets reset to FAILED.
-                cmd = job_lib.JobLibCodeGen.fail_all_jobs_in_progress()
-                returncode, stdout, stderr = self.run_on_head(
-                    handle, cmd, require_outputs=True)
-                subprocess_utils.handle_returncode(
-                    returncode, cmd,
-                    'Failed to set previously in-progress jobs to FAILED',
-                    stdout + stderr)
-
-            with timeline.Event('backend.provision.post_process'):
-                global_user_state.add_or_update_cluster(
-                    cluster_name,
-                    handle,
-                    task.resources,
-                    ready=True,
-                )
-                usage_lib.messages.usage.update_final_cluster_status(
-                    global_user_state.ClusterStatus.UP)
-                auth_config = common_utils.read_yaml(
-                    handle.cluster_yaml)['auth']
-                backend_utils.SSHConfigHelper.add_cluster(
-                    cluster_name, ip_list, auth_config)
-
-                common_utils.remove_file_if_exists(lock_path)
-                return handle
+            common_utils.remove_file_if_exists(lock_path)
 
     def _sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
