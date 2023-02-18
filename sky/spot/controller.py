@@ -166,15 +166,16 @@ class SpotController:
                                           end_time=end_time)
 
                     # Debugging: fetch the status again.
-                    time.sleep(180)
+                    time.sleep(20)
                     (cluster_status,
                      handle) = backend_utils.refresh_cluster_status_handle(
                          self._cluster_name, force_refresh=True)
                     if cluster_status != global_user_state.ClusterStatus.UP:
-                        cluster_status_str = ('status: None' if cluster_status is None else
-                                              f' (status: {cluster_status.value})')
-                        logger.info(
-                            f'Cluster is not up {cluster_status_str}. Bug detected.')
+                        cluster_status_str = (
+                            'status: None' if cluster_status is None else
+                            f' (status: {cluster_status.value})')
+                        logger.info(f'Cluster is not up {cluster_status_str}. '
+                                    'Bug detected.')
                     break
                 # Although the cluster is healthy, we fail to access the
                 # job status. Try to recover the job (will not restart the
