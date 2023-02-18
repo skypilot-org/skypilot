@@ -41,6 +41,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import onprem_utils
+from sky.resources import ResourcesGroup
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
@@ -72,14 +73,13 @@ RESET_BOLD = '\033[0m'
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
-_LAUNCHED_HEAD_PATTERN = re.compile(r'(\d+) ray[._]head[._]default')
 _LAUNCHED_LOCAL_WORKER_PATTERN = re.compile(r'(\d+) node_')
-_LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
+_LAUNCHED_NODES_PATTERN = re.compile(r'(\d+) skypilot_task_[a-zA-Z0-9_]+')
 # Intentionally not using prefix 'rf' for the string format because yapf have a
 # bug with python=3.6.
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
-    r'({}): ray[._]worker[._]default'.format(IP_ADDR_REGEX))
+    r'({}): skypilot_task_[a-zA-Z0-9_]+'.format(IP_ADDR_REGEX))
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
 # We use fixed IP address to avoid DNS lookup blocking the check, for machine
@@ -239,6 +239,18 @@ def _optimize_file_mounts(yaml_path: str) -> None:
 
     yaml_config['file_mounts'] = new_file_mounts
     yaml_config['setup_commands'] = setup_commands
+
+    for task_name in yaml_config.get('available_node_types', {}):
+        worker_setup_commands = yaml_config['available_node_types'][
+            task_name].get('worker_setup_commands', [])
+        if worker_setup_commands:
+            worker_setup_commands[
+                0] = f'{postprocess_runtime_files_command}; {worker_setup_commands[0]}'
+        else:
+            worker_setup_commands = [postprocess_runtime_files_command]
+
+        yaml_config['available_node_types'][task_name][
+            'worker_setup_commands'] = worker_setup_commands
 
     # (For local) Move all runtime files, including the just-written yaml, to
     # local_runtime_files_dir/.
@@ -712,8 +724,7 @@ def _replace_yaml_dicts(new_yaml: str, old_yaml: str,
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
-        to_provision: 'resources.Resources',
-        num_nodes: int,
+        to_provision: ResourcesGroup,
         cluster_config_template: str,
         cluster_name: str,
         local_wheel_path: pathlib.Path,
@@ -737,15 +748,28 @@ def write_cluster_config(
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
-    # This can raise a ResourceUnavailableError, when the region/zones requested
-    # does not appear in the catalog. It can be triggered when the user changed
-    # the catalog file, while there is a cluster in the removed region/zone.
-    # TODO(zhwu): We should change the exception type to a more specific one,
-    # as the ResourceUnavailableError is overly used. Also, it would be better
-    # to move the check out of this function, i.e. the caller should be
-    # responsible for the validation.
-    resources_vars = cloud.make_deploy_resources_variables(
-        to_provision, region, zones)
+
+    assert len(to_provision.resources_dict) > 0, 'must have at least 1 task'
+
+    yaml_tasks = []
+    for task_name in to_provision.resources_dict:
+        resources, num_nodes = to_provision.resources_dict[task_name]
+        # This can raise a ResourceUnavailableError, when the region/zones requested
+        # does not appear in the catalog. It can be triggered when the user changed
+        # the catalog file, while there is a cluster in the removed region/zone.
+        # TODO(zhwu): We should change the exception type to a more specific one,
+        # as the ResourceUnavailableError is overly used. Also, it would be better
+        # to move the check out of this function, i.e. the caller should be
+        # responsible for the validation.
+        resources_vars = cloud.make_deploy_resources_variables(
+            resources, region, zones)
+        yaml_tasks.append(
+            dict(
+                resources_vars, **{
+                    'task_name': task_name,
+                    'num_nodes': num_nodes,
+                    'disk_size': resources.disk_size,
+                }))
     config_dict = {}
 
     azure_subscription_id = None
@@ -772,44 +796,43 @@ def write_cluster_config(
     tmp_yaml_path = yaml_path + '.tmp'
     tmp_yaml_path = fill_template(
         cluster_config_template,
-        dict(
-            resources_vars,
-            **{
-                'cluster_name': cluster_name,
-                'num_nodes': num_nodes,
-                'disk_size': to_provision.disk_size,
-                # Temporary measure, as deleting per-cluster SGs is too slow.
-                # See https://github.com/skypilot-org/skypilot/pull/742.
-                # Generate the name of the security group we're looking for.
-                # (username, last 4 chars of hash of hostname): for uniquefying
-                # users on shared-account cloud providers. Using uuid.getnode()
-                # is incorrect; observed to collide on Macs.
-                'security_group': f'sky-sg-{common_utils.user_and_hostname_hash()}',
-                # Azure only.
-                'azure_subscription_id': azure_subscription_id,
-                'resource_group': f'{cluster_name}-{region_name}',
-                # GCP only.
-                'gcp_project_id': gcp_project_id,
-                # Ray version.
-                'ray_version': constants.SKY_REMOTE_RAY_VERSION,
-                # Cloud credentials for cloud storage.
-                'credentials': credentials,
-                # Sky remote utils.
-                'sky_remote_path': SKY_REMOTE_PATH,
-                'sky_local_path': str(local_wheel_path),
-                # Add yaml file path to the template variables.
-                'sky_ray_yaml_remote_path': SKY_RAY_YAML_REMOTE_PATH,
-                'sky_ray_yaml_local_path':
-                    tmp_yaml_path
-                    if not isinstance(cloud, clouds.Local) else yaml_path,
-                'sky_version': str(version.parse(sky.__version__)),
-                'sky_wheel_hash': wheel_hash,
-                # Local IP handling (optional).
-                'head_ip': None if ip_list is None else ip_list[0],
-                'worker_ips': None if ip_list is None else ip_list[1:],
-                # Authentication (optional).
-                **auth_config,
-            }),
+        {
+            'cluster_name': cluster_name,
+            'tasks': yaml_tasks,
+            'region': resources_vars['region'],
+            'zones': resources_vars['zones'],
+            'num_nodes': to_provision.num_nodes,
+            # Temporary measure, as deleting per-cluster SGs is too slow.
+            # See https://github.com/skypilot-org/skypilot/pull/742.
+            # Generate the name of the security group we're looking for.
+            # (username, last 4 chars of hash of hostname): for uniquefying
+            # users on shared-account cloud providers. Using uuid.getnode()
+            # is incorrect; observed to collide on Macs.
+            'security_group': f'sky-sg-{common_utils.user_and_hostname_hash()}',
+            # Azure only.
+            'azure_subscription_id': azure_subscription_id,
+            'resource_group': f'{cluster_name}-{region_name}',
+            # GCP only.
+            'gcp_project_id': gcp_project_id,
+            # Ray version.
+            'ray_version': constants.SKY_REMOTE_RAY_VERSION,
+            # Cloud credentials for cloud storage.
+            'credentials': credentials,
+            # Sky remote utils.
+            'sky_remote_path': SKY_REMOTE_PATH,
+            'sky_local_path': str(local_wheel_path),
+            # Add yaml file path to the template variables.
+            'sky_ray_yaml_remote_path': SKY_RAY_YAML_REMOTE_PATH,
+            'sky_ray_yaml_local_path': tmp_yaml_path if not isinstance(
+                cloud, clouds.Local) else yaml_path,
+            'sky_version': str(version.parse(sky.__version__)),
+            'sky_wheel_hash': wheel_hash,
+            # Local IP handling (optional).
+            'head_ip': None if ip_list is None else ip_list[0],
+            'worker_ips': None if ip_list is None else ip_list[1:],
+            # Authentication (optional).
+            **auth_config,
+        },
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
@@ -840,32 +863,38 @@ def write_cluster_config(
     os.rename(tmp_yaml_path, yaml_path)
 
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
-    # For TPU nodes. TPU VMs do not need TPU_NAME.
-    if (resources_vars.get('tpu_type') is not None and
-            resources_vars.get('tpu_vm') is None):
-        tpu_name = resources_vars.get('tpu_name')
-        if tpu_name is None:
-            tpu_name = cluster_name
 
-        user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
-        scripts = tuple(
-            fill_template(
-                template_name,
-                dict(
-                    resources_vars, **{
-                        'tpu_name': tpu_name,
-                        'gcp_project_id': gcp_project_id,
-                    }),
-                # Use new names for TPU scripts so that different runs can use
-                # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
-                # with cluster yamls.
-                output_path=os.path.join(user_file_dir, template_name).replace(
-                    '.sh.j2', f'.{cluster_name}.sh'),
-            ) for template_name in
-            ['gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2'])
-        config_dict['tpu-create-script'] = scripts[0]
-        config_dict['tpu-delete-script'] = scripts[1]
-        config_dict['tpu_name'] = tpu_name
+    # TODO(isaac): Support multiple TPUs in a ResourcesGroup.
+    for task_name in to_provision.resources_dict:
+        resources, num_nodes = to_provision.resources_dict[task_name]
+        resources_vars = cloud.make_deploy_resources_variables(
+            resources, region, zones)
+        # For TPU nodes. TPU VMs do not need TPU_NAME.
+        if (resources_vars.get('tpu_type') is not None and
+                resources_vars.get('tpu_vm') is None):
+            tpu_name = resources_vars.get('tpu_name')
+            if tpu_name is None:
+                tpu_name = cluster_name
+
+            user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
+            scripts = tuple(
+                fill_template(
+                    template_name,
+                    dict(
+                        resources_vars, **{
+                            'tpu_name': tpu_name,
+                            'gcp_project_id': gcp_project_id,
+                        }),
+                    # Use new names for TPU scripts so that different runs can use
+                    # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
+                    # with cluster yamls.
+                    output_path=os.path.join(user_file_dir, template_name).
+                    replace('.sh.j2', f'.{cluster_name}.sh'),
+                ) for template_name in
+                ['gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2'])
+            config_dict['tpu-create-script'] = scripts[0]
+            config_dict['tpu-delete-script'] = scripts[1]
+            config_dict['tpu_name'] = tpu_name
     return config_dict
 
 
@@ -938,6 +967,7 @@ def wait_until_ray_cluster_ready(
                 stderr)
             logger.debug(output)
 
+            ready_head = 0
             # Workers that are ready
             ready_workers = 0
             # On-prem/local case is handled differently.
@@ -951,19 +981,10 @@ def wait_until_ray_cluster_ready(
                 # of nodes launched, including head.
                 ready_workers = len(result)
             else:
-                result = _LAUNCHED_WORKER_PATTERN.findall(output)
-                if len(result) == 0:
-                    ready_workers = 0
-                else:
-                    assert len(result) == 1, result
-                    ready_workers = int(result[0])
-
-            result = _LAUNCHED_HEAD_PATTERN.findall(output)
-            ready_head = 0
-            if result:
-                assert len(result) == 1, result
-                ready_head = int(result[0])
-                assert ready_head <= 1, ready_head
+                result = _LAUNCHED_NODES_PATTERN.findall(output)
+                if result:
+                    ready_head = 1
+                    ready_workers = sum(map(int, result)) - 1  # Exclude head
 
             worker_status.update('[bold cyan]'
                                  f'{ready_workers} out of {num_nodes - 1} '
@@ -1160,13 +1181,15 @@ def get_node_ips(cluster_yaml: str,
     # won't work and we need to query the node IPs with gcloud as
     # implmented in _get_tpu_vm_pod_ips.
     ray_config = common_utils.read_yaml(cluster_yaml)
-    use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
-    if use_tpu_vm:
-        assert expected_num_nodes == 1, 'TPU VM only supports single node for now.'
-        ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
-        if len(ips) != tpu_utils.get_num_tpu_devices(handle.launched_resources):
-            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
-        return ips
+
+    # TODO(isaac): Support TPUs for heterogeneous clusters.
+    # use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
+    # if use_tpu_vm:
+    #     assert expected_num_nodes == 1, 'TPU VM only supports single node for now.'
+    #     ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
+    #     if len(ips) != tpu_utils.get_num_tpu_devices(handle.launched_resources):
+    #         raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+    #     return ips
 
     if get_internal_ips:
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:

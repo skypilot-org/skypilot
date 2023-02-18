@@ -26,6 +26,7 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import spot
 from sky import task as task_lib
@@ -84,6 +85,12 @@ def _convert_to_dag(entrypoint: Any) -> 'sky.Dag':
         with sky.Dag() as dag:
             dag.add(entrypoint)
         return dag
+    elif isinstance(entrypoint, task_lib.TaskGroup):
+        entrypoint = copy.deepcopy(entrypoint)
+        with sky.Dag() as dag:
+            for task in entrypoint.tasks:
+                dag.add(task)
+        return dag
     else:
         raise TypeError(
             'Expected a sky.Task or sky.Dag but received argument of type: '
@@ -104,7 +111,7 @@ class Stage(enum.Enum):
 
 
 def _execute(
-    entrypoint: Union['sky.Task', 'sky.Dag'],
+    entrypoint: Union['sky.Task', 'sky.Dag', 'sky.TaskGroup'],
     dryrun: bool = False,
     down: bool = False,
     stream_logs: bool = True,
@@ -158,14 +165,14 @@ def _execute(
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
     """
     dag = _convert_to_dag(entrypoint)
-    assert len(dag) == 1, f'We support 1 task for now. {dag}'
-    task = dag.tasks[0]
+    task_group = sky.TaskGroup(dag.tasks)
 
-    if task.need_spot_recovery:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Spot recovery is specified in the task. To launch the '
-                'managed spot job, please use: sky spot launch')
+    for task in task_group.tasks:
+        if task.need_spot_recovery:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Spot recovery is specified in the task. To launch the '
+                    'managed spot job, please use: sky spot launch')
 
     cluster_exists = False
     if cluster_name is not None:
@@ -203,7 +210,7 @@ def _execute(
                 f'{backends.CloudVmRayBackend.NAME}')
 
     if not cluster_exists and Stage.OPTIMIZE in stages:
-        if task.best_resources is None:
+        if not task_group.optimized:
             # TODO: fix this for the situation where number of requested
             # accelerators is not an integer.
             if isinstance(backend, backends.CloudVmRayBackend):
@@ -212,20 +219,26 @@ def _execute(
                 # would directly error out ('No cloud is enabled...').  Fix by
                 # moving `sky check` checks out of optimize()?
                 dag = sky.optimize(dag, minimize=optimize_target)
-                task = dag.tasks[0]  # Keep: dag may have been deep-copied.
-                assert task.best_resources is not None, task
+                for task in dag.tasks:
+                    assert task.best_resources is not None, task
+                task_group.optimized = True
+                task_group = sky.TaskGroup(
+                    dag.tasks)  # Keep: dag may have been deep-copied.
 
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
-    if task.storage_mounts is not None:
-        # Optimizer should eventually choose where to store bucket
-        task.sync_storage_mounts()
+    for task in task_group.tasks:
+        if task.storage_mounts is not None:
+            # Optimizer should eventually choose where to store bucket
+            task.sync_storage_mounts()
 
     try:
         if Stage.PROVISION in stages:
             if handle is None:
-                handle = backend.provision(task,
-                                           task.best_resources,
+                resources_group = resources_lib.ResourcesGroup.from_task_group(
+                    task_group)
+                handle = backend.provision(task_group,
+                                           resources_group,
                                            dryrun=dryrun,
                                            stream_logs=stream_logs,
                                            cluster_name=cluster_name,
@@ -236,17 +249,15 @@ def _execute(
             return
 
         if Stage.SYNC_WORKDIR in stages:
-            if task.workdir is not None:
-                backend.sync_workdir(handle, task.workdir)
+            backend.sync_workdir(handle, task_group)
 
         if Stage.SYNC_FILE_MOUNTS in stages:
-            backend.sync_file_mounts(handle, task.file_mounts,
-                                     task.storage_mounts)
+            backend.sync_file_mounts(handle, task_group)
 
         if no_setup:
             logger.info('Setup commands skipped.')
         elif Stage.SETUP in stages:
-            backend.setup(handle, task, detach_setup=detach_setup)
+            backend.setup(handle, task_group, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages:
             if idle_minutes_to_autostop is not None:
@@ -257,14 +268,14 @@ def _execute(
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
-                backend.execute(handle, task, detach_run)
+                backend.execute(handle, task_group, detach_run)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
 
         if Stage.DOWN in stages:
             if down and idle_minutes_to_autostop is None:
-                backend.teardown_ephemeral_storage(task)
+                backend.teardown_ephemeral_storage(task_group)
                 backend.teardown(handle, terminate=True)
     finally:
         if cluster_name != spot.SPOT_CONTROLLER_NAME:
@@ -286,7 +297,7 @@ def _execute(
 @timeline.event
 @usage_lib.entrypoint
 def launch(
-    task: Union['sky.Task', 'sky.Dag'],
+    task: Union['sky.Task', 'sky.Dag', 'sky.TaskGroup'],
     cluster_name: Optional[str] = None,
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,

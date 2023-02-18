@@ -26,82 +26,76 @@ auth:
   ssh_private_key: {{ssh_private_key}}
 
 available_node_types:
-  ray_head_default:
-    resources: {}
-    node_config:
-{%- if tpu_vm %}
-      acceleratorType: {{tpu_type}}
-      runtimeVersion: {{runtime_version}}
-  {%- if use_spot %}
-      schedulingConfig:
-        preemptible: true
-  {%- endif %}
-{%- else %}
-      machineType: {{instance_type}}
-      disks:
-        - boot: true
-          autoDelete: true
-          type: PERSISTENT
-          initializeParams:
-            diskSizeGb: {{disk_size}}
-            # See https://cloud.google.com/deep-learning-vm/docs/images
-            sourceImage: {{image_id}}
-  {%- if gpu is not none %}
-      guestAccelerators:
-        - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
-          acceleratorCount: {{gpu_count}}
-      metadata:
-        items:
-          - key: install-nvidia-driver
-            value: "True"
-  {%- endif %}
-      scheduling:
-  {%- if use_spot %}
-        - preemptible: true
-  {%- endif %}
-        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
-{%- endif %}
-{% if num_nodes > 1 %}
-  ray_worker_default:
-    min_workers: {{num_nodes - 1}}
-    max_workers: {{num_nodes - 1}}
-    resources: {}
-    node_config:
-  {%- if tpu_vm %}
-      acceleratorType: {{tpu_type}}
-      runtimeVersion: {{runtime_version}}
-    {%- if use_spot %}
-      schedulingConfig:
-        preemptible: true
-    {%- endif %}
-  {%- else %}
-      machineType: {{instance_type}}
-      disks:
-        - boot: true
-          autoDelete: true
-          type: PERSISTENT
-          initializeParams:
-            diskSizeGb: {{disk_size}}
-            # See https://cloud.google.com/deep-learning-vm/docs/images
-            sourceImage: {{image_id}}
-    {%- if gpu is not none %}
-      guestAccelerators:
-        - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
-          acceleratorCount: {{gpu_count}}
-      metadata:
-        items:
-          - key: install-nvidia-driver
-            value: "True"
-    {%- endif %}
-      scheduling:
-    {%- if use_spot %}
-        - preemptible: true
-    {%- endif %}
-        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
-  {%- endif %}
-{%- endif %}
+{% for task in tasks %}
+  skypilot_task_{{ task.task_name }}:
+    {% if loop.first %}
+    min_workers: {{ task.num_nodes - 1 }}
+    max_workers: {{ task.num_nodes - 1 }}
+    {% else %}
+    min_workers: {{ task.num_nodes }}
+    max_workers: {{ task.num_nodes }}
+    {% endif %}
 
-head_node_type: ray_head_default
+    resources: {skypilot_resource_{{ task.task_name }}: 1, {% for resource in task.custom_resources %}{{resource}}: {{task.custom_resources[resource]}} {% endfor %}}
+    worker_setup_commands:
+      - sudo systemctl stop unattended-upgrades || true;
+        sudo systemctl disable unattended-upgrades || true;
+        sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
+        sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
+        sudo pkill -9 apt-get;
+        sudo pkill -9 dpkg;
+        sudo dpkg --configure -a;
+        mkdir -p ~/.ssh; touch ~/.ssh/config;
+        mkdir -p ~/.sky && echo {{ task.task_name }} > ~/.sky/task_name;
+        pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
+        (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
+        (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
+        (which conda > /dev/null 2>&1 && conda init > /dev/null && conda config --set auto_activate_base false) || (wget -nc https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b && eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true);
+        source ~/.bashrc;
+        (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+        (pip3 list | grep skypilot && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[aws]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
+        sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
+        sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
+        mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
+        python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
+        [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`; see
+    node_config:
+    {%- if task.tpu_vm %}
+      acceleratorType: {{task.tpu_type}}
+      runtimeVersion: {{task.runtime_version}}
+    {%- if task.use_spot %}
+      schedulingConfig:
+        preemptible: true
+    {%- endif %}
+    {%- else %}
+      machineType: {{task.instance_type}}
+      disks:
+        - boot: true
+          autoDelete: true
+          type: PERSISTENT
+          initializeParams:
+            diskSizeGb: {{task.disk_size}}
+            # See https://cloud.google.com/deep-learning-vm/docs/images
+            sourceImage: {{task.image_id}}
+    {%- if task.gpu is not none %}
+      guestAccelerators:
+        - acceleratorType: projects/{{gcp_project_id}}/zones/{{task.zones}}/acceleratorTypes/{{task.gpu}}
+          acceleratorCount: {{task.gpu_count}}
+      metadata:
+        items:
+          - key: install-nvidia-driver
+            value: "True"
+    {%- endif %}
+      scheduling:
+    {%- if task.use_spot %}
+        - preemptible: true
+    {%- endif %}
+        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
+  {%- endif %}
+{% endfor %}
+
+# Take the first task as the head node type
+head_node_type: skypilot_task_{{ tasks[0].task_name }}
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
@@ -142,6 +136,7 @@ setup_commands:
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
+    mkdir -p ~/.sky && echo {{ tasks[0].task_name }} > ~/.sky/task_name;
     pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
@@ -173,14 +168,14 @@ head_start_ray_commands:
   # all the sessions to be reloaded. This is a workaround.
   - ((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.skylet.skylet") || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);
     export SKYPILOT_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l);
-    ray stop; RAY_SCHEDULER_EVENTS=0 ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --num-gpus=$SKYPILOT_NUM_GPUS || exit 1;
+    ray stop; RAY_SCHEDULER_EVENTS=0 ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --num-gpus=$SKYPILOT_NUM_GPUS || exit 1;
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
 
 # Worker commands are needed for TPU VM Pods
 {%- if num_nodes > 1 or tpu_vm %}
 worker_start_ray_commands:
   - SKYPILOT_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l);
-    ray stop; RAY_SCHEDULER_EVENTS=0 ray start --disable-usage-stats --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --num-gpus=$SKYPILOT_NUM_GPUS || exit 1;
+    ray stop; RAY_SCHEDULER_EVENTS=0 ray start --disable-usage-stats --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --num-gpus=$SKYPILOT_NUM_GPUS || exit 1;
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
 {%- else %}
 worker_start_ray_commands: []

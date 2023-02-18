@@ -65,7 +65,7 @@ class Cloud:
     def region_zones_provision_loop(
         cls,
         *,
-        instance_type: Optional[str] = None,
+        instance_types: Optional[List[str]] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: Optional[bool] = False,
     ) -> Iterator[Tuple[Region, List[Zone]]]:
@@ -79,7 +79,7 @@ class Cloud:
         instance_type, accelerators, and use_spot.
 
         Args:
-            instance_type: The instance type to provision.
+            instance_type: The list of instance types to provision.
             accelerators: The accelerators to provision.
             use_spot: Whether to use spot instances.
 

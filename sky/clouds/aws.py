@@ -2,7 +2,6 @@
 
 # pylint: disable=import-outside-toplevel
 
-import json
 import os
 import subprocess
 import typing
@@ -75,7 +74,7 @@ class AWS(clouds.Cloud):
     def region_zones_provision_loop(
         cls,
         *,
-        instance_type: Optional[str] = None,
+        instance_types: Optional[List[str]] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
@@ -83,12 +82,16 @@ class AWS(clouds.Cloud):
         # each region.
         del accelerators  # unused
 
-        if instance_type is None:
+        if instance_types is None:
             # fallback to manually specified region/zones
             regions = cls.regions()
         else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'aws')
+            regions_list = [
+                service_catalog.get_region_zones_for_instance_type(
+                    instance_type, use_spot, 'aws')
+                for instance_type in instance_types
+            ]
+            regions = set(regions_list[0]).intersection(*regions_list[1:])
         for region in regions:
             yield region, region.zones
 
@@ -230,7 +233,7 @@ class AWS(clouds.Cloud):
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
+            custom_resources = acc_dict
         else:
             custom_resources = None
 

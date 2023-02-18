@@ -13,8 +13,8 @@ from sky import clouds
 from sky.clouds.service_catalog import list_accelerators
 from sky.dag import Dag
 from sky.execution import launch, exec, spot_launch  # pylint: disable=redefined-builtin
-from sky.resources import Resources
-from sky.task import Task
+from sky.resources import Resources, ResourcesGroup
+from sky.task import Task, TaskGroup
 from sky.optimizer import Optimizer, OptimizeTarget
 from sky.data import Storage, StorageMode, StoreType
 from sky.global_user_state import ClusterStatus
@@ -50,7 +50,9 @@ __all__ = [
     # APIs
     'Dag',
     'Task',
+    'TaskGroup',
     'Resources',
+    'ResourcesGroup',
     # execution APIs
     'launch',
     'exec',

@@ -205,8 +205,11 @@ class UsageMessageToReport(MessageToReport):
             self.cluster_names = cluster_name
         self.num_related_clusters = len(self.cluster_names)
 
-    def update_cluster_resources(self, num_nodes: int,
-                                 resources: 'resources_lib.Resources'):
+    def update_cluster_resources(
+            self, num_nodes: int,
+            resources_group: 'resources_lib.ResourcesGroup'):
+        # TODO(isaac): Update usage lib for ResourcesGroup.
+        resources = list(resources_group.resources_dict.values())[0][0]
         self.cloud = str(resources.cloud)
         self.region = resources.region
         self.zone = resources.zone

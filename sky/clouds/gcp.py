@@ -125,24 +125,31 @@ class GCP(clouds.Cloud):
     def region_zones_provision_loop(
         cls,
         *,
-        instance_type: Optional[str] = None,
+        instance_types: Optional[List[str]] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: Optional[bool] = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # GCP provisioner currently takes 1 zone per request.
         if accelerators is None:
-            if instance_type is None:
+            if instance_types is None:
                 # fallback to manually specified region/zones
                 regions = cls.regions()
             else:
-                regions = service_catalog.get_region_zones_for_instance_type(
-                    instance_type, use_spot, clouds='gcp')
+                regions_list = [
+                    service_catalog.get_region_zones_for_instance_type(
+                        instance_type, use_spot, clouds='gcp')
+                    for instance_type in instance_types
+                ]
+                regions = set(regions_list[0]).intersection(*regions_list[1:])
         else:
-            assert len(accelerators) == 1, accelerators
-            acc = list(accelerators.keys())[0]
-            acc_count = list(accelerators.values())[0]
-            regions = service_catalog.get_region_zones_for_accelerators(
-                acc, acc_count, use_spot, clouds='gcp')
+            regions_list = [
+                service_catalog.get_region_zones_for_accelerators(acc,
+                                                                  acc_count,
+                                                                  use_spot,
+                                                                  clouds='gcp')
+                for acc, acc_count in accelerators.items()
+            ]
+            regions = set(regions_list[0]).intersection(*regions_list[1:])
 
         for region in regions:
             for zone in region.zones:
@@ -237,9 +244,7 @@ class GCP(clouds.Cloud):
         if accelerators is not None:
             assert len(accelerators) == 1, r
             acc, acc_count = list(accelerators.items())[0]
-            resources_vars['custom_resources'] = json.dumps(accelerators,
-                                                            separators=(',',
-                                                                        ':'))
+            resources_vars['custom_resources'] = accelerators
             if 'tpu' in acc:
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
                 assert r.accelerator_args is not None, r

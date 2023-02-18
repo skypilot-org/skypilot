@@ -1,6 +1,6 @@
 """Sky backend interface."""
 import typing
-from typing import Dict, Optional
+from typing import Optional
 
 import sky
 from sky.utils import timeline
@@ -36,8 +36,8 @@ class Backend:
     @timeline.event
     @usage_lib.messages.usage.update_runtime('provision')
     def provision(self,
-                  task: 'task_lib.Task',
-                  to_provision: Optional['resources.Resources'],
+                  task_group: 'task_lib.TaskGroup',
+                  to_provision: Optional['resources.ResourcesGroup'],
                   dryrun: bool,
                   stream_logs: bool,
                   cluster_name: Optional[str] = None,
@@ -45,42 +45,44 @@ class Backend:
         if cluster_name is None:
             cluster_name = sky.backends.backend_utils.generate_cluster_name()
         usage_lib.record_cluster_name_for_current_operation(cluster_name)
-        usage_lib.messages.usage.update_actual_task(task)
-        return self._provision(task, to_provision, dryrun, stream_logs,
+        for task in task_group.tasks:
+            usage_lib.messages.usage.update_actual_task(task)
+        return self._provision(task_group, to_provision, dryrun, stream_logs,
                                cluster_name, retry_until_up)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_workdir')
-    def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
-        return self._sync_workdir(handle, workdir)
+    def sync_workdir(self, handle: ResourceHandle,
+                     task_group: 'task_lib.TaskGroup') -> None:
+        return self._sync_workdir(handle, task_group)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_file_mounts')
     def sync_file_mounts(
         self,
         handle: ResourceHandle,
-        all_file_mounts: Dict[Path, Path],
-        storage_mounts: Dict[Path, 'storage_lib.Storage'],
+        task_group: 'task_lib.TaskGroup',
     ) -> None:
-        return self._sync_file_mounts(handle, all_file_mounts, storage_mounts)
+        return self._sync_file_mounts(handle, task_group)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('setup')
-    def setup(self, handle: ResourceHandle, task: 'task_lib.Task',
+    def setup(self, handle: ResourceHandle, task_group: 'task_lib.Task',
               detach_setup: bool) -> None:
-        return self._setup(handle, task, detach_setup)
+        return self._setup(handle, task_group, detach_setup)
 
     def add_storage_objects(self, task: 'task_lib.Task') -> None:
         raise NotImplementedError
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('execute')
-    def execute(self, handle: ResourceHandle, task: 'task_lib.Task',
+    def execute(self, handle: ResourceHandle, task_group: 'task_lib.TaskGroup',
                 detach_run: bool) -> None:
         usage_lib.record_cluster_name_for_current_operation(
             handle.get_cluster_name())
-        usage_lib.messages.usage.update_actual_task(task)
-        return self._execute(handle, task, detach_run)
+        # TODO(isaac): Support usage lib for hetero clusters
+        # usage_lib.messages.usage.update_actual_task(task_group)
+        return self._execute(handle, task_group, detach_run)
 
     @timeline.event
     def post_execute(self, handle: ResourceHandle, down: bool) -> None:
@@ -88,8 +90,9 @@ class Backend:
         return self._post_execute(handle, down)
 
     @timeline.event
-    def teardown_ephemeral_storage(self, task: 'task_lib.Task') -> None:
-        return self._teardown_ephemeral_storage(task)
+    def teardown_ephemeral_storage(self,
+                                   task_group: 'task_lib.TaskGroup') -> None:
+        return self._teardown_ephemeral_storage(task_group)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('teardown')
@@ -105,37 +108,38 @@ class Backend:
 
     # --- Implementations of the APIs ---
     def _provision(self,
-                   task: 'task_lib.Task',
-                   to_provision: Optional['resources.Resources'],
+                   task_group: 'task_lib.TaskGroup',
+                   to_provision: Optional['resources.ResourcesGroup'],
                    dryrun: bool,
                    stream_logs: bool,
                    cluster_name: str,
                    retry_until_up: bool = False) -> ResourceHandle:
         raise NotImplementedError
 
-    def _sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
+    def _sync_workdir(self, handle: ResourceHandle,
+                      task_group: 'task_lib.TaskGroup') -> None:
         raise NotImplementedError
 
     def _sync_file_mounts(
         self,
         handle: ResourceHandle,
-        all_file_mounts: Dict[Path, Path],
-        storage_mounts: Dict[Path, 'storage_lib.Storage'],
+        task_group: 'task_lib.TaskGroup',
     ) -> None:
         raise NotImplementedError
 
-    def _setup(self, handle: ResourceHandle, task: 'task_lib.Task',
+    def _setup(self, handle: ResourceHandle, task_group: 'task_lib.TaskGroup',
                detach_setup: bool) -> None:
         raise NotImplementedError
 
-    def _execute(self, handle: ResourceHandle, task: 'task_lib.Task',
+    def _execute(self, handle: ResourceHandle, task_group: 'task_lib.TaskGroup',
                  detach_run: bool) -> None:
         raise NotImplementedError
 
     def _post_execute(self, handle: ResourceHandle, down: bool) -> None:
         raise NotImplementedError
 
-    def _teardown_ephemeral_storage(self, task: 'task_lib.Task') -> None:
+    def _teardown_ephemeral_storage(self,
+                                    task_group: 'task_lib.TaskGroup') -> None:
         raise NotImplementedError
 
     def _teardown(self,

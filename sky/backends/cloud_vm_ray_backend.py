@@ -133,7 +133,6 @@ class RayCodeGen:
 
         # For n nodes gang scheduling.
         self._has_gang_scheduling = False
-        self._num_nodes = 0
 
         self._has_register_run_fn = False
 
@@ -268,11 +267,11 @@ class RayCodeGen:
 
     def add_gang_scheduling_placement_group(
         self,
-        num_nodes: int,
-        accelerator_dict: Dict[str, int],
+        accelerator_dicts: Dict[str, Dict[str, int]],
         stable_cluster_internal_ips: List[str],
+        task_group: task_lib.TaskGroup,
     ) -> None:
-        """Create the gang scheduling placement group for a Task.
+        """Create the gang scheduling placement group for a TaskGroup.
 
         cluster_ips_sorted is used to ensure that the SKY_NODE_RANK environment
         variable is assigned in a deterministic order whenever a new task is
@@ -281,46 +280,54 @@ class RayCodeGen:
         assert self._has_prologue, ('Call add_prologue() before '
                                     'add_gang_scheduling_placement_group().')
         self._has_gang_scheduling = True
-        self._num_nodes = num_nodes
 
         # Set CPU to avoid ray hanging the resources allocation
         # for remote functions, since the task will request 1 CPU
         # by default.
-        bundles = [{
-            'CPU': backend_utils.DEFAULT_TASK_CPU_DEMAND
-        } for _ in range(num_nodes)]
-
-        if accelerator_dict is not None:
-            acc_name = list(accelerator_dict.keys())[0]
-            acc_count = list(accelerator_dict.values())[0]
-            gpu_dict = {'GPU': acc_count}
-            # gpu_dict should be empty when the accelerator is not GPU.
-            # FIXME: This is a hack to make sure that we do not reserve
-            # GPU when requesting TPU.
-            if 'tpu' in acc_name.lower():
-                gpu_dict = dict()
-            for bundle in bundles:
+        for i, task in enumerate(task_group.tasks):
+            bundles = []
+            bundle = {
+                'CPU': backend_utils.DEFAULT_TASK_CPU_DEMAND,
+                f'skypilot_resource_{task.name}': 1
+            }
+            if accelerator_dicts[task.name] is not None:
+                accelerator_dict = accelerator_dicts[task.name]
+                acc_name = list(accelerator_dict.keys())[0]
+                acc_count = list(accelerator_dict.values())[0]
+                gpu_dict = {'GPU': acc_count}
+                # gpu_dict should be empty when the accelerator is not GPU.
+                # FIXME: This is a hack to make sure that we do not reserve
+                # GPU when requesting TPU.
+                if 'tpu' in acc_name.lower():
+                    gpu_dict = dict()
                 bundle.update({
                     **accelerator_dict,
                     # Set the GPU to avoid ray hanging the resources allocation
                     **gpu_dict,
                 })
+            for _ in range(task.num_nodes):
+                bundles.append(bundle)
+
+            self._code += [
+                textwrap.dedent(f"""\
+                    {task.name}_pg = ray_util.placement_group({json.dumps(bundles)}, 'STRICT_SPREAD')
+                    plural = 's' if {task.num_nodes} > 1 else ''
+                    node_str = f'{task.num_nodes} node{{plural}}'
+
+                    message = '' if (setup_cmd is not None or {i} > 0) else {_CTRL_C_TIP_MESSAGE!r} + '\\n'
+                    message += f'INFO: Waiting for task resources on {{node_str}} for {task.name}. This will block if the cluster is full.'
+                    print(message,
+                        file=sys.stderr,
+                        flush=True)
+                    # FIXME: This will print the error message from autoscaler if
+                    # it is waiting for other task to finish. We should hide the
+                    # error message.
+                    ray.get({task.name}_pg.ready())
+                    """)
+            ]
 
         self._code += [
             textwrap.dedent(f"""\
-                pg = ray_util.placement_group({json.dumps(bundles)}, 'STRICT_SPREAD')
-                plural = 's' if {num_nodes} > 1 else ''
-                node_str = f'{num_nodes} node{{plural}}'
-
-                message = '' if setup_cmd is not None else {_CTRL_C_TIP_MESSAGE!r} + '\\n'
-                message += f'INFO: Waiting for task resources on {{node_str}}. This will block if the cluster is full.'
-                print(message,
-                      file=sys.stderr,
-                      flush=True)
-                # FIXME: This will print the error message from autoscaler if
-                # it is waiting for other task to finish. We should hide the
-                # error message.
-                ray.get(pg.ready())
                 print('INFO: All task resources reserved.',
                       file=sys.stderr,
                       flush=True)
@@ -328,22 +335,34 @@ class RayCodeGen:
                 """)
         ]
 
-        # Export IP and node rank to the environment variables.
         self._code += [
-            textwrap.dedent(f"""\
+            textwrap.dedent("""\
                 @ray.remote
                 def check_ip():
                     return ray.util.get_node_ip_address()
-                gang_scheduling_id_to_ip = ray.get([
-                    check_ip.options(num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND},
-                                     placement_group=pg,
-                                     placement_group_bundle_index=i).remote()
-                    for i in range(pg.bundle_count)
-                ])
-                print('INFO: Reserved IPs:', gang_scheduling_id_to_ip)
+                all_ips = []
+                """)
+        ]
 
+        for task in task_group.tasks:
+            # Export IP and node rank to the environment variables.
+            self._code += [
+                textwrap.dedent(f"""\
+                    gang_scheduling_id_to_ip_{task.name} = ray.get([
+                        check_ip.options(num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND},
+                                        placement_group={task.name}_pg,
+                                        placement_group_bundle_index=i).remote()
+                        for i in range({task.name}_pg.bundle_count)
+                    ])
+                    all_ips.extend(gang_scheduling_id_to_ip_{task.name})
+                    print('INFO: Reserved IPs for {task.name}:', gang_scheduling_id_to_ip_{task.name})
+                    """),
+            ]
+
+        self._code += [
+            textwrap.dedent(f"""\
                 cluster_ips_to_node_id = {{ip: i for i, ip in enumerate({stable_cluster_internal_ips!r})}}
-                job_ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_to_node_id.get)
+                job_ip_rank_list = sorted(all_ips, key=cluster_ips_to_node_id.get)
                 job_ip_rank_map = {{ip: i for i, ip in enumerate(job_ip_rank_list)}}
                 job_ip_list_str = '\\n'.join(job_ip_rank_list)
                 """),
@@ -406,7 +425,7 @@ class RayCodeGen:
             resources_key = list(ray_resources_dict.keys())[0]
             if 'tpu' in resources_key.lower():
                 num_gpus_str = ''
-        resources_str += ', placement_group=pg'
+        resources_str += f', placement_group={task_name}_pg'
         resources_str += f', placement_group_bundle_index={gang_scheduling_id}'
 
         sky_env_vars_dict_str = [
@@ -435,7 +454,7 @@ class RayCodeGen:
             textwrap.dedent(f"""\
         script = {bash_script!r}
         if run_fn is not None:
-            script = run_fn({gang_scheduling_id}, gang_scheduling_id_to_ip)
+            script = run_fn({gang_scheduling_id}, gang_scheduling_id_to_ip_{task_name})
 
 
         if script is not None:
@@ -443,7 +462,7 @@ class RayCodeGen:
             # Environment starting with `SKY_` is deprecated.
             sky_env_vars_dict['SKY_NUM_GPUS_PER_NODE'] = {int(math.ceil(num_gpus))!r}
 
-            ip = gang_scheduling_id_to_ip[{gang_scheduling_id!r}]
+            ip = gang_scheduling_id_to_ip_{task_name}[{gang_scheduling_id!r}]
             rank = job_ip_rank_map[ip]
 
             if len(cluster_ips_to_node_id) == 1: # Single-node task on single-node cluter
@@ -522,13 +541,11 @@ class RetryingVmProvisioner(object):
 
         def __init__(self,
                      cluster_name: str,
-                     resources: Optional[resources_lib.Resources],
-                     num_nodes: int,
+                     resources_group: Optional[resources_lib.ResourcesGroup],
                      cluster_exists: bool = False) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
             self.cluster_name = cluster_name
-            self.resources = resources
-            self.num_nodes = num_nodes
+            self.resources_group = resources_group
             # Whether the cluster exists in the clusters table. It may be
             # actually live or down.
             self.cluster_exists = cluster_exists
@@ -789,7 +806,7 @@ class RetryingVmProvisioner(object):
 
         assert False, f'Unknown cloud: {cloud}.'
 
-    def _yield_region_zones(self, to_provision: resources_lib.Resources,
+    def _yield_region_zones(self, to_provision: resources_lib.ResourcesGroup,
                             cluster_name: str, cluster_exists: bool):
         cloud = to_provision.cloud
         region = None
@@ -919,14 +936,28 @@ class RetryingVmProvisioner(object):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(message)
 
+        resources_list = [
+            resource
+            for resource, _ in list(to_provision.resources_dict.values())
+        ]
+        instance_types = []
+        accelerators = {}
+        any_use_spot = False
+
+        for resources in resources_list:
+            instance_types.append(resources.instance_type)
+            if resources.accelerators is not None:
+                accelerators.update(resources.accelerators)
+            any_use_spot = any_use_spot or resources.use_spot
+
         for region, zones in cloud.region_zones_provision_loop(
-                instance_type=to_provision.instance_type,
-                accelerators=to_provision.accelerators,
-                use_spot=to_provision.use_spot,
-        ):
+                instance_types=instance_types,
+                accelerators=accelerators,
+                use_spot=any_use_spot):
             # Only retry requested region/zones or all if not specified.
             zone_names = [zone.name for zone in zones]
-            if not to_provision.valid_on_region_zones(region.name, zone_names):
+            if not all((resource.valid_on_region_zones(region.name, zone_names)
+                        for resource in resources_list)):
                 continue
             if to_provision.zone is not None:
                 zones = [clouds.Zone(name=to_provision.zone)]
@@ -985,7 +1016,7 @@ class RetryingVmProvisioner(object):
             raise e
 
     def _retry_region_zones(self,
-                            to_provision: resources_lib.Resources,
+                            to_provision: resources_lib.ResourcesGroup,
                             num_nodes: int,
                             dryrun: bool,
                             stream_logs: bool,
@@ -1020,7 +1051,6 @@ class RetryingVmProvisioner(object):
             try:
                 config_dict = backend_utils.write_cluster_config(
                     to_provision,
-                    num_nodes,
                     _get_cluster_config_template(to_provision.cloud),
                     cluster_name,
                     self._local_wheel_path,
@@ -1046,7 +1076,9 @@ class RetryingVmProvisioner(object):
                 cluster_yaml=cluster_config_file,
                 launched_nodes=num_nodes,
                 # OK for this to be shown in CLI as status == INIT.
-                launched_resources=to_provision.copy(region=region.name),
+                # TODO(isaac): Update everywhere launched_resources is used,
+                # including status etc.
+                launched_resources=to_provision,
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
             usage_lib.messages.usage.update_final_cluster_status(
@@ -1064,6 +1096,7 @@ class RetryingVmProvisioner(object):
                     f'{to_provision.cloud} '
                     f'{region.name}{colorama.Style.RESET_ALL} ({zone_str})')
 
+                # TODO(isaac): Support TPUs for heterogeneous clusters
                 success = self._try_provision_tpu(to_provision, config_dict)
                 if not success:
                     continue
@@ -1075,7 +1108,9 @@ class RetryingVmProvisioner(object):
             }
             status, stdout, stderr, head_ip = self._gang_schedule_ray_up(
                 to_provision.cloud, cluster_config_file, handle, log_abs_path,
-                stream_logs, logging_info, to_provision.use_spot)
+                stream_logs, logging_info,
+                any((resource.use_spot
+                     for resource, _ in to_provision.resources_dict.values())))
 
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 if cluster_exists:
@@ -1093,8 +1128,7 @@ class RetryingVmProvisioner(object):
                     self._ensure_cluster_ray_started(handle, log_abs_path)
 
                 cluster_name = config_dict['cluster_name']
-                config_dict['launched_resources'] = to_provision.copy(
-                    region=region.name)
+                config_dict['launched_resources'] = to_provision
                 config_dict['launched_nodes'] = num_nodes
                 # Optimizations: head_ip and zones may or may not be None. In
                 # the latter case, the caller doesn't need to query them again.
@@ -1347,11 +1381,12 @@ class RetryingVmProvisioner(object):
         if returncode != 0:
             return self.GangSchedulingStatus.HEAD_FAILED, stdout, stderr, None
 
-        resources = cluster_handle.launched_resources
-        if tpu_utils.is_tpu_vm_pod(resources):
-            logger.info(f'{style.BRIGHT}Setting up TPU VM Pod workers...'
-                        f'{style.RESET_ALL}')
-            self._tpu_pod_setup(cluster_config_file, cluster_handle)
+        # TODO(isaac): Support TPUs for heterogeneous clusters.
+        # resources = cluster_handle.launched_resources
+        # if tpu_utils.is_tpu_vm_pod(resources):
+        #     logger.info(f'{style.BRIGHT}Setting up TPU VM Pod workers...'
+        #                 f'{style.RESET_ALL}')
+        #     self._tpu_pod_setup(cluster_config_file, cluster_handle, num_nodes)
 
         # Only 1 node or head node provisioning failure.
         if cluster_handle.launched_nodes == 1 and returncode == 0:
@@ -1468,15 +1503,14 @@ class RetryingVmProvisioner(object):
     @timeline.event
     def provision_with_retries(
         self,
-        task: task_lib.Task,
+        task_group: task_lib.TaskGroup,
         to_provision_config: ToProvisionConfig,
         dryrun: bool,
         stream_logs: bool,
     ):
         """Provision with retries for all launchable resources."""
         cluster_name = to_provision_config.cluster_name
-        to_provision = to_provision_config.resources
-        num_nodes = to_provision_config.num_nodes
+        to_provision = to_provision_config.resources_group
         cluster_exists = to_provision_config.cluster_exists
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
@@ -1497,7 +1531,7 @@ class RetryingVmProvisioner(object):
                     raise exceptions.ResourcesUnavailableError(str(e)) from e
                 config_dict = self._retry_region_zones(
                     to_provision,
-                    num_nodes,
+                    num_nodes=to_provision.num_nodes,
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
@@ -1518,7 +1552,7 @@ class RetryingVmProvisioner(object):
                 logger.warning(e)
                 provision_failed = True
                 logger.warning(
-                    f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
+                    f'\n{style.BRIGHT}Provision failed for '
                     f'{to_provision}. Trying other launchable resources '
                     f'(if any).{style.RESET_ALL}')
                 if not cluster_exists:
@@ -1528,24 +1562,29 @@ class RetryingVmProvisioner(object):
                 else:
                     logger.info(
                         'Retrying provisioning with requested resources '
-                        f'{task.num_nodes}x {task.resources}')
+                        f'{to_provision}')
                     # Retry with the current, potentially "smaller" resources:
                     # to_provision == the current new resources (e.g., V100:1),
                     # which may be "smaller" than the original (V100:8).
                     # num_nodes is not part of a Resources so must be updated
                     # separately.
-                    num_nodes = task.num_nodes
                     cluster_exists = False
 
                 # Set to None so that sky.optimize() will assign a new one
                 # (otherwise will skip re-optimizing this task).
                 # TODO: set all remaining tasks' best_resources to None.
-                task.best_resources = None
+                for task in task_group.tasks:
+                    task.best_resources = None
                 self._dag = sky.optimize(self._dag,
                                          minimize=self._optimize_target,
                                          blocked_launchable_resources=self.
                                          _blocked_launchable_resources)
-                to_provision = task.best_resources
+                to_provision = resources_lib.ResourcesGroup(
+                    to_provision.cloud, to_provision.region, to_provision.zone,
+                    {
+                        task.name: (task.best_resources, task.num_nodes)
+                        for task in task_group
+                    })
                 assert task in self._dag.tasks, 'Internal logic error.'
                 assert to_provision is not None, task
         return config_dict
@@ -1576,17 +1615,17 @@ class CloudVmRayBackend(backends.Backend):
         """
         _VERSION = 3
 
-        def __init__(
-                self,
-                *,
-                cluster_name: str,
-                cluster_yaml: str,
-                stable_internal_external_ips: Optional[List[Tuple[str,
-                                                                  str]]] = None,
-                launched_nodes: Optional[int] = None,
-                launched_resources: Optional[resources_lib.Resources] = None,
-                tpu_create_script: Optional[str] = None,
-                tpu_delete_script: Optional[str] = None) -> None:
+        def __init__(self,
+                     *,
+                     cluster_name: str,
+                     cluster_yaml: str,
+                     stable_internal_external_ips: Optional[List[Tuple[
+                         str, str]]] = None,
+                     launched_nodes: Optional[int] = None,
+                     launched_resources: Optional[
+                         resources_lib.ResourcesGroup] = None,
+                     tpu_create_script: Optional[str] = None,
+                     tpu_delete_script: Optional[str] = None) -> None:
             self._version = self._VERSION
             self.cluster_name = cluster_name
             self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'),
@@ -1594,6 +1633,7 @@ class CloudVmRayBackend(backends.Backend):
             # List of (internal_ip, external_ip) tuples for all the nodes
             # in the cluster, sorted by the external ips.
             self.stable_internal_external_ips = stable_internal_external_ips
+            self.task_name_to_external_ips = {}
             self.launched_nodes = launched_nodes
             self.launched_resources = launched_resources
             self.tpu_create_script = tpu_create_script
@@ -1608,8 +1648,7 @@ class CloudVmRayBackend(backends.Backend):
                     f'{self.stable_internal_external_ips},'
                     '\n\tcluster_yaml='
                     f'{self.cluster_yaml}, '
-                    f'\n\tlaunched_resources={self.launched_nodes}x '
-                    f'{self.launched_resources}, '
+                    f'\n\tlaunched_resources={self.launched_resources}, '
                     f'\n\ttpu_create_script={self.tpu_create_script}, '
                     f'\n\ttpu_delete_script={self.tpu_delete_script})')
 
@@ -1645,7 +1684,7 @@ class CloudVmRayBackend(backends.Backend):
                 local_region = clouds.Local.regions()[0].name
                 # Convert existing ResourceHandle fields to specify local
                 # cluster resources.
-                self.launched_resources = resources_lib.Resources(
+                self.launched_resources = resources_lib.ResourcesGroup(
                     cloud=clouds.Local(), region=local_region)
                 self.launched_nodes = len(ips)
                 self.local_handle['ips'] = ips
@@ -1677,6 +1716,34 @@ class CloudVmRayBackend(backends.Backend):
 
             self.launched_resources = self.launched_resources.copy(
                 region=region)
+
+        def _update_task_to_external_ips(self):
+            external_ips = self.external_ips()
+            ssh_credentials = backend_utils.ssh_credential_from_yaml(
+                self.cluster_yaml)
+            self.task_name_to_external_ips = {}
+
+            runners = command_runner.SSHCommandRunner.make_runner_list(
+                external_ips, **ssh_credentials)
+
+            def _get_task_name_for_ip(
+                    runner: 'command_runner.SSHCommandRunner') -> None:
+                cmd = 'cat ~/.sky/task_name'
+                returncode, stdout, stderr = runner.run(cmd,
+                                                        require_outputs=True,
+                                                        stream_logs=False)
+                subprocess_utils.handle_returncode(
+                    returncode, cmd,
+                    f'Failed to get task_name for {runner.ip} with error: {stderr}'
+                )
+                return (stdout.strip(), runner.ip)
+
+            task_name_to_ips_list = subprocess_utils.run_in_parallel(
+                _get_task_name_for_ip, runners)
+            for task_name, ip in task_name_to_ips_list:
+                if task_name not in self.task_name_to_external_ips:
+                    self.task_name_to_external_ips[task_name] = []
+                self.task_name_to_external_ips[task_name].append(ip)
 
         def _update_stable_cluster_ips(self,
                                        max_attempts: int = 1) -> List[str]:
@@ -1715,6 +1782,7 @@ class CloudVmRayBackend(backends.Backend):
             stable_internal_external_ips = [internal_external_ips[0]] + sorted(
                 internal_external_ips[1:], key=lambda x: x[1])
             self.stable_internal_external_ips = stable_internal_external_ips
+            self._update_task_to_external_ips()
 
         def internal_ips(self,
                          max_attempts: int = 1,
@@ -1797,13 +1865,14 @@ class CloudVmRayBackend(backends.Backend):
         assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(self, handle: ResourceHandle,
-                                    task: task_lib.Task):
+                                    task_group: task_lib.TaskGroup):
         """Check if resources requested by the task fit the cluster.
 
         The resources requested by the task should be smaller than the existing
         cluster.
         """
-        assert len(task.resources) == 1, task.resources
+        # TODO(isaac): Update to handle TaskGroup
+        return True
 
         launched_resources = handle.launched_resources
         task_resources = list(task.resources)[0]
@@ -1860,8 +1929,8 @@ class CloudVmRayBackend(backends.Backend):
                     f'{mismatch_str}')
 
     def _provision(self,
-                   task: task_lib.Task,
-                   to_provision: Optional[resources_lib.Resources],
+                   task_group: task_lib.TaskGroup,
+                   to_provision: resources_lib.ResourcesGroup,
                    dryrun: bool,
                    stream_logs: bool,
                    cluster_name: str,
@@ -1873,21 +1942,27 @@ class CloudVmRayBackend(backends.Backend):
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
         with timeline.FileLockEvent(lock_path):
             to_provision_config = RetryingVmProvisioner.ToProvisionConfig(
-                cluster_name, to_provision, task.num_nodes)
+                cluster_name, to_provision)
             prev_cluster_status = None
             if not dryrun:  # dry run doesn't need to check existing cluster.
                 # Try to launch the exiting cluster first
                 to_provision_config = self._check_existing_cluster(
-                    task, to_provision, cluster_name)
+                    task_group, to_provision, cluster_name)
                 prev_cluster_status, _ = (
                     backend_utils.refresh_cluster_status_handle(
                         cluster_name, acquire_per_cluster_status_lock=False))
-            assert to_provision_config.resources is not None, (
+            assert to_provision_config.resources_group is not None, (
                 'to_provision should not be None', to_provision_config)
 
-            usage_lib.messages.usage.update_cluster_resources(
-                to_provision_config.num_nodes, to_provision_config.resources)
-            usage_lib.messages.usage.update_cluster_status(prev_cluster_status)
+            # TODO(isaac): Update usage_lib for heteregeneous clusters.
+            # usage_lib.messages.usage.update_cluster_resources(
+            #     list(
+            #         to_provision_config.resources_group.resources_dict.values())
+            #     [0][1],
+            #     list(
+            #         to_provision_config.resources_group.resources_dict.values())
+            #     [0][0])
+            # usage_lib.messages.usage.update_cluster_status(prev_cluster_status)
 
             # TODO(suquark): once we have sky on PyPI, we should directly
             # install sky from PyPI.
@@ -1913,7 +1988,7 @@ class CloudVmRayBackend(backends.Backend):
                                                         local_wheel_path,
                                                         wheel_hash)
                     config_dict = provisioner.provision_with_retries(
-                        task, to_provision_config, dryrun, stream_logs)
+                        task_group, to_provision_config, dryrun, stream_logs)
                     break
                 except exceptions.ResourcesUnavailableError as e:
                     # Do not remove the stopped cluster from the global state
@@ -1929,8 +2004,9 @@ class CloudVmRayBackend(backends.Backend):
                         error_message = (
                             'Failed to provision all possible launchable '
                             'resources.'
-                            f' Relax the task\'s resource requirements: '
-                            f'{task.num_nodes}x {task.resources}')
+                            ' Relax the task\'s resource requirements: ') + (
+                                f'{task.num_nodes}x {task.resources}\n'
+                                for task in task_group.tasks)
                     if retry_until_up:
                         logger.error(error_message)
                         # Sleep and retry.
@@ -1979,31 +2055,34 @@ class CloudVmRayBackend(backends.Backend):
                 # provisioning), then we know the exact zone already.
                 handle.launched_resources = handle.launched_resources.copy(
                     zone=zones[0].name)
-            elif (task.num_nodes == 1 or
-                  handle.launched_resources.zone is not None):
-                # Query zone if the cluster has 1 node, or a zone is
-                # specifically requested for a multinode cluster.  Otherwise
-                # leave the zone field to None because head and worker nodes
-                # can be launched in different zones.
-                get_zone_cmd = (
-                    handle.launched_resources.cloud.get_zone_shell_cmd())
-                if get_zone_cmd is not None:
-                    returncode, stdout, stderr = self.run_on_head(
-                        handle, get_zone_cmd, require_outputs=True)
-                    subprocess_utils.handle_returncode(returncode,
-                                                       get_zone_cmd,
-                                                       'Failed to get zone',
-                                                       stderr=stderr,
-                                                       stream_logs=stream_logs)
-                    # zone will be checked during Resources cls
-                    # initialization.
-                    handle.launched_resources = handle.launched_resources.copy(
-                        zone=stdout.strip())
 
-            usage_lib.messages.usage.update_cluster_resources(
-                handle.launched_nodes, handle.launched_resources)
-            usage_lib.messages.usage.update_final_cluster_status(
-                global_user_state.ClusterStatus.UP)
+            # TODO(isaac): Implement this optimization for heterogeneous clusters.
+            # elif (task.num_nodes == 1 or
+            #       handle.launched_resources.zone is not None):
+            #     # Query zone if the cluster has 1 node, or a zone is
+            #     # specifically requested for a multinode cluster.  Otherwise
+            #     # leave the zone field to None because head and worker nodes
+            #     # can be launched in different zones.
+            #     get_zone_cmd = (
+            #         handle.launched_resources.cloud.get_zone_shell_cmd())
+            #     if get_zone_cmd is not None:
+            #         returncode, stdout, stderr = self.run_on_head(
+            #             handle, get_zone_cmd, require_outputs=True)
+            #         subprocess_utils.handle_returncode(returncode,
+            #                                            get_zone_cmd,
+            #                                            'Failed to get zone',
+            #                                            stderr=stderr,
+            #                                            stream_logs=stream_logs)
+            #         # zone will be checked during Resources cls
+            #         # initialization.
+            #         handle.launched_resources = handle.launched_resources.copy(
+            #             zone=stdout.strip())
+
+            # TODO(isaac): Update usage_lib for heterogeneous clusters.
+            # usage_lib.messages.usage.update_cluster_resources(
+            #     handle.launched_nodes, handle.launched_resources)
+            # usage_lib.messages.usage.update_final_cluster_status(
+            #     global_user_state.ClusterStatus.UP)
 
             # Update job queue to avoid stale jobs (when restarted), before
             # setting the cluster to be ready.
@@ -2048,166 +2127,176 @@ class CloudVmRayBackend(backends.Backend):
                 os.remove(lock_path)
                 return handle
 
-    def _sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
+    def _sync_workdir(self, handle: ResourceHandle,
+                      task_group: task_lib.TaskGroup) -> None:
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
         # e.g., in CLI.  So we should rerun rsync_up.
         fore = colorama.Fore
         style = colorama.Style
-        ip_list = handle.external_ips()
-        assert ip_list is not None, 'external_ips is not cached in handle'
-        full_workdir = os.path.abspath(os.path.expanduser(workdir))
 
-        # These asserts have been validated at Task construction time.
-        assert os.path.exists(full_workdir), f'{full_workdir} does not exist'
-        if os.path.islink(full_workdir):
-            logger.warning(
-                f'{fore.YELLOW}Workdir {workdir!r} is a symlink. '
-                f'Symlink contents are not uploaded.{style.RESET_ALL}')
-        else:
-            assert os.path.isdir(
-                full_workdir), f'{full_workdir} should be a directory.'
+        for task in task_group.tasks:
+            if task.workdir is None:
+                continue
 
-        # Raise warning if directory is too large
-        dir_size = backend_utils.path_size_megabytes(full_workdir)
-        if dir_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
-            logger.warning(
-                f'{fore.YELLOW}The size of workdir {workdir!r} '
-                f'is {dir_size} MB. Try to keep workdir small or use '
-                '.gitignore to exclude large files, as large sizes will slow '
-                f'down rsync.{style.RESET_ALL}')
+            ip_list = handle.task_name_to_external_ips.get(task.name)
+            assert ip_list is not None, f'ips for task {task.name} is not cached in handle'
+            full_workdir = os.path.abspath(os.path.expanduser(task.workdir))
 
-        log_path = os.path.join(self.log_dir, 'workdir_sync.log')
+            # These asserts have been validated at Task construction time.
+            assert os.path.exists(
+                full_workdir), f'{full_workdir} does not exist'
+            if os.path.islink(full_workdir):
+                logger.warning(
+                    f'{fore.YELLOW}Workdir {task.workdir!r} is a symlink. '
+                    f'Symlink contents are not uploaded.{style.RESET_ALL}')
+            else:
+                assert os.path.isdir(
+                    full_workdir), f'{full_workdir} should be a directory.'
 
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml)
+            # Raise warning if directory is too large
+            dir_size = backend_utils.path_size_megabytes(full_workdir)
+            if dir_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
+                logger.warning(
+                    f'{fore.YELLOW}The size of workdir {task.workdir!r} '
+                    f'is {dir_size} MB. Try to keep workdir small or use '
+                    '.gitignore to exclude large files, as large sizes will slow '
+                    f'down rsync.{style.RESET_ALL}')
 
-        # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
-        runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, **ssh_credentials)
+            log_path = os.path.join(self.log_dir, 'workdir_sync.log')
 
-        def _sync_workdir_node(runner: command_runner.SSHCommandRunner) -> None:
-            runner.rsync(
-                source=workdir,
-                target=SKY_REMOTE_WORKDIR,
-                up=True,
-                log_path=log_path,
-                stream_logs=False,
-            )
+            ssh_credentials = backend_utils.ssh_credential_from_yaml(
+                handle.cluster_yaml)
 
-        num_nodes = handle.launched_nodes
-        plural = 's' if num_nodes > 1 else ''
-        logger.info(
-            f'{fore.CYAN}Syncing workdir (to {num_nodes} node{plural}): '
-            f'{style.BRIGHT}{workdir}{style.RESET_ALL}'
-            f' -> '
-            f'{style.BRIGHT}{SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
-        tail_cmd = f'tail -n100 -f {log_path}'
-        logger.info('To view detailed progress: '
-                    f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
-        with backend_utils.safe_console_status('[bold cyan]Syncing[/]'):
-            subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
+            # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
+            runners = command_runner.SSHCommandRunner.make_runner_list(
+                ip_list, **ssh_credentials)
+
+            def _sync_workdir_node(
+                    runner: command_runner.SSHCommandRunner) -> None:
+                runner.rsync(
+                    source=task.workdir,
+                    target=SKY_REMOTE_WORKDIR,
+                    up=True,
+                    log_path=log_path,
+                    stream_logs=False,
+                )
+
+            num_nodes = handle.launched_nodes
+            plural = 's' if num_nodes > 1 else ''
+            logger.info(
+                f'{fore.CYAN}Syncing workdir (to {task.num_nodes} node{plural} for task {task.name}): '
+                f'{style.BRIGHT}{task.workdir}{style.RESET_ALL}'
+                f' -> '
+                f'{style.BRIGHT}{SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
+            tail_cmd = f'tail -n100 -f {log_path}'
+            logger.info('To view detailed progress: '
+                        f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
+            with backend_utils.safe_console_status('[bold cyan]Syncing[/]'):
+                subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
 
     def _sync_file_mounts(
         self,
         handle: ResourceHandle,
-        all_file_mounts: Dict[Path, Path],
-        storage_mounts: Dict[Path, storage_lib.Storage],
+        task_group: task_lib.TaskGroup,
     ) -> None:
         """Mounts all user files to the remote nodes."""
-        self._execute_file_mounts(handle, all_file_mounts)
-        self._execute_storage_mounts(handle, storage_mounts)
+        for task in task_group.tasks:
+            self._execute_file_mounts(handle, task)
+            self._execute_storage_mounts(handle, task)
 
-    def _setup(self, handle: ResourceHandle, task: task_lib.Task,
+    def _setup(self, handle: ResourceHandle, task_group: task_lib.TaskGroup,
                detach_setup: bool) -> Optional[str]:
         start = time.time()
         style = colorama.Style
         fore = colorama.Fore
 
-        if task.setup is None:
-            return
+        for task in task_group.tasks:
+            if task.setup is None:
+                return
 
-        setup_script = log_lib.make_task_bash_script(task.setup,
-                                                     env_vars=task.envs)
-        with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
-            f.write(setup_script)
-            f.flush()
-            setup_sh_path = f.name
-            setup_file = os.path.basename(setup_sh_path)
-            # Sync the setup script up and run it.
-            ip_list = handle.external_ips()
-            assert ip_list is not None, 'external_ips is not cached in handle'
-            ssh_credentials = backend_utils.ssh_credential_from_yaml(
-                handle.cluster_yaml)
-            # Disable connection sharing for setup script to avoid old
-            # connections being reused, which may cause stale ssh agent
-            # forwarding.
-            ssh_credentials.pop('ssh_control_name')
-            runners = command_runner.SSHCommandRunner.make_runner_list(
-                ip_list, **ssh_credentials)
+            setup_script = log_lib.make_task_bash_script(task.setup,
+                                                         env_vars=task.envs)
+            with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
+                f.write(setup_script)
+                f.flush()
+                setup_sh_path = f.name
+                setup_file = os.path.basename(setup_sh_path)
+                # Sync the setup script up and run it.
+                ip_list = handle.task_name_to_external_ips[task.name]
+                assert ip_list is not None, 'external_ips is not cached in handle'
+                ssh_credentials = backend_utils.ssh_credential_from_yaml(
+                    handle.cluster_yaml)
+                # Disable connection sharing for setup script to avoid old
+                # connections being reused, which may cause stale ssh agent
+                # forwarding.
+                ssh_credentials.pop('ssh_control_name')
+                runners = command_runner.SSHCommandRunner.make_runner_list(
+                    ip_list, **ssh_credentials)
 
-            # Need this `-i` option to make sure `source ~/.bashrc` work
-            setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
+                # Need this `-i` option to make sure `source ~/.bashrc` work
+                setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
 
-            def _setup_node(runner: command_runner.SSHCommandRunner) -> int:
-                runner.rsync(source=setup_sh_path,
-                             target=f'/tmp/{setup_file}',
-                             up=True,
-                             stream_logs=False)
-                if detach_setup:
-                    return
-                setup_log_path = os.path.join(self.log_dir,
-                                              f'setup-{runner.ip}.log')
-                returncode = runner.run(
-                    setup_cmd,
-                    log_path=setup_log_path,
-                    process_stream=False,
-                )
+                def _setup_node(runner: command_runner.SSHCommandRunner) -> int:
+                    runner.rsync(source=setup_sh_path,
+                                 target=f'/tmp/{setup_file}',
+                                 up=True,
+                                 stream_logs=False)
+                    if detach_setup:
+                        return
+                    setup_log_path = os.path.join(self.log_dir,
+                                                  f'setup-{runner.ip}.log')
+                    returncode = runner.run(
+                        setup_cmd,
+                        log_path=setup_log_path,
+                        process_stream=False,
+                    )
 
-                def error_message() -> str:
-                    # Use the function to avoid tailing the file in success case
-                    try:
-                        last_10_lines = subprocess.run(
-                            [
-                                'tail', '-n10',
-                                os.path.expanduser(setup_log_path)
-                            ],
-                            stdout=subprocess.PIPE,
-                            check=True).stdout.decode('utf-8')
-                    except subprocess.CalledProcessError:
-                        last_10_lines = None
+                    def error_message() -> str:
+                        # Use the function to avoid tailing the file in success case
+                        try:
+                            last_10_lines = subprocess.run(
+                                [
+                                    'tail', '-n10',
+                                    os.path.expanduser(setup_log_path)
+                                ],
+                                stdout=subprocess.PIPE,
+                                check=True).stdout.decode('utf-8')
+                        except subprocess.CalledProcessError:
+                            last_10_lines = None
 
-                    err_msg = (
-                        f'Failed to setup with return code {returncode}. '
-                        f'Check the details in log: {setup_log_path}')
-                    if last_10_lines:
-                        err_msg += (
-                            f'\n\n{colorama.Fore.RED}'
-                            '****** START Last lines of setup output ******'
-                            f'{colorama.Style.RESET_ALL}\n'
-                            f'{last_10_lines}'
-                            f'{colorama.Fore.RED}'
-                            '******* END Last lines of setup output *******'
-                            f'{colorama.Style.RESET_ALL}')
-                    return err_msg
+                        err_msg = (
+                            f'Failed to setup with return code {returncode}. '
+                            f'Check the details in log: {setup_log_path}')
+                        if last_10_lines:
+                            err_msg += (
+                                f'\n\n{colorama.Fore.RED}'
+                                '****** START Last lines of setup output ******'
+                                f'{colorama.Style.RESET_ALL}\n'
+                                f'{last_10_lines}'
+                                f'{colorama.Fore.RED}'
+                                '******* END Last lines of setup output *******'
+                                f'{colorama.Style.RESET_ALL}')
+                        return err_msg
 
-                subprocess_utils.handle_returncode(returncode=returncode,
-                                                   command=setup_cmd,
-                                                   error_msg=error_message)
+                    subprocess_utils.handle_returncode(returncode=returncode,
+                                                       command=setup_cmd,
+                                                       error_msg=error_message)
 
-            num_nodes = len(ip_list)
-            plural = 's' if num_nodes > 1 else ''
-            if not detach_setup:
-                logger.info(
-                    f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
-                    f'{style.RESET_ALL}')
-            subprocess_utils.run_in_parallel(_setup_node, runners)
+                num_nodes = len(ip_list)
+                plural = 's' if num_nodes > 1 else ''
+                if not detach_setup:
+                    logger.info(
+                        f'{fore.CYAN}Running setup on {num_nodes} node{plural} for task {task.name}.'
+                        f'{style.RESET_ALL}')
+                subprocess_utils.run_in_parallel(_setup_node, runners)
 
-        if detach_setup:
-            # Only set this when setup needs to be run outside the self._setup()
-            # as part of a job (--detach-setup).
-            self._setup_cmd = setup_cmd
-            return
+            if detach_setup:
+                # Only set this when setup needs to be run outside the self._setup()
+                # as part of a job (--detach-setup).
+                self._setup_cmd = setup_cmd
+                self._setup_cmds[task.name] = setup_cmd
+                return
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
         end = time.time()
         logger.debug(f'Setup took {end - start} seconds.')
@@ -2379,26 +2468,35 @@ class CloudVmRayBackend(backends.Backend):
     def _execute(
         self,
         handle: ResourceHandle,
-        task: task_lib.Task,
+        task_group: task_lib.Task,
         detach_run: bool,
     ) -> None:
-        if task.run is None:
-            logger.info('Run commands not specified or empty.')
-            return
+        resources_str = ','.join(
+            backend_utils.get_task_resources_str(task)
+            for task in task_group.tasks)
+        job_id = self._add_job(
+            handle, ','.join((task.name for task in task_group.tasks)),
+            resources_str)
+
+        for task in task_group.tasks:
+            if task.run is None:
+                logger.info('Run commands not specified or empty.')
+                return
+
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
-        self.check_resources_fit_cluster(handle, task)
+        self.check_resources_fit_cluster(handle, task_group)
 
-        resources_str = backend_utils.get_task_resources_str(task)
-        job_id = self._add_job(handle, task.name, resources_str)
-
-        is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
+        # TODO(isaac): Support TPUs for heterogeneous clusters.
+        is_tpu_vm_pod = False
+        # is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
-        if task.num_nodes > 1 or is_tpu_vm_pod:
-            self._execute_task_n_nodes(handle, task, job_id, detach_run)
+
+        if task_group.num_nodes > 1 or is_tpu_vm_pod:
+            self._execute_task_n_nodes(handle, task_group, job_id, detach_run)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
-            self._execute_task_one_node(handle, task, job_id, detach_run)
+            self._execute_task_one_node(handle, task_group, job_id, detach_run)
 
     def _post_execute(self, handle: ResourceHandle, down: bool) -> None:
         colorama.init()
@@ -2427,12 +2525,14 @@ class CloudVmRayBackend(backends.Backend):
         if handle.tpu_delete_script is not None:
             logger.info('Tip: `sky down` will delete launched TPU(s) too.')
 
-    def _teardown_ephemeral_storage(self, task: task_lib.Task) -> None:
-        storage_mounts = task.storage_mounts
-        if storage_mounts is not None:
-            for _, storage in storage_mounts.items():
-                if not storage.persistent:
-                    storage.delete()
+    def _teardown_ephemeral_storage(self,
+                                    task_group: task_lib.TaskGroup) -> None:
+        for task in task_group.tasks:
+            storage_mounts = task.storage_mounts
+            if storage_mounts is not None:
+                for _, storage in storage_mounts.items():
+                    if not storage.persistent:
+                        storage.delete()
 
     def _teardown(self,
                   handle: ResourceHandle,
@@ -2895,12 +2995,13 @@ class CloudVmRayBackend(backends.Backend):
 
     @timeline.event
     def _check_existing_cluster(
-            self, task: task_lib.Task, to_provision: resources_lib.Resources,
+            self, task_group: task_lib.TaskGroup,
+            to_provision: resources_lib.ResourcesGroup,
             cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
             # Cluster already exists.
-            self.check_resources_fit_cluster(handle, task)
+            self.check_resources_fit_cluster(handle, task_group)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
             return RetryingVmProvisioner.ToProvisionConfig(
@@ -2909,9 +3010,7 @@ class CloudVmRayBackend(backends.Backend):
                 handle.launched_nodes,
                 cluster_exists=True)
         usage_lib.messages.usage.set_new_cluster()
-        assert len(task.resources) == 1, task.resources
-        resources = list(task.resources)[0]
-        task_cloud = resources.cloud
+        task_cloud = to_provision.cloud
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
         backend_utils.check_cluster_name_is_valid(cluster_name, task_cloud)
@@ -2928,14 +3027,14 @@ class CloudVmRayBackend(backends.Backend):
         else:
             logger.info(
                 f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
-                f'[{task.num_nodes}x {to_provision}].'
+                f'[{to_provision}].'
                 f'{colorama.Style.RESET_ALL}\n'
                 'Tip: to reuse an existing cluster, '
                 'specify --cluster (-c). '
                 'Run `sky status` to see existing clusters.')
         return RetryingVmProvisioner.ToProvisionConfig(cluster_name,
                                                        to_provision,
-                                                       task.num_nodes)
+                                                       task_group.num_nodes)
 
     def _set_tpu_name(self, handle: ResourceHandle, tpu_name: str) -> None:
         """Sets TPU_NAME on all nodes."""
@@ -2959,21 +3058,20 @@ class CloudVmRayBackend(backends.Backend):
 
         subprocess_utils.run_in_parallel(_setup_tpu_name_on_node, runners)
 
-    def _execute_file_mounts(self, handle: ResourceHandle,
-                             file_mounts: Dict[Path, Path]):
+    def _execute_file_mounts(self, handle: ResourceHandle, task: task_lib.Task):
         """Executes file mounts - rsyncing local files and
         copying from remote stores."""
         # File mounts handling for remote paths possibly without write access:
         #  (1) in 'file_mounts' sections, add <prefix> to these target paths.
         #  (2) then, create symlinks from '/.../file' to '<prefix>/.../file'.
-        if file_mounts is None or not file_mounts:
+        if task.file_mounts is None or not task.file_mounts:
             return
         symlink_commands = []
         fore = colorama.Fore
         style = colorama.Style
         logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
         start = time.time()
-        ip_list = handle.external_ips()
+        ip_list = handle.task_name_to_external_ips[task.name]
         assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
@@ -2982,7 +3080,7 @@ class CloudVmRayBackend(backends.Backend):
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
 
         # Check the files and warn
-        for dst, src in file_mounts.items():
+        for dst, src in task.file_mounts.items():
             if not data_utils.is_cloud_store_url(src):
                 full_src = os.path.abspath(os.path.expanduser(src))
                 # Checked during Task.set_file_mounts().
@@ -3003,7 +3101,7 @@ class CloudVmRayBackend(backends.Backend):
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
-        for dst, src in file_mounts.items():
+        for dst, src in task.file_mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
             # (download gsutil on remote, run gsutil on remote).  Consider
             # alternatives (smart_open, each provider's own sdk), a
@@ -3089,15 +3187,14 @@ class CloudVmRayBackend(backends.Backend):
         logger.debug(f'File mount sync took {end - start} seconds.')
 
     def _execute_storage_mounts(self, handle: ResourceHandle,
-                                storage_mounts: Dict[Path,
-                                                     storage_lib.Storage]):
+                                task: task_lib.TaskGroup):
         """Executes storage mounts: installing mounting tools and mounting."""
         # Process only mount mode objects here. COPY mode objects have been
         # converted to regular copy file mounts and thus have been handled
         # in the '__execute_file_mounts' method.
         storage_mounts = {
             path: storage_mount
-            for path, storage_mount in storage_mounts.items()
+            for path, storage_mount in task.storage_mounts.items()
             if storage_mount.mode == storage_lib.StorageMode.MOUNT
         }
 
@@ -3118,7 +3215,7 @@ class CloudVmRayBackend(backends.Backend):
         logger.info(f'{fore.CYAN}Processing {len(storage_mounts)} '
                     f'storage mount{plural}.{style.RESET_ALL}')
         start = time.time()
-        ip_list = handle.external_ips()
+        ip_list = handle.task_name_to_external_ips[task.name]
         assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
@@ -3147,10 +3244,13 @@ class CloudVmRayBackend(backends.Backend):
         logger.debug(f'Storage mount sync took {end - start} seconds.')
 
     def _execute_task_one_node(self, handle: ResourceHandle,
-                               task: task_lib.Task, job_id: int,
+                               task_group: task_lib.TaskGroup, job_id: int,
                                detach_run: bool) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(self.log_dir, 'tasks')
+
+        assert len(task_group.tasks) == 1, 'only one task in task group'
+        task = task_group.tasks[0]
 
         accelerator_dict = backend_utils.get_task_demands_dict(task)
         internal_ips = handle.internal_ips()
@@ -3165,7 +3265,9 @@ class CloudVmRayBackend(backends.Backend):
                              setup_log_path=os.path.join(log_dir, 'setup.log'),
                              is_local=is_local)
         codegen.add_gang_scheduling_placement_group(
-            1, accelerator_dict, stable_cluster_internal_ips=internal_ips)
+            {task.name: accelerator_dict},
+            stable_cluster_internal_ips=internal_ips,
+            task_group=task_group)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
@@ -3193,76 +3295,92 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen.add_epilogue()
 
+        print(codegen.build())
+
         self._exec_code_on_head(handle,
                                 codegen.build(),
                                 job_id,
                                 executable='python3',
                                 detach_run=detach_run)
 
-    def _execute_task_n_nodes(self, handle: ResourceHandle, task: task_lib.Task,
-                              job_id: int, detach_run: bool) -> None:
+    def _execute_task_n_nodes(self, handle: ResourceHandle,
+                              task_group: task_lib.TaskGroup, job_id: int,
+                              detach_run: bool) -> None:
         # Strategy:
         #   ray.init(...)
         #   for node:
         #     submit _run_cmd(cmd) with resource {node_i: 1}
         log_dir_base = self.log_dir
         log_dir = os.path.join(log_dir_base, 'tasks')
-        accelerator_dict = backend_utils.get_task_demands_dict(task)
+        accelerator_dicts = {
+            task.name: backend_utils.get_task_demands_dict(task)
+            for task in task_group.tasks
+        }
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
+        # TODO(isaac): Support TPUs for heterogeneous clusters.
         # If TPU VM Pods is used, #num_nodes should be #num_tpu_devices
-        is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
-        if is_tpu_vm_pod:
-            num_actual_nodes = tpu_utils.get_num_tpu_devices(
-                handle.launched_resources)
-        else:
-            num_actual_nodes = task.num_nodes
-
+        # is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
+        # if is_tpu_vm_pod:
+        #     num_actual_nodes = tpu_utils.get_num_tpu_devices(
+        #         handle.launched_resources)
+        # else:
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
-        codegen.add_prologue(job_id,
-                             spot_task=task.spot_task,
-                             setup_cmd=self._setup_cmd,
-                             envs=task.envs,
-                             setup_log_path=os.path.join(log_dir, 'setup.log'),
-                             is_local=is_local)
+        combined_envs = {}
+        # Iterate in reverse order so that for conflicting envs, the first
+        # takes precedence
+        for task in reversed(task_group.tasks):
+            combined_envs.update(task.envs)
+        codegen.add_prologue(
+            job_id,
+            # If this task group contains the spot controller, then
+            # there will only one task
+            spot_task=task_group.tasks[0].spot_task,
+            setup_cmd=self._setup_cmd,
+            envs=combined_envs,
+            setup_log_path=os.path.join(log_dir, 'setup.log'),
+            is_local=is_local)
         codegen.add_gang_scheduling_placement_group(
-            num_actual_nodes,
-            accelerator_dict,
-            stable_cluster_internal_ips=internal_ips)
+            accelerator_dicts,
+            stable_cluster_internal_ips=internal_ips,
+            task_group=task_group)
 
-        if callable(task.run):
-            run_fn_code = textwrap.dedent(inspect.getsource(task.run))
-            run_fn_name = task.run.__name__
-            codegen.register_run_fn(run_fn_code, run_fn_name)
+        for task in task_group.tasks:
+            if callable(task.run):
+                run_fn_code = textwrap.dedent(inspect.getsource(task.run))
+                run_fn_name = task.run.__name__
+                codegen.register_run_fn(run_fn_code, run_fn_name)
 
-        # If it is a managed spot job, the JOB_ID_ENV_VAR will have been already
-        # set by the controller.
-        job_run_id = task.envs.get(
-            constants.JOB_ID_ENV_VAR,
-            common_utils.get_global_job_id(self.run_timestamp,
-                                           cluster_name=handle.cluster_name,
-                                           job_id=job_id))
+            # If it is a managed spot job, the JOB_ID_ENV_VAR will have been already
+            # set by the controller.
+            job_run_id = task.envs.get(
+                constants.JOB_ID_ENV_VAR,
+                common_utils.get_global_job_id(self.run_timestamp,
+                                               cluster_name=handle.cluster_name,
+                                               job_id=job_id))
 
-        # TODO(zhwu): The resources limitation for multi-node ray.tune and
-        # horovod should be considered.
-        for i in range(num_actual_nodes):
-            command_for_node = task.run if isinstance(task.run, str) else None
+            # TODO(zhwu): The resources limitation for multi-node ray.tune and
+            # horovod should be considered.
+            for i in range(task.num_nodes):
+                command_for_node = task.run if isinstance(task.run,
+                                                          str) else None
 
-            # Ray's per-node resources, to constrain scheduling each command to
-            # the corresponding node, represented by private IPs.
-            use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
-            codegen.add_ray_task(
-                bash_script=command_for_node,
-                env_vars=task.envs,
-                task_name=task.name,
-                job_run_id=job_run_id,
-                ray_resources_dict=accelerator_dict,
-                log_dir=log_dir,
-                gang_scheduling_id=i,
-                use_sudo=use_sudo,
-            )
+                # Ray's per-node resources, to constrain scheduling each command to
+                # the corresponding node, represented by private IPs.
+                use_sudo = isinstance(handle.launched_resources.cloud,
+                                      clouds.Local)
+                codegen.add_ray_task(
+                    bash_script=command_for_node,
+                    env_vars=task.envs,
+                    task_name=task.name,
+                    job_run_id=job_run_id,
+                    ray_resources_dict=accelerator_dicts[task.name],
+                    log_dir=log_dir,
+                    gang_scheduling_id=i,
+                    use_sudo=use_sudo,
+                )
 
         codegen.add_epilogue()
         # TODO(zhanghao): Add help info for downloading logs.

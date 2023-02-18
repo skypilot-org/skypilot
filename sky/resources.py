@@ -1,5 +1,5 @@
 """Resources: compute requirements of Tasks."""
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky import global_user_state
@@ -13,6 +13,85 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 _DEFAULT_DISK_SIZE_GB = 256
+
+
+class ResourcesGroup:
+    """A group of cloud resource bundles.
+
+    Each ResourcesGroup contains a list of Resources and the corresponding
+    number of instances."""
+
+    def __init__(self,
+                 cloud: Optional[clouds.Cloud] = None,
+                 region: Optional[str] = None,
+                 zone: Optional[str] = None,
+                 resources_dict: Optional[Dict[str, Tuple['Resources',
+                                                          int]]] = None):
+        """A group of Resources and the number of instances for each Resources.
+
+        Cloud, region, and zone must be the same for all Resources in a
+        ResourcesGroup if specified.
+        """
+        self.cloud = cloud
+        self.region = region
+        self.zone = zone
+
+        # Dict from task name to (Resources, num_nodes)
+        self.resources_dict = resources_dict
+
+    def copy(self, **override) -> 'ResourcesGroup':
+        """Returns a copy of the given Resources."""
+        resources_group = ResourcesGroup(override.get('cloud', self.cloud),
+                                         override.get('region', self.region),
+                                         override.get('zone', self.zone), {})
+        for task_name, (resources, num_nodes) in self.resources_dict.items():
+            resources_group.resources_dict[task_name] = (resources.copy(
+                **override), num_nodes)
+        return resources_group
+
+    def __repr__(self) -> str:
+        return ', '.join([
+            f'{num_nodes}x {resources}'
+            for resources, num_nodes in self.resources_dict.values()
+        ])
+
+    @property
+    def num_nodes(self) -> int:
+        return sum([count for _, count in self.resources_dict.values()])
+
+    @staticmethod
+    def from_task_group(task_group: 'TaskGroup') -> 'ResourcesGroup':
+        cloud = None
+        region = None
+        zone = None
+
+        for task in task_group.tasks:
+            if task.best_resources.cloud is not None:
+                if cloud is None:
+                    cloud = task.best_resources.cloud
+                else:
+                    assert cloud.is_same_cloud(task.best_resources.cloud), (
+                        f'all tasks in a task group must be on the same cloud'
+                        f'{cloud} {task.best_resources.cloud}')
+            if task.best_resources.region is not None:
+                if region is None:
+                    region = task.best_resources.region
+                else:
+                    assert region == task.best_resources.region, (
+                        'all tasks in a task group must be in the same region')
+            if task.best_resources.zone is not None:
+                if zone is None:
+                    assert zone == task.best_resources.zone, (
+                        'all tasks in a task group must be in the same zone')
+                else:
+                    assert zone == task.best_resources.zone
+
+        resources_group = ResourcesGroup(
+            cloud, region, zone, {
+                task.name: (task.best_resources, task.num_nodes)
+                for task in task_group.tasks
+            })
+        return resources_group
 
 
 class Resources:

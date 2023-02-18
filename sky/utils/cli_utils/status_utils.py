@@ -227,9 +227,7 @@ def _get_resources(cluster_status):
     elif isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
         if (handle.launched_nodes is not None and
                 handle.launched_resources is not None):
-            launched_resource_str = str(handle.launched_resources)
-            resources_str = (f'{handle.launched_nodes}x '
-                             f'{launched_resource_str}')
+            resources_str = str(handle.launched_resources)
     else:
         raise ValueError(f'Unknown handle type {type(handle)} encountered.')
     return resources_str

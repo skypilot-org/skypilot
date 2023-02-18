@@ -69,6 +69,23 @@ def _is_valid_env_var(name: str) -> bool:
     return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
 
 
+class TaskGroup:
+    """TaskGroup: a list of computation to be run on the cloud."""
+
+    def __init__(self, tasks: List['sky.Task']):
+        assert len(tasks) > 0, len(tasks)
+
+        names = [task.name for task in tasks if task is not None]
+        assert len(names) == len(set(names)), names
+        self.tasks = tasks
+
+        self.optimized = False
+
+    @property
+    def num_nodes(self) -> int:
+        return sum((task.num_nodes for task in self.tasks))
+
+
 class Task:
     """Task: a computation to be run on the cloud."""
 
