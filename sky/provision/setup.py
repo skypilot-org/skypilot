@@ -1,14 +1,34 @@
 """Setup dependencies & services during provisioning."""
-from typing import List
+import os
+from typing import List, Dict, Tuple
 import hashlib
+from concurrent import futures
 
 from sky.utils import command_runner, subprocess_utils
 from sky.provision import utils as provision_utils
 
 
-def setup_dependencies(cluster_name: str, setup_commands: List[str],
-                       ssh_runners: List[command_runner.SSHCommandRunner]):
-    # TODO(suquark): log to files
+def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
+                             digest: str, ip_dict: Dict,
+                             ssh_credentials: Dict[str, str]):
+    pool = futures.ThreadPoolExecutor(max_workers=32)
+
+    results = []
+    for instance_id, (private_ip, public_ip) in ip_dict.items():
+        runner = command_runner.SSHCommandRunner(public_ip, **ssh_credentials)
+        wrapper = provision_utils.cache_func(cluster_name, instance_id,
+                                             stage_name, digest)
+        log_dir_abs = provision_utils.get_log_dir(cluster_name, instance_id)
+        log_path_abs = str(log_dir_abs / (stage_name + '.log'))
+        results.append(pool.submit(wrapper(func), runner, log_path_abs))
+
+    for future in results:
+        future.result()
+
+
+def internal_dependencies_setup(cluster_name: str, setup_commands: List[str],
+                                ip_dict: Dict[str, Tuple[str, str]],
+                                ssh_credentials: Dict[str, str]):
     # compute the digest
     digests = []
     for cmd in setup_commands:
@@ -18,19 +38,12 @@ def setup_dependencies(cluster_name: str, setup_commands: List[str],
         hasher.update(d)
     digest = hasher.hexdigest()
 
-    def _setup_node(runner: command_runner.SSHCommandRunner):
+    def _setup_node(runner: command_runner.SSHCommandRunner, log_path: str):
         for cmd in setup_commands:
             returncode, stdout, stderr = runner.run(cmd,
                                                     stream_logs=False,
+                                                    log_path=log_path,
                                                     require_outputs=True)
-            if returncode:
-                return returncode, stdout, stderr
-        return 0, '', ''
-
-    @provision_utils.cache_func(cluster_name, 'setup_dependencies', digest)
-    def _run_setup(runners):
-        results = subprocess_utils.run_in_parallel(_setup_node, runners)
-        for returncode, stdout, stderr in results:
             if returncode:
                 raise RuntimeError(
                     'Failed to run setup commands on an instance. '
@@ -38,7 +51,12 @@ def setup_dependencies(cluster_name: str, setup_commands: List[str],
                     f'===== stdout ===== \n{stdout}\n'
                     f'===== stderr ====={stderr}')
 
-    _run_setup(ssh_runners)
+    _parallel_ssh_with_cache(_setup_node,
+                             cluster_name,
+                             stage_name='internal_dependencies_setup',
+                             digest=digest,
+                             ip_dict=ip_dict,
+                             ssh_credentials=ssh_credentials)
 
 
 def start_ray(ssh_runners: List[command_runner.SSHCommandRunner],
@@ -100,3 +118,55 @@ def start_skylet(ssh_runner: command_runner.SSHCommandRunner):
                            f'(exit code {returncode}). Error: '
                            f'===== stdout ===== \n{stdout}\n'
                            f'===== stderr ====={stderr}')
+
+
+def _internal_file_mounts(file_mounts: Dict,
+                          runner: command_runner.SSHCommandRunner,
+                          log_path: str):
+    if file_mounts is None or not file_mounts:
+        return
+
+    for dst, src in file_mounts.items():
+        # We should use this trick to speed up file mounting:
+        # https://stackoverflow.com/questions/1636889/how-can-i-configure-rsync-to-create-target-directory-on-remote-server
+        full_src = os.path.abspath(os.path.expanduser(src))
+
+        if os.path.isfile(full_src):
+            mkdir_command = f'mkdir -p {os.path.dirname(dst)}'
+        else:
+            mkdir_command = f'mkdir -p {dst}'
+
+        rc, stdout, stderr = runner.run(mkdir_command,
+                                        log_path=log_path,
+                                        stream_logs=False,
+                                        require_outputs=True)
+        subprocess_utils.handle_returncode(
+            rc,
+            mkdir_command, ('Failed to run command before rsync '
+                            f'{src} -> {dst}.'),
+            stderr=stdout + stderr)
+
+        runner.rsync(
+            source=src,
+            target=dst,
+            up=True,
+            log_path=log_path,
+            stream_logs=False,
+        )
+
+
+def internal_file_mounts(cluster_name: str, file_mounts: Dict,
+                         ip_dict: Dict[str, Tuple[str, str]],
+                         ssh_credentials: Dict[str, str], wheel_hash: str):
+    """Executes file mounts - rsyncing local files and
+    copying from remote stores."""
+
+    def _setup_node(runner: command_runner.SSHCommandRunner, log_path: str):
+        _internal_file_mounts(file_mounts, runner, log_path)
+
+    _parallel_ssh_with_cache(_setup_node,
+                             cluster_name,
+                             stage_name='internal_file_mounts',
+                             digest=wheel_hash,
+                             ip_dict=ip_dict,
+                             ssh_credentials=ssh_credentials)

@@ -29,14 +29,15 @@ def wait_for_ssh(public_ips: List[str]):
                 time.sleep(1)
 
 
-def cache_func(cluster_name: str, stage_name: str, hash_str: str):
+def cache_func(cluster_name: str, instance_id: str, stage_name: str,
+               hash_str: str):
 
     def decorator(function):
 
         @functools.wraps(function)
         def wrapper(*args, **kwargs):
-            with check_cache_hash_or_update(cluster_name, stage_name,
-                                            hash_str) as updated:
+            with check_cache_hash_or_update(cluster_name, instance_id,
+                                            stage_name, hash_str) as updated:
                 if updated:
                     return function(*args, **kwargs)
                 return None
@@ -47,9 +48,10 @@ def cache_func(cluster_name: str, stage_name: str, hash_str: str):
 
 
 @contextlib.contextmanager
-def check_cache_hash_or_update(cluster_name: str, stage_name: str,
-                               hash_str: str):
-    dirname = SKY_CLUSTER_PATH / cluster_name / 'cache'
+def check_cache_hash_or_update(cluster_name: str, instance_id: str,
+                               stage_name: str, hash_str: str):
+    dirname = (SKY_CLUSTER_PATH / cluster_name / 'instances' / instance_id /
+               'cache')
     dirname.mkdir(parents=True, exist_ok=True)
     path = dirname / stage_name
     if path.exists():
@@ -68,6 +70,13 @@ def check_cache_hash_or_update(cluster_name: str, stage_name: str,
         if not errored and (not path.exists() or updated):
             with open(path, 'w') as f:
                 f.write(hash_str)
+
+
+def get_log_dir(cluster_name: str, instance_id: str) -> pathlib.Path:
+    dirname = (SKY_CLUSTER_PATH / cluster_name / 'instances' / instance_id /
+               'logs')
+    dirname.mkdir(exist_ok=True)
+    return dirname.resolve()
 
 
 def remove_cluster_profile(cluster_name: str) -> None:

@@ -1213,7 +1213,7 @@ class RetryingVmProvisioner(object):
                 cluster_name, cloud_user_identity)
 
             if isinstance(to_provision.cloud, clouds.AWS):
-                success = self._bulk_provision_wrapper(to_provision, region,
+                ip_dict = self._bulk_provision_wrapper(to_provision, region,
                                                        zones, handle,
                                                        is_prev_cluster_healthy,
                                                        log_abs_path)
@@ -1224,7 +1224,8 @@ class RetryingVmProvisioner(object):
 
                 # NOTE: We handle the logic of '_ensure_cluster_ray_started'
                 # in '_post_provision_setup()'.
-                if success:
+                if ip_dict is not None:
+                    config_dict['ip_dict'] = ip_dict
                     config_dict['handle'] = handle
                     return config_dict
                 continue
@@ -1402,14 +1403,14 @@ class RetryingVmProvisioner(object):
         handle: 'CloudVmRayBackend.ResourceHandle',
         is_prev_cluster_healthy: bool,
         log_abs_path: str,
-    ) -> bool:
+    ) -> Optional[Dict]:
         os.makedirs(self.log_dir, exist_ok=True)
         fh = logging.FileHandler(log_abs_path)
         fh.setLevel(logging.DEBUG)
         try:
             logger.addHandler(fh)
-            self._bulk_provision(to_provision, region.name, zones, handle)
-            return True
+            return self._bulk_provision(to_provision, region.name, zones,
+                                        handle)
         except Exception:
             logger.exception(f'Provision cluster {handle.cluster_name} failed.')
             logger.error('*** Failed provisioning the cluster. ***')
@@ -1434,7 +1435,7 @@ class RetryingVmProvisioner(object):
             # cleaning up clusters now if there are not existing nodes.
             CloudVmRayBackend().teardown_no_lock(handle,
                                                  terminate=terminate_or_stop)
-            return False
+            return None
         finally:
             logger.removeHandler(fh)
             fh.close()
@@ -1446,7 +1447,7 @@ class RetryingVmProvisioner(object):
         region: str,
         zones: List[clouds.Zone],
         cluster_handle: 'CloudVmRayBackend.ResourceHandle',
-    ) -> None:
+    ) -> Dict:
         """Provisions a cluster and wait until fully provisioned."""
         from sky.provision import aws
 
@@ -1551,6 +1552,7 @@ class RetryingVmProvisioner(object):
         if not isinstance(to_provision.cloud, clouds.Local):
             logger.info(f'{colorama.Fore.GREEN}Successfully provisioned '
                         f'or found existing VM{plural}.{style.RESET_ALL}')
+        return ip_dict
 
     # TODO(suquark): Deprecate this method in future PRs.
     @timeline.event
@@ -2390,6 +2392,7 @@ class CloudVmRayBackend(backends.Backend):
             # We pass handle in the config dict for the new provisioner
             if 'handle' in config_dict:
                 handle = config_dict['handle']
+                ip_dict = config_dict['ip_dict']
                 log_path = os.path.join(self.log_dir, 'provision.log')
                 log_abs_path = os.path.abspath(log_path)
                 ip_list = self._post_provision_setup(
@@ -2399,6 +2402,7 @@ class CloudVmRayBackend(backends.Backend):
                     handle,
                     local_wheel_path=local_wheel_path,
                     wheel_hash=wheel_hash,
+                    ip_dict=ip_dict,
                     log_abs_path=log_abs_path)
                 self._finalize_provisioning_no_lock(handle, task,
                                                     prev_cluster_status,
@@ -2517,7 +2521,7 @@ class CloudVmRayBackend(backends.Backend):
             self, cloud_name: str, cluster_name: str,
             to_provision_config: RetryingVmProvisioner.ToProvisionConfig,
             handle: ResourceHandle, local_wheel_path: pathlib.Path,
-            wheel_hash: str, log_abs_path: str):
+            wheel_hash: str, ip_dict: Dict, log_abs_path: str):
         # TODO(suquark): in the future, we only need to mount credentials
         #  for controllers.
         # TODO(suquark): make use of log path
@@ -2540,27 +2544,31 @@ class CloudVmRayBackend(backends.Backend):
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, **ssh_credentials)
 
-        @provision_utils.cache_func(cluster_name, 'upload_wheels', wheel_hash)
-        def _upload_config_and_wheels():
-            # we mount the metadata with sky wheel for speedup
-            metadata_path = provision_utils.generate_metadata(
-                cloud_name, cluster_name)
-            self._execute_file_mounts(
-                handle,
-                file_mounts={
-                    backend_utils.SKY_REMOTE_PATH + '/' + wheel_hash:
-                        str(local_wheel_path),
-                    backend_utils.SKY_REMOTE_METADATA_PATH: str(metadata_path),
-                    **config_from_yaml.get('file_mounts', {}),
-                })
+        # we mount the metadata with sky wheel for speedup
+        metadata_path = provision_utils.generate_metadata(
+            cloud_name, cluster_name)
+        file_mounts = {
+            backend_utils.SKY_REMOTE_PATH + '/' + wheel_hash:
+                str(local_wheel_path),
+            backend_utils.SKY_REMOTE_METADATA_PATH: str(metadata_path),
+            **config_from_yaml.get('file_mounts', {}),
+        }
 
-        _upload_config_and_wheels()
+        with backend_utils.safe_console_status(
+                f'[bold cyan]Mounting internal files for '
+                f'[green]{cluster_name}[white] ...'):
+            provision_setup.internal_file_mounts(cluster_name,
+                                                 file_mounts,
+                                                 ip_dict,
+                                                 ssh_credentials,
+                                                 wheel_hash=wheel_hash)
 
         with backend_utils.safe_console_status(
                 f'[bold cyan]Running setup commands for '
                 f'[green]{cluster_name}[white] ...'):
-            provision_setup.setup_dependencies(
-                cluster_name, config_from_yaml['setup_commands'], runners)
+            provision_setup.internal_dependencies_setup(
+                cluster_name, config_from_yaml['setup_commands'], ip_dict,
+                ssh_credentials)
 
         if to_provision_config.cluster_exists:
             with backend_utils.safe_console_status(
