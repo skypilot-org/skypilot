@@ -50,10 +50,7 @@ def cache_func(cluster_name: str, instance_id: str, stage_name: str,
 @contextlib.contextmanager
 def check_cache_hash_or_update(cluster_name: str, instance_id: str,
                                stage_name: str, hash_str: str):
-    dirname = (SKY_CLUSTER_PATH / cluster_name / 'instances' / instance_id /
-               'cache')
-    dirname.mkdir(parents=True, exist_ok=True)
-    path = dirname / stage_name
+    path = get_cache_dir(cluster_name, instance_id) / stage_name
     if path.exists():
         with open(path) as f:
             updated = f.read() != hash_str
@@ -72,10 +69,17 @@ def check_cache_hash_or_update(cluster_name: str, instance_id: str,
                 f.write(hash_str)
 
 
+def get_cache_dir(cluster_name: str, instance_id: str) -> pathlib.Path:
+    dirname = (SKY_CLUSTER_PATH / cluster_name / 'instances' / instance_id /
+               'cache')
+    dirname.mkdir(parents=True, exist_ok=True)
+    return dirname.resolve()
+
+
 def get_log_dir(cluster_name: str, instance_id: str) -> pathlib.Path:
     dirname = (SKY_CLUSTER_PATH / cluster_name / 'instances' / instance_id /
                'logs')
-    dirname.mkdir(exist_ok=True)
+    dirname.mkdir(exist_ok=True, parents=True)
     return dirname.resolve()
 
 
@@ -92,6 +96,7 @@ def generate_metadata(cloud_name: str, cluster_name: str) -> pathlib.Path:
         'cloud': cloud_name,
         'cluster_name': cluster_name,
     }
+    (SKY_CLUSTER_PATH / cluster_name).mkdir(exist_ok=True, parents=True)
     path = SKY_CLUSTER_PATH / cluster_name / 'metadata.json'
     with open(path, 'w') as f:
         json.dump(metadata, f)
