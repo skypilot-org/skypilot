@@ -946,7 +946,7 @@ class RetryingVmProvisioner(object):
                 # cluster is launched.
                 handle = global_user_state.get_handle_from_cluster_name(
                     cluster_name)
-                assert handle is not None, cluster_name
+                assert handle is not None, f'handle should not be None {cluster_name}'
                 config = common_utils.read_yaml(handle.cluster_yaml)
                 # This is for the case when the zone field is not set in the
                 # launched resources in a previous launch (e.g., ctrl-c during
@@ -1756,7 +1756,7 @@ class RetryingVmProvisioner(object):
                 # num_nodes is not part of a Resources so must be updated
                 # separately.
                 num_nodes = task.num_nodes
-                prev_cluster_status = None
+            prev_cluster_status = None
 
             # Set to None so that sky.optimize() will assign a new one
             # (otherwise will skip re-optimizing this task).
