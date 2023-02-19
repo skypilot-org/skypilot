@@ -2141,7 +2141,6 @@ class CloudVmRayBackend(backends.Backend):
                 to_provision,
                 task.num_nodes,
                 previous_cluster_status=None)
-            prev_cluster_status = None
             if not dryrun:  # dry run doesn't need to check existing cluster.
                 # Try to launch the exiting cluster first
                 to_provision_config = self._check_existing_cluster(
@@ -2149,6 +2148,7 @@ class CloudVmRayBackend(backends.Backend):
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
 
+            prev_cluster_status = to_provision_config.previous_cluster_status
             usage_lib.messages.usage.update_cluster_resources(
                 to_provision_config.num_nodes, to_provision_config.resources)
             usage_lib.messages.usage.update_cluster_status(prev_cluster_status)
