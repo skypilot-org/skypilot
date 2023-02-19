@@ -554,15 +554,16 @@ class RetryingVmProvisioner(object):
     class ToProvisionConfig:
         """Resources to be provisioned."""
 
-        def __init__(self, cluster_name: str,
-                     resources: Optional[resources_lib.Resources],
-                     num_nodes: int,
-                     prev_status: global_user_state.ClusterStatus) -> None:
+        def __init__(
+            self, cluster_name: str,
+            resources: Optional[resources_lib.Resources], num_nodes: int,
+            previous_cluster_status: Optional[global_user_state.ClusterStatus]
+        ) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
             self.cluster_name = cluster_name
             self.resources = resources
             self.num_nodes = num_nodes
-            self.prev_status = prev_status
+            self.previous_cluster_status = previous_cluster_status
 
     class GangSchedulingStatus(enum.Enum):
         """Enum for gang scheduling status."""
@@ -730,7 +731,9 @@ class RetryingVmProvisioner(object):
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Errors occurred during provision; '
                                    'check logs above.')
-        if region.zones is None or set(zones) == set(region.zones):
+        if region.zones is None:
+            logger.warning(f'Got error(s) in {region.name}:') 
+        if set(zones) == set(region.zones):
             # The underlying AWS NodeProvider will try all specified zones of a
             # region. (Each boto3 request takes one zone.)
             logger.warning(f'Got error(s) in all zones of {region.name}:')
@@ -914,11 +917,13 @@ class RetryingVmProvisioner(object):
         cluster_name: str,
         prev_cluster_status: Optional[global_user_state.ClusterStatus]
     ) -> Iterable[Optional[List[clouds.Zone]]]:
-        """
+        """Yield zones within the given region to try for provisioning.
 
-        None means the cloud does not support zones.
-        An empty list means the cloud supports zones, but we have no zones
-        to try.
+        Yields:
+            Zones to try for provisioning within the given to_provision.region.
+              - None means the cloud does not support zones.
+              - An empty list means the cloud supports zones, but we have no
+                zones to try.
         """
         assert (to_provision.cloud is not None and
                 to_provision.region is not None), (
@@ -934,8 +939,9 @@ class RetryingVmProvisioner(object):
             zones = [clouds.Zone(name=to_provision.zone)
                     ] if to_provision.zone is not None else None
             if zones is None:
-                # Reuse the zone field in the ray yaml as the prev_resources.zone
-                # field may not be set before the previous cluster is launched.
+                # Reuse the zone field in the ray yaml as the
+                # prev_resources.zone field may not be set before the previous
+                # cluster is launched.
                 handle = global_user_state.get_handle_from_cluster_name(
                     cluster_name)
                 assert handle is not None, cluster_name
@@ -1664,7 +1670,7 @@ class RetryingVmProvisioner(object):
         cluster_name = to_provision_config.cluster_name
         to_provision = to_provision_config.resources
         num_nodes = to_provision_config.num_nodes
-        prev_cluster_status = to_provision_config.prev_status
+        prev_cluster_status = to_provision_config.previous_cluster_status
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
 
@@ -2128,7 +2134,10 @@ class CloudVmRayBackend(backends.Backend):
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
         with timeline.FileLockEvent(lock_path):
             to_provision_config = RetryingVmProvisioner.ToProvisionConfig(
-                cluster_name, to_provision, task.num_nodes, prev_status=None)
+                cluster_name,
+                to_provision,
+                task.num_nodes,
+                previous_cluster_status=None)
             prev_cluster_status = None
             if not dryrun:  # dry run doesn't need to check existing cluster.
                 # Try to launch the exiting cluster first
@@ -2921,13 +2930,15 @@ class CloudVmRayBackend(backends.Backend):
         process, and should not be set to False in other cases.
         """
         if refresh_cluster_status:
-            prev_status, _ = backend_utils.refresh_cluster_status_handle(
-                handle.cluster_name, acquire_per_cluster_status_lock=False)
+            previous_cluster_status, _ = (
+                backend_utils.refresh_cluster_status_handle(
+                    handle.cluster_name, acquire_per_cluster_status_lock=False))
         else:
             record = global_user_state.get_cluster_from_name(
                 handle.cluster_name)
-            prev_status = record['status'] if record is not None else None
-        if prev_status is None:
+            previous_cluster_status = record[
+                'status'] if record is not None else None
+        if previous_cluster_status is None:
             # When the cluster is not in the cluster table, we guarantee that
             # all related resources / cache / config are cleaned up, i.e. it
             # is safe to skip and return True.
@@ -2957,8 +2968,8 @@ class CloudVmRayBackend(backends.Backend):
                     stream_logs=False,
                     require_outputs=True)
         elif (terminate and
-              (prev_status == global_user_state.ClusterStatus.STOPPED or
-               use_tpu_vm)):
+              (previous_cluster_status
+               == global_user_state.ClusterStatus.STOPPED or use_tpu_vm)):
             # For TPU VMs, gcloud CLI is used for VM termination.
             if isinstance(cloud, clouds.AWS):
                 # TODO(zhwu): Room for optimization. We can move these cloud
@@ -3235,7 +3246,7 @@ class CloudVmRayBackend(backends.Backend):
                 cluster_name,
                 handle.launched_resources,
                 handle.launched_nodes,
-                prev_status=prev_cluster_status)
+                previous_cluster_status=prev_cluster_status)
         usage_lib.messages.usage.set_new_cluster()
         assert len(task.resources) == 1, task.resources
         # Use the task_cloud, because the cloud in `to_provision` can be changed
@@ -3262,10 +3273,11 @@ class CloudVmRayBackend(backends.Backend):
                 'Tip: to reuse an existing cluster, '
                 'specify --cluster (-c). '
                 'Run `sky status` to see existing clusters.')
-        return RetryingVmProvisioner.ToProvisionConfig(cluster_name,
-                                                       to_provision,
-                                                       task.num_nodes,
-                                                       prev_status=None)
+        return RetryingVmProvisioner.ToProvisionConfig(
+            cluster_name,
+            to_provision,
+            task.num_nodes,
+            previous_cluster_status=None)
 
     def _set_tpu_name(self, handle: ResourceHandle, tpu_name: str) -> None:
         """Sets TPU_NAME on all nodes."""

@@ -117,9 +117,15 @@ _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
     'cluster_name', 'provider', 'auth', 'node_config'
 }
-_RAY_YAML_KEYS_TO_RESTORE_EXCLUDE_FOR_BACK_COMPATIBILITY = [[
-    'provider', 'availability_zone'
-]]
+# For these keys, don't use the old yaml's version and instead use the new yaml's.
+#  - zone: The zone field of the old yaml may be '1a,1b,1c' (AWS) while the actual
+#    zone of the launched cluster is '1a'. If we restore, then on capacity errors
+#    it's possible to failover to 1b, which leaves a leaked instance in 1a. Here,
+#    we use the new yaml's zone field, which is guaranteed to be the existing zone
+#    '1a'.
+_RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
+    ('provider', 'availability_zone'),
+]
 
 
 def is_ip(s: str) -> bool:
@@ -915,7 +921,7 @@ def write_cluster_config(
         restored_yaml_content = _replace_yaml_dicts(
             new_yaml_content, old_yaml_content,
             _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
-            _RAY_YAML_KEYS_TO_RESTORE_EXCLUDE_FOR_BACK_COMPATIBILITY)
+            _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
         with open(tmp_yaml_path, 'w') as f:
             f.write(restored_yaml_content)
 
