@@ -731,14 +731,16 @@ class RetryingVmProvisioner(object):
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Errors occurred during provision; '
                                    'check logs above.')
-        if region.zones is None:
-            logger.warning(f'Got error(s) in {region.name}:')
-        if set(zones) == set(region.zones):
+
+        zones_str = ', '.join(z.name for z in zones)
+        if len(zones) > 1:
+            # Multiple zones means the upper-level retry loop is trying the
+            # whole region, so we should print the region name.
             # The underlying AWS NodeProvider will try all specified zones of a
             # region. (Each boto3 request takes one zone.)
-            logger.warning(f'Got error(s) in all zones of {region.name}:')
+            logger.warning(
+                f'Got error(s) in all zones of {region.name} ({zones_str}):')
         else:
-            zones_str = ', '.join(z.name for z in zones)
             logger.warning(f'Got error(s) in {zones_str}:')
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
