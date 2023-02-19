@@ -946,7 +946,8 @@ class RetryingVmProvisioner(object):
                 # cluster is launched.
                 handle = global_user_state.get_handle_from_cluster_name(
                     cluster_name)
-                assert handle is not None, f'handle should not be None {cluster_name}'
+                assert handle is not None, (
+                    f'handle should not be None {cluster_name!r}')
                 config = common_utils.read_yaml(handle.cluster_yaml)
                 # This is for the case when the zone field is not set in the
                 # launched resources in a previous launch (e.g., ctrl-c during
