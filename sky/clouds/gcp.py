@@ -207,10 +207,12 @@ class GCP(clouds.Cloud):
         cls,
         *,
         region: str,
+        num_nodes: int,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[Optional[List[clouds.Zone]]]:
+    ) -> Iterator[List[clouds.Zone]]:
+        del num_nodes  # Unused.
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,

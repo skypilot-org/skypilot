@@ -704,12 +704,16 @@ class SSHConfigHelper(object):
 
 def _replace_yaml_dicts(new_yaml: str, old_yaml: str,
                         restore_key_names: Set[str],
-                        exclude_restore_key_names: List[List[str]]) -> str:
-    """Replaces 'new' with 'old' for all keys in key_names.
+                        restore_key_names_exceptions: List[List[str]]) -> str:
+    """Replaces 'new' with 'old' for all keys in restore_key_names.
 
     The replacement will be applied recursively and only for the blocks
     with the key in key_names, and have the same ancestors in both 'new'
     and 'old' YAML tree.
+
+    The restore_key_names_exceptions is a list of key names that should not
+    be restored, i.e. those keys will be reset to the value in 'new' YAML
+    tree after the replacement.
     """
 
     def _restore_block(new_block: Dict[str, Any], old_block: Dict[str, Any]):
@@ -727,7 +731,7 @@ def _replace_yaml_dicts(new_yaml: str, old_yaml: str,
     old_config = yaml.safe_load(old_yaml)
     excluded_results = {}
     # Find all key values excluded from restore
-    for exclude_restore_key_name_list in exclude_restore_key_names:
+    for exclude_restore_key_name_list in restore_key_names_exceptions:
         excluded_result = new_config
         found_excluded_key = True
         for key in exclude_restore_key_name_list:
@@ -737,20 +741,17 @@ def _replace_yaml_dicts(new_yaml: str, old_yaml: str,
                 break
             excluded_result = excluded_result[key]
         if found_excluded_key:
-            excluded_results[json.dumps(
-                exclude_restore_key_name_list)] = excluded_result
+            excluded_results[exclude_restore_key_name_list] = excluded_result
 
     # Restore from old config
     _restore_block(new_config, old_config)
 
     # Revert the changes for the excluded key values
-    for exclude_restore_key_name_list, value in excluded_results.items():
-        exclude_restore_key_name_list = json.loads(
-            exclude_restore_key_name_list)
+    for exclude_restore_key_name, value in excluded_results.items():
         curr = new_config
-        for key in exclude_restore_key_name_list[:-1]:
+        for key in exclude_restore_key_name[:-1]:
             curr = curr[key]
-        curr[exclude_restore_key_name_list[-1]] = value
+        curr[exclude_restore_key_name[-1]] = value
     return common_utils.dump_yaml_str(new_config)
 
 

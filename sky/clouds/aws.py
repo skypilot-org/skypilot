@@ -148,10 +148,11 @@ class AWS(clouds.Cloud):
         cls,
         *,
         region: str,
+        num_nodes: int,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[Optional[List[clouds.Zone]]]:
+    ) -> Iterator[List[clouds.Zone]]:
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
         regions = cls.regions_with_offering(instance_type,
@@ -160,7 +161,15 @@ class AWS(clouds.Cloud):
                                             region=region,
                                             zone=None)
         for r in regions:
-            yield r.zones
+            assert r.zones is not None, r
+            if num_nodes > 1:
+                # When num_nodes > 1, we need to try the zones one by
+                # one, to avoid the nodes of a same cluster being
+                # placed in different zones.
+                for z in r.zones:
+                    yield [z]
+            else:
+                yield r.zones
 
     @classmethod
     def _get_default_ami(cls, region_name: str, instance_type: str) -> str:

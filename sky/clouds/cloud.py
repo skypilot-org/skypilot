@@ -130,6 +130,7 @@ class Cloud:
         cls,
         *,
         region: str,
+        num_nodes: int,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
@@ -139,13 +140,13 @@ class Cloud:
         Certain clouds' provisioners may handle batched requests, retrying for
         itself a list of zones under a region.  Others may need a specific zone
         per provision request (in that case, yields a one-element list for each
-        zone.
-
+        zone).
         Optionally, caller can filter the yielded region/zones by specifying the
         instance_type, accelerators, and use_spot.
 
         Args:
             region: The region to provision.
+            num_nodes: The number of nodes to provision.
             instance_type: The instance type to provision.
             accelerators: The accelerators to provision.
             use_spot: Whether to use spot instances.
@@ -169,11 +170,15 @@ class Cloud:
                                            instance_type='existing-instance'):
                     assert zone is None
                 ```
+            This means if something is yielded, either it's None (zones are not
+            supported and the region offers the resources) or it's a non-empty
+            list (zones are supported and they offer the resources).
 
         Typical usage:
 
             for zones in cloud.region_zones_provision_loop(
                 region,
+                num_nodes,
                 instance_type,
                 accelerators,
                 use_spot

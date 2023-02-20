@@ -230,10 +230,10 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         df['Region'] = region
         # An instance type may not be available in all zones. We need to
         # merge the zone info to the instance type info.
-        df = df.merge(offering_df, on=['InstanceType'], how='outer')
+        df = df.merge(offering_df, on=['InstanceType'], how='inner')
         # Add the mapping from zone name to zone id, as the zone id is
         # the real identifier for a zone across different users.
-        df = df.merge(zone_df, on=['AvailabilityZoneName'], how='outer')
+        df = df.merge(zone_df, on=['AvailabilityZoneName'], how='inner')
 
         # Add spot price column, by joining the spot pricing table.
         df = df.merge(spot_pricing_df,
