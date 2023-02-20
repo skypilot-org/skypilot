@@ -220,14 +220,17 @@ def get_region_cheapest_hourly_storage_cost(
     disk_size: int,
 ) -> float:
     """Returns the cheapest hourly storage price of a specify region."""
+    # for not implemented cloud like aws, azure, `storage_df` will be an
+    # empty df and disk price is not considered
+    # TODO(tian): remove this check after all cloud are implemented.
+    if 'Region' not in storage_df.columns:
+        return 0.0
     df = storage_df[storage_df['Region'] == region]
     cheapest_idx = df['Price'].idxmin()  # GB per month
     # Suppose one month have 30 days here.
     return df.loc[cheapest_idx]['Price'] * disk_size / (30 * 24)
 
 
-# TODO(tian): Change function call for get_hourly_cost in other clouds
-# (only GCP are using this newer version interface now).
 def get_hourly_cost_impl(
     df: pd.DataFrame,
     storage_df: pd.DataFrame,
@@ -277,37 +280,6 @@ def get_hourly_cost_impl(
             cheapest_price = cur_price
     assert cheapest_price is not None
     return cheapest_price
-
-
-def get_hourly_disk_cost_impl(
-    df: pd.DataFrame,
-    instance_type: str,
-    use_spot: bool,
-    region: Optional[str],
-    zone: Optional[str],
-) -> float:
-    """Returns the hourly price in the given region.
-
-    Refer to get_hourly_cost in service_catalog/__init__.py for the docstring.
-    """
-    # Cheapest storage might not locate in the same region as instance are
-    # launched. So if region is not specified, considering sum of storage and
-    # instance price together.
-    if region is not None:
-        df = df[df['Region'] == region]
-    if df.empty:
-        if region is None:
-            pos = 'all regions'
-        else:
-            pos = f'region {region!r}'
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Storage not found in {pos}.')
-
-    disk_price_str = 'Price'
-
-    cheapest_idx = df[disk_price_str].idxmin()
-    cheapest = df.loc[cheapest_idx]
-    return cheapest[disk_price_str]
 
 
 def get_vcpus_from_instance_type_impl(

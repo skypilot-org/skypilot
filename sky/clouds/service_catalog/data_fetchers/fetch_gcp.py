@@ -6,7 +6,7 @@ and queries the GCP API to get the real-time prices of the VMs, GPUs, and TPUs.
 
 import argparse
 import os
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional
 
 from googleapiclient import discovery
 import pandas as pd
@@ -351,22 +351,15 @@ def get_catalog_df(region_prefix: str) -> pd.DataFrame:
 
 
 def get_storage_df() -> pd.DataFrame:
-    # TODO(tian): is TPU machine use same storage SKUs as GCE?
     storage_skus = get_storage_skus(GCE_SERVICE_ID)
-    storage_df = pd.DataFrame(columns=['Name', 'Region', 'Price'])
+    df = pd.DataFrame(columns=['Name', 'Region', 'Price'])
     for sku in storage_skus:
         name = sku['name']
         regions = sku['serviceRegions']
         price = _get_tired_unit_price(sku)
         for region in regions:
-            storage_df = storage_df.append(
-                {
-                    'Name': name,
-                    'Region': region,
-                    'Price': price
-                },
-                ignore_index=True)
-    return storage_df
+            df.loc[len(df.index)] = [name, region, price]
+    return df
 
 
 if __name__ == '__main__':

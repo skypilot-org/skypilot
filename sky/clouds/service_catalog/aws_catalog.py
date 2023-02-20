@@ -31,6 +31,8 @@ _PULL_FREQUENCY_HOURS = 7
 
 _df = common.read_catalog('aws/vms.csv',
                           pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+_storage_df = common.read_catalog('aws/storage.csv',
+                                  pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 _image_df = common.read_catalog('aws/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
@@ -89,19 +91,12 @@ def accelerator_in_region_or_zone(acc_name: str,
 
 
 def get_hourly_cost(instance_type: str,
+                    disk_size: int,
                     use_spot: bool = False,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
-    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
-                                       zone)
-
-
-def get_hourly_disk_cost(instance_type: str,
-                         use_spot: bool = False,
-                         region: Optional[str] = None,
-                         zone: Optional[str] = None) -> float:
-    return common.get_hourly_disk_cost_impl(_df, instance_type, use_spot,
-                                            region, zone)
+    return common.get_hourly_cost_impl(_df, _storage_df, instance_type,
+                                       disk_size, use_spot, region, zone)
 
 
 def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:

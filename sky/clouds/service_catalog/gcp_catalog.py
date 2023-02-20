@@ -166,16 +166,6 @@ def get_hourly_cost(
                                        disk_size, use_spot, region, zone)
 
 
-def get_hourly_disk_cost(
-    instance_type: str,
-    use_spot: bool = False,
-    region: Optional[str] = None,
-    zone: Optional[str] = None,
-) -> float:
-    return common.get_hourly_disk_cost_impl(_df, instance_type, use_spot,
-                                            region, zone)
-
-
 def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
     # The number of vCPUs provided with a TPU VM is not officially documented.
     if instance_type == 'TPU-VM':
@@ -353,12 +343,16 @@ def list_accelerators(
         cpu_count = df['vCPUs'].iloc[0]
         memory = df['MemoryGiB'].iloc[0]
         vm_price = common.get_hourly_cost_impl(_df,
+                                               _storage_df,
                                                a100_host_vm_type,
+                                               disk_size=0,
                                                use_spot=False,
                                                region=None,
                                                zone=None)
         vm_spot_price = common.get_hourly_cost_impl(_df,
+                                                    _storage_df,
                                                     a100_host_vm_type,
+                                                    disk_size=0,
                                                     use_spot=True,
                                                     region=None,
                                                     zone=None)

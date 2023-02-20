@@ -13,6 +13,7 @@ if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
 _df = common.read_catalog('lambda/vms.csv')
+_storage_df = common.read_catalog('lambda/storage.csv')
 
 # Number of vCPUS for gpu_1x_a100_sxm4
 _DEFAULT_NUM_VCPUS = 30
@@ -43,6 +44,7 @@ def accelerator_in_region_or_zone(acc_name: str,
 
 
 def get_hourly_cost(instance_type: str,
+                    disk_size: int,
                     use_spot: bool = False,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
@@ -51,21 +53,8 @@ def get_hourly_cost(instance_type: str,
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Lambda Cloud does not support zones.')
-    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
-                                       zone)
-
-
-def get_hourly_disk_cost(instance_type: str,
-                         use_spot: bool = False,
-                         region: Optional[str] = None,
-                         zone: Optional[str] = None) -> float:
-    """Returns the disk cost, or the cheapest cost among all zones for spot."""
-    assert not use_spot, 'Lambda Cloud does not support spot.'
-    if zone is not None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Lambda Cloud does not support zones.')
-    return common.get_hourly_disk_cost_impl(_df, instance_type, use_spot,
-                                            region, zone)
+    return common.get_hourly_cost_impl(_df, _storage_df, instance_type,
+                                       disk_size, use_spot, region, zone)
 
 
 def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:

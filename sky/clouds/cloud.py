@@ -179,12 +179,6 @@ class Cloud:
         """Returns the hourly on-demand price for accelerators."""
         raise NotImplementedError
 
-    def instance_type_to_hourly_disk_cost(self, instance_type: str,
-                                          use_spot: bool, region: Optional[str],
-                                          zone: Optional[str]) -> float:
-        """Returns the hourly on-demand/spot disk price for an instance type."""
-        raise NotImplementedError
-
     def get_egress_cost(self, num_gigabytes):
         """Returns the egress cost.
 
