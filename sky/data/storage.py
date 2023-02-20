@@ -90,6 +90,9 @@ def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
     elif isinstance(cloud, clouds.Lambda):
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Lambda Cloud does not provide cloud storage.')
+    elif isinstance(cloud, clouds.SCP):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('SCP does not provide cloud storage.')
     else:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Unknown cloud type: {cloud}')

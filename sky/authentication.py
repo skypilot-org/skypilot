@@ -334,3 +334,6 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['file_mounts'] = file_mounts
 
     return config
+
+def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    return config
