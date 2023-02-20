@@ -177,15 +177,8 @@ def _execute(
         existing_handle = global_user_state.get_handle_from_cluster_name(
             cluster_name)
         cluster_exists = existing_handle is not None
-    if cluster_exists:
-        assert len(task.resources) == 1
-        task_resources = list(task.resources)[0]
-        if task_resources.cpus is not None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cannot specify CPU when using an existing cluster. '
-                    'CPU is only used for selecting the instance type when '
-                    'creating a new cluster.')
+        # TODO(woosuk): If the cluster exists, print a warning that
+        # `cpus` is not used as a job scheduling constraint, unlike `gpus`.
 
     stages = stages if stages is not None else list(Stage)
 
@@ -633,6 +626,7 @@ def spot_launch(
         controller_task = task_lib.Task.from_yaml(yaml_path)
         controller_task.spot_task = task
         assert len(controller_task.resources) == 1
+
         print(f'{colorama.Fore.YELLOW}'
               f'Launching managed spot job {name} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
