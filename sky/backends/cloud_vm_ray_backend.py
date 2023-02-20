@@ -733,7 +733,6 @@ class RetryingVmProvisioner(object):
                 raise RuntimeError('Errors occurred during provision; '
                                    'check logs above.')
 
-        zones_str = ', '.join(z.name for z in zones)
         regions_with_zones = clouds.AWS.regions_with_offering(
             launchable_resources.instance_type,
             launchable_resources.accelerators,
@@ -747,6 +746,7 @@ class RetryingVmProvisioner(object):
             # region. (Each boto3 request takes one zone.)
             logger.warning(f'Got error(s) in all zones of {region.name}:')
         else:
+            zones_str = ', '.join(z.name for z in zones)
             logger.warning(f'Got error(s) in {zones_str}:')
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
