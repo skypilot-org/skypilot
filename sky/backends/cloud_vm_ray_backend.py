@@ -733,14 +733,15 @@ class RetryingVmProvisioner(object):
                 raise RuntimeError('Errors occurred during provision; '
                                    'check logs above.')
 
-        regions_with_zones = clouds.AWS.regions_with_offering(
+        # Fill in the zones field in the Region.
+        region_with_zones_list = clouds.AWS.regions_with_offering(
             launchable_resources.instance_type,
             launchable_resources.accelerators,
             launchable_resources.use_spot,
             region.name,
             zone=None)
-        assert len(regions_with_zones) == 1, regions_with_zones
-        region_with_zones = regions_with_zones[0]
+        assert len(region_with_zones_list) == 1, region_with_zones_list
+        region_with_zones = region_with_zones_list[0]
         if set(zones) == set(region_with_zones.zones):
             # The underlying AWS NodeProvider will try all specified zones of a
             # region. (Each boto3 request takes one zone.)
