@@ -67,7 +67,7 @@ def process_subprocess_stream(
             while len(sel.get_map()) > 0:
                 events = sel.select()
                 for key, _ in events:
-                    line = key.fileobj.readline()  # type: ignore
+                    line = key.fileobj.readline()
                     if not line:
                         # Unregister the io when EOF reached
                         sel.unregister(key.fileobj)

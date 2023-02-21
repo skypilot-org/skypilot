@@ -594,7 +594,7 @@ class RetryingVmProvisioner(object):
 
         del region  # unused
         style = colorama.Style
-        assert len(zones) == 1, zones
+        assert zones and len(zones) == 1, zones
         zone = zones[0]
         splits = stderr.split('\n')
         exception_list = [s for s in splits if s.startswith('Exception: ')]
@@ -697,6 +697,7 @@ class RetryingVmProvisioner(object):
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
             stdout: str, stderr: str):
+        assert zones is not None, 'AWS should always have zones.'
         style = colorama.Style
         stdout_splits = stdout.split('\n')
         stderr_splits = stderr.split('\n')
@@ -873,6 +874,7 @@ class RetryingVmProvisioner(object):
                     self._blocked_resources.add(
                         launchable_resources.copy(zone=zone.name))
             return False  # definitely_no_nodes_launched
+        assert stdout is not None and stderr is not None, (stdout, stderr)
 
         # TODO(zongheng): refactor into Cloud interface?
         handlers = {

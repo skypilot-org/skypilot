@@ -524,7 +524,14 @@ def dump_job_table_cache(job_table: str):
 
 
 def load_job_table_cache() -> Optional[Tuple[float, str]]:
-    """Load job table cache from file."""
+    """Load job table cache from file.
+    
+    Returns:
+        A tuple of (timestamp, job_table), where the timestamp is
+        the time when the job table is dumped and the job_table is
+        the dumped job table in string. 
+        None if the cache file does not exist.
+    """
     cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
     if not cache_file.exists():
         return None
