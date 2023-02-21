@@ -14,7 +14,7 @@
     <img alt="GitHub Release" src="https://img.shields.io/github/release/skypilot-org/skypilot.svg">
   </a>
   
-  <a href="https://join.slack.com/t/skypilot-org/shared_invite/zt-1i4pa7lyc-g6Lo4_rqqCFWOSXdvwTs3Q"> 
+  <a href="https://join.slack.com/t/skypilot-org/shared_invite/zt-1pq71jdk3-pu9I1F_8rCgPJmnSO4VqBg"> 
     <img alt="Join Slack" src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack">
   </a>
   

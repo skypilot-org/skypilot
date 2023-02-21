@@ -10,7 +10,7 @@ Welcome to SkyPilot!
 .. raw:: html
 
    <p style="text-align:center">
-   <a class="reference external image-reference" style="vertical-align:9.5px" href="https://join.slack.com/t/skypilot-org/shared_invite/zt-1i4pa7lyc-g6Lo4_rqqCFWOSXdvwTs3Q"><img src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack" style="height:27px"></a>
+   <a class="reference external image-reference" style="vertical-align:9.5px" href="https://join.slack.com/t/skypilot-org/shared_invite/zt-1pq71jdk3-pu9I1F_8rCgPJmnSO4VqBg"><img src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack" style="height:27px"></a>
    <script async defer src="https://buttons.github.io/buttons.js"></script>
    <a class="github-button" href="https://github.com/skypilot-org/skypilot" data-show-count="true" data-size="large" aria-label="Star skypilot-org/skypilot on GitHub">Star</a>
    <a class="github-button" href="https://github.com/skypilot-org/skypilot/subscription" data-icon="octicon-eye" data-size="large" aria-label="Watch skypilot-org/skypilot on GitHub">Watch</a>
