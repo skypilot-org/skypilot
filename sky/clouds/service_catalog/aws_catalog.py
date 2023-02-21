@@ -5,6 +5,7 @@ instance types and pricing information for AWS.
 """
 import colorama
 import os
+import threading
 import typing
 from typing import Dict, List, Optional, Tuple
 
@@ -28,6 +29,10 @@ _DEFAULT_NUM_VCPUS = 8
 # Keep it synced with the frequency in
 # skypilot-catalog/.github/workflows/update-aws-catalog.yml
 _PULL_FREQUENCY_HOURS = 7
+
+# Flag to indicate whether the availability zone mapping has been applied.
+_az_mapping_applied = False
+_apply_az_mapping_lock = threading.RLock()
 
 _df = common.read_catalog('aws/vms.csv',
                           pull_frequency_hours=_PULL_FREQUENCY_HOURS)
@@ -67,19 +72,33 @@ def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
     return df
 
 
-_df = _apply_az_mapping(_df)
+def _apply_az_mapping_decorator(func):
+    """Decorator to apply availability zone mapping to the dataframe."""
+    def wrapper(*args, **kwargs):
+        with _apply_az_mapping_lock:
+            global _az_mapping_applied
+            if not _az_mapping_applied:
+                global _df
+                _df = _apply_az_mapping(_df)
+                _az_mapping_applied = True
+        return func(*args, **kwargs)
+
+    return wrapper
 
 
+@_apply_az_mapping_decorator
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
 
 
+@_apply_az_mapping_decorator
 def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     return common.validate_region_zone_impl('aws', _df, region, zone)
 
 
+@_apply_az_mapping_decorator
 def accelerator_in_region_or_zone(acc_name: str,
                                   acc_count: int,
                                   region: Optional[str] = None,
@@ -88,6 +107,7 @@ def accelerator_in_region_or_zone(acc_name: str,
                                                      region, zone)
 
 
+@_apply_az_mapping_decorator
 def get_hourly_cost(instance_type: str,
                     use_spot: bool = False,
                     region: Optional[str] = None,
@@ -113,6 +133,7 @@ def get_accelerators_from_instance_type(
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 
+@_apply_az_mapping_decorator
 def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
@@ -134,6 +155,7 @@ def get_instance_type_for_accelerator(
                                                          zone=zone)
 
 
+@_apply_az_mapping_decorator
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
     df = _df[_df['InstanceType'] == instance_type]
