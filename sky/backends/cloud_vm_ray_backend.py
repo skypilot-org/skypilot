@@ -933,7 +933,8 @@ class RetryingVmProvisioner(object):
                 offer the requested resources (so the outer loop should issue a
                 request to that region).
               - Non-empty list means the cloud supports zones, and the zones
-                do offer the requested resources.
+                do offer the requested resources. If a list is yielded, it is
+                guaranteed to be non-empty.
               - Nothing yielded means the region does not offer the requested
                 resources.
         """
@@ -1063,8 +1064,8 @@ class RetryingVmProvisioner(object):
                 yield None
             else:
                 assert zones, (
-                    'Either None or a non-empty list of zones should be yielded'
-                )
+                    'Either None or a non-empty list of zones should '
+                    'be yielded')
                 # Only retry requested region/zones or all if not specified.
                 zone_names = [zone.name for zone in zones]
                 if not to_provision.valid_on_region_zones(
@@ -1758,13 +1759,15 @@ class RetryingVmProvisioner(object):
                 # is in fallback mode.
                 self._blocked_resources.add(to_provision)
             else:
-                # If reached here, it means that the existing cluster should
-                # have been INIT and should have been terminated, as other cases
-                # will not trigger the failover due to `no_failover` flag.
+                # If we reach here, it means that the existing cluster must have
+                # a previous status of INIT, because other statuses (UP,
+                # STOPPED) will not trigger the failover due to `no_failover`
+                # flag; see _yield_zones(). Also, the cluster should have been
+                # terminated by _retry_zones().
                 assert (prev_cluster_status == global_user_state.ClusterStatus.
-                        INIT), (prev_cluster_status)
+                        INIT), prev_cluster_status
                 assert global_user_state.get_handle_from_cluster_name(
-                    cluster_name) is None, (cluster_name)
+                    cluster_name) is None, cluster_name
                 logger.info('Retrying provisioning with requested resources '
                             f'{task.num_nodes}x {task.resources}')
                 # Retry with the current, potentially "smaller" resources:
@@ -2292,11 +2295,10 @@ class CloudVmRayBackend(backends.Backend):
                         # initialization.
                         handle.launched_resources = (
                             handle.launched_resources.copy(zone=zones[0]))
-                    elif len(set(zones)) > 1:
-                        logger.warning(
-                            'Head and worker nodes are launched in different '
-                            'zones (legacy clusters before #1700), leave the '
-                            'zone field to None.')
+                    # If the number of zones > 1, nodes in the cluster are
+                    # launched in different zones (legacy clusters before
+                    # #1700), leave the zone field of handle.launched_resources
+                    # to None.
 
             usage_lib.messages.usage.update_cluster_resources(
                 handle.launched_nodes, handle.launched_resources)

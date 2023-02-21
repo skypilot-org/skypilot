@@ -163,9 +163,10 @@ class AWS(clouds.Cloud):
         for r in regions:
             assert r.zones is not None, r
             if num_nodes > 1:
-                # When num_nodes > 1, we need to try the zones one by
-                # one, to avoid the nodes of a same cluster being
-                # placed in different zones.
+                # When num_nodes > 1, we shouldn't pass a list of zones to the
+                # AWS NodeProvider to try, because it may then place the nodes of
+                # the same cluster in different zones. This is an artifact of the
+                # current AWS NodeProvider implementation.
                 for z in r.zones:
                     yield [z]
             else:
