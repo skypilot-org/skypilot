@@ -588,8 +588,9 @@ class RetryingVmProvisioner(object):
         colorama.init()
 
     def _update_blocklist_on_gcp_error(
-            self, launchable_resources: 'resources_lib.Resources', region,
-            zones, stdout, stderr):
+            self, launchable_resources: 'resources_lib.Resources',
+            region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
+            stdout: str, stderr: str):
 
         del region  # unused
         style = colorama.Style
@@ -693,8 +694,9 @@ class RetryingVmProvisioner(object):
                                        'check logs above.')
 
     def _update_blocklist_on_aws_error(
-            self, launchable_resources: 'resources_lib.Resources', region,
-            zones, stdout, stderr):
+            self, launchable_resources: 'resources_lib.Resources',
+            region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
+            stdout: str, stderr: str):
         style = colorama.Style
         stdout_splits = stdout.split('\n')
         stderr_splits = stderr.split('\n')
@@ -744,8 +746,9 @@ class RetryingVmProvisioner(object):
                 launchable_resources.copy(zone=zone.name))
 
     def _update_blocklist_on_azure_error(
-            self, launchable_resources: 'resources_lib.Resources', region,
-            zones, stdout, stderr):
+            self, launchable_resources: 'resources_lib.Resources',
+            region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
+            stdout: str, stderr: str):
         del zones  # Unused.
         # The underlying ray autoscaler will try all zones of a region at once.
         style = colorama.Style
@@ -778,8 +781,9 @@ class RetryingVmProvisioner(object):
             self._blocked_resources.add(launchable_resources.copy(zone=None))
 
     def _update_blocklist_on_lambda_error(
-            self, launchable_resources: 'resources_lib.Resources', region,
-            zones, stdout, stderr):
+            self, launchable_resources: 'resources_lib.Resources',
+            region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
+            stdout: str, stderr: str):
         del zones  # Unused.
         style = colorama.Style
         stdout_splits = stdout.split('\n')
@@ -814,8 +818,9 @@ class RetryingVmProvisioner(object):
                             launchable_resources.copy(region=r.name, zone=None))
 
     def _update_blocklist_on_local_error(
-            self, launchable_resources: 'resources_lib.Resources', region,
-            zones, stdout, stderr):
+            self, launchable_resources: 'resources_lib.Resources',
+            region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
+            stdout: str, stderr: str):
         del zones  # Unused.
         style = colorama.Style
         stdout_splits = stdout.split('\n')
@@ -843,8 +848,9 @@ class RetryingVmProvisioner(object):
             launchable_resources.copy(region=region.name, zone=None))
 
     def _update_blocklist_on_error(
-            self, launchable_resources: 'resources_lib.Resources', region,
-            zones, stdout, stderr) -> bool:
+            self, launchable_resources: 'resources_lib.Resources',
+            region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
+            stdout: Optional[str], stderr: Optional[str]) -> bool:
         """Handles cloud-specific errors and updates the block list.
 
         This parses textual stdout/stderr because we don't directly use the
@@ -862,9 +868,10 @@ class RetryingVmProvisioner(object):
             # Gang scheduling failure (head node is definitely up, but some
             # workers' provisioning failed).  Simply block the zones.
             assert stderr is None, stderr
-            for zone in zones:
-                self._blocked_resources.add(
-                    launchable_resources.copy(zone=zone.name))
+            if zones is not None:
+                for zone in zones:
+                    self._blocked_resources.add(
+                        launchable_resources.copy(zone=zone.name))
             return False  # definitely_no_nodes_launched
 
         # TODO(zongheng): refactor into Cloud interface?
@@ -879,7 +886,7 @@ class RetryingVmProvisioner(object):
         cloud_type = type(cloud)
         if cloud_type not in handlers:
             raise NotImplementedError(
-                'Cloud {cloud} unknown, or has not added '
+                f'Cloud {cloud} unknown, or has not added '
                 'support for parsing and handling provision failures.')
         handler = handlers[cloud_type]
         handler(launchable_resources, region, zones, stdout, stderr)
