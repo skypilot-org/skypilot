@@ -166,7 +166,7 @@ class SpotController:
                                           end_time=end_time)
 
                     # Debugging: fetch the status again.
-                    time.sleep(20)
+                    time.sleep(120)
                     (cluster_status,
                      handle) = backend_utils.refresh_cluster_status_handle(
                          self._cluster_name, force_refresh=True)
