@@ -384,6 +384,14 @@ def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
     if count == 0:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
+def get_distinct_cluster_names_from_history() -> List[Optional[str]]:
+    rows = _DB.cursor.execute('SELECT DISTINCT name from cluster_history').fetchall()
+    return rows
+
+def get_cluster_from_history_by_name(cluster_name: str) -> List[Optional[Any]]:
+    rows = _DB.cursor.execute('SELECT * from cluster_history WHERE name=(?)',
+                              (cluster_name,)).fetchall()    
+    return rows
 
 def get_distinct_cluster_names_from_history() -> List[Optional[str]]:
     rows = _DB.cursor.execute(

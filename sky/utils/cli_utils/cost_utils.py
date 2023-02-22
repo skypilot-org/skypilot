@@ -12,7 +12,6 @@ def get_cost_report(cluster_status):
 
     return f'${cost:.3f}'
 
-
 def get_status_for_cost_report(cluster_status):
     status = None
     if 'status' in cluster_status:
@@ -21,7 +20,6 @@ def get_status_for_cost_report(cluster_status):
     if status is None:
         return f'{colorama.Style.DIM}{"TERMINATED"}{colorama.Style.RESET_ALL}'
     return status.colored_str()
-
 
 def get_resources_for_cost_report(cluster_status):
     launched_nodes = cluster_status['num_nodes']
