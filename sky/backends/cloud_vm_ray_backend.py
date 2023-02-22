@@ -2256,15 +2256,15 @@ class CloudVmRayBackend(backends.Backend):
                     # initialization.
                     handle.launched_resources = handle.launched_resources.copy(
                         zone=stdout.strip())
-            self._finalize_provisioning_no_lock(handle, task,
-                                                prev_cluster_status, ip_list,
-                                                lock_path)
+            self._update_after_cluster_provisioned(handle, task,
+                                                   prev_cluster_status, ip_list,
+                                                   lock_path)
             return handle
 
-    def _finalize_provisioning_no_lock(
+    def _update_after_cluster_provisioned(
             self, handle: ResourceHandle, task: task_lib.Task,
             prev_cluster_status: global_user_state.ClusterStatus,
-            ip_list: List[str], lock_path: str):
+            ip_list: List[str], lock_path: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
         usage_lib.messages.usage.update_final_cluster_status(
