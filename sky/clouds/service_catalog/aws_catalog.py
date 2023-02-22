@@ -40,7 +40,7 @@ _image_df = common.read_catalog('aws/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 
-def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
+def _apply_az_mapping():
     """Maps zone IDs (use1-az1) to zone names (us-east-1x).
 
     Such mappings are account-specific and determined by AWS.
@@ -49,6 +49,10 @@ def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
         A dataframe with column 'AvailabilityZone' that's correctly replaced
         with the zone name (e.g. us-east-1a).
     """
+    global _az_mapping_applied
+    if _az_mapping_applied:
+        return
+    global _df
     az_mapping_path = common.get_catalog_path('aws/az_mappings.csv')
     if not os.path.exists(az_mapping_path):
         # Fetch az mapping from AWS.
@@ -66,10 +70,10 @@ def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
     # Use inner join to drop rows with unknown AZ IDs, which are likely
     # because the user does not have access to that Region. Otherwise,
     # there will be rows with NaN in the AvailabilityZone column.
-    df = df.merge(az_mappings, on=['AvailabilityZone'], how='inner')
-    df = df.drop(columns=['AvailabilityZone']).rename(
+    _df = _df.merge(az_mappings, on=['AvailabilityZone'], how='inner')
+    _df = _df.drop(columns=['AvailabilityZone']).rename(
         columns={'AvailabilityZoneName': 'AvailabilityZone'})
-    return df
+    _az_mapping_applied = True
 
 
 def _apply_az_mapping_decorator(func):
@@ -77,11 +81,7 @@ def _apply_az_mapping_decorator(func):
 
     def wrapper(*args, **kwargs):
         with _apply_az_mapping_lock:
-            global _az_mapping_applied
-            if not _az_mapping_applied:
-                global _df
-                _az_mapping_applied = True
-                _df = _apply_az_mapping(_df)
+            _apply_az_mapping()
         return func(*args, **kwargs)
 
     return wrapper
