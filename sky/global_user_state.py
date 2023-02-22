@@ -384,17 +384,7 @@ def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
     if count == 0:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
-def get_distinct_cluster_names_from_history() -> List[Optional[str]]:
-    rows = _DB.cursor.execute('SELECT DISTINCT name from cluster_history').fetchall()
-    return rows
 
-def get_cluster_from_history_by_name(cluster_name: str) -> List[Optional[Any]]:
-    rows = _DB.cursor.execute('SELECT * from cluster_history WHERE name=(?)',
-                              (cluster_name,)).fetchall()    
-    return rows
-
-<<<<<<< HEAD
-<<<<<<< HEAD
 def get_distinct_cluster_names_from_history() -> List[Optional[str]]:
     rows = _DB.cursor.execute(
         'SELECT DISTINCT name from cluster_history').fetchall()
@@ -405,30 +395,18 @@ def get_cluster_from_history_by_name(cluster_name: str) -> List[Optional[Any]]:
     rows = _DB.cursor.execute('SELECT * from cluster_history WHERE name=(?)',
                               (cluster_name,)).fetchall()
     return rows
-=======
-def aggregate_all_records() -> List[Optional[Dict[str, Any]]]:
-    rows = _DB.cursor.execute('SELECT name from cluster_history').fetchall()
 
-    records = {}
 
-    for (cluster_name,) in rows:
-        record = aggregate_records_by_name(cluster_name)
-        if cluster_name not in records:
-            records[cluster_name] = record
+def get_distinct_cluster_names_from_history() -> List[Optional[str]]:
+    rows = _DB.cursor.execute(
+        'SELECT DISTINCT name from cluster_history').fetchall()
+    return rows
 
-    return list(records.values())
-=======
-def aggregate_all_records(split: bool) -> List[Optional[Dict[str, Any]]]:
-    rows = _DB.cursor.execute('SELECT DISTINCT name from cluster_history').fetchall()
 
-    records = []
-
-    for (cluster_name,) in rows:
-        if split:
-            records += get_split_view_records_by_name(cluster_name)
-        else:
-            records.append(aggregate_records_by_name(cluster_name))
->>>>>>> 21bad003 (address almost all PR comments)
+def get_cluster_from_history_by_name(cluster_name: str) -> List[Optional[Any]]:
+    rows = _DB.cursor.execute('SELECT * from cluster_history WHERE name=(?)',
+                              (cluster_name,)).fetchall()
+    return rows
 
 
 def aggregate_records_by_name(cluster_name: str) -> Optional[Dict[str, Any]]:
@@ -457,11 +435,17 @@ def aggregate_records_by_name(cluster_name: str) -> Optional[Dict[str, Any]]:
         else:
             record['duration'] += _get_cluster_duration(cluster_hash)
             record['usage_intervals'] += pickle.loads(usage_intervals)
+<<<<<<< HEAD
+=======
+            record['resources'] = pickle.loads(launched_resources)
+            record['num_nodes'] = num_nodes
+>>>>>>> 97a20536 (lint and format)
 
     return record
 >>>>>>> 61c23eae (add spot cost report)
 
 
+<<<<<<< HEAD
 def get_distinct_cluster_names_from_history() -> List[Optional[str]]:
     rows = _DB.cursor.execute(
         'SELECT DISTINCT name from cluster_history').fetchall()
@@ -479,6 +463,43 @@ def _get_cluster_usage_intervals(
 ) -> Optional[List[Tuple[int, Optional[int]]]]:
     if cluster_hash is None:
         return None
+=======
+<<<<<<< HEAD
+=======
+def get_split_view_records_by_name(
+        cluster_name: str) -> Optional[Dict[str, Any]]:
+
+    rows = _DB.cursor.execute('SELECT * from cluster_history WHERE name=(?)',
+                              (cluster_name,)).fetchall()
+
+    records = []
+
+    for row in rows:
+        # TODO: use namedtuple instead of dict
+
+        (cluster_hash, name, num_nodes, _, launched_resources,
+         usage_intervals) = row[:6]
+
+        record = {
+            'name': '',
+            'launched_at': get_cluster_launch_time(cluster_hash),
+            'duration': _get_cluster_duration(cluster_hash),
+            'num_nodes': num_nodes,
+            'resources': pickle.loads(launched_resources),
+            'cluster_hash': cluster_hash,
+            'usage_intervals': pickle.loads(usage_intervals),
+        }
+
+        if len(records) == 0:
+            record['name'] = name
+        records.append(record)
+
+    return records
+
+
+>>>>>>> 97a20536 (lint and format)
+def _get_cluster_usage_intervals(cluster_hash: str) -> Optional[Dict[str, Any]]:
+>>>>>>> 8df22022 (lint and format)
     rows = _DB.cursor.execute(
         'SELECT usage_intervals FROM cluster_history WHERE cluster_hash=(?)',
         (cluster_hash,))
