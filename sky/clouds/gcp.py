@@ -182,6 +182,8 @@ class GCP(clouds.Cloud):
                     for r2 in vm_regions:
                         if r1.name != r2.name:
                             continue
+                        assert r1.zones is not None, r1
+                        assert r2.zones is not None, r2
                         zones = []
                         for z1 in r1.zones:
                             for z2 in r2.zones:
@@ -195,27 +197,32 @@ class GCP(clouds.Cloud):
             regions = [r for r in regions if r.name == region]
         if zone is not None:
             for r in regions:
+                assert r.zones is not None, r
                 r.set_zones([z for z in r.zones if z.name == zone])
             regions = [r for r in regions if r.zones]
         return regions
 
     @classmethod
-    def region_zones_provision_loop(
+    def zones_provision_loop(
         cls,
         *,
+        region: str,
+        num_nodes: int,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+    ) -> Iterator[List[clouds.Zone]]:
+        del num_nodes  # Unused.
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
-                                            region=None,
+                                            region=region,
                                             zone=None)
         # GCP provisioner currently takes 1 zone per request.
-        for region in regions:
-            for zone in region.zones:
-                yield (region, [zone])
+        for r in regions:
+            assert r.zones is not None, r
+            for zone in r.zones:
+                yield [zone]
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -317,9 +324,7 @@ class GCP(clouds.Cloud):
                 'Set either both or neither for: region, zones.')
             region = self._get_default_region()
             zones = region.zones
-        else:
-            assert zones is not None, (
-                'Set either both or neither for: region, zones.')
+        assert zones is not None, (region, zones)
 
         region_name = region.name
         zone_name = zones[0].name
