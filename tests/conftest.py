@@ -221,5 +221,5 @@ def pytest_sessionstart(session):
                 ap-northeast-1a,apne1-az4
                 ap-northeast-1c,apne1-az1
                 ap-northeast-1d,apne1-az2
-            """))
+                """))
         os.replace(f.name, str(aws_az_mapping_path))
