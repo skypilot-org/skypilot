@@ -5,13 +5,13 @@ instance types and pricing information for AWS.
 """
 import colorama
 import os
-import threading
 import typing
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
 from sky import sky_logging
+from sky.clouds import aws
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
@@ -30,31 +30,34 @@ _DEFAULT_NUM_VCPUS = 8
 # skypilot-catalog/.github/workflows/update-aws-catalog.yml
 _PULL_FREQUENCY_HOURS = 7
 
-# Flag to indicate whether the availability zone mapping has been applied.
-_az_mapping_applied = False
-_apply_az_mapping_lock = threading.Lock()
-
 _df = common.read_catalog('aws/vms.csv',
                           pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 _image_df = common.read_catalog('aws/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 
-def _apply_az_mapping():
+def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
     """Maps zone IDs (use1-az1) to zone names (us-east-1x).
 
-    Such mappings are account-specific and determined by AWS.
+    Such mappings are account-specific and determined by AWS. The mpaaing will
+    also remove the regions that are not supported by the user account. If the
+    user does not have AWS credentials configured, we use a default mapping.
 
     Returns:
         A dataframe with column 'AvailabilityZone' that's correctly replaced
         with the zone name (e.g. us-east-1a).
     """
-    global _az_mapping_applied
-    if _az_mapping_applied:
-        return
-    global _df
     az_mapping_path = common.get_catalog_path('aws/az_mappings.csv')
     if not os.path.exists(az_mapping_path):
+        aws_enabled, _ = aws.AWS().check_credentials()
+        if not aws_enabled:
+            logger.debug(
+                f'{colorama.Style.DIM}Availability zone mapping is not '
+                f'available because AWS credentials are not configured. '
+                f'Using the default mapping.{colorama.Style.RESET_ALL}')
+            df = df.drop(columns=['AvailabilityZone']).rename(
+                columns={'AvailabilityZoneName': 'AvailabilityZone'})
+            return df
         # Fetch az mapping from AWS.
         # pylint: disable=import-outside-toplevel
         import ray
@@ -70,52 +73,25 @@ def _apply_az_mapping():
     # Use inner join to drop rows with unknown AZ IDs, which are likely
     # because the user does not have access to that Region. Otherwise,
     # there will be rows with NaN in the AvailabilityZone column.
-    _df = _df.merge(az_mappings, on=['AvailabilityZone'], how='inner')
-    _df = _df.drop(columns=['AvailabilityZone']).rename(
+    df = df.merge(az_mappings, on=['AvailabilityZone'], how='inner')
+    df = df.drop(columns=['AvailabilityZone']).rename(
         columns={'AvailabilityZoneName': 'AvailabilityZone'})
-    _az_mapping_applied = True
+    return df
 
 
-def _apply_az_mapping_decorator(func):
-    """Decorator to apply availability zone mapping to the dataframe."""
-
-    def wrapper(*args, **kwargs):
-        with _apply_az_mapping_lock:
-            _apply_az_mapping()
-        return func(*args, **kwargs)
-
-    return wrapper
+_df = _apply_az_mapping(_df)
 
 
-@_apply_az_mapping_decorator
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
-
-
-# Helper functions for `validate_region_zone`.
-def _validate_region(
-        region: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    # When zone is not specified, we don't need to apply the AZ mapping.
-    # This is useful for `sky show-gpus` where user may not have access to
-    # AWS.
-    return common.validate_region_zone_impl('aws', _df, region, None)
-
-
-@_apply_az_mapping_decorator
-def _validate_region_zone(region: Optional[str],
-                          zone: str) -> Tuple[Optional[str], Optional[str]]:
-    return common.validate_region_zone_impl('aws', _df, region, zone)
 
 
 def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    if zone is None:
-        return _validate_region(region)
-    return _validate_region_zone(region, zone)
+    return common.validate_region_zone_impl('aws', _df, region, zone)
 
 
-@_apply_az_mapping_decorator
 def accelerator_in_region_or_zone(acc_name: str,
                                   acc_count: int,
                                   region: Optional[str] = None,
@@ -124,7 +100,6 @@ def accelerator_in_region_or_zone(acc_name: str,
                                                      region, zone)
 
 
-@_apply_az_mapping_decorator
 def get_hourly_cost(instance_type: str,
                     use_spot: bool = False,
                     region: Optional[str] = None,
@@ -150,7 +125,6 @@ def get_accelerators_from_instance_type(
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 
-@_apply_az_mapping_decorator
 def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
@@ -172,7 +146,6 @@ def get_instance_type_for_accelerator(
                                                          zone=zone)
 
 
-@_apply_az_mapping_decorator
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
     df = _df[_df['InstanceType'] == instance_type]
