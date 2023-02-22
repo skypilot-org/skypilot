@@ -696,6 +696,7 @@ class RetryingVmProvisioner(object):
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
             stdout: str, stderr: str):
         assert zones is not None, 'AWS should always have zones.'
+
         style = colorama.Style
         stdout_splits = stdout.split('\n')
         stderr_splits = stderr.split('\n')
@@ -741,6 +742,7 @@ class RetryingVmProvisioner(object):
             zone=None)
         assert len(region_with_zones_list) == 1, region_with_zones_list
         region_with_zones = region_with_zones_list[0]
+        assert region_with_zones.zones is not None, region_with_zones
         if set(zones) == set(region_with_zones.zones):
             # The underlying AWS NodeProvider will try all specified zones of a
             # region. (Each boto3 request takes one zone.)
@@ -1136,7 +1138,7 @@ class RetryingVmProvisioner(object):
         dryrun: bool,
         stream_logs: bool,
         cluster_name: str,
-        cloud_user_identity: str,
+        cloud_user_identity: Optional[str],
         prev_cluster_status: Optional[global_user_state.ClusterStatus],
     ):
         """The provision retry loop."""
@@ -2306,7 +2308,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return handle
 
     def _update_after_cluster_provisioned(
-            self, handle: ResourceHandle, task: task_lib.Task,
+            self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
             prev_cluster_status: global_user_state.ClusterStatus,
             ip_list: List[str], lock_path: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
