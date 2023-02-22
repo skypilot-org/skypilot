@@ -74,6 +74,7 @@ def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
 
 def _apply_az_mapping_decorator(func):
     """Decorator to apply availability zone mapping to the dataframe."""
+
     def wrapper(*args, **kwargs):
         with _apply_az_mapping_lock:
             global _az_mapping_applied
@@ -90,16 +91,21 @@ def _apply_az_mapping_decorator(func):
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
 
-@_apply_az_mapping_decorator
-def _validate_region_zone(region: Optional[str],
-                          zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    return common.validate_region_zone_impl('aws', _df, region, zone)
 
-def _validate_region(region: Optional[str]) -> Optional[str]:
+# Helper functions for `validate_region_zone`.
+def _validate_region(
+        region: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     # When zone is not specified, we don't need to apply the AZ mapping.
     # This is useful for `sky show-gpus` where user may not have access to
     # AWS.
     return common.validate_region_zone_impl('aws', _df, region, None)
+
+
+@_apply_az_mapping_decorator
+def _validate_region_zone(region: Optional[str],
+                          zone: str) -> Tuple[Optional[str], Optional[str]]:
+    return common.validate_region_zone_impl('aws', _df, region, zone)
+
 
 def validate_region_zone(
         region: Optional[str],
