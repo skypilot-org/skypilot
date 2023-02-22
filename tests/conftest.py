@@ -157,7 +157,8 @@ def generic_cloud(request) -> str:
 def pytest_sessionstart(session):
     from sky.clouds import aws
     from sky.clouds.service_catalog import common
-    aws_az_mapping_path = pathlib.Path(common.get_catalog_path('aws/az_mappings.csv'))
+    aws_az_mapping_path = pathlib.Path(
+        common.get_catalog_path('aws/az_mappings.csv'))
     aws_az_mapping_path.parent.mkdir(parents=True, exist_ok=True)
     aws_az_mapping_path.touch()
 
