@@ -151,4 +151,3 @@ def _generic_cloud(config) -> str:
 @pytest.fixture
 def generic_cloud(request) -> str:
     return _generic_cloud(request.config)
-
