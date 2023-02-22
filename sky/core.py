@@ -151,8 +151,7 @@ def cost_report(cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
 
     filtered_reports = []
     for cluster_report in cluster_reports:
-        cluster_report['total_cost'] = cost_utils.get_total_cost(
-            cluster_report)
+        cluster_report['total_cost'] = cost_utils.get_total_cost(cluster_report)
         if cluster_name is None:
             filtered_reports.append(cluster_report)
         elif cluster_report['name'] == cluster_name:

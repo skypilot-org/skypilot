@@ -485,8 +485,7 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
-@typing.overload
-def format_job_table(tasks: List[Dict[str, Any]],
+def format_job_table(jobs: List[Dict[str, Any]],
                      show_all: bool,
                      return_rows: Literal[False] = False,
                      max_jobs: Optional[int] = None) -> str:
@@ -668,8 +667,7 @@ def dump_spot_cost_report(split: bool) -> str:
     cluster_reports = cost_utils.aggregate_all_records(split)
 
     for cluster_report in cluster_reports:
-        cluster_report['total_cost'] = cost_utils.get_total_cost(
-            cluster_report)
+        cluster_report['total_cost'] = cost_utils.get_total_cost(cluster_report)
         launched_resources = cluster_report['resources']
 
         cluster_report['resources'] = f'{launched_resources}'
@@ -677,10 +675,12 @@ def dump_spot_cost_report(split: bool) -> str:
 
     return common_utils.encode_payload(cluster_reports)
 
+
 def load_spot_cost_report(payload: str) -> List[Dict[str, Any]]:
     """Load job costs from json string."""
     cost_report = common_utils.decode_payload(payload)
     return cost_report
+
 
 def format_cost_table(reports: List[Dict[str, Any]]) -> str:
     """Show all spot costs."""
@@ -714,6 +714,7 @@ def format_cost_table(reports: List[Dict[str, Any]]) -> str:
         cost_table.add_row(values)
 
     return str(cost_table)
+
 
 class SpotCodeGen:
     """Code generator for managed spot job utility functions.
@@ -792,7 +793,7 @@ class SpotCodeGen:
     @classmethod
     def get_cost_report(cls) -> str:
         code = [
-            f'spot_cost_table = spot_utils.dump_spot_cost_report(split={split})',
+            f'spot_cost_table=spot_utils.dump_spot_cost_report(split={split})',
             'print(spot_cost_table, flush=True)',
         ]
         return cls._build(code)

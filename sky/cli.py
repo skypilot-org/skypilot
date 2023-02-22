@@ -1789,12 +1789,10 @@ def cost_report(all: bool, cluster: str):  # pylint: disable=redefined-builtin
     - Clusters that were terminated/stopped on the cloud console.
     """
     if all and cluster is not None:
-            click.secho(
-                'Either specify --all or --cluster, not both',
-                fg='yellow')
-            return
+        click.secho('Either specify --all or --cluster, not both', fg='yellow')
+        return
     cluster_records = core.cost_report(cluster)
-    
+
     nonreserved_cluster_records = []
     reserved_clusters = dict()
     for cluster_record in cluster_records:

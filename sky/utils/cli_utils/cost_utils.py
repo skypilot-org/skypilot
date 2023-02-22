@@ -1,14 +1,8 @@
 """Utilities for sky cost report and sky spot cost."""
-from typing import Any, Callable, Dict, List, Optional
-import click
+from typing import Any, Dict, List
 import colorama
-
-from sky import backends
-from sky import spot
 from sky import global_user_state
-from sky.backends import backend_utils
-from sky.utils import common_utils
-from sky.utils import log_utils
+
 
 def get_cost_report(cluster_status):
     cost = cluster_status['total_cost']
@@ -17,6 +11,7 @@ def get_cost_report(cluster_status):
         return '-'
 
     return f'${cost:.3f}'
+
 
 def get_status_for_cost_report(cluster_status):
     status = None
@@ -27,6 +22,7 @@ def get_status_for_cost_report(cluster_status):
         return f'{colorama.Style.DIM}{"TERMINATED"}{colorama.Style.RESET_ALL}'
     return status.colored_str()
 
+
 def get_resources_for_cost_report(cluster_status):
     launched_nodes = cluster_status['num_nodes']
     launched_resources = cluster_status['resources']
@@ -36,13 +32,13 @@ def get_resources_for_cost_report(cluster_status):
                      f'{launched_resource_str}')
 
     return resources_str
-    
 
-def aggregate_all_records(split: bool) -> List[Optional[Dict[str, Any]]]:
+
+def aggregate_all_records(split: bool) -> List[Dict[str, Any]]:
     rows = global_user_state.get_distinct_cluster_names_from_history()
-    records = global_user_state.get_clusters_from_history();
+    records = global_user_state.get_clusters_from_history()
 
-    agg_records = []
+    agg_records: List[Dict[str, Any]] = []
 
     for (cluster_name,) in rows:
         if split:
@@ -52,8 +48,10 @@ def aggregate_all_records(split: bool) -> List[Optional[Dict[str, Any]]]:
 
     return agg_records
 
-def aggregate_records_by_name(cluster_name: str, records: List[Any]) -> Optional[Dict[str, Any]]:
-    agg_record = {}
+
+def aggregate_records_by_name(cluster_name: str,
+                              records: List[Any]) -> Dict[str, Any]:
+    agg_record: Dict[str, Any] = {}
 
     for record in records:
 
@@ -77,10 +75,10 @@ def aggregate_records_by_name(cluster_name: str, records: List[Any]) -> Optional
     return agg_record
 
 
-def get_split_view_records_by_name(
-        cluster_name: str, records: List[Any]) -> Optional[Dict[str, Any]]:
+def get_split_view_records_by_name(cluster_name: str,
+                                   records: List[Any]) -> List[Dict[str, Any]]:
 
-    agg_records = []
+    agg_records: List[Dict[str, Any]] = []
 
     for record in records:
 
@@ -101,7 +99,8 @@ def get_split_view_records_by_name(
 
     return agg_records
 
-def get_total_cost(cluster_report: dict) -> float:
+
+def get_total_cost(cluster_report: Dict[str, Any]) -> float:
     duration = cluster_report['duration']
     launched_nodes = cluster_report['num_nodes']
     launched_resources = cluster_report['resources']
