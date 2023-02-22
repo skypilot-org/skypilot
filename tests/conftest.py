@@ -160,10 +160,9 @@ def pytest_sessionstart(session):
     aws_az_mapping_path = pathlib.Path(
         common.get_catalog_path('aws/az_mappings.csv'))
     aws_az_mapping_path.parent.mkdir(parents=True, exist_ok=True)
-    aws_az_mapping_path.touch()
 
     aws_enabled = aws.AWS().check_credentials()[0]
-    if not aws_enabled and not os.path.exists(aws_az_mapping_path):
+    if not aws_enabled and not aws_az_mapping_path.exists():
         # If we don't have AWS access, create a dummy file
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
             f.write(
@@ -222,4 +221,5 @@ def pytest_sessionstart(session):
                 ap-northeast-1c,apne1-az1
                 ap-northeast-1d,apne1-az2
                 """))
+        aws_az_mapping_path.touch()
         os.replace(f.name, str(aws_az_mapping_path))
