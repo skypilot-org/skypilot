@@ -219,3 +219,11 @@ def pytest_sessionstart(session):
                 ap-northeast-1d,apne1-az2
             """))
         os.replace(f.name, aws_az_mapping_path)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    from sky.clouds.service_catalog import common
+    aws_az_mapping_path = common.get_catalog_path('aws/az_mappings.csv')
+    if os.path.exists(aws_az_mapping_path):
+        # Remove the dummy file
+        os.remove(aws_az_mapping_path)
