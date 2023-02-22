@@ -502,13 +502,6 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
         job['status'] = spot_state.SpotStatus(job['status'])
     return jobs
 
-
-def load_spot_cost_report(payload: str) -> List[Dict[str, Any]]:
-    """Load job costs from json string."""
-    cost_report = common_utils.decode_payload(payload)
-    return cost_report
-
-
 def format_job_table(jobs: List[Dict[str, Any]],
                      show_all: bool,
                      return_rows: Literal[False] = False,
@@ -754,7 +747,6 @@ def format_cost_table(reports: List[Dict[str, Any]]) -> str:
         cost_table.add_row(values)
 
     return str(cost_table)
-
 
 class SpotCodeGen:
     """Code generator for managed spot job utility functions.

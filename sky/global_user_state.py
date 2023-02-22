@@ -384,7 +384,16 @@ def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
     if count == 0:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
+def get_distinct_cluster_names_from_history() -> List[Optional[str]]:
+    rows = _DB.cursor.execute('SELECT DISTINCT name from cluster_history').fetchall()
+    return rows
 
+def get_cluster_from_history_by_name(cluster_name: str) -> List[Optional[Any]]:
+    rows = _DB.cursor.execute('SELECT * from cluster_history WHERE name=(?)',
+                              (cluster_name,)).fetchall()    
+    return rows
+
+<<<<<<< HEAD
 <<<<<<< HEAD
 def get_distinct_cluster_names_from_history() -> List[Optional[str]]:
     rows = _DB.cursor.execute(
@@ -408,6 +417,18 @@ def aggregate_all_records() -> List[Optional[Dict[str, Any]]]:
             records[cluster_name] = record
 
     return list(records.values())
+=======
+def aggregate_all_records(split: bool) -> List[Optional[Dict[str, Any]]]:
+    rows = _DB.cursor.execute('SELECT DISTINCT name from cluster_history').fetchall()
+
+    records = []
+
+    for (cluster_name,) in rows:
+        if split:
+            records += get_split_view_records_by_name(cluster_name)
+        else:
+            records.append(aggregate_records_by_name(cluster_name))
+>>>>>>> 21bad003 (address almost all PR comments)
 
 
 def aggregate_records_by_name(cluster_name: str) -> Optional[Dict[str, Any]]:

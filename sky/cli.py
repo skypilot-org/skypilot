@@ -1762,6 +1762,7 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
               is_flag=True,
               required=False,
               help='Show all information in full.')
+<<<<<<< HEAD
 @click.option('--condensed',
               '-c',
               default=False,
@@ -1775,6 +1776,16 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
 def cost_report(all: bool, condensed: bool, clusters: List[str]):  # pylint: disable=redefined-builtin
+=======
+@click.option('--cluster',
+              '-c',
+              default=None,
+              type=str,
+              required=False,
+              help='Specify a cluster name to report cost for.')
+@usage_lib.entrypoint
+def cost_report(all: bool, cluster: str):  # pylint: disable=redefined-builtin
+>>>>>>> 21bad003 (address almost all PR comments)
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show estimated costs for launched clusters.
 
@@ -1793,6 +1804,7 @@ def cost_report(all: bool, condensed: bool, clusters: List[str]):  # pylint: dis
 
     - Clusters that were terminated/stopped on the cloud console.
     """
+<<<<<<< HEAD
     if all and len(clusters) > 0:
         click.secho('Either specify --all or --cluster, not both', fg='yellow')
         return
@@ -1803,6 +1815,20 @@ def cost_report(all: bool, condensed: bool, clusters: List[str]):  # pylint: dis
         return
     cluster_records = core.cost_report(clusters, condensed)
 
+=======
+<<<<<<< HEAD
+    cluster_records = core.cost_report()
+=======
+
+    if all and cluster is not None:
+            click.secho(
+                'Either specify --all or --cluster, not both',
+                fg='yellow')
+            return
+    cluster_records = core.cost_report(cluster)
+    
+>>>>>>> 2bad0924 (address almost all PR comments)
+>>>>>>> 21bad003 (address almost all PR comments)
     nonreserved_cluster_records = []
     reserved_clusters = dict()
     for cluster_record in cluster_records:

@@ -83,8 +83,6 @@ def _get_non_condensed_records_by_name(
     agg_records: List[Dict[str, Any]] = []
     total_duration = 0
 
-    total_duration = 0
-
     for record in records:
 
         if record['name'] == cluster_name:
