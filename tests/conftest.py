@@ -161,6 +161,7 @@ def pytest_sessionstart(session):
         try:
             # Try to fetch the AZ mapping from AWS (if we have AWS access)
             from sky.clouds.service_catalog import aws_catalog
+            aws_catalog._apply_az_mapping()
         except:
             # If we don't have AWS access, create a dummy file
             with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
