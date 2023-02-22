@@ -32,7 +32,7 @@ _PULL_FREQUENCY_HOURS = 7
 
 # Flag to indicate whether the availability zone mapping has been applied.
 _az_mapping_applied = False
-_apply_az_mapping_lock = threading.RLock()
+_apply_az_mapping_lock = threading.Lock()
 
 _df = common.read_catalog('aws/vms.csv',
                           pull_frequency_hours=_PULL_FREQUENCY_HOURS)
@@ -79,8 +79,8 @@ def _apply_az_mapping_decorator(func):
             global _az_mapping_applied
             if not _az_mapping_applied:
                 global _df
-                _df = _apply_az_mapping(_df)
                 _az_mapping_applied = True
+                _df = _apply_az_mapping(_df)
         return func(*args, **kwargs)
 
     return wrapper
@@ -90,12 +90,23 @@ def _apply_az_mapping_decorator(func):
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
 
-
 @_apply_az_mapping_decorator
+def _validate_region_zone(region: Optional[str],
+                          zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    return common.validate_region_zone_impl('aws', _df, region, zone)
+
+def _validate_region(region: Optional[str]) -> Optional[str]:
+    # When zone is not specified, we don't need to apply the AZ mapping.
+    # This is useful for `sky show-gpus` where user may not have access to
+    # AWS.
+    return common.validate_region_zone_impl('aws', _df, region, None)
+
 def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    return common.validate_region_zone_impl('aws', _df, region, zone)
+    if zone is None:
+        return _validate_region(region)
+    return _validate_region_zone(region, zone)
 
 
 @_apply_az_mapping_decorator
