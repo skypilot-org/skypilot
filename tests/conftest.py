@@ -158,7 +158,7 @@ def pytest_sessionstart(session):
     from sky.clouds.service_catalog import common
     aws_az_mapping_path = common.get_catalog_path('aws/az_mappings.csv')
 
-    aws_enabled = aws.AWS().check_credentials()
+    aws_enabled = aws.AWS().check_credentials()[0]
     if not aws_enabled and not os.path.exists(aws_az_mapping_path):
         # If we don't have AWS access, create a dummy file
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
@@ -219,11 +219,3 @@ def pytest_sessionstart(session):
                 ap-northeast-1d,apne1-az2
             """))
         os.replace(f.name, aws_az_mapping_path)
-
-
-def pytest_sessionfinish(session, exitstatus):
-    from sky.clouds.service_catalog import common
-    aws_az_mapping_path = common.get_catalog_path('aws/az_mappings.csv')
-    if os.path.exists(aws_az_mapping_path):
-        # Remove the dummy file
-        os.remove(aws_az_mapping_path)
