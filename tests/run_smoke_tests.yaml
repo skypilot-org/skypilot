@@ -1,0 +1,19 @@
+workdir: .
+
+setup: |
+  { docker run -d --name sandbox \
+            -v $HOME/.aws:/root/.aws \
+            -v $HOME/.azure:/root/.azure \
+            -v $HOME/.config:/root/.config \
+            -v $HOME/sky_workdir:/root/skypilot:rw \
+            -v $HOME/.sky:/root/.sky:rw \
+            -v $HOME/.ssh:/root/.ssh:rw \
+            continuumio/miniconda3 \
+            sleep infinity; } || true
+  docker exec sandbox /bin/bash -c "apt update; apt install -y vim rsync; echo 'export SKYPILOT_DEV=1' >> ~/.bashrc && cd /root/skypilot && pip install -r requirements-dev.txt && pip install -e .[all] && conda install -y -c conda-forge google-cloud-sdk"
+
+run: |
+  # docker exec sandbox /bin/bash -c "cd /root/skypilot && pytest tests/test_smoke.py --terminate-on-failure"
+  docker exec sandbox /bin/bash -c "cd /root/skypilot && pytest tests/test_smoke.py --terminate-on-failure --lf"
+  # docker exec sandbox /bin/bash -c "cd /root/skypilot && tests/backward_compatibility_tests.sh"
+  # docker exec sandbox /bin/bash -c "ps aux | grep "sky|pytest" | awk '{print $2}' | xargs kill; export SKYPILOT_DEV=1 sky down -a"
