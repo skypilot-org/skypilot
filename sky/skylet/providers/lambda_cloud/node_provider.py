@@ -93,7 +93,7 @@ class LambdaNodeProvider(NodeProvider):
     def _list_instances_in_cluster(self) -> Dict[str, Any]:
         """List running instances in cluster."""
         vms = self.lambda_client.list_instances()
-        return [node for node in vms if node['name'] == self.cluster_name]
+        return [node for node in vms if node.get('name') == self.cluster_name]
 
     @synchronized
     def _get_filtered_nodes(self, tag_filters: Dict[str,

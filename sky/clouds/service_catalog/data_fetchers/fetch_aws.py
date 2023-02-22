@@ -85,6 +85,20 @@ def _get_instance_types(region: str) -> pd.DataFrame:
 
 
 @ray.remote
+def _get_instance_type_offerings(region: str) -> pd.DataFrame:
+    client = aws.client('ec2', region_name=region)
+    paginator = client.get_paginator('describe_instance_type_offerings')
+    items = []
+    for i, resp in enumerate(
+            paginator.paginate(LocationType='availability-zone')):
+        print(f'{region} getting instance type offerings page {i}')
+        items += resp['InstanceTypeOfferings']
+
+    return pd.DataFrame(items).rename(
+        columns={'Location': 'AvailabilityZoneName'})
+
+
+@ray.remote
 def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
     client = aws.client('ec2', region_name=region)
     zones = []
@@ -164,8 +178,9 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         if zone_df is None:
             raise RuntimeError(f'No access to region {region}')
 
-        df, pricing_df, spot_pricing_df = ray.get([
+        df, offering_df, pricing_df, spot_pricing_df = ray.get([
             _get_instance_types.remote(region),
+            _get_instance_type_offerings.remote(region),
             _get_pricing_table.remote(region),
             _get_spot_pricing_table.remote(region),
         ])
@@ -213,9 +228,12 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         # so we need to merge the two dataframes.
         df = df.merge(pricing_df, on=['InstanceType'], how='outer')
         df['Region'] = region
-        # Cartesian product of instance types and availability zones, so that
-        # we can join the spot pricing table per instance type and zone.
-        df = df.merge(pd.DataFrame(zone_df), how='cross')
+        # An instance type may not be available in all zones. We need to
+        # merge the zone info to the instance type info.
+        df = df.merge(offering_df, on=['InstanceType'], how='inner')
+        # Add the mapping from zone name to zone id, as the zone id is
+        # the real identifier for a zone across different users.
+        df = df.merge(zone_df, on=['AvailabilityZoneName'], how='inner')
 
         # Add spot price column, by joining the spot pricing table.
         df = df.merge(spot_pricing_df,

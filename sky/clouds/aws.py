@@ -144,22 +144,33 @@ class AWS(clouds.Cloud):
         return regions
 
     @classmethod
-    def region_zones_provision_loop(
+    def zones_provision_loop(
         cls,
         *,
+        region: str,
+        num_nodes: int,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+    ) -> Iterator[List[clouds.Zone]]:
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
-                                            region=None,
+                                            region=region,
                                             zone=None)
-        for region in regions:
-            yield region, region.zones
+        for r in regions:
+            assert r.zones is not None, r
+            if num_nodes > 1:
+                # When num_nodes > 1, we shouldn't pass a list of zones to the
+                # AWS NodeProvider to try, because it may then place the nodes of
+                # the same cluster in different zones. This is an artifact of the
+                # current AWS NodeProvider implementation.
+                for z in r.zones:
+                    yield [z]
+            else:
+                yield r.zones
 
     @classmethod
     def _get_default_ami(cls, region_name: str, instance_type: str) -> str:
@@ -323,9 +334,7 @@ class AWS(clouds.Cloud):
                 'Set either both or neither for: region, zones.')
             region = self._get_default_region()
             zones = region.zones
-        else:
-            assert zones is not None, (
-                'Set either both or neither for: region, zones.')
+        assert zones is not None, (region, zones)
 
         region_name = region.name
         zone_names = [zone.name for zone in zones]
