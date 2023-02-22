@@ -1788,6 +1788,7 @@ def cost_report(all: bool, cluster: str):  # pylint: disable=redefined-builtin
 
     - Clusters that were terminated/stopped on the cloud console.
     """
+
     if all and cluster is not None:
         click.secho('Either specify --all or --cluster, not both', fg='yellow')
         return
