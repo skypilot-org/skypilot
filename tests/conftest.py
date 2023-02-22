@@ -1,4 +1,5 @@
 import os
+import pathlib
 import pytest
 import tempfile
 import textwrap
@@ -156,7 +157,9 @@ def generic_cloud(request) -> str:
 def pytest_sessionstart(session):
     from sky.clouds import aws
     from sky.clouds.service_catalog import common
-    aws_az_mapping_path = common.get_catalog_path('aws/az_mappings.csv')
+    aws_az_mapping_path = pathlib.Path(common.get_catalog_path('aws/az_mappings.csv'))
+    aws_az_mapping_path.parent.mkdir(parents=True, exist_ok=True)
+    aws_az_mapping_path.touch()
 
     aws_enabled = aws.AWS().check_credentials()[0]
     if not aws_enabled and not os.path.exists(aws_az_mapping_path):
@@ -218,4 +221,4 @@ def pytest_sessionstart(session):
                 ap-northeast-1c,apne1-az1
                 ap-northeast-1d,apne1-az2
             """))
-        os.replace(f.name, aws_az_mapping_path)
+        os.replace(f.name, str(aws_az_mapping_path))
