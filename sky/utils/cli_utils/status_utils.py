@@ -11,6 +11,7 @@ from sky import status_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils.cli_utils import cost_utils
 
 _COMMAND_TRUNC_LENGTH = 25
 NUM_COST_REPORT_LINES = 5
@@ -151,10 +152,10 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
         StatusColumn('LAUNCHED', _get_launched),
         StatusColumn('DURATION', _get_duration, trunc_length=20),
         StatusColumn('RESOURCES',
-                     _get_resources_for_cost_report,
+                     cost_utils.get_resources_for_cost_report,
                      trunc_length=70 if not show_all else 0),
         StatusColumn('STATUS',
-                     _get_status_for_cost_report,
+                     cost_utils.get_status_for_cost_report,
                      show_by_default=True),
         StatusColumn('COST/hr',
                      _get_price_for_cost_report,

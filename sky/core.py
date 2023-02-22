@@ -23,6 +23,7 @@ from sky.utils import log_utils
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import subprocess_utils
+from sky.utils.cli_utils import cost_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -110,7 +111,7 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
 
 
 @usage_lib.entrypoint
-def cost_report(cluster_name: str = None) -> List[Dict[str, Any]]:
+def cost_report(cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
@@ -142,17 +143,22 @@ def cost_report(cluster_name: str = None) -> List[Dict[str, Any]]:
         cluster.
     """
 
-    # aqgregate records for spot controller
+    # aggregate records for spot controller
     if cluster_name is not None:
-        cluster_reports = global_user_state.aggregate_all_records(split=False)
+        cluster_reports = cost_utils.aggregate_all_records(split=False)
     else:
         cluster_reports = global_user_state.get_clusters_from_history()
 
+    filtered_reports = []
     for cluster_report in cluster_reports:
         cluster_report['total_cost'] = global_user_state.get_total_cost(
             cluster_report)
+        if cluster_name is None:
+            filtered_reports.append(cluster_report)
+        elif cluster_report['name'] == cluster_name:
+            filtered_reports.append(cluster_report)
 
-    return cluster_reports
+    return filtered_reports
 
 
 def _start(

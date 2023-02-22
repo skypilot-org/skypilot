@@ -26,6 +26,7 @@ from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.spot import spot_state
 from sky.utils import subprocess_utils
+from sky.utils.cli_utils import cost_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag as dag_lib
@@ -518,7 +519,6 @@ def format_job_table(
       list of "rows" (each of which is a list of str).
     """
 
-
     columns = [
         'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
         'JOB DURATION', '#RECOVERIES', 'STATUS'
@@ -664,6 +664,24 @@ def load_spot_cost_report(payload: str) -> List[Dict[str, Any]]:
     cost_report = common_utils.decode_payload(payload)
     return cost_report
 
+def dump_spot_cost_report(split: bool) -> str:
+    cluster_reports = cost_utils.aggregate_all_records(split)
+
+    for cluster_report in cluster_reports:
+        cluster_report['total_cost'] = global_user_state.get_total_cost(
+            cluster_report)
+        launched_resources = cluster_report['resources']
+
+        cluster_report['resources'] = f'{launched_resources}'
+        cluster_report['region'] = launched_resources.region
+
+    return common_utils.encode_payload(cluster_reports)
+
+def load_spot_cost_report(payload: str) -> List[Dict[str, Any]]:
+    """Load job costs from json string."""
+    cost_report = common_utils.decode_payload(payload)
+    return cost_report
+
 def format_cost_table(reports: List[Dict[str, Any]]) -> str:
     """Show all spot costs."""
     columns = [
@@ -696,21 +714,6 @@ def format_cost_table(reports: List[Dict[str, Any]]) -> str:
         cost_table.add_row(values)
 
     return str(cost_table)
-
-
-def spot_cost_report(split: bool) -> str:
-    cluster_reports = global_user_state.aggregate_all_records(split)
-
-    for cluster_report in cluster_reports:
-        cluster_report['total_cost'] = global_user_state.get_total_cost(
-            cluster_report)
-        launched_resources = cluster_report['resources']
-
-        cluster_report['resources'] = f'{launched_resources}'
-        cluster_report['region'] = launched_resources.region
-
-    return common_utils.encode_payload(cluster_reports)
-
 
 class SpotCodeGen:
     """Code generator for managed spot job utility functions.
@@ -789,7 +792,7 @@ class SpotCodeGen:
     @classmethod
     def get_cost_report(cls) -> str:
         code = [
-            f'spot_cost_table = spot_utils.spot_cost_report(split={split})',
+            f'spot_cost_table = spot_utils.dump_spot_cost_report(split={split})',
             'print(spot_cost_table, flush=True)',
         ]
         return cls._build(code)

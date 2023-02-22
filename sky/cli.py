@@ -1762,8 +1762,14 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
               is_flag=True,
               required=False,
               help='Show all information in full.')
+@click.option('--cluster',
+              '-c',
+              default=None,
+              type=str,
+              required=False,
+              help='Specify a cluster name to report cost for.')
 @usage_lib.entrypoint
-def cost_report(all: bool):  # pylint: disable=redefined-builtin
+def cost_report(all: bool, cluster: str):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show estimated costs for launched clusters.
 
@@ -1782,8 +1788,13 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 
     - Clusters that were terminated/stopped on the cloud console.
     """
-    cluster_records = core.cost_report()
-
+    if all and cluster is not None:
+            click.secho(
+                'Either specify --all or --cluster, not both',
+                fg='yellow')
+            return
+    cluster_records = core.cost_report(cluster)
+    
     nonreserved_cluster_records = []
     reserved_clusters = dict()
     for cluster_record in cluster_records:
@@ -3652,7 +3663,7 @@ _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 def spot_cost_report(refresh: bool, split: bool):
     """Show cost report of managed spot jobs.
     """
-    click.secho('Fetching managed spot job statuses...', fg='yellow')
+    click.secho('Fetching managed spot job costs...', fg='yellow')
     no_costs_found_str = '  No job costs found.'
     try:
         cost_table = core.spot_cost_report(refresh, split)
@@ -3665,8 +3676,7 @@ def spot_cost_report(refresh: bool, split: bool):
     else:
         cost_table = spot_lib.format_cost_table(cost_table)
 
-    in_progress_only_hint = ' (showing in-progress jobs only)'
-    click.echo(f'Managed spot jobs{in_progress_only_hint}:\n{cost_table}')
+    click.echo(f'Managed spot jobs:\n{cost_table}')
 
 
 @spot.command('cancel', cls=_DocumentedCodeCommand)
