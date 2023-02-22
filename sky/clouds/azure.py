@@ -173,6 +173,7 @@ class Azure(clouds.Cloud):
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         del accelerators  # unused
+        assert zone is None, 'Azure does not support zones'
         if instance_type is None:
             # Fall back to default regions
             regions = cls.regions()
@@ -182,27 +183,27 @@ class Azure(clouds.Cloud):
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
-        if zone is not None:
-            for r in regions:
-                r.set_zones([z for z in r.zones if z.name == zone])
-            regions = [r for r in regions if r.zones]
         return regions
 
     @classmethod
-    def region_zones_provision_loop(
+    def zones_provision_loop(
         cls,
         *,
+        region: str,
+        num_nodes: int,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+    ) -> Iterator[None]:
+        del num_nodes  # unused
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
-                                            region=None,
+                                            region=region,
                                             zone=None)
-        for region in regions:
-            yield region, region.zones
+        for r in regions:
+            assert r.zones is None, r
+            yield r.zones
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
