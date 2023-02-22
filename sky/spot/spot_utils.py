@@ -668,7 +668,7 @@ def dump_spot_cost_report(split: bool) -> str:
     cluster_reports = cost_utils.aggregate_all_records(split)
 
     for cluster_report in cluster_reports:
-        cluster_report['total_cost'] = global_user_state.get_total_cost(
+        cluster_report['total_cost'] = cost_utils.get_total_cost(
             cluster_report)
         launched_resources = cluster_report['resources']
 
