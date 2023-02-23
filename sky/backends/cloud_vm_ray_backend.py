@@ -317,6 +317,7 @@ class RayCodeGen:
                 print('INFO: All task resources reserved.',
                       file=sys.stderr,
                       flush=True)
+                job_lib.scheduler.schedule_step()
                 """)
         ]
 
@@ -331,7 +332,6 @@ class RayCodeGen:
                 # We unset it so that user setup command may properly use this env var.
                 setup_cmd = 'unset CUDA_VISIBLE_DEVICES; ' + setup_cmd
                 job_lib.set_status({job_id!r}, job_lib.JobStatus.SETTING_UP)
-                print({_CTRL_C_TIP_MESSAGE!r}, file=sys.stderr, flush=True)
                 total_num_nodes = len(ray.nodes())
                 setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
                 setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
@@ -365,7 +365,6 @@ class RayCodeGen:
         self._code += [
             textwrap.dedent(f"""\
                 job_lib.set_job_started({self.job_id!r})
-                job_lib.scheduler.schedule_step()
                 """),
         ]
 
@@ -2454,9 +2453,8 @@ class CloudVmRayBackend(backends.Backend):
                 '--no-wait '
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
-            mkdir_code = (
-                f'{cd} && mkdir -p {remote_log_dir} && touch '
-                f'{remote_log_path} && echo START > {remote_log_path} 2>&1')
+            mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} &&'
+                          f'echo START > {remote_log_path} 2>&1')
             code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
             job_submit_cmd = mkdir_code + ' && ' + code
 

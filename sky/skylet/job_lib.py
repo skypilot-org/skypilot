@@ -92,15 +92,15 @@ class JobStatus(enum.Enum):
     # In the 'jobs' table, the `submitted_at` column will be set to the current
     # time, when the job is firstly created (in the INIT state).
     INIT = 'INIT'
+    # The job is waiting for the required resources. (`ray job status`
+    # shows RUNNING as the generated ray program has started, but blocked
+    # by the placement constraints.)
+    PENDING = 'PENDING'
     # Running the user's setup script (only in effect if --detach-setup is
     # set). Our update_job_status() can temporarily (for a short period) set
     # the status to SETTING_UP, if the generated ray program has not set
     # the status to PENDING or RUNNING yet.
     SETTING_UP = 'SETTING_UP'
-    # The job is waiting for the required resources. (`ray job status`
-    # shows RUNNING as the generated ray program has started, but blocked
-    # by the placement constraints.)
-    PENDING = 'PENDING'
     # The job is running.
     # In the 'jobs' table, the `start_at` column will be set to the current
     # time, when the job is firstly transitioned to RUNNING.
@@ -140,8 +140,9 @@ class JobStatus(enum.Enum):
 # correctly updated.
 # TODO(zhwu): This number should be tuned based on heuristics.
 _SUBMITTED_GAP_SECONDS = 60
+_PENDING_SUBMIT_TIMEOUT = 5
 
-_PRE_RESOURCE_STATUSES = [JobStatus.PENDING, JobStatus.SETTING_UP]
+_PRE_RESOURCE_STATUSES = [JobStatus.PENDING]
 
 
 class JobScheduler:
@@ -192,6 +193,9 @@ class JobScheduler:
                 self._run_job(job_id, run_cmd)
                 return
 
+    def _get_jobs(self) -> Tuple:
+        raise NotImplementedError
+
 
 class FIFOScheduler(JobScheduler):
     """First in first out job scheduler"""
@@ -229,8 +233,8 @@ _RAY_TO_JOB_STATUS_MAP = {
     # (ray's status becomes RUNNING), i.e. it will be very rare that the job
     # will be set to SETTING_UP by the update_job_status, as our generated
     # ray program will set the status to PENDING immediately.
-    'PENDING': JobStatus.INIT,
-    'RUNNING': JobStatus.SETTING_UP,
+    'PENDING': JobStatus.PENDING,
+    'RUNNING': JobStatus.PENDING,
     'SUCCEEDED': JobStatus.SUCCEEDED,
     'FAILED': JobStatus.FAILED,
     'STOPPED': JobStatus.CANCELLED,
@@ -506,10 +510,14 @@ def update_job_status(job_owner: str,
             ray_status = job_details[ray_job_id].status
             job_statuses[i] = _RAY_TO_JOB_STATUS_MAP[ray_status]
         if job_id in pending_jobs:
+            # Gives a 5 second timeout between job being submit from the
+            # pending queue until appearing in ray jobs
             if pending_jobs[job_id]['submit'] > 0 and pending_jobs[job_id][
-                    'submit'] < time.time() - 5:
+                    'submit'] < time.time() - _PENDING_SUBMIT_TIMEOUT:
                 continue
             if pending_jobs[job_id]['created_time'] < psutil.boot_time():
+                # The job is stale as it is created before the instance
+                # is created.
                 job_statuses[i] = JobStatus.FAILED
             else:
                 job_statuses[i] = JobStatus.PENDING
