@@ -1,0 +1,28 @@
+{
+  "blockStorage": {
+    "blockStorageName": "CSPApiTestGinBS001",
+    "diskSize": 100,
+    "encryptEnabled": false,
+    "productId": "PRODUCT-sRlJ34iBr9hOxN9J5PrQxo"
+  },
+  "contractId": "PRODUCT-ZJsOdXCVrNiHZdyAhbNIli",
+  "deletionProtectionEnabled": false,
+  "dnsEnabled": false,
+  "imageId": "IMAGE-6MYX_91Vt4dGi_aQ2pfRRc",
+  "nic": {
+    "internalIpAddress": "192.168.0.51",
+    "natEnabled": true,
+    "subnetId": "SUBNET-JbvLZkUZtclSiOpno2Yuwm"
+  },
+  "osAdmin": {
+    "osUserId": "root",
+    "osUserPassword": "example123$"
+  },
+  "productGroupId": "PRODUCTGROUP-WutIQNrAsShJaJtocIdgfi",
+  "securityGroupIds": [
+    "FIREWALL_SECURITY_GROUP--PbvncmJrVnPOiiadDcx7e"
+  ],
+  "serverTypeId": "PRODUCT-0n8ZLdJosLeG9_0q2VaZsn",
+  "serviceZoneId": "ZONE-lxu6F_ntqxeIMaZZwh2I-p",
+  "virtualServerName": "gin230223051"
+}

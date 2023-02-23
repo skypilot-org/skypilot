@@ -106,7 +106,7 @@ _JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
 # (so import would fail).
 _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
     pathlib.Path(sky.__file__).resolve().parent / 'backends' /
-    'monkey_patches' / 'ray_up_with_monkey_patched_hash_launch_conf.py')
+    'monkey_patches' / 'monkey_patch_ray_up.py')
 
 
 def _get_cluster_config_template(cloud):

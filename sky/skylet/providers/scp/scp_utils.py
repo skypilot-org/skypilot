@@ -11,7 +11,7 @@ from typing import Any, Dict, List
 
 CREDENTIALS_PATH = '~/.scp/scp_credential'
 API_ENDPOINT = 'https://openapi.samsungsdscloud.com/virtual-server'
-TEMP_VM_JSON_PATH = '/tmp/tmp_vm_body.json'
+TEMP_VM_JSON_PATH = '/tmp/json/tmp_vm_body.json'
 
 
 class SCPError(Exception):
@@ -184,7 +184,7 @@ class SCPClient:
         return response.json().get('contents', [])
 
     def set_ssh_key(self, name: str, pub_key: str) -> None:
-        """Set ssh key."""r
+        """Set ssh key."""
         data = json.dumps({
             'name': name,
             'public_key': pub_key
