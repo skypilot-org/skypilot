@@ -2074,8 +2074,8 @@ class CloudVmRayBackend(backends.Backend):
         cluster.
 
         Raises:
-            exceptions.ResourcesMismatchError: If the resources requested by the
-                task are larger than the existing cluster.
+            exceptions.ResourcesMismatchError: If the resources in the task
+                does not match the existing cluster.
         """
         assert len(task.resources) == 1, task.resources
 
