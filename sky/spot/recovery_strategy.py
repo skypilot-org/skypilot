@@ -250,8 +250,7 @@ class StrategyExecutor:
                     exceptions.NotSupportedError,
                     exceptions.CloudUserIdentityError) as e:
                 if raise_on_failure:
-                        raise exceptions.ProvisionPrechecksError(
-                            reasons=[e])
+                    raise exceptions.ProvisionPrechecksError(reasons=[e])
                 return None
             except exceptions.ResourcesUnavailableError as e:
                 # This is raised when the launch fails due to prechecks or
