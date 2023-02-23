@@ -235,7 +235,8 @@ class Lambda(clouds.Cloud):
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         try:
             lambda_utils.LambdaCloudClient().list_instances()
         except (AssertionError, KeyError, lambda_utils.LambdaCloudError):
@@ -253,7 +254,8 @@ class Lambda(clouds.Cloud):
             for filename in _CREDENTIAL_FILES
         }
 
-    def get_current_user_identity(self) -> Optional[str]:
+    @classmethod
+    def get_current_user_identity(cls) -> Optional[str]:
         # TODO(ewzeng): Implement get_current_user_identity for Lambda
         return None
 

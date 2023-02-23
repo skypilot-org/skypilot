@@ -6,6 +6,7 @@ instance types and pricing information for AWS.
 import colorama
 import hashlib
 import os
+import threading
 import typing
 from typing import Dict, List, Optional, Tuple
 
@@ -14,6 +15,7 @@ import pandas as pd
 from sky import sky_logging
 from sky.clouds import aws
 from sky.clouds.service_catalog import common
+from sky.clouds.service_catalog import config
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -31,8 +33,11 @@ _DEFAULT_NUM_VCPUS = 8
 # skypilot-catalog/.github/workflows/update-aws-catalog.yml
 _PULL_FREQUENCY_HOURS = 7
 
-_df = common.read_catalog('aws/vms.csv',
-                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+_default_df = common.read_catalog('aws/vms.csv',
+                                  pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+_user_df = None
+_apply_az_mapping_lock = threading.Lock()
+
 _image_df = common.read_catalog('aws/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
@@ -54,35 +59,23 @@ def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
         A dataframe with column 'AvailabilityZone' that's correctly replaced
         with the zone name (e.g. us-east-1a).
     """
-    aws_enabled, _ = aws.AWS().check_credentials()
-    if aws_enabled:
-        user_identity = aws.AWS().get_current_user_identity()
-        assert user_identity is not None, 'user_identity is None'
-        aws_user_hash = hashlib.md5(user_identity.encode()).hexdigest()[:8]
-    else:
-        aws_user_hash = 'default'
+    # The caller should guarantee that the aws credentials are valid.
+    user_identity = aws.AWS.get_current_user_identity()
+    assert user_identity is not None, 'user_identity is None'
+    aws_user_hash = hashlib.md5(user_identity.encode()).hexdigest()[:8]
 
     az_mapping_path = common.get_catalog_path(
         f'aws/az_mappings-{aws_user_hash}.csv')
     if not os.path.exists(az_mapping_path):
-        if aws_enabled:
-            # Fetch az mapping from AWS.
-            # pylint: disable=import-outside-toplevel
-            import ray
-            from sky.clouds.service_catalog.data_fetchers import fetch_aws
-            logger.info(f'{colorama.Style.DIM}Fetching availability zones '
-                        f'mapping for AWS...{colorama.Style.RESET_ALL}')
-            with ux_utils.suppress_output():
-                ray.init()
-            az_mappings = fetch_aws.fetch_availability_zone_mappings()
-        else:
-            logger.debug('Failed to fetch availability zone mappings (using '
-                         'default mapping)')
-            dummy_az_name = _df.rename(
-                columns={'AvailabilityZone': 'AvailabilityZoneName'
-                        })['AvailabilityZoneName']
-            az_mappings = pd.concat([_df['AvailabilityZone'], dummy_az_name],
-                                    axis=1)
+        # Fetch az mapping from AWS.
+        # pylint: disable=import-outside-toplevel
+        import ray
+        from sky.clouds.service_catalog.data_fetchers import fetch_aws
+        logger.info(f'{colorama.Style.DIM}Fetching availability zones '
+                    f'mapping for AWS...{colorama.Style.RESET_ALL}')
+        with ux_utils.suppress_output():
+            ray.init()
+        az_mappings = fetch_aws.fetch_availability_zone_mappings()
         az_mappings.to_csv(az_mapping_path, index=False)
     else:
         az_mappings = pd.read_csv(az_mapping_path)
@@ -95,50 +88,60 @@ def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-_df = _apply_az_mapping(_df)
+def _get_df() -> pd.DataFrame:
+    if config.get_use_default_catalog():
+        return _default_df
+    else:
+        global _user_df
+        with _apply_az_mapping_lock:
+            if _user_df is None:
+                _user_df = _apply_az_mapping(_default_df)
+        return _user_df
 
 
 def instance_type_exists(instance_type: str) -> bool:
-    return common.instance_type_exists_impl(_df, instance_type)
+    return common.instance_type_exists_impl(_get_df(), instance_type)
 
 
 def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    return common.validate_region_zone_impl('aws', _df, region, zone)
+    return common.validate_region_zone_impl('aws', _get_df(), region, zone)
 
 
 def accelerator_in_region_or_zone(acc_name: str,
                                   acc_count: int,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> bool:
-    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
-                                                     region, zone)
+    return common.accelerator_in_region_or_zone_impl(_get_df(), acc_name,
+                                                     acc_count, region, zone)
 
 
 def get_hourly_cost(instance_type: str,
                     use_spot: bool = False,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
-    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
-                                       zone)
+    return common.get_hourly_cost_impl(_get_df(), instance_type, use_spot,
+                                       region, zone)
 
 
 def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
-    return common.get_vcpus_from_instance_type_impl(_df, instance_type)
+    return common.get_vcpus_from_instance_type_impl(_get_df(), instance_type)
 
 
 def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
     if cpus is None:
         cpus = str(_DEFAULT_NUM_VCPUS)
     instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}.'
-    df = _df[_df['InstanceType'].str.startswith(instance_type_prefix)]
+    df = _get_df()
+    df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
     return common.get_instance_type_for_cpus_impl(df, cpus)
 
 
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, int]]:
-    return common.get_accelerators_from_instance_type_impl(_df, instance_type)
+    return common.get_accelerators_from_instance_type_impl(
+        _get_df(), instance_type)
 
 
 def get_instance_type_for_accelerator(
@@ -153,7 +156,7 @@ def get_instance_type_for_accelerator(
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
-    return common.get_instance_type_for_accelerator_impl(df=_df,
+    return common.get_instance_type_for_accelerator_impl(df=_get_df(),
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
                                                          cpus=cpus,
@@ -164,7 +167,8 @@ def get_instance_type_for_accelerator(
 
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
-    df = _df[_df['InstanceType'] == instance_type]
+    df = _get_df()
+    df = df[df['InstanceType'] == instance_type]
     region_list = common.get_region_zones(df, use_spot)
     # Hack: Enforce US regions are always tried first:
     #   [US regions sorted by price] + [non-US regions sorted by price]
@@ -185,8 +189,9 @@ def list_accelerators(
         case_sensitive: bool = True
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in AWS offering accelerators."""
-    return common.list_accelerators_impl('AWS', _df, gpus_only, name_filter,
-                                         region_filter, case_sensitive)
+    return common.list_accelerators_impl('AWS', _get_df(), gpus_only,
+                                         name_filter, region_filter,
+                                         case_sensitive)
 
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:

@@ -9,6 +9,7 @@ from sky.clouds.service_catalog.constants import (
     CATALOG_SCHEMA_VERSION,
     LOCAL_CATALOG_DIR,
 )
+from sky.clouds.service_catalog.config import use_default_catalog
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -309,6 +310,8 @@ __all__ = [
     # Images
     'get_image_id_from_tag',
     'is_image_tag_valid',
+    # Configuring
+    'use_default_catalog',
     # Constants
     'HOSTED_CATALOG_DIR_URL',
     'CATALOG_SCHEMA_VERSION',

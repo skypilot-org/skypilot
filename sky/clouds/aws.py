@@ -1,7 +1,5 @@
 """Amazon Web Services."""
-
-# pylint: disable=import-outside-toplevel
-
+import functools
 import json
 import os
 import subprocess
@@ -406,10 +404,12 @@ class AWS(clouds.Cloud):
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    @functools.lru_cache(maxsize=1)
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
-            # pylint: disable=top-level-import-outside-toplevel,unused-import
+            # pylint: disable=import-outside-toplevel,unused-import
             import boto3
             import botocore
         except ImportError:
@@ -426,21 +426,21 @@ class AWS(clouds.Cloud):
             return False, (
                 'AWS CLI is not installed properly. '
                 'Run the following commands:'
-                f'\n{self._INDENT_PREFIX}  $ pip install skypilot[aws]'
-                f'{self._INDENT_PREFIX}Credentials may also need to be set. '
-                f'{self._STATIC_CREDENTIAL_HELP_STR}')
+                f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[aws]'
+                f'{cls._INDENT_PREFIX}Credentials may also need to be set. '
+                f'{cls._STATIC_CREDENTIAL_HELP_STR}')
 
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
         try:
-            self.get_current_user_identity()
+            cls.get_current_user_identity()
         except exceptions.CloudUserIdentityError as e:
             return False, str(e)
 
         static_credential_exists = os.path.isfile(
             os.path.expanduser('~/.aws/credentials'))
         hints = None
-        if self._is_current_identity_sso():
+        if cls._is_current_identity_sso():
             hints = 'AWS SSO is set. '
             if static_credential_exists:
                 hints += (
@@ -459,13 +459,14 @@ class AWS(clouds.Cloud):
             # `get_current_user_identity` does not guarantee this file exists.
             if not static_credential_exists:
                 return (False, '~/.aws/credentials does not exist. ' +
-                        self._STATIC_CREDENTIAL_HELP_STR)
+                        cls._STATIC_CREDENTIAL_HELP_STR)
 
         # Fetch the AWS availability zones mapping from ID to name.
         from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
         return True, hints
 
-    def _is_current_identity_sso(self) -> bool:
+    @classmethod
+    def _is_current_identity_sso(cls) -> bool:
         proc = subprocess.run('aws configure list',
                               shell=True,
                               check=False,
@@ -475,7 +476,8 @@ class AWS(clouds.Cloud):
             return False
         return 'sso' in proc.stdout.decode().split()
 
-    def get_current_user_identity(self) -> Optional[str]:
+    @classmethod
+    def get_current_user_identity(cls) -> Optional[str]:
         """Returns the identity of the user on this cloud.
 
         Raises:
@@ -497,15 +499,16 @@ class AWS(clouds.Cloud):
         except aws.botocore_exceptions().NoCredentialsError:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
-                    f'AWS credentials are not set. {self._STATIC_CREDENTIAL_HELP_STR}'
+                    f'AWS credentials are not set. {cls._STATIC_CREDENTIAL_HELP_STR}'
                 ) from None
         except aws.botocore_exceptions().ClientError:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'Failed to access AWS services with credentials. '
                     'Make sure that the access and secret keys are correct.'
-                    f' {self._STATIC_CREDENTIAL_HELP_STR}') from None
+                    f' {cls._STATIC_CREDENTIAL_HELP_STR}') from None
         except aws.botocore_exceptions().InvalidConfigError as e:
+            # pylint: disable=import-outside-toplevel
             import awscli
             from packaging import version
             awscli_version = version.parse(awscli.__version__)
@@ -514,9 +517,9 @@ class AWS(clouds.Cloud):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.CloudUserIdentityError(
                         'awscli is too old to use SSO. Run the following command to upgrade:'
-                        f'\n{self._INDENT_PREFIX}  $ pip install awscli>=1.27.10'
-                        f'\n{self._INDENT_PREFIX}You may need to log into SSO again after '
-                        f'upgrading. {self._sso_credentials_help_str()}'
+                        f'\n{cls._INDENT_PREFIX}  $ pip install awscli>=1.27.10'
+                        f'\n{cls._INDENT_PREFIX}You may need to log into SSO again after '
+                        f'upgrading. {cls._sso_credentials_help_str()}'
                     ) from None
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
@@ -530,8 +533,7 @@ class AWS(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'AWS access token is expired.'
-                    f' {self._sso_credentials_help_str(expired=True)}'
-                ) from None
+                    f' {cls._sso_credentials_help_str(expired=True)}') from None
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
