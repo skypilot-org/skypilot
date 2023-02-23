@@ -1406,16 +1406,12 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
                          'Hint: make sure it is not leaked.')
             continue
 
-        if not get_internal_ips:
-            ips = [
-                endpoint['accessConfig']['externalIp']
-                for endpoint in tpuvm_json['networkEndpoints']
-            ]
-        else:
-            ips = [
-                endpoint['ipAddress']
-                for endpoint in tpuvm_json['networkEndpoints']
-            ]
+        ips = []
+        for endpoint in tpuvm_json['networkEndpoints']:
+            ip = (endpoint.get('ipAddress', None) if get_internal_ips else
+                  endpoint['accessConfig'].get('externalIp', None))
+            if ip is not None:
+                ips.append(ip)
         all_ips.extend(ips)
 
     return all_ips
@@ -1803,38 +1799,41 @@ def _update_cluster_status_no_lock(
         return record
 
     cluster_name = handle.cluster_name
-    try:
-        # TODO(zhwu): This function cannot distinguish transient network error
-        # in ray's get IPs vs. ray runtime failing.
-        external_ips = handle.external_ips(use_cached_ips=False)
-        # This happens to a stopped TPU VM as we use gcloud to query the IP.
-        if external_ips is None or len(external_ips) == 0:
-            raise exceptions.FetchIPError(
-                reason=exceptions.FetchIPError.Reason.HEAD)
-        if handle.launched_nodes == 1:
-            # Check the ray cluster status. We have to check it for single node
-            # case, since the get_node_ips() does not require ray cluster to be
-            # running.
-            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
-            runner = command_runner.SSHCommandRunner(external_ips[0],
-                                                     **ssh_credentials)
-            returncode = runner.run('ray status', stream_logs=False)
-            if returncode:
+    use_spot = handle.launched_resources.use_spot
+    # if cluster is not spot, we can determine its health by "ray status".
+    if not use_spot:
+        try:
+            # TODO(zhwu): This function cannot distinguish transient network error
+            # in ray's get IPs vs. ray runtime failing.
+            external_ips = handle.external_ips(use_cached_ips=False)
+            # This happens to a stopped TPU VM as we use gcloud to query the IP.
+            if external_ips is None or len(external_ips) == 0:
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
-        # If we get node ips correctly, the cluster is UP. It is safe to
-        # set the status to UP, as the `handle.external_ips` function uses ray
-        # to fetch IPs and starting ray is the final step of sky launch.
-        record['status'] = global_user_state.ClusterStatus.UP
-        global_user_state.add_or_update_cluster(cluster_name,
-                                                handle,
-                                                requested_resources=None,
-                                                ready=True,
-                                                is_launch=False)
-        return record
-    except exceptions.FetchIPError:
-        logger.debug('Refreshing status: Failed to get IPs from cluster '
-                     f'{cluster_name!r}, trying to fetch from provider.')
+            if handle.launched_nodes == 1:
+                # Check the ray cluster status. We have to check it for single node
+                # case, since the get_node_ips() does not require ray cluster to be
+                # running.
+                ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
+                runner = command_runner.SSHCommandRunner(
+                    external_ips[0], **ssh_credentials)
+                returncode = runner.run('ray status', stream_logs=False)
+                if returncode:
+                    raise exceptions.FetchIPError(
+                        reason=exceptions.FetchIPError.Reason.HEAD)
+            # If we get node ips correctly, the cluster is UP. It is safe to
+            # set the status to UP, as the `handle.external_ips` function uses ray
+            # to fetch IPs and starting ray is the final step of sky launch.
+            record['status'] = global_user_state.ClusterStatus.UP
+            global_user_state.add_or_update_cluster(cluster_name,
+                                                    handle,
+                                                    requested_resources=None,
+                                                    ready=True,
+                                                    is_launch=False)
+            return record
+        except exceptions.FetchIPError:
+            logger.debug('Refreshing status: Failed to get IPs from cluster '
+                         f'{cluster_name!r}, trying to fetch from provider.')
     # For all code below, ray fails to get IPs for the cluster.
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
 

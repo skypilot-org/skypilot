@@ -586,8 +586,6 @@ class RetryingVmProvisioner(object):
         self._local_wheel_path = local_wheel_path
         self._wheel_hash = wheel_hash
 
-        colorama.init()
-
     def _update_blocklist_on_gcp_error(
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
@@ -2481,7 +2479,6 @@ class CloudVmRayBackend(backends.Backend):
         detach_run: bool = False,
     ) -> None:
         """Executes generated code on the head node."""
-        colorama.init()
         style = colorama.Style
         fore = colorama.Fore
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
@@ -2665,7 +2662,6 @@ class CloudVmRayBackend(backends.Backend):
             self._execute_task_one_node(handle, task, job_id, detach_run)
 
     def _post_execute(self, handle: ResourceHandle, down: bool) -> None:
-        colorama.init()
         fore = colorama.Fore
         style = colorama.Style
         name = handle.cluster_name

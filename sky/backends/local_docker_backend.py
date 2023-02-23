@@ -201,7 +201,6 @@ class LocalDockerBackend(backends.Backend):
         to it to handle sky exec commands.
         """
         del task  # unused
-        colorama.init()
         style = colorama.Style
         assert handle in self.images, \
             f'No image found for {handle}, have you run Backend.provision()?'
@@ -274,7 +273,6 @@ class LocalDockerBackend(backends.Backend):
 
     def _post_execute(self, handle: ResourceHandle, down: bool) -> None:
         del down  # unused
-        colorama.init()
         style = colorama.Style
         container = self.containers[handle]
 
