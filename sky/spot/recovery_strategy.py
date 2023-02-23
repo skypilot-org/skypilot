@@ -246,6 +246,12 @@ class StrategyExecutor:
                            detach_run=True,
                            _is_launched_by_spot_controller=True)
                 logger.info('Spot cluster launched.')
+            except exceptions.InvalidClusterNameError as e:
+                logger.error('Failure happened before provisioning. '
+                             f'{common_utils.format_exception(e)}')
+                if raise_on_failure:
+                    raise exceptions.ProvisionPrechecksError(reasons=[e])
+                return None
             except exceptions.ResourcesUnavailableError as e:
                 # This is raised when the launch fails due to prechecks or
                 # after failing over through all the candidates.

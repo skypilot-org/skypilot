@@ -393,6 +393,11 @@ def launch(
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the cluster is
             owned by another user.
+        exceptions.InvalidClusterNameError: if the cluster name is invalid.
+        exceptions.ResourcesMismatchError: if the requested resources
+            do not match the existing cluster.
+        exceptions.NotSupportedError: if required features are not supported
+            by the backend/cloud/cluster.
         exceptions.ResourcesUnavailableError: if the requested resources
             cannot be satisfied. The failover_history of the exception
             will be set as:
@@ -402,7 +407,7 @@ def launch(
                 2. Non-empty: iff at least 1 exception from either
                 our pre-checks (e.g., cluster name invalid) or a region/zone
                 throwing resource unavailability.
-        exceptions.NotSupportedError: if the cluster name is reserved.
+        exceptions.CommandError: any ssh command error.
     Other exceptions may be raised depending on the backend.
     """
     entrypoint = task
