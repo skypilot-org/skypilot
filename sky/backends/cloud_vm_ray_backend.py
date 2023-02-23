@@ -3277,7 +3277,7 @@ class CloudVmRayBackend(backends.Backend):
             self, task: task_lib.Task, to_provision: resources_lib.Resources,
             cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
         """Checks if the cluster exists and returns the provision config.
-        
+
         Raises:
             exceptions.ResourcesMismatchError: If the resources in the task
                 does not match the existing cluster.
