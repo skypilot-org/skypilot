@@ -45,12 +45,10 @@ _image_df = common.read_catalog('aws/images.csv',
 def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
     """Maps zone IDs (use1-az1) to zone names (us-east-1x).
 
+    The caller should guarantee that the aws credentials are valid.
+
     Such mappings are account-specific and determined by AWS. We fetch the
-    mappings from AWS, which requires AWS credentials. If the user does not
-    have AWS credentials configured, we use zone id as the zone name, which
-    is only used for show-gpus. It is ok to use the default mapping because
-    the user will not be able to provision instances with those wrong
-    availablity zones due to the lack of credentials.
+    mappings from AWS, which requires AWS credentials.
 
     The mappings will also serve to remove from '_df' the regions that are
     not supported by the user account.
@@ -58,6 +56,10 @@ def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         A dataframe with column 'AvailabilityZone' that's correctly replaced
         with the zone name (e.g. us-east-1a).
+    
+    Raises:
+        exceptions.CloudUserIdentityError: If the user identity cannot be
+            determined. (This should not happen.)        
     """
     # The caller should guarantee that the aws credentials are valid.
     user_identity = aws.AWS.get_current_user_identity()
