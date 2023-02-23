@@ -1767,7 +1767,7 @@ def _query_status_lambda(
     vms = lambda_utils.LambdaCloudClient().list_instances()
     possible_names = [f'{cluster}-head', f'{cluster}-worker']
     for node in vms:
-        if node['name'] in possible_names:
+        if node.get('name') in possible_names:
             status_list.append(status_map[node['status']])
     return status_list
 
