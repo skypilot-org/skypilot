@@ -67,20 +67,24 @@ class Local(clouds.Cloud):
         return cls.regions()
 
     @classmethod
-    def region_zones_provision_loop(
+    def zones_provision_loop(
         cls,
         *,
+        region: str,
+        num_nodes: int,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+    ) -> Iterator[None]:
+        del num_nodes  # Unused.
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot=use_spot,
-                                            region=None,
+                                            region=region,
                                             zone=None)
-        for region in regions:
-            yield region, region.zones
+        for r in regions:
+            assert r.zones is None, r
+            yield r.zones
 
     #### Normal methods ####
 
