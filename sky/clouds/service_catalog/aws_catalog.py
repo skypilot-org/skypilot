@@ -4,12 +4,14 @@ This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
 import colorama
+import hashlib
 import os
 import typing
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from sky import exceptions
 from sky import sky_logging
 from sky.clouds import aws
 from sky.clouds.service_catalog import common
@@ -39,34 +41,54 @@ _image_df = common.read_catalog('aws/images.csv',
 def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
     """Maps zone IDs (use1-az1) to zone names (us-east-1x).
 
-    Such mappings are account-specific and determined by AWS. The mpaaing will
-    also remove the regions that are not supported by the user account. If the
-    user does not have AWS credentials configured, we use a default mapping.
+    Such mappings are account-specific and determined by AWS. We fetch the
+    mappings from AWS, which requires AWS credentials. If the user does not
+    have AWS credentials configured, we use zone id as the zone name, which
+    is only used for show-gpus. It is ok to use the default mapping because
+    the user will not be able to provision instances with those wrong
+    availablity zones due to the lack of credentials.
+
+    The mappings will also serve to remove from '_df' the regions that are
+    not supported by the user account.
 
     Returns:
         A dataframe with column 'AvailabilityZone' that's correctly replaced
         with the zone name (e.g. us-east-1a).
     """
-    az_mapping_path = common.get_catalog_path('aws/az_mappings.csv')
+    try:
+        user_identity = aws.AWS().get_current_user_identity()
+        assert user_identity is not None, 'user_identity is None'
+        aws_user_hash = hashlib.md5(user_identity.encode()).hexdigest()[:8]
+    except exceptions.CloudUserIdentityError:
+        aws_user_hash = 'default'
+
+    az_mapping_path = common.get_catalog_path(
+        f'aws/az_mappings-{aws_user_hash}.csv')
     if not os.path.exists(az_mapping_path):
-        aws_enabled, _ = aws.AWS().check_credentials()
-        if not aws_enabled:
-            logger.debug(
-                f'{colorama.Style.DIM}Availability zone mapping is not '
-                f'available because AWS credentials are not configured. '
-                f'Using the default mapping.{colorama.Style.RESET_ALL}')
-            df = df.drop(columns=['AvailabilityZone']).rename(
-                columns={'AvailabilityZoneName': 'AvailabilityZone'})
-            return df
-        # Fetch az mapping from AWS.
-        # pylint: disable=import-outside-toplevel
-        import ray
-        from sky.clouds.service_catalog.data_fetchers import fetch_aws
-        logger.info(f'{colorama.Style.DIM}Fetching availability zones mapping '
-                    f'for AWS...{colorama.Style.RESET_ALL}')
-        with ux_utils.suppress_output():
-            ray.init()
-        az_mappings = fetch_aws.fetch_availability_zone_mappings()
+        az_mappings = None
+        if aws_user_hash != 'default':
+            aws_enabled, _ = aws.AWS().check_credentials()
+            if aws_enabled:
+                logger.debug(
+                    'Failed to fetch availability zone mappings (using '
+                    'default mapping)')
+                # Fetch az mapping from AWS.
+                # pylint: disable=import-outside-toplevel
+                import ray
+                from sky.clouds.service_catalog.data_fetchers import fetch_aws
+                logger.info(f'{colorama.Style.DIM}Fetching availability zones '
+                            f'mapping for AWS...{colorama.Style.RESET_ALL}')
+                with ux_utils.suppress_output():
+                    ray.init()
+                az_mappings = fetch_aws.fetch_availability_zone_mappings()
+        if az_mappings is None:
+            dummy_az_name = _df.rename(
+                columns={'AvailabilityZone': 'AvailabilityZoneName'
+                        })['AvailabilityZoneName']
+            az_mappings = pd.concat([_df['AvailabilityZone'], dummy_az_name],
+                                    axis=1)
+            az_mapping_path = common.get_catalog_path(
+                'aws/az_mappings-default.csv')
         az_mappings.to_csv(az_mapping_path, index=False)
     else:
         az_mappings = pd.read_csv(az_mapping_path)

@@ -476,7 +476,12 @@ class AWS(clouds.Cloud):
         return 'sso' in proc.stdout.decode().split()
 
     def get_current_user_identity(self) -> Optional[str]:
-        """Returns the identity of the user on this cloud."""
+        """Returns the identity of the user on this cloud.
+
+        Raises:
+            exceptions.CloudUserIdentityError: if the user identity cannot be
+                retrieved.
+        """
         try:
             sts = aws.client('sts')
             # The caller identity contains 3 fields: UserId, AccountId, Arn.
