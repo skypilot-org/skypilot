@@ -11,7 +11,6 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from sky import exceptions
 from sky import sky_logging
 from sky.clouds import aws
 from sky.clouds.service_catalog import common
@@ -77,9 +76,8 @@ def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
                 ray.init()
             az_mappings = fetch_aws.fetch_availability_zone_mappings()
         else:
-            logger.debug(
-                'Failed to fetch availability zone mappings (using '
-                'default mapping)')
+            logger.debug('Failed to fetch availability zone mappings (using '
+                         'default mapping)')
             dummy_az_name = _df.rename(
                 columns={'AvailabilityZone': 'AvailabilityZoneName'
                         })['AvailabilityZoneName']

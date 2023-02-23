@@ -157,11 +157,11 @@ def generic_cloud(request) -> str:
 def pytest_sessionstart(session):
     from sky.clouds import aws
     from sky.clouds.service_catalog import common
-    aws_az_mapping_path = pathlib.Path(
-        common.get_catalog_path('aws/az_mappings.csv'))
-    aws_az_mapping_path.parent.mkdir(parents=True, exist_ok=True)
-
     aws_enabled = aws.AWS().check_credentials()[0]
+
+    aws_az_mapping_path = pathlib.Path(
+        common.get_catalog_path('aws/az_mappings-default.csv'))
+    aws_az_mapping_path.parent.mkdir(parents=True, exist_ok=True)
     if not aws_enabled and not aws_az_mapping_path.exists():
         # If we don't have AWS access, create a dummy file
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
