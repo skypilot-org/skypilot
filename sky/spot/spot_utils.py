@@ -29,7 +29,7 @@ logger = sky_logging.init_logger(__name__)
 SPOT_CONTROLLER_NAME = f'sky-spot-controller-{common_utils.get_user_hash()}'
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
-JOB_STATUS_CHECK_GAP_SECONDS = 10
+JOB_STATUS_CHECK_GAP_SECONDS = 20
 
 # Controller checks if its job has started every this many seconds.
 JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5

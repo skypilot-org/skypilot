@@ -2980,7 +2980,6 @@ class CloudVmRayBackend(backends.Backend):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(f'Unsupported cloud {cloud} for stopped '
                                      f'cluster {cluster_name!r}.')
-            logger.info(f'terminate cmd used {terminate_cmd}')
             with backend_utils.safe_console_status(f'[bold cyan]Terminating '
                                                    f'[green]{cluster_name}'):
                 returncode, stdout, stderr = log_lib.run_with_log(

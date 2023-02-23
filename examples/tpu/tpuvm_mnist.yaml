@@ -2,8 +2,6 @@ name: tpuvm_mnist
 
 resources:
   accelerators: tpu-v2-8
-  cloud: gcp
-  zone: us-central1-f
   accelerator_args:
     runtime_version: tpu-vm-base
     tpu_vm: True
@@ -15,10 +13,6 @@ setup: |
   conda activate flax
   if [ $? -eq 0 ]; then
     echo 'conda env exists'
-    pip install "jax[tpu]>=0.2.16" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-    pip install --upgrade clu
-    pip install -e flax
-    pip install tensorflow tensorflow-datasets
   else
     conda create -n flax python=3.8 -y
     conda activate flax
@@ -37,4 +31,4 @@ run: |
   python3 main.py --workdir=/tmp/mnist \
   --config=configs/default.py \
   --config.learning_rate=0.05 \
-  --config.num_epochs=100000000000
+  --config.num_epochs=10
