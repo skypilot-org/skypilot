@@ -55,40 +55,36 @@ def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
         A dataframe with column 'AvailabilityZone' that's correctly replaced
         with the zone name (e.g. us-east-1a).
     """
-    try:
+    aws_enabled, _ = aws.AWS().check_credentials()
+    if aws_enabled:
         user_identity = aws.AWS().get_current_user_identity()
         assert user_identity is not None, 'user_identity is None'
         aws_user_hash = hashlib.md5(user_identity.encode()).hexdigest()[:8]
-    except exceptions.CloudUserIdentityError:
+    else:
         aws_user_hash = 'default'
 
     az_mapping_path = common.get_catalog_path(
         f'aws/az_mappings-{aws_user_hash}.csv')
     if not os.path.exists(az_mapping_path):
-        az_mappings = None
-        if aws_user_hash != 'default':
-            aws_enabled, _ = aws.AWS().check_credentials()
-            if aws_enabled:
-                logger.debug(
-                    'Failed to fetch availability zone mappings (using '
-                    'default mapping)')
-                # Fetch az mapping from AWS.
-                # pylint: disable=import-outside-toplevel
-                import ray
-                from sky.clouds.service_catalog.data_fetchers import fetch_aws
-                logger.info(f'{colorama.Style.DIM}Fetching availability zones '
-                            f'mapping for AWS...{colorama.Style.RESET_ALL}')
-                with ux_utils.suppress_output():
-                    ray.init()
-                az_mappings = fetch_aws.fetch_availability_zone_mappings()
-        if az_mappings is None:
+        if aws_enabled:
+            # Fetch az mapping from AWS.
+            # pylint: disable=import-outside-toplevel
+            import ray
+            from sky.clouds.service_catalog.data_fetchers import fetch_aws
+            logger.info(f'{colorama.Style.DIM}Fetching availability zones '
+                        f'mapping for AWS...{colorama.Style.RESET_ALL}')
+            with ux_utils.suppress_output():
+                ray.init()
+            az_mappings = fetch_aws.fetch_availability_zone_mappings()
+        else:
+            logger.debug(
+                'Failed to fetch availability zone mappings (using '
+                'default mapping)')
             dummy_az_name = _df.rename(
                 columns={'AvailabilityZone': 'AvailabilityZoneName'
                         })['AvailabilityZoneName']
             az_mappings = pd.concat([_df['AvailabilityZone'], dummy_az_name],
                                     axis=1)
-            az_mapping_path = common.get_catalog_path(
-                'aws/az_mappings-default.csv')
         az_mappings.to_csv(az_mapping_path, index=False)
     else:
         az_mappings = pd.read_csv(az_mapping_path)
