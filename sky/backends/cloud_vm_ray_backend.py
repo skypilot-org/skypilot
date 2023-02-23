@@ -2072,6 +2072,10 @@ class CloudVmRayBackend(backends.Backend):
 
         The resources requested by the task should be smaller than the existing
         cluster.
+
+        Raises:
+            exceptions.ResourcesMismatchError: If the resources requested by the
+                task are larger than the existing cluster.
         """
         assert len(task.resources) == 1, task.resources
 
@@ -2141,6 +2145,9 @@ class CloudVmRayBackend(backends.Backend):
         Raises:
             exceptions.ClusterOwnerIdentityMismatchError: if the cluster
                 'cluster_name' exists and is owned by another user.
+            exceptions.InvalidClusterNameError: if the cluster name is invalid.
+            exceptions.ResourcesMismatchError: if the requested resources
+                do not match the existing cluster.
             exceptions.ResourcesUnavailableError: if the requested resources
                 cannot be satisfied. The failover_history of the exception
                 will be set as at least 1 exception from either our pre-checks
@@ -3269,6 +3276,14 @@ class CloudVmRayBackend(backends.Backend):
     def _check_existing_cluster(
             self, task: task_lib.Task, to_provision: resources_lib.Resources,
             cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
+        """Checks if the cluster exists and returns the provision config.
+        
+        Raises:
+            exceptions.ResourcesMismatchError: If the resources in the task
+                does not match the existing cluster.
+            exceptions.InvalidClusterNameError: If the cluster name is invalid.
+            # TODO(zhwu): complete the list of exceptions.
+        """
         prev_cluster_status, handle = (
             backend_utils.refresh_cluster_status_handle(
                 cluster_name, acquire_per_cluster_status_lock=False))
