@@ -50,7 +50,7 @@ def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
     Such mappings are account-specific and determined by AWS. We fetch the
     mappings from AWS, which requires AWS credentials.
 
-    The mappings will also serve to remove from '_df' the regions that are
+    The mappings will also serve to remove from 'df' the regions that are
     not supported by the user account.
 
     Returns:
