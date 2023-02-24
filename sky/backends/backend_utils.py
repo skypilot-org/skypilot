@@ -1604,9 +1604,10 @@ def _query_status_gcp(
                      f'--filter="(labels.ray-cluster-name={cluster})" '
                      '--format="value(state)"')
     else:
+        # Ref: https://cloud.google.com/compute/docs/instances/instance-life-cycle
         status_map = {
             'PROVISIONING': global_user_state.ClusterStatus.INIT,
-            'STARTING': global_user_state.ClusterStatus.INIT,
+            'STAGING': global_user_state.ClusterStatus.INIT,
             'RUNNING': global_user_state.ClusterStatus.UP,
             'REPAIRING': global_user_state.ClusterStatus.INIT,
             # 'TERMINATED' in GCP means stopped, with disk preserved.

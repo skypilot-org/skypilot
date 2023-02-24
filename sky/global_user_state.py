@@ -426,10 +426,13 @@ def _get_cluster_launch_time(cluster_hash: str) -> Optional[Dict[str, Any]]:
     return usage_intervals[0][0]
 
 
-def _get_cluster_duration(cluster_hash: str) -> Optional[Dict[str, Any]]:
+def _get_cluster_duration(cluster_hash: str) -> int:
+    total_duration = 0
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
-    total_duration = 0
+    if usage_intervals is None:
+        return total_duration
+
     for i, (start_time, end_time) in enumerate(usage_intervals):
         # duration from latest start time to time of query
         if end_time is None:
