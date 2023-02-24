@@ -30,6 +30,7 @@ def get_use_default_catalog() -> bool:
 
 def use_default_catalog(func):
     """Decorator: disable fetching account-specific catalog which need credentials."""
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         with _set_use_default_catalog(True):

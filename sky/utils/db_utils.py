@@ -53,6 +53,8 @@ class SQLiteConn(threading.local):
     def __init__(self, db_path: str, create_table: Callable):
         super().__init__()
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
+        # NOTE: We use a timeout of 10 seconds to avoid database locked
+        # errors. This is a hack, but it works.
+        self.conn = sqlite3.connect(db_path, timeout=10)
         self.cursor = self.conn.cursor()
         create_table(self.cursor, self.conn)
