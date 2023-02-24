@@ -30,7 +30,7 @@ def get_use_default_catalog() -> bool:
 
 def use_default_catalog(func):
     """Decorator: disable fetching account-specific catalog.
-    
+
     The account-specific catalog requires the credentials of the
     cloud to be set.
     """
