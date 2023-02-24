@@ -4,6 +4,7 @@ This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
 import colorama
+import glob
 import hashlib
 import os
 import threading
@@ -49,7 +50,12 @@ def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
     The caller should guarantee that the aws credentials are valid.
 
     Such mappings are account-specific and determined by AWS. We fetch the
-    mappings from AWS, which requires AWS credentials.
+    mappings from AWS, which requires AWS credentials. If the user does not
+    have AWS credentials configured, we use zone name mapping of the
+    SkyPilot's dev account (or zone id directly due to no zone name in an
+    older version). It is ok to use the default mapping because the user
+    will not be able to provision instances with those wrong availablity
+    zones due to the lack of credentials.
 
     The mappings will also serve to remove from 'df' the regions that are
     not supported by the user account.
@@ -57,33 +63,54 @@ def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         A dataframe with column 'AvailabilityZone' that's correctly replaced
         with the zone name (e.g. us-east-1a).
-
-    Raises:
-        exceptions.CloudIdentityError: If the user identity cannot be
-            retrieved for the AWS account.
-        exceptions.NotSupportedError: If the AWS credentials are not valid.
     """
-    # The caller should guarantee that the aws credentials are valid. Fail
-    # fast if they are not.
-    user_identity = aws.AWS.get_current_user_identity()
-    assert user_identity is not None, 'user_identity is None'
-    aws_user_hash = hashlib.md5(user_identity.encode()).hexdigest()[:8]
+    # The caller should guarantee that the aws credentials are valid.
+    try:
+        user_identity = aws.AWS.get_current_user_identity()
+        assert user_identity is not None, 'user_identity is None'
+        aws_user_hash = hashlib.md5(user_identity.encode()).hexdigest()[:8]
+    except exceptions.CloudUserIdentityError:
+        glob_name = common.get_catalog_path('aws/az_mappings-*.csv')
+        # Find the most recent file that matches the glob.
+        glob_files = glob.glob(glob_name)
+        if glob_files:
+            glob_files.sort(key=os.path.getmtime)
+            aws_user_hash = os.path.basename(glob_files[-1]).split('-')[1]
+            aws_user_hash = aws_user_hash.split('.')[0]
+        else:
+            aws_user_hash = 'default'
+        logger.debug(
+            'Failed to get AWS user identity. Using the latest mapping '
+            f'file for user {aws_user_hash!r}.')
 
     az_mapping_path = common.get_catalog_path(
         f'aws/az_mappings-{aws_user_hash}.csv')
     if not os.path.exists(az_mapping_path):
-        aws_enabled, hint = aws.AWS.check_credentials()
-        if not aws_enabled:
-            raise exceptions.NotSupportedError(hint)
-        # Fetch az mapping from AWS.
-        # pylint: disable=import-outside-toplevel
-        import ray
-        from sky.clouds.service_catalog.data_fetchers import fetch_aws
-        logger.info(f'{colorama.Style.DIM}Fetching availability zones '
-                    f'mapping for AWS...{colorama.Style.RESET_ALL}')
-        with ux_utils.suppress_output():
-            ray.init()
-        az_mappings = fetch_aws.fetch_availability_zone_mappings()
+        az_mappings = None
+        if aws_user_hash != 'default':
+            aws_enabled, _ = aws.AWS.check_credentials()
+            if aws_enabled:
+                # Fetch az mapping from AWS.
+                # pylint: disable=import-outside-toplevel
+                import ray
+                from sky.clouds.service_catalog.data_fetchers import fetch_aws
+                logger.info(f'{colorama.Style.DIM}Fetching availability zones '
+                            f'mapping for AWS...{colorama.Style.RESET_ALL}')
+                with ux_utils.suppress_output():
+                    ray.init()
+                az_mappings = fetch_aws.fetch_availability_zone_mappings()
+
+        if az_mappings is None:
+            logger.debug('Failed to fetch availability zone mappings (using '
+                         'default mapping)')
+            if 'AvailabilityZoneName' in df.columns:
+                dummy_az_name = df['AvailabilityZoneName']
+            else:
+                dummy_az_name = df.rename(
+                    columns={'AvailabilityZone': 'AvailabilityZoneName'
+                            })['AvailabilityZoneName']
+            az_mappings = pd.concat([df['AvailabilityZone'], dummy_az_name],
+                                    axis=1)
         az_mappings.to_csv(az_mapping_path, index=False)
     else:
         az_mappings = pd.read_csv(az_mapping_path)
