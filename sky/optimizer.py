@@ -868,7 +868,7 @@ def _make_launchables_for_valid_region_zones(
     launchables = []
     regions = launchable_resources.get_offering_regions_for_launchable()
     for region in regions:
-        if launchable_resources.use_spot:
+        if launchable_resources.use_spot and region.zones is not None:
             # Spot instances.
             # Do not batch the per-zone requests.
             for zone in region.zones:
