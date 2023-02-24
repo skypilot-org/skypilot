@@ -16,8 +16,13 @@ def add_column_to_table(
         if row[1] == column_name:
             break
     else:
-        cursor.execute(f'ALTER TABLE {table_name} '
-                       f'ADD COLUMN {column_name} {column_type}')
+        try:
+            cursor.execute(f'ALTER TABLE {table_name} '
+                        f'ADD COLUMN {column_name} {column_type}')
+        except sqlite3.OperationalError:
+            # We may be trying to add the same column twice, when
+            # running multiple threads. This is fine.
+            pass
     conn.commit()
 
 
