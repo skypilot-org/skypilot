@@ -1408,6 +1408,8 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
 
         ips = []
         for endpoint in tpuvm_json['networkEndpoints']:
+            # Note: if TPU VM is being preempted, its IP field may not exist.
+            # We use get() to avoid KeyError.
             ip = (endpoint.get('ipAddress', None) if get_internal_ips else
                   endpoint['accessConfig'].get('externalIp', None))
             if ip is not None:
@@ -1800,7 +1802,12 @@ def _update_cluster_status_no_lock(
 
     cluster_name = handle.cluster_name
     use_spot = handle.launched_resources.use_spot
-    # if cluster is not spot, we can determine its health by "ray status".
+    # For non-spot clusters, this is an optimization: we call external_ips()
+    # and/or SSH into the cluster to run 'ray status' in various cases to
+    # determine cluster health, because these may be faster than querying
+    # the true node statuses from the cloud provider.
+    # For spot clusters, the above can be unsafe.
+    # Therefore we directly query the cloud provider.
     if not use_spot:
         try:
             # TODO(zhwu): This function cannot distinguish transient network error

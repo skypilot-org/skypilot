@@ -117,10 +117,8 @@ class StrategyExecutor:
                 logger.error('Failed to terminate the spot cluster '
                              f'{self.cluster_name}. Retrying.')
                 import traceback  # pylint: disable=import-outside-toplevel
-                logger.error(f'  Detailed exception: {e}')
-                logger.info(f'  Traceback: {traceback.format_exc()}')
-                logger.info('wait for 30 seconds and retry...')
-                time.sleep(30)
+                logger.error(f'  Exception: {type(e)}: {str(e)}')
+                logger.error(f'  Traceback: {traceback.format_exc()}')
 
     def _try_cancel_all_jobs(self):
         handle = global_user_state.get_handle_from_cluster_name(
