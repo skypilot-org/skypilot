@@ -2724,6 +2724,7 @@ def check():
     ('The region to use. If not specified, shows accelerators from all regions.'
     ),
 )
+@service_catalog.use_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
         gpu_name: Optional[str],

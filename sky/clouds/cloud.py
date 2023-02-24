@@ -288,7 +288,8 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud.
 
         Returns a boolean of whether the user can access this cloud, and a
@@ -296,7 +297,8 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def get_current_user_identity(self) -> Optional[str]:
+    @classmethod
+    def get_current_user_identity(cls) -> Optional[str]:
         """(Advanced) Returns currently active user identity of this cloud.
 
         The user "identity" is associated with each SkyPilot cluster they

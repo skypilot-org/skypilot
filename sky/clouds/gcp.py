@@ -1,4 +1,5 @@
 """Google Cloud Platform."""
+import functools
 import json
 import os
 import subprocess
@@ -489,7 +490,8 @@ class GCP(clouds.Cloud):
         return service_catalog.get_vcpus_from_instance_type(instance_type,
                                                             clouds='gcp')
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
@@ -510,10 +512,10 @@ class GCP(clouds.Cloud):
             _run_output('gcloud --version')
 
             # Check if application default credentials are set.
-            project_id = self.get_project_id()
+            project_id = cls.get_project_id()
 
             # Check if the user is activated.
-            self.get_current_user_identity()
+            cls.get_current_user_identity()
         except (auth.exceptions.DefaultCredentialsError,
                 subprocess.CalledProcessError,
                 exceptions.CloudUserIdentityError, FileNotFoundError,
@@ -609,7 +611,9 @@ class GCP(clouds.Cloud):
         credentials[GCP_CONFIG_SKY_BACKUP_PATH] = GCP_CONFIG_SKY_BACKUP_PATH
         return credentials
 
-    def get_current_user_identity(self) -> Optional[str]:
+    @classmethod
+    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    def get_current_user_identity(cls) -> Optional[str]:
         """Returns the email address + project id of the active user."""
         try:
             account = _run_output('gcloud auth list --filter=status:ACTIVE '
@@ -630,7 +634,7 @@ class GCP(clouds.Cloud):
                     '--format="value(account)"` and ensure it correctly '
                     'returns the current user.')
         try:
-            return f'{account} [project_id={self.get_project_id()}]'
+            return f'{account} [project_id={cls.get_project_id()}]'
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
