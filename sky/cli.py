@@ -1541,6 +1541,7 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
                         raise
             if msg:
                 click.echo(msg)
+                job_info = ''
                 if n_jobs is not None and n_jobs > 0:
                     job_info = f'{n_jobs} spot jobs are in progress'
                     if n_jobs > _SPOT_JOBS_IN_STATUS:
