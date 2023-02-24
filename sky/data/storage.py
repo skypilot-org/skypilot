@@ -64,8 +64,6 @@ class StoreType(enum.Enum):
             return StoreType.GCS
         elif isinstance(cloud, clouds.Azure):
             return StoreType.AZURE
-        elif isinstance(cloud, clouds.Cloudflare):
-            return StoreType.R2
 
         raise ValueError(f'Unsupported cloud for StoreType: {cloud}')
 
@@ -92,8 +90,6 @@ def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
         return StoreType.S3
     elif isinstance(cloud, clouds.GCP):
         return StoreType.GCS
-    elif isinstance(cloud, clouds.Cloudflare):
-        return StoreType.R2
     elif isinstance(cloud, clouds.Azure):
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure Blob Storage is not supported yet.')
