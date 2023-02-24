@@ -38,7 +38,10 @@ _PULL_FREQUENCY_HOURS = 7
 # The main catalog dataframe.
 #   - _default_df: default non-account-specific catalog
 #     The AvailabilityZone column is a zone ID (e.g. use1-az1).
-#   - _user_df: account-specific catalog (i.e., regions that the account doesn't have enabled are dropped; AZ mapping is applied, etc.) Creating this requires AWS credentials. It is created at most once (and cached) per a process' lifetime.
+#   - _user_df: account-specific catalog (i.e., regions that the account
+#     doesn't have enabled are dropped; AZ mapping is applied, etc.)
+#     Creating this requires AWS credentials. It is created at most once
+#     (and cached) per a process' lifetime.
 #     The AvailabilityZone column is a zone name (e.g. us-east-1a).
 # `_apply_az_mapping_lock` protects reading/writing `_user_df`.
 _default_df = common.read_catalog('aws/vms.csv',
