@@ -400,8 +400,16 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
-def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
-    """Show all spot jobs."""
+def format_job_table(jobs: List[Dict[str, Any]],
+                     show_all: bool,
+                     max_jobs: Optional[int] = None) -> str:
+    """Show all spot jobs.
+
+    Args:
+        jobs: A list of spot jobs.
+        show_all: Whether to show all columns.
+        max_jobs: The maximum number of jobs to show in the table.
+    """
     columns = [
         'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'JOB DURATION',
         '#RECOVERIES', 'STATUS'
@@ -411,6 +419,12 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
     job_table = log_utils.create_table(columns)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
+    for job in jobs:
+        if not job['status'].is_terminal():
+            status_counts[job['status'].value] += 1
+
+    if max_jobs is not None:
+        jobs = jobs[:max_jobs]
     for job in jobs:
         # The job['job_duration'] is already calculated in
         # dump_spot_job_queue().
@@ -432,8 +446,6 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
             job['recovery_count'],
             job['status'].colored_str(),
         ]
-        if not job['status'].is_terminal():
-            status_counts[job['status'].value] += 1
         if show_all:
             values.extend([
                 # STARTED
@@ -444,6 +456,7 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
                 if job['failure_reason'] is not None else '-',
             ])
         job_table.add_row(values)
+
     status_str = ', '.join([
         f'{count} {status}' for status, count in sorted(status_counts.items())
     ])

@@ -1383,9 +1383,10 @@ def exec(
     sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
-def _get_in_progress_spot_jobs(show_all_in_progress: bool = False) -> Tuple[Optional[int], str]:
+def _get_in_progress_spot_jobs(
+        show_all_in_progress: bool = False) -> Tuple[Optional[int], str]:
     """Get the in-progress spot jobs.
-    
+
     Returns:
         A tuple of (num_in_progress_jobs, msg). If num_in_progress_jobs is None,
         it means there is an error when querying the spot jobs. In this case,
@@ -1398,12 +1399,10 @@ def _get_in_progress_spot_jobs(show_all_in_progress: bool = False) -> Tuple[Opti
             # Make the call slient
             spot_jobs = core.spot_queue(refresh=False, skip_finished=True)
             num_in_progress_jobs = len(spot_jobs)
-            if not show_all_in_progress:
-                spot_jobs = spot_jobs[:_SPOT_JOBS_IN_STATUS]
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         if controller_status == global_user_state.ClusterStatus.INIT:
-            msg = 'Spot jobs are not available until the controller is up.'
+            msg = 'Spot jobs will not be shown until the controller is up.'
         else:
             assert controller_status != global_user_state.ClusterStatus.UP
             # Do not show any spot jobs if the controller is STOPPED or not
@@ -1412,7 +1411,11 @@ def _get_in_progress_spot_jobs(show_all_in_progress: bool = False) -> Tuple[Opti
     except RuntimeError:
         msg = 'Failed to query spot jobs due to connection issue.'
     else:
-        msg = spot_lib.format_job_table(spot_jobs, show_all=False)
+        max_jobs_to_show = (None
+                            if show_all_in_progress else _SPOT_JOBS_IN_STATUS)
+        msg = spot_lib.format_job_table(spot_jobs,
+                                        show_all=False,
+                                        max_jobs=max_jobs_to_show)
     return num_in_progress_jobs, msg
 
 
@@ -1538,8 +1541,15 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
                         raise
             if msg:
                 click.echo(msg)
-                hints.append(f'* Check all spot jobs: {colorama.Style.BRIGHT}'
-                             f'sky spot queue{colorama.Style.RESET_ALL}')
+                if n_jobs is not None and n_jobs > 0:
+                    job_info = f'{n_jobs} spot jobs are in progress'
+                    if n_jobs > _SPOT_JOBS_IN_STATUS:
+                        job_info += (f' ({_SPOT_JOBS_IN_STATUS} latest ones '
+                                     'shown above)')
+                    job_info += '. '
+                hints.append(
+                    f'* {job_info}To see all jobs: {colorama.Style.BRIGHT}'
+                    f'sky spot queue{colorama.Style.RESET_ALL}')
 
         if num_pending_autostop > 0:
             plural = ' has'
