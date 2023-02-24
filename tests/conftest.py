@@ -174,6 +174,3 @@ def enable_all_clouds(monkeypatch):
         prefix='tmp_backup_config_default', delete=False)
     monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
                         config_file_backup.name)
-    monkeypatch.setattr(
-        'sky.clouds.service_catalog.config.get_use_default_catalog',
-        lambda: True)

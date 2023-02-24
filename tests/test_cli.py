@@ -8,7 +8,7 @@ from sky import clouds
 import sky.cli as cli
 
 
-def test_infer_gpunode_type(enable_all_clouds):
+def test_infer_gpunode_type():
     resources = [
         sky.Resources(cloud=sky.AWS(), instance_type='p3.2xlarge'),
         sky.Resources(cloud=sky.GCP(), accelerators='K80'),
@@ -19,7 +19,7 @@ def test_infer_gpunode_type(enable_all_clouds):
         assert cli._infer_interactive_node_type(spec) == 'gpunode', spec
 
 
-def test_infer_cpunode_type(enable_all_clouds):
+def test_infer_cpunode_type():
     resources = [
         sky.Resources(cloud=sky.AWS(), instance_type='m5.2xlarge'),
         sky.Resources(cloud=sky.GCP()),
@@ -29,7 +29,7 @@ def test_infer_cpunode_type(enable_all_clouds):
         assert cli._infer_interactive_node_type(spec) == 'cpunode', spec
 
 
-def test_infer_tpunode_type(enable_all_clouds):
+def test_infer_tpunode_type():
     resources = [
         sky.Resources(cloud=sky.GCP(), accelerators='tpu-v3-8'),
         sky.Resources(cloud=sky.GCP(), accelerators='tpu-v2-32'),
