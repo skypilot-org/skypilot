@@ -47,9 +47,7 @@ def _make_resources(
         lambda: enabled_clouds,
     )
     monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        'sky.clouds.service_catalog.config.get_use_default_catalog',
-        lambda: True)
+
 
     config_file_backup = tempfile.NamedTemporaryFile(
         prefix='tmp_backup_config_default', delete=False)

@@ -35,6 +35,12 @@ _DEFAULT_NUM_VCPUS = 8
 # skypilot-catalog/.github/workflows/update-aws-catalog.yml
 _PULL_FREQUENCY_HOURS = 7
 
+# The main catalog dataframe.
+#   - _default_df: default non-account-specific catalog
+#     The AvailabilityZone column is a zone ID (e.g. use1-az1).
+#   - _user_df: account-specific catalog (i.e., regions that the account doesn't have enabled are dropped; AZ mapping is applied, etc.) Creating this requires AWS credentials. It is created at most once (and cached) per a process' lifetime.
+#     The AvailabilityZone column is a zone name (e.g. us-east-1a).
+# `_apply_az_mapping_lock` protects reading/writing `_user_df`.
 _default_df = common.read_catalog('aws/vms.csv',
                                   pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 _user_df = None
@@ -44,18 +50,19 @@ _image_df = common.read_catalog('aws/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 
-def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
+def _fetch_and_apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
     """Maps zone IDs (use1-az1) to zone names (us-east-1x).
 
-    The caller should guarantee that the aws credentials are valid.
+    The upper-level functions that use the availability zone information
+    should be able to handle the case where the zone name is not correct,
+    due to the credentials not being configured.
 
     Such mappings are account-specific and determined by AWS. We fetch the
     mappings from AWS, which requires AWS credentials. If the user does not
-    have AWS credentials configured, we use zone name mapping of the
-    SkyPilot's dev account (or zone id directly due to no zone name in an
-    older version). It is ok to use the default mapping because the user
-    will not be able to provision instances with those wrong availablity
-    zones due to the lack of credentials.
+    have AWS credentials configured, we use original zone id. It is ok to
+    use the default mapping because the user will not be able to provision
+    instances with those wrong availablity zones due to the lack of
+    credentials.
 
     The mappings will also serve to remove from 'df' the regions that are
     not supported by the user account.
@@ -64,7 +71,6 @@ def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
         A dataframe with column 'AvailabilityZone' that's correctly replaced
         with the zone name (e.g. us-east-1a).
     """
-    # The caller should guarantee that the aws credentials are valid.
     try:
         user_identity = aws.AWS.get_current_user_identity()
         assert user_identity is not None, 'user_identity is None'
@@ -72,10 +78,16 @@ def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
     except exceptions.CloudUserIdentityError:
         glob_name = common.get_catalog_path('aws/az_mappings-*.csv')
         # Find the most recent file that matches the glob.
+        # We check the existing files because the user could remove the
+        # credentials after a cluster is created. Using the latest mapping
+        # file is better than using the default mapping file because the
+        # former is more likely to be correct.
         glob_files = glob.glob(glob_name)
         if glob_files:
             glob_files.sort(key=os.path.getmtime)
             aws_user_hash = os.path.basename(glob_files[-1]).split('-')[1]
+            # aws_user_hash can be set to `default` if the user never
+            # configured AWS credentials.
             aws_user_hash = aws_user_hash.split('.')[0]
         else:
             aws_user_hash = 'default'
@@ -88,25 +100,19 @@ def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
     if not os.path.exists(az_mapping_path):
         az_mappings = None
         if aws_user_hash != 'default':
-            aws_enabled, _ = aws.AWS.check_credentials()
-            if aws_enabled:
-                # Fetch az mapping from AWS.
-                # pylint: disable=import-outside-toplevel
-                import ray
-                from sky.clouds.service_catalog.data_fetchers import fetch_aws
-                logger.info(f'{colorama.Style.DIM}Fetching availability zones '
-                            f'mapping for AWS...{colorama.Style.RESET_ALL}')
-                with ux_utils.suppress_output():
-                    ray.init()
-                az_mappings = fetch_aws.fetch_availability_zone_mappings()
-
-        if az_mappings is None:
-            # Returning the original dataframe directly, as no az mapping
-            # is available. The caller should handle the case where the
-            # credentials are invalid.
-            if 'AvailabilityZoneName' in df.columns:
-                df = df.drop(columns=['AvailabilityZone']).rename(
-                    columns={'AvailabilityZoneName': 'AvailabilityZone'})
+            # Fetch az mapping from AWS.
+            # pylint: disable=import-outside-toplevel
+            import ray
+            from sky.clouds.service_catalog.data_fetchers import fetch_aws
+            logger.info(f'{colorama.Style.DIM}Fetching availability zones '
+                        f'mapping for AWS...{colorama.Style.RESET_ALL}')
+            with ux_utils.suppress_output():
+                ray.init()
+            az_mappings = fetch_aws.fetch_availability_zone_mappings()
+        else:
+            # Returning the original dataframe directly, as no cloud
+            # identity can be fetched which suggests there are no
+            # credentials.
             return df
         az_mappings.to_csv(az_mapping_path, index=False)
     else:
@@ -127,7 +133,7 @@ def _get_df() -> pd.DataFrame:
         global _user_df
         with _apply_az_mapping_lock:
             if _user_df is None:
-                _user_df = _apply_az_mapping(_default_df)
+                _user_df = _fetch_and_apply_az_mapping(_default_df)
         return _user_df
 
 

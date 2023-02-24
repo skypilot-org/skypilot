@@ -314,7 +314,7 @@ __all__ = [
     # Images
     'get_image_id_from_tag',
     'is_image_tag_valid',
-    # Configuring
+    # Configuration
     'use_default_catalog',
     # Constants
     'HOSTED_CATALOG_DIR_URL',

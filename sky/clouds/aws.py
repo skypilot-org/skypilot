@@ -405,7 +405,7 @@ class AWS(clouds.Cloud):
         return (_make(instance_list), fuzzy_candidate_list)
 
     @classmethod
-    @functools.lru_cache(maxsize=1)
+    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
@@ -463,6 +463,7 @@ class AWS(clouds.Cloud):
 
         # Fetch the AWS availability zones mapping from ID to name.
         from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
+        aws_catalog.get_default_instance_type()
         return True, hints
 
     @classmethod

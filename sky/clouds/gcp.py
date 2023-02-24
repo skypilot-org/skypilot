@@ -612,7 +612,7 @@ class GCP(clouds.Cloud):
         return credentials
 
     @classmethod
-    @functools.lru_cache(maxsize=1)
+    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
     def get_current_user_identity(cls) -> Optional[str]:
         """Returns the email address + project id of the active user."""
         try:

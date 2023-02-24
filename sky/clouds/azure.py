@@ -368,7 +368,7 @@ class Azure(clouds.Cloud):
             accelerator, acc_count, region, zone, 'azure')
 
     @classmethod
-    @functools.lru_cache(maxsize=1)
+    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
     def get_current_user_identity(cls) -> Optional[str]:
         """Returns the cloud user identity."""
         # This returns the user's email address + [subscription_id].
