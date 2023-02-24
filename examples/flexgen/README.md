@@ -17,12 +17,12 @@ And don't worry about costs - SkyPilot will automatically find the lowest priced
     sky check
     ```
 
-2. Launch FlexGen on the cloud with SkyPilot. This will automatically provision a VM instance on the cloud, install FlexGen, and launch the webui. See flexgen.yaml for selecting your own cloud, region, GPU and more!
+2. Launch FlexGen on your desired cloud with SkyPilot. This will automatically provision a VM instance on the cloud, install FlexGen, and launch the webui. You can also not specify the `--cloud` option to let SkyPilot pick the cheapest cloud for you!
     ```
-    sky launch -d -c flexgen flexgen.yaml
+    sky launch flexgen.yaml -c flexgen -d --cloud gcp --gpus T4:1
     ```
 
-3. Open a new terminal to setup SSH port forwarding. This will allow you to access the webui from your browser.
+3. Open a new terminal to setup SSH port forwarding. Keep this terminal open. This will allow you to access the webui from your browser.
     ```
     ssh -L 7681:localhost:7681 flexgen
     ```
@@ -35,6 +35,7 @@ sky down flexgen
 ```
 
 ### Notes
+* First time you open the browser, it may take some time to download the model. Subsequent loads should be much faster.
 * To restart the conversation simply refresh the page. Depending on your chosen GPU, you would likely be able to have only one tab running at a time!
 * You can try other models too! See the comments at the end of flexgen.yaml for more details.
 

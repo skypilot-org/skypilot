@@ -7,13 +7,17 @@
 #   sky down flexgen
 
 resources:
-  cloud: gcp  # Can also be aws or azure, you choose!
   accelerators: T4:1
   cpus: 32 # Needs RAM else crashes
 
 setup: |
   # Needs pytorch version pinning (at least on GCP)
   conda install -y pytorch==1.12.1 torchvision==0.13.1 torchaudio==0.12.1 cudatoolkit=11.3 -c pytorch
+  
+  # Install ttyd
+  wget https://github.com/tsl0922/ttyd/releases/download/1.7.2/ttyd.x86_64
+  sudo mv ttyd.x86_64 /usr/local/bin/ttyd
+  sudo chmod +x /usr/local/bin/ttyd
   
   # Install flexgen
   git clone https://github.com/FMInference/FlexGen.git
