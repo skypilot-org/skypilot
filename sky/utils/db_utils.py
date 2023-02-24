@@ -18,7 +18,7 @@ def add_column_to_table(
     else:
         try:
             cursor.execute(f'ALTER TABLE {table_name} '
-                        f'ADD COLUMN {column_name} {column_type}')
+                           f'ADD COLUMN {column_name} {column_type}')
         except sqlite3.OperationalError:
             # We may be trying to add the same column twice, when
             # running multiple threads. This is fine.
