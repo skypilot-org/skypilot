@@ -101,16 +101,7 @@ def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
                 az_mappings = fetch_aws.fetch_availability_zone_mappings()
 
         if az_mappings is None:
-            logger.debug('Failed to fetch availability zone mappings (using '
-                         'default mapping)')
-            if 'AvailabilityZoneName' in df.columns:
-                dummy_az_name = df['AvailabilityZoneName']
-            else:
-                dummy_az_name = df.rename(
-                    columns={'AvailabilityZone': 'AvailabilityZoneName'
-                            })['AvailabilityZoneName']
-            az_mappings = pd.concat([df['AvailabilityZone'], dummy_az_name],
-                                    axis=1)
+            return df
         az_mappings.to_csv(az_mapping_path, index=False)
     else:
         az_mappings = pd.read_csv(az_mapping_path)
