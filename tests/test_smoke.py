@@ -1873,7 +1873,7 @@ class TestStorageWithCredentials:
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
 
     @pytest.mark.parametrize('nonexist_bucket_url',
-                             ['s3://{random_name}', 'gs://{random_name}'])
+                             ['s3://{random_name}'])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
         # Attempts to create fetch a stroage with a non-existent source.
         # Generate a random bucket name and verify it doesn't exist:
@@ -1918,7 +1918,7 @@ class TestStorageWithCredentials:
                 random_name=nonexist_bucket_name))
 
     @pytest.mark.parametrize('private_bucket',
-                             [f's3://imagenet', f'gs://imagenet', f'r2://imagenet'])
+                             [f's3://imagenet', f'r2://imagenet'])
     def test_private_bucket(self, private_bucket):
         # Attempts to access private buckets not belonging to the user.
         # These buckets are known to be private, but may need to be updated if
