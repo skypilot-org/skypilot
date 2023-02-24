@@ -502,7 +502,8 @@ class GCP(clouds.Cloud):
             # `auth.default()` does not guarantee these files exist.
             for file in [
                     '~/.config/gcloud/access_tokens.db',
-                    '~/.config/gcloud/credentials.db'
+                    '~/.config/gcloud/credentials.db',
+                    '~/.config/gcloud/application_default_credentials.json'
             ]:
                 if not os.path.isfile(os.path.expanduser(file)):
                     raise FileNotFoundError(file)
