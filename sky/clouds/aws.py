@@ -461,8 +461,9 @@ class AWS(clouds.Cloud):
                 return (False, '~/.aws/credentials does not exist. ' +
                         cls._STATIC_CREDENTIAL_HELP_STR)
 
-        # Fetch the AWS availability zones mapping from ID to name.
+        # Fetch the AWS catalogs
         from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
+        # Trigger the fetch of the availability zones mapping.
         aws_catalog.get_default_instance_type()
         return True, hints
 
