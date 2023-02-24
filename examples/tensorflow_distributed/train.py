@@ -1,6 +1,6 @@
 # Example script that uses Keras and tf.distribute.MultiWorkerMirroredStrategy to train a model on multiple workers.
 #
-# Usage (two nodes):
+# Usage (two separate processes):
 #   TF_CONFIG='{"cluster":{"worker":["localhost:12345","localhost:23456"]},"task":{"type":"worker","index":0}}' python train.py
 #   TF_CONFIG='{"cluster":{"worker":["localhost:12345","localhost:23456"]},"task":{"type":"worker","index":1}}' python train.py
 

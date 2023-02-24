@@ -32,7 +32,7 @@ run: |
   # 
   # Examples of envvars:
   #   SKYPILOT_NODE_IPS="192.168.0.1 192.168.0.2"
-  #   $SKYPILOT_NODE_RANK="1"
+  #   SKYPILOT_NODE_RANK="1"
   
   IP_LIST_IDX=$(($SKYPILOT_NODE_RANK + 1))
   echo "$SKYPILOT_NODE_IPS" | sed -n ${IP_LIST_IDX}p
