@@ -98,7 +98,7 @@ class TestReservedClustersOperations:
             ready=True)
 
     @pytest.mark.timeout(60)
-    def test_down_spot_controller(self, _mock_cluster_state, monkeypatch):
+    def test_down_spot_controller(self, enable_all_clouds, _mock_cluster_state, monkeypatch):
 
         def mock_cluster_refresh_up(
             cluster_name: str,
@@ -139,7 +139,7 @@ class TestReservedClustersOperations:
         assert 'Aborted' in result.output
 
     @pytest.mark.timeout(60)
-    def test_stop_spot_controller(self, _mock_cluster_state):
+    def test_stop_spot_controller(self, enable_all_clouds, _mock_cluster_state):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.stop, [spot.SPOT_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
@@ -156,7 +156,7 @@ class TestReservedClustersOperations:
         assert 'Aborted' in result.output
 
     @pytest.mark.timeout(60)
-    def test_autostop_spot_controller(self, _mock_cluster_state):
+    def test_autostop_spot_controller(self, enable_all_clouds, _mock_cluster_state):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.autostop, [spot.SPOT_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
@@ -172,7 +172,7 @@ class TestReservedClustersOperations:
         assert isinstance(result.exception, SystemExit)
         assert 'Aborted' in result.output
 
-    def test_cancel_on_spot_controller(self, _mock_cluster_state):
+    def test_cancel_on_spot_controller(self, enable_all_clouds, _mock_cluster_state):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.cancel,
                                    [spot.SPOT_CONTROLLER_NAME, '-a'])
