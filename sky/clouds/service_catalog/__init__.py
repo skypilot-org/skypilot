@@ -46,7 +46,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
         return results[0]
     return results
 
-
+@use_default_catalog
 def list_accelerators(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
@@ -55,6 +55,9 @@ def list_accelerators(
     case_sensitive: bool = True,
 ) -> 'Dict[str, List[common.InstanceTypeInfo]]':
     """List the names of all accelerators offered by Sky.
+
+    This will include all accelerators offered by Sky, including those
+    that may not be available in the user's account.
 
     Returns: A dictionary of canonical accelerator names mapped to a list
     of instance type offerings. See usage in cli.py.

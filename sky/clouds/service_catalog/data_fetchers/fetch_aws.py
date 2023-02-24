@@ -50,7 +50,8 @@ US_REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
 
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
-    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone'
+    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone',
+    'AvailabilityZoneName'
 ]
 
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is

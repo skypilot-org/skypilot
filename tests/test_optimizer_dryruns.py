@@ -47,6 +47,7 @@ def _make_resources(
         lambda: enabled_clouds,
     )
     monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr('sky.clouds.service_catalog.config.get_use_default_catalog', lambda: True)
 
     config_file_backup = tempfile.NamedTemporaryFile(
         prefix='tmp_backup_config_default', delete=False)
@@ -334,13 +335,13 @@ def test_valid_image(monkeypatch):
         cloud=sky.GCP(),
         region='us-central1',
         image_id=
-        'projects/deeplearning-platform-release/global/images/family/common-cpu'
+        'projects/deeplearning-platform-release/global/images/family/common-cpu-v20230126'
     )
     _test_resources(
         monkeypatch,
         cloud=sky.GCP(),
         image_id=
-        'projects/deeplearning-platform-release/global/images/family/common-cpu'
+        'projects/deeplearning-platform-release/global/images/family/common-cpu-v20230126'
     )
 
 

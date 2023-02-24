@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from sky import exceptions
 from sky import sky_logging
 from sky.clouds import aws
 from sky.clouds.service_catalog import common
@@ -58,10 +59,12 @@ def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
         with the zone name (e.g. us-east-1a).
     
     Raises:
-        exceptions.CloudUserIdentityError: If the user identity cannot be
-            determined. (This should not happen.)        
+        exceptions.CloudIdentityError: If the user identity cannot be
+            retrieved for the AWS account.
+        exceptions.NotSupportedError: If the AWS credentials are not valid.
     """
-    # The caller should guarantee that the aws credentials are valid.
+    # The caller should guarantee that the aws credentials are valid. Fail
+    # fast if they are not.
     user_identity = aws.AWS.get_current_user_identity()
     assert user_identity is not None, 'user_identity is None'
     aws_user_hash = hashlib.md5(user_identity.encode()).hexdigest()[:8]
@@ -69,6 +72,9 @@ def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
     az_mapping_path = common.get_catalog_path(
         f'aws/az_mappings-{aws_user_hash}.csv')
     if not os.path.exists(az_mapping_path):
+        aws_enabled, hint = aws.AWS.check_credentials()
+        if not aws_enabled:
+            raise exceptions.NotSupportedError(hint)
         # Fetch az mapping from AWS.
         # pylint: disable=import-outside-toplevel
         import ray
