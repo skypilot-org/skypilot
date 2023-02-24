@@ -60,14 +60,14 @@ def resource(resource_name: str, **kwargs):
     # with boto3.resource() is not thread-safe).
     # Reference: https://stackoverflow.com/a/59635814
 
-    session = session()
-    cloudflare_credentials = session.get_credentials().get_frozen_credentials()
+    session_ = session()
+    cloudflare_credentials = session_.get_credentials().get_frozen_credentials()
     endpoint = create_endpoint()
-    
-    return session.resource(resource_name,
+
+    return session_.resource(resource_name,
         endpoint_url = endpoint,
         aws_access_key_id = cloudflare_credentials.access_key,
-        aws_secret_access_key = cloudflare_credentials.secret_key, 
+        aws_secret_access_key = cloudflare_credentials.secret_key,
         region_name='auto'
         )
 
