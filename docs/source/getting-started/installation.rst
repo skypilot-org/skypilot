@@ -34,7 +34,7 @@ You may also install SkyPilot from source.
 
 .. note::
 
-    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`conda install grpcio=1.43.0` prior to installing SkyPilot.
+    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`pip uninstall grpcio; conda install -c conda-forge grpcio=1.43.0` prior to installing SkyPilot.
 
 .. note::
 

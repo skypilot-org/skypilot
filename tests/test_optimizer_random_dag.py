@@ -123,13 +123,7 @@ def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
     assert objective == min_objective
 
 
-def test_optimizer(monkeypatch):
-    enabled_clouds = list(CLOUDS.values())
-    monkeypatch.setattr(
-        'sky.global_user_state.get_enabled_clouds',
-        lambda: enabled_clouds,
-    )
-    monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
+def test_optimizer(enable_all_clouds):
 
     dag = generate_random_dag(num_tasks=5, seed=0)
     sky.Optimizer._add_dummy_source_sink_nodes(dag)

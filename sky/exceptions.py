@@ -31,7 +31,9 @@ class ResourcesUnavailableError(Exception):
         # Copy the list to avoid modifying from outside.
         self.failover_history: List[Exception] = list(failover_history)
 
-    def with_failover_history(self, failover_history: List[Exception]) -> None:
+    def with_failover_history(
+            self,
+            failover_history: List[Exception]) -> 'ResourcesUnavailableError':
         # Copy the list to avoid modifying from outside.
         self.failover_history = list(failover_history)
         return self

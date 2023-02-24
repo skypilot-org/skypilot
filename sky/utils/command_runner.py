@@ -186,9 +186,9 @@ class SSHCommandRunner:
             self,
             cmd: Union[str, List[str]],
             *,
+            require_outputs: bool = False,
             port_forward: Optional[List[int]] = None,
             # Advanced options.
-            require_outputs: bool = False,
             log_path: str = os.devnull,
             # If False, do not redirect stdout/stderr to optimize performance.
             process_stream: bool = True,
@@ -276,9 +276,9 @@ class SSHCommandRunner:
 
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
-                                    stream_logs,
-                                    process_stream=process_stream,
                                     require_outputs=require_outputs,
+                                    stream_logs=stream_logs,
+                                    process_stream=process_stream,
                                     shell=True,
                                     executable=executable,
                                     **kwargs)
