@@ -1861,7 +1861,7 @@ class TestStorageWithCredentials:
         [('s3://tcga-2-open', storage_lib.StoreType.S3),
          ('s3://digitalcorpora', storage_lib.StoreType.S3),
          ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS),
-         ('r2://r2-public-data-sentinel-3', storage_lib.StoreType.R2)],
+         ('r2://test-bucket', storage_lib.StoreType.R2)],
         indirect=['tmp_public_storage_obj'])
     def test_public_bucket(self, tmp_public_storage_obj, store_type):
         # Creates a new bucket with a public source and verifies that it is not
