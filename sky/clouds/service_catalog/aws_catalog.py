@@ -101,6 +101,12 @@ def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
                 az_mappings = fetch_aws.fetch_availability_zone_mappings()
 
         if az_mappings is None:
+            # Returning the original dataframe directly, as no az mapping
+            # is available. The caller should handle the case where the
+            # credentials are invalid.
+            if 'AvailabilityZoneName' in df.columns:
+                df = df.drop(columns=['AvailabilityZone']).rename(
+                    columns={'AvailabilityZoneName': 'AvailabilityZone'})
             return df
         az_mappings.to_csv(az_mapping_path, index=False)
     else:
