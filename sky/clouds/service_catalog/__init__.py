@@ -46,6 +46,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
         return results[0]
     return results
 
+
 @use_default_catalog
 def list_accelerators(
     gpus_only: bool = True,

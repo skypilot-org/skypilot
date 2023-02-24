@@ -57,7 +57,7 @@ def _apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         A dataframe with column 'AvailabilityZone' that's correctly replaced
         with the zone name (e.g. us-east-1a).
-    
+
     Raises:
         exceptions.CloudIdentityError: If the user identity cannot be
             retrieved for the AWS account.
