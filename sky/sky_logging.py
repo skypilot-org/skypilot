@@ -27,7 +27,7 @@ class NewLineFormatter(logging.Formatter):
 
 def init_logger(name: str):
     h = logging.StreamHandler(sys.stdout)
-    h.flush = sys.stdout.flush
+    h.flush = sys.stdout.flush  # type: ignore
 
     fmt = NewLineFormatter(FORMAT, datefmt=DATE_FORMAT)
     h.setFormatter(fmt)

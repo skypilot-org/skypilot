@@ -5,7 +5,7 @@ import json
 import pathlib
 import shlex
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import colorama
 import filelock
@@ -95,7 +95,7 @@ def update_spot_job_status(job_id: Optional[int] = None):
         job_ids = [job_id]
     for job_id_ in job_ids:
         controller_status = job_lib.get_status(job_id_)
-        if controller_status.is_terminal():
+        if controller_status is None or controller_status.is_terminal():
             logger.error(f'Controller for job {job_id_} has exited abnormally. '
                          'Setting the job status to FAILED_CONTROLLER.')
             task_name = spot_state.get_task_name_by_job_id(job_id_)
@@ -237,20 +237,20 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='')
         status_display.update(msg)
         prev_msg = msg
-        job_status = spot_state.get_status(job_id)
-        while job_status is None:
+        spot_job_status = spot_state.get_status(job_id)
+        while spot_job_status is None:
             time.sleep(1)
-            job_status = spot_state.get_status(job_id)
+            spot_job_status = spot_state.get_status(job_id)
 
-        if job_status.is_terminal():
+        if spot_job_status.is_terminal():
             job_msg = ''
-            if job_status.is_failed():
+            if spot_job_status.is_failed():
                 job_msg = (
                     f'\nFailure reason: {spot_state.get_failure_reason(job_id)}'
                 )
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
-                    f'{job_status.value}. Logs will not be shown.'
+                    f'{spot_job_status.value}. Logs will not be shown.'
                     f'{colorama.Style.RESET_ALL}{job_msg}')
         task_name = spot_state.get_task_name_by_job_id(job_id)
         cluster_name = generate_spot_cluster_name(task_name, job_id)
@@ -473,7 +473,7 @@ class SpotCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs_by_id(cls, job_ids: Optional[List[int]]) -> str:
+    def cancel_jobs_by_id(cls, job_ids: Optional[Sequence[int]]) -> str:
         code = [
             f'msg = spot_utils.cancel_jobs_by_id({job_ids})',
             'print(msg, end="", flush=True)',
@@ -523,8 +523,15 @@ def dump_job_table_cache(job_table: str):
         json.dump((time.time(), job_table), f)
 
 
-def load_job_table_cache() -> Optional[Tuple[str, str]]:
-    """Load job table cache from file."""
+def load_job_table_cache() -> Optional[Tuple[float, str]]:
+    """Load job table cache from file.
+
+    Returns:
+        A tuple of (timestamp, job_table), where the timestamp is
+        the time when the job table is dumped and the job_table is
+        the dumped job table in string.
+        None if the cache file does not exist.
+    """
     cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
     if not cache_file.exists():
         return None
@@ -535,7 +542,7 @@ def load_job_table_cache() -> Optional[Tuple[str, str]]:
 def is_spot_controller_up(
     stopped_message: str,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
-           Optional[backends.Backend.ResourceHandle]]:
+           Optional['backends.CloudVmRayResourceHandle']]:
     """Check if the spot controller is up.
 
     It can be used to check the actual controller status (since the autostop is

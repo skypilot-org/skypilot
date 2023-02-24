@@ -195,7 +195,7 @@ def show_local_status_table(local_clusters: List[str]):
         config = common_utils.read_yaml(config_path)
         username = config['auth']['ssh_user']
 
-        if not isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+        if not isinstance(handle, backends.CloudVmRayResourceHandle):
             raise ValueError(f'Unknown handle type {type(handle)} encountered.')
 
         if (handle.launched_nodes is not None and
@@ -285,9 +285,9 @@ def _get_status_for_cost_report(cluster_status):
 def _get_resources(cluster_status):
     handle = cluster_status['handle']
     resources_str = '<initializing>'
-    if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
+    if isinstance(handle, backends.LocalDockerResourceHandle):
         resources_str = 'docker'
-    elif isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+    elif isinstance(handle, backends.CloudVmRayResourceHandle):
         if (handle.launched_nodes is not None and
                 handle.launched_resources is not None):
             launched_resource_str = str(handle.launched_resources)
