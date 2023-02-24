@@ -796,6 +796,8 @@ def _maybe_translate_local_file_mounts_and_sync_up(
                 storage_obj.source = f's3://{storage_obj.name}'
             elif store_type == storage_lib.StoreType.GCS:
                 storage_obj.source = f'gs://{storage_obj.name}'
+            elif store_type == storage_lib.StoreType.R2:
+                storage_obj.source = f'r2://{storage_obj.name}'
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(

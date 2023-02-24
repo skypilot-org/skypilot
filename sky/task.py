@@ -733,6 +733,15 @@ class Task:
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
+                elif store_type is storage_lib.StoreType.R2:
+                    if storage.source is not None and storage.source.startswith(
+                            'r2://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 'r2://' + storage.name
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
                 elif store_type is storage_lib.StoreType.AZURE:
                     # TODO when Azure Blob is done: sync ~/.azure
                     assert False, 'TODO: Azure Blob not mountable yet'
