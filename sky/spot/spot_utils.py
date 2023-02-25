@@ -464,7 +464,10 @@ def format_job_table(jobs: List[Dict[str, Any]],
         status_str = f'In progress jobs: {status_str}'
     else:
         status_str = 'No in progress jobs.'
-    return f'{status_str}\n{job_table}'
+    output = status_str
+    if str(job_table):
+        output += f'\n{job_table}'
+    return output
 
 
 class SpotCodeGen:

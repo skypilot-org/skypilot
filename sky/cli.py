@@ -1414,9 +1414,7 @@ def _get_in_progress_spot_jobs(
             msg = 'Spot jobs will not be shown until the controller is up.'
         else:
             assert controller_status != global_user_state.ClusterStatus.UP
-            # Do not show any spot jobs if the controller is STOPPED or not
-            # exist.
-            msg = ''
+            msg = 'No in-progress jobs.'
     except RuntimeError:
         msg = 'Failed to query spot jobs due to connection issue.'
     else:
@@ -1536,7 +1534,8 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
 
         hints = []
         if show_spot_queue:
-            click.echo()
+            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                        f'Managed spot jobs{colorama.Style.RESET_ALL}')
             with backend_utils.safe_console_status(
                     '[cyan]Checking spot jobs[/]'):
                 n_jobs, msg = spot_jobs_future.get()
@@ -1550,16 +1549,16 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
                     # (see ray/_private/worker.py).
                     if e.code != 15:
                         raise
-            if msg:
-                click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Managed spot jobs{colorama.Style.RESET_ALL}')
-                click.echo(msg + '\n')
+
+            click.echo(msg + '\n')
+            if n_jobs is not None:
+                # spot controller is UP.
                 job_info = ''
-                if n_jobs is not None and n_jobs > 0:
+                if  n_jobs > 0:
                     job_info = f'{n_jobs} spot jobs are in progress'
                     if n_jobs > _SPOT_JOBS_IN_STATUS:
                         job_info += (f' ({_SPOT_JOBS_IN_STATUS} latest ones '
-                                     'shown above)')
+                                    'shown above)')
                     job_info += '. '
                 hints.append(
                     f'* {job_info}To see all jobs: {colorama.Style.BRIGHT}'
