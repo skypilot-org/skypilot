@@ -582,7 +582,7 @@ def is_spot_controller_up(
     """
     try:
         controller_status, handle = backend_utils.refresh_cluster_status_handle(
-            SPOT_CONTROLLER_NAME)
+            SPOT_CONTROLLER_NAME, force_refresh=True)
     except exceptions.ClusterStatusFetchingError as e:
         # We do not catch the exceptions related to the cluster owner identity
         # mismatch, please refer to the comment in
