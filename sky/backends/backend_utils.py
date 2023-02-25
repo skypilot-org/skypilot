@@ -2094,23 +2094,20 @@ def check_cluster_available(
         if onprem_utils.check_if_local_cloud(cluster_name):
             raise exceptions.ClusterNotUpError(
                 constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
-                    cluster_name),
-                cluster_status=cluster_status)
+                    cluster_name))
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
                 f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for '
                 f'cluster {cluster_name!r} (status: {cluster_status.value}). '
                 'It is only allowed for '
                 f'{global_user_state.ClusterStatus.UP.value} clusters.'
-                f'{colorama.Style.RESET_ALL}',
-                cluster_status=cluster_status)
+                f'{colorama.Style.RESET_ALL}')
 
     if handle.head_ip is None:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
                 f'Cluster {cluster_name!r} has been stopped or not properly '
-                'set up. Please re-launch it with `sky start`.',
-                cluster_status=cluster_status)
+                'set up. Please re-launch it with `sky start`.')
     return handle
 
 
