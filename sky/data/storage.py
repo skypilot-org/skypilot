@@ -705,6 +705,8 @@ class Storage(object):
             # remove handle and return
             if is_sky_managed:
                 self.handle.remove_store(store)
+                ######
+                print(store_type)
                 store.delete()
                 # Check remaining stores - if none is sky managed, remove
                 # the storage from global_user_state.
