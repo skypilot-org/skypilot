@@ -4,7 +4,7 @@ This script takes about 1 minute to finish.
 """
 import argparse
 import json
-import multiprocessing
+from multiprocessing import pool as mp_pool
 import os
 import subprocess
 from typing import List, Optional, Set
@@ -142,7 +142,7 @@ def get_gpu_name(family: str) -> Optional[str]:
 
 
 def get_all_regions_instance_types_df(region_set: Set[str]):
-    with multiprocessing.Pool() as pool:
+    with mp_pool.Pool() as pool:
         dfs = pool.map_async(get_pricing_df, region_set)
         df_sku = pool.apply_async(get_sku_df, (region_set,))
         dfs = dfs.get()

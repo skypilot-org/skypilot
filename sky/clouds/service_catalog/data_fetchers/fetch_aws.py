@@ -4,7 +4,7 @@ This script takes about 1 minute to finish.
 import argparse
 import datetime
 import itertools
-import multiprocessing
+from multiprocessing import pool as mp_pool
 import os
 import subprocess
 from typing import Dict, List, Optional, Set, Tuple, Union
@@ -174,7 +174,9 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         if zone_df is None:
             raise RuntimeError(f'No access to region {region}')
 
-        with multiprocessing.pool.ThreadPool() as pool:
+        # Use ThreadPool instead of Pool because this function can be called
+        # within a multiprocessing.Pool, and Pool cannot be nested.
+        with mp_pool.ThreadPool() as pool:
             futures = [
                 pool.apply_async(_get_instance_types, (region,)),
                 pool.apply_async(_get_instance_type_offerings, (region,)),
@@ -255,7 +257,7 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
 
 
 def get_all_regions_instance_types_df(regions: Set[str]) -> pd.DataFrame:
-    with multiprocessing.Pool() as pool:
+    with mp_pool.Pool() as pool:
         df_or_regions = pool.map(_get_instance_types_df, regions)
     new_dfs = []
     for df_or_region in df_or_regions:
@@ -330,7 +332,7 @@ def get_all_regions_images_df(regions: Set[str]) -> pd.DataFrame:
     image_metas = [
         (r, *i) for r, i in itertools.product(regions, _GPU_UBUNTU_DATE_PYTORCH)
     ]
-    with multiprocessing.Pool() as pool:
+    with mp_pool.Pool() as pool:
         results = pool.starmap(_get_image_row, image_metas)
     result_df = pd.DataFrame(
         results,
@@ -349,8 +351,8 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
     """
     regions = list(get_enabled_regions())
     # Use ThreadPool instead of Pool because this function can be called within
-    # a multiprocessing.Pool, and Pool cannot be nested.
-    with multiprocessing.pool.ThreadPool() as pool:
+    # a Pool, and Pool cannot be nested.
+    with mp_pool.ThreadPool() as pool:
         az_mappings = pool.map(_get_availability_zones, regions)
     missing_regions = {
         regions[i] for i, m in enumerate(az_mappings) if m is None
