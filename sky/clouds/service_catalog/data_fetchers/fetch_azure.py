@@ -145,10 +145,8 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
     with multiprocessing.Pool() as pool:
         dfs = pool.map_async(get_pricing_df, region_set)
         df_sku = pool.apply_async(get_sku_df, (region_set,))
-        dfs.wait()
         dfs = dfs.get()
         df = pd.concat(dfs)
-        df_sku.wait()
         df_sku = df_sku.get()
 
     print('Processing dataframes')
