@@ -214,7 +214,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         so that the container is kept alive and we can issue docker exec cmds
         to it to handle sky exec commands.
         """
-        del task, detach_setup  # unused
+        del detach_setup  # unused
         colorama.init()
         style = colorama.Style
         assert handle in self.images, \
@@ -360,6 +360,10 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
 
     def _execute_task_one_node(self, handle: LocalDockerResourceHandle,
                                task: 'task_lib.Task') -> None:
+        if callable(task.run):
+            raise NotImplementedError(
+                'Tasks with callable run commands are not supported in '
+                'LocalDockerBackend.')
         container = self.containers[handle]
         _, image_metadata = self.images[handle]
         with tempfile.NamedTemporaryFile(mode='w') as temp_file:

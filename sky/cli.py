@@ -959,6 +959,7 @@ def _make_task_from_entrypoint_with_overrides(
         cloud = 'local'
 
     if is_yaml:
+        assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
         task = sky.Task.from_yaml(entrypoint)
     else:

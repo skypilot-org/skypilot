@@ -34,7 +34,7 @@ _TaskToCostMap = Dict[task_lib.Task, Dict[resources_lib.Resources, float]]
 # cloud -> list of resources that have the same accelerators.
 _PerCloudCandidates = Dict[clouds.Cloud, List[resources_lib.Resources]]
 # task -> per-cloud candidates
-_TaskToPerCloudCandidates = Dict[task_lib.task_lib.Task, _PerCloudCandidates]
+_TaskToPerCloudCandidates = Dict[task_lib.Task, _PerCloudCandidates]
 
 
 # Constants: minimize what target?

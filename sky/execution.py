@@ -707,6 +707,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     # 2. When the src is the same, use the same bucket.
     copy_mounts_with_file_in_src = {}
     for i, (dst, src) in enumerate(copy_mounts.items()):
+        assert task.file_mounts is not None
         task.file_mounts.pop(dst)
         if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
             copy_mounts_with_file_in_src[dst] = src
