@@ -2,7 +2,6 @@
 This script takes about 1 minute to finish.
 """
 import argparse
-import asyncio
 import datetime
 import itertools
 import multiprocessing
@@ -75,7 +74,7 @@ def get_enabled_regions() -> Set[str]:
     return regions_enabled
 
 
-async def _get_instance_types(region: str) -> pd.DataFrame:
+def _get_instance_types(region: str) -> pd.DataFrame:
     client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_instance_types')
     items = []
@@ -86,7 +85,7 @@ async def _get_instance_types(region: str) -> pd.DataFrame:
     return pd.DataFrame(items)
 
 
-async def _get_instance_type_offerings(region: str) -> pd.DataFrame:
+def _get_instance_type_offerings(region: str) -> pd.DataFrame:
     client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_instance_type_offerings')
     items = []
@@ -120,7 +119,7 @@ def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
     return pd.DataFrame(zones)
 
 
-async def _get_pricing_table(region: str) -> pd.DataFrame:
+def _get_pricing_table(region: str) -> pd.DataFrame:
     print(f'{region} downloading pricing table')
     url = PRICING_TABLE_URL_FMT.format(region=region)
     df = pd.read_csv(url, skiprows=5, low_memory=False)
@@ -138,7 +137,7 @@ async def _get_pricing_table(region: str) -> pd.DataFrame:
               ]]
 
 
-async def _get_spot_pricing_table(region: str) -> pd.DataFrame:
+def _get_spot_pricing_table(region: str) -> pd.DataFrame:
     """Get spot pricing table for a region.
 
     Example output:
@@ -175,13 +174,16 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         if zone_df is None:
             raise RuntimeError(f'No access to region {region}')
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        df, offering_df, pricing_df, spot_pricing_df = loop.run_until_complete(
-            asyncio.gather(_get_instance_types(region),
-                           _get_instance_type_offerings(region),
-                           _get_pricing_table(region),
-                           _get_spot_pricing_table(region)))
+        with multiprocessing.pool.ThreadPool() as pool:
+            futures = [
+                pool.apply_async(_get_instance_types, (region,)),
+                pool.apply_async(_get_instance_type_offerings, (region,)),
+                pool.apply_async(_get_pricing_table, (region,)),
+                pool.apply_async(_get_spot_pricing_table, (region,))
+            ]
+            df, offering_df, pricing_df, spot_pricing_df = [
+                future.get() for future in futures
+            ]
         print(f'{region} Processing dataframes')
 
         def get_acc_info(row) -> Tuple[Optional[str], float]:
