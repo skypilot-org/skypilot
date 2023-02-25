@@ -1,6 +1,6 @@
 """Logging utils."""
 import enum
-from typing import List, Optional
+from typing import Optional, Sequence
 
 import colorama
 import pendulum
@@ -54,7 +54,8 @@ class RayUpLineProcessor(LineProcessor):
         self.status_display.stop()
 
 
-def create_table(field_names: List[str], **kwargs) -> prettytable.PrettyTable:
+def create_table(field_names: Sequence[str],
+                 **kwargs) -> prettytable.PrettyTable:
     """Creates table with default style."""
     border = kwargs.pop('border', False)
     align = kwargs.pop('align', 'l')

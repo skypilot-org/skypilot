@@ -5,6 +5,5 @@ sky
 --exclude sky/skylet/providers
 --exclude sky/resources.py
 --exclude sky/global_user_state.py
---exclude sky/optimizer.py
 --exclude sky/task.py
 --exclude sky/backends/monkey_patches
