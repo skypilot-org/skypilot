@@ -174,8 +174,8 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         if zone_df is None:
             raise RuntimeError(f'No access to region {region}')
 
-        # Use ThreadPool instead of Pool because this function can be called within
-        # a multiprocessing.Pool, and Pool cannot be nested.
+        # Use ThreadPool instead of Pool because this function can be called
+        # within a multiprocessing.Pool, and Pool cannot be nested.
         with mp_pool.ThreadPool() as pool:
             futures = [
                 pool.apply_async(_get_instance_types, (region,)),
