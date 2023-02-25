@@ -1506,16 +1506,18 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
       cluster statuses from the cloud providers.
     """
     with multiprocessing.Pool(1) as pool:
-        # Run the spot job query in parallel to speed up the status query.
+        # Do not show spot queue if user specifies clusters.
+        show_spot_queue = show_spot_queue and not clusters
         if show_spot_queue:
+            # Run the spot job query in parallel to speed up the status query.
             spot_jobs_future = pool.apply_async(_get_in_progress_spot_jobs,
                                                 (all,))
 
+        query_clusters: Optional[List[str]] = None
         if clusters:
-            clusters = _get_glob_clusters(clusters)
-        else:
-            clusters = None
-        cluster_records = core.status(cluster_names=clusters, refresh=refresh)
+            query_clusters = _get_glob_clusters(clusters)
+        cluster_records = core.status(cluster_names=query_clusters,
+                                      refresh=refresh)
         nonreserved_cluster_records = []
         reserved_clusters = []
         for cluster_record in cluster_records:
@@ -1534,11 +1536,11 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
 
         hints = []
         if show_spot_queue:
-            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'Managed spot jobs{colorama.Style.RESET_ALL}')
+            click.echo()
             with backend_utils.safe_console_status(
                     '[cyan]Checking spot jobs[/]'):
                 n_jobs, msg = spot_jobs_future.get()
+
                 try:
                     pool.close()
                     pool.join()
@@ -1549,7 +1551,9 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
                     if e.code != 15:
                         raise
             if msg:
-                click.echo(msg)
+                click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                           f'Managed spot jobs{colorama.Style.RESET_ALL}')
+                click.echo(msg + '\n')
                 job_info = ''
                 if n_jobs is not None and n_jobs > 0:
                     job_info = f'{n_jobs} spot jobs are in progress'
@@ -1569,7 +1573,7 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
                          'auto{stop,down} scheduled. Refresh statuses with: '
                          f'{colorama.Style.BRIGHT}sky status --refresh'
                          f'{colorama.Style.RESET_ALL}')
-        click.echo('\n' + '\n'.join(hints))
+        click.echo('\n'.join(hints))
 
 
 @cli.command()

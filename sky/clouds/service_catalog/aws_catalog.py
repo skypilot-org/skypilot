@@ -18,7 +18,6 @@ from sky import sky_logging
 from sky.clouds import aws
 from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import config
-from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
