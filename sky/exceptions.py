@@ -51,8 +51,8 @@ class ProvisionPrechecksError(Exception):
         reasons: (List[Exception]) The reasons why the prechecks failed.
     """
 
-    def __init__(self, message: str, reasons: List[Exception]) -> None:
-        super().__init__(message)
+    def __init__(self, reasons: List[Exception]) -> None:
+        super().__init__()
         self.reasons = list(reasons)
 
 

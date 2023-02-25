@@ -52,8 +52,7 @@ class StatusColumn:
 
 
 def show_status_table(cluster_records: List[Dict[str, Any]],
-                      show_all: bool,
-                      reserved_group_name: Optional[str] = None) -> int:
+                      show_all: bool) -> int:
     """Compute cluster table values and display.
 
     Returns:
@@ -92,14 +91,8 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
         pending_autostop += _is_pending_autostop(record)
 
     if cluster_records:
-        if reserved_group_name is not None:
-            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'{reserved_group_name}{colorama.Style.RESET_ALL}'
-                       f'{colorama.Style.DIM}'
-                       f'{colorama.Style.RESET_ALL}')
-        else:
-            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
-                       f'{colorama.Style.RESET_ALL}')
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+                   f'{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
     else:
         click.echo('No existing clusters.')

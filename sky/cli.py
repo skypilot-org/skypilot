@@ -1416,13 +1416,16 @@ def _get_in_progress_spot_jobs(
             msg = ('Controller\'s latest status is detected to be INIT; jobs '
                    'will not be shown until it becomes UP.')
         else:
-            assert controller_status in [None, global_user_state.ClusterStatus.STOPPED]
+            assert controller_status in [
+                None, global_user_state.ClusterStatus.STOPPED
+            ]
             msg = 'No in progress jobs.'
     except RuntimeError:
-        msg = 'Failed to query spot jobs due to connection issues. Try again later.'
+        msg = ('Failed to query spot jobs due to connection '
+               'issues. Try again later.')
     else:
-        max_jobs_to_show = (None
-                            if show_all_in_progress else _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS)
+        max_jobs_to_show = (None if show_all_in_progress else
+                            _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS)
         msg = spot_lib.format_job_table(spot_jobs,
                                         show_all=False,
                                         max_jobs=max_jobs_to_show)
@@ -1561,10 +1564,12 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
                 # spot controller is UP.
                 job_info = ''
                 if num_in_progress_jobs > 0:
-                    job_info = f'{num_in_progress_jobs} spot jobs are in progress'
+                    job_info = (f'{num_in_progress_jobs} spot jobs are '
+                                'in progress')
                     if num_in_progress_jobs > _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS:
-                        job_info += (f' ({_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS} latest ones '
-                                     'shown above)')
+                        job_info += (
+                            f' ({_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS} latest ones '
+                            'shown above)')
                     job_info += '. '
                 hints.append(
                     f'* {job_info}To see all jobs: {colorama.Style.BRIGHT}'
