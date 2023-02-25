@@ -756,8 +756,13 @@ def spot_queue(refresh: bool,
         handle = _start(spot.SPOT_CONTROLLER_NAME)
         controller_status = global_user_state.ClusterStatus.UP
 
-    if (controller_status == global_user_state.ClusterStatus.STOPPED or
-        (handle is None or handle.head_ip is None)):
+    if handle is None or handle.head_ip is None:
+        # When the controller is STOPPED, the head_ip will be None, as
+        # it will be set in global_user_state.remove_cluster().
+        # We do not directly check for UP because the controller may be
+        # in INIT state during another spot launch, but still have
+        # head_ip available. In this case, we can still try to ssh
+        # into the controller and fetch the job table.
         raise exceptions.ClusterNotUpError('Spot controller is not up.',
                                            cluster_status=controller_status)
 

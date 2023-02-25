@@ -403,7 +403,7 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
 def format_job_table(jobs: List[Dict[str, Any]],
                      show_all: bool,
                      max_jobs: Optional[int] = None) -> str:
-    """Show all spot jobs.
+    """Returns spot jobs as a formatted string.
 
     Args:
         jobs: A list of spot jobs.
