@@ -130,6 +130,7 @@ class Cloud:
         cls,
         *,
         region: str,
+        num_nodes: int,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
@@ -138,26 +139,46 @@ class Cloud:
 
         Certain clouds' provisioners may handle batched requests, retrying for
         itself a list of zones under a region.  Others may need a specific zone
-        per provision request (in that case, yields (region, a one-element list
-        for each zone)).
+        per provision request (in that case, yields a one-element list for each
+        zone).
         Optionally, caller can filter the yielded region/zones by specifying the
         instance_type, accelerators, and use_spot.
 
         Args:
             region: The region to provision.
+            num_nodes: The number of nodes to provision.
             instance_type: The instance type to provision.
             accelerators: The accelerators to provision.
             use_spot: Whether to use spot instances.
 
         Yields:
-            A list of zones to provision in the given region, in the order of
-            price. If there is no zone that offers the specified resources,
-            nothing is yielded;
-            If the cloud does not support `Zone`s, None will be yielded.
+            A list of zones that offer the requested resources in the given
+            region, in the order of price.
+            (1) If there is no zone that offers the specified resources, nothing
+                is yielded. For example, Azure does not support zone, and
+                calling this method with non-existing instance_type in the given
+                region, will yield nothing, i.e. raise StopIteration.
+                ```
+                for zone in Azure.zones_provision_loop(region=region,
+                                           instance_type='non-existing'):
+                    # Will not reach here.
+                ```
+            (2) If the cloud's provisioner does not support `Zone`s, `None` will
+                be yielded.
+                ```
+                for zone in Azure.zones_provision_loop(region=region,
+                                           instance_type='existing-instance'):
+                    assert zone is None
+                ```
+            This means if something is yielded, either it's None (zones are not
+            supported and the region offers the resources) or it's a non-empty
+            list (zones are supported and they offer the resources).
 
         Typical usage:
 
-            for region, zones in cloud.region_zones_provision_loop(
+            for zones in cloud.region_zones_provision_loop(
+                region,
+                num_nodes,
                 instance_type,
                 accelerators,
                 use_spot
@@ -267,7 +288,8 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud.
 
         Returns a boolean of whether the user can access this cloud, and a
@@ -275,7 +297,8 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def get_current_user_identity(self) -> Optional[str]:
+    @classmethod
+    def get_current_user_identity(cls) -> Optional[str]:
         """(Advanced) Returns currently active user identity of this cloud.
 
         The user "identity" is associated with each SkyPilot cluster they

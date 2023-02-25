@@ -93,16 +93,19 @@ class Lambda(clouds.Cloud):
         cls,
         *,
         region: str,
+        num_nodes: int,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[Optional[List[clouds.Zone]]]:
+    ) -> Iterator[None]:
+        del num_nodes  # unused
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
                                             region=region,
                                             zone=None)
         for r in regions:
+            assert r.zones is None, r
             yield r.zones
 
     def instance_type_to_hourly_cost(self,
@@ -232,7 +235,8 @@ class Lambda(clouds.Cloud):
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         try:
             lambda_utils.LambdaCloudClient().list_instances()
         except (AssertionError, KeyError, lambda_utils.LambdaCloudError):
@@ -250,7 +254,8 @@ class Lambda(clouds.Cloud):
             for filename in _CREDENTIAL_FILES
         }
 
-    def get_current_user_identity(self) -> Optional[str]:
+    @classmethod
+    def get_current_user_identity(cls) -> Optional[str]:
         # TODO(ewzeng): Implement get_current_user_identity for Lambda
         return None
 

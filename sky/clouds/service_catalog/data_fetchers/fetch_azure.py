@@ -231,7 +231,7 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
     before_drop_len = len(df_ret)
     df_ret.dropna(subset=['InstanceType'], inplace=True, how='all')
     after_drop_len = len(df_ret)
-    print('Dropped {} duplicated rows'.format(before_drop_len - after_drop_len))
+    print(f'Dropped {before_drop_len - after_drop_len} duplicated rows')
 
     # Filter out deprecated families
     df_ret = df_ret.loc[~df_ret['family'].isin(DEPRECATED_FAMILIES)]

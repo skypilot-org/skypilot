@@ -155,7 +155,7 @@ class StorageStatus(enum.Enum):
 
 
 def add_or_update_cluster(cluster_name: str,
-                          cluster_handle: 'backends.Backend.ResourceHandle',
+                          cluster_handle: 'backends.ResourceHandle',
                           requested_resources: Optional[Set[Any]],
                           ready: bool,
                           is_launch: bool = True):
@@ -163,7 +163,7 @@ def add_or_update_cluster(cluster_name: str,
 
     Args:
         cluster_name: Name of the cluster.
-        cluster_handle: Backend.ResourceHandle of the cluster.
+        cluster_handle: backends.ResourceHandle of the cluster.
         requested_resources: Resources requested for cluster.
         ready: Whether the cluster is ready to use. If False, the cluster will
             be marked as INIT, otherwise it will be marked as UP.
@@ -339,7 +339,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> float:
 
 
 def get_handle_from_cluster_name(
-        cluster_name: str) -> Optional['backends.Backend.ResourceHandle']:
+        cluster_name: str) -> Optional['backends.ResourceHandle']:
     assert cluster_name is not None, 'cluster_name cannot be None'
     rows = _DB.cursor.execute('SELECT handle FROM clusters WHERE name=(?)',
                               (cluster_name,))
@@ -426,10 +426,13 @@ def _get_cluster_launch_time(cluster_hash: str) -> Optional[Dict[str, Any]]:
     return usage_intervals[0][0]
 
 
-def _get_cluster_duration(cluster_hash: str) -> Optional[Dict[str, Any]]:
+def _get_cluster_duration(cluster_hash: str) -> int:
+    total_duration = 0
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
-    total_duration = 0
+    if usage_intervals is None:
+        return total_duration
+
     for i, (start_time, end_time) in enumerate(usage_intervals):
         # duration from latest start time to time of query
         if end_time is None:

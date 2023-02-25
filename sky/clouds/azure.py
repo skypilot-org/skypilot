@@ -1,4 +1,5 @@
 """Azure."""
+import functools
 import json
 import os
 import subprocess
@@ -190,16 +191,19 @@ class Azure(clouds.Cloud):
         cls,
         *,
         region: str,
+        num_nodes: int,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[Optional[List[clouds.Zone]]]:
+    ) -> Iterator[None]:
+        del num_nodes  # unused
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
                                             region=region,
                                             zone=None)
         for r in regions:
+            assert r.zones is None, r
             yield r.zones
 
     # TODO: factor the following three methods, as they are the same logic
@@ -310,7 +314,8 @@ class Azure(clouds.Cloud):
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         help_str = (
             ' Run the following commands:'
@@ -338,7 +343,7 @@ class Azure(clouds.Cloud):
         # If Azure is properly logged in, this will return the account email
         # address + subscription ID.
         try:
-            self.get_current_user_identity()
+            cls.get_current_user_identity()
         except exceptions.CloudUserIdentityError:
             return False, 'Azure credential is not set.' + help_str
         return True, None
@@ -362,7 +367,9 @@ class Azure(clouds.Cloud):
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'azure')
 
-    def get_current_user_identity(self) -> Optional[str]:
+    @classmethod
+    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    def get_current_user_identity(cls) -> Optional[str]:
         """Returns the cloud user identity."""
         # This returns the user's email address + [subscription_id].
         retry_cnt = 0
@@ -391,7 +398,7 @@ class Azure(clouds.Cloud):
                         f'{common_utils.format_exception(e, use_bracket=True)}'
                     ) from e
         try:
-            project_id = self.get_project_id()
+            project_id = cls.get_project_id()
         except (ModuleNotFoundError, RuntimeError) as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
