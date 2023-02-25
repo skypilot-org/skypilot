@@ -20,7 +20,6 @@ from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import config
 from sky.clouds.service_catalog.data_fetchers import fetch_aws
 
-
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
