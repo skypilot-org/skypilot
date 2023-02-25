@@ -5,12 +5,8 @@ import numpy as np
 import pandas as pd
 
 import sky
+from sky import clouds
 
-CLOUDS = {
-    'AWS': sky.AWS(),
-    'GCP': sky.GCP(),
-    'Azure': sky.Azure(),
-}
 ALL_INSTANCE_TYPES = sum(sky.list_accelerators(gpus_only=True).values(), [])
 GCP_HOST_VM = 'n1-highmem-8'
 
@@ -69,7 +65,7 @@ def generate_random_dag(
                 if pd.isna(instance_type):
                     instance_type = GCP_HOST_VM
                 resources = sky.Resources(
-                    cloud=CLOUDS[candidate.cloud],
+                    cloud=clouds.CLOUD_REGISTRY.from_str(candidate.cloud),
                     instance_type=instance_type,
                     accelerators={
                         candidate.accelerator_name: candidate.accelerator_count
