@@ -75,12 +75,12 @@ def list_accelerators(
     return dict(ret)
 
 
-def list_accelerator_counts(
+def list_accelerator_counts_and_prices(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
     region_filter: Optional[str] = None,
     clouds: CloudFilter = None,
-) -> Dict[str, List[int]]:
+) -> Dict[str, List[Tuple[int, float]]]:
     """List all accelerators offered by Sky and available counts.
 
     Returns: A dictionary of canonical accelerator names mapped to a list
@@ -90,14 +90,28 @@ def list_accelerator_counts(
                                   name_filter, region_filter, False)
     if not isinstance(results, list):
         results = [results]
-    accelerator_counts: Dict[str, Set[int]] = collections.defaultdict(set)
+    accelerator_counts: Dict[str,
+                             List[Tuple[int,
+                                        float]]] = collections.defaultdict(list)
     for result in results:
         for gpu, items in result.items():
             for item in items:
-                accelerator_counts[gpu].add(item.accelerator_count)
-    ret: Dict[str, List[int]] = {}
+                idx, existed = None, False
+                for i, v in enumerate(accelerator_counts[gpu]):
+                    if v[0] == item.accelerator_count:
+                        idx, existed = i, True
+                        break
+                if existed:
+                    assert idx is not None
+                    if item.spot_price < accelerator_counts[gpu][idx][1]:
+                        accelerator_counts[gpu][idx] = (item.accelerator_count,
+                                                        item.spot_price)
+                else:
+                    accelerator_counts[gpu].append(
+                        (item.accelerator_count, item.spot_price))
+    ret: Dict[str, List[Tuple[int, float]]] = {}
     for gpu, counts in accelerator_counts.items():
-        ret[gpu] = sorted(counts)
+        ret[gpu] = sorted(counts, key=lambda element: element[0])
     return ret
 
 

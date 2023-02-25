@@ -2764,19 +2764,16 @@ def show_gpus(
     if show_all and gpu_name is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
 
-    def _list_to_str(lst):
-        return ', '.join([str(e) for e in lst])
-
     def _output():
         gpu_table = log_utils.create_table(
-            ['NVIDIA_GPU', 'AVAILABLE_QUANTITIES'])
+            ['NVIDIA_GPU', 'AVAILABLE_QUANTITY', 'HOURLY_SPOT_PRICE'])
         tpu_table = log_utils.create_table(
-            ['GOOGLE_TPU', 'AVAILABLE_QUANTITIES'])
+            ['GOOGLE_TPU', 'AVAILABLE_QUANTITY', 'HOURLY_SPOT_PRICE'])
         other_table = log_utils.create_table(
-            ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
+            ['OTHER_GPU', 'AVAILABLE_QUANTITY', 'HOURLY_SPOT_PRICE'])
 
         if gpu_name is None:
-            result = service_catalog.list_accelerator_counts(
+            result = service_catalog.list_accelerator_counts_and_prices(
                 gpus_only=True,
                 clouds=cloud,
                 region_filter=region,
@@ -2784,13 +2781,19 @@ def show_gpus(
             # NVIDIA GPUs
             for gpu in service_catalog.get_common_gpus():
                 if gpu in result:
-                    gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
+                    gpu_result: List[Tuple[int, float]] = result.pop(gpu)
+                    for (num, spot_price) in gpu_result:
+                        gpu_table.add_row(
+                            [gpu, str(num), '$ ' + str(spot_price)])
             yield from gpu_table.get_string()
 
             # Google TPUs
             for tpu in service_catalog.get_tpus():
                 if tpu in result:
-                    tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
+                    tpu_result: List[Tuple[int, float]] = result.pop(tpu)
+                    for (num, spot_price) in tpu_result:
+                        tpu_table.add_row(
+                            [tpu, str(num), '$ ' + str(spot_price)])
             if len(tpu_table.get_string()) > 0:
                 yield '\n\n'
             yield from tpu_table.get_string()
@@ -2799,7 +2802,9 @@ def show_gpus(
             if show_all:
                 yield '\n\n'
                 for gpu, qty in sorted(result.items()):
-                    other_table.add_row([gpu, _list_to_str(qty)])
+                    for (num, spot_price) in qty:
+                        other_table.add_row(
+                            [gpu, str(num), '$ ' + str(spot_price)])
                 yield from other_table.get_string()
                 yield '\n\n'
             else:
