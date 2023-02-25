@@ -90,7 +90,7 @@ class LambdaNodeProvider(NodeProvider):
                     }
                 }
 
-    def _list_instances_in_cluster(self) -> Dict[str, Any]:
+    def _list_instances_in_cluster(self) -> List[Dict[str, Any]]:
         """List running instances in cluster."""
         vms = self.lambda_client.list_instances()
         return [node for node in vms if node.get('name') == self.cluster_name]
@@ -151,15 +151,24 @@ class LambdaNodeProvider(NodeProvider):
 
     def node_tags(self, node_id: str) -> Dict[str, str]:
         """Returns the tags of the given node (string dict)."""
-        return self._get_cached_node(node_id=node_id)['tags']
+        node = self._get_cached_node(node_id=node_id)
+        if node is None:
+            return {}
+        return node['tags']
 
-    def external_ip(self, node_id: str) -> str:
+    def external_ip(self, node_id: str) -> Optional[str]:
         """Returns the external ip of the given node."""
-        return self._get_cached_node(node_id=node_id)['external_ip']
+        node = self._get_cached_node(node_id=node_id)
+        if node is None:
+            return None
+        return node.get('external_ip')
 
-    def internal_ip(self, node_id: str) -> str:
+    def internal_ip(self, node_id: str) -> Optional[str]:
         """Returns the internal ip (Ray ip) of the given node."""
-        return self._get_cached_node(node_id=node_id)['internal_ip']
+        node = self._get_cached_node(node_id=node_id)
+        if node is None:
+            return None
+        return node.get('internal_ip')
 
     def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str],
                     count: int) -> None:
@@ -195,6 +204,7 @@ class LambdaNodeProvider(NodeProvider):
     def set_node_tags(self, node_id: str, tags: Dict[str, str]) -> None:
         """Sets the tag values (string dict) for the specified node."""
         node = self._get_node(node_id)
+        assert node is not None, node_id
         node['tags'].update(tags)
         self.metadata[node_id] = {'tags': node['tags']}
 
