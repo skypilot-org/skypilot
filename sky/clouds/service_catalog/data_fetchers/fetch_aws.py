@@ -2,14 +2,16 @@
 This script takes about 1 minute to finish.
 """
 import argparse
+import asyncio
 import datetime
+import itertools
+import multiprocessing
 import os
 import subprocess
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import pandas as pd
-import ray
 
 from sky.adaptors import aws
 
@@ -73,8 +75,7 @@ def get_enabled_regions() -> Set[str]:
     return regions_enabled
 
 
-@ray.remote
-def _get_instance_types(region: str) -> pd.DataFrame:
+async def _get_instance_types(region: str) -> pd.DataFrame:
     client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_instance_types')
     items = []
@@ -85,8 +86,7 @@ def _get_instance_types(region: str) -> pd.DataFrame:
     return pd.DataFrame(items)
 
 
-@ray.remote
-def _get_instance_type_offerings(region: str) -> pd.DataFrame:
+async def _get_instance_type_offerings(region: str) -> pd.DataFrame:
     client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_instance_type_offerings')
     items = []
@@ -99,7 +99,6 @@ def _get_instance_type_offerings(region: str) -> pd.DataFrame:
         columns={'Location': 'AvailabilityZoneName'})
 
 
-@ray.remote
 def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
     client = aws.client('ec2', region_name=region)
     zones = []
@@ -121,8 +120,7 @@ def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
     return pd.DataFrame(zones)
 
 
-@ray.remote
-def _get_pricing_table(region: str) -> pd.DataFrame:
+async def _get_pricing_table(region: str) -> pd.DataFrame:
     print(f'{region} downloading pricing table')
     url = PRICING_TABLE_URL_FMT.format(region=region)
     df = pd.read_csv(url, skiprows=5, low_memory=False)
@@ -140,8 +138,7 @@ def _get_pricing_table(region: str) -> pd.DataFrame:
               ]]
 
 
-@ray.remote
-def _get_spot_pricing_table(region: str) -> pd.DataFrame:
+async def _get_spot_pricing_table(region: str) -> pd.DataFrame:
     """Get spot pricing table for a region.
 
     Example output:
@@ -170,21 +167,21 @@ def _get_spot_pricing_table(region: str) -> pd.DataFrame:
     return df
 
 
-@ray.remote
 def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
     try:
         # Fetch the zone info first to make sure the account has access to the
         # region.
-        zone_df = ray.get(_get_availability_zones.remote(region))
+        zone_df = _get_availability_zones(region)
         if zone_df is None:
             raise RuntimeError(f'No access to region {region}')
 
-        df, offering_df, pricing_df, spot_pricing_df = ray.get([
-            _get_instance_types.remote(region),
-            _get_instance_type_offerings.remote(region),
-            _get_pricing_table.remote(region),
-            _get_spot_pricing_table.remote(region),
-        ])
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        df, offering_df, pricing_df, spot_pricing_df = loop.run_until_complete(
+            asyncio.gather(_get_instance_types(region),
+                           _get_instance_type_offerings(region),
+                           _get_pricing_table(region),
+                           _get_spot_pricing_table(region)))
         print(f'{region} Processing dataframes')
 
         def get_acc_info(row) -> Tuple[Optional[str], float]:
@@ -256,7 +253,8 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
 
 
 def get_all_regions_instance_types_df(regions: Set[str]) -> pd.DataFrame:
-    df_or_regions = ray.get([_get_instance_types_df.remote(r) for r in regions])
+    with multiprocessing.Pool() as pool:
+        df_or_regions = pool.map(_get_instance_types_df, regions)
     new_dfs = []
     for df_or_region in df_or_regions:
         if isinstance(df_or_region, str):
@@ -314,7 +312,6 @@ def _fetch_image_id(region: str, ubuntu_version: str, creation_date: str,
     return image_id
 
 
-@ray.remote
 def _get_image_row(
         region: str, gpu: str, ubuntu_version: str, date: str,
         pytorch_version) -> Tuple[str, str, str, str, Optional[str], str]:
@@ -328,20 +325,16 @@ def _get_image_row(
 
 
 def get_all_regions_images_df(regions: Set[str]) -> pd.DataFrame:
-    workers = []
-    for (gpu, ubuntu_version, date,
-         pytorch_version) in _GPU_UBUNTU_DATE_PYTORCH:
-        for region in regions:
-            workers.append(
-                _get_image_row.remote(region, gpu, ubuntu_version, date,
-                                      pytorch_version))
-
-    results = ray.get(workers)
-    results = pd.DataFrame(
+    image_metas = [
+        (r, *i) for r, i in itertools.product(regions, _GPU_UBUNTU_DATE_PYTORCH)
+    ]
+    with multiprocessing.Pool() as pool:
+        results = pool.starmap(_get_image_row, image_metas)
+    result_df = pd.DataFrame(
         results,
         columns=['Tag', 'Region', 'OS', 'OSVersion', 'ImageId', 'CreationDate'])
-    results.sort_values(['Tag', 'Region'], inplace=True)
-    return results
+    result_df.sort_values(['Tag', 'Region'], inplace=True)
+    return result_df
 
 
 def fetch_availability_zone_mappings() -> pd.DataFrame:
@@ -353,8 +346,10 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
         use1-az2          us-east-1a
     """
     regions = list(get_enabled_regions())
-    az_mappings = [_get_availability_zones.remote(r) for r in regions]
-    az_mappings = ray.get(az_mappings)
+    # Use ThreadPool instead of Pool because this function can be called within
+    # a multiprocessing.Pool, and Pool cannot be nested.
+    with multiprocessing.pool.ThreadPool() as pool:
+        az_mappings = pool.map(_get_availability_zones, regions)
     missing_regions = {
         regions[i] for i, m in enumerate(az_mappings) if m is None
     }
@@ -407,7 +402,6 @@ if __name__ == '__main__':
                 f'{name}: Fetched regions {fetched_regions} does not match '
                 f'requested regions {user_regions}.')
 
-    ray.init()
     instance_df = get_all_regions_instance_types_df(user_regions)
     _check_regions_integrity(instance_df, 'instance types')
 

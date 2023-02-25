@@ -18,7 +18,6 @@ from sky import sky_logging
 from sky.clouds import aws
 from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import config
-from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -105,12 +104,9 @@ def _fetch_and_apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
         if aws_user_hash != 'default':
             # Fetch az mapping from AWS.
             # pylint: disable=import-outside-toplevel
-            import ray
             from sky.clouds.service_catalog.data_fetchers import fetch_aws
             logger.info(f'{colorama.Style.DIM}Fetching availability zones '
                         f'mapping for AWS...{colorama.Style.RESET_ALL}')
-            with ux_utils.suppress_output():
-                ray.init()
             az_mappings = fetch_aws.fetch_availability_zone_mappings()
         else:
             # Returning the original dataframe directly, as no cloud
