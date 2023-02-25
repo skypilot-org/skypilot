@@ -346,7 +346,9 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
         use1-az2          us-east-1a
     """
     regions = list(get_enabled_regions())
-    with multiprocessing.Pool() as pool:
+    # Use ThreadPool instead of Pool because this function can be called within
+    # a multiprocessing.Pool, and Pool cannot be nested.
+    with multiprocessing.pool.ThreadPool() as pool:
         az_mappings = pool.map(_get_availability_zones, regions)
     missing_regions = {
         regions[i] for i, m in enumerate(az_mappings) if m is None
