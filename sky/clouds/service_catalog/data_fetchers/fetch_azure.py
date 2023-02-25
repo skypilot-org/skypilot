@@ -4,7 +4,6 @@ This script takes about 1 minute to finish.
 """
 import argparse
 import json
-import multiprocessing
 import os
 import subprocess
 from typing import List, Optional, Set
@@ -12,6 +11,7 @@ import urllib
 
 import numpy as np
 import pandas as pd
+import ray
 import requests
 
 US_REGIONS = [
@@ -65,6 +65,7 @@ def get_pricing_url(region: Optional[str] = None) -> str:
     return f'https://prices.azure.com/api/retail/prices?$filter={filters_str}'
 
 
+@ray.remote
 def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
     all_items = []
     url = get_pricing_url(region)
@@ -90,6 +91,13 @@ def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
               (df['unitPrice'] > 0)]
 
 
+@ray.remote
+def get_all_regions_pricing_df(regions: Set[str]) -> pd.DataFrame:
+    dfs = ray.get([get_pricing_df.remote(region) for region in regions])
+    return pd.concat(dfs)
+
+
+@ray.remote
 def get_sku_df(region_set: Set[str]) -> pd.DataFrame:
     print('Fetching SKU list')
     # To get a complete list, --all option is necessary.
@@ -142,15 +150,10 @@ def get_gpu_name(family: str) -> Optional[str]:
 
 
 def get_all_regions_instance_types_df(region_set: Set[str]):
-    with multiprocessing.Pool() as pool:
-        dfs = pool.map_async(get_pricing_df, region_set)
-        df_sku = pool.apply_async(get_sku_df, (region_set,))
-        dfs.wait()
-        dfs = dfs.get()
-        df = pd.concat(dfs)
-        df_sku.wait()
-        df_sku = df_sku.get()
-
+    df, df_sku = ray.get([
+        get_all_regions_pricing_df.remote(region_set),
+        get_sku_df.remote(region_set),
+    ])
     print('Processing dataframes')
     df.drop_duplicates(inplace=True)
 
@@ -244,6 +247,7 @@ if __name__ == '__main__':
         help='Fetch all global regions, not just the U.S. ones.')
     args = parser.parse_args()
 
+    ray.init()
     region_filter = get_regions() if args.all_regions else US_REGIONS
     region_filter = set(region_filter)
 
