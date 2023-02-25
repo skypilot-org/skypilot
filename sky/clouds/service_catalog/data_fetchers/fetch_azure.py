@@ -239,7 +239,7 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
     return df_ret
 
 
-if __name__ == '__main__':
+def fetch():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--all-regions',
@@ -255,3 +255,7 @@ if __name__ == '__main__':
     os.makedirs('azure', exist_ok=True)
     instance_df.to_csv('azure/vms.csv', index=False)
     print('Azure Service Catalog saved to azure/vms.csv')
+
+
+if __name__ == '__main__':
+    fetch()

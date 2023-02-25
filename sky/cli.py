@@ -30,6 +30,7 @@ each other.
 import copy
 import datetime
 import functools
+import importlib
 import os
 import shlex
 import subprocess
@@ -2720,6 +2721,11 @@ def check():
               is_flag=True,
               default=False,
               help='Show details of all GPU/TPU/accelerator offerings.')
+@click.option('--refresh',
+              '-r',
+              is_flag=True,
+              default=False,
+              help='Refresh price to latest version')
 @click.option('--cloud',
               default=None,
               type=str,
@@ -2737,6 +2743,7 @@ def check():
 def show_gpus(
         gpu_name: Optional[str],
         all: bool,  # pylint: disable=redefined-builtin
+        refresh: bool,
         cloud: Optional[str],
         region: Optional[str]):
     """Show supported GPU/TPU/accelerators.
@@ -2752,9 +2759,40 @@ def show_gpus(
     To show all accelerators, including less common ones and their detailed
     information, use ``sky show-gpus --all``.
 
+    To refresh latest price info, use ``sky show-gpus --refresh``.
+
     NOTE: If region is not specified, the price displayed for each instance type
     is the lowest across all regions for both on-demand and spot instances.
     """
+
+    def fetch_latest_price(cloud_name: str):
+        if cloud_name not in ['aws', 'azure', 'gcp']:
+            click.echo(
+                f'Fetcher for cloud "{cloud_name}" is not supported now.',
+                err=True)
+            return
+        try:
+            cloud_fetcher_module = importlib.import_module(
+                f'sky.clouds.service_catalog.data_fetchers.fetch_{cloud_name}')
+        except ModuleNotFoundError:
+            raise ValueError(
+                'Cannot find module "sky.clouds.service_catalog'
+                f'.data_fetchers.fetch_{cloud_name}" for cloud "{cloud_name}".'
+            ) from None
+        try:
+            fetch = getattr(cloud_fetcher_module, 'fetch')
+        except AttributeError:
+            raise AttributeError(f'Module "fetch_{cloud_name}" does not '
+                                 f'implement the "fetch" method') from None
+        fetch()
+
+    if refresh:
+        if cloud is None:
+            for cl in clouds.CLOUD_REGISTRY.values():
+                fetch_latest_price(cl._REPR.lower())
+        else:
+            fetch_latest_price(cloud)
+
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(

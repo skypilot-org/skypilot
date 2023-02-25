@@ -369,7 +369,7 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
     return az_mappings
 
 
-if __name__ == '__main__':
+def fetch():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--az-mappings',
@@ -425,3 +425,7 @@ if __name__ == '__main__':
         az_mappings_df = fetch_availability_zone_mappings()
         az_mappings_df.to_csv('aws/az_mappings.csv', index=False)
         print('AWS Availability Zone mapping saved to aws/az_mappings.csv')
+
+
+if __name__ == '__main__':
+    fetch()

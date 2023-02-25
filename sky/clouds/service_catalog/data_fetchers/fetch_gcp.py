@@ -576,7 +576,7 @@ def get_catalog_df(region_prefix: str) -> pd.DataFrame:
     return catalog_df
 
 
-if __name__ == '__main__':
+def fetch():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--all-regions',
@@ -590,3 +590,7 @@ if __name__ == '__main__':
     os.makedirs('gcp', exist_ok=True)
     gcp_catalog_df.to_csv('gcp/vms.csv', index=False)
     print('GCP Service Catalog saved to gcp/vms.csv')
+
+
+if __name__ == '__main__':
+    fetch()
