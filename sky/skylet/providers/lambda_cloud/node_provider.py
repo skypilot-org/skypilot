@@ -49,7 +49,7 @@ class LambdaNodeProvider(NodeProvider):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
         self.lambda_client = lambda_utils.LambdaCloudClient()
-        self.cached_nodes = {}
+        self.cached_nodes: Dict[str, Dict[str, Any]] = {}
         self.metadata = lambda_utils.Metadata(TAG_PATH_PREFIX, cluster_name)
         vms = self._list_instances_in_cluster()
 

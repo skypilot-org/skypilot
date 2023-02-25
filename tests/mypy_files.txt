@@ -4,5 +4,4 @@ sky
 --exclude sky/callbacks
 --exclude sky/skylet/providers
 --exclude sky/resources.py
---exclude sky/global_user_state.py
 --exclude sky/backends/monkey_patches

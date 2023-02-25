@@ -129,7 +129,7 @@ def _get_glob_storages(storages: Sequence[str]) -> List[str]:
     return list(set(glob_storages))
 
 
-def _warn_if_local_cluster(cluster: str, local_clusters: List[str],
+def _warn_if_local_cluster(cluster: str, local_clusters: Sequence[str],
                            message: str) -> bool:
     """Raises warning if the cluster name is a local cluster."""
     if cluster in local_clusters:
@@ -554,7 +554,7 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
     ctx.exit()
 
 
-def _add_click_options(options: List[click.Option]):
+def _add_click_options(options: Sequence[click.Option]):
     """A decorator for adding a list of click option decorators."""
 
     def _add_options(func):
@@ -661,6 +661,9 @@ def _check_resources_match(backend: backends.Backend,
         return
 
     if node_type is not None:
+        assert isinstance(
+            handle,
+            backends.CloudVmRayBackend.ResourceHandle), (node_type, handle)
         inferred_node_type = _infer_interactive_node_type(
             handle.launched_resources)
         if node_type != inferred_node_type:
@@ -843,6 +846,7 @@ def _create_and_ssh_into_node(
         node_type=node_type,
     )
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    assert isinstance(handle, backends.CloudVmRayBackend.ResourceHandle), handle
 
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
     # connection, and for allowing adding 'cd workdir' in the future.
@@ -921,7 +925,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
 
 
 def _make_task_from_entrypoint_with_overrides(
-    entrypoint: List[str],
+    entrypoint: Sequence[str],
     *,
     name: Optional[str] = None,
     cluster: Optional[str] = None,
@@ -936,7 +940,7 @@ def _make_task_from_entrypoint_with_overrides(
     use_spot: Optional[bool] = None,
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
-    env: Optional[List[Tuple[str, str]]] = None,
+    env: Optional[Sequence[Tuple[str, str]]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
 ) -> sky.Task:
@@ -1175,7 +1179,7 @@ def cli():
               help='Skip setup phase when (re-)launching cluster.')
 @usage_lib.entrypoint
 def launch(
-    entrypoint: List[str],
+    entrypoint: Sequence[str],
     cluster: Optional[str],
     dryrun: bool,
     detach_setup: bool,
@@ -1192,7 +1196,7 @@ def launch(
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
-    env: List[Tuple[str, str]],
+    env: Sequence[Tuple[str, str]],
     disk_size: Optional[int],
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
@@ -1285,7 +1289,7 @@ def launch(
 # pylint: disable=redefined-builtin
 def exec(
     cluster: str,
-    entrypoint: List[str],
+    entrypoint: Sequence[str],
     detach_run: bool,
     name: Optional[str],
     cloud: Optional[str],
@@ -1297,7 +1301,7 @@ def exec(
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
-    env: List[Tuple[str, str]],
+    env: Sequence[Tuple[str, str]],
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or a command on a cluster (skip setup).
@@ -1709,7 +1713,7 @@ def logs(
               help='Skip confirmation prompt.')
 @click.argument('jobs', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
-def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disable=redefined-builtin
+def cancel(cluster: str, all: bool, jobs: Sequence[int], yes: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s)."""
     bold = colorama.Style.BRIGHT
@@ -3069,7 +3073,7 @@ def spot():
 @timeline.event
 @usage_lib.entrypoint
 def spot_launch(
-    entrypoint: List[str],
+    entrypoint: Sequence[str],
     name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
@@ -3082,7 +3086,7 @@ def spot_launch(
     use_spot: Optional[bool],
     image_id: Optional[str],
     spot_recovery: Optional[str],
-    env: List[Tuple[str, str]],
+    env: Sequence[Tuple[str, str]],
     disk_size: Optional[int],
     detach_run: bool,
     retry_until_up: bool,
@@ -3442,7 +3446,7 @@ def benchmark_launch(
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
-    env: List[Tuple[str, str]],
+    env: Sequence[Tuple[str, str]],
     disk_size: Optional[int],
     idle_minutes_to_autostop: Optional[int],
     yes: bool,
@@ -3813,7 +3817,7 @@ def benchmark_show(benchmark: str) -> None:
 @usage_lib.entrypoint
 def benchmark_down(
     benchmark: str,
-    clusters_to_exclude: List[str],
+    clusters_to_exclude: Sequence[str],
     yes: bool,
 ) -> None:
     """Tear down all clusters belonging to a benchmark."""
@@ -3912,6 +3916,7 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
             bucket_name = benchmark_state.get_benchmark_from_name(
                 benchmark)['bucket']
             handle = global_user_state.get_handle_from_storage_name(bucket_name)
+            assert handle is not None, bucket_name
             bucket_type = list(handle.sky_stores.keys())[0]
             benchmark_utils.remove_benchmark_logs(benchmark, bucket_name,
                                                   bucket_type)

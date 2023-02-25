@@ -16,7 +16,7 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import Dict, Iterable, List, Optional, Tuple, Union, Set
+from typing import Dict, Iterable, List, Optional, Tuple, Union, Sequence, Set
 
 import colorama
 import filelock
@@ -960,7 +960,7 @@ class RetryingVmProvisioner(object):
                 # cluster is launched.
                 handle = global_user_state.get_handle_from_cluster_name(
                     cluster_name)
-                assert handle is not None, (
+                assert isinstance(handle, CloudVmRayResourceHandle), (
                     f'handle should not be None {cluster_name!r}')
                 config = common_utils.read_yaml(handle.cluster_yaml)
                 # This is for the case when the zone field is not set in the
@@ -2317,7 +2317,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _update_after_cluster_provisioned(
             self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
-            prev_cluster_status: global_user_state.ClusterStatus,
+            prev_cluster_status: Optional[global_user_state.ClusterStatus],
             ip_list: List[str], lock_path: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
@@ -2794,7 +2794,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def get_job_status(
         self,
         handle: CloudVmRayResourceHandle,
-        job_ids: Optional[List[int]] = None,
+        job_ids: Optional[Sequence[int]] = None,
         stream_logs: bool = True
     ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
         code = job_lib.JobLibCodeGen.get_job_status(job_ids)
@@ -2809,7 +2809,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         return statuses
 
     def cancel_jobs(self, handle: CloudVmRayResourceHandle,
-                    jobs: Optional[List[int]]):
+                    jobs: Optional[Sequence[int]]):
         job_owner = onprem_utils.get_job_owner(handle.cluster_yaml)
         code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs)
 
@@ -2825,7 +2825,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def sync_down_logs(
             self,
             handle: CloudVmRayResourceHandle,
-            job_ids: Optional[List[str]],
+            job_ids: Optional[Sequence[str]],
             local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
         """Sync down logs for the given job_ids.
 

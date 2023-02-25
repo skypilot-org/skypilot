@@ -3,7 +3,7 @@
 from multiprocessing import pool
 import os
 import subprocess
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 import urllib.parse
 
 from sky import exceptions
@@ -80,7 +80,7 @@ def is_cloud_store_url(url):
 
 
 def _group_files_by_dir(
-        source_list: List[str]) -> Tuple[Dict[str, List[str]], List[str]]:
+        source_list: Sequence[str]) -> Tuple[Dict[str, List[str]], List[str]]:
     """Groups a list of paths based on their directory
 
     Given a list of paths, generates a dict of {dir_name: List[file_name]}
@@ -109,7 +109,7 @@ def _group_files_by_dir(
     return grouped_files, dirs
 
 
-def parallel_upload(source_path_list: List[str],
+def parallel_upload(source_path_list: Sequence[str],
                     filesync_command_generator: Callable[[str, List[str]], str],
                     dirsync_command_generator: Callable[[str, str], str],
                     bucket_name: str,

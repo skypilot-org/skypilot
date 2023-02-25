@@ -341,7 +341,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             # Only record the cloud/region if the launch is successful.
             handle = global_user_state.get_handle_from_cluster_name(
                 self.cluster_name)
-            assert handle is not None, 'Cluster should be launched.'
+            assert isinstance(handle, backends.CloudVmRayResourceHandle), (
+                'Cluster should be launched.', handle)
             launched_resources = handle.launched_resources
             self._launched_cloud_region = (launched_resources.cloud,
                                            launched_resources.region)

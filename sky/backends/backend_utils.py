@@ -13,7 +13,7 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 from typing_extensions import Literal
 import uuid
 
@@ -1501,7 +1501,7 @@ def check_network_connection():
 
 def _process_cli_query(
     cloud: str, cluster: str, query_cmd: str, deliminiator: str,
-    status_map: Dict[str, global_user_state.ClusterStatus]
+    status_map: Mapping[str, Optional[global_user_state.ClusterStatus]]
 ) -> List[global_user_state.ClusterStatus]:
     """Run the cloud CLI query and returns cluster status.
 
@@ -1543,11 +1543,13 @@ def _process_cli_query(
     cluster_status = stdout.strip()
     if cluster_status == '':
         return []
-    return [
-        status_map[s]
-        for s in cluster_status.split(deliminiator)
-        if status_map[s] is not None
-    ]
+
+    statuses = []
+    for s in cluster_status.split(deliminiator):
+        node_status = status_map[s]
+        if node_status is not None:
+            statuses.append(node_status)
+    return statuses
 
 
 def _query_status_aws(
@@ -1632,6 +1634,8 @@ def _query_status_gcp(
         logger.debug(f'Terminating preempted TPU VM cluster {cluster}')
         backend = backends.CloudVmRayBackend()
         handle = global_user_state.get_handle_from_cluster_name(cluster)
+        assert isinstance(handle,
+                          backends.CloudVmRayResourceHandle), (cluster, handle)
         # Do not use refresh cluster status during teardown, as that will
         # cause inifinite recursion by calling cluster status refresh
         # again.
@@ -1693,7 +1697,9 @@ def _query_status_lambda(
     vms = lambda_utils.LambdaCloudClient().list_instances()
     for node in vms:
         if node['name'] == cluster:
-            return [status_map[node['status']]]
+            status = status_map[node['status']]
+            if status is not None:
+                return [status]
     return []
 
 
@@ -2074,7 +2080,10 @@ def check_cluster_available(
             f'not fatal, but {operation} might hang if the cluster is not up.\n'
             f'Detailed reason: {e}')
         record = global_user_state.get_cluster_from_name(cluster_name)
-        cluster_status, handle = record['status'], record['handle']
+        if record is None:
+            cluster_status, handle = None, None
+        else:
+            cluster_status, handle = record['status'], record['handle']
 
     if handle is None:
         with ux_utils.print_exception_no_traceback():
@@ -2274,6 +2283,12 @@ def get_backend_from_handle(
 def get_backend_from_handle(
     handle: 'local_docker_backend.LocalDockerResourceHandle'
 ) -> 'local_docker_backend.LocalDockerBackend':
+    ...
+
+
+@typing.overload
+def get_backend_from_handle(
+        handle: backends.ResourceHandle) -> backends.Backend:
     ...
 
 

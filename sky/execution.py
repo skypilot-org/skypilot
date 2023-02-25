@@ -805,7 +805,6 @@ def _maybe_translate_local_file_mounts_and_sync_up(
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
                         f'Unsupported store type: {store_type}')
-            storage_obj.name = None
             storage_obj.force_delete = True
 
     return task
