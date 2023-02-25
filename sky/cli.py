@@ -99,7 +99,9 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              use_spot=False),
 }
 
-_SPOT_JOBS_IN_STATUS = 5
+# The maximum number of in-progress spot jobs to show in the status
+# command.
+_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 5
 
 
 def _get_glob_clusters(clusters: Sequence[str]) -> List[str]:
@@ -1414,13 +1416,13 @@ def _get_in_progress_spot_jobs(
             msg = ('Controller\'s latest status is detected to be INIT; jobs '
                    'will not be shown until it becomes UP.')
         else:
-            assert controller_status != global_user_state.ClusterStatus.UP
-            msg = 'No in-progress jobs.'
+            assert controller_status in [None, global_user_state.ClusterStatus.STOPPED]
+            msg = 'No in progress jobs.'
     except RuntimeError:
-        msg = 'Failed to query spot jobs due to connection issue.'
+        msg = 'Failed to query spot jobs due to connection issues. Try again later.'
     else:
         max_jobs_to_show = (None
-                            if show_all_in_progress else _SPOT_JOBS_IN_STATUS)
+                            if show_all_in_progress else _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS)
         msg = spot_lib.format_job_table(spot_jobs,
                                         show_all=False,
                                         max_jobs=max_jobs_to_show)
@@ -1445,7 +1447,7 @@ def _get_in_progress_spot_jobs(
               default=True,
               is_flag=True,
               required=False,
-              help='Show spot queue information.')
+              help='Also show recent in-progress spot jobs, if any.')
 @click.argument('clusters',
                 required=False,
                 type=str,
@@ -1504,6 +1506,8 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
+    # Using a pool with 1 worker to run the spot job query in parallel to speed
+    # up. The pool provides a AsyncResult object that can be used as a future.
     with multiprocessing.Pool(1) as pool:
         # Do not show spot queue if user specifies clusters.
         show_spot_queue = show_spot_queue and not clusters
@@ -1539,7 +1543,7 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
                        f'Managed spot jobs{colorama.Style.RESET_ALL}')
             with backend_utils.safe_console_status(
                     '[cyan]Checking spot jobs[/]'):
-                n_jobs, msg = spot_jobs_future.get()
+                num_in_progress_jobs, msg = spot_jobs_future.get()
 
                 try:
                     pool.close()
@@ -1548,17 +1552,18 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
                     # This is to avoid a "Exception ignored" problem caused by
                     # ray worker setting the sigterm handler to sys.exit(15)
                     # (see ray/_private/worker.py).
+                    # TODO (zhwu): Remove any importing of ray in SkyPilot.
                     if e.code != 15:
                         raise
 
             click.echo(msg + '\n')
-            if n_jobs is not None:
+            if num_in_progress_jobs is not None:
                 # spot controller is UP.
                 job_info = ''
-                if n_jobs > 0:
-                    job_info = f'{n_jobs} spot jobs are in progress'
-                    if n_jobs > _SPOT_JOBS_IN_STATUS:
-                        job_info += (f' ({_SPOT_JOBS_IN_STATUS} latest ones '
+                if num_in_progress_jobs > 0:
+                    job_info = f'{num_in_progress_jobs} spot jobs are in progress'
+                    if num_in_progress_jobs > _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS:
+                        job_info += (f' ({_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS} latest ones '
                                      'shown above)')
                     job_info += '. '
                 hints.append(
@@ -1573,7 +1578,8 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
                          'auto{stop,down} scheduled. Refresh statuses with: '
                          f'{colorama.Style.BRIGHT}sky status --refresh'
                          f'{colorama.Style.RESET_ALL}')
-        click.echo('\n'.join(hints))
+        if hints:
+            click.echo('\n'.join(hints))
 
 
 @cli.command()
