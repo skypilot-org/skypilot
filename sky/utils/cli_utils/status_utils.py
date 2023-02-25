@@ -345,7 +345,7 @@ def _get_status_for_cost_report(
         cluster_cost_report_record: _ClusterCostReportRecord) -> str:
     status = cluster_cost_report_record['status']
     if status is None:
-        return f'{colorama.Style.DIM}{"TERMINATED"}{colorama.Style.RESET_ALL}'
+        return f'{colorama.Style.DIM}TERMINATED{colorama.Style.RESET_ALL}'
     return status.colored_str()
 
 
