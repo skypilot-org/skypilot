@@ -1518,7 +1518,6 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     the cluster with autostop/use_spot set or terminated/stopped
     on the cloud console.
     """
-
     cluster_records = core.cost_report()
     nonreserved_cluster_records = []
     reserved_clusters = dict()

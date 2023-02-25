@@ -128,14 +128,12 @@ def cost_report() -> List[Dict[str, Any]]:
             'total_cost': (float) cost given resources and usage intervals,
         }
 
-
-        The estimated cost column indicates price for the cluster based on the
-        type of resources being used and the duration of use up until the call
-        to status. This means if the cluster is UP, successive calls to report
-        will show increasing price. The estimated cost is calculated based on
-        the local cache of the cluster status, and may not be accurate for
-        the cluster with autostop/use_spot set or terminated/stopped
-        on the cloud console.
+    The estimated cost column indicates price for the cluster based on the type
+    of resources being used and the duration of use up until the call to
+    status. This means if the cluster is UP, successive calls to report will
+    show increasing price. The estimated cost is calculated based on the local
+    cache of the cluster status, and may not be accurate for the cluster with
+    autostop/use_spot set or terminated/stopped on the cloud console.
 
     Returns:
         A list of dicts, with each dict containing the cost information of a
