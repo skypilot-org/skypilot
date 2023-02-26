@@ -1458,7 +1458,7 @@ def _get_in_progress_spot_jobs(
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def status(all: bool, refresh: bool, show_spot_queue: bool,
+def status(all: bool, refresh: bool, show_spot_jobs: bool,
            clusters: List[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
@@ -1513,8 +1513,8 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
     # up. The pool provides a AsyncResult object that can be used as a future.
     with multiprocessing.Pool(1) as pool:
         # Do not show spot queue if user specifies clusters.
-        show_spot_queue = show_spot_queue and not clusters
-        if show_spot_queue:
+        show_spot_jobs = show_spot_jobs and not clusters
+        if show_spot_jobs:
             # Run the spot job query in parallel to speed up the status query.
             spot_jobs_future = pool.apply_async(_get_in_progress_spot_jobs,
                                                 (all,))
@@ -1541,7 +1541,7 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
         status_utils.show_local_status_table(local_clusters)
 
         hints = []
-        if show_spot_queue:
+        if show_spot_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed spot jobs{colorama.Style.RESET_ALL}')
             with backend_utils.safe_console_status(
