@@ -1558,13 +1558,17 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                     if e.code != 15:
                         raise
 
-            click.echo(msg + '\n')
+            click.echo(msg)
             if num_in_progress_jobs is not None:
                 # spot controller is UP.
                 job_info = ''
                 if num_in_progress_jobs > 0:
-                    job_info = (f'{num_in_progress_jobs} spot jobs are '
-                                'in progress')
+                    plural_and_verb = ' is'
+                    if num_in_progress_jobs > 1:
+                        plural_and_verb = 's are'
+                    job_info = (
+                        f'{num_in_progress_jobs} spot job{plural_and_verb} '
+                        'in progress')
                     if num_in_progress_jobs > _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS:
                         job_info += (
                             f' ({_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS} latest ones '
@@ -1575,15 +1579,15 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                     f'sky spot queue{colorama.Style.RESET_ALL}')
 
         if num_pending_autostop > 0:
-            plural = ' has'
+            plural_and_verb = ' has'
             if num_pending_autostop > 1:
-                plural = 's have'
-            hints.append(f'* {num_pending_autostop} cluster{plural} '
+                plural_and_verb = 's have'
+            hints.append(f'* {num_pending_autostop} cluster{plural_and_verb} '
                          'auto{stop,down} scheduled. Refresh statuses with: '
                          f'{colorama.Style.BRIGHT}sky status --refresh'
                          f'{colorama.Style.RESET_ALL}')
         if hints:
-            click.echo('\n'.join(hints))
+            click.echo('\n' + '\n'.join(hints))
 
 
 @cli.command()
