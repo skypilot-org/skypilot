@@ -30,6 +30,7 @@ each other.
 import copy
 import datetime
 import functools
+import multiprocessing
 import os
 import shlex
 import subprocess
@@ -97,6 +98,10 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              accelerator_args={'runtime_version': '2.5.0'},
                              use_spot=False),
 }
+
+# The maximum number of in-progress spot jobs to show in the status
+# command.
+_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 5
 
 
 def _get_glob_clusters(clusters: Sequence[str]) -> List[str]:
@@ -1389,6 +1394,44 @@ def exec(
     sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
+def _get_in_progress_spot_jobs(
+        show_all_in_progress: bool = False) -> Tuple[Optional[int], str]:
+    """Get the in-progress spot jobs.
+
+    Returns:
+        A tuple of (num_in_progress_jobs, msg). If num_in_progress_jobs is None,
+        it means there is an error when querying the spot jobs. In this case,
+        msg contains the error message. Otherwise, msg contains the formatted
+        spot job table.
+    """
+    num_in_progress_jobs = None
+    try:
+        with ux_utils.suppress_output():
+            # Make the call slient
+            spot_jobs = core.spot_queue(refresh=False, skip_finished=True)
+        num_in_progress_jobs = len(spot_jobs)
+    except exceptions.ClusterNotUpError as e:
+        controller_status = e.cluster_status
+        if controller_status == global_user_state.ClusterStatus.INIT:
+            msg = ('Controller\'s latest status is INIT; jobs '
+                   'will not be shown until it becomes UP.')
+        else:
+            assert controller_status in [
+                None, global_user_state.ClusterStatus.STOPPED
+            ]
+            msg = 'No in progress jobs.'
+    except RuntimeError:
+        msg = ('Failed to query spot jobs due to connection '
+               'issues. Try again later.')
+    else:
+        max_jobs_to_show = (None if show_all_in_progress else
+                            _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS)
+        msg = spot_lib.format_job_table(spot_jobs,
+                                        show_all=False,
+                                        max_jobs=max_jobs_to_show)
+    return num_in_progress_jobs, msg
+
+
 @cli.command()
 @click.option('--all',
               '-a',
@@ -1403,13 +1446,19 @@ def exec(
     is_flag=True,
     required=False,
     help='Query the latest cluster statuses from the cloud provider(s).')
+@click.option('--show-spot-jobs/--no-show-spot-jobs',
+              default=True,
+              is_flag=True,
+              required=False,
+              help='Also show recent in-progress spot jobs, if any.')
 @click.argument('clusters',
                 required=False,
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
-def status(all: bool, refresh: bool, clusters: List[str]):  # pylint: disable=redefined-builtin
+# pylint: disable=redefined-builtin
+def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1459,39 +1508,82 @@ def status(all: bool, refresh: bool, clusters: List[str]):  # pylint: disable=re
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
-    query_clusters: Optional[List[str]] = None
-    if clusters:
-        query_clusters = _get_glob_clusters(clusters)
-    cluster_records = core.status(cluster_names=query_clusters, refresh=refresh)
-    nonreserved_cluster_records = []
-    reserved_clusters = {}
-    for cluster_record in cluster_records:
-        cluster_name = cluster_record['name']
-        if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
-            cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
-                cluster_name]
-            reserved_clusters[cluster_group_name] = cluster_record
-        else:
-            nonreserved_cluster_records.append(cluster_record)
-    local_clusters = onprem_utils.check_and_get_local_clusters(
-        suppress_error=True)
+    # Using a pool with 1 worker to run the spot job query in parallel to speed
+    # up. The pool provides a AsyncResult object that can be used as a future.
+    with multiprocessing.Pool(1) as pool:
+        # Do not show spot queue if user specifies clusters.
+        show_spot_jobs = show_spot_jobs and not clusters
+        if show_spot_jobs:
+            # Run the spot job query in parallel to speed up the status query.
+            spot_jobs_future = pool.apply_async(_get_in_progress_spot_jobs,
+                                                (all,))
 
-    num_pending_autostop = 0
-    num_pending_autostop += status_utils.show_status_table(
-        nonreserved_cluster_records, all)
-    for cluster_group_name, cluster_record in reserved_clusters.items():
+        query_clusters: Optional[List[str]] = None
+        if clusters:
+            query_clusters = _get_glob_clusters(clusters)
+        cluster_records = core.status(cluster_names=query_clusters,
+                                      refresh=refresh)
+        nonreserved_cluster_records = []
+        reserved_clusters = []
+        for cluster_record in cluster_records:
+            cluster_name = cluster_record['name']
+            if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+                reserved_clusters.append(cluster_record)
+            else:
+                nonreserved_cluster_records.append(cluster_record)
+        local_clusters = onprem_utils.check_and_get_local_clusters(
+            suppress_error=True)
+
+        num_pending_autostop = 0
         num_pending_autostop += status_utils.show_status_table(
-            [cluster_record], all, reserved_group_name=cluster_group_name)
-    if num_pending_autostop > 0:
-        plural = ' has'
-        if num_pending_autostop > 1:
-            plural = 's have'
-        click.echo('\n'
-                   f'{num_pending_autostop} cluster{plural} '
-                   'auto{stop,down} scheduled. Refresh statuses with: '
-                   f'{colorama.Style.BRIGHT}sky status --refresh'
-                   f'{colorama.Style.RESET_ALL}')
-    status_utils.show_local_status_table(local_clusters)
+            nonreserved_cluster_records + reserved_clusters, all)
+        status_utils.show_local_status_table(local_clusters)
+
+        hints = []
+        if show_spot_jobs:
+            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Managed spot jobs{colorama.Style.RESET_ALL}')
+            with backend_utils.safe_console_status(
+                    '[cyan]Checking spot jobs[/]'):
+                num_in_progress_jobs, msg = spot_jobs_future.get()
+
+                try:
+                    pool.close()
+                    pool.join()
+                except SystemExit as e:
+                    # This is to avoid a "Exception ignored" problem caused by
+                    # ray worker setting the sigterm handler to sys.exit(15)
+                    # (see ray/_private/worker.py).
+                    # TODO (zhwu): Remove any importing of ray in SkyPilot.
+                    if e.code != 15:
+                        raise
+
+            click.echo(msg + '\n')
+            if num_in_progress_jobs is not None:
+                # spot controller is UP.
+                job_info = ''
+                if num_in_progress_jobs > 0:
+                    job_info = (f'{num_in_progress_jobs} spot jobs are '
+                                'in progress')
+                    if num_in_progress_jobs > _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS:
+                        job_info += (
+                            f' ({_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS} latest ones '
+                            'shown)')
+                    job_info += '. '
+                hints.append(
+                    f'* {job_info}To see all jobs: {colorama.Style.BRIGHT}'
+                    f'sky spot queue{colorama.Style.RESET_ALL}')
+
+        if num_pending_autostop > 0:
+            plural = ' has'
+            if num_pending_autostop > 1:
+                plural = 's have'
+            hints.append(f'* {num_pending_autostop} cluster{plural} '
+                         'auto{stop,down} scheduled. Refresh statuses with: '
+                         f'{colorama.Style.BRIGHT}sky status --refresh'
+                         f'{colorama.Style.RESET_ALL}')
+        if hints:
+            click.echo('\n'.join(hints))
 
 
 @cli.command()

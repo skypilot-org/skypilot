@@ -58,8 +58,7 @@ class StatusColumn:
 
 
 def show_status_table(cluster_records: List[_ClusterRecord],
-                      show_all: bool,
-                      reserved_group_name: Optional[str] = None) -> int:
+                      show_all: bool) -> int:
     """Compute cluster table values and display.
 
     Returns:
@@ -99,19 +98,8 @@ def show_status_table(cluster_records: List[_ClusterRecord],
         num_pending_autostop += _is_pending_autostop(record)
 
     if cluster_records:
-        if reserved_group_name is not None:
-            autostop_minutes = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
-            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'{reserved_group_name}{colorama.Style.RESET_ALL}'
-                       f'{colorama.Style.DIM} (autostopped if idle for '
-                       f'{autostop_minutes}min)'
-                       f'{colorama.Style.RESET_ALL}')
-            reset = backend_utils.RESET_BOLD
-            click.echo('Use spot jobs CLI: '
-                       f'{colorama.Style.BRIGHT}sky spot --help{reset}')
-        else:
-            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
-                       f'{colorama.Style.RESET_ALL}')
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+                   f'{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
     else:
         click.echo('No existing clusters.')
