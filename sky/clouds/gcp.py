@@ -110,60 +110,15 @@ class GCP(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     #### Regions/Zones ####
-
-    @classmethod
-    def regions(cls) -> List[clouds.Region]:
-        if not cls._regions:
-            # https://cloud.google.com/compute/docs/regions-zones
-            cls._regions = [
-                clouds.Region('us-west1').set_zones([
-                    clouds.Zone('us-west1-a'),
-                    clouds.Zone('us-west1-b'),
-                    # clouds.Zone('us-west1-c'),  # No GPUs.
-                ]),
-                clouds.Region('us-central1').set_zones([
-                    clouds.Zone('us-central1-a'),
-                    clouds.Zone('us-central1-b'),
-                    clouds.Zone('us-central1-c'),
-                    clouds.Zone('us-central1-f'),
-                ]),
-                clouds.Region('us-east1').set_zones([
-                    clouds.Zone('us-east1-b'),
-                    clouds.Zone('us-east1-c'),
-                    clouds.Zone('us-east1-d'),
-                ]),
-                clouds.Region('us-east4').set_zones([
-                    clouds.Zone('us-east4-a'),
-                    clouds.Zone('us-east4-b'),
-                    clouds.Zone('us-east4-c'),
-                ]),
-                clouds.Region('us-west2').set_zones([
-                    # clouds.Zone('us-west2-a'),  # No GPUs.
-                    clouds.Zone('us-west2-b'),
-                    clouds.Zone('us-west2-c'),
-                ]),
-                # Ignoring us-west3 as it doesn't have GPUs.
-                clouds.Region('us-west4').set_zones([
-                    clouds.Zone('us-west4-a'),
-                    clouds.Zone('us-west4-b'),
-                    # clouds.Zone('us-west4-c'),  # No GPUs.
-                ]),
-            ]
-        return cls._regions
-
     @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
+        assert instance_type is not None
         if accelerators is None:
-            if instance_type is None:
-                # Fall back to the default regions.
-                # TODO: Get the regions from the service catalog.
-                regions = cls.regions()
-            else:
-                regions = service_catalog.get_region_zones_for_instance_type(
-                    instance_type, use_spot, clouds='gcp')
+            regions = service_catalog.get_region_zones_for_instance_type(
+                instance_type, use_spot, clouds='gcp')
         else:
             assert len(accelerators) == 1, accelerators
             acc = list(accelerators.keys())[0]

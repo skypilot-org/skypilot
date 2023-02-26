@@ -90,53 +90,20 @@ class AWS(clouds.Cloud):
     #### Regions/Zones ####
 
     @classmethod
-    def regions(cls):
-        if not cls._regions:
-            # https://aws.amazon.com/premiumsupport/knowledge-center/vpc-find-availability-zone-options/
-            cls._regions = [
-                clouds.Region('us-west-1').set_zones([
-                    clouds.Zone('us-west-1a'),
-                    clouds.Zone('us-west-1b'),
-                ]),
-                clouds.Region('us-west-2').set_zones([
-                    clouds.Zone('us-west-2a'),
-                    clouds.Zone('us-west-2b'),
-                    clouds.Zone('us-west-2c'),
-                    clouds.Zone('us-west-2d'),
-                ]),
-                clouds.Region('us-east-2').set_zones([
-                    clouds.Zone('us-east-2a'),
-                    clouds.Zone('us-east-2b'),
-                    clouds.Zone('us-east-2c'),
-                ]),
-                clouds.Region('us-east-1').set_zones([
-                    clouds.Zone('us-east-1a'),
-                    clouds.Zone('us-east-1b'),
-                    clouds.Zone('us-east-1c'),
-                    clouds.Zone('us-east-1d'),
-                    clouds.Zone('us-east-1e'),
-                    clouds.Zone('us-east-1f'),
-                ]),
-            ]
-        return cls._regions
-
-    @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         del accelerators  # unused
-        if instance_type is None:
-            # Fall back to default regions
-            regions = cls.regions()
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'aws')
+        assert instance_type is not None
+        regions = service_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'aws')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
         if zone is not None:
             for r in regions:
+                assert r.zones is not None, r
                 r.set_zones([z for z in r.zones if z.name == zone])
             regions = [r for r in regions if r.zones]
         return regions
