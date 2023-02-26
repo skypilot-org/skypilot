@@ -189,6 +189,6 @@ class AutostopEvent(SkyletEvent):
         # would be launched).
         config['auth'].pop('ssh_proxy_command', None)
         # Empty the file_mounts.
-        config['file_mounts'] = dict()
+        config['file_mounts'] = {}
         common_utils.dump_yaml(yaml_path, config)
         logger.debug('Replaced upscaling speed to 0.')

@@ -1,4 +1,5 @@
 """Google Cloud Platform."""
+import functools
 import json
 import os
 import subprocess
@@ -182,6 +183,8 @@ class GCP(clouds.Cloud):
                     for r2 in vm_regions:
                         if r1.name != r2.name:
                             continue
+                        assert r1.zones is not None, r1
+                        assert r2.zones is not None, r2
                         zones = []
                         for z1 in r1.zones:
                             for z2 in r2.zones:
@@ -195,27 +198,32 @@ class GCP(clouds.Cloud):
             regions = [r for r in regions if r.name == region]
         if zone is not None:
             for r in regions:
+                assert r.zones is not None, r
                 r.set_zones([z for z in r.zones if z.name == zone])
             regions = [r for r in regions if r.zones]
         return regions
 
     @classmethod
-    def region_zones_provision_loop(
+    def zones_provision_loop(
         cls,
         *,
+        region: str,
+        num_nodes: int,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+    ) -> Iterator[List[clouds.Zone]]:
+        del num_nodes  # Unused.
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
-                                            region=None,
+                                            region=region,
                                             zone=None)
         # GCP provisioner currently takes 1 zone per request.
-        for region in regions:
-            for zone in region.zones:
-                yield (region, [zone])
+        for r in regions:
+            assert r.zones is not None, r
+            for zone in r.zones:
+                yield [zone]
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -317,9 +325,7 @@ class GCP(clouds.Cloud):
                 'Set either both or neither for: region, zones.')
             region = self._get_default_region()
             zones = region.zones
-        else:
-            assert zones is not None, (
-                'Set either both or neither for: region, zones.')
+        assert zones is not None, (region, zones)
 
         region_name = region.name
         zone_name = zones[0].name
@@ -484,7 +490,8 @@ class GCP(clouds.Cloud):
         return service_catalog.get_vcpus_from_instance_type(instance_type,
                                                             clouds='gcp')
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
@@ -497,7 +504,8 @@ class GCP(clouds.Cloud):
             # `auth.default()` does not guarantee these files exist.
             for file in [
                     '~/.config/gcloud/access_tokens.db',
-                    '~/.config/gcloud/credentials.db'
+                    '~/.config/gcloud/credentials.db',
+                    '~/.config/gcloud/application_default_credentials.json'
             ]:
                 if not os.path.isfile(os.path.expanduser(file)):
                     raise FileNotFoundError(file)
@@ -505,10 +513,10 @@ class GCP(clouds.Cloud):
             _run_output('gcloud --version')
 
             # Check if application default credentials are set.
-            project_id = self.get_project_id()
+            project_id = cls.get_project_id()
 
             # Check if the user is activated.
-            self.get_current_user_identity()
+            cls.get_current_user_identity()
         except (auth.exceptions.DefaultCredentialsError,
                 subprocess.CalledProcessError,
                 exceptions.CloudUserIdentityError, FileNotFoundError,
@@ -604,7 +612,9 @@ class GCP(clouds.Cloud):
         credentials[GCP_CONFIG_SKY_BACKUP_PATH] = GCP_CONFIG_SKY_BACKUP_PATH
         return credentials
 
-    def get_current_user_identity(self) -> Optional[str]:
+    @classmethod
+    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    def get_current_user_identity(cls) -> Optional[str]:
         """Returns the email address + project id of the active user."""
         try:
             account = _run_output('gcloud auth list --filter=status:ACTIVE '
@@ -625,7 +635,7 @@ class GCP(clouds.Cloud):
                     '--format="value(account)"` and ensure it correctly '
                     'returns the current user.')
         try:
-            return f'{account} [project_id={self.get_project_id()}]'
+            return f'{account} [project_id={cls.get_project_id()}]'
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(

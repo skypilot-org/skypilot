@@ -43,7 +43,7 @@ then:
 """
 import copy
 import os
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Sequence
 
 import yaml
 
@@ -109,7 +109,7 @@ def loaded() -> bool:
     return _dict is not None
 
 
-def get_nested(keys: Tuple[str], default_value: Any) -> Any:
+def get_nested(keys: Sequence[str], default_value: Any) -> Any:
     """Gets a nested key.
 
     If any key is not found, or any intermediate key does not point to a dict
@@ -128,13 +128,14 @@ def get_nested(keys: Tuple[str], default_value: Any) -> Any:
     return curr
 
 
-def pop_nested(keys: Tuple[str]) -> Dict[str, Any]:
+def pop_nested(keys: Sequence[str]) -> Dict[str, Any]:
     """Returns a deep-copied config with the nested key popped.
 
     Like get_nested(), if any key is not found, this will not raise an error.
     """
     _check_loaded_or_die()
     global _dict
+    assert _dict is not None
     curr = copy.deepcopy(_dict)
     to_return = curr
     prev = None
