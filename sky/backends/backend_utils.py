@@ -1841,8 +1841,21 @@ def _update_cluster_status_no_lock(
         except exceptions.FetchIPError:
             logger.debug('Refreshing status: Failed to get IPs from cluster '
                          f'{cluster_name!r}, trying to fetch from provider.')
-    # For all code below, ray fails to get IPs for the cluster.
+    # For all code below, we query cluster status by cloud CLI for two cases:
+    # 1) ray fails to get IPs for the cluster.
+    # 2) the cluster is a spot cluster.
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
+
+    all_up = all(status == global_user_state.ClusterStatus.UP
+                 for status in node_statuses)
+    if all_up and len(node_statuses) == handle.launched_nodes:
+        record['status'] = global_user_state.ClusterStatus.UP
+        global_user_state.add_or_update_cluster(cluster_name,
+                                                handle,
+                                                requested_resources=None,
+                                                ready=True,
+                                                is_launch=False)
+        return record
 
     if len(node_statuses) > handle.launched_nodes:
         # Unexpected: in the queried region more than 1 cluster with the same
