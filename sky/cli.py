@@ -1413,7 +1413,7 @@ def _get_in_progress_spot_jobs(
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         if controller_status == global_user_state.ClusterStatus.INIT:
-            msg = ('Controller\'s latest status is detected to be INIT; jobs '
+            msg = ('Controller\'s latest status is INIT; jobs '
                    'will not be shown until it becomes UP.')
         else:
             assert controller_status in [
