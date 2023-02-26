@@ -699,7 +699,7 @@ def get_storage() -> List[Dict[str, Any]]:
     print(rows)
     for name, launched_at, handle, last_use, status in rows:
         # TODO: use namedtuple instead of dict
-        print(handle)
+        print(pickle.loads(handle))
         records.append({
             'name': name,
             'launched_at': launched_at,
