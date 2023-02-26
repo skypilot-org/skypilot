@@ -875,7 +875,9 @@ def storage_ls() -> List[Dict[str, Any]]:
     """
     storages = global_user_state.get_storage()
     for storage in storages:
-        storage['store'] = list(storage.pop('handle').sky_stores.keys())
+        tmp = storage.pop('handle')
+        logger.debug(f'#######{tmp.sky_stores}#######')
+        storage['store'] = list(tmp.sky_stores.keys())
     return storages
 
 

@@ -1838,6 +1838,9 @@ class TestStorageWithCredentials:
     def test_bucket_bulk_deletion(self, store_type):
         # Create a temp folder with over 256 files and folders, upload
         # files and folders to a new bucket, then delete bucket.
+        # TODO(Doyoung): following subprocess commands does not create
+        # 256 files as expected. It creates a directory called "folder{000...255}"
+        # make a fix so it actually creates bulk files.
         with tempfile.TemporaryDirectory() as tmpdir:
             subprocess.check_output(f'mkdir -p {tmpdir}/folder{{000..255}}',
                                     shell=True)
