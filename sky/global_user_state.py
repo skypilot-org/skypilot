@@ -680,7 +680,7 @@ def get_handle_from_storage_name(
         if handle is None:
             return None
         t = pickle.loads(handle)
-        logger.info(f'{t}')
+        logger.info(f'get handle: \n {t}')
         return pickle.loads(handle)
 
 
