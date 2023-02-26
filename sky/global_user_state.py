@@ -679,6 +679,7 @@ def get_handle_from_storage_name(
                               (storage_name,))
     for (handle,) in rows:
         if handle is None:
+            logger.info("444")
             return None
         t = pickle.loads(handle)
         logger.info(f'get handle: \n {t}')
