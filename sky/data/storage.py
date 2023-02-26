@@ -678,8 +678,6 @@ class Storage(object):
         # Adds a store object to the storage
         store_type = StoreType.from_store(store)
         self.stores[store_type] = store
-        import pickle
-        print(pickle.loads(self.handle))
         # If store initialized and is sky managed, add to state
         if store.is_sky_managed:
             self.handle.add_store(store)
