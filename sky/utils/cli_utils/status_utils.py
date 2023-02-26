@@ -1,17 +1,14 @@
 """Utilities for sky status."""
-import typing
 from typing import Any, Callable, Dict, List, Optional
 import click
 import colorama
 
 from sky import backends
+from sky import global_user_state
 from sky import spot
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import log_utils
-
-if typing.TYPE_CHECKING:
-    from sky import global_user_state
 
 _COMMAND_TRUNC_LENGTH = 25
 
@@ -287,7 +284,7 @@ _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
 
 
 def _get_status(
-        cluster_record: _ClusterRecord) -> 'global_user_state.ClusterStatus':
+        cluster_record: _ClusterRecord) -> global_user_state.ClusterStatus:
     return cluster_record['status']
 
 
@@ -334,8 +331,9 @@ def _get_autostop(cluster_record: _ClusterRecord) -> str:
 
 
 def _is_pending_autostop(cluster_record: _ClusterRecord) -> bool:
-    return _get_autostop(cluster_record) != '-' and _get_status(
-        cluster_record).value != 'STOPPED'
+    # autostop < 0 means nothing scheduled.
+    return cluster_record['autostop'] >= 0 and _get_status(
+        cluster_record) != global_user_state.ClusterStatus.STOPPED
 
 
 # ---- 'sky cost-report' helper functions below ----
