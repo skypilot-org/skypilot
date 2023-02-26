@@ -1409,7 +1409,7 @@ def _get_in_progress_spot_jobs(
         with ux_utils.suppress_output():
             # Make the call slient
             spot_jobs = core.spot_queue(refresh=False, skip_finished=True)
-            num_in_progress_jobs = len(spot_jobs)
+        num_in_progress_jobs = len(spot_jobs)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         if controller_status == global_user_state.ClusterStatus.INIT:
@@ -1458,8 +1458,7 @@ def _get_in_progress_spot_jobs(
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def status(all: bool, refresh: bool, show_spot_jobs: bool,
-           clusters: List[str]):
+def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 

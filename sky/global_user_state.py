@@ -11,10 +11,11 @@ import json
 import os
 import pathlib
 import pickle
+import sqlite3
 import time
-import uuid
 import typing
 from typing import Any, Dict, List, Tuple, Optional, Set
+import uuid
 
 import colorama
 
@@ -39,7 +40,14 @@ def create_table(cursor, conn):
     # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
     #  This may cause the database locked problem from WSL issue #1441.
     if not common_utils.is_wsl():
-        cursor.execute('PRAGMA journal_mode=WAL')
+        try:
+            cursor.execute('PRAGMA journal_mode=WAL')
+        except sqlite3.OperationalError as e:
+            if 'database is locked' not in str(e):
+                raise
+            # If the database is locked, it is OK to continue, as the WAL mode
+            # is not critical and is likely to be enabled by other processes.
+
     # Table for Clusters
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS clusters (
