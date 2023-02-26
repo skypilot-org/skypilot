@@ -109,7 +109,7 @@ def nullify_cost_for_autostop(cluster_record: Dict[str, Any]):
     return cluster_record
 
 
-def show_cost_report_table(cluster_records: List[Dict[str, Any]],
+def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
                            show_all: bool,
                            reserved_group_name: Optional[str] = None):
     """Compute cluster table values and display for cost report.
