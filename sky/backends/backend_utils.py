@@ -824,22 +824,12 @@ def write_cluster_config(
     if (isinstance(ssh_proxy_command_config, str) or
             ssh_proxy_command_config is None):
         ssh_proxy_command = ssh_proxy_command_config
-    elif isinstance(ssh_proxy_command_config, dict):
-        ssh_proxy_command = ssh_proxy_command_config.get(region_name, None)
-        if ssh_proxy_command is None:
-            # Skip this region. The upper layer will handle the failover to
-            # other regions.
-            raise exceptions.ResourcesUnavailableError(
-                f'No ssh_proxy_command provided for region {region_name}. Skipped.'
-            )
-        elif not isinstance(ssh_proxy_command, str):
-            raise ValueError(
-                'Invalid ssh_proxy_command config (expected a str): '
-                f'{ssh_proxy_command_config!r}')
     else:
-        raise ValueError(
-            'Invalid ssh_proxy_command config (expected a str or a dict with '
-            f'region names as keys): {ssh_proxy_command_config!r}')
+        # The existence of the region_name should be guaranteed by the
+        # Resources.get_valid_regions_for_launchable()
+        assert (isinstance(ssh_proxy_command_config, dict) and region_name
+                in ssh_proxy_command_config), ssh_proxy_command_config
+        ssh_proxy_command = ssh_proxy_command_config[region_name]
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the

@@ -10,6 +10,7 @@ from sky.utils import accelerator_registry
 from sky.utils import schemas
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
+from sky import skypilot_config
 
 logger = sky_logging.init_logger(__name__)
 
@@ -370,7 +371,7 @@ class Resources:
         self._region, self._zone = self._cloud.validate_region_zone(
             region, zone)
 
-    def get_offering_regions_for_launchable(self) -> List[clouds.Region]:
+    def get_valid_regions_for_launchable(self) -> List[clouds.Region]:
         """Returns a set of `Region`s that can provision this Resources.
 
         Each `Region` has a list of `Zone`s that can provision this Resources.
@@ -382,7 +383,32 @@ class Resources:
                                                     self._region, self._zone)
         if self._image_id is not None and None not in self._image_id:
             regions = [r for r in regions if r.name in self._image_id]
-        return regions
+
+        # Filter the regions by the skypilot_config
+        ssh_proxy_command_config = skypilot_config.get_nested(
+            (str(self._cloud).lower(), 'ssh_proxy_command'), None)
+        if (isinstance(ssh_proxy_command_config, str) or
+                ssh_proxy_command_config is None):
+            # All regions are valid as the regions are not specified for the
+            # ssh_proxy_command config.
+            return regions
+
+        if isinstance(ssh_proxy_command_config, dict):
+            filtered_regions = []
+            for region in regions:
+                region_name = region.name
+                ssh_proxy_command = ssh_proxy_command_config.get(
+                    region_name, None)
+                if ssh_proxy_command is None:
+                    # Skip this region. The upper layer will handle the failover to
+                    # other regions.
+                    continue
+                filtered_regions.append(region)
+            return filtered_regions
+
+        raise ValueError(
+            'Invalid ssh_proxy_command config (expected a str or a dict with '
+            f'region names as keys): {ssh_proxy_command_config!r}')
 
     def _try_validate_instance_type(self) -> None:
         if self.instance_type is None:
