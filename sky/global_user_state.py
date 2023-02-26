@@ -674,6 +674,10 @@ def get_handle_from_storage_name(
         return None
     rows = _DB.cursor.execute('SELECT handle FROM storage WHERE name=(?)',
                               (storage_name,))
+    from sky import sky_logging
+    logger = sky_logging.init_logger(__name__)
+    t = pickle.loads(handle)
+    logger.info(f'{t}')
     for (handle,) in rows:
         if handle is None:
             return None
