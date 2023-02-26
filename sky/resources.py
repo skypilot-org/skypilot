@@ -400,8 +400,8 @@ class Resources:
                 ssh_proxy_command = ssh_proxy_command_config.get(
                     region_name, None)
                 if ssh_proxy_command is None:
-                    # Skip this region. The upper layer will handle the failover to
-                    # other regions.
+                    # Skip this region. The upper layer will handle the failover
+                    # to other regions.
                     continue
                 # TODO: filter out the zones not available in the vpc_name
                 filtered_regions.append(region)
