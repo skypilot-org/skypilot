@@ -1958,7 +1958,10 @@ def _refresh_cluster_record(
 
     Args:
         cluster_name: The name of the cluster.
-        force_refresh: refresh the cluster status as long as the cluster exists.
+        force_refresh: if True, refresh the cluster status even if it may be
+            skipped. Otherwise (the default), only refresh if the cluster:
+                1. is a spot cluster, or
+                2. is a non-spot cluster, is not STOPPED, and autostop is set.
         acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
             before updating the status.
 
@@ -2094,20 +2097,23 @@ def check_cluster_available(
         if onprem_utils.check_if_local_cloud(cluster_name):
             raise exceptions.ClusterNotUpError(
                 constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
-                    cluster_name))
+                    cluster_name),
+                cluster_status=cluster_status)
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
                 f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for '
                 f'cluster {cluster_name!r} (status: {cluster_status.value}). '
                 'It is only allowed for '
                 f'{global_user_state.ClusterStatus.UP.value} clusters.'
-                f'{colorama.Style.RESET_ALL}')
+                f'{colorama.Style.RESET_ALL}',
+                cluster_status=cluster_status)
 
     if handle.head_ip is None:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
                 f'Cluster {cluster_name!r} has been stopped or not properly '
-                'set up. Please re-launch it with `sky start`.')
+                'set up. Please re-launch it with `sky start`.',
+                cluster_status=cluster_status)
     return handle
 
 

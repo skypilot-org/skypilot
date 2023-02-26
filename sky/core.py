@@ -734,6 +734,7 @@ def spot_queue(refresh: bool,
         ]
     Raises:
         sky.exceptions.ClusterNotUpError: the spot controller is not up.
+        RuntimeError: if failed to get the spot jobs with ssh.
     """
 
     stop_msg = ''
@@ -753,9 +754,17 @@ def spot_queue(refresh: bool,
               f'{colorama.Style.RESET_ALL}')
 
         handle = _start(spot.SPOT_CONTROLLER_NAME)
+        controller_status = global_user_state.ClusterStatus.UP
 
     if handle is None or handle.head_ip is None:
-        raise exceptions.ClusterNotUpError('Spot controller is not up.')
+        # When the controller is STOPPED, the head_ip will be None, as
+        # it will be set in global_user_state.remove_cluster().
+        # We do not directly check for UP because the controller may be
+        # in INIT state during another spot launch, but still have
+        # head_ip available. In this case, we can still try to ssh
+        # into the controller and fetch the job table.
+        raise exceptions.ClusterNotUpError('Spot controller is not up.',
+                                           cluster_status=controller_status)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -768,8 +777,11 @@ def spot_queue(refresh: bool,
         stream_logs=False,
         separate_stderr=True)
     try:
-        subprocess_utils.handle_returncode(
-            returncode, code, 'Failed to fetch managed job statuses', stderr)
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to fetch managed spot jobs',
+                                           stderr,
+                                           stream_logs=False)
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
@@ -794,12 +806,14 @@ def spot_cancel(name: Optional[str] = None,
         RuntimeError: failed to cancel the job.
     """
     job_ids = [] if job_ids is None else job_ids
-    _, handle = spot.is_spot_controller_up(
+    cluster_status, handle = spot.is_spot_controller_up(
         'All managed spot jobs should have finished.')
     if handle is None or handle.head_ip is None:
         # The error message is already printed in spot.is_spot_controller_up.
+        # TODO(zhwu): Move the error message into the exception.
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError()
+            raise exceptions.ClusterNotUpError('',
+                                               cluster_status=cluster_status)
 
     job_id_str = ','.join(map(str, job_ids))
     if sum([len(job_ids) > 0, name is not None, all]) != 1:
@@ -858,7 +872,8 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
         if controller_status == global_user_state.ClusterStatus.INIT:
             msg = ''
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(msg)
+            raise exceptions.ClusterNotUpError(msg,
+                                               cluster_status=controller_status)
 
     if name is not None and job_id is not None:
         raise ValueError('Cannot specify both name and job_id.')
