@@ -1847,8 +1847,12 @@ class TestStorageWithCredentials:
                 f'touch {tmpdir}/folder{{000..255}}/test.txt', shell=True)
 
             timestamp = str(time.time()).replace('.', '')
-            store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
-                                            source=tmpdir)
+            if store_type == storage_lib.StoreType.R2:
+                store_obj = storage_lib.Storage(name=f'r2-sky-test-{timestamp}',
+                                                source=tmpdir)
+            else:
+                store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
+                                                source=tmpdir)
             store_obj.add_store(store_type)
 
         subprocess.check_output(['sky', 'storage', 'delete', store_obj.name])
