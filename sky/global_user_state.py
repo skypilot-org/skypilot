@@ -670,19 +670,13 @@ def set_storage_handle(storage_name: str, handle: 'Storage.StorageMetadata'):
 
 def get_handle_from_storage_name(
         storage_name: Optional[str]) -> Optional['Storage.StorageMetadata']:
-    from sky import sky_logging
-    logger = sky_logging.init_logger(__name__)
     if storage_name is None:
-        logger.info("333")
         return None
     rows = _DB.cursor.execute('SELECT handle FROM storage WHERE name=(?)',
                               (storage_name,))
     for (handle,) in rows:
         if handle is None:
-            logger.info("444")
             return None
-        t = pickle.loads(handle)
-        logger.info(f'get handle: \n {t}')
         return pickle.loads(handle)
 
 
