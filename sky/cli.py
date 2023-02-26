@@ -1446,7 +1446,7 @@ def _get_in_progress_spot_jobs(
     is_flag=True,
     required=False,
     help='Query the latest cluster statuses from the cloud provider(s).')
-@click.option('--show-spot-queue/--no-show-spot-queue',
+@click.option('--show-spot-jobs/--no-show-spot-jobs',
               default=True,
               is_flag=True,
               required=False,
