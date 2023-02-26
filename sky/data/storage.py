@@ -401,7 +401,9 @@ class Storage(object):
         self.stores = {} if stores is None else stores
 
         # Logic to rebuild Storage if it is in global user state
+        logger.info('111')
         handle = global_user_state.get_handle_from_storage_name(self.name)
+        logger.info('222')
         if handle is not None:
             self.handle = handle
             # Reconstruct the Storage object from the global_user_state
