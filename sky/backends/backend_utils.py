@@ -1958,11 +1958,10 @@ def _refresh_cluster_record(
 
     Args:
         cluster_name: The name of the cluster.
-        force_refresh: refresh the cluster status as long as the cluster exists.
-            If False, the cluster status will only be refreshed if the cluster:
+        force_refresh: if True, refresh the cluster status even if it may be skipped. Otherwise (the default),
+            only refresh if the cluster:
                 1. is a spot cluster, or
-                2. is a non-spot cluster, is not in the STOPPED, and the
-                autostop is set.
+                2. is a non-spot cluster, is not STOPPED, and autostop is set.
         acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
             before updating the status.
 
