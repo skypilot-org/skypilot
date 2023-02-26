@@ -403,6 +403,7 @@ class Resources:
                     # Skip this region. The upper layer will handle the failover to
                     # other regions.
                     continue
+                # TODO: filter out the zones not available in the vpc_name
                 filtered_regions.append(region)
             return filtered_regions
 
