@@ -1413,7 +1413,7 @@ def _get_in_progress_spot_jobs(
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         if controller_status == global_user_state.ClusterStatus.INIT:
-            msg = ('Controller\'s latest status is detected to be INIT; jobs '
+            msg = ('Controller\'s latest status is INIT; jobs '
                    'will not be shown until it becomes UP.')
         else:
             assert controller_status in [
@@ -1569,7 +1569,7 @@ def status(all: bool, refresh: bool, show_spot_queue: bool,
                     if num_in_progress_jobs > _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS:
                         job_info += (
                             f' ({_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS} latest ones '
-                            'shown above)')
+                            'shown)')
                     job_info += '. '
                 hints.append(
                     f'* {job_info}To see all jobs: {colorama.Style.BRIGHT}'
