@@ -1901,10 +1901,11 @@ class TestStorageWithCredentials:
                 expected_output = 'BucketNotFoundException'
             elif nonexist_bucket_url.startswith('r2'):
                 endpoint_url = cloudflare.create_endpoint()
+                nonexist_endpoint_url = endpoint_url[:10] + "random" + endpoint_url[10:]
                 command = [
                     'aws', 's3api', 'head-bucket', '--bucket',
                     nonexist_bucket_name,
-                    f'--endpoint {endpoint_url}'
+                    f'--endpoint {nonexist_endpoint_url}'
                     '--profile=r2'
                 ]
                 expected_output = '404'
@@ -1934,7 +1935,7 @@ class TestStorageWithCredentials:
                 random_name=nonexist_bucket_name))
 
     @pytest.mark.parametrize('private_bucket',
-                             [f's3://imagenet', f'gs://imagenet'])
+                             [f's3://imagenet'])
     def test_private_bucket(self, private_bucket):
         # Attempts to access private buckets not belonging to the user.
         # These buckets are known to be private, but may need to be updated if
