@@ -1964,10 +1964,10 @@ class TestStorageWithCredentials:
         if store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             if suffix:
-                url = f's3://{bucket_name}/{suffix} --endpoint {endpoint_url} --profile=r2'
+                url = f's3://{bucket_name}/{suffix}'
             else:
-                url = f's3://{bucket_name} --endpoint {endpoint_url} --profile=r2'
-            return ['aws', 's3', 'ls', url]
+                url = f's3://{bucket_name}'
+            return ['aws', 's3', 'ls', url, '--endpoint', endpoint_url, '--profile=r2']
 
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
