@@ -5,7 +5,7 @@ Usage:
                                  [--api-key-path API_KEY_PATH]
 
 If neither --api-key nor --api-key-path are provided, this script will parse
-`~/.lambda/lambda_keys` to look for Lambda api key.
+`~/.lambda/lambda_keys` to look for Lambda API key.
 """
 import argparse
 import csv
@@ -14,10 +14,10 @@ import os
 import requests
 
 ENDPOINT = 'https://cloud.lambdalabs.com/api/v1/instance-types'
-LAMBDA_KEYS_PATH = os.path.expanduser('~/.lambda_cloud/lambda_keys')
+DEFAULT_LAMBDA_KEYS_PATH = os.path.expanduser('~/.lambda_cloud/lambda_keys')
 
 # This is the list that Lambda Labs gave us.
-regions = [
+REGIONS = [
     'australia-southeast-1',
     'europe-central-1',
     'asia-south-1',
@@ -31,7 +31,8 @@ regions = [
     'us-south-1',
 ]
 
-gpu_to_memory = {
+# Source: https://lambdalabs.com/service/gpu-cloud
+GPU_TO_MEMORY = {
     'A100': 40960,
     'A100-80GB': 81920,
     'A6000': 49152,
@@ -48,18 +49,16 @@ def name_to_gpu(name: str) -> str:
     return name.split('_')[2].upper()
 
 
-def name_to_act(name: str) -> int:
+def name_to_gpu_cnt(name: str) -> int:
     return int(name.split('_')[1].replace('x', ''))
 
 
-def create_catalog(
-        api_key: str,  # pylint: disable=redefined-outer-name
-        output_path: str) -> None:
+def create_catalog(api_key: str, output_path: str) -> None:
     headers = {'Authorization': f'Bearer {api_key}'}
     response = requests.get(ENDPOINT, headers=headers)
     info = response.json()['data']
 
-    with open(output_path, mode='w') as f:  # pylint: disable=redefined-outer-name
+    with open(output_path, mode='w') as f:
         writer = csv.writer(f, delimiter=',', quotechar='"')
         writer.writerow([
             'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
@@ -68,44 +67,39 @@ def create_catalog(
         # We parse info.keys() in reverse order so gpu_1x_a100_sxm4 comes before
         # gpu_1x_a100 in the catalog (gpu_1x_a100_sxm4 has more availability).
         for vm in reversed(list(info.keys())):
-            aname = name_to_gpu(vm)
-            act = name_to_act(vm) * 1.0
-            vcpus = info[vm]['instance_type']['specs']['vcpus'] * 1.0
-            mem = info[vm]['instance_type']['specs']['memory_gib'] * 1.0
-            price = info[vm]['instance_type']\
-                    ['price_cents_per_hour'] * 1.0 / 100
+            gpu = name_to_gpu(vm)
+            gpu_cnt = float(name_to_gpu_cnt(vm))
+            vcpus = float(info[vm]['instance_type']['specs']['vcpus'])
+            mem = float(info[vm]['instance_type']['specs']['memory_gib'])
+            price = float(info[vm]['instance_type']\
+                    ['price_cents_per_hour']) / 100
             gpuinfo = {
                 'Gpus': [{
-                    'Name': aname,
+                    'Name': gpu,
                     'Manufacturer': 'NVIDIA',
-                    'Count': act,
+                    'Count': gpu_cnt,
                     'MemoryInfo': {
-                        'SizeInMiB': gpu_to_memory[aname]
+                        'SizeInMiB': GPU_TO_MEMORY[gpu]
                     },
                 }],
-                'TotalGpuMemoryInMiB': gpu_to_memory[aname]
+                'TotalGpuMemoryInMiB': GPU_TO_MEMORY[gpu]
             }
             gpuinfo = json.dumps(gpuinfo).replace('"', "'")  # pylint: disable=invalid-string-quote
-            for r in regions:
+            for r in REGIONS:
                 writer.writerow(
-                    [vm, aname, act, vcpus, mem, price, r, gpuinfo, ''])
+                    [vm, gpu, gpu_cnt, vcpus, mem, price, r, gpuinfo, ''])
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--api-key', help='Lambda API key.')
-    parser.add_argument('--api-key-path',
-                        help='path of file containing Lambda API key.')
-    args = parser.parse_args()
-
-    api_key = args.api_key
+def get_api_key(cmdline_args: argparse.Namespace) -> str:
+    """Get Lambda API key from cmdline or DEFAULT_LAMBDA_KEYS_PATH."""
+    api_key = cmdline_args.api_key
     if api_key is None:
-        if args.api_key_path is not None:
-            with open(args.api_key_path, mode='r') as f:
+        if cmdline_args.api_key_path is not None:
+            with open(cmdline_args.api_key_path, mode='r') as f:
                 api_key = f.read().strip()
         else:
             # Read from ~/.lambda_cloud/lambda_keys
-            with open(LAMBDA_KEYS_PATH, mode='r') as f:
+            with open(DEFAULT_LAMBDA_KEYS_PATH, mode='r') as f:
                 lines = [
                     line.strip() for line in f.readlines() if ' = ' in line
                 ]
@@ -114,6 +108,15 @@ if __name__ == '__main__':
                         api_key = line.split(' = ')[1]
                         break
     assert api_key is not None
+    return api_key
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--api-key', help='Lambda API key.')
+    parser.add_argument('--api-key-path',
+                        help='path of file containing Lambda API key.')
+    args = parser.parse_args()
     os.makedirs('lambda', exist_ok=True)
-    create_catalog(api_key, 'lambda/vms.csv')
+    create_catalog(get_api_key(args), 'lambda/vms.csv')
     print('Lambda Cloud catalog saved to lambda/vms.csv')
