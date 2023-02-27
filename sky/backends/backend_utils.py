@@ -1488,7 +1488,7 @@ def check_network_connection():
     http.mount('http://', adapter)
     try:
         http.head(_TEST_IP, timeout=3)
-    except requests.Timeout as e:
+    except (requests.Timeout, requests.exceptions.ConnectionError) as e:
         raise exceptions.NetworkError(
             'Could not refresh the cluster. Network seems down.') from e
 
