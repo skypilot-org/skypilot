@@ -42,7 +42,6 @@ class Local(clouds.Cloud):
         clouds.CloudImplementationFeatures.AUTOSTOP:
             ('Local cloud does not support stopping instances.')
     }
-    _regions: List[clouds.Region] = [LOCAL_REGION]
 
     @classmethod
     def _cloud_unsupported_features(
@@ -54,17 +53,13 @@ class Local(clouds.Cloud):
         return None
 
     @classmethod
-    def regions(cls):
-        return cls._regions
-
-    @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
+    def regions_with_offering(cls, instance_type: str,
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         """Local cloud resources are placed in only one region."""
         del instance_type, accelerators, use_spot, region, zone
-        return cls.regions()
+        return [cls.LOCAL_REGION]
 
     @classmethod
     def zones_provision_loop(
@@ -72,7 +67,7 @@ class Local(clouds.Cloud):
         *,
         region: str,
         num_nodes: int,
-        instance_type: Optional[str] = None,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[None]:

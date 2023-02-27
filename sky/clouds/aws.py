@@ -90,12 +90,11 @@ class AWS(clouds.Cloud):
     #### Regions/Zones ####
 
     @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
+    def regions_with_offering(cls, instance_type: str,
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         del accelerators  # unused
-        assert instance_type is not None
         regions = service_catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'aws')
 
@@ -114,7 +113,7 @@ class AWS(clouds.Cloud):
         *,
         region: str,
         num_nodes: int,
-        instance_type: Optional[str] = None,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[List[clouds.Zone]]:
@@ -291,14 +290,8 @@ class AWS(clouds.Cloud):
                                                             clouds='aws')
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            region: Optional['clouds.Region'],
+            self, resources: 'resources_lib.Resources', region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        if region is None:
-            assert zones is None, (
-                'Set either both or neither for: region, zones.')
-            region = self._get_default_region()
-            zones = region.zones
         assert zones is not None, (region, zones)
 
         region_name = region.name

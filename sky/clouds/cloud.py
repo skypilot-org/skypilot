@@ -101,11 +101,7 @@ class Cloud:
     #### Regions/Zones ####
 
     @classmethod
-    def regions(cls) -> List[Region]:
-        raise NotImplementedError
-
-    @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
+    def regions_with_offering(cls, instance_type: str,
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[Region]:
@@ -131,7 +127,7 @@ class Cloud:
         *,
         region: str,
         num_nodes: int,
-        instance_type: Optional[str] = None,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[Optional[List[Zone]]]:
@@ -221,7 +217,7 @@ class Cloud:
     def make_deploy_resources_variables(
         self,
         resources: 'resources.Resources',
-        region: Optional['Region'],
+        region: 'Region',
         zones: Optional[List['Zone']],
     ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
@@ -264,10 +260,6 @@ class Cloud:
         This method may return None if the cloud's default instance family
         does not have a VM with the given number of vCPUs (e.g., when cpus='7').
         """
-        raise NotImplementedError
-
-    @classmethod
-    def _get_default_region(cls) -> Region:
         raise NotImplementedError
 
     @classmethod

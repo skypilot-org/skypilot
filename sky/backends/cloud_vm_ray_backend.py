@@ -695,6 +695,7 @@ class RetryingVmProvisioner(object):
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
             stdout: str, stderr: str):
+        assert launchable_resources.is_launchable()
         assert zones is not None, 'AWS should always have zones.'
 
         style = colorama.Style
@@ -942,9 +943,10 @@ class RetryingVmProvisioner(object):
                 resources.
         """
         assert (to_provision.cloud is not None and
-                to_provision.region is not None), (
-                    to_provision,
-                    'cloud and region must have been set by optimizer')
+                to_provision.region is not None and to_provision.instance_type
+                is not None), (to_provision,
+                               'cloud, region and instance_type must have been '
+                               'set by optimizer')
         cloud = to_provision.cloud
         region = clouds.Region(to_provision.region)
         zones = None

@@ -375,6 +375,10 @@ class Resources:
         """Returns a set of `Region`s that can provision this Resources.
 
         Each `Region` has a list of `Zone`s that can provision this Resources.
+
+        (Internal) This function respects any config in skypilot_config that
+        may have restricted the regions to be considered (e.g., a
+        ssh_proxy_command dict with region names as keys).
         """
         assert self.is_launchable()
         regions = self._cloud.regions_with_offering(self._instance_type,
@@ -386,30 +390,23 @@ class Resources:
 
         # Filter the regions by the skypilot_config
         ssh_proxy_command_config = skypilot_config.get_nested(
-            (str(self._cloud).lower(), 'ssh_proxy_command'), None)
+            ('aws', 'ssh_proxy_command'), None)
         if (isinstance(ssh_proxy_command_config, str) or
                 ssh_proxy_command_config is None):
             # All regions are valid as the regions are not specified for the
             # ssh_proxy_command config.
             return regions
 
-        if isinstance(ssh_proxy_command_config, dict):
-            filtered_regions = []
-            for region in regions:
-                region_name = region.name
-                ssh_proxy_command = ssh_proxy_command_config.get(
-                    region_name, None)
-                if ssh_proxy_command is None:
-                    # Skip this region. The upper layer will handle the failover
-                    # to other regions.
-                    continue
-                # TODO: filter out the zones not available in the vpc_name
-                filtered_regions.append(region)
-            return filtered_regions
-
-        raise ValueError(
-            'Invalid ssh_proxy_command config (expected a str or a dict with '
-            f'region names as keys): {ssh_proxy_command_config!r}')
+        # ssh_proxy_command_config: Dict[str, str], region_name -> command
+        # It is guaranteed by the skypilot_config.
+        filtered_regions = []
+        for region in regions:
+            region_name = region.name
+            if region_name not in ssh_proxy_command_config:
+                continue
+            # TODO: filter out the zones not available in the vpc_name
+            filtered_regions.append(region)
+        return filtered_regions
 
     def _try_validate_instance_type(self) -> None:
         if self.instance_type is None:
