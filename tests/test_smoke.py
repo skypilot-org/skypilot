@@ -1799,7 +1799,7 @@ class TestStorageWithCredentials:
         # Creates a temporary bucket using awscli
         endpoint_url = cloudflare.create_endpoint()
         subprocess.check_call(['aws', 's3', 'mb', f's3://{tmp_bucket_name}',
-                               f'--endpoint {endpoint_url}', '--profile=r2'])
+                               '--endpoint', endpoint_url, '--profile=r2'])
         yield tmp_bucket_name
         subprocess.check_call(
             ['aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force',
