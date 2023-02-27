@@ -1803,7 +1803,7 @@ class TestStorageWithCredentials:
         yield tmp_bucket_name
         subprocess.check_call(
             ['aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force',
-             f'--endpoint {endpoint_url}', '--profile=r2'])
+             '--endpoint', endpoint_url, '--profile=r2'])
 
     @pytest.fixture
     def tmp_public_storage_obj(self, request):
@@ -1905,7 +1905,7 @@ class TestStorageWithCredentials:
                 command = [
                     'aws', 's3api', 'head-bucket', '--bucket',
                     nonexist_bucket_name,
-                    f'--endpoint {nonexist_endpoint_url}'
+                    '--endpoint', nonexist_endpoint_url'
                     '--profile=r2'
                 ]
                 expected_output = '404'
