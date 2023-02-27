@@ -334,13 +334,13 @@ def test_valid_image(monkeypatch):
         cloud=sky.GCP(),
         region='us-central1',
         image_id=
-        'projects/deeplearning-platform-release/global/images/family/common-cpu'
+        'projects/deeplearning-platform-release/global/images/family/common-cpu-v20230126'
     )
     _test_resources(
         monkeypatch,
         cloud=sky.GCP(),
         image_id=
-        'projects/deeplearning-platform-release/global/images/family/common-cpu'
+        'projects/deeplearning-platform-release/global/images/family/common-cpu-v20230126'
     )
 
 

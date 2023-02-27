@@ -1,4 +1,5 @@
 """Google Cloud Platform."""
+import functools
 import json
 import os
 import subprocess
@@ -96,9 +97,6 @@ class GCP(clouds.Cloud):
     # lower limit.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 35
 
-    _regions: List[clouds.Region] = []
-    _zones: List[clouds.Zone] = []
-
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
@@ -109,60 +107,14 @@ class GCP(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     #### Regions/Zones ####
-
     @classmethod
-    def regions(cls) -> List[clouds.Region]:
-        if not cls._regions:
-            # https://cloud.google.com/compute/docs/regions-zones
-            cls._regions = [
-                clouds.Region('us-west1').set_zones([
-                    clouds.Zone('us-west1-a'),
-                    clouds.Zone('us-west1-b'),
-                    # clouds.Zone('us-west1-c'),  # No GPUs.
-                ]),
-                clouds.Region('us-central1').set_zones([
-                    clouds.Zone('us-central1-a'),
-                    clouds.Zone('us-central1-b'),
-                    clouds.Zone('us-central1-c'),
-                    clouds.Zone('us-central1-f'),
-                ]),
-                clouds.Region('us-east1').set_zones([
-                    clouds.Zone('us-east1-b'),
-                    clouds.Zone('us-east1-c'),
-                    clouds.Zone('us-east1-d'),
-                ]),
-                clouds.Region('us-east4').set_zones([
-                    clouds.Zone('us-east4-a'),
-                    clouds.Zone('us-east4-b'),
-                    clouds.Zone('us-east4-c'),
-                ]),
-                clouds.Region('us-west2').set_zones([
-                    # clouds.Zone('us-west2-a'),  # No GPUs.
-                    clouds.Zone('us-west2-b'),
-                    clouds.Zone('us-west2-c'),
-                ]),
-                # Ignoring us-west3 as it doesn't have GPUs.
-                clouds.Region('us-west4').set_zones([
-                    clouds.Zone('us-west4-a'),
-                    clouds.Zone('us-west4-b'),
-                    # clouds.Zone('us-west4-c'),  # No GPUs.
-                ]),
-            ]
-        return cls._regions
-
-    @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
+    def regions_with_offering(cls, instance_type: str,
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         if accelerators is None:
-            if instance_type is None:
-                # Fall back to the default regions.
-                # TODO: Get the regions from the service catalog.
-                regions = cls.regions()
-            else:
-                regions = service_catalog.get_region_zones_for_instance_type(
-                    instance_type, use_spot, clouds='gcp')
+            regions = service_catalog.get_region_zones_for_instance_type(
+                instance_type, use_spot, clouds='gcp')
         else:
             assert len(accelerators) == 1, accelerators
             acc = list(accelerators.keys())[0]
@@ -182,6 +134,8 @@ class GCP(clouds.Cloud):
                     for r2 in vm_regions:
                         if r1.name != r2.name:
                             continue
+                        assert r1.zones is not None, r1
+                        assert r2.zones is not None, r2
                         zones = []
                         for z1 in r1.zones:
                             for z2 in r2.zones:
@@ -195,27 +149,32 @@ class GCP(clouds.Cloud):
             regions = [r for r in regions if r.name == region]
         if zone is not None:
             for r in regions:
+                assert r.zones is not None, r
                 r.set_zones([z for z in r.zones if z.name == zone])
             regions = [r for r in regions if r.zones]
         return regions
 
     @classmethod
-    def region_zones_provision_loop(
+    def zones_provision_loop(
         cls,
         *,
-        instance_type: Optional[str] = None,
+        region: str,
+        num_nodes: int,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+    ) -> Iterator[List[clouds.Zone]]:
+        del num_nodes  # Unused.
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
-                                            region=None,
+                                            region=region,
                                             zone=None)
         # GCP provisioner currently takes 1 zone per request.
-        for region in regions:
-            for zone in region.zones:
-                yield (region, [zone])
+        for r in regions:
+            assert r.zones is not None, r
+            for zone in r.zones:
+                yield [zone]
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -304,22 +263,10 @@ class GCP(clouds.Cloud):
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          clouds='gcp')
 
-    @classmethod
-    def _get_default_region(cls) -> clouds.Region:
-        return cls.regions()[-1]
-
     def make_deploy_resources_variables(
-            self, resources: 'resources.Resources',
-            region: Optional['clouds.Region'],
+            self, resources: 'resources.Resources', region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        if region is None:
-            assert zones is None, (
-                'Set either both or neither for: region, zones.')
-            region = self._get_default_region()
-            zones = region.zones
-        else:
-            assert zones is not None, (
-                'Set either both or neither for: region, zones.')
+        assert zones is not None, (region, zones)
 
         region_name = region.name
         zone_name = zones[0].name
@@ -484,7 +431,8 @@ class GCP(clouds.Cloud):
         return service_catalog.get_vcpus_from_instance_type(instance_type,
                                                             clouds='gcp')
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
@@ -497,7 +445,8 @@ class GCP(clouds.Cloud):
             # `auth.default()` does not guarantee these files exist.
             for file in [
                     '~/.config/gcloud/access_tokens.db',
-                    '~/.config/gcloud/credentials.db'
+                    '~/.config/gcloud/credentials.db',
+                    '~/.config/gcloud/application_default_credentials.json'
             ]:
                 if not os.path.isfile(os.path.expanduser(file)):
                     raise FileNotFoundError(file)
@@ -505,10 +454,10 @@ class GCP(clouds.Cloud):
             _run_output('gcloud --version')
 
             # Check if application default credentials are set.
-            project_id = self.get_project_id()
+            project_id = cls.get_project_id()
 
             # Check if the user is activated.
-            self.get_current_user_identity()
+            cls.get_current_user_identity()
         except (auth.exceptions.DefaultCredentialsError,
                 subprocess.CalledProcessError,
                 exceptions.CloudUserIdentityError, FileNotFoundError,
@@ -604,7 +553,9 @@ class GCP(clouds.Cloud):
         credentials[GCP_CONFIG_SKY_BACKUP_PATH] = GCP_CONFIG_SKY_BACKUP_PATH
         return credentials
 
-    def get_current_user_identity(self) -> Optional[str]:
+    @classmethod
+    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    def get_current_user_identity(cls) -> Optional[str]:
         """Returns the email address + project id of the active user."""
         try:
             account = _run_output('gcloud auth list --filter=status:ACTIVE '
@@ -625,7 +576,7 @@ class GCP(clouds.Cloud):
                     '--format="value(account)"` and ensure it correctly '
                     'returns the current user.')
         try:
-            return f'{account} [project_id={self.get_project_id()}]'
+            return f'{account} [project_id={cls.get_project_id()}]'
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(

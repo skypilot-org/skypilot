@@ -34,7 +34,7 @@ You may also install SkyPilot from source.
 
 .. note::
 
-    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`conda install grpcio=1.43.0` prior to installing SkyPilot.
+    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`pip uninstall grpcio; conda install -c conda-forge grpcio=1.43.0` prior to installing SkyPilot.
 
 .. note::
 
@@ -45,9 +45,12 @@ You may also install SkyPilot from source.
 Cloud account setup
 -------------------
 
-Configure access to at least one cloud:
+If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can properly access your enabled clouds<verify-cloud-access>`.
 
-**AWS**
+Otherwise, configure access to at least one cloud, then run ``sky check``:
+
+AWS
+~~~~~~~~~
 
 To get the **AWS access key** required by :code:`aws configure`, please go to the `AWS IAM Management Console <https://us-east-1.console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials>`_ and click on the "Access keys" dropdown (detailed instructions `here <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_). The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
 
@@ -61,7 +64,8 @@ To get the **AWS access key** required by :code:`aws configure`, please go to th
 
 Note: If you are using AWS IAM Identity Center (AWS SSO), you will need :code:`pip install awscli>=1.27.10`. See `here <https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html>`_ for instructions on how to configure AWS SSO.
 
-**GCP**
+GCP
+~~~~~~~~~
 
 .. code-block:: console
 
@@ -82,7 +86,8 @@ Note: if you encounter *Authorization Error (Error 400: invalid_request)* with t
 
   If you are using multiple GCP projects, list all the configs by :code:`gcloud config configurations list` and activate one by :code:`gcloud config configurations activate <CONFIG_NAME>` (See `GCP docs <https://cloud.google.com/sdk/docs/configurations#activating_a_configuration>`_).
 
-**Azure**
+Azure
+~~~~~~~~~
 
 .. code-block:: console
 
@@ -93,9 +98,10 @@ Note: if you encounter *Authorization Error (Error 400: invalid_request)* with t
 
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
-**Lambda Cloud**
+Lambda Cloud
+~~~~~~~~~~~~~~~~~~
 
-Lambda Labs GPU Cloud is a cloud provider offering low-cost GPUs. You can learn more about them `here <https://lambdalabs.com/>`__.
+Lambda Labs GPU Cloud, or Lambda Cloud, is a cloud provider offering low-cost GPUs. You can learn more about them `here <https://lambdalabs.com/>`__.
 
 To configure Lambda Cloud access, go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambda console to generate a key and then add it to :code:`~/.lambda_cloud/lambda_keys` by running:
 
@@ -110,7 +116,10 @@ To configure Lambda Cloud access, go to the `API Keys <https://cloud.lambdalabs.
 
   Multi-node clusters and stopping instances are currently not supported on Lambda Cloud.
 
-**Verifying cloud setup**
+.. _verify-cloud-access:
+
+Verifying cloud access
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 After configuring the desired clouds, you can optionally run :code:`sky check` to verify that credentials are correctly set up:
 

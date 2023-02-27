@@ -18,6 +18,7 @@ import os
 import platform
 import re
 import warnings
+from typing import Dict, List
 
 import setuptools
 
@@ -87,6 +88,7 @@ install_requires = [
     'ray[default]>=1.9.0,<=2.3.0',
     'rich',
     'tabulate',
+    'typing-extensions',
     'filelock',  # TODO(mraheja): Enforce >=3.6.0 when python version is >= 3.7
     # This is used by ray. The latest 1.44.0 will generate an error
     # `Fork support is only compatible with the epoll1 and poll
@@ -103,7 +105,7 @@ install_requires = [
 
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the following
 # packages dependencies are changed.
-extras_require = {
+extras_require: Dict[str, List[str]] = {
     'aws': [
         # awscli>=1.27.10 is required for SSO support.
         'awscli',
