@@ -33,7 +33,7 @@ import os
 from ray.autoscaler import sdk
 
 
-# Ref: https://github.com/ray-project/ray/blob/releases/2.2.0/python/ray/autoscaler/_private/util.py#L392-L404
+# Ref: https://github.com/ray-project/ray/blob/releases/2.3.0/python/ray/autoscaler/_private/util.py#L392-L404
 def monkey_patch_hash_launch_conf(node_conf, auth):
     hasher = hashlib.sha1()
     # For hashing, we replace the path to the key with the key

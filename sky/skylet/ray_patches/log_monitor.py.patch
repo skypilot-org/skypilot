@@ -1,9 +1,9 @@
 0a1,4
-> # Adapted from https://github.com/ray-project/ray/blob/ray-2.2.0/python/ray/_private/log_monitor.py
+> # Adapted from https://github.com/ray-project/ray/blob/ray-2.3.0/python/ray/_private/log_monitor.py
 > # Fixed the problem for progress bar, as the latest version does not preserve \r for progress bar.
-> # It is reverted to https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/_private/log_monitor.py#L299-L300
+> # The change is adapted from https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/_private/log_monitor.py#L299-L300
 > 
-351c355,356
+354c358,359
 <                     next_line = next_line.rstrip("\r\n")
 ---
 >                     if next_line[-1] == "\n":

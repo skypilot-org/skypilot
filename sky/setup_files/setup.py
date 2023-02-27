@@ -64,8 +64,7 @@ def parse_readme(readme: str) -> str:
 
 install_requires = [
     'wheel',
-    # NOTE: ray 2.2.0 requires click>=7.0; We disable the
-    # shell completion for click<8.0 for backward compatibility.
+    # NOTE: ray 2.3.0 requires click>=7.0
     'click>=7.0',
     # NOTE: required by awscli. To avoid ray automatically installing
     # the latest version.

@@ -194,7 +194,7 @@ class RayCodeGen:
         # Should use 'auto' or 'ray://<internal_head_ip>:10001' rather than
         # 'ray://localhost:10001', or 'ray://127.0.0.1:10001', for public cloud.
         # Otherwise, it will a bug of ray job failed to get the placement group
-        # in ray <= 2.2.0.
+        # in ray <= 2.3.0.
         # TODO(mluo): Check why 'auto' not working with on-prem cluster and
         # whether the placement group issue also occurs in on-prem cluster.
         ray_address = 'ray://localhost:10001' if is_local else 'auto'
@@ -1400,7 +1400,7 @@ class RetryingVmProvisioner(object):
             # Downside is existing tasks on the cluster will keep running
             # (which may be ok with the semantics of 'sky launch' twice).
             # Tracked in https://github.com/ray-project/ray/issues/20402.
-            # Ref: https://github.com/ray-project/ray/blob/releases/2.2.0/python/ray/autoscaler/sdk/sdk.py#L16-L49  # pylint: disable=line-too-long
+            # Ref: https://github.com/ray-project/ray/blob/releases/2.3.0/python/ray/autoscaler/sdk/sdk.py#L16-L49  # pylint: disable=line-too-long
             script_path = write_ray_up_script_with_patched_launch_hash_fn(
                 cluster_config_file, ray_up_kwargs={'no_restart': True})
 
@@ -1623,7 +1623,7 @@ class RetryingVmProvisioner(object):
         if isinstance(launched_resources.cloud, clouds.Local):
             raise RuntimeError(
                 'The command `ray status` errored out on the head node '
-                'of the local cluster. Check if ray[default]==2.2.0 '
+                'of the local cluster. Check if ray[default]==2.3.0 '
                 'is installed or running correctly.')
         backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
 

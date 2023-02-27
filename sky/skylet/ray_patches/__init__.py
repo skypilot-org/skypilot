@@ -14,7 +14,7 @@ To get original versions, go to the Ray branch with version:
 
 Example workflow:
 
-  >> wget https://raw.githubusercontent.com/ray-project/ray/releases/2.2.0/python/ray/autoscaler/_private/command_runner.py
+  >> wget https://raw.githubusercontent.com/ray-project/ray/releases/2.3.0/python/ray/autoscaler/_private/command_runner.py
   >> cp command_runner.py command_runner.py.1
 
   >> # Make some edits to command_runner.py.1...
