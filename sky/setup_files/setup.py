@@ -85,7 +85,7 @@ install_requires = [
     'PrettyTable>=2.0.0',
     # Lower local ray version is not fully supported, due to the
     # autoscaler issues (also tracked in #537).
-    'ray[default]>=1.9.0,<=2.2.0',
+    'ray[default]>=1.9.0,<=2.3.0',
     'rich',
     'tabulate',
     'filelock',  # TODO(mraheja): Enforce >=3.6.0 when python version is >= 3.7
