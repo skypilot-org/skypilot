@@ -69,12 +69,12 @@ class StoreType(enum.Enum):
 
     @classmethod
     def from_store(cls, store: 'AbstractStore') -> 'StoreType':
-        if isinstance(store, R2Store):
-            return StoreType.R2
+        if isinstance(store, S3Store):
+            return StoreType.S3
         elif isinstance(store, GcsStore):
             return StoreType.GCS
-        elif isinstance(store, S3Store):
-            return StoreType.S3
+        elif isinstance(store, R2Store):
+            return StoreType.R2
         else:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unknown store type: {store}')
@@ -1105,7 +1105,7 @@ class S3Store(AbstractStore):
             time.sleep(0.1)
 
 
-class R2Store(S3Store):
+class R2Store(AbstractStore):
     """R2Store inherits from S3Store Object and represents the backend
     for R2 buckets.
     """
