@@ -74,46 +74,6 @@ logger = sky_logging.init_logger(__name__)
 _dict = None
 
 
-def _try_load_config() -> None:
-    global _dict
-    config_path_via_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
-    if config_path_via_env_var is not None:
-        config_path = config_path_via_env_var
-    else:
-        config_path = CONFIG_PATH
-    config_path = os.path.expanduser(config_path)
-    if os.path.exists(config_path):
-        logger.debug(f'Using config path: {config_path}')
-        try:
-            _dict = common_utils.read_yaml(config_path)
-            logger.debug(f'Config loaded: {_dict}')
-        except yaml.YAMLError as e:
-            logger.error(f'Error in loading config file ({config_path}):', e)
-
-        for cloud in clouds.CLOUD_REGISTRY:
-            _syntax_check_for_ssh_proxy_command(cloud)
-        logger.debug('Config syntax check passed.')
-
-
-# Load on import.
-_try_load_config()
-
-
-def _check_loaded_or_die():
-    """Checks loaded() is true; otherwise raises RuntimeError."""
-    global _dict
-    if _dict is None:
-        raise RuntimeError(
-            f'No user configs loaded. Check {CONFIG_PATH} exists and '
-            'can be loaded.')
-
-
-def loaded() -> bool:
-    """Returns if the user configurations are loaded."""
-    global _dict
-    return _dict is not None
-
-
 def get_nested(keys: Sequence[str], default_value: Any) -> Any:
     """Gets a nested key.
 
@@ -174,3 +134,43 @@ def _syntax_check_for_ssh_proxy_command(cloud: str) -> None:
     raise ValueError(
         'Invalid ssh_proxy_command config (expected a str or a dict with '
         f'region names as keys): {ssh_proxy_command_config!r}')
+
+
+def _try_load_config() -> None:
+    global _dict
+    config_path_via_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
+    if config_path_via_env_var is not None:
+        config_path = config_path_via_env_var
+    else:
+        config_path = CONFIG_PATH
+    config_path = os.path.expanduser(config_path)
+    if os.path.exists(config_path):
+        logger.debug(f'Using config path: {config_path}')
+        try:
+            _dict = common_utils.read_yaml(config_path)
+            logger.debug(f'Config loaded: {_dict}')
+        except yaml.YAMLError as e:
+            logger.error(f'Error in loading config file ({config_path}):', e)
+
+        for cloud in clouds.CLOUD_REGISTRY:
+            _syntax_check_for_ssh_proxy_command(cloud)
+        logger.debug('Config syntax check passed.')
+
+
+# Load on import.
+_try_load_config()
+
+
+def _check_loaded_or_die():
+    """Checks loaded() is true; otherwise raises RuntimeError."""
+    global _dict
+    if _dict is None:
+        raise RuntimeError(
+            f'No user configs loaded. Check {CONFIG_PATH} exists and '
+            'can be loaded.')
+
+
+def loaded() -> bool:
+    """Returns if the user configurations are loaded."""
+    global _dict
+    return _dict is not None
