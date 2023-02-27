@@ -1905,7 +1905,7 @@ class TestStorageWithCredentials:
                 command = [
                     'aws', 's3api', 'head-bucket', '--bucket',
                     nonexist_bucket_name,
-                    '--endpoint', nonexist_endpoint_url'
+                    '--endpoint', nonexist_endpoint_url,
                     '--profile=r2'
                 ]
                 expected_output = '404'
