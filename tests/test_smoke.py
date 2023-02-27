@@ -1901,11 +1901,10 @@ class TestStorageWithCredentials:
                 expected_output = 'BucketNotFoundException'
             elif nonexist_bucket_url.startswith('r2'):
                 endpoint_url = cloudflare.create_endpoint()
-                nonexist_endpoint_url = endpoint_url[:10] + "random" + endpoint_url[10:]
                 command = [
                     'aws', 's3api', 'head-bucket', '--bucket',
                     nonexist_bucket_name,
-                    '--endpoint', nonexist_endpoint_url,
+                    '--endpoint', endpoint_url,
                     '--profile=r2'
                 ]
                 expected_output = '404'
