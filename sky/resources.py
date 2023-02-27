@@ -390,7 +390,7 @@ class Resources:
 
         # Filter the regions by the skypilot_config
         ssh_proxy_command_config = skypilot_config.get_nested(
-            ('aws', 'ssh_proxy_command'), None)
+            (str(self._cloud).lower(), 'ssh_proxy_command'), None)
         if (isinstance(ssh_proxy_command_config, str) or
                 ssh_proxy_command_config is None):
             # All regions are valid as the regions are not specified for the
@@ -398,7 +398,7 @@ class Resources:
             return regions
 
         # ssh_proxy_command_config: Dict[str, str], region_name -> command
-        # It is guaranteed by the skypilot_config.
+        # This type check is done by skypilot_config at config load time.
         filtered_regions = []
         for region in regions:
             region_name = region.name

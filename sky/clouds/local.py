@@ -128,6 +128,10 @@ class Local(clouds.Cloud):
         # the ResourceHandle, which calculates the accelerators in the cluster.
         return None
 
+    @classmethod
+    def regions(cls) -> List[clouds.Region]:
+        return [Local.LOCAL_REGION]
+
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
             region: Optional['clouds.Region'],

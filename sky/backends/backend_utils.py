@@ -826,7 +826,7 @@ def write_cluster_config(
         ssh_proxy_command = ssh_proxy_command_config
     else:
         # ssh_proxy_command_config: Dict[str, str], region_name -> command
-        # It is guaranteed by the skypilot_config.
+        # This type check is done by skypilot_config at config load time.
         if region_name not in ssh_proxy_command_config:
             # Skip this region. The upper layer will handle the failover to
             # other regions.
