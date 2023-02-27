@@ -1934,7 +1934,7 @@ class TestStorageWithCredentials:
                 random_name=nonexist_bucket_name))
 
     @pytest.mark.parametrize('private_bucket',
-                             [f's3://imagenet', f'r2://imagenet'])
+                             [f's3://imagenet', f'gs://imagenet'])
     def test_private_bucket(self, private_bucket):
         # Attempts to access private buckets not belonging to the user.
         # These buckets are known to be private, but may need to be updated if

@@ -1280,7 +1280,7 @@ class R2Store(AbstractStore):
         """
         r2 = cloudflare.resource('s3')
         bucket = r2.Bucket(self.name)
-
+        endpoint_url = cloudflare.create_endpoint()
         try:
             # Try Public bucket case.
             # This line does not error out if the bucket is an external public
@@ -1293,7 +1293,6 @@ class R2Store(AbstractStore):
             # AccessDenied error for buckets that are private and not owned by
             # user.
             if error_code == '403':
-                endpoint_url = cloudflare.create_endpoint()
                 command = (f'aws s3 ls s3://{self.name} '
                            f'--endpoint {endpoint_url} --profile=r2')
                 with ux_utils.print_exception_no_traceback():
@@ -1306,7 +1305,9 @@ class R2Store(AbstractStore):
                 raise exceptions.StorageBucketGetError(
                     'Attempted to connect to a non-existent bucket: '
                     f'{self.source}. Consider using `aws s3 ls '
-                    f'{self.source}` to debug.')
+                    f's3://{self.name} '
+                    f'--endpoint {endpoint_url} --profile=r2\' '
+                    'to debug.')
 
         # If bucket cannot be found in both private and public settings,
         # the bucket is created by Sky.
