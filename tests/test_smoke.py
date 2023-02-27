@@ -1862,13 +1862,15 @@ class TestStorageWithCredentials:
 
         output = subprocess.check_output(['sky', 'storage', 'ls'])
         assert store_obj.name not in output.decode('utf-8')
-
+    
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
         [('s3://tcga-2-open', storage_lib.StoreType.S3),
          ('s3://digitalcorpora', storage_lib.StoreType.S3),
          ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS),
          ('r2://test-bucket', storage_lib.StoreType.R2)],
+         # To test for r2, need to provide existing bucket name
+         # that corresponds to r2 credential and accountid you provide
         indirect=['tmp_public_storage_obj'])
     def test_public_bucket(self, tmp_public_storage_obj, store_type):
         # Creates a new bucket with a public source and verifies that it is not
