@@ -1,4 +1,5 @@
 """Google Cloud Platform."""
+import functools
 import json
 import os
 import subprocess
@@ -85,64 +86,35 @@ class GCP(clouds.Cloud):
     """Google Cloud Platform."""
 
     _REPR = 'GCP'
-    _regions: List[clouds.Region] = []
-    _zones: List[clouds.Zone] = []
+
+    # GCP has a 63 char limit; however, Ray autoscaler adds many
+    # characters. Through testing, this is the maximum length for the Sky
+    # cluster name on GCP.  Ref:
+    # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
+    # NOTE: actually 37 is maximum for a single-node cluster which gets the
+    # suffix '-head', but 35 for a multinode cluster because workers get the
+    # suffix '-worker'. Here we do not distinguish these cases and take the
+    # lower limit.
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 35
+
+    @classmethod
+    def _cloud_unsupported_features(
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+        return dict()
+
+    @classmethod
+    def _max_cluster_name_length(cls) -> Optional[int]:
+        return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     #### Regions/Zones ####
-
     @classmethod
-    def regions(cls) -> List[clouds.Region]:
-        if not cls._regions:
-            # https://cloud.google.com/compute/docs/regions-zones
-            cls._regions = [
-                clouds.Region('us-west1').set_zones([
-                    clouds.Zone('us-west1-a'),
-                    clouds.Zone('us-west1-b'),
-                    # clouds.Zone('us-west1-c'),  # No GPUs.
-                ]),
-                clouds.Region('us-central1').set_zones([
-                    clouds.Zone('us-central1-a'),
-                    clouds.Zone('us-central1-b'),
-                    clouds.Zone('us-central1-c'),
-                    clouds.Zone('us-central1-f'),
-                ]),
-                clouds.Region('us-east1').set_zones([
-                    clouds.Zone('us-east1-b'),
-                    clouds.Zone('us-east1-c'),
-                    clouds.Zone('us-east1-d'),
-                ]),
-                clouds.Region('us-east4').set_zones([
-                    clouds.Zone('us-east4-a'),
-                    clouds.Zone('us-east4-b'),
-                    clouds.Zone('us-east4-c'),
-                ]),
-                clouds.Region('us-west2').set_zones([
-                    # clouds.Zone('us-west2-a'),  # No GPUs.
-                    clouds.Zone('us-west2-b'),
-                    clouds.Zone('us-west2-c'),
-                ]),
-                # Ignoring us-west3 as it doesn't have GPUs.
-                clouds.Region('us-west4').set_zones([
-                    clouds.Zone('us-west4-a'),
-                    clouds.Zone('us-west4-b'),
-                    # clouds.Zone('us-west4-c'),  # No GPUs.
-                ]),
-            ]
-        return cls._regions
-
-    @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
+    def regions_with_offering(cls, instance_type: str,
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         if accelerators is None:
-            if instance_type is None:
-                # Fall back to the default regions.
-                # TODO: Get the regions from the service catalog.
-                regions = cls.regions()
-            else:
-                regions = service_catalog.get_region_zones_for_instance_type(
-                    instance_type, use_spot, clouds='gcp')
+            regions = service_catalog.get_region_zones_for_instance_type(
+                instance_type, use_spot, clouds='gcp')
         else:
             assert len(accelerators) == 1, accelerators
             acc = list(accelerators.keys())[0]
@@ -162,6 +134,8 @@ class GCP(clouds.Cloud):
                     for r2 in vm_regions:
                         if r1.name != r2.name:
                             continue
+                        assert r1.zones is not None, r1
+                        assert r2.zones is not None, r2
                         zones = []
                         for z1 in r1.zones:
                             for z2 in r2.zones:
@@ -175,27 +149,32 @@ class GCP(clouds.Cloud):
             regions = [r for r in regions if r.name == region]
         if zone is not None:
             for r in regions:
+                assert r.zones is not None, r
                 r.set_zones([z for z in r.zones if z.name == zone])
             regions = [r for r in regions if r.zones]
         return regions
 
     @classmethod
-    def region_zones_provision_loop(
+    def zones_provision_loop(
         cls,
         *,
-        instance_type: Optional[str] = None,
+        region: str,
+        num_nodes: int,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+    ) -> Iterator[List[clouds.Zone]]:
+        del num_nodes  # Unused.
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
-                                            region=None,
+                                            region=region,
                                             zone=None)
         # GCP provisioner currently takes 1 zone per request.
-        for region in regions:
-            for zone in region.zones:
-                yield (region, [zone])
+        for r in regions:
+            assert r.zones is not None, r
+            for zone in r.zones:
+                yield [zone]
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -279,27 +258,15 @@ class GCP(clouds.Cloud):
             raise
 
     @classmethod
-    def get_default_instance_type(cls) -> str:
-        # General-purpose instance with 8 vCPUs and 32 GB RAM.
-        # Intel Ice Lake 8373C or Cascade Lake 6268CL
-        return 'n2-standard-8'
-
-    @classmethod
-    def _get_default_region(cls) -> clouds.Region:
-        return cls.regions()[-1]
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None) -> Optional[str]:
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         clouds='gcp')
 
     def make_deploy_resources_variables(
-            self, resources: 'resources.Resources',
-            region: Optional['clouds.Region'],
+            self, resources: 'resources.Resources', region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        if region is None:
-            assert zones is None, (
-                'Set either both or neither for: region, zones.')
-            region = self._get_default_region()
-            zones = region.zones
-        else:
-            assert zones is not None, (
-                'Set either both or neither for: region, zones.')
+        assert zones is not None, (region, zones)
 
         region_name = region.name
         zone_name = zones[0].name
@@ -377,45 +344,73 @@ class GCP(clouds.Cloud):
         return resources_vars
 
     def get_feasible_launchable_resources(self, resources):
-        fuzzy_candidate_list = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
-            return ([resources], fuzzy_candidate_list)
+            return ([resources], [])
 
-        # No other resources (cpu/mem) to filter for now, so just return a
-        # default VM type.
-        host_vm_type = GCP.get_default_instance_type()
-        acc_dict = None
+        if resources.accelerators is None:
+            # Return a default instance type with the given number of vCPUs.
+            host_vm_type = GCP.get_default_instance_type(cpus=resources.cpus)
+            if host_vm_type is None:
+                return ([], [])
+            else:
+                r = resources.copy(
+                    cloud=GCP(),
+                    instance_type=host_vm_type,
+                    accelerators=None,
+                    cpus=None,
+                )
+                return ([r], [])
+
+        use_tpu_vm = False
+        if resources.accelerator_args is not None:
+            use_tpu_vm = resources.accelerator_args.get('tpu_vm', False)
+
         # Find instance candidates to meet user's requirements
-        if resources.accelerators is not None:
-            assert len(resources.accelerators.items(
-            )) == 1, 'cannot handle more than one accelerator candidates.'
-            acc, acc_count = list(resources.accelerators.items())[0]
-            (instance_list, fuzzy_candidate_list
-            ) = service_catalog.get_instance_type_for_accelerator(
-                acc,
-                acc_count,
-                use_spot=resources.use_spot,
-                region=resources.region,
-                zone=resources.zone,
-                clouds='gcp')
+        assert len(resources.accelerators.items()
+                  ) == 1, 'cannot handle more than one accelerator candidates.'
+        acc, acc_count = list(resources.accelerators.items())[0]
 
-            if instance_list is None:
-                return ([], fuzzy_candidate_list)
-            assert len(
-                instance_list
-            ) == 1, f'More than one instance type matched, {instance_list}'
+        # For TPU VMs, the instance type is fixed to 'TPU-VM'. However, we still
+        # need to call the below function to get the fuzzy candidate list.
+        (instance_list, fuzzy_candidate_list
+        ) = service_catalog.get_instance_type_for_accelerator(
+            acc,
+            acc_count,
+            cpus=resources.cpus if not use_tpu_vm else None,
+            use_spot=resources.use_spot,
+            region=resources.region,
+            zone=resources.zone,
+            clouds='gcp')
 
+        if instance_list is None:
+            return ([], fuzzy_candidate_list)
+        assert len(
+            instance_list
+        ) == 1, f'More than one instance type matched, {instance_list}'
+
+        if use_tpu_vm:
+            host_vm_type = 'TPU-VM'
+            # FIXME(woosuk): This leverages the fact that TPU VMs have 96 vCPUs.
+            num_cpus_in_tpu_vm = 96
+            if resources.cpus is not None:
+                if resources.cpus.endswith('+'):
+                    cpus = float(resources.cpus[:-1])
+                    if cpus > num_cpus_in_tpu_vm:
+                        return ([], fuzzy_candidate_list)
+                else:
+                    cpus = float(resources.cpus)
+                    if cpus != num_cpus_in_tpu_vm:
+                        return ([], fuzzy_candidate_list)
+        else:
             host_vm_type = instance_list[0]
-            acc_dict = {acc: acc_count}
-            if resources.accelerator_args is not None:
-                use_tpu_vm = resources.accelerator_args.get('tpu_vm', False)
-                if use_tpu_vm:
-                    host_vm_type = 'TPU-VM'
+
+        acc_dict = {acc: acc_count}
         r = resources.copy(
             cloud=GCP(),
             instance_type=host_vm_type,
             accelerators=acc_dict,
+            cpus=None,
         )
         return ([r], fuzzy_candidate_list)
 
@@ -436,7 +431,8 @@ class GCP(clouds.Cloud):
         return service_catalog.get_vcpus_from_instance_type(instance_type,
                                                             clouds='gcp')
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
@@ -449,7 +445,8 @@ class GCP(clouds.Cloud):
             # `auth.default()` does not guarantee these files exist.
             for file in [
                     '~/.config/gcloud/access_tokens.db',
-                    '~/.config/gcloud/credentials.db'
+                    '~/.config/gcloud/credentials.db',
+                    '~/.config/gcloud/application_default_credentials.json'
             ]:
                 if not os.path.isfile(os.path.expanduser(file)):
                     raise FileNotFoundError(file)
@@ -457,10 +454,10 @@ class GCP(clouds.Cloud):
             _run_output('gcloud --version')
 
             # Check if application default credentials are set.
-            project_id = self.get_project_id()
+            project_id = cls.get_project_id()
 
             # Check if the user is activated.
-            self.get_current_user_identity()
+            cls.get_current_user_identity()
         except (auth.exceptions.DefaultCredentialsError,
                 subprocess.CalledProcessError,
                 exceptions.CloudUserIdentityError, FileNotFoundError,
@@ -556,7 +553,9 @@ class GCP(clouds.Cloud):
         credentials[GCP_CONFIG_SKY_BACKUP_PATH] = GCP_CONFIG_SKY_BACKUP_PATH
         return credentials
 
-    def get_current_user_identity(self) -> Optional[str]:
+    @classmethod
+    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    def get_current_user_identity(cls) -> Optional[str]:
         """Returns the email address + project id of the active user."""
         try:
             account = _run_output('gcloud auth list --filter=status:ACTIVE '
@@ -577,7 +576,7 @@ class GCP(clouds.Cloud):
                     '--format="value(account)"` and ensure it correctly '
                     'returns the current user.')
         try:
-            return f'{account} [project_id={self.get_project_id()}]'
+            return f'{account} [project_id={cls.get_project_id()}]'
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(

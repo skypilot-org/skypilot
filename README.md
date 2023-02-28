@@ -14,7 +14,7 @@
     <img alt="GitHub Release" src="https://img.shields.io/github/release/skypilot-org/skypilot.svg">
   </a>
   
-  <a href="https://join.slack.com/t/skypilot-org/shared_invite/zt-1i4pa7lyc-g6Lo4_rqqCFWOSXdvwTs3Q"> 
+  <a href="http://slack.skypilot.co"> 
     <img alt="Join Slack" src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack">
   </a>
   
@@ -28,7 +28,7 @@
 SkyPilot is a framework for easily and cost effectively running ML workloads[^1] on any cloud. 
 
 SkyPilot abstracts away the cloud infra burden:
-- Launch jobs & clusters on any cloud (AWS, Azure, GCP)
+- Launch jobs & clusters on any cloud (AWS, Azure, GCP, Lambda Cloud)
 - Find scarce resources across zones/regions/clouds
 - Queue jobs & use cloud object stores
 
@@ -42,7 +42,7 @@ SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code change
 
 Install with pip (choose your clouds) or [from source](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html):
 ```
-pip install "skypilot[aws,gcp,azure]"
+pip install "skypilot[aws,gcp,azure,lambda]"
 ```
 
 ## Getting Started
@@ -121,7 +121,7 @@ We are excited to hear your feedback!
 * For issues and feature requests, please [open a GitHub issue](https://github.com/skypilot-org/skypilot/issues/new).
 * For questions, please use [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
 
-For general discussions, join us on the [SkyPilot Slack](https://join.slack.com/t/skypilot-org/shared_invite/zt-1i4pa7lyc-g6Lo4_rqqCFWOSXdvwTs3Q).
+For general discussions, join us on the [SkyPilot Slack](http://slack.skypilot.co).
 
 ## Contributing
 We welcome and value all contributions to the project! Please refer to [CONTRIBUTING](CONTRIBUTING.md) for how to get involved.

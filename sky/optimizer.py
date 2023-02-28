@@ -94,6 +94,18 @@ class Optimizer:
             minimize=OptimizeTarget.COST,
             blocked_resources: Optional[List[resources_lib.Resources]] = None,
             quiet: bool = False):
+        """Find the best execution plan for the given DAG.
+
+        Args:
+            dag: the DAG to optimize.
+            minimize: whether to minimize cost or time.
+            blocked_resources: a list of resources that should not be used.
+            quiet: whether to suppress logging.
+
+        Raises:
+            exceptions.ResourcesUnavailableError: if no resources are available
+                for a task.
+        """
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
         Optimizer._add_dummy_source_sink_nodes(dag)
@@ -854,9 +866,9 @@ def _make_launchables_for_valid_region_zones(
     # TODO(woosuk): A better design is to implement batching at a higher level
     # (e.g., in provisioner or optimizer), not here.
     launchables = []
-    regions = launchable_resources.get_offering_regions_for_launchable()
+    regions = launchable_resources.get_valid_regions_for_launchable()
     for region in regions:
-        if launchable_resources.use_spot:
+        if launchable_resources.use_spot and region.zones is not None:
             # Spot instances.
             # Do not batch the per-zone requests.
             for zone in region.zones:
@@ -960,6 +972,10 @@ def _fill_in_launchable_resources(
                                 f'{colorama.Fore.CYAN}'
                                 f'{sorted(all_fuzzy_candidates)}'
                                 f'{colorama.Style.RESET_ALL}')
+                elif resources.cpus is not None:
+                    logger.info('Try specifying a different CPU count, '
+                                'or add "+" to the end of the CPU count '
+                                'to allow for larger instances.')
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)

@@ -25,6 +25,13 @@ _TPU_REGIONS = [
     'asia-east1',
 ]
 
+# Default instance family for CPU-only VMs.
+# This is the latest general-purpose instance family as of Jan 2023.
+# CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
+# Memory: 4 GiB RAM per 1 vCPU.
+_DEFAULT_INSTANCE_FAMILY = 'n2-standard'
+_DEFAULT_NUM_VCPUS = 8
+
 # This can be switched between n1 and n2.
 # n2 is not allowed for launching GPUs.
 _DEFAULT_HOST_VM_FAMILY = 'n1'
@@ -164,9 +171,19 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
     return common.get_vcpus_from_instance_type_impl(_df, instance_type)
 
 
+def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
+    if cpus is None:
+        cpus = str(_DEFAULT_NUM_VCPUS)
+    instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}-'
+    df = _df[_df['InstanceType'].notna()]
+    df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
+    return common.get_instance_type_for_cpus_impl(df, cpus)
+
+
 def get_instance_type_for_accelerator(
         acc_name: str,
         acc_count: int,
+        cpus: Optional[str] = None,
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
@@ -178,20 +195,48 @@ def get_instance_type_for_accelerator(
     """
     (instance_list,
      fuzzy_candidate_list) = common.get_instance_type_for_accelerator_impl(
-         _df, acc_name, acc_count, use_spot, region, zone)
+         _df, acc_name, acc_count, cpus, use_spot, region, zone)
     if instance_list is None:
         return None, fuzzy_candidate_list
 
     if acc_name in _A100_INSTANCE_TYPE_DICTS:
         # If A100 is used, host VM type must be A2.
         # https://cloud.google.com/compute/docs/gpus#a100-gpus
+
+        # FIXME(woosuk): This uses the knowledge that the A2 machines provide
+        # 12 vCPUs per GPU, except for a2-megagpu-16g which has 16 GPUs.
+        if cpus is not None:
+            num_a2_cpus = min(12 * acc_count, 96)
+            if cpus.endswith('+'):
+                if num_a2_cpus < float(cpus[:-1]):
+                    return None, []
+            else:
+                if num_a2_cpus != float(cpus):
+                    return None, []
         return [_A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]], []
+
     if acc_name not in _NUM_ACC_TO_NUM_CPU:
         acc_name = 'DEFAULT'
 
-    num_cpus = _NUM_ACC_TO_NUM_CPU[acc_name].get(acc_count, None)
-    # The (acc_name, acc_count) should be validated in the caller.
-    assert num_cpus is not None, (acc_name, acc_count)
+    assert _DEFAULT_HOST_VM_FAMILY == 'n1'
+    num_cpus = None
+    if cpus is None:
+        num_cpus = _NUM_ACC_TO_NUM_CPU[acc_name].get(acc_count, None)
+    else:
+        # FIXME(woosuk): This uses the knowledge that the N1-highmem machines
+        # have 2, 4, 8, 16, 32, 64, or 96 vCPUs.
+        for num_n1_cpus in [2, 4, 8, 16, 32, 64, 96]:
+            if cpus.endswith('+'):
+                if num_n1_cpus >= float(cpus[:-1]):
+                    num_cpus = num_n1_cpus
+                    break
+            else:
+                if num_n1_cpus == float(cpus):
+                    num_cpus = num_n1_cpus
+                    break
+    if num_cpus is None:
+        return None, []
+
     mem_type = 'highmem'
     # patches for the number of cores per GPU, as some of the combinations
     # are not supported by GCP.
@@ -403,7 +448,7 @@ def check_accelerator_attachable_to_host(instance_type: str,
     acc_name, acc_count = acc[0]
 
     if acc_name.startswith('tpu-'):
-        # TODO(woosuk): Check max vcpus and memory for each TPU type.
+        # TODO(woosuk): Check max vCPUs and memory for each TPU type.
         assert instance_type == 'TPU-VM' or instance_type.startswith('n1-')
         return
 

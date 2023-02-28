@@ -1,5 +1,26 @@
 # Smoke tests for SkyPilot
 # Default options are set in pyproject.toml
+# Example usage:
+# Run all tests except for AWS and Lambda Cloud
+# > pytest tests/test_smoke.py
+#
+# Terminate failed clusetrs after test finishes
+# > pytest tests/test_smoke.py --terminate-on-failure
+#
+# Re-run last failed tests
+# > pytest --lf
+#
+# Run one of the smoke tests
+# > pytest tests/test_smoke.py::test_minimal
+#
+# Only run managed spot tests
+# > pytest tests/test_smoke.py --managed-spot
+#
+# Only run test for AWS + generic tests
+# > pytest tests/test_smoke.py --aws
+#
+# Change cloud for generic tests to aws
+# > pytest tests/test_smoke.py --generic-cloud aws
 
 import hashlib
 import inspect
@@ -35,9 +56,12 @@ _smoke_test_hash = hashlib.md5(
 # id.
 test_id = str(uuid.uuid4())[-2:]
 
+LAMBDA_TYPE = '--cloud lambda --gpus A100'
+
 storage_setup_commands = [
     'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
-    'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/foo',
+    'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/tmp\ file2',
+    'touch ~/tmp-workdir/foo',
     'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
     'touch ~/.ssh/id_rsa.pub'
 ]
@@ -131,7 +155,8 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
            f'\nLog: less {log_file.name}\n')
     test.echo(msg)
     log_file.write(msg)
-    if proc.returncode == 0 and test.teardown is not None:
+    if (proc.returncode == 0 or
+            pytest.terminate_on_failure) and test.teardown is not None:
         subprocess_utils.run(
             test.teardown,
             stdout=log_file,
@@ -484,6 +509,7 @@ def test_image_no_conda():
 
 
 # ------------ Test stale job ------------
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 def test_stale_job(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -561,6 +587,7 @@ def test_gcp_stale_job_manual_restart():
 
 
 # ---------- Check Sky's environment variables; workdir. ----------
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_env_check(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -575,6 +602,7 @@ def test_env_check(generic_cloud: str):
 
 
 # ---------- file_mounts ----------
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_file_mounts(generic_cloud: str):
     name = _get_cluster_name()
     test_commands = [
@@ -584,6 +612,24 @@ def test_file_mounts(generic_cloud: str):
     ]
     test = Test(
         'using_file_mounts',
+        test_commands,
+        f'sky down -y {name}',
+        timeout=20 * 60,  # 20 mins
+    )
+    run_one_test(test)
+
+
+# TODO(ewzeng): merge this with 'test_file_mounts' when multi-node is supported.
+@pytest.mark.lambda_cloud
+def test_lambda_file_mounts():
+    name = _get_cluster_name()
+    test_commands = [
+        *storage_setup_commands,
+        f'sky launch -y -c {name} {LAMBDA_TYPE} --num-nodes 1 examples/using_file_mounts.yaml',
+        f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+    ]
+    test = Test(
+        'lambda_using_file_mounts',
         test_commands,
         f'sky down -y {name}',
         timeout=20 * 60,  # 20 mins
@@ -647,6 +693,7 @@ def test_gcp_storage_mounts():
 
 
 # ---------- CLI logs ----------
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_cli_logs(generic_cloud: str):
     name = _get_cluster_name()
     timestamp = time.time()
@@ -668,7 +715,31 @@ def test_cli_logs(generic_cloud: str):
     run_one_test(test)
 
 
+# TODO(ewzeng): merge this with 'test_cli_logs' when multi-node is supported.
+@pytest.mark.lambda_cloud
+def test_lambda_logs():
+    name = _get_cluster_name()
+    timestamp = time.time()
+    test = Test(
+        'lambda_cli_logs',
+        [
+            f'sky launch -y -c {name} {LAMBDA_TYPE} "echo {timestamp} 1"',
+            f'sky exec {name} "echo {timestamp} 2"',
+            f'sky exec {name} "echo {timestamp} 3"',
+            f'sky exec {name} "echo {timestamp} 4"',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} 3 4 --sync-down',
+            f'sky logs {name} * --sync-down',
+            f'sky logs {name} 1 | grep "{timestamp} 1"',
+            f'sky logs {name} | grep "{timestamp} 4"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Job Queue. ----------
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
 def test_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -695,6 +766,30 @@ def test_job_queue(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.lambda_cloud
+def test_lambda_job_queue():
+    name = _get_cluster_name()
+    test = Test(
+        'lambda_job_queue',
+        [
+            f'sky launch -y -c {name} {LAMBDA_TYPE} examples/job_queue/cluster.yaml',
+            f'sky exec {name} -n {name}-1 --gpus A100:0.5 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-2 --gpus A100:0.5 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-3 --gpus A100:0.5 -d examples/job_queue/job.yaml',
+            f'sky queue {name} | grep {name}-1 | grep RUNNING',
+            f'sky queue {name} | grep {name}-2 | grep RUNNING',
+            f'sky queue {name} | grep {name}-3 | grep PENDING',
+            f'sky cancel -y {name} 2',
+            'sleep 5',
+            f'sky queue {name} | grep {name}-3 | grep RUNNING',
+            f'sky cancel -y {name} 3',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_job_queue_multinode(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -732,6 +827,7 @@ def test_job_queue_multinode(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 def test_large_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -756,6 +852,7 @@ def test_large_job_queue(generic_cloud: str):
 
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_multi_echo(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -776,6 +873,7 @@ def test_multi_echo(generic_cloud: str):
 
 
 # ---------- Task: 1 node training. ----------
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 instances
 def test_huggingface(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -784,6 +882,22 @@ def test_huggingface(generic_cloud: str):
             f'sky launch -y -c {name} --cloud {generic_cloud} examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky exec {name} examples/huggingface_glue_imdb_app.yaml',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.lambda_cloud
+def test_lambda_huggingface(generic_cloud: str):
+    name = _get_cluster_name()
+    test = Test(
+        'lambda_huggingface_glue_imdb_app',
+        [
+            f'sky launch -y -c {name} {LAMBDA_TYPE} examples/huggingface_glue_imdb_app.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} {LAMBDA_TYPE} examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -852,6 +966,7 @@ def test_tpu_vm_pod():
 
 
 # ---------- Simple apps. ----------
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_multi_hostname(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -868,6 +983,7 @@ def test_multi_hostname(generic_cloud: str):
 
 
 # ---------- Task: n=2 nodes with setups. ----------
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_distributed_tf(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -931,6 +1047,7 @@ def test_azure_start_stop():
 
 
 # ---------- Testing Autostopping ----------
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 def test_autostop(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -947,7 +1064,7 @@ def test_autostop(generic_cloud: str):
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
-            'sleep 150',
+            'sleep 250',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
 
             # Ensure the cluster is UP and the autostop setting is reset ('-').
@@ -965,7 +1082,7 @@ def test_autostop(generic_cloud: str):
             f'sky autostop -y {name} -i 1',  # Should restart the timer.
             'sleep 45',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
-            'sleep 150',
+            'sleep 250',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
 
             # Test restarting the idleness timer via exec:
@@ -976,7 +1093,7 @@ def test_autostop(generic_cloud: str):
             f'sky exec {name} echo hi',  # Should restart the timer.
             'sleep 45',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
-            'sleep 150',
+            'sleep 250',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
         ],
         f'sky down -y {name}',
@@ -986,6 +1103,7 @@ def test_autostop(generic_cloud: str):
 
 
 # ---------- Testing Autodowning ----------
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_autodown(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1016,6 +1134,41 @@ def test_autodown(generic_cloud: str):
         ],
         f'sky down -y {name}',
         timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.lambda_cloud
+def test_lambda_autodown():
+    name = _get_cluster_name()
+    test = Test(
+        'lambda_autodown',
+        [
+            f'sky launch -y -d -c {name} {LAMBDA_TYPE} tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} --down -i 1',
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "1m (down)"',
+            # Ensure the cluster is not terminated early.
+            'sleep 45',
+            f'sky status --refresh | grep {name} | grep UP',
+            # Ensure the cluster is terminated.
+            'sleep 200',
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} {LAMBDA_TYPE} --down tests/test_yamls/minimal.yaml',
+            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
+            f'sky exec {name} {LAMBDA_TYPE} tests/test_yamls/minimal.yaml',
+            f'sky status | grep {name} | grep "1m (down)"',
+            'sleep 200',
+            # Ensure the cluster is terminated.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} {LAMBDA_TYPE} --down tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} --cancel',
+            'sleep 200',
+            # Ensure the cluster is still UP.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && echo "$s" | grep {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=25 * 60,
     )
     run_one_test(test)
 
@@ -1063,7 +1216,7 @@ def test_cancel_azure():
     run_one_test(test)
 
 
-# ---------- Testing `sky cancel` ----------
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_cancel_pytorch(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1087,6 +1240,7 @@ def test_cancel_pytorch(generic_cloud: str):
 
 
 # ---------- Testing use-spot option ----------
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 def test_use_spot(generic_cloud: str):
     """Test use-spot and sky exec."""
     name = _get_cluster_name()
@@ -1104,6 +1258,7 @@ def test_use_spot(generic_cloud: str):
 
 
 # ---------- Testing managed spot ----------
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot(generic_cloud: str):
     """Test the spot yaml."""
@@ -1129,6 +1284,7 @@ def test_spot(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_failed_setup(generic_cloud: str):
     """Test managed spot job with failed setup."""
@@ -1212,6 +1368,7 @@ def test_spot_recovery_gcp():
     run_one_test(test)
 
 
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_recovery_default_resources(generic_cloud: str):
     """Test managed spot recovery for default resources."""
@@ -1239,7 +1396,7 @@ def test_spot_recovery_multi_node_aws():
         'spot_recovery_multi_node_aws',
         [
             f'sky spot launch --cloud aws --region {region} -n {name} --num-nodes 2 "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
-            'sleep 400',
+            'sleep 450',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the worker manually.
@@ -1251,7 +1408,7 @@ def test_spot_recovery_multi_node_aws():
              '--output text)'),
             'sleep 50',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
-            'sleep 500',
+            'sleep 560',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
@@ -1413,6 +1570,7 @@ def test_spot_cancellation_gcp():
 
 
 # ---------- Testing storage for managed spot ----------
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_storage(generic_cloud: str):
     """Test storage with managed spot"""
@@ -1464,6 +1622,7 @@ def test_spot_tpu():
 
 
 # ---------- Testing env for spot ----------
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_inline_env(generic_cloud: str):
     """Test spot env"""

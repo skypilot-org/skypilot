@@ -11,10 +11,11 @@ import json
 import os
 import pathlib
 import pickle
+import sqlite3
 import time
-import uuid
 import typing
 from typing import Any, Dict, List, Tuple, Optional, Set
+import uuid
 
 import colorama
 
@@ -39,7 +40,14 @@ def create_table(cursor, conn):
     # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
     #  This may cause the database locked problem from WSL issue #1441.
     if not common_utils.is_wsl():
-        cursor.execute('PRAGMA journal_mode=WAL')
+        try:
+            cursor.execute('PRAGMA journal_mode=WAL')
+        except sqlite3.OperationalError as e:
+            if 'database is locked' not in str(e):
+                raise
+            # If the database is locked, it is OK to continue, as the WAL mode
+            # is not critical and is likely to be enabled by other processes.
+
     # Table for Clusters
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS clusters (
@@ -101,6 +109,7 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'cluster_hash',
                                  'TEXT DEFAULT null')
+
     conn.commit()
 
 
@@ -154,7 +163,7 @@ class StorageStatus(enum.Enum):
 
 
 def add_or_update_cluster(cluster_name: str,
-                          cluster_handle: 'backends.Backend.ResourceHandle',
+                          cluster_handle: 'backends.ResourceHandle',
                           requested_resources: Optional[Set[Any]],
                           ready: bool,
                           is_launch: bool = True):
@@ -162,7 +171,7 @@ def add_or_update_cluster(cluster_name: str,
 
     Args:
         cluster_name: Name of the cluster.
-        cluster_handle: Backend.ResourceHandle of the cluster.
+        cluster_handle: backends.ResourceHandle of the cluster.
         requested_resources: Resources requested for cluster.
         ready: Whether the cluster is ready to use. If False, the cluster will
             be marked as INIT, otherwise it will be marked as UP.
@@ -338,7 +347,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> float:
 
 
 def get_handle_from_cluster_name(
-        cluster_name: str) -> Optional['backends.Backend.ResourceHandle']:
+        cluster_name: str) -> Optional['backends.ResourceHandle']:
     assert cluster_name is not None, 'cluster_name cannot be None'
     rows = _DB.cursor.execute('SELECT handle FROM clusters WHERE name=(?)',
                               (cluster_name,))
@@ -425,10 +434,13 @@ def _get_cluster_launch_time(cluster_hash: str) -> Optional[Dict[str, Any]]:
     return usage_intervals[0][0]
 
 
-def _get_cluster_duration(cluster_hash: str) -> Optional[Dict[str, Any]]:
+def _get_cluster_duration(cluster_hash: str) -> int:
+    total_duration = 0
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
-    total_duration = 0
+    if usage_intervals is None:
+        return total_duration
+
     for i, (start_time, end_time) in enumerate(usage_intervals):
         # duration from latest start time to time of query
         if end_time is None:
@@ -544,15 +556,31 @@ def get_clusters() -> List[Dict[str, Any]]:
 
 
 def get_clusters_from_history() -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute('SELECT * from cluster_history').fetchall()
+    rows = _DB.cursor.execute(
+        'SELECT ch.cluster_hash, ch.name, ch.num_nodes, '
+        'ch.launched_resources, ch.usage_intervals, clusters.status  '
+        'FROM cluster_history ch '
+        'LEFT OUTER JOIN clusters '
+        'ON ch.cluster_hash=clusters.cluster_hash ').fetchall()
 
+    # '(cluster_hash, name, num_nodes, requested_resources, '
+    #         'launched_resources, usage_intervals) '
     records = []
 
     for row in rows:
         # TODO: use namedtuple instead of dict
 
-        (cluster_hash, name, num_nodes, _, launched_resources,
-         usage_intervals) = row[:6]
+        (
+            cluster_hash,
+            name,
+            num_nodes,
+            launched_resources,
+            usage_intervals,
+            status,
+        ) = row[:6]
+
+        if status is not None:
+            status = ClusterStatus[status]
 
         record = {
             'name': name,
@@ -562,6 +590,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             'resources': pickle.loads(launched_resources),
             'cluster_hash': cluster_hash,
             'usage_intervals': pickle.loads(usage_intervals),
+            'status': status,
         }
 
         records.append(record)

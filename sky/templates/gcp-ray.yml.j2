@@ -20,6 +20,12 @@ provider:
 {%- if tpu_vm %}
   _has_tpus: True
 {%- endif %}
+  # Disable launch config check for worker nodes as it can cause resource
+  # leakage.
+  # Reference: https://github.com/ray-project/ray/blob/840215bc09e942b50cad0ab2db96a8fdc79217c1/python/ray/autoscaler/_private/autoscaler.py#L1101
+  # The upper-level SkyPilot code has make sure there will not be resource
+  # leakage.
+  disable_launch_config_check: true
 
 auth:
   ssh_user: gcpuser

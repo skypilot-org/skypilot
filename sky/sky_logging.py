@@ -27,15 +27,16 @@ class NewLineFormatter(logging.Formatter):
 
 def init_logger(name: str):
     h = logging.StreamHandler(sys.stdout)
-    h.flush = sys.stdout.flush
+    h.flush = sys.stdout.flush  # type: ignore
 
     fmt = NewLineFormatter(FORMAT, datefmt=DATE_FORMAT)
     h.setFormatter(fmt)
 
     logger = logging.getLogger(name)
-    logger.addHandler(h)
     if env_options.Options.SHOW_DEBUG_INFO.get():
-        logger.setLevel(logging.DEBUG)
+        h.setLevel(logging.DEBUG)
     else:
-        logger.setLevel(logging.INFO)
+        h.setLevel(logging.INFO)
+    logger.addHandler(h)
+    logger.setLevel(logging.DEBUG)
     return logger

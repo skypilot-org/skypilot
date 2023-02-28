@@ -5,7 +5,7 @@ import json
 import pathlib
 import shlex
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import colorama
 import filelock
@@ -95,7 +95,7 @@ def update_spot_job_status(job_id: Optional[int] = None):
         job_ids = [job_id]
     for job_id_ in job_ids:
         controller_status = job_lib.get_status(job_id_)
-        if controller_status.is_terminal():
+        if controller_status is None or controller_status.is_terminal():
             logger.error(f'Controller for job {job_id_} has exited abnormally. '
                          'Setting the job status to FAILED_CONTROLLER.')
             task_name = spot_state.get_task_name_by_job_id(job_id_)
@@ -119,8 +119,12 @@ def update_spot_job_status(job_id: Optional[int] = None):
             # The controller job for this spot job is not running: it must
             # have exited abnormally, and we should set the job status to
             # FAILED_CONTROLLER.
-            spot_state.set_failed(job_id_,
-                                  spot_state.SpotStatus.FAILED_CONTROLLER)
+            spot_state.set_failed(
+                job_id_,
+                spot_state.SpotStatus.FAILED_CONTROLLER,
+                failure_reason=
+                'Controller process has exited abnormally. For more details,'
+                f' run: sky spot logs --controller {job_id_}')
 
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
@@ -233,20 +237,21 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='')
         status_display.update(msg)
         prev_msg = msg
-        job_status = spot_state.get_status(job_id)
-        while job_status is None:
+        spot_job_status = spot_state.get_status(job_id)
+        while spot_job_status is None:
             time.sleep(1)
-            job_status = spot_state.get_status(job_id)
+            spot_job_status = spot_state.get_status(job_id)
 
-        if job_status.is_terminal():
+        if spot_job_status.is_terminal():
             job_msg = ''
-            if job_status.is_failed():
-                job_msg = ('\nFor detailed error message, please check: '
-                           f'{colorama.Style.BRIGHT}sky logs '
-                           f'{SPOT_CONTROLLER_NAME} {job_id}'
-                           f'{colorama.Style.RESET_ALL}')
-            return (f'Job {job_id} is already in terminal state '
-                    f'{job_status.value}. Logs will not be shown.{job_msg}')
+            if spot_job_status.is_failed():
+                job_msg = (
+                    f'\nFailure reason: {spot_state.get_failure_reason(job_id)}'
+                )
+            return (f'{colorama.Fore.YELLOW}'
+                    f'Job {job_id} is already in terminal state '
+                    f'{spot_job_status.value}. Logs will not be shown.'
+                    f'{colorama.Style.RESET_ALL}{job_msg}')
         task_name = spot_state.get_task_name_by_job_id(job_id)
         cluster_name = generate_spot_cluster_name(task_name, job_id)
         backend = backends.CloudVmRayBackend()
@@ -395,17 +400,31 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
-def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
-    """Show all spot jobs."""
+def format_job_table(jobs: List[Dict[str, Any]],
+                     show_all: bool,
+                     max_jobs: Optional[int] = None) -> str:
+    """Returns spot jobs as a formatted string.
+
+    Args:
+        jobs: A list of spot jobs.
+        show_all: Whether to show all columns.
+        max_jobs: The maximum number of jobs to show in the table.
+    """
     columns = [
         'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'JOB DURATION',
         '#RECOVERIES', 'STATUS'
     ]
     if show_all:
-        columns += ['STARTED', 'CLUSTER', 'REGION']
+        columns += ['STARTED', 'CLUSTER', 'REGION', 'FAILURE']
     job_table = log_utils.create_table(columns)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
+    for job in jobs:
+        if not job['status'].is_terminal():
+            status_counts[job['status'].value] += 1
+
+    if max_jobs is not None:
+        jobs = jobs[:max_jobs]
     for job in jobs:
         # The job['job_duration'] is already calculated in
         # dump_spot_job_queue().
@@ -427,23 +446,28 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
             job['recovery_count'],
             job['status'].colored_str(),
         ]
-        if not job['status'].is_terminal():
-            status_counts[job['status'].value] += 1
         if show_all:
-            # STARTED
-            started = log_utils.readable_time_duration(job['start_at'])
-            values.append(started)
             values.extend([
+                # STARTED
+                log_utils.readable_time_duration(job['start_at']),
                 job['cluster_resources'],
                 job['region'],
+                job['failure_reason']
+                if job['failure_reason'] is not None else '-',
             ])
         job_table.add_row(values)
+
     status_str = ', '.join([
         f'{count} {status}' for status, count in sorted(status_counts.items())
     ])
     if status_str:
-        status_str = f'In progress jobs: {status_str}\n\n'
-    return status_str + str(job_table)
+        status_str = f'In progress jobs: {status_str}'
+    else:
+        status_str = 'No in progress jobs.'
+    output = status_str
+    if str(job_table):
+        output += f'\n{job_table}'
+    return output
 
 
 class SpotCodeGen:
@@ -467,7 +491,7 @@ class SpotCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs_by_id(cls, job_ids: Optional[List[int]]) -> str:
+    def cancel_jobs_by_id(cls, job_ids: Optional[Sequence[int]]) -> str:
         code = [
             f'msg = spot_utils.cancel_jobs_by_id({job_ids})',
             'print(msg, end="", flush=True)',
@@ -517,8 +541,15 @@ def dump_job_table_cache(job_table: str):
         json.dump((time.time(), job_table), f)
 
 
-def load_job_table_cache() -> Optional[Tuple[str, str]]:
-    """Load job table cache from file."""
+def load_job_table_cache() -> Optional[Tuple[float, str]]:
+    """Load job table cache from file.
+
+    Returns:
+        A tuple of (timestamp, job_table), where the timestamp is
+        the time when the job table is dumped and the job_table is
+        the dumped job table in string.
+        None if the cache file does not exist.
+    """
     cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
     if not cache_file.exists():
         return None
@@ -529,7 +560,7 @@ def load_job_table_cache() -> Optional[Tuple[str, str]]:
 def is_spot_controller_up(
     stopped_message: str,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
-           Optional[backends.Backend.ResourceHandle]]:
+           Optional['backends.CloudVmRayResourceHandle']]:
     """Check if the spot controller is up.
 
     It can be used to check the actual controller status (since the autostop is
@@ -550,8 +581,13 @@ def is_spot_controller_up(
           identity.
     """
     try:
+        # Set force_refresh=False to make sure the refresh only happens when the
+        # controller is INIT/UP. This optimization avoids unnecessary costly
+        # refresh when the controller is already stopped. This optimization is
+        # based on the assumption that the user will not start the controller
+        # manually from the cloud console.
         controller_status, handle = backend_utils.refresh_cluster_status_handle(
-            SPOT_CONTROLLER_NAME, force_refresh=True)
+            SPOT_CONTROLLER_NAME, force_refresh=False)
     except exceptions.ClusterStatusFetchingError as e:
         # We do not catch the exceptions related to the cluster owner identity
         # mismatch, please refer to the comment in

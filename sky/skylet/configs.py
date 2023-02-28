@@ -4,7 +4,7 @@ import functools
 import os
 import pathlib
 import sqlite3
-from typing import Optional
+from typing import Callable, Optional, Union
 
 _DB_PATH = os.path.expanduser('~/.sky/skylet_config.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
@@ -25,7 +25,7 @@ def _safe_cursor():
         conn.close()
 
 
-def ensure_table(func: callable):
+def ensure_table(func: Callable):
     """Ensure the table exists before calling the function.
 
     Since this module will be imported whenever `sky` is imported (due to
@@ -55,15 +55,16 @@ def ensure_table(func: callable):
 
 
 @ensure_table
-def get_config(key: str) -> Optional[str]:
+def get_config(key: str) -> Optional[bytes]:
     with _safe_cursor() as cursor:
         rows = cursor.execute('SELECT value FROM config WHERE key = ?', (key,))
         for (value,) in rows:
             return value
+        return None
 
 
 @ensure_table
-def set_config(key: str, value: str) -> None:
+def set_config(key: str, value: Union[bytes, str]) -> None:
     with _safe_cursor() as cursor:
         cursor.execute(
             """\
