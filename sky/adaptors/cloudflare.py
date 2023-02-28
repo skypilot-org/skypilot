@@ -48,7 +48,7 @@ def session():
 
 @functools.lru_cache()
 @import_package
-def resource(resource_name: str, **kwargs):
+def resource(resource_name: str):
     """Create an CLOUDFLARE resource.
 
     Args:

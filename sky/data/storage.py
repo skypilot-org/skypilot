@@ -466,8 +466,8 @@ class Storage(object):
 
         Args:
           source: str; File path where the data is initially stored. Can be a
-            local path or a cloud URI (s3://, gs://, r2:// etc.). Local paths do not
-            need to be absolute.
+            local path or a cloud URI (s3://, gs://, r2:// etc.). 
+            Local paths do not need to be absolute.
           mode: StorageMode; StorageMode of the storage object
 
         Returns:
@@ -553,7 +553,8 @@ class Storage(object):
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
-                        f'Supported paths: local, s3://, gs://, r2://. Got: {source}')
+                        f'Supported paths: local, s3://, gs://, '
+                        f'r2://. Got: {source}')
         return source, is_local_source
 
     def _validate_storage_spec(self) -> None:
@@ -704,7 +705,7 @@ class Storage(object):
             # We delete a store from the cloud if it's sky managed. Else just
             # remove handle and return
             if is_sky_managed:
-                self.handle.remove_store(store)  
+                self.handle.remove_store(store)
                 store.delete()
                 # Check remaining stores - if none is sky managed, remove
                 # the storage from global_user_state.
@@ -896,7 +897,7 @@ class S3Store(AbstractStore):
                 elif self.source.startswith('gs://'):
                     self._transfer_to_s3()
                 elif self.source.startswith('r2://'):
-                    self._transfer_to_s3()                
+                    self._transfer_to_s3()
                 else:
                     self.batch_aws_rsync([self.source])
         except exceptions.StorageUploadError:
@@ -1587,7 +1588,7 @@ class R2Store(AbstractStore):
         if self.source.startswith('gs://'):
             data_transfer.gcs_to_r2(self.name, self.name)
         elif self.source.startswith('s3://'):
-            data_transfer.s3_to_r2(self.name, self.name)       
+            data_transfer.s3_to_r2(self.name, self.name)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the R2 bucket.

@@ -24,7 +24,7 @@ import colorama
 
 from sky import clouds
 from sky import sky_logging
-from sky.adaptors import aws, gcp, cloudflare
+from sky.adaptors import aws, gcp
 from sky.backends import backend_utils
 from sky.utils import ux_utils
 
@@ -127,8 +127,9 @@ def s3_to_r2(s3_bucket_name: str, r2_bucket_name: str) -> None:
       s3_bucket_name: str; Name of the Amazon S3 Bucket
       r2_bucket_name: str; Name of the Cloudflare R2 Bucket
     """
-    raise NotImplementedError("Moving data directly from clouds to R2 is currently not "
-                              "supported. Please specify a local source for the storage object.")
+    raise NotImplementedError('Moving data directly from clouds to R2 is '
+                              'currently not supported. Please specify '
+                              'a local source for the storage object.')
 
 def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
     """Creates a one-time transfer from Google Cloud Storage to Amazon S3.
@@ -150,8 +151,9 @@ def gcs_to_r2(gs_bucket_name: str, r2_bucket_name: str) -> None:
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
       r2_bucket_name: str; Name of the Cloudflare R2 Bucket
     """
-    raise NotImplementedError("Moving data directly from clouds to R2 is currently not "
-                              "supported. Please specify a local source for the storage object.")
+    raise NotImplementedError('Moving data directly from clouds to R2 is '
+                              'currently not supported. Please specify '
+                              'a local source for the storage object.')
 
 
 
@@ -165,8 +167,9 @@ def r2_to_gcs(r2_bucket_name: str, gs_bucket_name: str) -> None:
       r2_bucket_name: str; Name of the Cloudflare R2 Bucket
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
     """
-    raise NotImplementedError("Moving data directly from R2 to other clouds is currently not "
-                              "supported. Please specify a local source for the storage object.")
+    raise NotImplementedError('Moving data directly from R2 to clouds is '
+                              'currently not supported. Please specify '
+                              'a local source for the storage object.')
 
 
 def r2_to_s3(r2_bucket_name: str, s3_bucket_name: str) -> None:
@@ -179,8 +182,9 @@ def r2_to_s3(r2_bucket_name: str, s3_bucket_name: str) -> None:
       r2_bucket_name: str; Name of the Cloudflare R2 Bucket\
       s3_bucket_name: str; Name of the Amazon S3 Bucket
     """
-    raise NotImplementedError("Moving data directly from R2 to other clouds is currently not "
-                              "supported. Please specify a local source for the storage object.")
+    raise NotImplementedError('Moving data directly from R2 to clouds is '
+                              'currently not supported. Please specify '
+                              'a local source for the storage object.')
 
 
 
