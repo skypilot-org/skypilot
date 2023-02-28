@@ -36,8 +36,6 @@ class Lambda(clouds.Cloud):
         clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the Lambda Cloud implementation yet.',
     }
 
-    _regions: List[clouds.Region] = []
-
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
@@ -48,28 +46,7 @@ class Lambda(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions(cls) -> List[clouds.Region]:
-        if not cls._regions:
-            cls._regions = [
-                # Popular US regions
-                clouds.Region('us-east-1'),
-                clouds.Region('us-west-2'),
-                clouds.Region('us-west-1'),
-                clouds.Region('us-south-1'),
-
-                # Everyone else
-                clouds.Region('asia-northeast-1'),
-                clouds.Region('asia-northeast-2'),
-                clouds.Region('asia-south-1'),
-                clouds.Region('australia-southeast-1'),
-                clouds.Region('europe-central-1'),
-                clouds.Region('europe-south-1'),
-                clouds.Region('me-west-1'),
-            ]
-        return cls._regions
-
-    @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
+    def regions_with_offering(cls, instance_type: str,
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
@@ -77,12 +54,8 @@ class Lambda(clouds.Cloud):
         del accelerators, zone  # unused
         if use_spot:
             return []
-        if instance_type is None:
-            # Fall back to default regions
-            regions = cls.regions()
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'lambda')
+        regions = service_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'lambda')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -94,7 +67,7 @@ class Lambda(clouds.Cloud):
         *,
         region: str,
         num_nodes: int,
-        instance_type: Optional[str] = None,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[None]:
@@ -165,12 +138,9 @@ class Lambda(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            region: Optional['clouds.Region'],
+            self, resources: 'resources_lib.Resources', region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del zones
-        if region is None:
-            region = self._get_default_region()
+        assert zones is None, 'Lambda does not support zones.'
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -274,3 +244,7 @@ class Lambda(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'lambda')
+
+    @classmethod
+    def regions(cls) -> List['clouds.Region']:
+        return service_catalog.regions(clouds='lambda')

@@ -128,6 +128,13 @@ def accelerator_in_region_or_zone(
                                acc_name, acc_count, region, zone)
 
 
+def regions(clouds: CloudFilter = None) -> 'List[cloud.Region]':
+    """Returns the list of regions in a Cloud's catalog.
+    Each Region object contains a list of Zones, if available.
+    """
+    return _map_clouds_catalog(clouds, 'regions')
+
+
 def get_region_zones_for_instance_type(
         instance_type: str,
         use_spot: bool,
