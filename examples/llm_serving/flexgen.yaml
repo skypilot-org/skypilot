@@ -1,32 +1,33 @@
 # Runs FlexGen on the cloud using SkyPilot and provides a web interface to chat with the model.
 #
 # Usage:
-#   sky launch -c flexgen flexgen.yaml
-#   ssh -L 7681:localhost:7681 flexgen
+#   sky launch -c llm flexgen.yaml
+#   ssh -L 7681:localhost:7681 llm
 #   # Open http://localhost:7681 in your browser to chat
-#   sky down flexgen
+#   sky down llm
 
 resources:
   accelerators: T4:1
-  cpus: 32 # Needs RAM else crashes
+  cpus: 32+ # Needs RAM else crashes
 
 setup: |
   # Needs pytorch version pinning (at least on GCP)
   conda install -y pytorch==1.12.1 torchvision==0.13.1 torchaudio==0.12.1 cudatoolkit=11.3 -c pytorch
   
-  # Install ttyd
+  # Install ttyd for web serving
   wget https://github.com/tsl0922/ttyd/releases/download/1.7.2/ttyd.x86_64
   sudo mv ttyd.x86_64 /usr/local/bin/ttyd
   sudo chmod +x /usr/local/bin/ttyd
   
   # Install flexgen
-  git clone https://github.com/FMInference/FlexGen.git
+  git clone https://github.com/romilbhardwaj/FlexGen.git
   cd FlexGen
+  git checkout b697ab3
   pip3 install -e .
 
 run: |
   ttyd /bin/bash -c "python3 ~/sky_workdir/FlexGen/apps/chatbot.py --model facebook/opt-6.7b"
 
 # You can also try:
-# python3 -m flexgen.flex_opt --model facebook/opt-30b --percent 0 100 100 0 100 0
-# python3 -m flexgen.flex_opt --model facebook/opt-175b --percent 0 0 100 0 100 0 --offload-dir YOUR_SSD_FOLDER
+# python3 -m ~/sky_workdir/FlexGen/apps/chatbot.py --model facebook/opt-30b --percent 0 100 100 0 100 0
+# python3 -m ~/sky_workdir/FlexGen/apps/chatbot.py --model facebook/opt-175b --percent 0 0 100 0 100 0 --offload-dir YOUR_SSD_FOLDER
