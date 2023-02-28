@@ -2606,6 +2606,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       job_submit_cmd,
                                                       stream_logs=False,
                                                       require_outputs=True)
+
+        if 'has no attribute' in stdout:
+            logger.warn(
+                f'{colorama.Fore.RED}SkyPilot must be updated on remote,' 
+                f'use `sky launch` instead{colorama.Style.RESET_ALL}'
+            )
+            return
+
         subprocess_utils.handle_returncode(returncode,
                                            job_submit_cmd,
                                            f'Failed to submit job {job_id}.',
