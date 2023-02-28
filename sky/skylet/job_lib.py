@@ -688,22 +688,24 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
     # ray cluster (tracked in #1262).
     for job in job_records:
         job_id = make_ray_job_id(job['job_id'], job_owner)
-        try:
-            # TODO(mraheja): remove pylint disabling when filelock
-            # version updated
-            # pylint: disable=abstract-class-instantiated
-            with filelock.FileLock(_get_lock_path(job_id)):
+        # Job is locked to ensure that pending queue does not start it while
+        # it is being cancelled
+        with filelock.FileLock(_get_lock_path(job_id)):
+            try:
+                # TODO(mraheja): remove pylint disabling when filelock
+                # version updated
+                # pylint: disable=abstract-class-instantiated
                 job_client.stop_job(job_id)
-        except RuntimeError as e:
-            # If the job does not exist or if the request to the
-            # job server fails.
-            logger.warning(str(e))
-            continue
+            except RuntimeError as e:
+                # If the job does not exist or if the request to the
+                # job server fails.
+                logger.warning(str(e))
+                continue
 
-        if job['status'] in [
-                JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING
-        ]:
-            set_status(job['job_id'], JobStatus.CANCELLED)
+            if job['status'] in [
+                    JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING
+            ]:
+                set_status(job['job_id'], JobStatus.CANCELLED)
 
 
 def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
