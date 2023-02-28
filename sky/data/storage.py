@@ -466,7 +466,7 @@ class Storage(object):
 
         Args:
           source: str; File path where the data is initially stored. Can be a
-            local path or a cloud URI (s3://, gs://, r2:// etc.). 
+            local path or a cloud URI (s3://, gs://, r2:// etc.).
             Local paths do not need to be absolute.
           mode: StorageMode; StorageMode of the storage object
 
