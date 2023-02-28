@@ -9,7 +9,6 @@ from ray.autoscaler.tags import (
     TAG_RAY_CLUSTER_NAME,
     TAG_RAY_USER_NODE_TYPE,
     TAG_RAY_NODE_NAME,
-    TAG_RAY_LAUNCH_CONFIG,
     TAG_RAY_NODE_STATUS,
     STATUS_UP_TO_DATE,
     TAG_RAY_NODE_KIND,
@@ -21,9 +20,9 @@ from sky import authentication as auth
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 
-TAG_PATH_PREFIX = '~/.sky/generated/lambda_cloud/metadata'
-REMOTE_RAY_SSH_KEY = '~/ray_bootstrap_key.pem'
-GET_INTERNAL_IP_CMD = 'ip -4 -br addr show | grep -Eo "10\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"'
+_TAG_PATH_PREFIX = '~/.sky/generated/lambda_cloud/metadata'
+_REMOTE_RAY_SSH_KEY = '~/ray_bootstrap_key.pem'
+_GET_INTERNAL_IP_CMD = 'ip -4 -br addr show | grep -Eo "10\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"'
 
 logger = logging.getLogger(__name__)
 
@@ -52,16 +51,16 @@ class LambdaNodeProvider(NodeProvider):
         self.lock = RLock()
         self.lambda_client = lambda_utils.LambdaCloudClient()
         self.cached_nodes = {}
-        self.metadata = lambda_utils.Metadata(TAG_PATH_PREFIX, cluster_name)
+        self.metadata = lambda_utils.Metadata(_TAG_PATH_PREFIX, cluster_name)
         self.ssh_key_path = os.path.expanduser(auth.PRIVATE_SSH_KEY_PATH)
-        remote_ssh_key = os.path.expanduser(REMOTE_RAY_SSH_KEY)
+        remote_ssh_key = os.path.expanduser(_REMOTE_RAY_SSH_KEY)
         if os.path.exists(remote_ssh_key):
             self.ssh_key_path = remote_ssh_key
 
     def _guess_and_add_missing_tags(self, vms: Dict[str, Any]) -> None:
         """Adds missing vms to local tag file and guesses their tags."""
         for node in vms:
-            if self.metadata.exists(node['id']):
+            if self.metadata[node['id']] is not None:
                 pass
             elif node['name'] == f'{self.cluster_name}-head':
                 self.metadata[node['id']] = {
@@ -101,8 +100,7 @@ class LambdaNodeProvider(NodeProvider):
             instance_info = self.metadata[vm['id']]
             if instance_info is not None:
                 metadata['tags'] = instance_info['tags']
-            ip = vm['ip']
-            metadata['external_ip'] = ip
+            metadata['external_ip'] = vm['ip']
             return metadata
 
         def _match_tags(vm: Dict[str, Any]):
@@ -114,14 +112,20 @@ class LambdaNodeProvider(NodeProvider):
             return True
 
         def _get_internal_ip(node: Dict[str, Any]):
+            # TODO(ewzeng): cache internal ips in metadata file to reduce
+            # ssh overhead.
             runner = command_runner.SSHCommandRunner(node['external_ip'],
                                                      'ubuntu',
                                                      self.ssh_key_path)
-            out = runner.run(GET_INTERNAL_IP_CMD,
-                             require_outputs=True,
-                             stream_logs=False)
-            assert out[0] == 0
-            node['internal_ip'] = out[1].strip()
+            rc, stdout, stderr = runner.run(_GET_INTERNAL_IP_CMD,
+                                            require_outputs=True,
+                                            stream_logs=False)
+            subprocess_utils.handle_returncode(
+                rc,
+                _GET_INTERNAL_IP_CMD,
+                'Failed get obtain private IP from node',
+                stderr=stdout + stderr)
+            node['internal_ip'] = stdout.strip()
 
         vms = self._list_instances_in_cluster()
         self.metadata.refresh([node['id'] for node in vms])
@@ -176,7 +180,7 @@ class LambdaNodeProvider(NodeProvider):
         config_tags[TAG_RAY_CLUSTER_NAME] = self.cluster_name
 
         # Create nodes
-        ttype = node_config['InstanceType']
+        instance_type = node_config['InstanceType']
         region = self.provider_config['region']
         if config_tags[TAG_RAY_NODE_KIND] == NODE_KIND_HEAD:
             name = f'{self.cluster_name}-head'
@@ -186,10 +190,11 @@ class LambdaNodeProvider(NodeProvider):
         # so we do a loop. Remove loop when launch api allows quantity > 1
         booting_list = []
         for _ in range(count):
-            vm_id = self.lambda_client.create_instances(instance_type=ttype,
-                                                        region=region,
-                                                        quantity=1,
-                                                        name=name)[0]
+            vm_id = self.lambda_client.create_instances(
+                instance_type=instance_type,
+                region=region,
+                quantity=1,
+                name=name)[0]
             self.metadata[vm_id] = {'tags': config_tags}
             booting_list.append(vm_id)
             time.sleep(10)  # Avoid api rate limits

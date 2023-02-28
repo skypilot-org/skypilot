@@ -2,7 +2,7 @@
 import os
 import json
 import requests
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 CREDENTIALS_PATH = '~/.lambda_cloud/lambda_keys'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
@@ -24,8 +24,9 @@ class Metadata:
         # In case parent directory does not exist
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
 
-    def __getitem__(self, instance_id: str) -> Dict[str, Any]:
-        assert os.path.exists(self.path), 'Metadata file not found'
+    def __getitem__(self, instance_id: str) -> Optional[Dict[str, Any]]:
+        if not os.path.exists(self.path):
+            return None
         with open(self.path, 'r') as f:
             metadata = json.load(f)
         return metadata.get(instance_id)
@@ -65,13 +66,6 @@ class Metadata:
             return
         with open(self.path, 'w') as f:
             json.dump(metadata, f)
-
-    def exists(self, instance_id: str) -> bool:
-        if not os.path.exists(self.path):
-            return False
-        with open(self.path, 'r') as f:
-            metadata = json.load(f)
-        return instance_id in metadata
 
 
 def raise_lambda_error(response: requests.Response) -> None:
