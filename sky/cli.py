@@ -3289,14 +3289,16 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
       watch -n60 sky spot queue
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
+    controller_status = global_user_state.ClusterStatus.UP
     no_jobs_found_str = '  No jobs found.'
     try:
         job_table = core.spot_queue(refresh=refresh,
                                     skip_finished=skip_finished)
-    except exceptions.ClusterNotUpError:
+    except exceptions.ClusterNotUpError as e:
         # TODO(mehul): handle skip_finished for the cached case. E.g., change
         # {load,dump}_job_table_cache() to use structured data, and let
         # format_job_table() to take skip_finished.
+        controller_status = e.cluster_status
         cache = spot_lib.load_job_table_cache()
         if cache is not None:
             readable_time = log_utils.readable_time_duration(cache[0])
@@ -3330,7 +3332,13 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
         in_progress_only_hint = ' (showing in-progress jobs only)'
     if not job_table:
         job_table = no_jobs_found_str
-    click.echo(f'Managed spot jobs{in_progress_only_hint}:\n{job_table}')
+    if controller_status is not None:
+        # Only show the spot queue if the spot controller exists.
+        # As the message for non-exist spot controller have been shown in
+        # controller cluster status check in `core.job_queue`.
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Managed spot jobs{colorama.Style.RESET_ALL}'
+                   f'{in_progress_only_hint}\n{job_table}')
 
 
 _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
