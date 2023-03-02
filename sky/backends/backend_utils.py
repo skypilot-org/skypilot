@@ -1302,15 +1302,16 @@ def get_node_ips(cluster_yaml: str,
     ray_config = common_utils.read_yaml(cluster_yaml)
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
-        assert expected_num_nodes == 1, (
-            'TPU VM only supports single node for now.')
         assert handle is not None, 'handle is required for TPU VM.'
         try:
             ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
         except exceptions.CommandError as e:
             raise exceptions.FetchIPError(
                 exceptions.FetchIPError.Reason.HEAD) from e
-        if len(ips) != tpu_utils.get_num_tpu_devices(handle.launched_resources):
+        num_tpu_devices = tpu_utils.get_num_tpu_devices(
+            handle.launched_resources)
+        if num_tpu_devices is None or (len(ips) !=
+                                       expected_num_nodes * num_tpu_devices):
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
         return ips
 

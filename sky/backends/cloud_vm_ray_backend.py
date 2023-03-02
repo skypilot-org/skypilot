@@ -3023,8 +3023,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     stream_logs=False,
                     require_outputs=True)
         elif (terminate and
-              (prev_cluster_status == global_user_state.ClusterStatus.STOPPED or
-               use_tpu_vm)):
+              (prev_cluster_status == global_user_state.ClusterStatus.STOPPED)):
             # For TPU VMs, gcloud CLI is used for VM termination.
             if isinstance(cloud, clouds.AWS):
                 # TODO(zhwu): Room for optimization. We can move these cloud
@@ -3037,10 +3036,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'Name=tag:ray-cluster-name,Values={handle.cluster_name} '
                     f'--query Reservations[].Instances[].InstanceId '
                     '--output text')
-                terminate_cmds = [
-                    (f'aws ec2 terminate-instances --region {region} '
-                     f'--instance-ids $({query_cmd})')
-                ]
+                terminate_cmd = (
+                    f'aws ec2 terminate-instances --region {region} '
+                    f'--instance-ids $({query_cmd})')
             elif isinstance(cloud, clouds.GCP):
                 zone = config['provider']['availability_zone']
                 # TODO(wei-lin): refactor by calling functions of node provider
@@ -3061,13 +3059,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                      f'cluster {cluster_name!r}.')
             with backend_utils.safe_console_status(f'[bold cyan]Terminating '
                                                    f'[green]{cluster_name}'):
-                for terminate_cmd in terminate_cmds:
-                    returncode, stdout, stderr = log_lib.run_with_log(
-                        terminate_cmd,
-                        log_abs_path,
-                        shell=True,
-                        stream_logs=False,
-                        require_outputs=True)
+                returncode, stdout, stderr = log_lib.run_with_log(
+                    terminate_cmd,
+                    log_abs_path,
+                    shell=True,
+                    stream_logs=False,
+                    require_outputs=True)
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',

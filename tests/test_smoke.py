@@ -957,7 +957,7 @@ def test_multi_tpu_vm():
             f'sleep 10',
             f'sky logs {name} 1 --status | grep "RUNNING"',
             f'sky logs {name} 2 --status | grep "PENDING"',
-            f'sky cancel {name} 1',
+            f'sky cancel {name} 1 -y',
             f'sleep 10',
             f'sky logs {name} 1 --status | grep "CANCELLED"',
             f'sky logs {name} 2 --status | grep "RUNNING"',
