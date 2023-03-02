@@ -145,6 +145,7 @@ class GcsCloudStorage(CloudStorage):
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)
 
+
 class R2CloudStorage(CloudStorage):
     """Cloudflare Cloud Storage."""
 

@@ -131,6 +131,7 @@ def s3_to_r2(s3_bucket_name: str, r2_bucket_name: str) -> None:
                               'currently not supported. Please specify '
                               'a local source for the storage object.')
 
+
 def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
     """Creates a one-time transfer from Google Cloud Storage to Amazon S3.
 
@@ -154,7 +155,6 @@ def gcs_to_r2(gs_bucket_name: str, r2_bucket_name: str) -> None:
     raise NotImplementedError('Moving data directly from clouds to R2 is '
                               'currently not supported. Please specify '
                               'a local source for the storage object.')
-
 
 
 def r2_to_gcs(r2_bucket_name: str, gs_bucket_name: str) -> None:
@@ -185,7 +185,6 @@ def r2_to_s3(r2_bucket_name: str, s3_bucket_name: str) -> None:
     raise NotImplementedError('Moving data directly from R2 to clouds is '
                               'currently not supported. Please specify '
                               'a local source for the storage object.')
-
 
 
 def _add_bucket_iam_member(bucket_name: str, role: str, member: str) -> None:

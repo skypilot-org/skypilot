@@ -418,7 +418,7 @@ class Storage(object):
                                                    source=self.source)
                 elif s_type == StoreType.R2:
                     store = R2Store.from_metadata(s_metadata,
-                                                    source=self.source)
+                                                  source=self.source)
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Unknown store type: {s_type}')
@@ -1144,10 +1144,10 @@ class GcsStore(AbstractStore):
                         f'Source specified as {self.source}, a GCS bucket. ',
                         'GCS Bucket should exist.')
                 elif self.source.startswith('r2://'):
-                    assert self.name == data_utils.split_r2_path(self.source
-                    )[0], (
-                        'R2 Bucket is specified as path, the name should be '
-                        'the same as R2 bucket.')
+                    assert self.name == data_utils.split_r2_path(
+                        self.source
+                    )[0], ('R2 Bucket is specified as path, the name should be '
+                           'the same as R2 bucket.')
                     assert data_utils.verify_r2_bucket(self.name), (
                         f'Source specified as {self.source}, a R2 bucket. ',
                         'R2 Bucket should exist.')
@@ -1466,7 +1466,6 @@ class R2Store(AbstractStore):
                     'R2 Bucket is specified as path, the name should be '
                     'the same as R2 bucket.')
 
-
     def initialize(self):
         """Initializes the R2 store object on the cloud.
 
@@ -1663,11 +1662,12 @@ class R2Store(AbstractStore):
                        '-O /usr/local/bin/goofys && '
                        'sudo chmod +x /usr/local/bin/goofys')
         endpoint_url = cloudflare.create_endpoint()
-        mount_cmd = (f'AWS_PROFILE={cloudflare.R2_PROFILE_NAME} goofys -o allow_other '
-                     f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
-                     f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
-                     f'--endpoint {endpoint_url} '
-                     f'{self.bucket.name} {mount_path}')
+        mount_cmd = (
+            f'AWS_PROFILE={cloudflare.R2_PROFILE_NAME} goofys -o allow_other '
+            f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
+            f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
+            f'--endpoint {endpoint_url} '
+            f'{self.bucket.name} {mount_path}')
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 

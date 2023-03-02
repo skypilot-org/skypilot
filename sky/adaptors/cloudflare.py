@@ -12,6 +12,7 @@ _session_creation_lock = threading.RLock()
 ACCOUNT_ID_PATH = '~/.cloudflare/accountid'
 R2_PROFILE_NAME = 'r2'
 
+
 def import_package(func):
 
     @functools.wraps(func)
@@ -65,12 +66,13 @@ def resource(resource_name: str):
     cloudflare_credentials = session_.get_credentials().get_frozen_credentials()
     endpoint = create_endpoint()
 
-    return session_.resource(resource_name,
-        endpoint_url = endpoint,
-        aws_access_key_id = cloudflare_credentials.access_key,
-        aws_secret_access_key = cloudflare_credentials.secret_key,
-        region_name='auto'
-        )
+    return session_.resource(
+        resource_name,
+        endpoint_url=endpoint,
+        aws_access_key_id=cloudflare_credentials.access_key,
+        aws_secret_access_key=cloudflare_credentials.secret_key,
+        region_name='auto')
+
 
 @functools.lru_cache()
 def client(service_name: str, region):
@@ -89,12 +91,13 @@ def client(service_name: str, region):
     cloudflare_credentials = session_.get_credentials().get_frozen_credentials()
     endpoint = create_endpoint()
 
-    return session_.client(service_name,
-        endpoint_url = endpoint,
-        aws_access_key_id = cloudflare_credentials.access_key,
-        aws_secret_access_key = cloudflare_credentials.secret_key,
-        region_name = region
-        )
+    return session_.client(
+        service_name,
+        endpoint_url=endpoint,
+        aws_access_key_id=cloudflare_credentials.access_key,
+        aws_secret_access_key=cloudflare_credentials.secret_key,
+        region_name=region)
+
 
 @import_package
 def botocore_exceptions():

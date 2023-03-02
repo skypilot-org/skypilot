@@ -105,12 +105,12 @@ install_requires = [
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the following
 # packages dependencies are changed.
 aws_dependencies = [
-        # awscli>=1.27.10 is required for SSO support.
-        'awscli',
-        'boto3',
-        # 'Crypto' module used in authentication.py for AWS.
-        'pycryptodome==3.12.0',
-    ]
+    # awscli>=1.27.10 is required for SSO support.
+    'awscli',
+    'boto3',
+    # 'Crypto' module used in authentication.py for AWS.
+    'pycryptodome==3.12.0',
+]
 extras_require = {
     'aws': aws_dependencies,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
