@@ -107,7 +107,9 @@ available_node_types:
     {%- if use_spot %}
         - preemptible: true
     {%- endif %}
+    {%- if gpu is not none %}
         - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
+    {%- endif %}
   {%- endif %}
 {%- endif %}
 
