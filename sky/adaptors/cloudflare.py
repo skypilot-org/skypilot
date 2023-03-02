@@ -9,7 +9,8 @@ import os
 boto3 = None
 botocore = None
 _session_creation_lock = threading.RLock()
-
+ACCOUNT_ID_PATH = '~/.cloudflare/accountid'
+R2_PROFILE_NAME = 'r2'
 
 def import_package(func):
 
@@ -23,7 +24,7 @@ def import_package(func):
                 boto3 = _boto3
                 botocore = _botocore
             except ImportError:
-                raise ImportError('Fail to import dependencies for AWS.'
+                raise ImportError('Fail to import dependencies for Cloudflare.'
                                   'Try pip install "skypilot[aws]"') from None
         return func(*args, **kwargs)
 
@@ -43,16 +44,16 @@ def session():
     # However, the session object itself is thread-safe, so we are
     # able to use lru_cache() to cache the session object.
     with _session_creation_lock:
-        return boto3.session.Session(profile_name='r2')
+        return boto3.session.Session(profile_name=R2_PROFILE_NAME)
 
 
 @functools.lru_cache()
 @import_package
 def resource(resource_name: str):
-    """Create an CLOUDFLARE resource.
+    """Create an Cloudflare resource.
 
     Args:
-        resource_name: CLOUDFLARE resource name (e.g., 's3').
+        resource_name: Cloudflare resource name (e.g., 's3').
         kwargs: Other options.
     """
     # Need to use the resource retrieved from the per-thread session
@@ -105,7 +106,7 @@ def botocore_exceptions():
 def create_endpoint():
     """Reads accountid necessary to interact with R2"""
 
-    accountid_path = os.path.expanduser('~/.cloudflare/accountid')
+    accountid_path = os.path.expanduser(ACCOUNT_ID_PATH)
     with open(accountid_path, 'r') as f:
         lines = f.readlines()
         accountid = lines[0]

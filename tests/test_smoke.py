@@ -1850,11 +1850,7 @@ class TestStorageWithCredentials:
                 f'touch {tmpdir}/folder{{000..255}}/test.txt', shell=True)
 
             timestamp = str(time.time()).replace('.', '')
-            if store_type == storage_lib.StoreType.R2:
-                store_obj = storage_lib.Storage(name=f'r2-sky-test-{timestamp}',
-                                                source=tmpdir)
-            else:
-                store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
+            store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
                                                 source=tmpdir)
             store_obj.add_store(store_type)
 
@@ -1867,10 +1863,7 @@ class TestStorageWithCredentials:
         'tmp_public_storage_obj, store_type',
         [('s3://tcga-2-open', storage_lib.StoreType.S3),
          ('s3://digitalcorpora', storage_lib.StoreType.S3),
-         ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS),
-         ('r2://test-bucket', storage_lib.StoreType.R2)],
-         # To test for r2, need to provide existing bucket name
-         # that corresponds to r2 credential and accountid you provide
+         ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS)],
         indirect=['tmp_public_storage_obj'])
     def test_public_bucket(self, tmp_public_storage_obj, store_type):
         # Creates a new bucket with a public source and verifies that it is not

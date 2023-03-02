@@ -150,7 +150,7 @@ def parallel_upload(source_path_list: List[str],
                     max_concurrent_uploads: Optional[int] = None) -> None:
     """Helper function to run parallel uploads for a list of paths.
 
-    Used by S3Store, GCSStore, ad R2Store to run rsync commands in parallel by
+    Used by S3Store, GCSStore, and R2Store to run rsync commands in parallel by
     providing appropriate command generators.
 
     Args:

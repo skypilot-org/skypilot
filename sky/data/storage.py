@@ -1551,7 +1551,7 @@ class R2Store(AbstractStore):
                             f'{includes} {base_dir_path} '
                             f's3://{self.name} '
                             f'--endpoint {endpoint_url} '
-                            '--profile=r2')
+                            f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
@@ -1562,7 +1562,7 @@ class R2Store(AbstractStore):
                 f'{src_dir_path} '
                 f's3://{self.name}/{dest_dir_name} '
                 f'--endpoint {endpoint_url} '
-                '--profile=r2')
+                f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
 
         # Generate message for upload
@@ -1618,7 +1618,8 @@ class R2Store(AbstractStore):
             # user.
             if error_code == '403':
                 command = (f'aws s3 ls s3://{self.name} '
-                           f'--endpoint {endpoint_url} --profile=r2')
+                           f'--endpoint {endpoint_url} '
+                           f'--profile={cloudflare.R2_PROFILE_NAME}')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
                         _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
@@ -1630,7 +1631,8 @@ class R2Store(AbstractStore):
                     'Attempted to connect to a non-existent bucket: '
                     f'{self.source}. Consider using `aws s3 ls '
                     f's3://{self.name} '
-                    f'--endpoint {endpoint_url} --profile=r2\' '
+                    f'--endpoint {endpoint_url} '
+                    f'--profile={cloudflare.R2_PROFILE_NAME}\' '
                     'to debug.')
 
         # If bucket cannot be found in both private and public settings,
@@ -1661,7 +1663,7 @@ class R2Store(AbstractStore):
                        '-O /usr/local/bin/goofys && '
                        'sudo chmod +x /usr/local/bin/goofys')
         endpoint_url = cloudflare.create_endpoint()
-        mount_cmd = ('AWS_PROFILE=r2 goofys -o allow_other '
+        mount_cmd = (f'AWS_PROFILE={cloudflare.R2_PROFILE_NAME} goofys -o allow_other '
                      f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
                      f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
                      f'--endpoint {endpoint_url} '
@@ -1711,7 +1713,8 @@ class R2Store(AbstractStore):
         # which removes the bucket by force.
         endpoint_url = cloudflare.create_endpoint()
         remove_command = (f'aws s3 rb s3://{bucket_name} --force '
-                          f'--endpoint {endpoint_url} --profile=r2')
+                          f'--endpoint {endpoint_url} '
+                          f'--profile={cloudflare.R2_PROFILE_NAME}')
         try:
             with backend_utils.safe_console_status(
                     f'[bold cyan]Deleting R2 bucket {bucket_name}[/]'):

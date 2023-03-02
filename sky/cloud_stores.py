@@ -184,7 +184,7 @@ class R2CloudStorage(CloudStorage):
         download_via_awscli = ('aws s3 sync --no-follow-symlinks '
                                f'{source} s3://{destination} '
                                f'--endpoint {endpoint_url} '
-                               '--profile=r2')
+                               f'--profile={cloudflare.R2_PROFILE_NAME}')
 
         all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)
@@ -195,7 +195,7 @@ class R2CloudStorage(CloudStorage):
         endpoint_url = cloudflare.create_endpoint()
         download_via_awscli = (f'aws s3 cp s3://{source} {destination} '
                                f'--endpoint {endpoint_url} '
-                               '--profile=r2')
+                               f'--profile={cloudflare.R2_PROFILE_NAME}')
 
         all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)

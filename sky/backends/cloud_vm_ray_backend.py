@@ -3359,7 +3359,7 @@ class CloudVmRayBackend(backends.Backend):
                     stream_logs=False,
                 )
                 continue
-                
+
             storage = cloud_stores.get_storage_from_path(src)
             if storage.is_directory(src):
                 sync = storage.make_sync_dir_command(source=src,
