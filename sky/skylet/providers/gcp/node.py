@@ -50,7 +50,7 @@ MAX_POLLS = 12
 # TPU deletion uses MAX_POLLS
 MAX_POLLS_TPU = MAX_POLLS * 8
 # Stopping instances can take several minutes, so we increase the timeout
-MAX_POLLS_STOP =  MAX_POLLS * 8
+MAX_POLLS_STOP = MAX_POLLS * 8
 POLL_INTERVAL = 5
 
 
@@ -317,15 +317,12 @@ class GCPResource(metaclass=abc.ABCMeta):
         return results
 
     @abc.abstractmethod
-    def start_instance(self, node_id: str,
-                       wait_for_operation: bool = True) -> dict:
+    def start_instance(self, node_id: str, wait_for_operation: bool = True) -> dict:
         """Start an instance and return result."""
 
     @abc.abstractmethod
-    def stop_instance(self, node_id: str,
-                      wait_for_operation: bool = True) -> dict:
+    def stop_instance(self, node_id: str, wait_for_operation: bool = True) -> dict:
         """Stop an instance and return result."""
-
 
     @abc.abstractmethod
     def delete_instance(self, node_id: str, wait_for_operation: bool = True) -> dict:
@@ -372,13 +369,16 @@ class GCPCompute(GCPResource):
 
         return result
 
-    def list_instances(self, label_filters: Optional[dict] = None,
-                       ) -> List[GCPComputeNode]:
+    def list_instances(
+        self,
+        label_filters: Optional[dict] = None,
+    ) -> List[GCPComputeNode]:
         non_terminated_status = list(GCPComputeNode.NON_TERMINATED_STATUSES)
         return self._list_instances(label_filters, non_terminated_status)
 
-    def _list_instances(self, label_filters: Optional[dict],
-                        status_filter: List[str]) -> List[GCPComputeNode]:
+    def _list_instances(
+        self, label_filters: Optional[dict], status_filter: Optional[List[str]]
+    ) -> List[GCPComputeNode]:
         label_filters = label_filters or {}
 
         if label_filters:
@@ -395,16 +395,19 @@ class GCPCompute(GCPResource):
         else:
             label_filter_expr = ""
 
-        instance_state_filter_expr = (
-            "("
-            + " OR ".join(
-                [
-                    "(status = {status})".format(status=status)
-                    for status in status_filter
-                ]
+        if status_filter:
+            instance_state_filter_expr = (
+                "("
+                + " OR ".join(
+                    [
+                        "(status = {status})".format(status=status)
+                        for status in status_filter
+                    ]
+                )
+                + ")"
             )
-            + ")"
-        )
+        else:
+            instance_state_filter_expr = ""
 
         cluster_name_filter_expr = "(labels.{key} = {value})".format(
             key=TAG_RAY_CLUSTER_NAME, value=self.cluster_name
@@ -563,13 +566,17 @@ class GCPCompute(GCPResource):
             result = operation
 
         return result, name
-    def start_instance(self, node_id: str,
-                       wait_for_operation: bool = True) -> dict:
-        operation = self.resource.instances().start(
-            project=self.project_id,
-            zone=self.availability_zone,
-            instance=node_id,
-        ).execute()
+
+    def start_instance(self, node_id: str, wait_for_operation: bool = True) -> dict:
+        operation = (
+            self.resource.instances()
+            .start(
+                project=self.project_id,
+                zone=self.availability_zone,
+                instance=node_id,
+            )
+            .execute()
+        )
 
         if wait_for_operation:
             result = self.wait_for_operation(operation)
@@ -578,13 +585,16 @@ class GCPCompute(GCPResource):
 
         return result
 
-    def stop_instance(self, node_id: str,
-                      wait_for_operation: bool = True) -> dict:
-        operation = self.resource.instances().stop(
-            project=self.project_id,
-            zone=self.availability_zone,
-            instance=node_id,
-        ).execute()
+    def stop_instance(self, node_id: str, wait_for_operation: bool = True) -> dict:
+        operation = (
+            self.resource.instances()
+            .stop(
+                project=self.project_id,
+                zone=self.availability_zone,
+                instance=node_id,
+            )
+            .execute()
+        )
 
         if wait_for_operation:
             result = self.wait_for_operation(operation)
@@ -592,7 +602,6 @@ class GCPCompute(GCPResource):
             result = operation
 
         return result
-
 
     def delete_instance(self, node_id: str, wait_for_operation: bool = True) -> dict:
         operation = (
@@ -660,16 +669,22 @@ class GCPTPU(GCPResource):
         non_terminated_status = list(GCPTPUNode.NON_TERMINATED_STATUSES)
         return self._list_instances(label_filters, non_terminated_status)
 
-    def _list_instances(self, label_filters: Optional[dict],
-                    status_filter: Optional[List[str]]) -> List[GCPTPUNode]:
+    def _list_instances(
+        self, label_filters: Optional[dict], status_filter: Optional[List[str]]
+    ) -> List[GCPTPUNode]:
         try:
-            response = self.resource.projects().locations().nodes().list(
-                parent=self.path).execute()
+            response = (
+                self.resource.projects()
+                .locations()
+                .nodes()
+                .list(parent=self.path)
+                .execute()
+            )
         except HttpError as e:
             # SKY: Catch HttpError when accessing unauthorized region.
             # Return empty list instead of raising exception to not break
             # ray down.
-            logger.warning(f'googleapiclient.errors.HttpError: {e.reason}')
+            logger.warning(f"googleapiclient.errors.HttpError: {e.reason}")
             return []
 
         instances = response.get("nodes", [])
@@ -763,14 +778,20 @@ class GCPTPU(GCPResource):
             config["networkConfig"]["enableExternalIps"] = True
 
         try:
-            operation = self.resource.projects().locations().nodes().create(
-                parent=self.path,
-                body=config,
-                nodeId=name,
-            ).execute()
+            operation = (
+                self.resource.projects()
+                .locations()
+                .nodes()
+                .create(
+                    parent=self.path,
+                    body=config,
+                    nodeId=name,
+                )
+                .execute()
+            )
         except HttpError as e:
             # SKY: Catch HttpError when accessing unauthorized region.
-            logger.error(f'googleapiclient.errors.HttpError: {e.reason}')
+            logger.error(f"googleapiclient.errors.HttpError: {e.reason}")
             raise e
 
         if wait_for_operation:
@@ -780,10 +801,10 @@ class GCPTPU(GCPResource):
 
         return result, name
 
-    def start_instance(self, node_id: str,
-                       wait_for_operation: bool = True) -> dict:
-        operation = self.resource.projects().locations().nodes().start(
-            name=node_id).execute()
+    def start_instance(self, node_id: str, wait_for_operation: bool = True) -> dict:
+        operation = (
+            self.resource.projects().locations().nodes().start(name=node_id).execute()
+        )
 
         # No need to increase MAX_POLLS for deletion
         if wait_for_operation:
@@ -793,10 +814,10 @@ class GCPTPU(GCPResource):
 
         return result
 
-    def stop_instance(self, node_id: str,
-                      wait_for_operation: bool = True) -> dict:
-        operation = self.resource.projects().locations().nodes().stop(
-            name=node_id).execute()
+    def stop_instance(self, node_id: str, wait_for_operation: bool = True) -> dict:
+        operation = (
+            self.resource.projects().locations().nodes().stop(name=node_id).execute()
+        )
 
         # No need to increase MAX_POLLS for deletion
         if wait_for_operation:

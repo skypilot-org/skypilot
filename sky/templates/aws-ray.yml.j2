@@ -7,7 +7,7 @@ idle_timeout_minutes: 60
 
 provider:
   type: external
-  module: sky.skylet.providers.aws.AWSNodeProvider
+  module: sky.skylet.providers.aws.AWSNodeProviderV2
   region: {{region}}
   availability_zone: {{zones}}
   # Keep (otherwise cannot reuse when re-provisioning).
@@ -16,9 +16,25 @@ provider:
   security_group:
     # AWS config file must include security group name
     GroupName: {{security_group}}
+{% if vpc_name is not none %}
+  # NOTE: This is a new field added by SkyPilot and parsed by our own
+  # AWSNodeProvider.
+  vpc_name: {{vpc_name}}
+{% endif %}
+  use_internal_ips: {{use_internal_ips}}
+  # Disable launch config check for worker nodes as it can cause resource
+  # leakage.
+  # Reference: https://github.com/ray-project/ray/blob/840215bc09e942b50cad0ab2db96a8fdc79217c1/python/ray/autoscaler/_private/autoscaler.py#L1101
+  # The upper-level SkyPilot code has make sure there will not be resource
+  # leakage.
+  disable_launch_config_check: true
 
 auth:
   ssh_user: ubuntu
+  ssh_private_key: {{ssh_private_key}}
+{% if ssh_proxy_command is not none %}
+  ssh_proxy_command: {{ssh_proxy_command}}
+{% endif %}
 
 available_node_types:
   ray.head.default:
@@ -42,6 +58,11 @@ available_node_types:
           #   SpotOptions:
           #       MaxPrice: MAX_HOURLY_PRICE
       {% endif %}
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: skypilot-user
+              Value: {{ user }}
 {% if num_nodes > 1 %}
   ray.worker.default:
     min_workers: {{num_nodes - 1}}
@@ -64,6 +85,11 @@ available_node_types:
           #   SpotOptions:
           #       MaxPrice: MAX_HOURLY_PRICE
       {% endif %}
+      TagSpecifications:
+        - ResourceType: instance
+          Tags:
+            - Key: skypilot-user
+              Value: {{ user }}
 {%- endif %}
 
 head_node_type: ray.head.default
@@ -89,6 +115,7 @@ initialization_commands: []
 # Increment the following for catching performance bugs easier:
 #   current num items (num SSH connections): 1
 setup_commands:
+  # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Create ~/.ssh/config file in case the file does not exist in the custom image.
   # Make sure python3 & pip3 are available on this image.
   # We set auto_activate_base to be false for pre-installed conda.
@@ -97,19 +124,24 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - mkdir -p ~/.ssh; touch ~/.ssh/config;
+  - function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
+    sudo systemctl stop unattended-upgrades || true;
+    sudo systemctl disable unattended-upgrades || true;
+    sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
+    p=$(mylsof "/var/lib/dpkg/lock-frontend"); echo "$p";
+    sudo kill -9 `echo "$p" | tail -n 1` || true;
+    sudo rm /var/lib/dpkg/lock-frontend;
+    sudo pkill -9 dpkg;
+    sudo pkill -9 apt-get;
+    sudo dpkg --configure --force-overwrite -a;
+    mkdir -p ~/.ssh; touch ~/.ssh/config;
     pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
-    (which conda > /dev/null 2>&1 && conda init > /dev/null && conda config --set auto_activate_base false) || (wget -nc https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b && eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true);
+    (which conda > /dev/null 2>&1 && conda init > /dev/null) || (wget -nc https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b && eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true);
     source ~/.bashrc;
     (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
     (pip3 list | grep skypilot && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[aws]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
-    sudo systemctl stop unattended-upgrades;
-    sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
-    sudo pkill -9 apt-get;
-    sudo pkill -9 dpkg;
-    sudo dpkg --configure -a;
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
@@ -129,12 +161,12 @@ head_start_ray_commands:
   # Line "which prlimit ..": increase the limit of the number of open files for the raylet process, as the `ulimit` may not take effect at this point, because it requires
   # all the sessions to be reloaded. This is a workaround.
   - ((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.skylet.skylet") || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);
-    ray stop; ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} || exit 1;
+    ray stop; RAY_SCHEDULER_EVENTS=0 ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} || exit 1;
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
-  - ray stop; ray start --disable-usage-stats --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} || exit 1;
+  - ray stop; RAY_SCHEDULER_EVENTS=0 ray start --disable-usage-stats --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} || exit 1;
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
 {%- else %}
 worker_start_ray_commands: []

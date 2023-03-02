@@ -41,8 +41,8 @@ We copy a 1 GB file from S3 to EBS using `aws s3 cp` command.
 * SkyPilot Storage offers higher **read** performance than EBS because it can directly
   stream files from S3 to memory.
 * SkyPilot Storage **write** performance is significantly higher than EBS because it
-  writes to memory and then asynchronously uploads to S3. SkyPilot Storage offers 
-  only eventual consistency, so a write operation to SkyPilot Storage may not reflect 
-  immediately on the S3 storage.
+  writes directly to S3 over network instead of disk.
+* SkyPilot Storage offers close-to-open consistency, so it is guaranteed that when a file is closed, 
+  subsequent opens will see the latest changes. 
 * These benchmarks are run on single large files. The performance of SkyPilot Storage
   degrades when using many small files.

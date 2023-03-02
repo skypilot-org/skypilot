@@ -2,56 +2,97 @@
 
 import functools
 import getpass
-import inspect
 import hashlib
+import inspect
 import json
-import random
 import os
+import platform
+import random
 import re
 import socket
 import sys
 import time
+from typing import Any, Callable, Dict, Optional, Union
 import uuid
-from typing import Any
 import yaml
+
+import colorama
 
 from sky import sky_logging
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
+USER_HASH_LENGTH = 8
+
+_COLOR_PATTERN = re.compile(r'\x1b[^m]*m')
 
 _PAYLOAD_PATTERN = re.compile(r'<sky-payload>(.*)</sky-payload>')
 _PAYLOAD_STR = '<sky-payload>{}</sky-payload>'
 
 logger = sky_logging.init_logger(__name__)
 
-_run_id = None
+_usage_run_id = None
 
 
-def get_run_id():
+def get_usage_run_id() -> str:
     """Returns a unique run id for each 'run'.
 
     A run is defined as the lifetime of a process that has imported `sky`
     and has called its CLI or programmatic APIs. For example, two successive
     `sky launch` are two runs.
     """
-    global _run_id
-    if _run_id is None:
-        _run_id = str(uuid.uuid4())
-    return _run_id
+    global _usage_run_id
+    if _usage_run_id is None:
+        _usage_run_id = str(uuid.uuid4())
+    return _usage_run_id
 
 
-def get_user_hash():
-    """Returns a unique user-machine specific hash as a user id."""
+def get_user_hash(default_value: Optional[str] = None) -> str:
+    """Returns a unique user-machine specific hash as a user id.
+
+    We cache the user hash in a file to avoid potential user_name or
+    hostname changes causing a new user hash to be generated.
+    """
+
+    def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
+        if user_hash is None:
+            return False
+        try:
+            int(user_hash, 16)
+        except (TypeError, ValueError):
+            return False
+        return len(user_hash) == USER_HASH_LENGTH
+
+    user_hash = default_value
+    if _is_valid_user_hash(user_hash):
+        assert user_hash is not None
+        return user_hash
+
     if os.path.exists(_USER_HASH_FILE):
+        # Read from cached user hash file.
         with open(_USER_HASH_FILE, 'r') as f:
-            return f.read()
+            # Remove invalid characters.
+            user_hash = f.read().strip()
+        if _is_valid_user_hash(user_hash):
+            return user_hash
 
     hash_str = user_and_hostname_hash()
-    user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:8]
+    user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
+    if not _is_valid_user_hash(user_hash):
+        # A fallback in case the hash is invalid.
+        user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
     with open(_USER_HASH_FILE, 'w') as f:
         f.write(user_hash)
     return user_hash
+
+
+def get_global_job_id(job_timestamp: str, cluster_name: Optional[str],
+                      job_id: str) -> str:
+    """Returns a unique job run id for each job run.
+
+    A job run is defined as the lifetime of a job that has been launched.
+    """
+    return f'{job_timestamp}_{cluster_name}_id-{job_id}'
 
 
 class Backoff:
@@ -61,7 +102,7 @@ class Backoff:
 
     def __init__(self, initial_backoff: int = 5, max_backoff_factor: int = 5):
         self._initial = True
-        self._backoff = None
+        self._backoff = 0.0
         self._inital_backoff = initial_backoff
         self._max_backoff = max_backoff_factor * self._inital_backoff
 
@@ -127,13 +168,13 @@ def user_and_hostname_hash() -> str:
     return f'{getpass.getuser()}-{hostname_hash}'
 
 
-def read_yaml(path):
+def read_yaml(path) -> Dict[str, Any]:
     with open(path, 'r') as f:
         config = yaml.safe_load(f)
     return config
 
 
-def dump_yaml(path, config):
+def dump_yaml(path, config) -> None:
     with open(path, 'w') as f:
         f.write(dump_yaml_str(config))
 
@@ -153,7 +194,7 @@ def dump_yaml_str(config):
                      default_flow_style=False)
 
 
-def make_decorator(cls, name_or_fn, **ctx_kwargs):
+def make_decorator(cls, name_or_fn: Union[str, Callable], **ctx_kwargs):
     """Make the cls a decorator.
 
     class cls:
@@ -213,9 +254,9 @@ def retry(method, max_retries=3, initial_backoff=1):
             try:
                 return method(*args, **kwargs)
             except Exception as e:  # pylint: disable=broad-except
-                logger.warning(f'Caught {e}. Retrying.')
                 try_count += 1
                 if try_count < max_retries:
+                    logger.warning(f'Caught {e}. Retrying.')
                     time.sleep(backoff.current_backoff())
                 else:
                     raise
@@ -258,3 +299,67 @@ def decode_payload(payload_str: str) -> Any:
     payload_str = matched[0]
     payload = json.loads(payload_str)
     return payload
+
+
+def class_fullname(cls):
+    """Get the full name of a class.
+
+    Example:
+        >>> e = sky.exceptions.FetchIPError()
+        >>> class_fullname(e.__class__)
+        'sky.exceptions.FetchIPError'
+
+    Args:
+        cls: The class to get the full name.
+
+    Returns:
+        The full name of the class.
+    """
+    return f'{cls.__module__}.{cls.__name__}'
+
+
+def format_exception(e: Union[Exception, SystemExit],
+                     use_bracket: bool = False) -> str:
+    """Format an exception to a string.
+
+    Args:
+        e: The exception to format.
+
+    Returns:
+        A string that represents the exception.
+    """
+    bright = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
+    if use_bracket:
+        return f'{bright}[{class_fullname(e.__class__)}]:{reset} {e}'
+    return f'{bright}{class_fullname(e.__class__)}:{reset} {e}'
+
+
+def remove_color(s: str):
+    """Remove color from a string.
+
+    Args:
+        s: The string to remove color.
+
+    Returns:
+        A string without color.
+    """
+    return _COLOR_PATTERN.sub('', s)
+
+
+def remove_file_if_exists(path: str):
+    """Delete a file if it exists.
+
+    Args:
+        path: The path to the file.
+    """
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        logger.debug(f'Tried to remove {path} but failed to find it. Skip.')
+        pass
+
+
+def is_wsl() -> bool:
+    """Detect if running under Windows Subsystem for Linux (WSL)."""
+    return 'microsoft' in platform.uname()[3].lower()

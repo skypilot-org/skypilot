@@ -1,15 +1,25 @@
 """A script that queries AWS API to get instance types and pricing information.
 This script takes about 1 minute to finish.
 """
+import argparse
 import datetime
-from typing import Tuple, Union
+import itertools
+from multiprocessing import pool as mp_pool
+import os
+import subprocess
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import pandas as pd
-import ray
 
 from sky.adaptors import aws
 
+# Enable most of the regions. Each user's account may have a subset of these
+# enabled; this is ok because we take the intersection of the list here with
+# the user-specific enabled regions in `aws_catalog`, via the "availability
+# zone mapping".
+# TODO(zhwu): fix the regions with no supported AMI (maybe by finding AMIs
+# similar to the Deep Learning AMI).
 ALL_REGIONS = [
     'us-east-1',
     'us-east-2',
@@ -17,17 +27,20 @@ ALL_REGIONS = [
     'us-west-2',
     'ca-central-1',
     'eu-central-1',
+    # 'eu-central-2', # no supported AMI
     'eu-west-1',
     'eu-west-2',
     'eu-south-1',
+    # 'eu-south-2', # no supported AMI
     'eu-west-3',
     'eu-north-1',
     'me-south-1',
-    # 'me-central-1', # failed for no credential
+    'me-central-1',
     'af-south-1',
     'ap-east-1',
     'ap-southeast-3',
-    # 'ap-south-1', # failed for no credential
+    'ap-south-1',
+    # 'ap-south-2', # no supported AMI
     'ap-northeast-3',
     'ap-northeast-2',
     'ap-southeast-1',
@@ -36,20 +49,32 @@ ALL_REGIONS = [
 ]
 US_REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
 
-REGIONS = US_REGIONS
-
+# The following columns will be included in the final catalog.
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
     'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone'
 ]
 
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
-# only available in this region, but it serves pricing information for all regions.
-PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv'
+# only available in this region, but it serves pricing information for all
+# regions.
+PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv'  # pylint: disable=line-too-long
+
+regions_enabled: Optional[Set[str]] = None
 
 
-@ray.remote
-def get_instance_types(region: str) -> pd.DataFrame:
+def get_enabled_regions() -> Set[str]:
+    # Should not be called concurrently.
+    global regions_enabled
+    if regions_enabled is None:
+        aws_client = aws.client('ec2', region_name='us-east-1')
+        user_cloud_regions = aws_client.describe_regions()['Regions']
+        regions_enabled = {r['RegionName'] for r in user_cloud_regions}
+        regions_enabled = regions_enabled.intersection(set(ALL_REGIONS))
+    return regions_enabled
+
+
+def _get_instance_types(region: str) -> pd.DataFrame:
     client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_instance_types')
     items = []
@@ -60,18 +85,41 @@ def get_instance_types(region: str) -> pd.DataFrame:
     return pd.DataFrame(items)
 
 
-@ray.remote
-def get_availability_zones(region: str) -> pd.DataFrame:
+def _get_instance_type_offerings(region: str) -> pd.DataFrame:
+    client = aws.client('ec2', region_name=region)
+    paginator = client.get_paginator('describe_instance_type_offerings')
+    items = []
+    for i, resp in enumerate(
+            paginator.paginate(LocationType='availability-zone')):
+        print(f'{region} getting instance type offerings page {i}')
+        items += resp['InstanceTypeOfferings']
+
+    return pd.DataFrame(items).rename(
+        columns={'Location': 'AvailabilityZoneName'})
+
+
+def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
     client = aws.client('ec2', region_name=region)
     zones = []
-    response = client.describe_availability_zones()
+    try:
+        response = client.describe_availability_zones()
+    except aws.botocore_exceptions().ClientError:
+        # The user's AWS account may not have access to this region.
+        # The error looks like:
+        # botocore.exceptions.ClientError: An error occurred
+        # (AuthFailure) when calling the DescribeAvailabilityZones
+        # operation: AWS was not able to validate the provided
+        # access credentials
+        return None
     for resp in response['AvailabilityZones']:
-        zones.append({'AvailabilityZone': resp['ZoneName']})
+        zones.append({
+            'AvailabilityZoneName': resp['ZoneName'],
+            'AvailabilityZone': resp['ZoneId'],
+        })
     return pd.DataFrame(zones)
 
 
-@ray.remote
-def get_pricing_table(region: str) -> pd.DataFrame:
+def _get_pricing_table(region: str) -> pd.DataFrame:
     print(f'{region} downloading pricing table')
     url = PRICING_TABLE_URL_FMT.format(region=region)
     df = pd.read_csv(url, skiprows=5, low_memory=False)
@@ -89,33 +137,58 @@ def get_pricing_table(region: str) -> pd.DataFrame:
               ]]
 
 
-@ray.remote
-def get_spot_pricing_table(region: str) -> pd.DataFrame:
+def _get_spot_pricing_table(region: str) -> pd.DataFrame:
+    """Get spot pricing table for a region.
+
+    Example output:
+        InstanceType  AvailabilityZoneName  SpotPrice
+        p3.2xlarge    us-east-1a            1.0000
+    """
     print(f'{region} downloading spot pricing table')
     client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_spot_price_history')
     response_iterator = paginator.paginate(ProductDescriptions=['Linux/UNIX'],
                                            StartTime=datetime.datetime.utcnow())
-    ret = []
+    ret: List[Dict[str, str]] = []
     for response in response_iterator:
+        # response['SpotPriceHistory'] is a list of dicts, each dict is like:
+        # {
+        #  'AvailabilityZone': 'us-east-2c',  # This is the AZ name.
+        #  'InstanceType': 'm6i.xlarge',
+        #  'ProductDescription': 'Linux/UNIX',
+        #  'SpotPrice': '0.041900',
+        #  'Timestamp': datetime.datetime
+        # }
         ret = ret + response['SpotPriceHistory']
     df = pd.DataFrame(ret)[['InstanceType', 'AvailabilityZone', 'SpotPrice']]
-    df = df.set_index(['InstanceType', 'AvailabilityZone'])
+    df = df.rename(columns={'AvailabilityZone': 'AvailabilityZoneName'})
+    df = df.set_index(['InstanceType', 'AvailabilityZoneName'])
     return df
 
 
-@ray.remote
-def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
+def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
     try:
-        df, zone_df, pricing_df, spot_pricing_df = ray.get([
-            get_instance_types.remote(region),
-            get_availability_zones.remote(region),
-            get_pricing_table.remote(region),
-            get_spot_pricing_table.remote(region),
-        ])
+        # Fetch the zone info first to make sure the account has access to the
+        # region.
+        zone_df = _get_availability_zones(region)
+        if zone_df is None:
+            raise RuntimeError(f'No access to region {region}')
+
+        # Use ThreadPool instead of Pool because this function can be called
+        # within a multiprocessing.Pool, and Pool cannot be nested.
+        with mp_pool.ThreadPool() as pool:
+            futures = [
+                pool.apply_async(_get_instance_types, (region,)),
+                pool.apply_async(_get_instance_type_offerings, (region,)),
+                pool.apply_async(_get_pricing_table, (region,)),
+                pool.apply_async(_get_spot_pricing_table, (region,))
+            ]
+            df, offering_df, pricing_df, spot_pricing_df = [
+                future.get() for future in futures
+            ]
         print(f'{region} Processing dataframes')
 
-        def get_acc_info(row) -> Tuple[str, float]:
+        def get_acc_info(row) -> Tuple[Optional[str], float]:
             accelerator = None
             for col, info_key in [('GpuInfo', 'Gpus'),
                                   ('InferenceAcceleratorInfo', 'Accelerators'),
@@ -134,13 +207,13 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
 
         def get_memory_gib(row) -> float:
             if isinstance(row['MemoryInfo'], dict):
-                return row['MemoryInfo']['SizeInMiB'] // 1024
-            return int(row['Memory'].split(' GiB')[0])
+                return row['MemoryInfo']['SizeInMiB'] / 1024
+            return float(row['Memory'].split(' GiB')[0])
 
         def get_additional_columns(row) -> pd.Series:
             acc_name, acc_count = get_acc_info(row)
             # AWS p3dn.24xlarge offers a different V100 GPU.
-            # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/
+            # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/ # pylint: disable=line-too-long
             if row['InstanceType'] == 'p3dn.24xlarge':
                 acc_name = 'V100-32GB'
             if row['InstanceType'] == 'p4de.24xlarge':
@@ -157,13 +230,16 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         # so we need to merge the two dataframes.
         df = df.merge(pricing_df, on=['InstanceType'], how='outer')
         df['Region'] = region
-        # Cartesian product of instance types and availability zones, so that
-        # we can join the spot pricing table per instance type and zone.
-        df = df.merge(pd.DataFrame(zone_df), how='cross')
+        # An instance type may not be available in all zones. We need to
+        # merge the zone info to the instance type info.
+        df = df.merge(offering_df, on=['InstanceType'], how='inner')
+        # Add the mapping from zone name to zone id, as the zone id is
+        # the real identifier for a zone across different users.
+        df = df.merge(zone_df, on=['AvailabilityZoneName'], how='inner')
 
         # Add spot price column, by joining the spot pricing table.
         df = df.merge(spot_pricing_df,
-                      left_on=['InstanceType', 'AvailabilityZone'],
+                      left_on=['InstanceType', 'AvailabilityZoneName'],
                       right_index=True,
                       how='outer')
 
@@ -174,14 +250,15 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         # patch the GpuInfo for p4de.24xlarge
         df.loc[df['InstanceType'] == 'p4de.24xlarge', 'GpuInfo'] = 'A100-80GB'
         df = df[USEFUL_COLUMNS]
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         print(f'{region} failed with {e}')
         return region
     return df
 
 
-def get_all_regions_instance_types_df():
-    df_or_regions = ray.get([get_instance_types_df.remote(r) for r in REGIONS])
+def get_all_regions_instance_types_df(regions: Set[str]) -> pd.DataFrame:
+    with mp_pool.Pool() as pool:
+        df_or_regions = pool.map(_get_instance_types_df, regions)
     new_dfs = []
     for df_or_region in df_or_regions:
         if isinstance(df_or_region, str):
@@ -194,8 +271,155 @@ def get_all_regions_instance_types_df():
     return df
 
 
+# Fetch Images
+# https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
+# Current AMIs (we have to use different PyTorch versions for different OS as Ubuntu 18.04
+# does not have the latest PyTorch version):
+# GPU:
+# Deep Learning AMI GPU PyTorch 1.13.1 (Ubuntu 20.04) 20230103
+#   Nvidia driver: 515.65.01, CUDA Version: 11.7
+#
+# Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 18.04) 20221114
+#   Nvidia driver: 510.47.03, CUDA Version: 11.6
+#
+# K80:
+# Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
+#   Nvidia driver: 470.57.02, CUDA Version: 11.4
+#
+# Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 18.04) 20211208
+#   Nvidia driver: 470.57.02, CUDA Version: 11.4
+_GPU_UBUNTU_DATE_PYTORCH = [
+    ('gpu', '20.04', '20230103', '1.13.1'),
+    ('gpu', '18.04', '20221114', '1.10.0'),
+    ('k80', '20.04', '20211208', '1.10.0'),
+    ('k80', '18.04', '20211208', '1.10.0'),
+]
+
+
+def _fetch_image_id(region: str, ubuntu_version: str, creation_date: str,
+                    pytorch_version: str) -> Optional[str]:
+    try:
+        image = subprocess.check_output(f"""\
+            aws ec2 describe-images --region {region} --owners amazon \\
+                --filters 'Name=name,Values="Deep Learning AMI GPU PyTorch {pytorch_version} (Ubuntu {ubuntu_version}) {creation_date}"' \\
+                    'Name=state,Values=available' --query 'Images[:1].ImageId' --output text
+            """,
+                                        shell=True)
+    except subprocess.CalledProcessError as e:
+        print(f'Failed {region}, {ubuntu_version}, {creation_date}. '
+              'Trying next date.')
+        print(f'{type(e)}: {e}')
+        image_id = None
+    else:
+        assert image is not None
+        image_id = image.decode('utf-8').strip()
+    return image_id
+
+
+def _get_image_row(
+        region: str, gpu: str, ubuntu_version: str, date: str,
+        pytorch_version) -> Tuple[str, str, str, str, Optional[str], str]:
+    print(f'Getting image for {region}, {ubuntu_version}, {gpu}')
+    image_id = _fetch_image_id(region, ubuntu_version, date, pytorch_version)
+    if image_id is None:
+        # not found
+        print(f'Failed to find image for {region}, {ubuntu_version}, {gpu}')
+    tag = f'skypilot:{gpu}-ubuntu-{ubuntu_version.replace(".", "")}'
+    return tag, region, 'ubuntu', ubuntu_version, image_id, date
+
+
+def get_all_regions_images_df(regions: Set[str]) -> pd.DataFrame:
+    image_metas = [
+        (r, *i) for r, i in itertools.product(regions, _GPU_UBUNTU_DATE_PYTORCH)
+    ]
+    with mp_pool.Pool() as pool:
+        results = pool.starmap(_get_image_row, image_metas)
+    result_df = pd.DataFrame(
+        results,
+        columns=['Tag', 'Region', 'OS', 'OSVersion', 'ImageId', 'CreationDate'])
+    result_df.sort_values(['Tag', 'Region'], inplace=True)
+    return result_df
+
+
+def fetch_availability_zone_mappings() -> pd.DataFrame:
+    """Fetch the availability zone mappings from ID to Name.
+
+    Example output:
+        AvailabilityZone  AvailabilityZoneName
+        use1-az1          us-east-1b
+        use1-az2          us-east-1a
+    """
+    regions = list(get_enabled_regions())
+    # Use ThreadPool instead of Pool because this function can be called within
+    # a Pool, and Pool cannot be nested.
+    with mp_pool.ThreadPool() as pool:
+        az_mappings = pool.map(_get_availability_zones, regions)
+    missing_regions = {
+        regions[i] for i, m in enumerate(az_mappings) if m is None
+    }
+    if missing_regions:
+        # This could happen if a AWS API glitch happens, it is to make sure
+        # that the availability zone does not get lost silently.
+        print('WARNING: Missing availability zone mappings for the following '
+              f'enabled regions: {missing_regions}')
+    # Remove the regions that the user does not have access to.
+    az_mappings = [m for m in az_mappings if m is not None]
+    az_mappings = pd.concat(az_mappings)
+    return az_mappings
+
+
 if __name__ == '__main__':
-    ray.init()
-    df = get_all_regions_instance_types_df()
-    df.to_csv('aws.csv', index=False)
-    print('AWS Service Catalog saved to aws.csv')
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--az-mappings',
+        dest='az_mappings',
+        action='store_true',
+        help='Fetch the mapping from availability zone IDs to zone names.')
+    parser.add_argument('--no-az-mappings',
+                        dest='az_mappings',
+                        action='store_false')
+    parser.add_argument(
+        '--check-all-regions-enabled-for-account',
+        action='store_true',
+        help=('Check that this account has enabled "all" global regions '
+              'hardcoded in this script. Useful to ensure our automatic '
+              'fetcher fetches the expected data.'))
+    parser.set_defaults(az_mappings=True)
+    args, _ = parser.parse_known_args()
+
+    user_regions = get_enabled_regions()
+    if args.check_all_regions_enabled_for_account and set(
+            ALL_REGIONS) - user_regions:
+        raise RuntimeError('The following regions are not enabled: '
+                           f'{set(ALL_REGIONS) - user_regions}')
+
+    def _check_regions_integrity(df: pd.DataFrame, name: str):
+        # Check whether the fetched regions match the requested regions to
+        # guard against network issues or glitches in the AWS API.
+        fetched_regions = set(df['Region'].unique())
+        if fetched_regions != user_regions:
+            # This is a sanity check to make sure that the regions we
+            # requested are the same as the ones we fetched.
+            # The mismatch could happen for network issues or glitches
+            # in the AWS API.
+            raise RuntimeError(
+                f'{name}: Fetched regions {fetched_regions} does not match '
+                f'requested regions {user_regions}.')
+
+    instance_df = get_all_regions_instance_types_df(user_regions)
+    _check_regions_integrity(instance_df, 'instance types')
+
+    os.makedirs('aws', exist_ok=True)
+    instance_df.to_csv('aws/vms.csv', index=False)
+    print('AWS Service Catalog saved to aws/vms.csv')
+
+    image_df = get_all_regions_images_df(user_regions)
+    _check_regions_integrity(image_df, 'images')
+
+    image_df.to_csv('aws/images.csv', index=False)
+    print('AWS Images saved to aws/images.csv')
+
+    if args.az_mappings:
+        az_mappings_df = fetch_availability_zone_mappings()
+        az_mappings_df.to_csv('aws/az_mappings.csv', index=False)
+        print('AWS Availability Zone mapping saved to aws/az_mappings.csv')

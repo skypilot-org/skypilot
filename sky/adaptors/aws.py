@@ -2,15 +2,17 @@
 
 # pylint: disable=import-outside-toplevel
 
-from functools import wraps
+import functools
+import threading
 
 boto3 = None
 botocore = None
+_session_creation_lock = threading.RLock()
 
 
 def import_package(func):
 
-    @wraps(func)
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         global boto3, botocore
         if boto3 is None or botocore is None:
@@ -27,17 +29,23 @@ def import_package(func):
     return wrapper
 
 
+# lru_cache() is thread-safe and it will return the same session object
+# for different threads.
+# Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache # pylint: disable=line-too-long
+@functools.lru_cache()
 @import_package
-def client(service_name: str, **kwargs):
-    """Create an AWS client of a certain service.
+def session():
+    """Create an AWS session."""
+    # Creating the session object is not thread-safe for boto3,
+    # so we add a reentrant lock to synchronize the session creation.
+    # Reference: https://github.com/boto/boto3/issues/1592
+    # However, the session object itself is thread-safe, so we are
+    # able to use lru_cache() to cache the session object.
+    with _session_creation_lock:
+        return boto3.session.Session()
 
-    Args:
-        service_name: AWS service name (e.g., 's3', 'ec2').
-        kwargs: Other options.
-    """
-    return boto3.client(service_name, **kwargs)
 
-
+@functools.lru_cache()
 @import_package
 def resource(resource_name: str, **kwargs):
     """Create an AWS resource.
@@ -46,17 +54,30 @@ def resource(resource_name: str, **kwargs):
         resource_name: AWS resource name (e.g., 's3').
         kwargs: Other options.
     """
-    return boto3.resource(resource_name, **kwargs)
+    # Need to use the resource retrieved from the per-thread session
+    # to avoid thread-safety issues (Directly creating the client
+    # with boto3.resource() is not thread-safe).
+    # Reference: https://stackoverflow.com/a/59635814
+    return session().resource(resource_name, **kwargs)
+
+
+@functools.lru_cache()
+def client(service_name: str, **kwargs):
+    """Create an AWS client of a certain service.
+
+    Args:
+        service_name: AWS service name (e.g., 's3', 'ec2').
+        kwargs: Other options.
+    """
+    # Need to use the client retrieved from the per-thread session
+    # to avoid thread-safety issues (Directly creating the client
+    # with boto3.client() is not thread-safe).
+    # Reference: https://stackoverflow.com/a/59635814
+    return session().client(service_name, **kwargs)
 
 
 @import_package
-def session():
-    """Create an AWS session."""
-    return boto3.Session()
-
-
-@import_package
-def client_exception():
-    """Client exception."""
+def botocore_exceptions():
+    """AWS botocore exception."""
     from botocore import exceptions
-    return exceptions.ClientError
+    return exceptions

@@ -97,6 +97,11 @@ def list_ec2_instances(
 
 
 class AWSNodeProvider(NodeProvider):
+    """Deprecated for SkyPilot and kept for backward compatibility.
+
+    The cluster launch template has been updated to use AWSNodeProviderV2.
+    """
+
     max_terminate_nodes = 1000
 
     def __init__(self, provider_config, cluster_name):
@@ -276,10 +281,9 @@ class AWSNodeProvider(NodeProvider):
                     "Name": "tag:{}".format(TAG_RAY_NODE_KIND),
                     "Values": [tags[TAG_RAY_NODE_KIND]],
                 },
-                {
-                    "Name": "tag:{}".format(TAG_RAY_LAUNCH_CONFIG),
-                    "Values": [tags[TAG_RAY_LAUNCH_CONFIG]],
-                },
+                # SkyPilot: removed TAG_RAY_LAUNCH_CONFIG to allow reusing nodes
+                # with different launch configs.
+                # Reference: https://github.com/skypilot-org/skypilot/pull/1671
             ]
             # This tag may not always be present.
             if TAG_RAY_USER_NODE_TYPE in tags:
@@ -289,8 +293,50 @@ class AWSNodeProvider(NodeProvider):
                         "Values": [tags[TAG_RAY_USER_NODE_TYPE]],
                     }
                 )
+            filters_with_launch_config = copy.copy(filters)
+            filters_with_launch_config.append(
+                {
+                    "Name": "tag:{}".format(TAG_RAY_LAUNCH_CONFIG),
+                    "Values": [tags[TAG_RAY_LAUNCH_CONFIG]],
+                }
+            )
 
-            reuse_nodes = list(self.ec2.instances.filter(Filters=filters))[:count]
+            # SkyPilot: We try to use the instances with the same matching launch_config first. If
+            # there is not enough instances with matching launch_config, we then use all the
+            # instances with the same matching launch_config plus some instances with wrong
+            # launch_config.
+            nodes_matching_launch_config = list(
+                self.ec2.instances.filter(Filters=filters_with_launch_config)
+            )
+            # launch_time is the latest launch time of the node, rather than the
+            # initial launch time.
+            nodes_matching_launch_config.sort(key=lambda n: n.launch_time, reverse=True)
+            if len(nodes_matching_launch_config) >= count:
+                reuse_nodes = nodes_matching_launch_config[:count]
+            else:
+                nodes_all = list(self.ec2.instances.filter(Filters=filters))
+                nodes_matching_launch_config_ids = set(
+                    n.id for n in nodes_matching_launch_config
+                )
+                nodes_non_matching_launch_config = [
+                    n for n in nodes_all if n.id not in nodes_matching_launch_config_ids
+                ]
+                # This `sort` is for backward compatibility, where the user already has leaked
+                # stopped nodes with the different launch config before update to #1671,
+                # and the total number of the leaked nodes is greater than the number of
+                # nodes to be created. With this, we will make sure we will reuse the
+                # most recently used nodes.
+                # This can be removed in the future when we are sure all the users
+                # have updated to #1671.
+                nodes_non_matching_launch_config.sort(
+                    key=lambda n: n.launch_time, reverse=True
+                )
+                reuse_nodes = (
+                    nodes_matching_launch_config + nodes_non_matching_launch_config
+                )
+                # The total number of reusable nodes can be less than the number of nodes to be created.
+                reuse_nodes = reuse_nodes[:count]
+
             reuse_node_ids = [n.id for n in reuse_nodes]
             reused_nodes_dict = {n.id: n for n in reuse_nodes}
             if reuse_nodes:
@@ -662,3 +708,22 @@ class AWSNodeProvider(NodeProvider):
                     + "."
                 )
         return cluster_config
+
+
+class AWSNodeProviderV2(AWSNodeProvider):
+    """Same as V1, except head and workers use a SkyPilot IAM role.
+
+    The new version of the AWS node provider supports AWS SSO
+    (see #1489), by using a new IAM role with different permissions
+    than the original ray-autoscaler-v1 for both the head node and
+    worker nodes.
+
+    We did not overwrite the original AWSNodeProvider class to avoid
+    breaking existing clusters. Otherwise, the existing clusters will
+    have a new launch_hash and will have new node(s) launched, causing
+    the existing nodes to leak.
+    """
+
+    @staticmethod
+    def bootstrap_config(cluster_config):
+        return bootstrap_aws(cluster_config, skypilot_iam_role=True)

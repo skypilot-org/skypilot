@@ -1,4 +1,5 @@
 """Azure."""
+import functools
 import json
 import os
 import subprocess
@@ -6,12 +7,17 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import exceptions
+from sky import sky_logging
 from sky.adaptors import azure
 from sky.clouds import service_catalog
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
+
+logger = sky_logging.init_logger(__name__)
 
 # Minimum set of files under ~/.azure that grant Azure access.
 _CREDENTIAL_FILES = [
@@ -20,6 +26,8 @@ _CREDENTIAL_FILES = [
     'config',
     'msal_token_cache.json',
 ]
+
+_MAX_IDENTITY_FETCH_RETRY = 10
 
 
 def _run_output(cmd):
@@ -36,15 +44,39 @@ class Azure(clouds.Cloud):
     """Azure."""
 
     _REPR = 'Azure'
-    _regions: List[clouds.Region] = []
+    # Azure has a 90 char limit for resource group; however, SkyPilot adds the
+    # suffix `-<region name>`. Azure also has a 64 char limit for VM names, and
+    # ray adds addtional `ray-`, `-worker`, and `-<9 chars hash>` for the VM
+    # names, so the limit is 64 - 4 - 7 - 10 = 43.
+    # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # pylint: disable=line-too-long
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 42
 
-    def instance_type_to_hourly_cost(self, instance_type, use_spot):
+    @classmethod
+    def _cloud_unsupported_features(
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+        return dict()
+
+    @classmethod
+    def _max_cluster_name_length(cls) -> int:
+        return cls._MAX_CLUSTER_NAME_LEN_LIMIT
+
+    def instance_type_to_hourly_cost(self,
+                                     instance_type: str,
+                                     use_spot: bool,
+                                     region: Optional[str] = None,
+                                     zone: Optional[str] = None) -> float:
         return service_catalog.get_hourly_cost(instance_type,
-                                               region=None,
                                                use_spot=use_spot,
+                                               region=region,
+                                               zone=zone,
                                                clouds='azure')
 
-    def accelerators_to_hourly_cost(self, accelerators, use_spot):
+    def accelerators_to_hourly_cost(self,
+                                    accelerators: Dict[str, int],
+                                    use_spot: bool,
+                                    region: Optional[str] = None,
+                                    zone: Optional[str] = None) -> float:
+        del accelerators, use_spot, region, zone  # unused
         # Azure includes accelerators as part of the instance type.
         # Implementing this is also necessary for e.g., the instance may have 4
         # GPUs, while the task specifies to use 1 GPU.
@@ -77,11 +109,19 @@ class Azure(clouds.Cloud):
         return isinstance(other, Azure)
 
     @classmethod
-    def get_default_instance_type(cls) -> str:
-        # 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.
-        return 'Standard_D8_v4'
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None) -> Optional[str]:
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         clouds='azure')
 
     def _get_image_config(self, gen_version, instance_type):
+        # az vm image list \
+        #  --publisher microsoft-dsvm --all --output table
+        # nvidia-driver: 495.29.05, cuda: 11.5
+
+        # The latest image 2022.09.14/2022.08.11/22.06.10/22.05.11/
+        # 22.04.27/22.04.05 has even older nvidia driver 470.57.02,
+        # cuda: 11.4
         image_config = {
             'image_publisher': 'microsoft-dsvm',
             'image_offer': 'ubuntu-2004',
@@ -109,41 +149,38 @@ class Azure(clouds.Cloud):
         return image_config
 
     @classmethod
-    def regions(cls) -> List[clouds.Region]:
-        # NOTE on zones: Ray Autoscaler does not support specifying
-        # availability zones, and Azure CLI will try launching VMs in all
-        # zones. Hence for our purposes we do not keep track of zones.
-        if not cls._regions:
-            cls._regions = [
-                clouds.Region('centralus'),
-                clouds.Region('eastus'),
-                clouds.Region('eastus2'),
-                clouds.Region('northcentralus'),
-                clouds.Region('southcentralus'),
-                clouds.Region('westcentralus'),
-                clouds.Region('westus'),
-                clouds.Region('westus2'),
-            ]
-        return cls._regions
+    def regions_with_offering(cls, instance_type: str,
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> List[clouds.Region]:
+        del accelerators  # unused
+        assert zone is None, 'Azure does not support zones'
+        regions = service_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'azure')
+
+        if region is not None:
+            regions = [r for r in regions if r.name == region]
+        return regions
 
     @classmethod
-    def region_zones_provision_loop(
+    def zones_provision_loop(
         cls,
         *,
-        instance_type: Optional[str] = None,
+        region: str,
+        num_nodes: int,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: bool,
-    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        del accelerators  # unused
-
-        if instance_type is None:
-            # fallback to manually specified region/zones
-            regions = cls.regions()
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, clouds='azure')
-        for region in regions:
-            yield region, region.zones
+        use_spot: bool = False,
+    ) -> Iterator[None]:
+        del num_nodes  # unused
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot,
+                                            region=region,
+                                            zone=None)
+        for r in regions:
+            assert r.zones is None, r
+            yield r.zones
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
@@ -160,7 +197,7 @@ class Azure(clouds.Cloud):
     def get_vcpus_from_instance_type(
         cls,
         instance_type: str,
-    ) -> float:
+    ) -> Optional[float]:
         return service_catalog.get_vcpus_from_instance_type(instance_type,
                                                             clouds='azure')
 
@@ -169,17 +206,11 @@ class Azure(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources.Resources',
-            region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
-        if region is None:
-            assert zones is None, (
-                'Set either both or neither for: region, zones.')
-            region = self._get_default_region()
+            self, resources: 'resources.Resources', region: 'clouds.Region',
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+        assert zones is None, ('Azure does not support zones', zones)
 
         region_name = region.name
-        # Azure does not support specific zones.
-        zones = []
 
         r = resources
         assert not r.use_spot, \
@@ -199,7 +230,8 @@ class Azure(clouds.Cloud):
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
             'region': region_name,
-            'zones': zones,
+            # Azure does not support specific zones.
+            'zones': None,
             **image_config
         }
 
@@ -208,12 +240,11 @@ class Azure(clouds.Cloud):
             # TODO(zhwu): our azure subscription offer ID does not support spot.
             # Need to support it.
             return ([], [])
-        fuzzy_candidate_list = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
             resources = resources.copy(accelerators=None)
-            return ([resources], fuzzy_candidate_list)
+            return ([resources], [])
 
         def _make(instance_list):
             resource_list = []
@@ -223,28 +254,40 @@ class Azure(clouds.Cloud):
                     instance_type=instance_type,
                     # Setting this to None as Azure doesn't separately bill /
                     # attach the accelerators.  Billed as part of the VM type.
-                    accelerators=None)
+                    accelerators=None,
+                    cpus=None,
+                )
                 resource_list.append(r)
             return resource_list
 
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
         if accelerators is None:
-            # No requirements to filter, so just return a default VM type.
-            return (_make([Azure.get_default_instance_type()]),
-                    fuzzy_candidate_list)
+            # Return a default instance type with the given number of vCPUs.
+            default_instance_type = Azure.get_default_instance_type(
+                cpus=resources.cpus)
+            if default_instance_type is None:
+                return ([], [])
+            else:
+                return (_make([default_instance_type]), [])
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
         (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(acc,
-                                                              acc_count,
-                                                              clouds='azure')
+        ) = service_catalog.get_instance_type_for_accelerator(
+            acc,
+            acc_count,
+            cpus=resources.cpus,
+            use_spot=resources.use_spot,
+            region=resources.region,
+            zone=resources.zone,
+            clouds='azure')
         if instance_list is None:
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         help_str = (
             ' Run the following commands:'
@@ -262,22 +305,20 @@ class Azure(clouds.Cloud):
                     f'{azure_token_cache_file} does not exist.' + help_str)
 
         try:
-            output = _run_output('az account show --output=json')
+            _run_output('az --version')
         except subprocess.CalledProcessError:
             return False, (
+                # TODO(zhwu): Change the installation hint to from PyPI.
                 'Azure CLI returned error. Run the following commands:'
-                '\n      $ pip install skypilot[azure]  # if installed from '
-                'PyPI'
-                '\n    Or:'
-                '\n      $ pip install .[azure]  # if installed from source'
+                '\n      $ pip install skypilot[azure]'
                 '\n    Credentials may also need to be set.' + help_str)
-        # If Azure is properly logged in, this will return something like:
-        #   {"id": ..., "user": ...}
-        # and if not, it will return:
-        #   Please run 'az login' to setup account.
-        if output.startswith('{'):
-            return True, None
-        return False, 'Azure credentials not set.' + help_str
+        # If Azure is properly logged in, this will return the account email
+        # address + subscription ID.
+        try:
+            cls.get_current_user_identity()
+        except exceptions.CloudUserIdentityError:
+            return False, 'Azure credential is not set.' + help_str
+        return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
@@ -290,11 +331,6 @@ class Azure(clouds.Cloud):
         return service_catalog.instance_type_exists(instance_type,
                                                     clouds='azure')
 
-    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region,
-                                                    zone,
-                                                    clouds='azure')
-
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
                                       acc_count: int,
@@ -302,6 +338,44 @@ class Azure(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'azure')
+
+    @classmethod
+    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    def get_current_user_identity(cls) -> Optional[str]:
+        """Returns the cloud user identity."""
+        # This returns the user's email address + [subscription_id].
+        retry_cnt = 0
+        while True:
+            retry_cnt += 1
+            try:
+                import knack  # pylint: disable=import-outside-toplevel
+                account_email = azure.get_current_account_user()
+                break
+            except (FileNotFoundError, knack.util.CLIError) as e:
+                error = exceptions.CloudUserIdentityError(
+                    'Failed to get activated Azure account.\n'
+                    '  Reason: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
+                if retry_cnt <= _MAX_IDENTITY_FETCH_RETRY:
+                    logger.debug(f'{error}.\nRetrying...')
+                    continue
+                with ux_utils.print_exception_no_traceback():
+                    raise error from None
+            except Exception as e:  # pylint: disable=broad-except
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.CloudUserIdentityError(
+                        'Failed to get Azure user identity with unknown '
+                        f'exception.\n'
+                        '  Reason: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}'
+                    ) from e
+        try:
+            project_id = cls.get_project_id()
+        except (ModuleNotFoundError, RuntimeError) as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    'Failed to get Azure project ID.') from e
+        return f'{account_email} [subscription_id={project_id}]'
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:

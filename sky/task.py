@@ -8,7 +8,6 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import yaml
 
 import sky
-from sky import check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
@@ -143,7 +142,7 @@ class Task:
         self.storage_mounts = {}
         self.storage_plans = {}
         self.setup = setup
-        self._envs = envs
+        self._envs = envs or {}
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
@@ -275,7 +274,7 @@ class Task:
         fm_storages = []
         file_mounts = config.pop('file_mounts', None)
         if file_mounts is not None:
-            copy_mounts = dict()
+            copy_mounts = {}
             for dst_path, src in file_mounts.items():
                 # Check if it is str path
                 if isinstance(src, str):
@@ -354,7 +353,7 @@ class Task:
           ValueError: if various invalid inputs errors are detected.
         """
         if envs is None:
-            self._envs = None
+            self._envs = {}
             return self
         if isinstance(envs, (list, tuple)):
             keys = set(env[0] for env in envs)
@@ -381,6 +380,10 @@ class Task:
     @property
     def need_spot_recovery(self) -> bool:
         return any(r.spot_recovery is not None for r in self.resources)
+
+    @property
+    def use_spot(self) -> bool:
+        return any(r.use_spot for r in self.resources)
 
     @num_nodes.setter
     def num_nodes(self, num_nodes: Optional[int]) -> None:
@@ -445,6 +448,7 @@ class Task:
         """
         if isinstance(resources, sky.Resources):
             resources = {resources}
+        # TODO(woosuk): Check if the resources are None.
         self.resources = resources
         return self
 
@@ -467,8 +471,8 @@ class Task:
         """
         if self.time_estimator_func is None:
             raise NotImplementedError(
-                'Node [{}] does not have a cost model set; '
-                'call set_time_estimator() first'.format(self))
+                f'Node [{self}] does not have a cost model set; '
+                'call set_time_estimator() first')
         return self.time_estimator_func(resources)
 
     def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> 'Task':
@@ -677,12 +681,8 @@ class Task:
             storage_cloud = resources.cloud
             if storage_cloud is None:
                 # Get the first enabled cloud.
+                backend_utils.check_public_cloud_enabled()
                 enabled_clouds = global_user_state.get_enabled_clouds()
-                if len(enabled_clouds) == 0:
-                    check.check(quiet=True)
-                    enabled_clouds = global_user_state.get_enabled_clouds()
-                if len(enabled_clouds) == 0:
-                    raise ValueError('No enabled clouds.')
 
                 for cloud in storage_lib.STORE_ENABLED_CLOUDS:
                     for enabled_cloud in enabled_clouds:
@@ -717,8 +717,9 @@ class Task:
                 store_type = storage_plans[storage]
                 if store_type is storage_lib.StoreType.S3:
                     # TODO: allow for Storage mounting of different clouds
-                    if storage.source is not None and storage.source.startswith(
-                            's3://'):
+                    if storage.source is not None and not isinstance(
+                            storage.source,
+                            list) and storage.source.startswith('s3://'):
                         blob_path = storage.source
                     else:
                         blob_path = 's3://' + storage.name
@@ -726,7 +727,9 @@ class Task:
                         mnt_path: blob_path,
                     })
                 elif store_type is storage_lib.StoreType.GCS:
-                    if storage.source.startswith('gs://'):
+                    if storage.source is not None and not isinstance(
+                            storage.source,
+                            list) and storage.source.startswith('gs://'):
                         blob_path = storage.source
                     else:
                         blob_path = 'gs://' + storage.name
@@ -780,9 +783,11 @@ class Task:
 
         INTERNAL: this method is internal-facing.
         """
-        config = dict()
+        config = {}
 
-        def add_if_not_none(key, value):
+        def add_if_not_none(key, value, no_empty: bool = False):
+            if no_empty and not value:
+                return
             if value is not None:
                 config[key] = value
 
@@ -805,9 +810,9 @@ class Task:
         add_if_not_none('setup', self.setup)
         add_if_not_none('workdir', self.workdir)
         add_if_not_none('run', self.run)
-        add_if_not_none('envs', self.envs)
+        add_if_not_none('envs', self.envs, no_empty=True)
 
-        add_if_not_none('file_mounts', dict())
+        add_if_not_none('file_mounts', {})
 
         if self.file_mounts is not None:
             config['file_mounts'].update(self.file_mounts)

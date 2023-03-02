@@ -14,7 +14,7 @@
     <img alt="GitHub Release" src="https://img.shields.io/github/release/skypilot-org/skypilot.svg">
   </a>
   
-  <a href="https://join.slack.com/t/skypilot-org/shared_invite/zt-1i4pa7lyc-g6Lo4_rqqCFWOSXdvwTs3Q"> 
+  <a href="http://slack.skypilot.co"> 
     <img alt="Join Slack" src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack">
   </a>
   
@@ -27,8 +27,8 @@
 
 SkyPilot is a framework for easily and cost effectively running ML workloads[^1] on any cloud. 
 
-SkyPilot abstracts away cloud infra burden:
-- Launch jobs & clusters on any cloud (AWS, Azure, GCP)
+SkyPilot abstracts away the cloud infra burden:
+- Launch jobs & clusters on any cloud (AWS, Azure, GCP, Lambda Cloud)
 - Find scarce resources across zones/regions/clouds
 - Queue jobs & use cloud object stores
 
@@ -42,7 +42,7 @@ SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code change
 
 Install with pip (choose your clouds) or [from source](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html):
 ```
-pip install "skypilot[aws,gcp,azure]"
+pip install "skypilot[aws,gcp,azure,lambda]"
 ```
 
 ## Getting Started
@@ -86,7 +86,7 @@ Prepare the workdir by cloning:
 git clone https://github.com/pytorch/examples.git ~/torch_examples
 ```
 
-Launch with `sky launch`:
+Launch with `sky launch` (note: [access to GPU instances](https://skypilot.readthedocs.io/en/latest/reference/quota.html) is needed for this example):
 ```bash
 sky launch my_task.yaml
 ```
@@ -113,13 +113,15 @@ Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/
 - [YAML reference](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html)
 - Framework examples: [PyTorch DDP](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml),  [Distributed](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py) [TensorFlow](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml), [JAX/Flax on TPU](https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml), [Stable Diffusion](https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion), [Detectron2](https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml), [programmatic grid search](https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py), [Docker](https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml), and [many more](./examples).
 
+More information:
+- [Introductory blog post](https://medium.com/@zongheng_yang/skypilot-ml-and-data-science-on-any-cloud-with-massive-cost-savings-244189cc7c0f)
 
 ## Issues, feature requests, and questions
 We are excited to hear your feedback! 
 * For issues and feature requests, please [open a GitHub issue](https://github.com/skypilot-org/skypilot/issues/new).
 * For questions, please use [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
 
-For general discussions, join us on the [SkyPilot Slack](https://join.slack.com/t/skypilot-org/shared_invite/zt-1i4pa7lyc-g6Lo4_rqqCFWOSXdvwTs3Q).
+For general discussions, join us on the [SkyPilot Slack](http://slack.skypilot.co).
 
 ## Contributing
 We welcome and value all contributions to the project! Please refer to [CONTRIBUTING](CONTRIBUTING.md) for how to get involved.

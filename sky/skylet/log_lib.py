@@ -110,11 +110,12 @@ def process_subprocess_stream(
 def run_with_log(
     cmd: Union[List[str], str],
     log_path: str,
+    *,
+    require_outputs: bool = False,
     stream_logs: bool = False,
     start_streaming_at: str = '',
     end_streaming_at: Optional[str] = None,
     skip_lines: Optional[List[str]] = None,
-    require_outputs: bool = False,
     shell: bool = False,
     with_ray: bool = False,
     process_stream: bool = True,
@@ -161,13 +162,13 @@ def run_with_log(
         os.makedirs(dirname, exist_ok=True)
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
-    stdout = stderr = None
+    stdout_arg = stderr_arg = None
     if process_stream:
-        stdout = subprocess.PIPE
-        stderr = subprocess.PIPE if not with_ray else subprocess.STDOUT
+        stdout_arg = subprocess.PIPE
+        stderr_arg = subprocess.PIPE if not with_ray else subprocess.STDOUT
     with subprocess.Popen(cmd,
-                          stdout=stdout,
-                          stderr=stderr,
+                          stdout=stdout_arg,
+                          stderr=stderr_arg,
                           start_new_session=True,
                           shell=shell,
                           **kwargs) as proc:
@@ -302,6 +303,7 @@ def run_bash_command_with_log(bash_command: str,
         # Need this `-i` option to make sure `source ~/.bashrc` work.
         inner_command = f'/bin/bash -i {script_path}'
 
+        subprocess_cmd: Union[str, List[str]]
         if use_sudo:
             subprocess.run(f'chmod a+rwx {script_path}', shell=True, check=True)
             subprocess_cmd = job_lib.make_job_command_with_user_switching(
@@ -351,14 +353,16 @@ def _follow_job_logs(file,
             # Auto-exit the log tailing, if the job has finished. Check
             # the job status before query again to avoid unfinished logs.
             if status not in [
-                    job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING
+                    job_lib.JobStatus.SETTING_UP, job_lib.JobStatus.PENDING,
+                    job_lib.JobStatus.RUNNING
             ]:
                 if wait_last_logs:
                     # Wait all the logs are printed before exit.
                     time.sleep(1 + _SKY_LOG_TAILING_GAP_SECONDS)
                     wait_last_logs = False
                     continue
-                print(f'INFO: Job finished (status: {status.value}).')
+                status_str = status.value if status is not None else 'None'
+                print(f'INFO: Job finished (status: {status_str}).')
                 return
 
             time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)
@@ -382,14 +386,14 @@ def tail_logs(job_owner: str,
     job_str = f'job {job_id}'
     if spot_job_id is not None:
         job_str = f'spot job {spot_job_id}'
-    logger.debug(f'Tailing logs for job, real job_id {job_id}, spot_job_id '
-                 f'{spot_job_id}.')
-    logger.info(f'{colorama.Fore.YELLOW}Start streaming logs for {job_str}.'
-                f'{colorama.Style.RESET_ALL}')
     if log_dir is None:
         print(f'{job_str.capitalize()} not found (see `sky queue`).',
               file=sys.stderr)
         return
+    logger.debug(f'Tailing logs for job, real job_id {job_id}, spot_job_id '
+                 f'{spot_job_id}.')
+    logger.info(f'{colorama.Fore.YELLOW}Start streaming logs for {job_str}.'
+                f'{colorama.Style.RESET_ALL}')
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
 
@@ -398,11 +402,7 @@ def tail_logs(job_owner: str,
     # Wait for the log to be written. This is needed due to the `ray submit`
     # will take some time to start the job and write the log.
     retry_cnt = 0
-    while status in [
-            job_lib.JobStatus.INIT,
-            job_lib.JobStatus.PENDING,
-            job_lib.JobStatus.RUNNING,
-    ]:
+    while status is not None and not status.is_terminal():
         retry_cnt += 1
         if os.path.exists(log_path) and status != job_lib.JobStatus.INIT:
             break
@@ -419,7 +419,9 @@ def tail_logs(job_owner: str,
 
     start_stream_at = 'INFO: Tip: use Ctrl-C to exit log'
     if follow and status in [
-            job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING
+            job_lib.JobStatus.SETTING_UP,
+            job_lib.JobStatus.PENDING,
+            job_lib.JobStatus.RUNNING,
     ]:
         # Not using `ray job logs` because it will put progress bar in
         # multiple lines.

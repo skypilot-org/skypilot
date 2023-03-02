@@ -1,12 +1,13 @@
-import copy
-from typing import Tuple
+"""Analyze the new catalog fetched with the original."""
+
+from typing import List
 import pandas as pd
 
 from sky.clouds.service_catalog import common
 
 
 def resource_diff(original_df: pd.DataFrame, new_df: pd.DataFrame,
-                  check_tuple: Tuple[str]) -> pd.DataFrame:
+                  check_tuple: List[str]) -> pd.DataFrame:
     """Returns the difference between two dataframes."""
     original_resources = original_df[check_tuple]
     new_resources = new_df[check_tuple]
@@ -28,24 +29,27 @@ table = {}
 for cloud in CLOUD_CHECKS:
     result = {}
     print(f'=> Checking {cloud}')
-    original_df = common.read_catalog(f'{cloud}.csv')
-    new_df = pd.read_csv(f'{cloud}.csv')
+    original_catalog_df = common.read_catalog(f'{cloud}.csv')
+    new_catalog_df = pd.read_csv(f'{cloud}.csv')
 
     current_check_tuple = CLOUD_CHECKS[cloud]
 
-    diff_df = resource_diff(original_df, new_df, current_check_tuple)
-    diff_df.merge(new_df, on=current_check_tuple,
-                  how='left').to_csv(f'{cloud}_diff.csv', index=False)
+    resource_diff_df = resource_diff(original_catalog_df, new_catalog_df,
+                                     current_check_tuple)
+    resource_diff_df.merge(new_catalog_df, on=current_check_tuple,
+                           how='left').to_csv(f'{cloud}_diff.csv', index=False)
 
-    result['#resources'] = len(diff_df)
+    result['#resources'] = len(resource_diff_df)
 
     check_price = current_check_tuple + ['Price']
-    diff_df = resource_diff(original_df, new_df, check_price)
-    result['#prices'] = len(diff_df)
+    price_diff_df = resource_diff(original_catalog_df, new_catalog_df,
+                                  check_price)
+    result['#prices'] = len(price_diff_df)
 
     check_price = current_check_tuple + ['SpotPrice']
-    diff_df = resource_diff(original_df, new_df, check_price)
-    result['#spot_prices'] = len(diff_df)
+    spot_price_diff_df = resource_diff(original_catalog_df, new_catalog_df,
+                                       check_price)
+    result['#spot_prices'] = len(spot_price_diff_df)
 
     table[cloud] = result
 

@@ -7,8 +7,11 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
+import colorama
+
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.utils import db_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -32,8 +35,12 @@ _CURSOR.execute("""\
     last_recovered_at FLOAT DEFAULT -1,
     recovery_count INTEGER DEFAULT 0,
     job_duration FLOAT DEFAULT 0)""")
-# job_duration is the time a job actually runs before last_recover,
-# excluding the provision and recovery time.
+
+db_utils.add_column_to_table(_CURSOR, _CONN, 'spot', 'failure_reason', 'TEXT')
+
+# job_duration is the time a job actually runs (including the
+# setup duration) before last_recover, excluding the provision
+# and recovery time.
 # If the job is not finished:
 # total_job_duration = now() - last_recovered_at + job_duration
 # If the job is not finished:
@@ -43,23 +50,79 @@ _CONN.commit()
 columns = [
     'job_id', 'job_name', 'resources', 'submitted_at', 'status',
     'run_timestamp', 'start_at', 'end_at', 'last_recovered_at',
-    'recovery_count', 'job_duration'
+    'recovery_count', 'job_duration', 'failure_reason'
 ]
 
 
 class SpotStatus(enum.Enum):
-    """Spot job status, designed to be in serverless style"""
+    """Spot job status, designed to be in serverless style.
+
+    The SpotStatus is a higher level status than the JobStatus.
+    Each spot job submitted to the spot cluster, will have a JobStatus
+    on that spot cluster:
+        JobStatus = [INIT, SETTING_UP, PENDING, RUNNING, ...]
+    Whenever the spot cluster is preempted and recovered, the JobStatus
+    will go through the statuses above again.
+    That means during the lifetime of a spot job, its JobsStatus could be
+    reset to INIT or SETTING_UP multiple times (depending on the preemptions).
+
+    However, a spot job only has one SpotStatus on the spot controller.
+        SpotStatus = [PENDING, SUBMITTED, STARTING, RUNNING, ...]
+    Mapping from JobStatus to SpotStatus:
+        INIT            ->  STARTING/RECOVERING
+        SETTING_UP      ->  RUNNING
+        PENDING         ->  RUNNING
+        RUNNING         ->  RUNNING
+        SUCCEEDED       ->  SUCCEEDED
+        FAILED          ->  FAILED
+        FAILED_SETUP    ->  FAILED_SETUP
+    Note that the JobStatus will not be stuck in PENDING, because each spot
+    cluster is dedicated to a spot job, i.e. there should always be enough
+    resource to run the job and the job will be immediately transitioned to
+    RUNNING.
+    """
+    # PENDING: Waiting for the spot controller to have a slot to run the
+    # controller process.
+    # The submitted_at timestamp of the spot job in the 'spot' table will be
+    # set to the time when the job is firstly submitted by the user (set to
+    # PENDING).
     PENDING = 'PENDING'
+    # SUBMITTED: The spot controller starts the controller process.
     SUBMITTED = 'SUBMITTED'
+    # STARTING: The controller process is launching the spot cluster for
+    # the spot job.
     STARTING = 'STARTING'
+    # RUNNING: The job is submitted to the spot cluster, and is setting up
+    # or running.
+    # The start_at timestamp of the spot job in the 'spot' table will be set
+    # to the time when the job is firstly transitioned to RUNNING.
     RUNNING = 'RUNNING'
+    # RECOVERING: The spot cluster is preempted, and the controller process
+    # is recovering the spot cluster (relaunching/failover).
     RECOVERING = 'RECOVERING'
     # Terminal statuses
+    # SUCCEEDED: The job is finished successfully.
     SUCCEEDED = 'SUCCEEDED'
-    FAILED = 'FAILED'
-    FAILED_NO_RESOURCE = 'FAILED_NO_RESOURCE'
-    FAILED_CONTROLLER = 'FAILED_CONTROLLER'
+    # CANCELLED: The job is cancelled by the user.
     CANCELLED = 'CANCELLED'
+    # FAILED: The job is finished with failure from the user's program.
+    FAILED = 'FAILED'
+    # FAILED_SETUP: The job is finished with failure from the user's setup
+    # script.
+    FAILED_SETUP = 'FAILED_SETUP'
+    # FAILED_PRECHECKS: the underlying `sky.launch` fails due to precheck
+    # errors only. I.e., none of the failover exceptions, if any, is due to
+    # resources unavailability. This exception includes the following cases:
+    # 1. The optimizer cannot find a feasible solution.
+    # 2. Precheck errors: invalid cluster name, failure in getting cloud user
+    #    identity, or unsupported feature.
+    FAILED_PRECHECKS = 'FAILED_PRECHECKS'
+    # FAILED_NO_RESOURCE: The job is finished with failure because there is no
+    # resource available in the cloud provider(s) to launch the spot cluster.
+    FAILED_NO_RESOURCE = 'FAILED_NO_RESOURCE'
+    # FAILED_CONTROLLER: The job is finished with failure because of unexpected
+    # error in the controller process.
+    FAILED_CONTROLLER = 'FAILED_CONTROLLER'
 
     def is_terminal(self) -> bool:
         return self in self.terminal_statuses()
@@ -67,14 +130,44 @@ class SpotStatus(enum.Enum):
     def is_failed(self) -> bool:
         return self in self.failure_statuses()
 
+    def colored_str(self):
+        color = _SPOT_STATUS_TO_COLOR[self]
+        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
     @classmethod
     def terminal_statuses(cls) -> List['SpotStatus']:
-        return (cls.SUCCEEDED, cls.FAILED, cls.FAILED_NO_RESOURCE,
-                cls.FAILED_CONTROLLER, cls.CANCELLED)
+        return [
+            cls.SUCCEEDED,
+            cls.FAILED,
+            cls.FAILED_SETUP,
+            cls.FAILED_PRECHECKS,
+            cls.FAILED_NO_RESOURCE,
+            cls.FAILED_CONTROLLER,
+            cls.CANCELLED,
+        ]
 
     @classmethod
     def failure_statuses(cls) -> List['SpotStatus']:
-        return (cls.FAILED, cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER)
+        return [
+            cls.FAILED, cls.FAILED_SETUP, cls.FAILED_PRECHECKS,
+            cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER
+        ]
+
+
+_SPOT_STATUS_TO_COLOR = {
+    SpotStatus.PENDING: colorama.Fore.BLUE,
+    SpotStatus.SUBMITTED: colorama.Fore.BLUE,
+    SpotStatus.STARTING: colorama.Fore.BLUE,
+    SpotStatus.RUNNING: colorama.Fore.GREEN,
+    SpotStatus.RECOVERING: colorama.Fore.CYAN,
+    SpotStatus.SUCCEEDED: colorama.Fore.GREEN,
+    SpotStatus.FAILED: colorama.Fore.RED,
+    SpotStatus.FAILED_PRECHECKS: colorama.Fore.RED,
+    SpotStatus.FAILED_SETUP: colorama.Fore.RED,
+    SpotStatus.FAILED_NO_RESOURCE: colorama.Fore.RED,
+    SpotStatus.FAILED_CONTROLLER: colorama.Fore.RED,
+    SpotStatus.CANCELLED: colorama.Fore.YELLOW,
+}
 
 
 # === Status transition functions ===
@@ -163,12 +256,15 @@ def set_succeeded(job_id: int, end_time: float):
 
 def set_failed(job_id: int,
                failure_type: SpotStatus,
+               failure_reason: str,
                end_time: Optional[float] = None):
     assert failure_type.is_failed(), failure_type
     end_time = time.time() if end_time is None else end_time
+
     fields_to_set = {
         'end_at': end_time,
         'status': failure_type.value,
+        'failure_reason': failure_reason,
     }
     previsou_status = _CURSOR.execute(
         'SELECT status FROM spot WHERE job_id=(?)', (job_id,)).fetchone()
@@ -187,14 +283,7 @@ def set_failed(job_id: int,
         WHERE job_id=(?) AND end_at IS null""",
         (*list(fields_to_set.values()), job_id))
     _CONN.commit()
-    if failure_type == SpotStatus.FAILED:
-        logger.info('Job failed due to user code.')
-    elif failure_type == SpotStatus.FAILED_NO_RESOURCE:
-        logger.info('Job failed due to failing to find available resources '
-                    'after retries.')
-    else:
-        assert failure_type == SpotStatus.FAILED_CONTROLLER, failure_type
-        logger.info('Job failed due to unexpected controller failure.')
+    logger.info(failure_reason)
 
 
 def set_cancelled(job_id: int):
@@ -238,6 +327,18 @@ def get_status(job_id: int) -> Optional[SpotStatus]:
     return SpotStatus(status[0])
 
 
+def get_failure_reason(job_id: int) -> Optional[str]:
+    """Get the failure reason of a job."""
+    reason = _CURSOR.execute(
+        """\
+        SELECT failure_reason FROM spot WHERE job_id=(?)""",
+        (job_id,)).fetchone()
+    if reason is None:
+        return None
+    # reason[0] will be None if it is unfilled.
+    return reason[0]
+
+
 def get_spot_jobs() -> List[Dict[str, Any]]:
     """Get spot clusters' status."""
     rows = _CURSOR.execute("""\
@@ -264,3 +365,4 @@ def get_latest_job_id() -> Optional[int]:
         SELECT job_id FROM spot ORDER BY submitted_at DESC LIMIT 1""")
     for (job_id,) in rows:
         return job_id
+    return None

@@ -24,6 +24,8 @@ builtin cd "$ROOT" || exit 1
 YAPF_VERSION=$(yapf --version | awk '{print $2}')
 PYLINT_VERSION=$(pylint --version | head -n 1 | awk '{print $2}')
 PYLINT_QUOTES_VERSION=$(pip list | grep pylint-quotes | awk '{print $2}')
+MYPY_VERSION=$(mypy --version | awk '{print $2}')
+BLACK_VERSION=$(black --version | head -n 1 | awk '{print $2}')
 
 # # params: tool name, tool version, required version
 tool_version_check() {
@@ -33,9 +35,11 @@ tool_version_check() {
     fi
 }
 
-tool_version_check "yapf" $YAPF_VERSION "0.32.0"
-tool_version_check "pylint" $PYLINT_VERSION "2.8.2"
-tool_version_check "pylint-quotes" $PYLINT_QUOTES_VERSION "0.2.3"
+tool_version_check "yapf" $YAPF_VERSION "$(grep yapf requirements-dev.txt | cut -d'=' -f3)"
+tool_version_check "pylint" $PYLINT_VERSION "$(grep "pylint==" requirements-dev.txt | cut -d'=' -f3)"
+tool_version_check "pylint-quotes" $PYLINT_QUOTES_VERSION "$(grep "pylint-quotes==" requirements-dev.txt | cut -d'=' -f3)"
+tool_version_check "mypy" "$MYPY_VERSION" "$(grep mypy requirements-dev.txt | cut -d'=' -f3)"
+tool_version_check "black" "$BLACK_VERSION" "$(grep black requirements-dev.txt | cut -d'=' -f3)"
 
 YAPF_FLAGS=(
     '--recursive'
@@ -43,7 +47,15 @@ YAPF_FLAGS=(
 )
 
 YAPF_EXCLUDES=(
-    '--exclude' 'sky/skylet/providers/**'
+    '--exclude' 'sky/skylet/providers/aws/**'
+    '--exclude' 'sky/skylet/providers/gcp/**'
+    '--exclude' 'sky/skylet/providers/azure/**'
+)
+
+BLACK_INCLUDES=(
+    'sky/skylet/providers/aws'
+    'sky/skylet/providers/gcp'
+    'sky/skylet/providers/azure'
 )
 
 # Format specified files
@@ -62,8 +74,8 @@ format_changed() {
     # exist on both branches.
     MERGEBASE="$(git merge-base origin/master HEAD)"
 
-    if ! git diff --diff-filter=ACM --quiet --exit-code "$MERGEBASE" -- '*.py' &>/dev/null; then
-        git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' | xargs -P 5 \
+    if ! git diff --diff-filter=ACM --quiet --exit-code "$MERGEBASE" -- '*.py' '*.pyi' &>/dev/null; then
+        git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' | xargs -P 5 \
              yapf --in-place "${YAPF_EXCLUDES[@]}" "${YAPF_FLAGS[@]}"
     fi
 
@@ -86,12 +98,19 @@ else
    # Format only the files that changed in last commit.
    format_changed
 fi
+echo 'SkyPilot yapf: Done'
+echo 'SkyPilot Black:'
+black "${BLACK_INCLUDES[@]}"
+
+# Run mypy
+# TODO(zhwu): When more of the codebase is typed properly, the mypy flags
+# should be set to do a more stringent check.
+echo 'SkyPilot mypy:'
+mypy $(cat tests/mypy_files.txt)
 
 # Run Pylint
 echo 'Sky Pylint:'
 pylint --load-plugins pylint_quotes sky
-echo 'Sky Utils Pylint:'
-pylint --load-plugins pylint_quotes sky/utils
 
 if ! git diff --quiet &>/dev/null; then
     echo 'Reformatted files. Please review and stage the changes.'

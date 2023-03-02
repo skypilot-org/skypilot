@@ -1,10 +1,11 @@
+import copy
 import json
 import logging
 from pathlib import Path
 from threading import RLock
 from uuid import uuid4
 
-from azure.identity import DefaultAzureCredential
+from azure.identity import AzureCliCredential
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.resource import ResourceManagementClient
@@ -62,15 +63,12 @@ class AzureNodeProvider(NodeProvider):
         # group after tearing down the cluster. To comfort the autoscaler, we need
         # to create/update it here, so the resource group always exists.
         from sky.skylet.providers.azure.config import _configure_resource_group
+
         _configure_resource_group({"provider": provider_config})
         subscription_id = provider_config["subscription_id"]
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
-        # AWS provides managed identity for Azure, but it is not setup properly by
-        # default. This interferes with azure-cli credentials and causes failures,
-        # when using sky to launch Azure on AWS ec2 instances. We disable it to give
-        # way to azure-cli credentials.
-        credential = DefaultAzureCredential(exclude_shared_token_cache_credential=True,
-                                            exclude_managed_identity_credential=True)
+        # Sky only supports Azure CLI credential for now.
+        credential = AzureCliCredential()
         self.compute_client = ComputeManagementClient(credential, subscription_id)
         self.network_client = NetworkManagementClient(credential, subscription_id)
         self.resource_client = ResourceManagementClient(credential, subscription_id)
@@ -193,11 +191,48 @@ class AzureNodeProvider(NodeProvider):
             VALIDITY_TAGS = [
                 TAG_RAY_CLUSTER_NAME,
                 TAG_RAY_NODE_KIND,
-                TAG_RAY_LAUNCH_CONFIG,
                 TAG_RAY_USER_NODE_TYPE,
             ]
             filters = {tag: tags[tag] for tag in VALIDITY_TAGS if tag in tags}
-            reuse_nodes = self.stopped_nodes(filters)[:count]
+            filters_with_launch_config = copy.copy(filters)
+            if TAG_RAY_LAUNCH_CONFIG in tags:
+                filters_with_launch_config[TAG_RAY_LAUNCH_CONFIG] = tags[
+                    TAG_RAY_LAUNCH_CONFIG
+                ]
+
+            # SkyPilot: We try to use the instances with the same matching launch_config first. If
+            # there is not enough instances with matching launch_config, we then use all the
+            # instances with the same matching launch_config plus some instances with wrong
+            # launch_config.
+            nodes_matching_launch_config = self.stopped_nodes(
+                filters_with_launch_config
+            )
+            nodes_matching_launch_config.sort(reverse=True)
+            if len(nodes_matching_launch_config) >= count:
+                reuse_nodes = nodes_matching_launch_config[:count]
+            else:
+                nodes_all = self.stopped_nodes(filters)
+                nodes_non_matching_launch_config = [
+                    n for n in nodes_all if n not in nodes_matching_launch_config
+                ]
+                # This sort is for backward compatibility, where the user already has
+                # leaked stopped nodes with the different launch config before update
+                # to #1671, and the total number of the leaked nodes is greater than
+                # the number of nodes to be created. With this, we make sure the nodes
+                # are reused in a deterministic order (sorting by str IDs; we cannot
+                # get the launch time info here; otherwise, sort by the launch time
+                # is more accurate.)
+                # This can be removed in the future when we are sure all the users
+                # have updated to #1671.
+                nodes_non_matching_launch_config.sort(reverse=True)
+                reuse_nodes = (
+                    nodes_matching_launch_config + nodes_non_matching_launch_config
+                )
+                # The total number of reusable nodes can be less than the number of nodes to be created.
+                # This `[:count]` is fine, as it will get all the reusable nodes, even if there are
+                # less nodes.
+                reuse_nodes = reuse_nodes[:count]
+
             logger.info(
                 f"Reusing nodes {list(reuse_nodes)}. "
                 "To disable reuse, set `cache_stopped_nodes: False` "
