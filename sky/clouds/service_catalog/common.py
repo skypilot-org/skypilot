@@ -1,5 +1,6 @@
 """Common utilities for service catalog."""
 import hashlib
+import json
 import os
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
@@ -214,7 +215,8 @@ def validate_region_zone_impl(
     return validated_region, validated_zone
 
 
-def get_region_cheapest_hourly_storage_cost(
+def get_region_cheapest_storage_cost(
+    time_in_hour: float,
     storage_df: pd.DataFrame,
     region: str,
     disk_size: int,
@@ -226,12 +228,29 @@ def get_region_cheapest_hourly_storage_cost(
     if 'Region' not in storage_df.columns:
         return 0.0
     df = storage_df[storage_df['Region'] == region]
-    cheapest_idx = df['Price'].idxmin()  # GB per month
-    # Suppose one month have 30 days here.
-    return df.loc[cheapest_idx]['Price'] * disk_size / (30 * 24)
+    cheapest_price = None
+    for _, row in df.iterrows():
+        price_str = row['Price']
+        price = json.loads(price_str)
+        assert isinstance(price, dict)
+        # assume one month have 30 days here
+        units = time_in_hour * disk_size / 30 / 24
+        tot_price = 0.0
+        # for tier_min_unit in reversed order
+        for tier_min_unit in sorted(price.keys(), key=lambda x: -float(x)):
+            if units >= float(tier_min_unit):
+                tot_price += price[tier_min_unit] * (units -
+                                                     float(tier_min_unit))
+                units = float(tier_min_unit)
+        assert abs(units) < 1e-2, units
+        if cheapest_price is None or tot_price < cheapest_price:
+            cheapest_price = tot_price
+    assert cheapest_price is not None
+    return cheapest_price
 
 
-def get_hourly_cost_impl(
+def get_cost_impl(
+    time_in_hour: float,
     df: pd.DataFrame,
     storage_df: pd.DataFrame,
     instance_type: str,
@@ -240,10 +259,13 @@ def get_hourly_cost_impl(
     region: Optional[str],
     zone: Optional[str],
 ) -> float:
-    """Returns the hourly price of a VM instance in the given region and zone.
+    """Returns the price of a VM instance in the given region and zone.
+
+    if `time_in_hour` < 0, this function returns hourly price.
+    @see gcp_catalog.py
 
     This implenemtation considered both vm price and storage price.
-    Refer to get_hourly_cost in service_catalog/__init__.py for the docstring.
+    Refer to get_cost in service_catalog/__init__.py for the docstring.
     """
     # total_hourly_cost = instance_price + disk_size * storage_price
     df = _get_instance_type(df, instance_type, region, zone)
@@ -273,9 +295,10 @@ def get_hourly_cost_impl(
     cheapest_price = None
     for _, row in df[['Region', price_str]].iterrows():
         instance_region, price = row['Region'], row[price_str]
-        storage_price = get_region_cheapest_hourly_storage_cost(
-            storage_df, instance_region, disk_size)
-        cur_price = price + storage_price
+        storage_price = get_region_cheapest_storage_cost(
+            time_in_hour, storage_df, instance_region, disk_size)
+        cur_price = price * time_in_hour + storage_price \
+            if time_in_hour >= 0 else price
         if cheapest_price is None or cur_price < cheapest_price:
             cheapest_price = cur_price
     assert cheapest_price is not None

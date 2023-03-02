@@ -132,24 +132,25 @@ def get_region_zones_for_instance_type(
                                instance_type, use_spot)
 
 
-def get_hourly_cost(instance_type: str,
-                    disk_size: int,
-                    use_spot: bool,
-                    region: Optional[str],
-                    zone: Optional[str],
-                    clouds: CloudFilter = None) -> float:
-    """Returns the hourly price of a VM instance in the given region and zone.
+def get_cost(time_in_hour: float,
+             instance_type: str,
+             disk_size: int,
+             use_spot: bool,
+             region: Optional[str],
+             zone: Optional[str],
+             clouds: CloudFilter = None) -> float:
+    """Returns the price of a VM instance in the given region and zone.
 
-    * If (region, zone) == (None, None), return the cheapest hourly price among
+    * If (region, zone) == (None, None), return the cheapest price among
         all regions and zones.
-    * If (region, zone) == (str, None), return the cheapest hourly price among
+    * If (region, zone) == (str, None), return the cheapest price among
         all the zones in the given region.
-    * If (region, zone) == (None, str), return the hourly price of the instance
+    * If (region, zone) == (None, str), return the price of the instance
         type in the zone.
     * If (region, zone) == (str, str), zone must be in the region, and the
-        function returns the hourly price of the instance type in the zone.
+        function returns the price of the instance type in the zone.
     """
-    return _map_clouds_catalog(clouds, 'get_hourly_cost', instance_type,
+    return _map_clouds_catalog(clouds, 'get_cost', time_in_hour, instance_type,
                                disk_size, use_spot, region, zone)
 
 
@@ -300,7 +301,7 @@ __all__ = [
     'list_accelerators',
     'list_accelerator_counts',
     'get_region_zones_for_instance_type',
-    'get_hourly_cost',
+    'get_cost',
     'get_accelerators_from_instance_type',
     'get_instance_type_for_accelerator',
     'get_accelerator_hourly_cost',

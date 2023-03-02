@@ -167,9 +167,10 @@ class Cloud:
 
     #### Normal methods ####
 
-    def instance_type_to_hourly_cost(self, instance_type: str, disk_size: int,
-                                     use_spot: bool, region: Optional[str],
-                                     zone: Optional[str]) -> float:
+    def instance_type_to_cost(self, time_in_hour: float, instance_type: str,
+                              disk_size: int, use_spot: bool,
+                              region: Optional[str],
+                              zone: Optional[str]) -> float:
         """Returns the hourly on-demand/spot price for an instance type."""
         raise NotImplementedError
 

@@ -44,18 +44,19 @@ def accelerator_in_region_or_zone(acc_name: str,
                                                      region, zone)
 
 
-def get_hourly_cost(instance_type: str,
-                    disk_size: int,
-                    use_spot: bool = False,
-                    region: Optional[str] = None,
-                    zone: Optional[str] = None) -> float:
+def get_cost(time_in_hour: float,
+             instance_type: str,
+             disk_size: int,
+             use_spot: bool = False,
+             region: Optional[str] = None,
+             zone: Optional[str] = None) -> float:
     # Ref: https://azure.microsoft.com/en-us/support/legal/offer-details/
     assert not use_spot, 'Current Azure subscription does not support spot.'
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure does not support zones.')
-    return common.get_hourly_cost_impl(_df, _storage_df, instance_type,
-                                       disk_size, use_spot, region, zone)
+    return common.get_cost_impl(time_in_hour, _df, _storage_df, instance_type,
+                                disk_size, use_spot, region, zone)
 
 
 def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:

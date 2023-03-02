@@ -242,18 +242,20 @@ class AWS(clouds.Cloud):
 
     #### Normal methods ####
 
-    def instance_type_to_hourly_cost(self,
-                                     instance_type: str,
-                                     disk_size: int,
-                                     use_spot: bool,
-                                     region: Optional[str] = None,
-                                     zone: Optional[str] = None) -> float:
-        return service_catalog.get_hourly_cost(instance_type,
-                                               disk_size=disk_size,
-                                               use_spot=use_spot,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='aws')
+    def instance_type_to_cost(self,
+                              time_in_hour: float,
+                              instance_type: str,
+                              disk_size: int,
+                              use_spot: bool,
+                              region: Optional[str] = None,
+                              zone: Optional[str] = None) -> float:
+        return service_catalog.get_cost(time_in_hour,
+                                        instance_type,
+                                        disk_size=disk_size,
+                                        use_spot=use_spot,
+                                        region=region,
+                                        zone=zone,
+                                        clouds='aws')
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
