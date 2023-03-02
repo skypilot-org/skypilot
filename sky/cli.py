@@ -1428,8 +1428,8 @@ def _get_spot_jobs(
         msg = ('Failed to query spot jobs due to connection '
                'issues. Try again later.')
     else:
-        max_jobs_to_show = (None if limit_num_jobs_to_show else
-                            _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS)
+        max_jobs_to_show = (_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS
+                            if limit_num_jobs_to_show else None)
         msg = spot_lib.format_job_table(spot_jobs,
                                         show_all=show_all,
                                         max_jobs=max_jobs_to_show)
