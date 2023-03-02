@@ -31,17 +31,22 @@ logger = sky_logging.init_logger(__name__)
 
 # pylint: disable=redefined-builtin
 
-
 echo = print
+is_silent = False
+
 
 @contextlib.contextmanager
 def silent():
     """Silence all SkyPilot output."""
     global echo
+    global is_silent
     previous_echo = echo
+    previous_is_silent = is_silent
+    is_silent = True
     echo = lambda *args, **kwargs: None
     yield
     echo = previous_echo
+    is_silent = previous_is_silent
 
 
 @usage_lib.entrypoint
@@ -562,15 +567,15 @@ def cancel(cluster_name: str,
 
     if all:
         echo(f'{colorama.Fore.YELLOW}'
-              f'Cancelling all jobs on cluster {cluster_name!r}...'
-              f'{colorama.Style.RESET_ALL}')
+             f'Cancelling all jobs on cluster {cluster_name!r}...'
+             f'{colorama.Style.RESET_ALL}')
         job_ids = None
     else:
         assert job_ids is not None, 'job_ids should not be None'
         jobs_str = ', '.join(map(str, job_ids))
         echo(f'{colorama.Fore.YELLOW}'
-              f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
-              f'{colorama.Style.RESET_ALL}')
+             f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
+             f'{colorama.Style.RESET_ALL}')
 
     backend.cancel_jobs(handle, job_ids)
 
@@ -606,8 +611,8 @@ def tail_logs(cluster_name: str,
     if job_id is None:
         job_str = 'the last job'
     echo(f'{colorama.Fore.YELLOW}'
-          f'Tailing logs of {job_str} on cluster {cluster_name!r}...'
-          f'{colorama.Style.RESET_ALL}')
+         f'Tailing logs of {job_str} on cluster {cluster_name!r}...'
+         f'{colorama.Style.RESET_ALL}')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.tail_logs(handle, job_id, follow=follow)
@@ -649,8 +654,8 @@ def download_logs(
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     echo(f'{colorama.Fore.YELLOW}'
-          'Syncing down logs to local...'
-          f'{colorama.Style.RESET_ALL}')
+         'Syncing down logs to local...'
+         f'{colorama.Style.RESET_ALL}')
     local_log_dirs = backend.sync_down_logs(handle, job_ids, local_dir)
     return local_log_dirs
 
@@ -697,8 +702,8 @@ def job_status(cluster_name: str,
         return {}
 
     echo(f'{colorama.Fore.YELLOW}'
-          'Getting job status...'
-          f'{colorama.Style.RESET_ALL}')
+         'Getting job status...'
+         f'{colorama.Style.RESET_ALL}')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     statuses = backend.get_job_status(handle, job_ids, stream_logs=stream_logs)
@@ -751,15 +756,16 @@ def spot_queue(refresh: bool,
     stop_msg = ''
     if not refresh:
         stop_msg = 'To view the latest job table: sky spot queue --refresh'
-    controller_status, handle = spot.is_spot_controller_up(stop_msg)
+    controller_status, handle = spot.is_spot_controller_up(stop_msg,
+                                                           silent=is_silent)
 
     if (refresh and controller_status in [
             global_user_state.ClusterStatus.STOPPED,
             global_user_state.ClusterStatus.INIT
     ]):
         echo(f'{colorama.Fore.YELLOW}'
-              'Restarting controller for latest status...'
-              f'{colorama.Style.RESET_ALL}')
+             'Restarting controller for latest status...'
+             f'{colorama.Style.RESET_ALL}')
 
         handle = _start(spot.SPOT_CONTROLLER_NAME)
         controller_status = global_user_state.ClusterStatus.UP
@@ -815,7 +821,7 @@ def spot_cancel(name: Optional[str] = None,
     """
     job_ids = [] if job_ids is None else job_ids
     cluster_status, handle = spot.is_spot_controller_up(
-        'All managed spot jobs should have finished.')
+        'All managed spot jobs should have finished.', silent=is_silent)
     if handle is None or handle.head_ip is None:
         # The error message is already printed in spot.is_spot_controller_up.
         # TODO(zhwu): Move the error message into the exception.
@@ -874,7 +880,8 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
     # TODO(zhwu): Automatically restart the spot controller
     controller_status, handle = spot.is_spot_controller_up(
         'Please restart the spot controller with '
-        f'`sky start {spot.SPOT_CONTROLLER_NAME}`.')
+        f'`sky start {spot.SPOT_CONTROLLER_NAME}`.',
+        silent=is_silent)
     if handle is None or handle.head_ip is None:
         msg = 'All jobs finished.'
         if controller_status == global_user_state.ClusterStatus.INIT:

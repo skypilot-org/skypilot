@@ -559,6 +559,7 @@ def load_job_table_cache() -> Optional[Tuple[float, str]]:
 
 def is_spot_controller_up(
     stopped_message: str,
+    silent: bool = False,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
            Optional['backends.CloudVmRayResourceHandle']]:
     """Check if the spot controller is up.
@@ -580,6 +581,7 @@ def is_spot_controller_up(
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
     """
+    echo = lambda *args, **kwargs: None if silent else print
     try:
         # Set force_refresh=False to make sure the refresh only happens when the
         # controller is INIT/UP. This optimization avoids unnecessary costly
@@ -603,7 +605,7 @@ def is_spot_controller_up(
             controller_status, handle = record['status'], record['handle']
 
     if controller_status is None:
-        print('No managed spot jobs are found.')
+        echo('No managed spot jobs are found.')
     elif controller_status != global_user_state.ClusterStatus.UP:
         msg = (f'Spot controller {SPOT_CONTROLLER_NAME} '
                f'is {controller_status.value}.')
@@ -611,6 +613,6 @@ def is_spot_controller_up(
             msg += f'\n{stopped_message}'
         if controller_status == global_user_state.ClusterStatus.INIT:
             msg += '\nPlease wait for the controller to be ready.'
-        print(msg)
+        echo(msg)
         handle = None
     return controller_status, handle
