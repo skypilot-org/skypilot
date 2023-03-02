@@ -1395,13 +1395,16 @@ def get_node_ips(cluster_yaml: str,
 @timeline.event
 def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
                         get_internal_ips: bool = False) -> List[str]:
-    """Returns the IPs of all TPU VM Pod workers using gcloud."""
+    """Returns the IPs of all TPU VM Pod workers using gcloud.
+
+    Need to make sure the first IP is the head node IP.
+    """
 
     cluster_name = ray_config['cluster_name']
     zone = ray_config['provider']['availability_zone']
     query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
                  f'"(labels.ray-cluster-name={cluster_name})" '
-                 f'--zone={zone} --format="value(name)"')
+                 f'--zone={zone} --format=json')
     returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
                                                       '/dev/null',
                                                       shell=True,
@@ -1415,27 +1418,15 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
     if len(stdout) == 0:
         logger.debug('No TPU VMs found with cluster name '
                      f'{cluster_name} in zone {zone}.')
-    if len(stdout.splitlines()) > 1:
+    all_json = json.loads(stdout)
+    if len(all_json) > 1:
         # Rare case, this could mean resource leakage. Hint user.
         logger.warning('Found more than one TPU VM/Pod with the same cluster '
                        f'name {cluster_name} in zone {zone}.')
 
-    all_ips = []
-    for tpu_id in stdout.splitlines():
-        tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe {tpu_id}'
-                     f' --zone {zone} --format=json')
-        returncode, stdout, stderr = log_lib.run_with_log(tpuvm_cmd,
-                                                          os.devnull,
-                                                          shell=True,
-                                                          stream_logs=False,
-                                                          require_outputs=True)
-        subprocess_utils.handle_returncode(
-            returncode,
-            tpuvm_cmd,
-            'Failed to run gcloud tpu-vm describe.',
-            stderr=stdout + stderr)
-
-        tpuvm_json = json.loads(stdout)
+    all_ips: List[str] = []
+    for tpuvm_json in all_json:
+        tpu_id = tpuvm_json['name']
         if tpuvm_json['state'] != 'READY':
             # May be a leaked preempted resource, or terminated by user in the
             # console, or still in the process of being created.
@@ -1455,7 +1446,9 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
                 endpoint['ipAddress']
                 for endpoint in tpuvm_json['networkEndpoints']
             ]
-        all_ips.extend(ips)
+        is_head = tpuvm_json['labels']['ray-node-type'] == 'head'
+        # make sure the head ip is placed at the front of the list
+        all_ips = ips + all_ips if is_head else all_ips + ips
 
     return all_ips
 
