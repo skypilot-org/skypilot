@@ -26,11 +26,13 @@ def create_resource(resource: str,
         # We should prevent caching the resource for thread safety.
         # Instead, the logic that uses the resource should reuse the same
         # resource as much as possible.
-        return boto3.resource(
-            resource,
-            region,
-            config=config.Config(retries={'max_attempts': max_attempts}),
-            **credentials)
+        return boto3.resource(resource,
+                              region,
+                              config=config.Config(retries={
+                                  'max_attempts': max_attempts,
+                                  'mode': 'adaptive'
+                              }),
+                              **credentials)
 
 
 def handle_boto_error(exc: Exception, msg: str, *args, **kwargs) -> None:

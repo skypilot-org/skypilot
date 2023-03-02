@@ -5,8 +5,13 @@ import typing
 import functools
 import importlib
 import inspect
+import os
 
 from sky.provision import common
+
+
+def _get_proxy():
+    return os.getenv('SKYPILOT_PROXY')
 
 
 def _router(func):
@@ -21,11 +26,19 @@ def _router(func):
         else:
             provider_name = kwargs.pop('provider_name')
 
-        module_name = provider_name
+        proxy = _get_proxy()
+        if proxy:
+            module_name = proxy
+        else:
+            module_name = provider_name
+
         module = importlib.import_module(f'sky.provision.{module_name.lower()}')
 
         impl = getattr(module, func.__name__)
-        return impl(*args, **kwargs)
+        if proxy:
+            return impl(provider_name, *args, **kwargs)
+        else:
+            return impl(*args, **kwargs)
 
     return _wrapper
 

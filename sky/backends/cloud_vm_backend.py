@@ -243,10 +243,14 @@ def _post_provision_setup(
         backend_utils.SKY_REMOTE_PATH + '/' + wheel_hash: str(local_wheel_path),
         backend_utils.SKY_REMOTE_METADATA_PATH: str(metadata_path),
     }
+
+    #if not os.getenv('SKYPILOT_PROXY'):
     head_node_file_mounts = {
         **common_file_mounts,
         **config_from_yaml.get('file_mounts', {})
     }
+    # else:
+    #     head_node_file_mounts = {}
 
     with backend_utils.safe_console_status(
             f'[bold cyan]Mounting internal files for '

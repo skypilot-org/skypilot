@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat with Bot</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" integrity="sha512-HK5fgLBL+xu6dm/Ii3z4xhlSUyZgTT9tuc/hSrtw6uzJOvgRr2a9jyxxT1ely+B+xFAmJKVSTbpM/CuL7qxO8w==" crossorigin="anonymous" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f2f2f2;
+      color: #333;
+      margin: 0;
+      padding: 0;
+    }
+    .navbar {
+      background-color: #333;
+      color: #fff;
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 20px;
+    }
+    .navbar a {
+      color: #fff;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+    }
+    .navbar a i {
+      margin-right: 5px;
+      font-size: 18px;
+    }
+    .chat-container {
+      height: 95vh;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .chat {
+      height: 90%;
+      width: 90%;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0px 0px 20px rgba(0, 0, 0, 0.1);
+      background-color: #fff;
+      position: relative;
+    }
+    .chat-body {
+      height: 100%;
+      padding: 20px;
+      overflow-y: scroll;
+      box-sizing: border-box;
+    }
+    .chat-message {
+      margin-bottom: 20px;
+      display: flex;
+    }
+    .chat-message:last-child {
+      margin-bottom: 0;
+    }
+    .chat-message .message-text {
+      background-color: #f2f2f2;
+      border-radius: 10px;
+      padding: 10px;
+      max-width: 80%;
+    }
+    .chat-message.right .message-text {
+      background-color: #2e5737;
+      color: #fff;
+      white-space: pre-wrap;
+    }
+    .chat-message .message-timestamp {
+      margin-left: 10px;
+      font-size: 12px;
+      color: #999;
+    }
+    .chat-input {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: center;
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      background-color: #fff;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    .chat-input textarea {
+      flex-grow: 1;
+      border-radius: 5px;
+      padding: 10px;
+      margin-right: 10px;
+      resize: none;
+      width: 100%;
+      font-size: 16px;
+      box-sizing: border-box;
+
+      -webkit-box-shadow: inset 0 1px 3px rgba(0,0,0,.05),0 1px 0 rgba(255,255,255,.075);
+      box-shadow: inset 0 1px 3px rgba(0,0,0,.05),0 1px 0 rgba(255,255,255,.075);
+      background-color: #fff;
+      border: 1px solid #ccc;
+    }
+    .chat-input button {
+      background-color: #333;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      padding: 20px 20px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .chat-input button:hover {
+      background-color: #444;
+    }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="/"><i class="fa fa-home"></i></a>
+    <a>SkyPilot Natural Language API</a>
+  </nav>
+  <div class="chat-container">
+    <div class="chat">
+      <div class="chat-body">
+        <div style="height: 60px"></div>
+      </div>
+      <div class="chat-input">
+        <textarea placeholder="Type your message here"></textarea>
+        <button>Send</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    // Get references to chat elements
+    const chatBody = document.querySelector('.chat-body');
+    const chatInput = document.querySelector('.chat-input');
+    const chatInputTextarea = chatInput.querySelector('textarea');
+    const chatInputButton = chatInput.querySelector('button');
+    let chat_history = [];
+
+    // Function to create a new chat message
+    const createChatMessage = (message, isBot = false) => {
+      // Create new message element
+      const messageElement = document.createElement('div');
+      messageElement.classList.add('chat-message');
+      if (isBot) {
+        messageElement.classList.add('right');
+      }
+
+      // Create message text element
+      const messageTextElement = document.createElement('div');
+      messageTextElement.classList.add('message-text');
+      messageTextElement.textContent = message;
+
+      // Create message timestamp element
+      const messageTimestampElement = document.createElement('div');
+      messageTimestampElement.classList.add('message-timestamp');
+      const timestamp = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      messageTimestampElement.textContent = timestamp;
+
+      // Add message text and timestamp to message element
+      messageElement.appendChild(messageTextElement);
+      messageElement.appendChild(messageTimestampElement);
+
+      // Add message element to chat body
+      chatBody.insertBefore(messageElement, chatBody.children[chatBody.children.length-1]); //.appendChild(messageElement);
+
+      // Scroll chat body to bottom
+      chatBody.scrollTop = chatBody.scrollHeight;
+    };
+
+    // Function to handle new messages
+    const handleNewMessage = async () => {
+      const messageText = chatInputTextarea.value;
+      if (messageText.trim() === '') {
+        return;
+      }
+      let message = chat_history.slice();
+      message.push({'role': 'user', 'content': messageText});
+      createChatMessage(messageText);
+      chatInputTextarea.value = '';
+      chatInputTextarea.disabled = true;
+
+      // Call chat web service
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ message: message })
+      });
+
+      if (!response.ok) {
+        console.error('Error:', response.status);
+        return;
+      }
+      const responseData = await response.json();
+      const prefix = '';  // 'Bot: '
+      createChatMessage(prefix + responseData.reply, true);
+      chatInputTextarea.disabled = false;
+
+      chat_history.push({'role': 'user', 'content': messageText});
+      chat_history.push({'role': 'assistant', 'content': responseData.reply});
+    };
+
+    // Handle send button click
+    chatInputButton.addEventListener('click', handleNewMessage);
+
+    // Handle enter key press
+    chatInputTextarea.addEventListener('keydown', event => {
+      if (event.code === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        handleNewMessage();
+      }
+    });
+
+    // Focus on input field
+    chatInputTextarea.focus();
+  </script>
+</body>
+</html>

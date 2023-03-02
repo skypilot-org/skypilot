@@ -1,0 +1,4 @@
+certificates/
+package*.json
+node_modules/
+static/
