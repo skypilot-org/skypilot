@@ -111,7 +111,7 @@ aws_dependencies = [
     # 'Crypto' module used in authentication.py for AWS.
     'pycryptodome==3.12.0',
 ]
-extras_require = {
+extras_require: Dict[str, List[str]] = {
     'aws': aws_dependencies,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
