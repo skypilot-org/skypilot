@@ -1617,21 +1617,23 @@ def _query_status_gcp(
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
     # TODO(wei-lin): handle multi-node cases.
     if use_tpu_vm and len(status_list) == 0:
-        logger.debug(f'Terminating preempted TPU VM cluster {cluster}')
-        backend = backends.CloudVmRayBackend()
-        handle = global_user_state.get_handle_from_cluster_name(cluster)
-        # Do not use refresh cluster status during teardown, as that will
-        # cause inifinite recursion by calling cluster status refresh
-        # again.
+        # Cleanup the preempted TPU directly with gcloud CLI.
         # The caller of this function, `_update_cluster_status_no_lock() ->
         # _get_cluster_status_via_cloud_cli()`, will do the post teardown
         # cleanup, which will remove the cluster entry from the status table
         # & the ssh config file.
-        backend.teardown_no_lock(handle,
-                                 terminate=True,
-                                 purge=False,
-                                 post_teardown_cleanup=False,
-                                 refresh_cluster_status=False)
+        logger.debug(f'Terminating preempted TPU VM cluster {cluster}')
+        zone = ray_config['provider']['availability_zone']
+        terminate_cmd = tpu_utils.terminate_tpu_vm_cluster_cmd(cluster, zone)
+        returncode, stdout, stderr = log_lib.run_with_log(terminate_cmd,
+                                                          '/dev/null',
+                                                          shell=True,
+                                                          stream_logs=False,
+                                                          require_outputs=True)
+        if returncode != 0:
+            logger.error(
+                f'Failed to use gcloud to terminate TPU: {stdout+stderr}\n'
+                f'command: {terminate_cmd}')
     return status_list
 
 
