@@ -693,6 +693,7 @@ def dump_spot_cost(verbose: bool) -> str:
     seen_cluster_names = set()
 
     for cluster_report in cluster_reports:
+
         cluster_report['total_cost'] = cost_utils.get_total_cost(cluster_report)
         launched_resources = cluster_report['resources']
 

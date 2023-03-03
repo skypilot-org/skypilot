@@ -79,6 +79,7 @@ def get_split_view_records_by_name(cluster_name: str,
                                    records: List[Any]) -> List[Dict[str, Any]]:
 
     agg_records: List[Dict[str, Any]] = []
+    total_duration = 0
 
     total_duration = 0
 
