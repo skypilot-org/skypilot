@@ -18,6 +18,7 @@ import os
 import platform
 import re
 import warnings
+from typing import Dict, List
 
 import setuptools
 
@@ -85,9 +86,10 @@ install_requires = [
     'PrettyTable>=2.0.0',
     # Lower local ray version is not fully supported, due to the
     # autoscaler issues (also tracked in #537).
-    'ray[default]>=1.9.0,<=2.2.0',
+    'ray[default]>=1.9.0,<=2.3.0',
     'rich',
     'tabulate',
+    'typing-extensions',
     'filelock',  # TODO(mraheja): Enforce >=3.6.0 when python version is >= 3.7
     # This is used by ray. The latest 1.44.0 will generate an error
     # `Fork support is only compatible with the epoll1 and poll

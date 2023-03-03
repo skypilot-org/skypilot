@@ -7,6 +7,7 @@ import sky
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import backends
 from sky.backends import backend_utils
 from sky.skylet import job_lib
 from sky.spot import spot_utils
@@ -15,12 +16,11 @@ from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import backends
     from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
 
-SPOT_STRATEGIES = dict()
+SPOT_STRATEGIES = {}
 SPOT_DEFAULT_STRATEGY = None
 
 # Waiting time for job from INIT/PENDING to RUNNING
@@ -43,6 +43,8 @@ class StrategyExecutor:
             task: The task to execute.
             retry_until_up: Whether to retry until the cluster is up.
         """
+        assert isinstance(backend, backends.CloudVmRayBackend), (
+            'Only CloudVMRayBackend is supported.')
         self.dag = sky.Dag()
         self.dag.add(task)
         self.cluster_name = cluster_name
@@ -246,6 +248,12 @@ class StrategyExecutor:
                            detach_run=True,
                            _is_launched_by_spot_controller=True)
                 logger.info('Spot cluster launched.')
+            except exceptions.InvalidClusterNameError as e:
+                logger.error('Failure happened before provisioning. '
+                             f'{common_utils.format_exception(e)}')
+                if raise_on_failure:
+                    raise exceptions.ProvisionPrechecksError(reasons=[e])
+                return None
             except exceptions.ResourcesUnavailableError as e:
                 # This is raised when the launch fails due to prechecks or
                 # after failing over through all the candidates.
