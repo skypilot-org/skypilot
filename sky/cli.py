@@ -3353,7 +3353,8 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     _, handle = spot_lib.is_spot_controller_up(
         'All managed spot jobs should have finished.')
     if handle is None:
-        return
+        # Hint messages already printed by the call above.
+        sys.exit(1)
 
     job_id_str = ','.join(map(str, job_ids))
     if sum([len(job_ids) > 0, name is not None, all]) != 1:
