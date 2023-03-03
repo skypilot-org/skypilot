@@ -210,7 +210,8 @@ def _execute(
             if not down:
                 requested_features.add(
                     clouds.CloudImplementationFeatures.AUTOSTOP)
-                # TODO(suquark): enable GCP+spot to be stopped in the future.
+                # TODO(ewzeng): allow autostop for spot when stopping is
+                # supported.
                 if task.use_spot:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
