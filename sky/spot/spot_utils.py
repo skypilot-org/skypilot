@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import colorama
 import filelock
-import rich
 
 from sky import backends
 from sky import exceptions
@@ -218,7 +217,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     controller_status = job_lib.get_status(job_id)
     status_msg = ('[bold cyan]Waiting for controller process to be RUNNING '
                   '{status_str}[/]. It may take a few minutes.')
-    status_display = rich.status.Status(status_msg.format(status_str=''))
+    status_display = log_utils.safe_rich_status(status_msg.format(status_str=''))
     with status_display:
         prev_msg = None
         while (controller_status != job_lib.JobStatus.RUNNING and
