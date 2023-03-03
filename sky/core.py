@@ -429,8 +429,9 @@ def autostop(
         raise exceptions.NotSupportedError(
             f'{operation} cluster {cluster_name!r} with backend '
             f'{backend.__class__.__name__!r} is not supported.')
-    elif handle.launched_resources.use_spot and not down:
+    elif handle.launched_resources.use_spot and not down and not is_cancel:
         # Disable spot instances to be stopped.
+        # TODO(suquark): enable GCP+spot to be stopped in the future.
         raise exceptions.NotSupportedError(
             f'{colorama.Fore.YELLOW}Scheduling autostop on cluster '
             f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'

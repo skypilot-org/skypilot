@@ -210,6 +210,11 @@ def _execute(
             if not down:
                 requested_features.add(
                     clouds.CloudImplementationFeatures.AUTOSTOP)
+                # TODO(suquark): enable GCP+spot to be stopped in the future.
+                if task.use_spot:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'Autostop is not supported for spot instances.')
 
     elif idle_minutes_to_autostop is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
