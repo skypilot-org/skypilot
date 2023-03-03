@@ -152,8 +152,7 @@ def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
 
 
-def get_cost(
-    time_in_hour: float,
+def get_hourly_cost(
     instance_type: str,
     disk_size: int,
     use_spot: bool = False,
@@ -163,8 +162,8 @@ def get_cost(
     if instance_type == 'TPU-VM':
         # Currently the host VM of TPU does not cost extra.
         return 0
-    return common.get_cost_impl(time_in_hour, _df, _storage_df, instance_type,
-                                disk_size, use_spot, region, zone)
+    return common.get_hourly_cost_impl(_df, _storage_df, instance_type,
+                                       disk_size, use_spot, region, zone)
 
 
 def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
@@ -343,23 +342,20 @@ def list_accelerators(
         df = _df[_df['InstanceType'] == a100_host_vm_type]
         cpu_count = df['vCPUs'].iloc[0]
         memory = df['MemoryGiB'].iloc[0]
-        # -1 for get hourly price
-        vm_price = common.get_cost_impl(-1,
-                                        _df,
-                                        _storage_df,
-                                        a100_host_vm_type,
-                                        disk_size=0,
-                                        use_spot=False,
-                                        region=None,
-                                        zone=None)
-        vm_spot_price = common.get_cost_impl(-1,
-                                             _df,
-                                             _storage_df,
-                                             a100_host_vm_type,
-                                             disk_size=0,
-                                             use_spot=True,
-                                             region=None,
-                                             zone=None)
+        vm_price = common.get_hourly_cost_impl(_df,
+                                               _storage_df,
+                                               a100_host_vm_type,
+                                               disk_size=0,
+                                               use_spot=False,
+                                               region=None,
+                                               zone=None)
+        vm_spot_price = common.get_hourly_cost_impl(_df,
+                                                    _storage_df,
+                                                    a100_host_vm_type,
+                                                    disk_size=0,
+                                                    use_spot=True,
+                                                    region=None,
+                                                    zone=None)
         new_infos[info.accelerator_name].append(
             info._replace(
                 instance_type=a100_host_vm_type,

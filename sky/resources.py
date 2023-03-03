@@ -590,15 +590,14 @@ class Resources:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
         # Instance.
-        cost = self.cloud.instance_type_to_cost(hours, self._instance_type,
-                                                self.disk_size, self.use_spot,
-                                                self._region, self._zone)
+        hourly_cost = self.cloud.instance_type_to_hourly_cost(
+            self._instance_type, self.disk_size, self.use_spot, self._region,
+            self._zone)
         # Accelerators (if any).
         if self.accelerators is not None:
-            hourly_cost = self.cloud.accelerators_to_hourly_cost(
+            hourly_cost += self.cloud.accelerators_to_hourly_cost(
                 self.accelerators, self.use_spot, self._region, self._zone)
-            cost += hourly_cost * hours
-        return cost
+        return hourly_cost * hours
 
     def less_demanding_than(self,
                             other: Union[List['Resources'], 'Resources'],

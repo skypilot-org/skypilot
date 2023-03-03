@@ -6,9 +6,8 @@ import argparse
 import json
 import os
 import subprocess
-from typing import List, Optional, Set, Dict
+from typing import List, Optional, Set
 import urllib
-import collections
 
 import numpy as np
 import pandas as pd
@@ -55,9 +54,9 @@ USEFUL_COLUMNS = [
 ]
 
 
-def get_pricing_url(service_name: str, region: Optional[str] = None) -> str:
+def get_pricing_url(region: Optional[str] = None) -> str:
     filters = [
-        f'serviceName eq \'{service_name}\'',
+        'serviceName eq \'Virtual Machines\'',
         'priceType eq \'Consumption\'',
     ]
     if region is not None:
@@ -67,18 +66,15 @@ def get_pricing_url(service_name: str, region: Optional[str] = None) -> str:
 
 
 @ray.remote
-def get_pricing_df(service_name: str,
-                   region: Optional[str] = None) -> pd.DataFrame:
+def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
     all_items = []
-    url = get_pricing_url(service_name, region)
-    print(f'Getting pricing for {region} with service name {service_name}')
+    url = get_pricing_url(region)
+    print(f'Getting pricing for {region}')
     page = 0
     while url is not None:
         page += 1
         if page % 10 == 0:
-            print(
-                f'Fetched pricing pages {page} with service name {service_name}'
-            )
+            print(f'Fetched pricing pages {page}')
         r = requests.get(url)
         r.raise_for_status()
         content_str = r.content.decode('ascii')
@@ -88,7 +84,7 @@ def get_pricing_df(service_name: str,
             break
         all_items += items
         url = content.get('NextPageLink')
-    print(f'Done fetching pricing {region} with service name {service_name}')
+    print(f'Done fetching pricing {region}')
     df = pd.DataFrame(all_items)
     assert 'productName' in df.columns, (region, df.columns)
     return df[(~df['productName'].str.contains(' Windows')) &
@@ -96,10 +92,8 @@ def get_pricing_df(service_name: str,
 
 
 @ray.remote
-def get_all_regions_pricing_df(service_name: str,
-                               regions: Set[str]) -> pd.DataFrame:
-    dfs = ray.get(
-        [get_pricing_df.remote(service_name, region) for region in regions])
+def get_all_regions_pricing_df(regions: Set[str]) -> pd.DataFrame:
+    dfs = ray.get([get_pricing_df.remote(region) for region in regions])
     return pd.concat(dfs)
 
 
@@ -157,7 +151,7 @@ def get_gpu_name(family: str) -> Optional[str]:
 
 def get_all_regions_instance_types_df(region_set: Set[str]):
     df, df_sku = ray.get([
-        get_all_regions_pricing_df.remote('Virtual Machines', region_set),
+        get_all_regions_pricing_df.remote(region_set),
         get_sku_df.remote(region_set),
     ])
     print('Processing dataframes')
@@ -245,43 +239,6 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
     return df_ret
 
 
-def get_all_regions_storage_df(region_set: Set[str]):
-    df_storage = ray.get(
-        [get_all_regions_pricing_df.remote('Storage', region_set)])[0]
-    df_storage.drop_duplicates(inplace=True)
-    df_storage = df_storage[df_storage['unitPrice'] > 0]
-    # only default storage is used by sky
-    df_storage = df_storage[df_storage['skuName'] == 'Standard LRS']
-    df_storage = df_storage[df_storage['unitOfMeasure'] == '1 GB/Month']
-
-    print('Getting storage df')
-
-    class DiskInfo:
-
-        def __init__(self) -> None:
-            self.region: str = ''
-            # tierMinimumUnits -> unitPrice
-            self.price: Dict[str, float] = dict()
-
-    # name -> (region, tiered_price_dict)
-    storage_dict: Dict[str, DiskInfo] = collections.defaultdict(DiskInfo)
-    for _, row in df_storage.iterrows():
-        name = row['skuId']
-        region = row['armRegionName']
-        price = row['unitPrice']
-        tier_minimum = str(row['tierMinimumUnits'])
-        if storage_dict[name].region == '':
-            storage_dict[name].region = region
-        else:
-            assert storage_dict[name].region == region
-        storage_dict[name].price[tier_minimum] = price
-    df = pd.DataFrame(columns=['Name', 'Region', 'Price'])
-    for name, info in storage_dict.items():
-        df.loc[len(df)] = [name, info.region, json.dumps(info.price)]
-
-    return df
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -298,7 +255,3 @@ if __name__ == '__main__':
     os.makedirs('azure', exist_ok=True)
     instance_df.to_csv('azure/vms.csv', index=False)
     print('Azure Service Catalog saved to azure/vms.csv')
-
-    storage_df = get_all_regions_storage_df(region_filter)
-    storage_df.to_csv('azure/storage.csv', index=False)
-    print('Azure Storage Catalog saved to azure/storage.csv')

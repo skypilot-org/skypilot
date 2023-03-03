@@ -5,7 +5,6 @@ and queries the GCP API to get the real-time prices of the VMs, GPUs, and TPUs.
 """
 
 import argparse
-import json
 import os
 from typing import Any, Dict, List, Optional
 
@@ -133,22 +132,19 @@ def _get_unit_price(sku: Dict[str, Any]) -> float:
     return units + nanos
 
 
-def _get_tired_unit_price(sku: Dict[str, Any]) -> str:
+def _get_tired_unit_price(sku: Dict[str, Any]) -> float:
     pricing_info = sku['pricingInfo'][0]['pricingExpression']
 
-    def _get_tired_price(unit_price: Dict[str, Any]) -> float:
-        assert unit_price['currencyCode'] == 'USD'
+    def _get_tired_price(tier: int) -> float:
+        unit_price = pricing_info['tieredRates'][tier]['unitPrice']
         units = int(unit_price['units'])
         nanos = unit_price['nanos'] / 1e9
         return units + nanos
 
-    # tierMinimumUnits -> unitPrice
-    # use str as type to support json.loads()
-    price: Dict[str, float] = dict()
-    for tier in pricing_info['tieredRates']:
-        tier_min_unit = str(tier['startUsageAmount'])
-        price[tier_min_unit] = _get_tired_price(tier['unitPrice'])
-    return json.dumps(price)
+    # TODO(tian): Ignore first tier for now since it only applies to
+    # first 30 GiBy.mo.
+    return _get_tired_price(0) if len(
+        pricing_info['tieredRates']) == 1 else _get_tired_price(1)
 
 
 def get_vm_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
