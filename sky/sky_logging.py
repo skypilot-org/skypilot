@@ -1,6 +1,8 @@
 """Logging utilities."""
+import contextlib
 import logging
 import sys
+from typing import Optional
 
 from sky.utils import env_options
 
@@ -25,18 +27,60 @@ class NewLineFormatter(logging.Formatter):
         return msg
 
 
+_root_logger = logging.getLogger('sky')
+_default_handler = None
+echo = print
+_is_silent = False
+
+
+def _setup_logger(
+    logging_level: int = logging.DEBUG,
+    logging_format: Optional[str] = FORMAT,
+):
+    _root_logger.setLevel(logging_level)
+    global _default_handler
+    if _default_handler is None:
+        _default_handler = logging.StreamHandler(sys.stdout)
+        _default_handler.flush = sys.stdout.flush  # type: ignore
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            _default_handler.setLevel(logging.DEBUG)
+        else:
+            _default_handler.setLevel(logging.INFO)
+        _root_logger.addHandler(_default_handler)
+    fmt = NewLineFormatter(logging_format, datefmt=DATE_FORMAT)
+    _default_handler.setFormatter(fmt)
+    # Setting this will avoid the message
+    # being propagated to the parent logger.
+    _root_logger.propagate = False
+
+
+_setup_logger()
+
+
 def init_logger(name: str):
-    h = logging.StreamHandler(sys.stdout)
-    h.flush = sys.stdout.flush  # type: ignore
+    return logging.getLogger(name)
 
-    fmt = NewLineFormatter(FORMAT, datefmt=DATE_FORMAT)
-    h.setFormatter(fmt)
 
-    logger = logging.getLogger(name)
-    if env_options.Options.SHOW_DEBUG_INFO.get():
-        h.setLevel(logging.DEBUG)
-    else:
-        h.setLevel(logging.INFO)
-    logger.addHandler(h)
-    logger.setLevel(logging.DEBUG)
-    return logger
+@contextlib.contextmanager
+def silent():
+    """Turn off logging."""
+    global echo
+    global _is_silent
+    previous_level = _root_logger.level
+    previous_echo = echo
+    previous_is_silent = _is_silent
+
+    # Turn off logger
+    _root_logger.setLevel(logging.CRITICAL)
+    echo = lambda *args, **kwargs: None
+    _is_silent = True
+    yield
+
+    # Restore logger
+    _root_logger.setLevel(previous_level)
+    echo = previous_echo
+    _is_silent = previous_is_silent
+
+
+def is_silent():
+    return _is_silent

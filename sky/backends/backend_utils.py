@@ -10,7 +10,6 @@ import re
 import subprocess
 import tempfile
 import textwrap
-import threading
 import time
 import typing
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
@@ -25,7 +24,6 @@ from packaging import version
 import requests
 from requests import adapters
 from requests.packages.urllib3.util import retry as retry_lib
-import rich.console as rich_console
 import rich.progress as rich_progress
 import yaml
 
@@ -46,6 +44,7 @@ from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import env_options
+from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
@@ -60,7 +59,6 @@ if typing.TYPE_CHECKING:
     from sky.backends import local_docker_backend
 
 logger = sky_logging.init_logger(__name__)
-console = rich_console.Console()
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
@@ -1022,7 +1020,8 @@ def wait_until_ray_cluster_ready(
     last_nodes_so_far = 0
     start = time.time()
     runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
-    with console.status('[bold cyan]Waiting for workers...') as worker_status:
+    with log_utils.console.status(
+            '[bold cyan]Waiting for workers...') as worker_status:
         while True:
             rc, output, stderr = runner.run('ray status',
                                             log_path=log_path,
@@ -1188,7 +1187,7 @@ def parallel_data_transfer_to_nodes(
                f': {style.BRIGHT}{origin_source}{style.RESET_ALL} -> '
                f'{style.BRIGHT}{target}{style.RESET_ALL}')
     logger.info(message)
-    with safe_console_status(f'[bold cyan]{action_message}[/]'):
+    with log_utils.safe_rich_status(f'[bold cyan]{action_message}[/]'):
         subprocess_utils.run_in_parallel(_sync_node, runners)
 
 
@@ -2292,23 +2291,6 @@ def get_backend_from_handle(
         raise NotImplementedError(
             f'Handle type {type(handle)} is not supported yet.')
     return backend
-
-
-class NoOpConsole:
-    """An empty class for multi-threaded console.status."""
-
-    def __enter__(self):
-        pass
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
-
-
-def safe_console_status(msg: str):
-    """A wrapper for multi-threaded console.status."""
-    if threading.current_thread() is threading.main_thread():
-        return console.status(msg)
-    return NoOpConsole()
 
 
 def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:

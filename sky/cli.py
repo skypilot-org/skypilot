@@ -1409,7 +1409,7 @@ def _get_spot_jobs(
     """
     num_in_progress_jobs = None
     try:
-        with core.silent():
+        with sky_logging.silent():
             # Make the call silent
             spot_jobs = core.spot_queue(refresh=refresh,
                                         skip_finished=skip_finished)
@@ -1551,8 +1551,7 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
         if show_spot_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed spot jobs{colorama.Style.RESET_ALL}')
-            with backend_utils.safe_console_status(
-                    '[cyan]Checking spot jobs[/]'):
+            with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
                 num_in_progress_jobs, msg = spot_jobs_future.get()
 
                 try:
@@ -2335,7 +2334,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
            'jobs (output of `sky spot queue`) will be lost.')
     click.echo(msg)
     if cluster_status == global_user_state.ClusterStatus.UP:
-        with backend_utils.safe_console_status(
+        with log_utils.safe_rich_status(
                 '[bold cyan]Checking for in-progress spot jobs[/]'):
             try:
                 spot_jobs = core.spot_queue(refresh=False)
@@ -3296,18 +3295,18 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
 
       watch -n60 sky spot queue
     """
+    click.secho('Fetching managed spot job statuses...', fg='yellow')
+    with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
+        _, msg = _get_spot_jobs(refresh=refresh,
+                                skip_finished=skip_finished,
+                                show_all=all)
     if not skip_finished:
         in_progress_only_hint = ''
     else:
         in_progress_only_hint = ' (showing in-progress jobs only)'
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Managed spot jobs{colorama.Style.RESET_ALL}'
-               f'{in_progress_only_hint}')
-    with backend_utils.safe_console_status('[cyan]Checking spot jobs[/]'):
-        _, msg = _get_spot_jobs(refresh=refresh,
-                                skip_finished=skip_finished,
-                                show_all=all)
-    click.echo(msg)
+               f'{in_progress_only_hint}\n{msg}')
 
 
 _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)

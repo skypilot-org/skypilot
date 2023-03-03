@@ -1,5 +1,4 @@
 """SDK functions for cluster/job management."""
-import contextlib
 import getpass
 import sys
 from typing import Any, Dict, List, Optional, Sequence, Union
@@ -19,6 +18,7 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
+from sky.utils import log_utils
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import subprocess_utils
@@ -30,23 +30,6 @@ logger = sky_logging.init_logger(__name__)
 # ======================
 
 # pylint: disable=redefined-builtin
-
-echo = print
-is_silent = False
-
-
-@contextlib.contextmanager
-def silent():
-    """Silence all SkyPilot output."""
-    global echo
-    global is_silent
-    previous_echo = echo
-    previous_is_silent = is_silent
-    is_silent = True
-    echo = lambda *args, **kwargs: None
-    yield
-    echo = previous_echo
-    is_silent = previous_is_silent
 
 
 @usage_lib.entrypoint
@@ -186,7 +169,7 @@ def _start(
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
     if not force and cluster_status == global_user_state.ClusterStatus.UP:
-        echo(f'Cluster {cluster_name!r} is already up.')
+        sky_logging.echo(f'Cluster {cluster_name!r} is already up.')
         return handle
     assert force or cluster_status in (
         global_user_state.ClusterStatus.INIT,
@@ -566,16 +549,17 @@ def cancel(cluster_name: str,
     backend = backend_utils.get_backend_from_handle(handle)
 
     if all:
-        echo(f'{colorama.Fore.YELLOW}'
-             f'Cancelling all jobs on cluster {cluster_name!r}...'
-             f'{colorama.Style.RESET_ALL}')
+        sky_logging.echo(f'{colorama.Fore.YELLOW}'
+                         f'Cancelling all jobs on cluster {cluster_name!r}...'
+                         f'{colorama.Style.RESET_ALL}')
         job_ids = None
     else:
         assert job_ids is not None, 'job_ids should not be None'
         jobs_str = ', '.join(map(str, job_ids))
-        echo(f'{colorama.Fore.YELLOW}'
-             f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
-             f'{colorama.Style.RESET_ALL}')
+        sky_logging.echo(
+            f'{colorama.Fore.YELLOW}'
+            f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
+            f'{colorama.Style.RESET_ALL}')
 
     backend.cancel_jobs(handle, job_ids)
 
@@ -610,9 +594,9 @@ def tail_logs(cluster_name: str,
     job_str = f'job {job_id}'
     if job_id is None:
         job_str = 'the last job'
-    echo(f'{colorama.Fore.YELLOW}'
-         f'Tailing logs of {job_str} on cluster {cluster_name!r}...'
-         f'{colorama.Style.RESET_ALL}')
+    sky_logging.echo(f'{colorama.Fore.YELLOW}'
+                     f'Tailing logs of {job_str} on cluster {cluster_name!r}...'
+                     f'{colorama.Style.RESET_ALL}')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.tail_logs(handle, job_id, follow=follow)
@@ -653,9 +637,9 @@ def download_logs(
         return {}
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    echo(f'{colorama.Fore.YELLOW}'
-         'Syncing down logs to local...'
-         f'{colorama.Style.RESET_ALL}')
+    sky_logging.echo(f'{colorama.Fore.YELLOW}'
+                     'Syncing down logs to local...'
+                     f'{colorama.Style.RESET_ALL}')
     local_log_dirs = backend.sync_down_logs(handle, job_ids, local_dir)
     return local_log_dirs
 
@@ -701,9 +685,9 @@ def job_status(cluster_name: str,
     if job_ids is not None and len(job_ids) == 0:
         return {}
 
-    echo(f'{colorama.Fore.YELLOW}'
-         'Getting job status...'
-         f'{colorama.Style.RESET_ALL}')
+    sky_logging.echo(f'{colorama.Fore.YELLOW}'
+                     'Getting job status...'
+                     f'{colorama.Style.RESET_ALL}')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     statuses = backend.get_job_status(handle, job_ids, stream_logs=stream_logs)
@@ -718,7 +702,7 @@ def job_status(cluster_name: str,
 @usage_lib.entrypoint
 def spot_status(refresh: bool) -> List[Dict[str, Any]]:
     """[Deprecated] (alias of spot_queue) Get statuses of managed spot jobs."""
-    echo(
+    sky_logging.echo(
         f'{colorama.Fore.YELLOW}WARNING: `spot_status()` is deprecated. '
         f'Instead, use: spot_queue(){colorama.Style.RESET_ALL}',
         file=sys.stderr)
@@ -756,19 +740,22 @@ def spot_queue(refresh: bool,
     stop_msg = ''
     if not refresh:
         stop_msg = 'To view the latest job table: sky spot queue --refresh'
-    controller_status, handle = spot.is_spot_controller_up(stop_msg,
-                                                           silent=is_silent)
+    controller_status, handle = spot.is_spot_controller_up(stop_msg)
 
     if (refresh and controller_status in [
             global_user_state.ClusterStatus.STOPPED,
             global_user_state.ClusterStatus.INIT
     ]):
-        echo(f'{colorama.Fore.YELLOW}'
-             'Restarting controller for latest status...'
-             f'{colorama.Style.RESET_ALL}')
+        sky_logging.echo(f'{colorama.Fore.YELLOW}'
+                         'Restarting controller for latest status...'
+                         f'{colorama.Style.RESET_ALL}')
 
+        log_utils.force_update_rich_status(
+            '[cyan] Checking spot jobs - restarting '
+            'controller[/]')
         handle = _start(spot.SPOT_CONTROLLER_NAME)
         controller_status = global_user_state.ClusterStatus.UP
+        log_utils.force_update_rich_status('[cyan] Checking spot jobs[/]')
 
     if handle is None or handle.head_ip is None:
         # When the controller is STOPPED, the head_ip will be None, as
@@ -821,7 +808,7 @@ def spot_cancel(name: Optional[str] = None,
     """
     job_ids = [] if job_ids is None else job_ids
     cluster_status, handle = spot.is_spot_controller_up(
-        'All managed spot jobs should have finished.', silent=is_silent)
+        'All managed spot jobs should have finished.')
     if handle is None or handle.head_ip is None:
         # The error message is already printed in spot.is_spot_controller_up.
         # TODO(zhwu): Move the error message into the exception.
@@ -858,7 +845,7 @@ def spot_cancel(name: Optional[str] = None,
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
-    echo(stdout)
+    sky_logging.echo(stdout)
     if 'Multiple jobs found with name' in stdout:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -880,8 +867,7 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
     # TODO(zhwu): Automatically restart the spot controller
     controller_status, handle = spot.is_spot_controller_up(
         'Please restart the spot controller with '
-        f'`sky start {spot.SPOT_CONTROLLER_NAME}`.',
-        silent=is_silent)
+        f'`sky start {spot.SPOT_CONTROLLER_NAME}`.')
     if handle is None or handle.head_ip is None:
         msg = 'All jobs finished.'
         if controller_status == global_user_state.ClusterStatus.INIT:
