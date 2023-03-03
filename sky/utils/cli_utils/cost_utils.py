@@ -34,14 +34,14 @@ def get_resources_for_cost_report(cluster_status):
     return resources_str
 
 
-def aggregate_all_records(split: bool) -> List[Dict[str, Any]]:
+def aggregate_all_records(verbose: bool) -> List[Dict[str, Any]]:
     rows = global_user_state.get_distinct_cluster_names_from_history()
     records = global_user_state.get_clusters_from_history()
 
     agg_records: List[Dict[str, Any]] = []
 
     for (cluster_name,) in rows:
-        if split:
+        if verbose:
             agg_records += get_split_view_records_by_name(cluster_name, records)
         else:
             agg_records.append(aggregate_records_by_name(cluster_name, records))
@@ -79,24 +79,35 @@ def get_split_view_records_by_name(cluster_name: str,
                                    records: List[Any]) -> List[Dict[str, Any]]:
 
     agg_records: List[Dict[str, Any]] = []
+    total_duration = 0
 
     for record in records:
 
         if record['name'] == cluster_name:
             agg_record = {
                 'name': '',
+                'job_id': '',
+                'num_nodes': '',
+                'resources': '',
+                'cluster_hash': record['cluster_hash'],
                 'launched_at': record['launched_at'],
                 'duration': record['duration'],
-                'num_nodes': record['num_nodes'],
-                'resources': record['resources'],
-                'cluster_hash': record['cluster_hash'],
                 'usage_intervals': record['usage_intervals'],
             }
 
-            if len(agg_records) == 0:
-                agg_record['name'] = record['name']
+            total_duration += record['duration']
+
             agg_records.append(agg_record)
 
+            if len(agg_records) == 0:
+                agg_record['name'] = record['name']
+                agg_record['num_nodes'] = record['num_nodes']
+                agg_record['resources'] = record['resources']
+
+                agg_records.append(agg_record)
+                agg_records[0], agg_records[1] = agg_records[1], agg_records[0]
+
+    agg_records[0]['duration'] = total_duration
     return agg_records
 
 

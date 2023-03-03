@@ -206,6 +206,12 @@ def generate_spot_cluster_name(task_name: str, job_id: int) -> str:
     return f'{task_name}-{job_id}'
 
 
+def get_job_id_from_spot_cluster_name(spot_cluster_name: str) -> int:
+    """Parse job id from spot cluster name."""
+    job_id = spot_cluster_name.split('-')[-1]
+    return int(job_id)
+
+
 def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
     """Cancel jobs by id.
 
@@ -663,15 +669,19 @@ def load_spot_cost_report(payload: str) -> List[Dict[str, Any]]:
     cost_report = common_utils.decode_payload(payload)
     return cost_report
 
-def dump_spot_cost_report(split: bool) -> str:
-    cluster_reports = cost_utils.aggregate_all_records(split)
+def dump_spot_cost(verbose: bool) -> str:
+    cluster_reports = cost_utils.aggregate_all_records(verbose)
 
     for cluster_report in cluster_reports:
+
         cluster_report['total_cost'] = cost_utils.get_total_cost(cluster_report)
         launched_resources = cluster_report['resources']
 
         cluster_report['resources'] = f'{launched_resources}'
         cluster_report['region'] = launched_resources.region
+
+        cluster_report['job_id'] = get_job_id_from_spot_cluster_name(
+            cluster_report['name'])
 
     return common_utils.encode_payload(cluster_reports)
 
@@ -685,10 +695,12 @@ def load_spot_cost_report(payload: str) -> List[Dict[str, Any]]:
 def format_cost_table(reports: List[Dict[str, Any]]) -> str:
     """Show all spot costs."""
     columns = [
-        'NAME',
+        'JOB NAME',
+        'JOB ID'
         'RESOURCES',
         'NODES',
         'REGION',
+        'LAUNCH TIME'
         'TOT. DURATION',
         'TOT. COST',
     ]
@@ -701,12 +713,17 @@ def format_cost_table(reports: List[Dict[str, Any]]) -> str:
         duration = log_utils.readable_time_duration(0,
                                                     report['duration'],
                                                     absolute=True)
+
+        launch_time = log_utils.readable_time_duration(report['launched_at'])
+
         cost = report['total_cost']
         values = [
             report['name'],
+            report['job_id'],
             report['resources'],
             report['num_nodes'],
             report['region'],
+            launch_time,
             duration,
             f'${cost:.3f}',
         ]
@@ -791,9 +808,9 @@ class SpotCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_cost_report(cls) -> str:
+    def get_cost_report(cls, verbose: bool) -> str:
         code = [
-            f'spot_cost_table=spot_utils.dump_spot_cost_report(split={split})',
+            f'spot_cost_table=spot_utils.dump_spot_cost(verbose={verbose})',
             'print(spot_cost_table, flush=True)',
         ]
         return cls._build(code)
