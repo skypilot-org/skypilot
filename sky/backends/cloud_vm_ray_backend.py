@@ -107,6 +107,10 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
     pathlib.Path(sky.__file__).resolve().parent / 'backends' /
     'monkey_patches' / 'monkey_patch_ray_up.py')
 
+_SKYLET_RESTART_CMD = (
+    '(pkill -f "python3 -m sky.skylet.skylet"; nohup python3 -m '
+    'sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);')
+
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
@@ -1648,9 +1652,10 @@ class RetryingVmProvisioner(object):
             return
         backend = CloudVmRayBackend()
 
+        # For backward compatability and robustness of skylet, it is restarted
         returncode = backend.run_on_head(
             handle,
-            'ray status',
+            f'{_SKYLET_RESTART_CMD}ray status',
             # At this state, an erroneous cluster may not have cached
             # handle.head_ip (global_user_state.add_or_update_cluster(...,
             # ready=True)).
@@ -2608,10 +2613,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       require_outputs=True)
 
         if 'has no attribute' in stdout:
-            logger.warn(
-                f'{colorama.Fore.RED}SkyPilot must be updated on remote,' 
-                f'use `sky launch` instead{colorama.Style.RESET_ALL}'
-            )
+            logger.info(
+                f'{colorama.Fore.RED}SkyPilot must be updated on remote,'
+                f'use `sky launch` instead{colorama.Style.RESET_ALL}')
             return
 
         subprocess_utils.handle_returncode(returncode,

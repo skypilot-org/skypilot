@@ -10,7 +10,7 @@ import shlex
 import subprocess
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import colorama
 import filelock
@@ -155,13 +155,6 @@ class JobScheduler:
         set_status(job_id, JobStatus.PENDING)
         self.schedule_step()
 
-    def set_scheduled(self, job_id: str):
-        # TODO(mraheja): remove pylint disabling when filelock
-        # version updated
-        # pylint: disable=abstract-class-instantiated
-        with filelock.FileLock(_get_lock_path(job_id)):
-            self.remove_job_no_lock(job_id)
-
     def remove_job_no_lock(self, job_id: str) -> None:
         _CURSOR.execute(f'DELETE FROM pending_jobs WHERE job_id={job_id!r}')
         _CONN.commit()
@@ -174,7 +167,7 @@ class JobScheduler:
 
     def schedule_step(self) -> None:
         job_owner = getpass.getuser()
-        jobs = list(self._get_jobs())
+        jobs = self._get_jobs()
         if len(jobs) > 0:
             update_status(job_owner, _SUBMITTED_GAP_SECONDS)
         for job_id, run_cmd, submit, _ in jobs:
@@ -193,15 +186,16 @@ class JobScheduler:
                 self._run_job(job_id, run_cmd)
                 return
 
-    def _get_jobs(self) -> Tuple:
+    def _get_jobs(self) -> List:
         raise NotImplementedError
 
 
 class FIFOScheduler(JobScheduler):
     """First in first out job scheduler"""
 
-    def _get_jobs(self) -> Tuple:
-        return _CURSOR.execute('SELECT * FROM pending_jobs ORDER BY job_id')
+    def _get_jobs(self) -> List:
+        return list(
+            _CURSOR.execute('SELECT * FROM pending_jobs ORDER BY job_id'))
 
 
 scheduler = FIFOScheduler()
@@ -695,7 +689,7 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
         job_id = make_ray_job_id(job['job_id'], job_owner)
         # Job is locked to ensure that pending queue does not start it while
         # it is being cancelled
-        with filelock.FileLock(_get_lock_path(job_id)):
+        with filelock.FileLock(_get_lock_path(job['job_id'],)):
             try:
                 # TODO(mraheja): remove pylint disabling when filelock
                 # version updated
@@ -768,9 +762,9 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def queue_job(cls, job_name: str, cmd: str) -> None:
+    def queue_job(cls, job_id: int, cmd: str) -> str:
         code = ['job_lib.scheduler.queue('
-                f'{job_name!r},'
+                f'{job_id!r},'
                 f'{cmd!r})']
         return cls._build(code)
 
