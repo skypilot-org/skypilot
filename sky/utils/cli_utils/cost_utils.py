@@ -79,16 +79,17 @@ def get_split_view_records_by_name(cluster_name: str,
                                    records: List[Any]) -> List[Dict[str, Any]]:
 
     agg_records: List[Dict[str, Any]] = []
+
     total_duration = 0
 
     for record in records:
 
         if record['name'] == cluster_name:
             agg_record = {
-                'name': '',
+                'name': record['name'],
                 'job_id': '',
-                'num_nodes': '',
-                'resources': '',
+                'num_nodes': record['num_nodes'],
+                'resources': record['resources'],
                 'cluster_hash': record['cluster_hash'],
                 'launched_at': record['launched_at'],
                 'duration': record['duration'],
@@ -99,15 +100,17 @@ def get_split_view_records_by_name(cluster_name: str,
 
             agg_records.append(agg_record)
 
-            if len(agg_records) == 0:
-                agg_record['name'] = record['name']
-                agg_record['num_nodes'] = record['num_nodes']
-                agg_record['resources'] = record['resources']
+    if len(agg_records) == 1:
+        return agg_records
 
-                agg_records.append(agg_record)
-                agg_records[0], agg_records[1] = agg_records[1], agg_records[0]
+    head_record = {}
 
-    agg_records[0]['duration'] = total_duration
+    for k, v in agg_records[0].items():
+        head_record[k] = v
+
+    head_record['duration'] = total_duration
+    agg_records = [head_record] + agg_records
+
     return agg_records
 
 

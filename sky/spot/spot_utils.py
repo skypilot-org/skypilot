@@ -206,10 +206,11 @@ def generate_spot_cluster_name(task_name: str, job_id: int) -> str:
     return f'{task_name}-{job_id}'
 
 
-def get_job_id_from_spot_cluster_name(spot_cluster_name: str) -> int:
+def get_job_id_from_spot_cluster_name(spot_cluster_name: str) -> str:
     """Parse job id from spot cluster name."""
-    job_id = spot_cluster_name.split('-')[-1]
-    return int(job_id)
+    if spot_cluster_name == '':
+        return ''
+    return spot_cluster_name.split('-')[-1]
 
 
 def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
@@ -672,6 +673,8 @@ def load_spot_cost_report(payload: str) -> List[Dict[str, Any]]:
 def dump_spot_cost(verbose: bool) -> str:
     cluster_reports = cost_utils.aggregate_all_records(verbose)
 
+    seen_cluster_names = set()
+
     for cluster_report in cluster_reports:
 
         cluster_report['total_cost'] = cost_utils.get_total_cost(cluster_report)
@@ -680,8 +683,14 @@ def dump_spot_cost(verbose: bool) -> str:
         cluster_report['resources'] = f'{launched_resources}'
         cluster_report['region'] = launched_resources.region
 
-        cluster_report['job_id'] = get_job_id_from_spot_cluster_name(
-            cluster_report['name'])
+        cluster_name = cluster_report['name']
+        if cluster_name not in seen_cluster_names:
+            cluster_report['job_id'] = get_job_id_from_spot_cluster_name(
+                cluster_report['name'])
+            seen_cluster_names.add(cluster_name)
+
+        else:
+            cluster_report['name'] = ''
 
     return common_utils.encode_payload(cluster_reports)
 
@@ -696,11 +705,11 @@ def format_cost_table(reports: List[Dict[str, Any]]) -> str:
     """Show all spot costs."""
     columns = [
         'JOB NAME',
-        'JOB ID'
+        'JOB ID',
         'RESOURCES',
         'NODES',
         'REGION',
-        'LAUNCH TIME'
+        'LAUNCH TIME',
         'TOT. DURATION',
         'TOT. COST',
     ]
