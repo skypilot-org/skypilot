@@ -3689,6 +3689,7 @@ _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
     required=False,
     help='Query the latest statuses, restarting the spot controller if stopped.'
 )
+<<<<<<< HEAD
 @click.option('--condensed',
               '-c',
               default=False,
@@ -3698,12 +3699,29 @@ _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def spot_cost_report(refresh: bool, condensed: bool):
+=======
+@click.option(
+    '--verbose',
+    '-s',
+    default=True,
+    is_flag=True,
+    required=False,
+    help='Query the latest statuses, restarting the spot controller if stopped.'
+)
+@usage_lib.entrypoint
+# pylint: disable=redefined-builtin
+def spot_cost_report(refresh: bool, verbose: bool):
+>>>>>>> f6f00092 (untested changes to address feature reqs in pr comments)
     """Show cost report of managed spot jobs.
     """
     click.secho('Fetching managed spot job costs...', fg='yellow')
     no_costs_found_str = '  No job costs found.'
     try:
+<<<<<<< HEAD
         cost_table = core.spot_cost_report(refresh, condensed)
+=======
+        cost_table = core.spot_cost_report(refresh, verbose)
+>>>>>>> f6f00092 (untested changes to address feature reqs in pr comments)
     except exceptions.ClusterNotUpError:
         with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
             _, msg = _get_spot_jobs(refresh=refresh,

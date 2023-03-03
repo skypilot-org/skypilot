@@ -143,8 +143,15 @@ def cost_report(cluster_names: List[str],
         A list of dicts, with each dict containing the cost information of a
         cluster.
     """
+<<<<<<< HEAD
     if aggregate_by_cluster_name:
         cluster_reports = cost_utils.aggregate_all_records(condensed=True)
+=======
+
+    # aggregate records for spot controller
+    if cluster_name is not None:
+        cluster_reports = cost_utils.aggregate_all_records(verbose=False)
+>>>>>>> f6f00092 (untested changes to address feature reqs in pr comments)
     else:
         cluster_reports = global_user_state.get_clusters_from_history()
 
@@ -931,7 +938,11 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
 
 
 @usage_lib.entrypoint
+<<<<<<< HEAD
 def spot_cost_report(refresh: bool, condensed: bool) -> List[Dict[str, Any]]:
+=======
+def spot_cost_report(refresh: bool, verbose: bool) -> List[Dict[str, Any]]:
+>>>>>>> f6f00092 (untested changes to address feature reqs in pr comments)
 
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get statuses of managed spot jobs.
@@ -985,7 +996,11 @@ def spot_cost_report(refresh: bool, condensed: bool) -> List[Dict[str, Any]]:
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
+<<<<<<< HEAD
     code = spot.SpotCodeGen.get_cost_report(condensed)
+=======
+    code = spot.SpotCodeGen.get_cost_report(verbose)
+>>>>>>> f6f00092 (untested changes to address feature reqs in pr comments)
 
     returncode, job_costs_payload, stderr = backend.run_on_head(
         handle,
