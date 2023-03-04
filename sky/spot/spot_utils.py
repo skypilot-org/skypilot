@@ -213,6 +213,18 @@ def get_job_id_from_spot_cluster_name(spot_cluster_name: str) -> str:
     return spot_cluster_name.split('-')[-1]
 
 
+def get_job_name_from_spot_cluster_name(spot_cluster_name: str) -> str:
+    """Parse job name from spot cluster name."""
+
+    if spot_cluster_name == '':
+        return ''
+
+    job_id = get_job_id_from_spot_cluster_name(spot_cluster_name)
+    suffix_length = len(job_id) + 1
+
+    return spot_cluster_name[:-suffix_length]
+
+
 def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
     """Cancel jobs by id.
 
@@ -686,8 +698,10 @@ def dump_spot_cost(verbose: bool) -> str:
         cluster_name = cluster_report['name']
         if cluster_name not in seen_cluster_names:
             cluster_report['job_id'] = get_job_id_from_spot_cluster_name(
-                cluster_report['name'])
+                cluster_name)
             seen_cluster_names.add(cluster_name)
+            cluster_report['name'] = get_job_name_from_spot_cluster_name(
+                cluster_name)
 
         else:
             cluster_report['name'] = ''
