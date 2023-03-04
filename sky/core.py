@@ -977,8 +977,11 @@ def spot_cost_report(refresh: bool, verbose: bool) -> List[Dict[str, Any]]:
 
         handle = _start(spot.SPOT_CONTROLLER_NAME)
 
+    controller_status = global_user_state.ClusterStatus.UP
+
     if handle is None or handle.head_ip is None:
-        raise exceptions.ClusterNotUpError('Spot controller is not up.')
+        raise exceptions.ClusterNotUpError('Spot controller is not up.',
+                                           cluster_status=controller_status)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
