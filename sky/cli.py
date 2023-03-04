@@ -3648,21 +3648,20 @@ _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
     required=False,
     help='Query the latest statuses, restarting the spot controller if stopped.'
 )
-@click.option(
-    '--verbose',
-    '-s',
-    default=True,
-    is_flag=True,
-    required=False,
-    help='Query the latest statuses, restarting the spot controller if stopped.'
-)
+@click.option('--condensed',
+              '-c',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='If true, do not show verbose breakdown of spot job costs.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def spot_cost_report(refresh: bool, verbose: bool):
+def spot_cost_report(refresh: bool, condensed: bool):
     """Show cost report of managed spot jobs.
     """
     click.secho('Fetching managed spot job costs...', fg='yellow')
     no_costs_found_str = '  No job costs found.'
+    verbose = not condensed
     try:
         cost_table = core.spot_cost_report(refresh, verbose)
     except exceptions.ClusterNotUpError:
