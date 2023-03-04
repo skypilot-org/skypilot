@@ -36,7 +36,11 @@ available_node_types:
     max_workers: {{ task.num_nodes }}
     {% endif %}
 
-    resources: {skypilot_resource_{{ task.task_name }}: 1, {% for resource in task.custom_resources %}{{resource}}: {{task.custom_resources[resource]}} {% endfor %}}
+    resources:
+      skypilot_resource_{{ task.task_name }}: 1
+      {%- if task.custom_resources %}
+      {% for resource in task.custom_resources %}{{resource}}: {{task.custom_resources[resource]}} {% endfor %}
+      {%- endif %}
     worker_setup_commands:
       - sudo systemctl stop unattended-upgrades || true;
         sudo systemctl disable unattended-upgrades || true;
