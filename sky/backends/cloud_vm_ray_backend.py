@@ -2480,8 +2480,9 @@ class CloudVmRayBackend(backends.Backend):
 
         for task in task_group.tasks:
             if task.run is None:
-                logger.info('Run commands not specified or empty.')
-                return
+                logger.info(
+                    f'Run commands not specified or empty for task {task.name}.'
+                )
 
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
