@@ -215,7 +215,6 @@ def get_job_id_from_spot_cluster_name(spot_cluster_name: str) -> str:
 
 def get_job_name_from_spot_cluster_name(spot_cluster_name: str) -> str:
     """Parse job name from spot cluster name."""
-
     if spot_cluster_name == '':
         return ''
 
