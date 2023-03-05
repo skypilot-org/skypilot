@@ -136,7 +136,7 @@ def _print_candidate_resources(
             accelerator, count = list(resources.accelerators.items())[0]
             accelerators = f'{accelerator}:{count}'
         cloud = resources.cloud
-        vcpus = cloud.get_vcpus_from_instance_type(resources.instance_type)
+        vcpus = cloud.get_vcpus_mem_from_instance_type(resources.instance_type)
         if vcpus is None:
             vcpus = '-'
         elif vcpus.is_integer():

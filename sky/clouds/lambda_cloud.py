@@ -126,12 +126,12 @@ class Lambda(clouds.Cloud):
             instance_type, clouds='lambda')
 
     @classmethod
-    def get_vcpus_from_instance_type(
+    def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
     ) -> Optional[float]:
-        return service_catalog.get_vcpus_from_instance_type(instance_type,
-                                                            clouds='lambda')
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='lambda')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -198,6 +198,7 @@ class Lambda(clouds.Cloud):
             acc_count,
             use_spot=resources.use_spot,
             cpus=resources.cpus,
+            memory_gb_or_ratio=resources.memory,
             region=resources.region,
             zone=resources.zone,
             clouds='lambda')

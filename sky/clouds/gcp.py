@@ -378,6 +378,7 @@ class GCP(clouds.Cloud):
             acc,
             acc_count,
             cpus=resources.cpus if not use_tpu_vm else None,
+            memory_gb_or_ratio=resources.memory,
             use_spot=resources.use_spot,
             region=resources.region,
             zone=resources.zone,
@@ -424,12 +425,12 @@ class GCP(clouds.Cloud):
         return None
 
     @classmethod
-    def get_vcpus_from_instance_type(
+    def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
     ) -> Optional[float]:
-        return service_catalog.get_vcpus_from_instance_type(instance_type,
-                                                            clouds='gcp')
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='gcp')
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:

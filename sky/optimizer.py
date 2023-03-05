@@ -656,13 +656,20 @@ class Optimizer:
                 accelerators = f'{accelerators}:{count}'
             spot = '[Spot]' if resources.use_spot else ''
             cloud = resources.cloud
-            vcpus = cloud.get_vcpus_from_instance_type(resources.instance_type)
-            if vcpus is None:
-                vcpus = '-'
-            elif vcpus.is_integer():
-                vcpus = str(int(vcpus))
-            else:
-                vcpus = f'{vcpus:.1f}'
+            vcpus, mem = cloud.get_vcpus_mem_from_instance_type(
+                resources.instance_type)
+
+            def format_number(x):
+                if x is None:
+                    return '-'
+                elif x.is_integer():
+                    return str(int(x))
+                else:
+                    return f'{x:.1f}'
+
+            vcpus = format_number(vcpus)
+            mem = format_number(mem)
+
             if resources.zone is None:
                 region_or_zone = resources.region
             else:
@@ -671,13 +678,15 @@ class Optimizer:
                 str(cloud),
                 resources.instance_type + spot,
                 vcpus,
+                mem,
                 str(accelerators),
                 str(region_or_zone),
             ]
 
         # Print the list of resouces that the optimizer considered.
         resource_fields = [
-            'CLOUD', 'INSTANCE', 'vCPUs', 'ACCELERATORS', 'REGION/ZONE'
+            'CLOUD', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'ACCELERATORS',
+            'REGION/ZONE'
         ]
         # Do not print Source or Sink.
         best_plan_rows = [[t, t.num_nodes] + _get_resources_element_list(r)

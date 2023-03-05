@@ -164,10 +164,11 @@ def get_hourly_cost(instance_type: str,
                                use_spot, region, zone)
 
 
-def get_vcpus_from_instance_type(instance_type: str,
-                                 clouds: CloudFilter = None) -> Optional[float]:
+def get_vcpus_mem_from_instance_type(instance_type: str,
+                                     clouds: CloudFilter = None
+                                    ) -> Optional[float]:
     """Returns the number of virtual CPUs from a instance type."""
-    return _map_clouds_catalog(clouds, 'get_vcpus_from_instance_type',
+    return _map_clouds_catalog(clouds, 'get_vcpus_mem_from_instance_type',
                                instance_type)
 
 
@@ -194,6 +195,7 @@ def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
     cpus: Optional[str] = None,
+    memory_gb_or_ratio: Optional[str] = None,
     use_spot: bool = False,
     region: Optional[str] = None,
     zone: Optional[str] = None,
@@ -204,8 +206,8 @@ def get_instance_type_for_accelerator(
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
     return _map_clouds_catalog(clouds, 'get_instance_type_for_accelerator',
-                               acc_name, acc_count, cpus, use_spot, region,
-                               zone)
+                               acc_name, acc_count, cpus, memory_gb_or_ratio,
+                               use_spot, region, zone)
 
 
 def get_accelerator_hourly_cost(

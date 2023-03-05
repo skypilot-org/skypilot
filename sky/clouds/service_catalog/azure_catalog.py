@@ -56,8 +56,9 @@ def get_hourly_cost(instance_type: str,
                                        zone)
 
 
-def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
-    return common.get_vcpus_from_instance_type_impl(_df, instance_type)
+def get_vcpus_mem_from_instance_type(
+        instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+    return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
 def _get_instance_family(instance_type: str) -> str:
@@ -88,7 +89,7 @@ def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
         cpus = str(_DEFAULT_NUM_VCPUS)
     df = _df[_df['InstanceType'].apply(_get_instance_family) ==
              _DEFAULT_INSTANCE_FAMILY]
-    return common.get_instance_type_for_cpus_impl(df, cpus)
+    return common.get_instance_type_for_cpus_mem_impl(df, cpus)
 
 
 def get_accelerators_from_instance_type(
@@ -100,6 +101,7 @@ def get_instance_type_for_accelerator(
         acc_name: str,
         acc_count: int,
         cpus: Optional[str] = None,
+        memory_gb_or_ratio: Optional[str] = None,
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
@@ -110,13 +112,15 @@ def get_instance_type_for_accelerator(
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure does not support zones.')
-    return common.get_instance_type_for_accelerator_impl(df=_df,
-                                                         acc_name=acc_name,
-                                                         acc_count=acc_count,
-                                                         cpus=cpus,
-                                                         use_spot=use_spot,
-                                                         region=region,
-                                                         zone=zone)
+    return common.get_instance_type_for_accelerator_impl(
+        df=_df,
+        acc_name=acc_name,
+        acc_count=acc_count,
+        cpus=cpus,
+        memory_gb_or_ratio=memory_gb_or_ratio,
+        use_spot=use_spot,
+        region=region,
+        zone=zone)
 
 
 def get_region_zones_for_instance_type(

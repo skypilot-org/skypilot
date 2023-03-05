@@ -29,8 +29,9 @@ _TPU_REGIONS = [
 # This is the latest general-purpose instance family as of Jan 2023.
 # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
 # Memory: 4 GiB RAM per 1 vCPU.
-_DEFAULT_INSTANCE_FAMILY = 'n2-standard'
+_DEFAULT_INSTANCE_FAMILY = 'n2'
 _DEFAULT_NUM_VCPUS = 8
+_DEFAULT_MEMORY_CPU_RATIO = 4
 
 # This can be switched between n1 and n2.
 # n2 is not allowed for launching GPUs.
@@ -164,26 +165,34 @@ def get_hourly_cost(
                                        zone)
 
 
-def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
-    # The number of vCPUs provided with a TPU VM is not officially documented.
+def get_vcpus_mem_from_instance_type(
+        instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+    # The number of vCPUs and memory size provided with a TPU VM is not
+    # officially documented.
     if instance_type == 'TPU-VM':
-        return None
-    return common.get_vcpus_from_instance_type_impl(_df, instance_type)
+        return None, None
+    return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory_gb_or_ratio: Optional[str] = None) -> Optional[str]:
     if cpus is None:
         cpus = str(_DEFAULT_NUM_VCPUS)
+    if memory_gb_or_ratio is None:
+        memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
     instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}-'
     df = _df[_df['InstanceType'].notna()]
     df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
-    return common.get_instance_type_for_cpus_impl(df, cpus)
+    return common.get_instance_type_for_cpus_mem_impl(df, cpus,
+                                                      memory_gb_or_ratio)
 
 
 def get_instance_type_for_accelerator(
         acc_name: str,
         acc_count: int,
         cpus: Optional[str] = None,
+        memory_gb_or_ratio: Optional[str] = None,
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
@@ -195,7 +204,8 @@ def get_instance_type_for_accelerator(
     """
     (instance_list,
      fuzzy_candidate_list) = common.get_instance_type_for_accelerator_impl(
-         _df, acc_name, acc_count, cpus, use_spot, region, zone)
+         _df, acc_name, acc_count, cpus, memory_gb_or_ratio, use_spot, region,
+         zone)
     if instance_list is None:
         return None, fuzzy_candidate_list
 
@@ -212,6 +222,14 @@ def get_instance_type_for_accelerator(
                     return None, []
             else:
                 if num_a2_cpus != float(cpus):
+                    return None, []
+
+        if memory_gb_or_ratio is not None:
+            if memory_gb_or_ratio.endswith('x'):
+                if float(memory_gb_or_ratio[:-1]) < 8.0:
+                    return None, []
+            else:
+                if float(memory_gb_or_ratio) < 96.0:
                     return None, []
         return [_A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]], []
 

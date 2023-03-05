@@ -28,8 +28,9 @@ logger = sky_logging.init_logger(__name__)
 # This is the latest general-purpose instance family as of Jan 2023.
 # CPU: Intel Ice Lake 8375C.
 # Memory: 4 GiB RAM per 1 vCPU.
-_DEFAULT_INSTANCE_FAMILY = 'm6i'
+_DEFAULT_INSTANCE_FAMILY = ['m6i', 'r6i', 'c6i']
 _DEFAULT_NUM_VCPUS = 8
+_DEFAULT_MEMORY_CPU_RATIO = 4
 
 # Keep it synced with the frequency in
 # skypilot-catalog/.github/workflows/update-aws-catalog.yml
@@ -161,17 +162,27 @@ def get_hourly_cost(instance_type: str,
                                        region, zone)
 
 
-def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
-    return common.get_vcpus_from_instance_type_impl(_get_df(), instance_type)
+def get_vcpus_mem_from_instance_type(
+        instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+    return common.get_vcpus_mem_from_instance_type_impl(_get_df(),
+                                                        instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory_gb: Optional[str] = None) -> Optional[str]:
     if cpus is None:
         cpus = str(_DEFAULT_NUM_VCPUS)
-    instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}.'
+
+    if memory_gb is None:
+        memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
+    else:
+        memory_gb_or_ratio = memory_gb
+    instance_type_prefix = tuple(
+        f'{family}.' for family in _DEFAULT_INSTANCE_FAMILY)
     df = _get_df()
     df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
-    return common.get_instance_type_for_cpus_impl(df, cpus)
+    return common.get_instance_type_for_cpus_mem_impl(df, cpus,
+                                                      memory_gb_or_ratio)
 
 
 def get_accelerators_from_instance_type(
@@ -184,6 +195,7 @@ def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
     cpus: Optional[str] = None,
+    memory_gb_or_ratio: Optional[str] = None,
     use_spot: bool = False,
     region: Optional[str] = None,
     zone: Optional[str] = None,
@@ -192,13 +204,15 @@ def get_instance_type_for_accelerator(
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
-    return common.get_instance_type_for_accelerator_impl(df=_get_df(),
-                                                         acc_name=acc_name,
-                                                         acc_count=acc_count,
-                                                         cpus=cpus,
-                                                         use_spot=use_spot,
-                                                         region=region,
-                                                         zone=zone)
+    return common.get_instance_type_for_accelerator_impl(
+        df=_get_df(),
+        acc_name=acc_name,
+        acc_count=acc_count,
+        cpus=cpus,
+        memory_gb_or_ratio=memory_gb_or_ratio,
+        use_spot=use_spot,
+        region=region,
+        zone=zone)
 
 
 def get_region_zones_for_instance_type(instance_type: str,

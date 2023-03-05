@@ -253,10 +253,10 @@ def get_hourly_cost_impl(
     return cheapest[price_str]
 
 
-def get_vcpus_from_instance_type_impl(
+def get_vcpus_mem_from_instance_type_impl(
     df: pd.DataFrame,
     instance_type: str,
-) -> Optional[float]:
+) -> Tuple[Optional[float], Optional[float]]:
     df = _get_instance_type(df, instance_type, None)
     if len(df) == 0:
         with ux_utils.print_exception_no_traceback():
@@ -264,10 +264,20 @@ def get_vcpus_from_instance_type_impl(
     assert len(set(df['vCPUs'])) == 1, ('Cannot determine the number of vCPUs '
                                         f'of the instance type {instance_type}.'
                                         f'\n{df}')
+    assert len(set(
+        df['MemoryGiB'])) == 1, ('Cannot determine the memory size '
+                                 f'of the instance type {instance_type}.'
+                                 f'\n{df}')
+
     vcpus = df['vCPUs'].iloc[0]
-    if pd.isna(vcpus):
-        return None
-    return float(vcpus)
+    mem = df['MemoryGiB'].iloc[0]
+
+    def get_value(value):
+        if pd.isna(value):
+            return None
+        return float(value)
+
+    return get_value(vcpus), get_value(mem)
 
 
 def _filter_with_cpus(df: pd.DataFrame, cpus: Optional[str]) -> pd.DataFrame:
@@ -293,9 +303,39 @@ def _filter_with_cpus(df: pd.DataFrame, cpus: Optional[str]) -> pd.DataFrame:
         return df[df['vCPUs'] == num_cpus]
 
 
-def get_instance_type_for_cpus_impl(
-        df: pd.DataFrame, cpus: Optional[str] = None) -> Optional[str]:
+def _filter_with_mem(df: pd.DataFrame,
+                     memory_gb_or_ratio: Optional[str]) -> pd.DataFrame:
+    if memory_gb_or_ratio is None:
+        return df
+
+    # The following code is redundant with the code in
+    # resources.py::_set_memory() but we add it here for safety.
+    if memory_gb_or_ratio.endswith(('+', 'x', 'X')):
+        memory_gb_str = memory_gb_or_ratio[:-1]
+    else:
+        memory_gb_str = memory_gb_or_ratio
+    try:
+        memory_gb = float(memory_gb_str)
+    except ValueError:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'The "memory" field should be either a number or '
+                             'a string "<number>+" or "<number>x". Found: '
+                             f'{memory_gb_or_ratio!r}') from None
+
+    if memory_gb_or_ratio.endswith('+'):
+        return df[df['MemoryGiB'] >= memory_gb]
+    elif memory_gb_or_ratio.endswith(('x', 'X')):
+        return df[df['MemoryGiB'] >= df['vCPUs'] * memory_gb]
+    else:
+        return df[df['MemoryGiB'] == memory_gb]
+
+
+def get_instance_type_for_cpus_mem_impl(
+        df: pd.DataFrame,
+        cpus: Optional[str] = None,
+        memory_gb_or_ratio: Optional[str] = None) -> Optional[str]:
     df = _filter_with_cpus(df, cpus)
+    df = _filter_with_mem(df, memory_gb_or_ratio)
     if df.empty:
         return None
     # Sort by the number of vCPUs and then by the price.
@@ -323,6 +363,7 @@ def get_instance_type_for_accelerator_impl(
     acc_name: str,
     acc_count: int,
     cpus: Optional[str] = None,
+    memory_gb_or_ratio: Optional[str] = None,
     use_spot: bool = False,
     region: Optional[str] = None,
     zone: Optional[str] = None,
@@ -348,6 +389,7 @@ def get_instance_type_for_accelerator_impl(
         return (None, fuzzy_candidate_list)
 
     result = _filter_with_cpus(result, cpus)
+    result = _filter_with_mem(result, memory_gb_or_ratio)
     if region is not None:
         result = result[result['Region'] == region]
     if zone is not None:

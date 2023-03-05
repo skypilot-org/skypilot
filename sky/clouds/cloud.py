@@ -234,8 +234,8 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_vcpus_from_instance_type(cls,
-                                     instance_type: str) -> Optional[float]:
+    def get_vcpus_mem_from_instance_type(cls,
+                                         instance_type: str) -> Optional[float]:
         """Returns the number of virtual CPUs that the instance type offers."""
         raise NotImplementedError
 

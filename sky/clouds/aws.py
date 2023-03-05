@@ -282,12 +282,12 @@ class AWS(clouds.Cloud):
             instance_type, clouds='aws')
 
     @classmethod
-    def get_vcpus_from_instance_type(
+    def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
     ) -> Optional[float]:
-        return service_catalog.get_vcpus_from_instance_type(instance_type,
-                                                            clouds='aws')
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='aws')
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources', region: 'clouds.Region',
@@ -357,6 +357,7 @@ class AWS(clouds.Cloud):
             acc_count,
             use_spot=resources.use_spot,
             cpus=resources.cpus,
+            memory_gb_or_ratio=resources.memory,
             region=resources.region,
             zone=resources.zone,
             clouds='aws')

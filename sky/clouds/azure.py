@@ -194,12 +194,12 @@ class Azure(clouds.Cloud):
             instance_type, clouds='azure')
 
     @classmethod
-    def get_vcpus_from_instance_type(
+    def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
     ) -> Optional[float]:
-        return service_catalog.get_vcpus_from_instance_type(instance_type,
-                                                            clouds='azure')
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='azure')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -278,6 +278,7 @@ class Azure(clouds.Cloud):
             acc,
             acc_count,
             cpus=resources.cpus,
+            memory_gb_or_ratio=resources.memory,
             use_spot=resources.use_spot,
             region=resources.region,
             zone=resources.zone,
