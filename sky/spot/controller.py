@@ -2,7 +2,6 @@
 import argparse
 import multiprocessing
 import pathlib
-import signal
 import time
 import traceback
 
@@ -181,7 +180,7 @@ class SpotController:
                     # Some spot resource (e.g., Spot TPU VM) may need to be
                     # cleaned up after preemption.
                     logger.info('Cleaning up the preempted spot cluster...')
-                    self._strategy_executor.terminate_cluster()
+                    recovery_strategy.terminate_cluster(self._cluster_name)
 
             # Try to recover the spot jobs, when the cluster is preempted
             # or the job status is failed to be fetched.
@@ -194,10 +193,6 @@ class SpotController:
         """Run controller logic and handle exceptions."""
         try:
             self._run()
-        except KeyboardInterrupt:
-            # Kill the children processes launched by log_lib.run_with_log.
-            subprocess_utils.kill_children_processes()
-            spot_state.set_cancelled(self._job_id)
         except exceptions.ProvisionPrechecksError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
@@ -228,36 +223,10 @@ class SpotController:
                 self._job_id,
                 failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
                 failure_reason=msg)
-        finally:
-            self._strategy_executor.terminate_cluster()
-            job_status = spot_state.get_status(self._job_id)
-            # The job can be non-terminal if the controller exited abnormally,
-            # e.g. failed to launch cluster after reaching the MAX_RETRY.
-            if not job_status.is_terminal():
-                logger.info(f'Previous spot job status: {job_status.value}')
-                spot_state.set_failed(
-                    self._job_id,
-                    failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
-                    failure_reason=(
-                        'Unexpected error occurred. For details, '
-                        f'run: sky spot logs --controller {self._job_id}'))
-
-            # Clean up Storages with persistent=False.
-            self._backend.teardown_ephemeral_storage(self._task)
 
 
 def _run_controller(job_id: int, task_yaml: str, retry_until_up: bool):
     """Runs the controller in a remote process for interruption."""
-
-    # Override the SIGTERM handler to gracefully terminate the controller.
-    def handle_interupt(signum, frame):
-        """Handle the interrupt signal."""
-        # Need to raise KeyboardInterrupt to avoid the exception being caught by
-        # the strategy executor.
-        raise KeyboardInterrupt()
-
-    signal.signal(signal.SIGTERM, handle_interupt)
-
     # The controller needs to be instantiated in the remote process, since
     # the controller is not serializable.
     spot_controller = SpotController(job_id, task_yaml, retry_until_up)
@@ -294,11 +263,31 @@ def _handle_signal(job_id):
         f'User sent {user_signal.value} signal.')
 
 
+def _cleanup(job_id: int, task_yaml: str):
+    # NOTE: The code to get cluster name is same as what we did in the spot
+    # controller, we should keep it in sync with SpotController.__init__()
+    task_name = pathlib.Path(task_yaml).stem
+    task = sky.Task.from_yaml(task_yaml)
+    cluster_name = spot_utils.generate_spot_cluster_name(task_name, job_id)
+    recovery_strategy.terminate_cluster(cluster_name)
+    # Clean up Storages with persistent=False.
+    # TODO(zhwu): this assumes the specific backend.
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    backend.teardown_ephemeral_storage(task)
+
+
 def start(job_id, task_yaml, retry_until_up):
     """Start the controller."""
     controller_process = None
+    cancelling = False
     try:
         _handle_signal(job_id)
+        # TODO(suquark): In theory, we should make controller process a
+        #  daemon process so it will be killed after this process exits,
+        #  however daemon process cannot launch subprocesses, explained here:
+        #  https://docs.python.org/3/library/multiprocessing.html#multiprocessing.Process.daemon  # pylint: disable=line-too-long
+        #  So we can only enable daemon after we no longer need to
+        #  start daemon processes like Ray.
         controller_process = multiprocessing.Process(target=_run_controller,
                                                      args=(job_id, task_yaml,
                                                            retry_until_up))
@@ -308,15 +297,49 @@ def start(job_id, task_yaml, retry_until_up):
             time.sleep(1)
     except exceptions.SpotUserCancelledError:
         logger.info(f'Cancelling spot job {job_id}...')
+        cancelling = True
+    finally:
         if controller_process is not None:
-            logger.info('Sending SIGTERM to controller process '
-                        f'{controller_process.pid}')
-            # This will raise KeyboardInterrupt in the task.
-            # Using SIGTERM instead of SIGINT, as the SIGINT is weirdly ignored
-            # by the controller process when it is started inside a ray job.
-            controller_process.terminate()
-    if controller_process is not None:
-        controller_process.join()
+            logger.info(f'Killing controller process {controller_process.pid}')
+            # NOTE: it is ok to kill or join a killed process.
+            # Kill the controller process first; if its child process is
+            # killed first, then the controller process will raise errors.
+            # Kill any possible remaining children processes recursively.
+            subprocess_utils.kill_children_processes(controller_process.pid,
+                                                     force=True)
+            controller_process.join()
+            logger.info(f'Controller process {controller_process.pid} killed.')
+
+        logger.info(f'Cleaning up spot clusters of job {job_id}.')
+        # NOTE: Originally, we send an interruption signal to the controller
+        # process and the controller process handles cleanup. However, we
+        # figure out the behavior differs from cloud to cloud
+        # (e.g., GCP ignores 'SIGINT'). A possible explanation is
+        # https://unix.stackexchange.com/questions/356408/strange-problem-with-trap-and-sigint
+        # But anyway, a clean solution is killing the controller process
+        # directly, and then cleanup the cluster state.
+        _cleanup(job_id, task_yaml=task_yaml)
+        logger.info(f'Spot clusters of job {job_id} has been taken down.')
+
+        # TODO(suquark): It could take a long time cleaning up the cluster.
+        #  In the future, we may add a "cancelling" state for the spot
+        #  controller.
+        if cancelling:
+            spot_state.set_cancelled(job_id)
+
+        # We should check job status after 'set_cancelled', otherwise
+        # the job status is not terminal.
+        job_status = spot_state.get_status(job_id)
+        # The job can be non-terminal if the controller exited abnormally,
+        # e.g. failed to launch cluster after reaching the MAX_RETRY.
+        assert job_status is not None
+        if not job_status.is_terminal():
+            logger.info(f'Previous spot job status: {job_status.value}')
+            spot_state.set_failed(
+                job_id,
+                failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
+                failure_reason=('Unexpected error occurred. For details, '
+                                f'run: sky spot logs --controller {job_id}'))
 
 
 if __name__ == '__main__':
@@ -332,4 +355,7 @@ if __name__ == '__main__':
                         type=str,
                         help='The path to the user spot task yaml file.')
     args = parser.parse_args()
+    # We start process with 'spawn', because 'fork' could result in weird
+    # behaviors; 'spawn' is also cross-platform.
+    multiprocessing.set_start_method('spawn', force=True)
     start(args.job_id, args.task_yaml, args.retry_until_up)
