@@ -922,6 +922,10 @@ def write_cluster_config(
     # special dir, and upload that as the only file_mount instead. Delay
     # calling this optimization until now, when all source files have been
     # written and their contents finalized.
+    #
+    # Note that the ray yaml file will be copied into that special dir (i.e.,
+    # uploaded as part of the file_mounts), so the restore for backward
+    # compatibility should go before this call.
     if not isinstance(cloud, clouds.Local):
         # Only optimize the file mounts for public clouds now, as local has not
         # been fully tested yet.
