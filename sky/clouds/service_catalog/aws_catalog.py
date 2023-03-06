@@ -27,7 +27,9 @@ logger = sky_logging.init_logger(__name__)
 
 # This is the latest general-purpose instance family as of Jan 2023.
 # CPU: Intel Ice Lake 8375C.
-# Memory: 4 GiB RAM per 1 vCPU.
+# Memory: m6i - 4 GiB RAM per 1 vCPU;
+#         r6i - 8 GiB RAM per 1 vCPU;
+#         c6i - 2 GiB RAM per 1 vCPU.
 _DEFAULT_INSTANCE_FAMILY = ['m6i', 'r6i', 'c6i']
 _DEFAULT_NUM_VCPUS = 8
 _DEFAULT_MEMORY_CPU_RATIO = 4
@@ -168,15 +170,14 @@ def get_vcpus_mem_from_instance_type(
                                                         instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory_gb: Optional[str] = None) -> Optional[str]:
-    if cpus is None:
-        cpus = str(_DEFAULT_NUM_VCPUS)
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory_gb_or_ratio: Optional[str] = None) -> Optional[str]:
+    if cpus is None and memory_gb_or_ratio is None:
+        cpus = f'{_DEFAULT_NUM_VCPUS}+'
 
-    if memory_gb is None:
+    if memory_gb_or_ratio is None:
         memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
-    else:
-        memory_gb_or_ratio = memory_gb
     instance_type_prefix = tuple(
         f'{family}.' for family in _DEFAULT_INSTANCE_FAMILY)
     df = _get_df()

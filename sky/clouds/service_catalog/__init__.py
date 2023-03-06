@@ -164,15 +164,16 @@ def get_hourly_cost(instance_type: str,
                                use_spot, region, zone)
 
 
-def get_vcpus_mem_from_instance_type(instance_type: str,
-                                     clouds: CloudFilter = None
-                                    ) -> Optional[float]:
+def get_vcpus_mem_from_instance_type(
+        instance_type: str,
+        clouds: CloudFilter = None) -> Tuple[Optional[float], Optional[float]]:
     """Returns the number of virtual CPUs from a instance type."""
     return _map_clouds_catalog(clouds, 'get_vcpus_mem_from_instance_type',
                                instance_type)
 
 
 def get_default_instance_type(cpus: Optional[str] = None,
+                              memory_gb_or_ratio: Optional[str] = None,
                               clouds: CloudFilter = None) -> Optional[str]:
     """Returns the cloud's default instance type for the given number of vCPUs.
 
@@ -180,7 +181,8 @@ def get_default_instance_type(cpus: Optional[str] = None,
     with 4 vCPUs.  If cpus='4+', this method returns the default instance
     type with 4 or more vCPUs.
     """
-    return _map_clouds_catalog(clouds, 'get_default_instance_type', cpus)
+    return _map_clouds_catalog(clouds, 'get_default_instance_type', cpus,
+                               memory_gb_or_ratio)
 
 
 def get_accelerators_from_instance_type(

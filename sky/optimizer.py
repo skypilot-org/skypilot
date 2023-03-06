@@ -981,10 +981,16 @@ def _fill_in_launchable_resources(
                                 f'{colorama.Fore.CYAN}'
                                 f'{sorted(all_fuzzy_candidates)}'
                                 f'{colorama.Style.RESET_ALL}')
-                elif resources.cpus is not None:
-                    logger.info('Try specifying a different CPU count, '
-                                'or add "+" to the end of the CPU count '
-                                'to allow for larger instances.')
+                else:
+                    if resources.cpus is not None:
+                        logger.info('Try specifying a different CPU count, '
+                                    'or add "+" to the end of the CPU count '
+                                    'to allow for larger instances.')
+                    if resources.memory is not None:
+                        logger.info(
+                            'Try specifying a different memory amount, '
+                            'or add "+" to the end of the memory amount '
+                            'to allow for larger instances.')
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)

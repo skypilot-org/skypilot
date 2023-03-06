@@ -14,9 +14,12 @@ _df = common.read_catalog('azure/vms.csv')
 
 # This is the latest general-purpose instance family as of Jan 2023.
 # CPU: Intel Ice Lake 8370C.
-# Memory: 4 GiB RAM per 1 vCPU.
-_DEFAULT_INSTANCE_FAMILY = 'D_v5'
+# Memory: D_v5 -- 4 GiB RAM per 1 vCPU;
+#         E_v5 -- 8 GiB RAM per 1 vCPU.
+#         F    -- 2 GiB RAM per 1 vCPU.
+_DEFAULT_INSTANCE_FAMILY = ['D_v5', 'E_v5', 'F']
 _DEFAULT_NUM_VCPUS = 8
+_DEFAULT_MEMORY_CPU_RATIO = 4
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -84,12 +87,17 @@ def _get_instance_family(instance_type: str) -> str:
     return instance_family
 
 
-def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
-    if cpus is None:
-        cpus = str(_DEFAULT_NUM_VCPUS)
-    df = _df[_df['InstanceType'].apply(_get_instance_family) ==
-             _DEFAULT_INSTANCE_FAMILY]
-    return common.get_instance_type_for_cpus_mem_impl(df, cpus)
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory_gb_or_ratio: Optional[str] = None) -> Optional[str]:
+    if cpus is None and memory_gb_or_ratio is None:
+        cpus = f'{_DEFAULT_NUM_VCPUS}+'
+    if memory_gb_or_ratio is None:
+        memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
+    df = _df[_df['InstanceType'].apply(_get_instance_family).isin(
+        _DEFAULT_INSTANCE_FAMILY)]
+    return common.get_instance_type_for_cpus_mem_impl(df, cpus,
+                                                      memory_gb_or_ratio)
 
 
 def get_accelerators_from_instance_type(

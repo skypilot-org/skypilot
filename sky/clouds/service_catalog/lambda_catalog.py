@@ -16,6 +16,7 @@ _df = common.read_catalog('lambda/vms.csv')
 
 # Number of vCPUS for gpu_1x_a100_sxm4
 _DEFAULT_NUM_VCPUS = 30
+_DEFAULT_MEMORY_CPU_RATIO = 4
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -60,15 +61,21 @@ def get_vcpus_mem_from_instance_type(
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
-    if cpus is None:
-        cpus = str(_DEFAULT_NUM_VCPUS)
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory_gb_or_ratio: Optional[str] = None) -> Optional[str]:
+    if cpus is None and memory_gb_or_ratio is None:
+        cpus = f'{_DEFAULT_NUM_VCPUS}+'
+    if memory_gb_or_ratio is not None:
+        memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
     # Set to gpu_1x_a100_sxm4 to be the default instance type if match vCPU
     # requirement.
     df = _df[_df['InstanceType'].eq('gpu_1x_a100_sxm4')]
-    instance = common.get_instance_type_for_cpus_mem_impl(df, cpus)
+    instance = common.get_instance_type_for_cpus_mem_impl(
+        df, cpus, memory_gb_or_ratio)
     if not instance:
-        instance = common.get_instance_type_for_cpus_mem_impl(_df, cpus)
+        instance = common.get_instance_type_for_cpus_mem_impl(
+            _df, cpus, memory_gb_or_ratio)
     return instance
 
 

@@ -108,15 +108,17 @@ class Local(clouds.Cloud):
         return isinstance(other, Local)
 
     @classmethod
-    def get_default_instance_type(cls, cpus: Optional[str] = None) -> str:
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None) -> str:
         # There is only "1" instance type for local cloud: on-prem
-        del cpus  # Unused.
+        del cpus, memory  # Unused.
         return Local._DEFAULT_INSTANCE_TYPE
 
     @classmethod
-    def get_vcpus_mem_from_instance_type(cls,
-                                         instance_type: str) -> Optional[float]:
-        return None
+    def get_vcpus_mem_from_instance_type(
+            cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+        return None, None
 
     @classmethod
     def get_accelerators_from_instance_type(

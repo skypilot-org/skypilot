@@ -112,10 +112,12 @@ class Lambda(clouds.Cloud):
         return isinstance(other, Lambda)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         clouds='lambda')
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None) -> Optional[str]:
+        return service_catalog.get_default_instance_type(
+            cpus=cpus, memory_gb_or_ratio=memory, clouds='lambda')
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -129,7 +131,7 @@ class Lambda(clouds.Cloud):
     def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[float]:
+    ) -> Tuple[Optional[float], Optional[float]]:
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
                                                                 clouds='lambda')
 
@@ -175,6 +177,7 @@ class Lambda(clouds.Cloud):
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
                     cpus=None,
+                    memory=None,
                 )
                 resource_list.append(r)
             return resource_list
@@ -184,7 +187,7 @@ class Lambda(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             default_instance_type = Lambda.get_default_instance_type(
-                cpus=resources.cpus)
+                cpus=resources.cpus, memory=resources.memory)
             if default_instance_type is None:
                 return ([], [])
             else:
