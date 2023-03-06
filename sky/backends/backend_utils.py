@@ -904,12 +904,6 @@ def write_cluster_config(
         config_dict['ray'] = tmp_yaml_path
         return config_dict
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
-    # Delay the optimization of the config until the authentication files is
-    # added.
-    if not isinstance(cloud, clouds.Local):
-        # Only optimize the file mounts for public clouds now, as local has not
-        # been fully tested yet.
-        _optimize_file_mounts(tmp_yaml_path)
 
     # Restore the old yaml content for backward compatibility.
     if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
@@ -924,10 +918,6 @@ def write_cluster_config(
         with open(tmp_yaml_path, 'w') as f:
             f.write(restored_yaml_content)
 
-    # Rename the tmp file to the final YAML path.
-    os.rename(tmp_yaml_path, yaml_path)
-
-    usage_lib.messages.usage.update_ray_yaml(yaml_path)
     # For TPU nodes. TPU VMs do not need TPU_NAME.
     if (resources_vars.get('tpu_type') is not None and
             resources_vars.get('tpu_vm') is None):
@@ -960,6 +950,19 @@ def write_cluster_config(
         config_dict['tpu-create-script'] = scripts[0]
         config_dict['tpu-delete-script'] = scripts[1]
         config_dict['tpu_name'] = tpu_name
+
+    # Optimization: copy the contents of source files in file_mounts to a
+    # special dir, and upload that as the only file_mount instead. Delay
+    # calling this optimization until now, when all source files have been
+    # written and their contents finalized.
+    if not isinstance(cloud, clouds.Local):
+        # Only optimize the file mounts for public clouds now, as local has not
+        # been fully tested yet.
+        _optimize_file_mounts(tmp_yaml_path)
+
+    # Rename the tmp file to the final YAML path.
+    os.rename(tmp_yaml_path, yaml_path)
+    usage_lib.messages.usage.update_ray_yaml(yaml_path)
     return config_dict
 
 
