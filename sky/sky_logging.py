@@ -3,15 +3,14 @@ import contextlib
 import logging
 import sys
 import threading
-from typing import Optional
 
 from sky.utils import env_options
 
 # If the SKYPILOT_MINIMIZE_LOGGING environment variable is set to True,
 # remove logging prefixes and unnecessary information in optimizer
-FORMAT = (None if env_options.Options.MINIMIZE_LOGGING.get() else
-          '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s')
-DATE_FORMAT = '%m-%d %H:%M:%S'
+_FORMAT = (None if env_options.Options.MINIMIZE_LOGGING.get() else
+           '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s')
+_DATE_FORMAT = '%m-%d %H:%M:%S'
 
 
 class NewLineFormatter(logging.Formatter):
@@ -36,11 +35,8 @@ _logging_config.is_silent = False
 echo = print
 
 
-def _setup_logger(
-    logging_level: int = logging.DEBUG,
-    logging_format: Optional[str] = FORMAT,
-):
-    _root_logger.setLevel(logging_level)
+def _setup_logger():
+    _root_logger.setLevel(logging.DEBUG)
     global _default_handler
     if _default_handler is None:
         _default_handler = logging.StreamHandler(sys.stdout)
@@ -50,13 +46,16 @@ def _setup_logger(
         else:
             _default_handler.setLevel(logging.INFO)
         _root_logger.addHandler(_default_handler)
-    fmt = NewLineFormatter(logging_format, datefmt=DATE_FORMAT)
+    fmt = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT)
     _default_handler.setFormatter(fmt)
     # Setting this will avoid the message
     # being propagated to the parent logger.
     _root_logger.propagate = False
 
 
+# The logger is initialized when the module is imported.
+# This is thread-safe as the module is only imported once,
+# guaranteed by the Python GIL.
 _setup_logger()
 
 
@@ -66,7 +65,11 @@ def init_logger(name: str):
 
 @contextlib.contextmanager
 def silent():
-    """Turn off logging."""
+    """Make all sky_logging.echo() and logger.{info, warning...} silent.
+
+    We preserve the ERROR level logging, so that errors are
+    still printed.
+    """
     global echo
     global _logging_config
     previous_level = _root_logger.level
@@ -74,7 +77,7 @@ def silent():
     previous_echo = echo
 
     # Turn off logger
-    _root_logger.setLevel(logging.CRITICAL)
+    _root_logger.setLevel(logging.ERROR)
     _logging_config.is_silent = True
     echo = lambda *args, **kwargs: None
     yield
