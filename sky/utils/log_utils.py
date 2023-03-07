@@ -17,7 +17,7 @@ console = rich_console.Console()
 _status = None
 
 
-class NoOpConsoleStatus:
+class _NoOpConsoleStatus:
     """An empty class for multi-threaded console.status."""
 
     def __enter__(self):
@@ -45,11 +45,11 @@ def safe_rich_status(msg: str):
             _status = console.status(msg)
         _status.update(msg)
         return _status
-    return NoOpConsoleStatus()
+    return _NoOpConsoleStatus()
 
 
 def force_update_rich_status(msg: str):
-    """A wrapper for multi-threaded console.status."""
+    """Update the status message even if it is set to be silent."""
     if threading.current_thread() is threading.main_thread():
         global _status
         if _status is not None:

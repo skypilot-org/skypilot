@@ -1400,6 +1400,15 @@ def _get_spot_jobs(
         show_all: bool,
         limit_num_jobs_to_show: bool = False) -> Tuple[Optional[int], str]:
     """Get the in-progress spot jobs.
+    
+    Args:
+        refresh: Query the latest statuses, restarting the spot controller if
+            stopped.
+        skip_finished: Show only pending/running jobs\' information.
+        show_all: Show all information in full.
+        limit_num_jobs_to_show: If True, limit the number of jobs to show to
+            _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS, which is mainly used by
+            `sky status`
 
     Returns:
         A tuple of (num_in_progress_jobs, msg). If num_in_progress_jobs is None,
@@ -1436,6 +1445,7 @@ def _get_spot_jobs(
         msg = spot_lib.format_job_table(spot_jobs,
                                         show_all=show_all,
                                         max_jobs=max_jobs_to_show)
+    print('hi')
     return num_in_progress_jobs, msg
 
 
@@ -1527,7 +1537,7 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                                                     refresh=False,
                                                     skip_finished=True,
                                                     show_all=False,
-                                                    limit_num_jobs_to_show=all))
+                                                    limit_num_jobs_to_show=not all))
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                    f'{colorama.Style.RESET_ALL}')
         query_clusters: Optional[List[str]] = None

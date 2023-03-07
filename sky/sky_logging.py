@@ -1,7 +1,9 @@
 """Logging utilities."""
+import builtins
 import contextlib
 import logging
 import sys
+import threading
 from typing import Optional
 
 from sky.utils import env_options
@@ -29,9 +31,10 @@ class NewLineFormatter(logging.Formatter):
 
 _root_logger = logging.getLogger('sky')
 _default_handler = None
-echo = print
-_is_silent = False
+_logging_config = threading.local()
+_logging_config.is_silent = False
 
+echo = print
 
 def _setup_logger(
     logging_level: int = logging.DEBUG,
@@ -65,22 +68,22 @@ def init_logger(name: str):
 def silent():
     """Turn off logging."""
     global echo
-    global _is_silent
+    global _logging_config
     previous_level = _root_logger.level
+    previous_is_silent = _logging_config.is_silent
     previous_echo = echo
-    previous_is_silent = _is_silent
 
     # Turn off logger
     _root_logger.setLevel(logging.CRITICAL)
+    _logging_config.is_silent = True
     echo = lambda *args, **kwargs: None
-    _is_silent = True
     yield
 
     # Restore logger
-    _root_logger.setLevel(previous_level)
     echo = previous_echo
-    _is_silent = previous_is_silent
+    _root_logger.setLevel(previous_level)
+    _logging_config.is_silent = previous_is_silent
 
 
 def is_silent():
-    return _is_silent
+    return _logging_config.is_silent
