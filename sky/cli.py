@@ -1445,7 +1445,6 @@ def _get_spot_jobs(
         msg = spot_lib.format_job_table(spot_jobs,
                                         show_all=show_all,
                                         max_jobs=max_jobs_to_show)
-    print('hi')
     return num_in_progress_jobs, msg
 
 
