@@ -330,7 +330,8 @@ def list_accelerators(
     # Thus, we can show their exact cost including the host VM prices.
     new_infos = defaultdict(list)
     for info in a100_infos:
-        assert pd.isna(info.instance_type) and pd.isna(info.memory_gb), a100_infos
+        assert pd.isna(info.instance_type) and pd.isna(
+            info.memory_gb), a100_infos
         a100_host_vm_type = _A100_INSTANCE_TYPE_DICTS[info.accelerator_name][
             info.accelerator_count]
         df = _df[_df['InstanceType'] == a100_host_vm_type]

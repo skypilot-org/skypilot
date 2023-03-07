@@ -327,7 +327,8 @@ class Resources:
         if memory_gb_or_ratio <= 0:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'The "cpus" field should be positive. Found: {memory_gb!r}')
+                    f'The "cpus" field should be positive. Found: {memory_gb!r}'
+                )
 
     def _set_accelerators(
         self,
@@ -948,7 +949,7 @@ class Resources:
 
         if version < 7:
             self._cpus = None
-            
+
         if version < 8:
             self._memory_gb = None
 
