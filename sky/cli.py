@@ -1154,8 +1154,8 @@ def cli():
     help=
     ('Amount of memory each instance must have in GB (e.g., '
      '``--memory-gb=16`` (exactly 16GB), ``--memory-gb=16+`` (at least 16GB)) '
-     'or ``--memory-gb=4x`` (at least 4 times the amount of memory_gb in GB than '
-     '#CPUs)'))
+     'or ``--memory-gb=4x`` (at least 4 times the amount of memory_gb in GB '
+     'than #CPUs)'))
 @click.option('--disk-size',
               default=None,
               type=int,
