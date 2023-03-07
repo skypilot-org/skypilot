@@ -49,7 +49,7 @@ def safe_rich_status(msg: str):
 
 
 def force_update_rich_status(msg: str):
-    """Update the status message even if it is set to be silent."""
+    """Update the status message even if sky_logging.is_silent() is true."""
     if threading.current_thread() is threading.main_thread():
         global _status
         if _status is not None:
