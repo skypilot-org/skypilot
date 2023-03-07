@@ -65,6 +65,7 @@ console = rich_console.Console()
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
+SKY_TPU_NODE_SCRIPT_REMOTE_PATH = '~/.sky/sky_tpu_node_script.sh'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_PATH = '~/.sky/wheels'
 SKY_USER_FILE_PATH = '~/.sky/generated'
@@ -836,6 +837,14 @@ def write_cluster_config(
         ssh_proxy_command = ssh_proxy_command_config[region_name]
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
+    tpu_node_script_path = None
+    if (resources_vars.get('tpu_type') is not None and
+            resources_vars.get('tpu_vm') is None):
+        user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
+        tpu_node_script_path = os.path.join(user_file_dir,
+                                            'gcp-tpu-node.sh.j2').replace(
+                                                '.sh.j2', f'.{cluster_name}.sh')
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -888,6 +897,8 @@ def write_cluster_config(
                 'sky_ray_yaml_local_path':
                     tmp_yaml_path
                     if not isinstance(cloud, clouds.Local) else yaml_path,
+                'sky_tpu_node_script_remote_path': SKY_TPU_NODE_SCRIPT_REMOTE_PATH,
+                'sky_tpu_node_script_local_path': tpu_node_script_path,
                 'sky_version': str(version.parse(sky.__version__)),
                 'sky_wheel_hash': wheel_hash,
                 # Local IP handling (optional).
@@ -918,6 +929,34 @@ def write_cluster_config(
         with open(tmp_yaml_path, 'w') as f:
             f.write(restored_yaml_content)
 
+    # for TPU node, we generate a script for creating/deleting them
+    if (resources_vars.get('tpu_type') is not None and
+            resources_vars.get('tpu_vm') is None):
+        tpu_name = resources_vars.get('tpu_name')
+        if tpu_name is None:
+            tpu_name = cluster_name
+
+        from sky.skylet.providers.gcp import config as gcp_config  # pylint: disable=import-outside-toplevel
+        config = common_utils.read_yaml(os.path.expanduser(tmp_yaml_path))
+        vpc_name = gcp_config.get_usable_vpc(config)
+
+        tpu_script_path = fill_template(
+            'gcp-tpu-node.sh.j2',
+            dict(
+                resources_vars, **{
+                    'tpu_name': tpu_name,
+                    'gcp_project_id': gcp_project_id,
+                    'vpc_name': vpc_name,
+                }),
+            # Use new names for TPU scripts so that different runs can use
+            # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
+            # with cluster yamls.
+            output_path=tpu_node_script_path,
+        )
+        config_dict['tpu-create-script'] = tpu_script_path
+        config_dict['tpu-delete-script'] = tpu_script_path
+        config_dict['tpu_name'] = tpu_name
+
     # Optimization: copy the contents of source files in file_mounts to a
     # special dir, and upload that as the only file_mount instead. Delay
     # calling this optimization until now, when all source files have been
@@ -935,38 +974,6 @@ def write_cluster_config(
     os.rename(tmp_yaml_path, yaml_path)
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
 
-    # For TPU nodes. TPU VMs do not need TPU_NAME.
-    if (resources_vars.get('tpu_type') is not None and
-            resources_vars.get('tpu_vm') is None):
-        tpu_name = resources_vars.get('tpu_name')
-        if tpu_name is None:
-            tpu_name = cluster_name
-
-        user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
-
-        from sky.skylet.providers.gcp import config as gcp_config  # pylint: disable=import-outside-toplevel
-        config = common_utils.read_yaml(os.path.expanduser(config_dict['ray']))
-        vpc_name = gcp_config.get_usable_vpc(config)
-
-        scripts = tuple(
-            fill_template(
-                template_name,
-                dict(
-                    resources_vars, **{
-                        'tpu_name': tpu_name,
-                        'gcp_project_id': gcp_project_id,
-                        'vpc_name': vpc_name,
-                    }),
-                # Use new names for TPU scripts so that different runs can use
-                # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
-                # with cluster yamls.
-                output_path=os.path.join(user_file_dir, template_name).replace(
-                    '.sh.j2', f'.{cluster_name}.sh'),
-            ) for template_name in
-            ['gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2'])
-        config_dict['tpu-create-script'] = scripts[0]
-        config_dict['tpu-delete-script'] = scripts[1]
-        config_dict['tpu_name'] = tpu_name
     return config_dict
 
 

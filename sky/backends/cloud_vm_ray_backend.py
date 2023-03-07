@@ -1088,9 +1088,10 @@ class RetryingVmProvisioner(object):
             with backend_utils.safe_console_status(
                     '[bold cyan]Provisioning TPU '
                     f'[green]{tpu_name}[/]'):
-                subprocess_utils.run(f'bash {config_dict["tpu-create-script"]}',
-                                     stdout=subprocess.PIPE,
-                                     stderr=subprocess.PIPE)
+                subprocess_utils.run(
+                    f'bash {config_dict["tpu-create-script"]} -c',
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE)
             return True
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode('ascii')
@@ -3143,7 +3144,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             with backend_utils.safe_console_status(
                     '[bold cyan]Terminating TPU...'):
                 tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
-                    ['bash', handle.tpu_delete_script],
+                    ['bash', handle.tpu_delete_script, '-d'],
                     log_abs_path,
                     stream_logs=False,
                     require_outputs=True)
