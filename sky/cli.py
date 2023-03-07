@@ -1404,7 +1404,7 @@ def _get_spot_jobs(
     Args:
         refresh: Query the latest statuses, restarting the spot controller if
             stopped.
-        skip_finished: Show only pending/running jobs\' information.
+        skip_finished: Show only in-progress jobs.
         show_all: Show all information in full.
         limit_num_jobs_to_show: If True, limit the number of jobs to show to
             _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS, which is mainly used by
