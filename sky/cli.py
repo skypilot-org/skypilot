@@ -1408,7 +1408,7 @@ def _get_spot_jobs(
         show_all: Show all information of each spot job (e.g., region, price).
         limit_num_jobs_to_show: If True, limit the number of jobs to show to
             _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS, which is mainly used by
-            `sky status`
+            `sky status`.
 
     Returns:
         A tuple of (num_in_progress_jobs, msg). If num_in_progress_jobs is None,
