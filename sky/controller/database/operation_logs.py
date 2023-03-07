@@ -30,8 +30,8 @@ class AWSDynamoDBClient:
         self._client = boto3.client('dynamodb', region_name='us-east-1')
         self._thread_pool = ThreadPoolExecutor(32)
 
-    def _save_operation_logs(self, operation_id: str,
-                             metadata: List[str]) -> dict:
+    def _save_operation_log(self, operation_id: str,
+                            metadata: List[str]) -> dict:
         response = self._client.put_item(
             TableName=TABLE_NAME,
             Item={
@@ -45,32 +45,32 @@ class AWSDynamoDBClient:
         )
         return response
 
-    def _load_operation_logs(self, operation_id: str) -> dict:
+    def _load_operation_log(self, operation_id: str) -> dict:
         response = self._client.get_item(
             TableName=TABLE_NAME, Key={'operation_id': {
                 'S': operation_id
             }})
         return response.get('Item')
 
-    async def save_operation_logs(self, operation_id: str,
-                                  metadata: dict) -> dict:
-        future = self._thread_pool.submit(self._save_operation_logs,
+    async def save_operation_log(self, operation_id: str,
+                                 metadata: dict) -> dict:
+        future = self._thread_pool.submit(self._save_operation_log,
                                           operation_id, metadata)
         return await asyncio.wrap_future(future)
 
-    async def load_operation_logs(self, operation_id: str) -> dict:
-        future = self._thread_pool.submit(self._load_operation_logs,
+    async def load_operation_log(self, operation_id: str) -> dict:
+        future = self._thread_pool.submit(self._load_operation_log,
                                           operation_id)
         result = await asyncio.wrap_future(future)
         if result is None:
             return {}
         return json.loads(result['metadata']['S'])
 
-    def _scan_clusters(self) -> dict:
+    def _scan_operation_logs(self) -> dict:
         return self._client.scan(TableName=TABLE_NAME).get('Items')
 
-    async def scan_clusters(self) -> List:
-        future = self._thread_pool.submit(self._scan_clusters)
+    async def scan_operation_logs(self) -> List:
+        future = self._thread_pool.submit(self._scan_operation_logs)
         items = await asyncio.wrap_future(future)
         if items is None:
             return []
@@ -123,16 +123,16 @@ def delete_table():
     table.wait_until_not_exists()
 
 
-async def save_operation_logs(operation_id: str, metadata: dict) -> dict:
-    return await _get_client().save_operation_logs(operation_id, metadata)
+async def save_operation_log(operation_id: str, metadata: dict) -> dict:
+    return await _get_client().save_operation_log(operation_id, metadata)
 
 
 async def load_operation_logs(operation_id: str) -> dict:
-    return await _get_client().load_operation_logs(operation_id)
+    return await _get_client().load_operation_log(operation_id)
 
 
 async def scan_operation_logs() -> List:
-    return await _get_client().scan_clusters()
+    return await _get_client().scan_operation_logs()
 
 
 if __name__ == '__main__':
@@ -140,7 +140,7 @@ if __name__ == '__main__':
     # create_table()
     print(
         asyncio.run(
-            save_operation_logs(
+            save_operation_log(
                 'op1',
                 {
                     'operation': 'start_instances',

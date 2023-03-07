@@ -27,6 +27,8 @@ def chat(dialogues: list):
 
 if __name__ == '__main__':
     print(
-        chat(
-            'give me a AWS cpu cluster with two nodes, with name "test-cluster"'
-        ))
+        chat([{
+            'role': 'user',
+            'content': ('give me a AWS cpu cluster with two nodes, '
+                        'with name "test-cluster"')
+        }]))

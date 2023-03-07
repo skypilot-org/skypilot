@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import os
 import time
+import uuid
 from concurrent import futures
 
 import fastapi
@@ -15,8 +16,8 @@ import uvicorn
 from sky import provision
 from sky.provision import common
 from sky.controller import config as ssl_config
-from sky.controller import dynamodb
-from sky.controller import operation_logs
+from sky.controller.database import resource_state
+from sky.controller.database import operation_logs
 from sky.controller import chat_completion
 
 app = fastapi.FastAPI()
@@ -54,9 +55,19 @@ async def bootstrap(
         raise fastapi.HTTPException(status_code=401, detail="Unauthorized user")
     cluster_name = _encapsulate_cluster_name(user_id, cluster_name)
 
-    return await asyncio.wrap_future(
+    resp = await asyncio.wrap_future(
         pool.submit(provision.bootstrap, provider_name, region, cluster_name,
                     config))
+    await operation_logs.save_operation_log(
+        uuid.uuid4().hex, {
+            'provider_name': provider_name,
+            'region': region,
+            'operation': bootstrap.__name__,
+            'user_id': user_id,
+            'successful': True,
+            'timestamp': time.time(),
+        })
+    return resp
 
 
 @app.post('/api/start_instances/{provider_name}/{region}/{cluster_name}')
@@ -71,23 +82,26 @@ async def start_instances(
         raise fastapi.HTTPException(status_code=401, detail="Unauthorized user")
     cluster_name = _encapsulate_cluster_name(user_id, cluster_name)
 
-    clusters = await dynamodb.load_user_clusters(user_id)
-    add_cluster = True
-    for c in clusters:
-        if cluster_name == c['cluster_name']:
-            add_cluster = False
-    if add_cluster:
-        clusters.append({
-            'cluster_name': cluster_name,
-            'provider_name': provider_name,
-            'region': region,
-            'creation_time': time.time(),
-        })
-    await dynamodb.save_user_clusters(user_id, clusters)
+    metadata = {
+        'provider_name': provider_name,
+        'region': region,
+        'creation_time': time.time(),
+    }
+    await resource_state.save_user_cluster(user_id, cluster_name, metadata)
 
-    return await asyncio.wrap_future(
+    resp = await asyncio.wrap_future(
         pool.submit(provision.start_instances, provider_name, region,
                     cluster_name, config))
+    await operation_logs.save_operation_log(
+        uuid.uuid4().hex, {
+            'provider_name': provider_name,
+            'region': region,
+            'operation': start_instances.__name__,
+            'user_id': user_id,
+            'successful': True,
+            'timestamp': time.time(),
+        })
+    return resp
 
 
 @app.post('/api/stop_instances/{provider_name}/{region}/{cluster_name}')
@@ -104,6 +118,15 @@ async def stop_instances(
     await asyncio.wrap_future(
         pool.submit(provision.stop_instances, provider_name, region,
                     cluster_name))
+    await operation_logs.save_operation_log(
+        uuid.uuid4().hex, {
+            'provider_name': provider_name,
+            'region': region,
+            'operation': stop_instances.__name__,
+            'user_id': user_id,
+            'successful': True,
+            'timestamp': time.time(),
+        })
 
 
 @app.post('/api/terminate_instances/{provider_name}/{region}/{cluster_name}')
@@ -121,12 +144,16 @@ async def terminate_instances(
         pool.submit(provision.terminate_instances, provider_name, region,
                     cluster_name))
 
-    clusters = await dynamodb.load_user_clusters(user_id)
-    remaining_clusters = []
-    for c in clusters:
-        if c['cluster_name'] != cluster_name:
-            remaining_clusters.append(c)
-    await dynamodb.save_user_clusters(user_id, remaining_clusters)
+    await resource_state.delete_user_cluster(user_id, cluster_name)
+    await operation_logs.save_operation_log(
+        uuid.uuid4().hex, {
+            'provider_name': provider_name,
+            'region': region,
+            'operation': terminate_instances.__name__,
+            'user_id': user_id,
+            'successful': True,
+            'timestamp': time.time(),
+        })
 
 
 @app.get('/api/wait_instances/{provider_name}/{region}/{cluster_name}')
@@ -143,6 +170,15 @@ async def wait_instances(
     await asyncio.wrap_future(
         pool.submit(provision.wait_instances, provider_name, region,
                     cluster_name, state))
+    await operation_logs.save_operation_log(
+        uuid.uuid4().hex, {
+            'provider_name': provider_name,
+            'region': region,
+            'operation': wait_instances.__name__,
+            'user_id': user_id,
+            'successful': True,
+            'timestamp': time.time(),
+        })
 
 
 @app.get('/api/get_cluster_metadata/{provider_name}/{region}/{cluster_name}')
@@ -156,24 +192,34 @@ async def get_cluster_metadata(
         raise fastapi.HTTPException(status_code=401, detail="Unauthorized user")
     cluster_name = _encapsulate_cluster_name(user_id, cluster_name)
 
-    return await asyncio.wrap_future(
+    resp = await asyncio.wrap_future(
         pool.submit(provision.get_cluster_metadata, provider_name, region,
                     cluster_name))
+
+    await operation_logs.save_operation_log(
+        uuid.uuid4().hex, {
+            'provider_name': provider_name,
+            'region': region,
+            'operation': get_cluster_metadata.__name__,
+            'user_id': user_id,
+            'successful': True,
+            'timestamp': time.time(),
+        })
+    return resp
 
 
 @app.get('/console/list_clusters', response_class=responses.HTMLResponse)
 async def list_clusters(request: fastapi.Request):
-    results = await dynamodb.scan_clusters()
+    results = await resource_state.scan_clusters()
     expand_results = []
     for r in results:
-        for c in r['clusters']:
-            expand_results.append({
-                'user_id': r['user_id'],
-                'cluster_name': c['cluster_name'],
-                'provider_name': c['provider_name'],
-                'creation_time': datetime.datetime.fromtimestamp(
-                    c['creation_time']).isoformat(),
-            })
+        expand_results.append({
+            'user_id': r['user_id'],
+            'cluster_name': r['cluster_id'],
+            'provider_name': r['metadata']['provider_name'],
+            'creation_time': datetime.datetime.fromtimestamp(
+                r['metadata']['creation_time']).isoformat(),
+        })
     return templates.TemplateResponse("list_clusters.html", {
         "request": request,
         "results": expand_results
@@ -183,6 +229,7 @@ async def list_clusters(request: fastapi.Request):
 @app.get('/console/list_operations', response_class=responses.HTMLResponse)
 async def list_operations(request: fastapi.Request):
     results = await operation_logs.scan_operation_logs()
+    results.sort(key=lambda x: x['metadata'].get('timestamp', 0), reverse=True)
     expand_results = []
     for opr in results:
         expand_results.append({
