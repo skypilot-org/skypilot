@@ -193,9 +193,9 @@ def _interactive_node_cli_command(cli_func):
         required=False,
         help=
         ('Amount of memory each instance must have in GB (e.g., '
-         '``--memory-gb=16`` (exactly 16GB), ``--memory-gb=16+`` (at least 16GB)) '
-         'or ``--memory-gb=4x`` (at least 4 times the amount of memory in GB than '
-         '#CPUs)'))
+         '``--memory-gb=16`` (exactly 16GB), ``--memory-gb=16+`` (at least '
+         '16GB)) or ``--memory-gb=4x`` (at least 4 times the amount of memory '
+         'in GB than #CPUs)'))
     gpus = click.option('--gpus',
                         default=None,
                         type=str,
