@@ -986,7 +986,7 @@ def _fill_in_launchable_resources(
                         logger.info('Try specifying a different CPU count, '
                                     'or add "+" to the end of the CPU count '
                                     'to allow for larger instances.')
-                    if resources.memory is not None:
+                    if resources.memory_gb is not None:
                         logger.info(
                             'Try specifying a different memory amount, '
                             'or add "+" to the end of the memory amount '

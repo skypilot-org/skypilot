@@ -31,7 +31,7 @@ class InstanceTypeInfo(NamedTuple):
     - accelerator_name: Canonical name of the accelerator. E.g. `V100`.
     - accelerator_count: Number of accelerators offered by this instance type.
     - cpu_count: Number of vCPUs offered by this instance type.
-    - memory: Instance memory in GiB.
+    - memory_gb: Instance memory in GiB.
     - price: Regular instance price per hour (cheapest across all regions).
     - spot_price: Spot instance price per hour (cheapest across all regions).
     - region: Region where this instance type belongs to.
@@ -41,7 +41,7 @@ class InstanceTypeInfo(NamedTuple):
     accelerator_name: str
     accelerator_count: int
     cpu_count: Optional[float]
-    memory: Optional[float]
+    memory_gb: Optional[float]
     price: float
     spot_price: float
     region: str

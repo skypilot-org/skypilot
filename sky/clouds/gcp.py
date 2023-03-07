@@ -261,9 +261,9 @@ class GCP(clouds.Cloud):
     def get_default_instance_type(
             cls,
             cpus: Optional[str] = None,
-            memory: Optional[str] = None) -> Optional[str]:
+            memory_gb: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(
-            cpus=cpus, memory_gb_or_ratio=memory, clouds='gcp')
+            cpus=cpus, memory_gb_or_ratio=memory_gb, clouds='gcp')
 
     def make_deploy_resources_variables(
             self, resources: 'resources.Resources', region: 'clouds.Region',
@@ -353,7 +353,7 @@ class GCP(clouds.Cloud):
         if resources.accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             host_vm_type = GCP.get_default_instance_type(
-                cpus=resources.cpus, memory=resources.memory)
+                cpus=resources.cpus, memory_gb=resources.memory_gb)
             if host_vm_type is None:
                 return ([], [])
             else:
@@ -362,7 +362,7 @@ class GCP(clouds.Cloud):
                     instance_type=host_vm_type,
                     accelerators=None,
                     cpus=None,
-                    memory=None,
+                    memory_gb=None,
                 )
                 return ([r], [])
 
@@ -382,7 +382,7 @@ class GCP(clouds.Cloud):
             acc,
             acc_count,
             cpus=resources.cpus if not use_tpu_vm else None,
-            memory_gb_or_ratio=resources.memory if not use_tpu_vm else None,
+            memory_gb_or_ratio=resources.memory_gb if not use_tpu_vm else None,
             use_spot=resources.use_spot,
             region=resources.region,
             zone=resources.zone,
@@ -408,18 +408,18 @@ class GCP(clouds.Cloud):
                     if cpus != num_cpus_in_tpu_vm:
                         return ([], fuzzy_candidate_list)
             memory_in_tpu_vm = 624
-            if resources.memory is not None:
-                if resources.memory.endswith('+'):
-                    memory = float(resources.memory[:-1])
-                    if memory > memory_in_tpu_vm:
+            if resources.memory_gb is not None:
+                if resources.memory_gb.endswith('+'):
+                    memory_gb = float(resources.memory_gb[:-1])
+                    if memory_gb > memory_in_tpu_vm:
                         return ([], fuzzy_candidate_list)
-                elif resources.memory.endswith(('x', 'X')):
-                    memory = float(resources.memory[:-1])
-                    if memory * num_cpus_in_tpu_vm > memory_in_tpu_vm:
+                elif resources.memory_gb.endswith(('x', 'X')):
+                    memory_gb = float(resources.memory_gb[:-1])
+                    if memory_gb * num_cpus_in_tpu_vm > memory_in_tpu_vm:
                         return ([], fuzzy_candidate_list)
                 else:
-                    memory = float(resources.memory)
-                    if memory != memory_in_tpu_vm:
+                    memory_gb = float(resources.memory_gb)
+                    if memory_gb != memory_in_tpu_vm:
                         return ([], fuzzy_candidate_list)
         else:
             host_vm_type = instance_list[0]
@@ -430,7 +430,7 @@ class GCP(clouds.Cloud):
             instance_type=host_vm_type,
             accelerators=acc_dict,
             cpus=None,
-            memory=None,
+            memory_gb=None,
         )
         return ([r], fuzzy_candidate_list)
 
