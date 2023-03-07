@@ -9,7 +9,6 @@ from sky import resources as resources_lib
 from sky.skylet import log_lib
 from sky.utils import ux_utils
 
-
 _TPU_NOT_FOUND_ERROR = 'ERROR: (gcloud.compute.tpus.delete) NOT_FOUND'
 
 
@@ -107,18 +106,19 @@ def terminate_tpu_vm_cluster_cmd(cluster_name: str,
     return terminate_cmd
 
 
-def terminate_or_stop_tpu_node(
-    tpu_node_script: str, log_path: str = os.devnull, stop: bool = False) -> Tuple[bool, str, str]:
+def terminate_or_stop_tpu_node(tpu_node_script: str,
+                               log_path: str = os.devnull,
+                               stop: bool = False) -> Tuple[bool, str, str]:
     """Terminate TPU node.
 
     Returns True if TPU node is successfully terminated.
     """
-    cmd = (f'bash {tpu_node_script} -s' if stop else f'bash {tpu_node_script} -d')
-    tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
-        cmd,
-        log_path,
-        stream_logs=False,
-        require_outputs=True)
+    cmd = (f'bash {tpu_node_script} -s'
+           if stop else f'bash {tpu_node_script} -d')
+    tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(cmd,
+                                                          log_path,
+                                                          stream_logs=False,
+                                                          require_outputs=True)
     if tpu_rc == 0 or (_TPU_NOT_FOUND_ERROR in tpu_stderr and not stop):
         return True, tpu_stdout, tpu_stderr
     return False, tpu_stdout, tpu_stderr
