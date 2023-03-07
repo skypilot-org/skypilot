@@ -1,0 +1,37 @@
+#!/bin/bash
+set -e
+
+create=0 delete=0 stop=0
+while getopts "cds" arg;
+do 
+    case $arg in
+        c)create=1;;
+        d)delete=1;;
+        s)stop=1;;
+    esac
+done
+
+export PROJECT_ID={{gcp_project_id}}
+gcloud config set project $PROJECT_ID
+
+if [ $create -eq 1 ]; then
+    # NOTE: we pipe yes to this command, as users who have not enabled the TPU API
+    # can hit this call and get stuck forever in:
+    #  API [tpu.googleapis.com] not enabled on project [123456]. Would you like to enable and retry (this will take a few minutes)? (y/N)?
+    yes | gcloud compute tpus create {{tpu_name}} \
+    --zone={{zones}} \
+    --version={{runtime_version}} \
+    --accelerator-type={{tpu_type}} \
+    --network={{vpc_name}}
+fi
+
+if [ $delete -eq 1 ]; then
+    # Do not use --async, because if launching tpu again with the same name while
+    # the tpu is asynchronously being deleted, some race condition happens.  (Can
+    # repro with tpu_app.)
+    gcloud compute tpus delete {{tpu_name}} --zone={{zones}} -q
+fi
+
+if [ $stop -eq 1 ]; then
+    gcloud compute tpus stop {{tpu_name}} --zone={{zones}} -q
+fi
