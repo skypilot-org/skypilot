@@ -1400,7 +1400,7 @@ def _get_spot_jobs(
         show_all: bool,
         limit_num_jobs_to_show: bool = False) -> Tuple[Optional[int], str]:
     """Get the in-progress spot jobs.
-    
+
     Args:
         refresh: Query the latest statuses, restarting the spot controller if
             stopped.
@@ -1532,12 +1532,12 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
         show_spot_jobs = show_spot_jobs and not clusters
         if show_spot_jobs:
             # Run the spot job query in parallel to speed up the status query.
-            spot_jobs_future = pool.apply_async(_get_spot_jobs,
-                                                kwds=dict(
-                                                    refresh=False,
-                                                    skip_finished=True,
-                                                    show_all=False,
-                                                    limit_num_jobs_to_show=not all))
+            spot_jobs_future = pool.apply_async(
+                _get_spot_jobs,
+                kwds=dict(refresh=False,
+                          skip_finished=True,
+                          show_all=False,
+                          limit_num_jobs_to_show=not all))
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                    f'{colorama.Style.RESET_ALL}')
         query_clusters: Optional[List[str]] = None

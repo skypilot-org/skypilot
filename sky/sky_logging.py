@@ -1,5 +1,4 @@
 """Logging utilities."""
-import builtins
 import contextlib
 import logging
 import sys
@@ -35,6 +34,7 @@ _logging_config = threading.local()
 _logging_config.is_silent = False
 
 echo = print
+
 
 def _setup_logger(
     logging_level: int = logging.DEBUG,
