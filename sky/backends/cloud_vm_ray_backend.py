@@ -91,8 +91,6 @@ _TEARDOWN_PURGE_WARNING = (
     'Make sure resources are manually deleted.'
     f'{colorama.Style.RESET_ALL}')
 
-_TPU_NOT_FOUND_ERROR = 'ERROR: (gcloud.compute.tpus.delete) NOT_FOUND'
-
 _CTRL_C_TIP_MESSAGE = ('INFO: Tip: use Ctrl-C to exit log streaming '
                        '(task will not be killed).')
 
@@ -3143,16 +3141,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 os.path.exists(handle.tpu_delete_script)):
             with backend_utils.safe_console_status(
                     '[bold cyan]Terminating TPU...'):
-                tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
-                    ['bash', handle.tpu_delete_script, '-d'],
-                    log_abs_path,
-                    stream_logs=False,
-                    require_outputs=True)
-            if tpu_rc != 0:
-                if _TPU_NOT_FOUND_ERROR in tpu_stderr:
-                    logger.info('TPU not found. '
-                                'It should have been deleted already.')
-                elif purge:
+                success, tpu_stdout, tpu_stderr = tpu_utils.terminate_or_stop_tpu_node(
+                    handle.tpu_delete_script, log_abs_path)
+            if not success:
+                if purge:
                     logger.warning(
                         _TEARDOWN_PURGE_WARNING.format(
                             reason='stopping/terminating TPU'))

@@ -15,7 +15,7 @@ from sky import sky_logging
 from sky.backends import backend_utils, cloud_vm_ray_backend
 from sky.skylet import autostop_lib, job_lib
 from sky.spot import spot_utils
-from sky.utils import common_utils
+from sky.utils import common_utils, tpu_utils
 
 # Seconds of sleep between the processing of skylet events.
 EVENT_CHECKING_INTERVAL_SECONDS = 20
@@ -98,6 +98,8 @@ class AutostopEvent(SkyletEvent):
         autostop_lib.set_last_active_time_to_now()
         self._ray_yaml_path = os.path.abspath(
             os.path.expanduser(backend_utils.SKY_RAY_YAML_REMOTE_PATH))
+        self._tpu_node_script = os.path.abspath(
+            os.path.expanduser(backend_utils.SKY_TPU_NODE_SCRIPT_REMOTE_PATH))
 
     def _run(self):
         autostop_config = autostop_lib.get_autostop_config()
@@ -150,6 +152,18 @@ class AutostopEvent(SkyletEvent):
                 # collection.
                 env=dict(os.environ, RAY_USAGE_STATS_ENABLED='0'),
             )
+
+            # # for TPU nodes
+            # if autostop_config.down:
+            #     success, tpu_stdout, tpu_stderr = tpu_utils.terminate_or_stop_tpu_node(
+            #         self._tpu_node_script)
+            # else:
+            #     success, tpu_stdout, tpu_stderr = tpu_utils.terminate_or_stop_tpu_node(
+            #         self._tpu_node_script, stop=True)
+            # if not success:
+            #     logger.error(
+            #         f'Failed to terminate/stop TPU node. '
+            #         f'stdout: {tpu_stdout}, stderr: {tpu_stderr}')
 
             logger.info('Running ray down.')
             # Stop the workers first to avoid orphan workers.
