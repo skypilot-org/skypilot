@@ -1424,6 +1424,9 @@ def _get_spot_jobs(
                 None, global_user_state.ClusterStatus.STOPPED
             ]
             msg = 'No in progress jobs.'
+            if controller_status is None:
+                msg += (f' (See: {colorama.Style.BRIGHT}sky spot -h'
+                        f'{colorama.Style.RESET_ALL})')
     except RuntimeError:
         msg = ('Failed to query spot jobs due to connection '
                'issues. Try again later.')
@@ -1525,7 +1528,8 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                                                     skip_finished=True,
                                                     show_all=False,
                                                     limit_num_jobs_to_show=all))
-
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+                   f'{colorama.Style.RESET_ALL}')
         query_clusters: Optional[List[str]] = None
         if clusters:
             query_clusters = _get_glob_clusters(clusters)
