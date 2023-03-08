@@ -1394,9 +1394,21 @@ def exec(
     sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
-def _get_in_progress_spot_jobs(
-        show_all_in_progress: bool = False) -> Tuple[Optional[int], str]:
+def _get_spot_jobs(
+        refresh: bool,
+        skip_finished: bool,
+        show_all: bool,
+        limit_num_jobs_to_show: bool = False) -> Tuple[Optional[int], str]:
     """Get the in-progress spot jobs.
+
+    Args:
+        refresh: Query the latest statuses, restarting the spot controller if
+            stopped.
+        skip_finished: Show only in-progress jobs.
+        show_all: Show all information of each spot job (e.g., region, price).
+        limit_num_jobs_to_show: If True, limit the number of jobs to show to
+            _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS, which is mainly used by
+            `sky status`.
 
     Returns:
         A tuple of (num_in_progress_jobs, msg). If num_in_progress_jobs is None,
@@ -1406,9 +1418,10 @@ def _get_in_progress_spot_jobs(
     """
     num_in_progress_jobs = None
     try:
-        with ux_utils.suppress_output():
-            # Make the call slient
-            spot_jobs = core.spot_queue(refresh=False, skip_finished=True)
+        with sky_logging.silent():
+            # Make the call silent
+            spot_jobs = core.spot_queue(refresh=refresh,
+                                        skip_finished=skip_finished)
         num_in_progress_jobs = len(spot_jobs)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
@@ -1420,14 +1433,17 @@ def _get_in_progress_spot_jobs(
                 None, global_user_state.ClusterStatus.STOPPED
             ]
             msg = 'No in progress jobs.'
+            if controller_status is None:
+                msg += (f' (See: {colorama.Style.BRIGHT}sky spot -h'
+                        f'{colorama.Style.RESET_ALL})')
     except RuntimeError:
         msg = ('Failed to query spot jobs due to connection '
                'issues. Try again later.')
     else:
-        max_jobs_to_show = (None if show_all_in_progress else
-                            _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS)
+        max_jobs_to_show = (_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS
+                            if limit_num_jobs_to_show else None)
         msg = spot_lib.format_job_table(spot_jobs,
-                                        show_all=False,
+                                        show_all=show_all,
                                         max_jobs=max_jobs_to_show)
     return num_in_progress_jobs, msg
 
@@ -1515,9 +1531,14 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
         show_spot_jobs = show_spot_jobs and not clusters
         if show_spot_jobs:
             # Run the spot job query in parallel to speed up the status query.
-            spot_jobs_future = pool.apply_async(_get_in_progress_spot_jobs,
-                                                (all,))
-
+            spot_jobs_future = pool.apply_async(
+                _get_spot_jobs,
+                kwds=dict(refresh=False,
+                          skip_finished=True,
+                          show_all=False,
+                          limit_num_jobs_to_show=not all))
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+                   f'{colorama.Style.RESET_ALL}')
         query_clusters: Optional[List[str]] = None
         if clusters:
             query_clusters = _get_glob_clusters(clusters)
@@ -1543,8 +1564,7 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
         if show_spot_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed spot jobs{colorama.Style.RESET_ALL}')
-            with backend_utils.safe_console_status(
-                    '[cyan]Checking spot jobs[/]'):
+            with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
                 num_in_progress_jobs, msg = spot_jobs_future.get()
 
                 try:
@@ -2327,7 +2347,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
            'jobs (output of `sky spot queue`) will be lost.')
     click.echo(msg)
     if cluster_status == global_user_state.ClusterStatus.UP:
-        with backend_utils.safe_console_status(
+        with log_utils.safe_rich_status(
                 '[bold cyan]Checking for in-progress spot jobs[/]'):
             try:
                 spot_jobs = core.spot_queue(refresh=False)
@@ -3289,48 +3309,17 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
       watch -n60 sky spot queue
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
-    no_jobs_found_str = '  No jobs found.'
-    try:
-        job_table = core.spot_queue(refresh=refresh,
-                                    skip_finished=skip_finished)
-    except exceptions.ClusterNotUpError:
-        # TODO(mehul): handle skip_finished for the cached case. E.g., change
-        # {load,dump}_job_table_cache() to use structured data, and let
-        # format_job_table() to take skip_finished.
-        cache = spot_lib.load_job_table_cache()
-        if cache is not None:
-            readable_time = log_utils.readable_time_duration(cache[0])
-            if not cache[1].strip():
-                table_str = no_jobs_found_str
-                cached_hint = ''
-            else:
-                table_str = cache[1]
-                # Show a helpful hint at the end, if cached table is non-empty.
-                cached_hint = (
-                    '\n\nNOTE: cached job table is being shown '
-                    f'[last updated: {readable_time}].\nUse '
-                    f'{colorama.Style.BRIGHT}--refresh / -r'
-                    f'{colorama.Style.RESET_ALL} to restart the spot '
-                    'controller and see the latest job table.')
-            table_message = (
-                f'\n{colorama.Fore.YELLOW}Cached job status table '
-                f'[last updated: {readable_time}]:{colorama.Style.RESET_ALL}\n'
-                f'{table_str}{cached_hint}')
-        else:
-            table_message = 'No cached job status table found.'
-        click.echo(table_message)
-        return
-    job_table = spot_lib.format_job_table(job_table, all)
-
-    spot_lib.dump_job_table_cache(job_table)
-
+    with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
+        _, msg = _get_spot_jobs(refresh=refresh,
+                                skip_finished=skip_finished,
+                                show_all=all)
     if not skip_finished:
         in_progress_only_hint = ''
     else:
         in_progress_only_hint = ' (showing in-progress jobs only)'
-    if not job_table:
-        job_table = no_jobs_found_str
-    click.echo(f'Managed spot jobs{in_progress_only_hint}:\n{job_table}')
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'Managed spot jobs{colorama.Style.RESET_ALL}'
+               f'{in_progress_only_hint}\n{msg}')
 
 
 _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
@@ -3377,7 +3366,8 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     _, handle = spot_lib.is_spot_controller_up(
         'All managed spot jobs should have finished.')
     if handle is None:
-        return
+        # Hint messages already printed by the call above.
+        sys.exit(1)
 
     job_id_str = ','.join(map(str, job_ids))
     if sum([len(job_ids) > 0, name is not None, all]) != 1:
