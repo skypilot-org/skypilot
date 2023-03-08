@@ -98,7 +98,7 @@ class Resources:
                 }
 
         self._set_cpus(cpus)
-        self._set_memory_gb(memory)
+        self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
 
         self._try_validate_local()
@@ -220,15 +220,17 @@ class Resources:
 
         For example, memory='16' means each instance must have exactly 16GB
         memory; memory='16+' means each instance must have at least 16GB
-        memory; and memory='4x' means each instance must have 4 times the
-        number of CPUs of memory, e.g. if cpus='4', then memory='4x' means
-        each instance must have at least 16GB memory.
+        memory.
 
         (Developer note: The memory field is only used to select the instance
         type at launch time. Thus, Resources in the backend's ResourceHandle
         will always have the memory field set to None.)
+        (Developer note 2: The memory field can also end with 'x' or 'X', e.g.
+        memory='4x' means each instance must have 4 times the number of CPUs
+        of memory, e.g. if cpus='4', then memory='4x' means each instance must
+        have at least 16GB memory)
         """
-        return self._memory_gb
+        return self._memory
 
     @property
     def accelerators(self) -> Optional[Dict[str, int]]:
@@ -299,15 +301,15 @@ class Resources:
                 raise ValueError(
                     f'The "cpus" field should be positive. Found: {cpus!r}')
 
-    def _set_memory_gb(
+    def _set_memory(
         self,
         memory: Union[None, int, float, str],
     ) -> None:
         if memory is None:
-            self._memory_gb = None
+            self._memory = None
             return
 
-        self._memory_gb = str(memory)
+        self._memory = str(memory)
         if isinstance(memory, str):
             if memory.endswith(('+', 'x', 'X')):
                 num_memory_gb = memory[:-1]
@@ -950,7 +952,7 @@ class Resources:
             self._cpus = None
 
         if version < 8:
-            self._memory_gb = None
+            self._memory = None
 
         image_id = state.get('_image_id', None)
         if isinstance(image_id, str):

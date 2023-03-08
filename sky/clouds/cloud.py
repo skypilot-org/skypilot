@@ -260,8 +260,7 @@ class Cloud:
 
         If 'memory=4', this method returns the default instance type with 4GB
         memory.  If 'memory=4+', this method returns the default instance
-        type with 4GB or more memory.  If 'memory=4x', this method returns
-        the instance type with memory-to-vCPU ratio closest to 4GB/vCPU.
+        type with 4GB or more memory.
 
         When cpus is None or memory is None, this method will never return None.
         This method may return None if the cloud's default instance family
