@@ -92,8 +92,10 @@ class CommandError(Exception):
 class ClusterNotUpError(Exception):
     """Raised when a cluster is not up."""
 
-    def __init__(self, message: str,
-                 cluster_status: 'global_user_state.ClusterStatus') -> None:
+    def __init__(
+            self, message: str,
+            cluster_status: Optional['global_user_state.ClusterStatus']
+    ) -> None:
         super().__init__(message)
         self.cluster_status = cluster_status
 
