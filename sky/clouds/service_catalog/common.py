@@ -31,7 +31,7 @@ class InstanceTypeInfo(NamedTuple):
     - accelerator_name: Canonical name of the accelerator. E.g. `V100`.
     - accelerator_count: Number of accelerators offered by this instance type.
     - cpu_count: Number of vCPUs offered by this instance type.
-    - memory_gb: Instance memory in GiB.
+    - memory: Instance memory in GiB.
     - price: Regular instance price per hour (cheapest across all regions).
     - spot_price: Spot instance price per hour (cheapest across all regions).
     - region: Region where this instance type belongs to.
@@ -41,7 +41,7 @@ class InstanceTypeInfo(NamedTuple):
     accelerator_name: str
     accelerator_count: int
     cpu_count: Optional[float]
-    memory_gb: Optional[float]
+    memory: Optional[float]
     price: float
     spot_price: float
     region: str
@@ -315,19 +315,18 @@ def _filter_with_mem(df: pd.DataFrame,
     else:
         memory_gb_str = memory_gb_or_ratio
     try:
-        memory_gb = float(memory_gb_str)
+        memory = float(memory_gb_str)
     except ValueError:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'The "memory" field should be either a number or '
                              'a string "<number>+" or "<number>x". Found: '
                              f'{memory_gb_or_ratio!r}') from None
-
     if memory_gb_or_ratio.endswith('+'):
-        return df[df['MemoryGiB'] >= memory_gb]
+        return df[df['MemoryGiB'] >= memory]
     elif memory_gb_or_ratio.endswith(('x', 'X')):
-        return df[df['MemoryGiB'] >= df['vCPUs'] * memory_gb]
+        return df[df['MemoryGiB'] >= df['vCPUs'] * memory]
     else:
-        return df[df['MemoryGiB'] == memory_gb]
+        return df[df['MemoryGiB'] == memory]
 
 
 def get_instance_type_for_cpus_mem_impl(

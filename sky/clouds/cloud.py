@@ -251,16 +251,16 @@ class Cloud:
     def get_default_instance_type(
             cls,
             cpus: Optional[str] = None,
-            memory_gb: Optional[str] = None) -> Optional[str]:
+            memory: Optional[str] = None) -> Optional[str]:
         """Returns the default instance type with the given #vCPUs and memory.
 
         For example, if cpus='4', this method returns the default instance type
         with 4 vCPUs.  If cpus='4+', this method returns the default instance
         type with 4 or more vCPUs.
 
-        If 'memory_gb=4', this method returns the default instance type with 4GB
-        memory.  If 'memory_gb=4+', this method returns the default instance
-        type with 4GB or more memory.  If 'memory_gb=4x', this method returns
+        If 'memory=4', this method returns the default instance type with 4GB
+        memory.  If 'memory=4+', this method returns the default instance
+        type with 4GB or more memory.  If 'memory=4x', this method returns
         the instance type with memory-to-vCPU ratio closest to 4GB/vCPU.
 
         When cpus is None or memory is None, this method will never return None.

@@ -110,9 +110,9 @@ class Local(clouds.Cloud):
     @classmethod
     def get_default_instance_type(cls,
                                   cpus: Optional[str] = None,
-                                  memory_gb: Optional[str] = None) -> str:
+                                  memory: Optional[str] = None) -> str:
         # There is only "1" instance type for local cloud: on-prem
-        del cpus, memory_gb  # Unused.
+        del cpus, memory  # Unused.
         return Local._DEFAULT_INSTANCE_TYPE
 
     @classmethod

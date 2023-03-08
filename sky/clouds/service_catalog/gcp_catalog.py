@@ -330,13 +330,12 @@ def list_accelerators(
     # Thus, we can show their exact cost including the host VM prices.
     new_infos = defaultdict(list)
     for info in a100_infos:
-        assert pd.isna(info.instance_type) and pd.isna(
-            info.memory_gb), a100_infos
+        assert pd.isna(info.instance_type) and pd.isna(info.memory), a100_infos
         a100_host_vm_type = _A100_INSTANCE_TYPE_DICTS[info.accelerator_name][
             info.accelerator_count]
         df = _df[_df['InstanceType'] == a100_host_vm_type]
         cpu_count = df['vCPUs'].iloc[0]
-        memory_gb = df['MemoryGiB'].iloc[0]
+        memory = df['MemoryGiB'].iloc[0]
         vm_price = common.get_hourly_cost_impl(_df,
                                                a100_host_vm_type,
                                                use_spot=False,
@@ -351,7 +350,7 @@ def list_accelerators(
             info._replace(
                 instance_type=a100_host_vm_type,
                 cpu_count=cpu_count,
-                memory_gb=memory_gb,
+                memory=memory,
                 # total cost = VM instance + GPU.
                 price=info.price + vm_price,
                 spot_price=info.spot_price + vm_spot_price,
@@ -482,7 +481,7 @@ def check_accelerator_attachable_to_host(instance_type: str,
     # vCPU counts and memory sizes of N1 machines.
     df = _df[_df['InstanceType'] == instance_type]
     num_cpus = df['vCPUs'].iloc[0]
-    memory_gb = df['MemoryGiB'].iloc[0]
+    memory = df['MemoryGiB'].iloc[0]
 
     if num_cpus > max_cpus:
         with ux_utils.print_exception_no_traceback():
@@ -490,7 +489,7 @@ def check_accelerator_attachable_to_host(instance_type: str,
                 f'{acc_name}:{acc_count} cannot be attached to '
                 f'{instance_type}. The maximum number of vCPUs is {max_cpus}. '
                 'Please refer to: https://cloud.google.com/compute/docs/gpus')
-    if memory_gb > max_memory:
+    if memory > max_memory:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ResourcesMismatchError(
                 f'{acc_name}:{acc_count} cannot be attached to '

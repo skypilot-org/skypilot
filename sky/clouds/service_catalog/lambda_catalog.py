@@ -66,7 +66,7 @@ def get_default_instance_type(
         memory_gb_or_ratio: Optional[str] = None) -> Optional[str]:
     if cpus is None and memory_gb_or_ratio is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
-    if memory_gb_or_ratio is not None:
+    if memory_gb_or_ratio is None:
         memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
     # Set to gpu_1x_a100_sxm4 to be the default instance type if match vCPU
     # requirement.

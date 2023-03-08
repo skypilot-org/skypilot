@@ -51,7 +51,7 @@ class Resources:
         cloud: Optional[clouds.Cloud] = None,
         instance_type: Optional[str] = None,
         cpus: Union[None, int, float, str] = None,
-        memory_gb: Union[None, int, float, str] = None,
+        memory: Union[None, int, float, str] = None,
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
@@ -98,7 +98,7 @@ class Resources:
                 }
 
         self._set_cpus(cpus)
-        self._set_memory_gb(memory_gb)
+        self._set_memory_gb(memory)
         self._set_accelerators(accelerators, accelerator_args)
 
         self._try_validate_local()
@@ -143,9 +143,9 @@ class Resources:
         if self.cpus is not None:
             cpus = f', cpus={self.cpus}'
 
-        memory_gb = ''
-        if self.memory_gb is not None:
-            memory_gb = f', mem={self.memory_gb}'
+        memory = ''
+        if self.memory is not None:
+            memory = f', mem={self.memory}'
 
         if isinstance(self.cloud, clouds.Local):
             return f'{self.cloud}({self.accelerators})'
@@ -172,7 +172,7 @@ class Resources:
 
         hardware_str = (
             f'{instance_type}{use_spot}'
-            f'{cpus}{memory_gb}{accelerators}{accelerator_args}{image_id}'
+            f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
             f'{disk_size}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
@@ -215,18 +215,18 @@ class Resources:
         return self._cpus
 
     @property
-    def memory_gb(self) -> Optional[str]:
+    def memory(self) -> Optional[str]:
         """Returns the memory that each instance must have in GB.
 
-        For example, memory_gb='16' means each instance must have exactly 16GB
-        memory; memory_gb='16+' means each instance must have at least 16GB
-        memory; and memory_gb='4x' means each instance must have 4 times the
-        number of CPUs of memory, e.g. if cpus='4', then memory_gb='4x' means
+        For example, memory='16' means each instance must have exactly 16GB
+        memory; memory='16+' means each instance must have at least 16GB
+        memory; and memory='4x' means each instance must have 4 times the
+        number of CPUs of memory, e.g. if cpus='4', then memory='4x' means
         each instance must have at least 16GB memory.
 
-        (Developer note: The memory_gb field is only used to select the instance
+        (Developer note: The memory field is only used to select the instance
         type at launch time. Thus, Resources in the backend's ResourceHandle
-        will always have the memory_gb field set to None.)
+        will always have the memory field set to None.)
         """
         return self._memory_gb
 
@@ -301,18 +301,18 @@ class Resources:
 
     def _set_memory_gb(
         self,
-        memory_gb: Union[None, int, float, str],
+        memory: Union[None, int, float, str],
     ) -> None:
-        if memory_gb is None:
+        if memory is None:
             self._memory_gb = None
             return
 
-        self._memory_gb = str(memory_gb)
-        if isinstance(memory_gb, str):
-            if memory_gb.endswith(('+', 'x', 'X')):
-                num_memory_gb = memory_gb[:-1]
+        self._memory_gb = str(memory)
+        if isinstance(memory, str):
+            if memory.endswith(('+', 'x', 'X')):
+                num_memory_gb = memory[:-1]
             else:
-                num_memory_gb = memory_gb
+                num_memory_gb = memory
 
             try:
                 memory_gb_or_ratio = float(num_memory_gb)
@@ -320,15 +320,14 @@ class Resources:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'The "cpus" field should be either a number or '
-                        f'a string "<number>+". Found: {memory_gb!r}') from None
+                        f'a string "<number>+". Found: {memory!r}') from None
         else:
-            memory_gb_or_ratio = float(memory_gb)
+            memory_gb_or_ratio = float(memory)
 
         if memory_gb_or_ratio <= 0:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'The "cpus" field should be positive. Found: {memory_gb!r}'
-                )
+                    f'The "cpus" field should be positive. Found: {memory!r}')
 
     def _set_accelerators(
         self,
@@ -502,7 +501,7 @@ class Resources:
             self._cloud = valid_clouds[0]
 
     def _try_validate_cpus_mem(self) -> None:
-        if self.cpus is None and self.memory_gb is None:
+        if self.cpus is None and self.memory is None:
             return
         if self.instance_type is not None:
             # The assertion should be true because we have already executed
@@ -526,29 +525,29 @@ class Resources:
                             f'{self.instance_type} does not have the requested '
                             f'number of vCPUs. {self.instance_type} has {cpus} '
                             f'vCPUs, but {self.cpus} is requested.')
-            if self.memory_gb is not None:
-                if self.memory_gb.endswith('+'):
-                    if mem < float(self.memory_gb[:-1]):
+            if self.memory is not None:
+                if self.memory.endswith('+'):
+                    if mem < float(self.memory[:-1]):
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
                                 f'{self.instance_type} does not have enough '
                                 f'memory. {self.instance_type} has {mem} GB '
-                                f'memory, but {self.memory_gb} is requested.')
-                elif self.memory_gb.endswith(('x', 'X')):
-                    requested_mem = float(self.memory_gb[:-1] * cpus)
+                                f'memory, but {self.memory} is requested.')
+                elif self.memory.endswith(('x', 'X')):
+                    requested_mem = float(self.memory[:-1] * cpus)
                     if mem < requested_mem:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
                                 f'{self.instance_type} does not have the '
                                 f'requested memory. {self.instance_type} has '
                                 f'{cpus} CPUsand {mem} GB memory, but '
-                                f'{self.memory_gb} is requested.')
-                elif mem != float(self.memory_gb):
+                                f'{self.memory} is requested.')
+                elif mem != float(self.memory):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
                             f'{self.instance_type} does not have the requested '
                             f'memory. {self.instance_type} has {mem} GB '
-                            f'memory, but {self.memory_gb} is requested.')
+                            f'memory, but {self.memory} is requested.')
 
     def _try_validate_accelerators(self) -> None:
         """Validate accelerators against the instance type and region/zone."""
@@ -797,7 +796,7 @@ class Resources:
             self.cloud is None,
             self._instance_type is None,
             self.cpus is None,
-            self.memory_gb is None,
+            self.memory is None,
             self.accelerators is None,
             self.accelerator_args is None,
             not self._use_spot_specified,
@@ -810,7 +809,7 @@ class Resources:
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
             cpus=override.pop('cpus', self.cpus),
-            memory_gb=override.pop('memory_gb', self.memory_gb),
+            memory=override.pop('memory', self.memory),
             accelerators=override.pop('accelerators', self.accelerators),
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
@@ -851,8 +850,8 @@ class Resources:
             resources_fields['instance_type'] = config.pop('instance_type')
         if config.get('cpus') is not None:
             resources_fields['cpus'] = str(config.pop('cpus'))
-        if config.get('memory_gb') is not None:
-            resources_fields['memory_gb'] = str(config.pop('memory_gb'))
+        if config.get('memory') is not None:
+            resources_fields['memory'] = str(config.pop('memory'))
         if config.get('accelerators') is not None:
             resources_fields['accelerators'] = config.pop('accelerators')
         if config.get('accelerator_args') is not None:
@@ -887,7 +886,7 @@ class Resources:
         add_if_not_none('cloud', str(self.cloud))
         add_if_not_none('instance_type', self.instance_type)
         add_if_not_none('cpus', self.cpus)
-        add_if_not_none('memory_gb', self.memory_gb)
+        add_if_not_none('memory', self.memory)
         add_if_not_none('accelerators', self.accelerators)
         add_if_not_none('accelerator_args', self.accelerator_args)
 
