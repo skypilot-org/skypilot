@@ -1,4 +1,5 @@
 """Logging utilities."""
+import builtins
 import contextlib
 import logging
 import sys
@@ -32,7 +33,12 @@ _default_handler = None
 _logging_config = threading.local()
 _logging_config.is_silent = False
 
-echo = print
+# All code inside the library should use sky_logging.print()
+# rather than print().
+# This is to make controlled logging via is_silent() possible:
+# in some situation we would like to disable any
+# printing/logging.
+print = builtins.print # pylint: disable=redefined-builtin
 
 
 def _setup_logger():
@@ -65,25 +71,25 @@ def init_logger(name: str):
 
 @contextlib.contextmanager
 def silent():
-    """Make all sky_logging.echo() and logger.{info, warning...} silent.
+    """Make all sky_logging.print() and logger.{info, warning...} silent.
 
     We preserve the ERROR level logging, so that errors are
     still printed.
     """
-    global echo
+    global print
     global _logging_config
     previous_level = _root_logger.level
     previous_is_silent = _logging_config.is_silent
-    previous_echo = echo
+    previous_print = print
 
     # Turn off logger
     _root_logger.setLevel(logging.ERROR)
     _logging_config.is_silent = True
-    echo = lambda *args, **kwargs: None
+    print = lambda *args, **kwargs: None
     yield
 
     # Restore logger
-    echo = previous_echo
+    print = previous_print
     _root_logger.setLevel(previous_level)
     _logging_config.is_silent = previous_is_silent
 

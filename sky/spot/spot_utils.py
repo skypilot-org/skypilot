@@ -603,7 +603,7 @@ def is_spot_controller_up(
             controller_status, handle = record['status'], record['handle']
 
     if controller_status is None:
-        sky_logging.echo('No managed spot jobs are found.')
+        sky_logging.print('No managed spot jobs are found.')
     elif controller_status != global_user_state.ClusterStatus.UP:
         msg = (f'Spot controller {SPOT_CONTROLLER_NAME} '
                f'is {controller_status.value}.')
@@ -611,6 +611,6 @@ def is_spot_controller_up(
             msg += f'\n{stopped_message}'
         if controller_status == global_user_state.ClusterStatus.INIT:
             msg += '\nPlease wait for the controller to be ready.'
-        sky_logging.echo(msg)
+        sky_logging.print(msg)
         handle = None
     return controller_status, handle
