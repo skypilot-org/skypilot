@@ -155,15 +155,14 @@ class AutostopEvent(SkyletEvent):
 
             # for TPU nodes
             if autostop_config.down:
-                success, tpu_stdout, tpu_stderr = tpu_utils.terminate_or_stop_tpu_node(
+                success, stdout, stderr = tpu_utils.terminate_or_stop_tpu_node(
                     self._tpu_node_script)
             else:
-                success, tpu_stdout, tpu_stderr = tpu_utils.terminate_or_stop_tpu_node(
+                success, stdout, stderr = tpu_utils.terminate_or_stop_tpu_node(
                     self._tpu_node_script, stop=True)
             if not success:
-                logger.error(
-                    f'Failed to terminate/stop TPU node. '
-                    f'stdout: {tpu_stdout}, stderr: {tpu_stderr}')
+                logger.error(f'Failed to terminate/stop TPU node. '
+                             f'stdout: {stdout}, stderr: {stderr}')
 
             logger.info('Running ray down.')
             # Stop the workers first to avoid orphan workers.

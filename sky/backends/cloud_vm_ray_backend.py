@@ -3141,8 +3141,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 os.path.exists(handle.tpu_delete_script)):
             with backend_utils.safe_console_status(
                     '[bold cyan]Terminating TPU...'):
-                success, tpu_stdout, tpu_stderr = tpu_utils.terminate_or_stop_tpu_node(
-                    handle.tpu_delete_script, log_abs_path)
+                success, tpu_stdout, tpu_stderr = (
+                    tpu_utils.terminate_or_stop_tpu_node(
+                        handle.tpu_delete_script, log_abs_path))
             if not success:
                 if purge:
                     logger.warning(
