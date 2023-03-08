@@ -14,10 +14,10 @@ _df = common.read_catalog('azure/vms.csv')
 
 # This is the latest general-purpose instance family as of Jan 2023.
 # CPU: Intel Ice Lake 8370C.
-# Memory: D_v5 -- 4 GiB RAM per 1 vCPU;
-#         E_v5 -- 8 GiB RAM per 1 vCPU.
-#         F    -- 2 GiB RAM per 1 vCPU.
-_DEFAULT_INSTANCE_FAMILY = ['D_v5', 'E_v5', 'F']
+# Memory: D_v5  -- 4 GiB RAM per 1 vCPU;
+#         E_v5  -- 8 GiB RAM per 1 vCPU.
+#         Fs_v2 -- 2 GiB RAM per 1 vCPU.
+_DEFAULT_INSTANCE_FAMILY = ['D_v5', 'E_v5', 'Fs_v2']
 _DEFAULT_NUM_VCPUS = 8
 _DEFAULT_MEMORY_CPU_RATIO = 4
 
