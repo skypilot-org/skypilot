@@ -321,7 +321,7 @@ class Resources:
             except ValueError:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'The "cpus" field should be either a number or '
+                        f'The "memory" field should be either a number or '
                         f'a string "<number>+". Found: {memory!r}') from None
         else:
             memory_gb_or_ratio = float(memory)

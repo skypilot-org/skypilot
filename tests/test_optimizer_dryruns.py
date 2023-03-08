@@ -18,6 +18,14 @@ def _test_parse_cpus(spec, expected_cpus):
             assert list(task.resources)[0].cpus == expected_cpus
 
 
+def _test_parse_memory(spec, expected_memory):
+    with tempfile.NamedTemporaryFile('w') as f:
+        f.write(spec)
+        f.flush()
+        with sky.Dag():
+            task = sky.Task.from_yaml(f.name)
+            assert list(task.resources)[0].memory == expected_memory
+
 def _test_parse_accelerators(spec, expected_accelerators):
     with tempfile.NamedTemporaryFile('w') as f:
         f.write(spec)
@@ -104,6 +112,10 @@ def test_partial_cpus(monkeypatch):
     _test_resources_launch(monkeypatch, cpus='4')
     _test_resources_launch(monkeypatch, cpus='7+')
 
+def test_partial_memory(monkeypatch):
+    _test_resources_launch(monkeypatch, memory=32)
+    _test_resources_launch(monkeypatch, memory='32')
+    _test_resources_launch(monkeypatch, memory='32+')
 
 def test_partial_k80(monkeypatch):
     _test_resources_launch(monkeypatch, accelerators='K80')
@@ -178,6 +190,21 @@ def test_instance_type_mismatches_cpus(monkeypatch):
                                    cpus=cpus)
         assert 'does not have the requested number of vCPUs' in str(e.value)
 
+def test_instance_type_mismatches_memory(monkeypatch):
+    bad_instance_and_memory = [
+        # Actual: 32
+        ('m6i.2xlarge', 4),
+        # Actual: 4
+        ('c6i.large', 2),
+    ]
+    for instance, memory in bad_instance_and_memory:
+        with pytest.raises(ValueError) as e:
+            _test_resources_launch(monkeypatch,
+                                   sky.AWS(),
+                                   instance_type=instance,
+                                   memory=memory)
+        assert 'does not have the requested memory' in str(e.value)
+
 
 def test_instance_type_matches_cpus(monkeypatch):
     _test_resources_launch(monkeypatch,
@@ -196,6 +223,24 @@ def test_instance_type_matches_cpus(monkeypatch):
                            sky.AWS(),
                            instance_type='g4dn.2xlarge',
                            cpus=8.0)
+
+def test_instance_type_matches_memory(monkeypatch):
+    _test_resources_launch(monkeypatch,
+                           sky.AWS(),
+                           instance_type='c6i.8xlarge',
+                           memory=64)
+    _test_resources_launch(monkeypatch,
+                           sky.Azure(),
+                           instance_type='Standard_E8s_v5',
+                           memory='64')
+    _test_resources_launch(monkeypatch,
+                           sky.GCP(),
+                           instance_type='n1-standard-8',
+                           memory='30+')
+    _test_resources_launch(monkeypatch,
+                           sky.AWS(),
+                           instance_type='g4dn.2xlarge',
+                           memory=32)
 
 
 def test_instance_type_mistmatches_accelerators(monkeypatch):
@@ -265,6 +310,11 @@ def test_invalid_cpus(monkeypatch):
             _test_resources(monkeypatch, cloud, cpus='invalid')
         assert '"cpus" field should be' in str(e.value)
 
+def test_invalid_memory(monkeypatch):
+    for cloud in [sky.AWS(), sky.Azure(), sky.GCP(), None]:
+        with pytest.raises(ValueError) as e:
+            _test_resources(monkeypatch, cloud, memory='invalid')
+        assert '"memory" field should be' in str(e.value)
 
 def test_invalid_region(monkeypatch):
     for cloud in [sky.AWS(), sky.Azure(), sky.GCP()]:
@@ -359,6 +409,34 @@ def test_parse_cpus_from_yaml():
         resources:
             cpus: '3+' """)
     _test_parse_cpus(spec, '3+')
+
+    spec = textwrap.dedent("""\
+        resources:
+            cpus: 3+ """)
+    _test_parse_cpus(spec, '3+')
+
+
+
+def test_parse_memory_from_yaml():
+    spec = textwrap.dedent("""\
+        resources:
+            memory: 32""")
+    _test_parse_memory(spec, '32')
+
+    spec = textwrap.dedent("""\
+        resources:
+            memory: 1.5""")
+    _test_parse_memory(spec, '1.5')
+
+    spec = textwrap.dedent("""\
+        resources:
+            memory: '3+' """)
+    _test_parse_memory(spec, '3+')
+    
+    spec = textwrap.dedent("""\
+        resources:
+            memory: 3+ """)
+    _test_parse_memory(spec, '3+')
 
 
 def test_parse_accelerators_from_yaml():
