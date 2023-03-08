@@ -242,6 +242,63 @@ def test_instance_type_matches_memory(monkeypatch):
                            instance_type='g4dn.2xlarge',
                            memory=32)
 
+def test_instance_type_from_cpu_memory(monkeypatch, capfd):
+    _test_resources_launch(monkeypatch, cpus=8)
+    stdout, _ = capfd.readouterr()
+    # Choose General Purpose instance types
+    assert 'm6i.2xlarge' in stdout # AWS, 8 vCPUs, 32 GB memory
+    assert 'Standard_D8_v5' in stdout # Azure, 8 vCPUs, 32 GB memory
+    assert 'n2-standard-8' in stdout # GCP, 8 vCPUs, 32 GB memory
+    
+    
+    _test_resources_launch(monkeypatch, memory=32)
+    stdout, _ = capfd.readouterr()
+    # Choose memory-optimized instance types, when the memory
+    # is specified
+    assert 'r6i.xlarge' in stdout # AWS, 4 vCPUs, 32 GB memory
+    assert 'Standard_E4_v5' in stdout # Azure, 4 vCPUs, 32 GB memory
+    assert 'n2-highmem-4' in stdout # GCP, 4 vCPUs, 32 GB memory
+
+    _test_resources_launch(monkeypatch, memory='64+')
+    stdout, _ = capfd.readouterr()
+    # Choose memory-optimized instance types
+    assert 'r6i.2xlarge' in stdout # AWS, 8 vCPUs, 64 GB memory
+    assert 'Standard_E8_v5' in stdout # Azure, 8 vCPUs, 64 GB memory
+    assert 'n2-highmem-8' in stdout # GCP, 8 vCPUs, 64 GB memory
+    assert 'gpu_1x_a100_sxm4' in stdout # Lambda, 30 vCPUs, 200 GB memory
+    
+    _test_resources_launch(monkeypatch, cpus='4+', memory='4+')
+    stdout, _ = capfd.readouterr()
+    # Choose compute-optimized instance types, when the memory
+    # requirement is less than the memory of General Purpose
+    # instance types.
+    assert 'n2-highcpu-4' in stdout # GCP, 4 vCPUs, 4 GB memory
+    assert 'c6i.xlarge' in stdout # AWS, 4 vCPUs, 8 GB memory
+    assert 'Standard_F4s_v2' in stdout # Azure, 4 vCPUs, 8 GB memory
+    assert 'gpu_1x_a100_sxm4' in stdout # Lambda, 30 vCPUs, 200 GB memory
+
+    _test_resources_launch(monkeypatch, accelerators='T4')
+    stdout, _ = capfd.readouterr()
+    # Choose cheapest T4 instance type
+    assert 'g4dn.xlarge' in stdout # AWS, 4 vCPUs, 16 GB memory, 1 T4 GPU
+    assert 'Standard_NC4as_T4_v3' in stdout # Azure, 4 vCPUs, 28 GB memory, 1 T4 GPU
+    assert 'n1-highmem-4' in stdout # GCP, 4 vCPUs, 26 GB memory, 1 T4 GPU
+
+    _test_resources_launch(monkeypatch, cpus='16+', memory='32+', accelerators='T4')
+    stdout, _ = capfd.readouterr()
+    # Choose cheapest T4 instance type that satisfies the requirement
+    assert 'n1-standard-16' in stdout # GCP, 16 vCPUs, 60 GB memory, 1 T4 GPU
+    assert 'g4dn.4xlarge' in stdout # AWS, 16 vCPUs, 64 GB memory, 1 T4 GPU
+    assert 'Standard_NC16as_T4_v3' in stdout # Azure, 16 vCPUs, 110 GB memory, 1 T4 GPU
+    
+    _test_resources_launch(monkeypatch, memory='200+', accelerators='T4')
+    stdout, _ = capfd.readouterr()
+    # Choose cheapest T4 instance type that satisfies the requirement
+    assert 'n1-highmem-32' in stdout # GCP, 32 vCPUs, 208 GB memory, 1 T4 GPU
+    assert 'g4dn.16xlarge' in stdout # AWS, 64 vCPUs, 256 GB memory, 1 T4 GPU
+    assert 'Azure' not in stdout # Azure does not have a 1 T4 GPU instance type with 200+ GB memory
+
+
 
 def test_instance_type_mistmatches_accelerators(monkeypatch):
     bad_instance_and_accs = [
