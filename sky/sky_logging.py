@@ -38,7 +38,7 @@ _logging_config.is_silent = False
 # This is to make controlled logging via is_silent() possible:
 # in some situation we would like to disable any
 # printing/logging.
-print = builtins.print # pylint: disable=redefined-builtin
+print = builtins.print  # pylint: disable=redefined-builtin
 
 
 def _setup_logger():
