@@ -18,6 +18,7 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
+from sky.utils import log_utils
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import subprocess_utils
@@ -128,14 +129,12 @@ def cost_report() -> List[Dict[str, Any]]:
             'total_cost': (float) cost given resources and usage intervals,
         }
 
-
-        The estimated cost column indicates price for the cluster based on the
-        type of resources being used and the duration of use up until the call
-        to status. This means if the cluster is UP, successive calls to report
-        will show increasing price. The estimated cost is calculated based on
-        the local cache of the cluster status, and may not be accurate for
-        the cluster with autostop/use_spot set or terminated/stopped
-        on the cloud console.
+    The estimated cost column indicates price for the cluster based on the type
+    of resources being used and the duration of use up until the call to
+    status. This means if the cluster is UP, successive calls to report will
+    show increasing price. The estimated cost is calculated based on the local
+    cache of the cluster status, and may not be accurate for the cluster with
+    autostop/use_spot set or terminated/stopped on the cloud console.
 
     Returns:
         A list of dicts, with each dict containing the cost information of a
@@ -170,7 +169,7 @@ def _start(
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
     if not force and cluster_status == global_user_state.ClusterStatus.UP:
-        print(f'Cluster {cluster_name!r} is already up.')
+        sky_logging.print(f'Cluster {cluster_name!r} is already up.')
         return handle
     assert force or cluster_status in (
         global_user_state.ClusterStatus.INIT,
@@ -314,12 +313,6 @@ def stop(cluster_name: str, purge: bool = False) -> None:
         cloud = handle.launched_resources.cloud
         cloud.check_features_are_supported(
             {clouds.CloudImplementationFeatures.STOP})
-        if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
-            # Reference:
-            # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_a_with_gcloud  # pylint: disable=line-too-long
-            raise exceptions.NotSupportedError(
-                f'Stopping cluster {cluster_name!r} with TPU VM Pod '
-                'is not supported.')
         if handle.launched_resources.use_spot:
             # Disable spot instances to be stopped.
             # TODO(suquark): enable GCP+spot to be stopped in the future.
@@ -433,6 +426,14 @@ def autostop(
         raise exceptions.NotSupportedError(
             f'{operation} cluster {cluster_name!r} with backend '
             f'{backend.__class__.__name__!r} is not supported.')
+    elif handle.launched_resources.use_spot and not down and not is_cancel:
+        # Disable spot instances to be autostopped.
+        # TODO(ewzeng): allow autostop for spot when stopping is supported.
+        raise exceptions.NotSupportedError(
+            f'{colorama.Fore.YELLOW}Scheduling autostop on cluster '
+            f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
+            '  Stopping spot instances is not supported as the attached '
+            'disks will be lost.')
 
     if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
         # Reference:
@@ -447,7 +448,6 @@ def autostop(
         cloud.check_features_are_supported(
             {clouds.CloudImplementationFeatures.AUTOSTOP})
 
-    backend = backend_utils.get_backend_from_handle(handle)
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.set_autostop(handle, idle_minutes, down)
 
@@ -552,16 +552,17 @@ def cancel(cluster_name: str,
     backend = backend_utils.get_backend_from_handle(handle)
 
     if all:
-        print(f'{colorama.Fore.YELLOW}'
-              f'Cancelling all jobs on cluster {cluster_name!r}...'
-              f'{colorama.Style.RESET_ALL}')
+        sky_logging.print(f'{colorama.Fore.YELLOW}'
+                          f'Cancelling all jobs on cluster {cluster_name!r}...'
+                          f'{colorama.Style.RESET_ALL}')
         job_ids = None
     else:
         assert job_ids is not None, 'job_ids should not be None'
         jobs_str = ', '.join(map(str, job_ids))
-        print(f'{colorama.Fore.YELLOW}'
-              f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
-              f'{colorama.Style.RESET_ALL}')
+        sky_logging.print(
+            f'{colorama.Fore.YELLOW}'
+            f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
+            f'{colorama.Style.RESET_ALL}')
 
     backend.cancel_jobs(handle, job_ids)
 
@@ -596,9 +597,10 @@ def tail_logs(cluster_name: str,
     job_str = f'job {job_id}'
     if job_id is None:
         job_str = 'the last job'
-    print(f'{colorama.Fore.YELLOW}'
-          f'Tailing logs of {job_str} on cluster {cluster_name!r}...'
-          f'{colorama.Style.RESET_ALL}')
+    sky_logging.print(
+        f'{colorama.Fore.YELLOW}'
+        f'Tailing logs of {job_str} on cluster {cluster_name!r}...'
+        f'{colorama.Style.RESET_ALL}')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.tail_logs(handle, job_id, follow=follow)
@@ -639,9 +641,9 @@ def download_logs(
         return {}
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    print(f'{colorama.Fore.YELLOW}'
-          'Syncing down logs to local...'
-          f'{colorama.Style.RESET_ALL}')
+    sky_logging.print(f'{colorama.Fore.YELLOW}'
+                      'Syncing down logs to local...'
+                      f'{colorama.Style.RESET_ALL}')
     local_log_dirs = backend.sync_down_logs(handle, job_ids, local_dir)
     return local_log_dirs
 
@@ -688,9 +690,9 @@ def job_status(
     if job_ids is not None and len(job_ids) == 0:
         return {}
 
-    print(f'{colorama.Fore.YELLOW}'
-          'Getting job status...'
-          f'{colorama.Style.RESET_ALL}')
+    sky_logging.print(f'{colorama.Fore.YELLOW}'
+                      'Getting job status...'
+                      f'{colorama.Style.RESET_ALL}')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     statuses = backend.get_job_status(handle, job_ids, stream_logs=stream_logs)
@@ -705,7 +707,7 @@ def job_status(
 @usage_lib.entrypoint
 def spot_status(refresh: bool) -> List[Dict[str, Any]]:
     """[Deprecated] (alias of spot_queue) Get statuses of managed spot jobs."""
-    print(
+    sky_logging.print(
         f'{colorama.Fore.YELLOW}WARNING: `spot_status()` is deprecated. '
         f'Instead, use: spot_queue(){colorama.Style.RESET_ALL}',
         file=sys.stderr)
@@ -736,7 +738,9 @@ def spot_queue(refresh: bool,
             }
         ]
     Raises:
-        sky.exceptions.ClusterNotUpError: the spot controller is not up.
+        sky.exceptions.ClusterNotUpError: the spot controller is not up or
+            does not exist.
+        RuntimeError: if failed to get the spot jobs with ssh.
     """
 
     stop_msg = ''
@@ -744,21 +748,30 @@ def spot_queue(refresh: bool,
         stop_msg = 'To view the latest job table: sky spot queue --refresh'
     controller_status, handle = spot.is_spot_controller_up(stop_msg)
 
-    if controller_status is None:
-        return []
-
     if (refresh and controller_status in [
             global_user_state.ClusterStatus.STOPPED,
             global_user_state.ClusterStatus.INIT
     ]):
-        print(f'{colorama.Fore.YELLOW}'
-              'Restarting controller for latest status...'
-              f'{colorama.Style.RESET_ALL}')
+        sky_logging.print(f'{colorama.Fore.YELLOW}'
+                          'Restarting controller for latest status...'
+                          f'{colorama.Style.RESET_ALL}')
 
+        log_utils.force_update_rich_status(
+            '[cyan] Checking spot jobs - restarting '
+            'controller[/]')
         handle = _start(spot.SPOT_CONTROLLER_NAME)
+        controller_status = global_user_state.ClusterStatus.UP
+        log_utils.force_update_rich_status('[cyan] Checking spot jobs[/]')
 
     if handle is None or handle.head_ip is None:
-        raise exceptions.ClusterNotUpError('Spot controller is not up.')
+        # When the controller is STOPPED, the head_ip will be None, as
+        # it will be set in global_user_state.remove_cluster().
+        # We do not directly check for UP because the controller may be
+        # in INIT state during another spot launch, but still have
+        # head_ip available. In this case, we can still try to ssh
+        # into the controller and fetch the job table.
+        raise exceptions.ClusterNotUpError('Spot controller is not up.',
+                                           cluster_status=controller_status)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -771,8 +784,11 @@ def spot_queue(refresh: bool,
         stream_logs=False,
         separate_stderr=True)
     try:
-        subprocess_utils.handle_returncode(
-            returncode, code, 'Failed to fetch managed job statuses', stderr)
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to fetch managed spot jobs',
+                                           stderr,
+                                           stream_logs=False)
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
@@ -797,12 +813,14 @@ def spot_cancel(name: Optional[str] = None,
         RuntimeError: failed to cancel the job.
     """
     job_ids = [] if job_ids is None else job_ids
-    _, handle = spot.is_spot_controller_up(
+    cluster_status, handle = spot.is_spot_controller_up(
         'All managed spot jobs should have finished.')
     if handle is None or handle.head_ip is None:
         # The error message is already printed in spot.is_spot_controller_up.
+        # TODO(zhwu): Move the error message into the exception.
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError()
+            raise exceptions.ClusterNotUpError('',
+                                               cluster_status=cluster_status)
 
     job_id_str = ','.join(map(str, job_ids))
     if sum([len(job_ids) > 0, name is not None, all]) != 1:
@@ -833,7 +851,7 @@ def spot_cancel(name: Optional[str] = None,
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
-    print(stdout)
+    sky_logging.print(stdout)
     if 'Multiple jobs found with name' in stdout:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -861,7 +879,8 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
         if controller_status == global_user_state.ClusterStatus.INIT:
             msg = ''
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(msg)
+            raise exceptions.ClusterNotUpError(msg,
+                                               cluster_status=controller_status)
 
     if name is not None and job_id is not None:
         raise ValueError('Cannot specify both name and job_id.')

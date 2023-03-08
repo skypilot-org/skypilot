@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import colorama
 import filelock
-import rich
 
 from sky import backends
 from sky import exceptions
@@ -219,7 +218,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     controller_status = job_lib.get_status(job_id)
     status_msg = ('[bold cyan]Waiting for controller process to be RUNNING '
                   '{status_str}[/]. It may take a few minutes.')
-    status_display = rich.status.Status(status_msg.format(status_str=''))
+    status_display = log_utils.safe_rich_status(
+        status_msg.format(status_str=''))
     with status_display:
         prev_msg = None
         while (controller_status != job_lib.JobStatus.RUNNING and
@@ -403,8 +403,16 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
-def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
-    """Show all spot jobs."""
+def format_job_table(jobs: List[Dict[str, Any]],
+                     show_all: bool,
+                     max_jobs: Optional[int] = None) -> str:
+    """Returns spot jobs as a formatted string.
+
+    Args:
+        jobs: A list of spot jobs.
+        show_all: Whether to show all columns.
+        max_jobs: The maximum number of jobs to show in the table.
+    """
     columns = [
         'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'JOB DURATION',
         '#RECOVERIES', 'STATUS'
@@ -414,6 +422,12 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
     job_table = log_utils.create_table(columns)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
+    for job in jobs:
+        if not job['status'].is_terminal():
+            status_counts[job['status'].value] += 1
+
+    if max_jobs is not None:
+        jobs = jobs[:max_jobs]
     for job in jobs:
         # The job['job_duration'] is already calculated in
         # dump_spot_job_queue().
@@ -435,8 +449,6 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
             job['recovery_count'],
             job['status'].colored_str(),
         ]
-        if not job['status'].is_terminal():
-            status_counts[job['status'].value] += 1
         if show_all:
             values.extend([
                 # STARTED
@@ -447,12 +459,18 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
                 if job['failure_reason'] is not None else '-',
             ])
         job_table.add_row(values)
+
     status_str = ', '.join([
         f'{count} {status}' for status, count in sorted(status_counts.items())
     ])
     if status_str:
-        status_str = f'In progress jobs: {status_str}\n\n'
-    return status_str + str(job_table)
+        status_str = f'In progress jobs: {status_str}'
+    else:
+        status_str = 'No in progress jobs.'
+    output = status_str
+    if str(job_table):
+        output += f'\n{job_table}'
+    return output
 
 
 class SpotCodeGen:
@@ -566,8 +584,13 @@ def is_spot_controller_up(
           identity.
     """
     try:
+        # Set force_refresh=False to make sure the refresh only happens when the
+        # controller is INIT/UP. This optimization avoids unnecessary costly
+        # refresh when the controller is already stopped. This optimization is
+        # based on the assumption that the user will not start the controller
+        # manually from the cloud console.
         controller_status, handle = backend_utils.refresh_cluster_status_handle(
-            SPOT_CONTROLLER_NAME, force_refresh=True)
+            SPOT_CONTROLLER_NAME, force_refresh=False)
     except exceptions.ClusterStatusFetchingError as e:
         # We do not catch the exceptions related to the cluster owner identity
         # mismatch, please refer to the comment in
@@ -583,7 +606,7 @@ def is_spot_controller_up(
             controller_status, handle = record['status'], record['handle']
 
     if controller_status is None:
-        print('No managed spot jobs are found.')
+        sky_logging.print('No managed spot jobs are found.')
     elif controller_status != global_user_state.ClusterStatus.UP:
         msg = (f'Spot controller {SPOT_CONTROLLER_NAME} '
                f'is {controller_status.value}.')
@@ -591,6 +614,6 @@ def is_spot_controller_up(
             msg += f'\n{stopped_message}'
         if controller_status == global_user_state.ClusterStatus.INIT:
             msg += '\nPlease wait for the controller to be ready.'
-        print(msg)
+        sky_logging.print(msg)
         handle = None
     return controller_status, handle

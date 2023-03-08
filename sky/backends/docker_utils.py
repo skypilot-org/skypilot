@@ -131,7 +131,6 @@ def _execute_build(tag, context_path):
         unused_image, unused_build_logs = docker_client.images.build(
             path=context_path, tag=tag, rm=True, quiet=False)
     except docker.build_error() as e:
-        colorama.init()
         style = colorama.Style
         fore = colorama.Fore
         logger.error(f'{fore.RED}Image build for {tag} failed - are your setup '

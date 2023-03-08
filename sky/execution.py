@@ -210,6 +210,12 @@ def _execute(
             if not down:
                 requested_features.add(
                     clouds.CloudImplementationFeatures.AUTOSTOP)
+                # TODO(ewzeng): allow autostop for spot when stopping is
+                # supported.
+                if task.use_spot:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'Autostop is not supported for spot instances.')
 
     elif idle_minutes_to_autostop is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
@@ -310,7 +316,7 @@ def _execute(
             # Disable the usage collection for this status command.
             env = dict(os.environ,
                        **{env_options.Options.DISABLE_LOGGING.value: '1'})
-            subprocess_utils.run('sky status', env=env)
+            subprocess_utils.run('sky status --no-show-spot-jobs', env=env)
         print()
         print('\x1b[?25h', end='')  # Show cursor.
 

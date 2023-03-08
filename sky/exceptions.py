@@ -1,6 +1,10 @@
 """Exceptions."""
 import enum
+import typing
 from typing import List, Optional
+
+if typing.TYPE_CHECKING:
+    from sky import global_user_state
 
 # Return code for keyboard interruption and SIGTSTP
 KEYBOARD_INTERRUPT_CODE = 130
@@ -17,10 +21,10 @@ class ResourcesUnavailableError(Exception):
     """
 
     def __init__(self,
-                 *args: object,
+                 message: str,
                  no_failover: bool = False,
                  failover_history: Optional[List[Exception]] = None) -> None:
-        super().__init__(*args)
+        super().__init__(message)
         self.no_failover = no_failover
         if failover_history is None:
             failover_history = []
@@ -47,8 +51,8 @@ class ProvisionPrechecksError(Exception):
         reasons: (List[Exception]) The reasons why the prechecks failed.
     """
 
-    def __init__(self, *args: object, reasons: List[Exception]) -> None:
-        super().__init__(*args)
+    def __init__(self, reasons: List[Exception]) -> None:
+        super().__init__()
         self.reasons = list(reasons)
 
 
@@ -87,7 +91,11 @@ class CommandError(Exception):
 
 class ClusterNotUpError(Exception):
     """Raised when a cluster is not up."""
-    pass
+
+    def __init__(self, message: str,
+                 cluster_status: 'global_user_state.ClusterStatus') -> None:
+        super().__init__(message)
+        self.cluster_status = cluster_status
 
 
 class ClusterSetUpError(Exception):

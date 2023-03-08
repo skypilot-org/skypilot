@@ -872,7 +872,7 @@ def _make_launchables_for_valid_region_zones(
     # TODO(woosuk): A better design is to implement batching at a higher level
     # (e.g., in provisioner or optimizer), not here.
     launchables = []
-    regions = launchable_resources.get_offering_regions_for_launchable()
+    regions = launchable_resources.get_valid_regions_for_launchable()
     for region in regions:
         if launchable_resources.use_spot and region.zones is not None:
             # Spot instances.

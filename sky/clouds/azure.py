@@ -51,8 +51,6 @@ class Azure(clouds.Cloud):
     # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
 
-    _regions: List[clouds.Region] = []
-
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
@@ -151,36 +149,14 @@ class Azure(clouds.Cloud):
         return image_config
 
     @classmethod
-    def regions(cls) -> List[clouds.Region]:
-        # NOTE on zones: Ray Autoscaler does not support specifying
-        # availability zones, and Azure CLI will try launching VMs in all
-        # zones. Hence for our purposes we do not keep track of zones.
-        if not cls._regions:
-            cls._regions = [
-                clouds.Region('centralus'),
-                clouds.Region('eastus'),
-                clouds.Region('eastus2'),
-                clouds.Region('northcentralus'),
-                clouds.Region('southcentralus'),
-                clouds.Region('westcentralus'),
-                clouds.Region('westus'),
-                clouds.Region('westus2'),
-            ]
-        return cls._regions
-
-    @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
+    def regions_with_offering(cls, instance_type: str,
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         del accelerators  # unused
         assert zone is None, 'Azure does not support zones'
-        if instance_type is None:
-            # Fall back to default regions
-            regions = cls.regions()
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'azure')
+        regions = service_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'azure')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -192,7 +168,7 @@ class Azure(clouds.Cloud):
         *,
         region: str,
         num_nodes: int,
-        instance_type: Optional[str] = None,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[None]:
@@ -230,13 +206,9 @@ class Azure(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources.Resources',
-            region: Optional['clouds.Region'],
+            self, resources: 'resources.Resources', region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        if region is None:
-            assert zones is None, (
-                'Set either both or neither for: region, zones.')
-            region = self._get_default_region()
+        assert zones is None, ('Azure does not support zones', zones)
 
         region_name = region.name
 
