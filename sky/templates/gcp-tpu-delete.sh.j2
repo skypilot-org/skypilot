@@ -1,9 +1,0 @@
-#!/bin/bash
-export PROJECT_ID={{gcp_project_id}}
-
-gcloud config set project $PROJECT_ID
-
-# Do not use --async, because if launching tpu again with the same name while
-# the tpu is asynchronously being deleted, some race condition happens.  (Can
-# repro with tpu_app.)
-gcloud compute tpus delete {{tpu_name}} --zone={{zones}} -q
