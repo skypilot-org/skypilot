@@ -321,7 +321,7 @@ def stop(cluster_name: str, purge: bool = False) -> None:
         # TODO(suquark): enable GCP+spot to be stopped in the future.
         raise exceptions.NotSupportedError(
             f'{colorama.Fore.YELLOW}Stopping cluster '
-            f'{cluster_name!r}... skipped.{colorama.Style.RESET_ALL}\n'
+            f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
             '  Stopping spot instances is not supported as the attached '
             'disks will be lost.\n'
             '  To terminate the cluster instead, run: '
@@ -429,6 +429,14 @@ def autostop(
         raise exceptions.NotSupportedError(
             f'{operation} cluster {cluster_name!r} with backend '
             f'{backend.__class__.__name__!r} is not supported.')
+    elif handle.launched_resources.use_spot and not down and not is_cancel:
+        # Disable spot instances to be autostopped.
+        # TODO(ewzeng): allow autostop for spot when stopping is supported.
+        raise exceptions.NotSupportedError(
+            f'{colorama.Fore.YELLOW}Scheduling autostop on cluster '
+            f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
+            '  Stopping spot instances is not supported as the attached '
+            'disks will be lost.')
 
     if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
         # Reference:
@@ -443,7 +451,6 @@ def autostop(
         cloud.check_features_are_supported(
             {clouds.CloudImplementationFeatures.AUTOSTOP})
 
-    backend = backend_utils.get_backend_from_handle(handle)
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.set_autostop(handle, idle_minutes, down)
 
