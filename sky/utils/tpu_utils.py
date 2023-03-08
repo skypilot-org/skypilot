@@ -118,7 +118,8 @@ def terminate_or_stop_tpu_node(tpu_node_script: str,
     tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(cmd,
                                                           log_path,
                                                           stream_logs=False,
-                                                          require_outputs=True)
+                                                          require_outputs=True,
+                                                          shell=True)
     if tpu_rc == 0 or (_TPU_NOT_FOUND_ERROR in tpu_stderr and not stop):
         return True, tpu_stdout, tpu_stderr
     return False, tpu_stdout, tpu_stderr
