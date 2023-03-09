@@ -1,0 +1,48 @@
+name: pytorchelastic
+
+num_nodes: 2
+
+workdir: ./resnet_ddp
+
+resources:
+  cloud: gcp
+  accelerators: T4
+
+file_mounts:
+    /checkpoint:
+        name: # NOTE: Fill in your bucket name for checkpoints
+        mode: MOUNT
+
+setup: |
+  conda activate torch
+
+  if [ $? -eq 0 ]; then
+    echo "conda env exists"
+  else
+    conda create -n torch python=3.8 -y
+    conda activate torch
+    pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu116
+  fi
+
+  echo export WANDB_API_KEY=[YOUR-WANDB-KEY] >> ~/.bashrc
+
+  pip3 install --upgrade pip
+  pip3 install -r requirements.txt
+  mkdir -p data  && mkdir -p saved_models && cd data && \
+  wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
+  tar -xvzf cifar-10-python.tar.gz
+
+  mkdir -p /checkpoint/torch_ddp_resnet/
+  mkdir -p /checkpoint/wandb
+
+run: |
+  conda activate torch
+
+  run_id=elastic-$SKYPILOT_JOB_ID
+
+  num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
+  master_addr=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+  torchrun --nproc_per_node=1 --max_restarts=10 \
+  --nnodes=1:$num_nodes --rdzv_id=1 --rdzv_backend=c10d --rdzv_endpoint=$master_addr resnet_ddp.py --num_epochs 20 \
+  --model_dir /checkpoint/torch_ddp_resnet/ --resume --model_filename resnet_distributed-with-epochs.pth --wandb_dir /checkpoint/ --run_id $run_id
+
