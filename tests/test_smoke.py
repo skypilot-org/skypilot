@@ -72,7 +72,7 @@ storage_setup_commands = [
 # the spot queue command will return staled table.
 _SPOT_QUEUE_WAIT = ('s=$(sky spot queue); '
                     'until [ `echo "$s" '
-                    '| grep "Please wait for the controller to be ready" '
+                    '| grep "jobs will not be shown until it becomes UP." '
                     '| wc -l` -eq 0 ]; '
                     'do echo "Waiting for spot queue to be ready..."; '
                     'sleep 5; s=$(sky spot queue); done; echo "$s"; '
@@ -1288,7 +1288,7 @@ def test_spot_failed_setup(generic_cloud: str):
         'spot-failed-setup',
         [
             f'sky spot launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
-            'sleep 200',
+            'sleep 300',
             # Make sure the job failed quickly.
             f'{_SPOT_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED_SETUP"',
         ],

@@ -10,9 +10,9 @@ import requests
 import pandas as pd
 
 from sky import sky_logging
-from sky.backends import backend_utils
 from sky.clouds import cloud as cloud_lib
 from sky.clouds.service_catalog import constants
+from sky.utils import log_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -100,7 +100,7 @@ def read_catalog(filename: str,
             update_frequency_str = ''
             if pull_frequency_hours is not None:
                 update_frequency_str = f' (every {pull_frequency_hours} hours)'
-            with backend_utils.safe_console_status(
+            with log_utils.safe_rich_status(
                 (f'Updating {cloud} catalog: '
                  f'{filename}'
                  f'{update_frequency_str}')) as status:

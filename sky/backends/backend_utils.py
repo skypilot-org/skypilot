@@ -10,7 +10,6 @@ import re
 import subprocess
 import tempfile
 import textwrap
-import threading
 import time
 import typing
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
@@ -25,7 +24,6 @@ from packaging import version
 import requests
 from requests import adapters
 from requests.packages.urllib3.util import retry as retry_lib
-import rich.console as rich_console
 import rich.progress as rich_progress
 import yaml
 
@@ -46,6 +44,7 @@ from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import env_options
+from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
@@ -60,7 +59,6 @@ if typing.TYPE_CHECKING:
     from sky.backends import local_docker_backend
 
 logger = sky_logging.init_logger(__name__)
-console = rich_console.Console()
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
@@ -904,12 +902,6 @@ def write_cluster_config(
         config_dict['ray'] = tmp_yaml_path
         return config_dict
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
-    # Delay the optimization of the config until the authentication files is
-    # added.
-    if not isinstance(cloud, clouds.Local):
-        # Only optimize the file mounts for public clouds now, as local has not
-        # been fully tested yet.
-        _optimize_file_mounts(tmp_yaml_path)
 
     # Restore the old yaml content for backward compatibility.
     if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
@@ -924,10 +916,23 @@ def write_cluster_config(
         with open(tmp_yaml_path, 'w') as f:
             f.write(restored_yaml_content)
 
+    # Optimization: copy the contents of source files in file_mounts to a
+    # special dir, and upload that as the only file_mount instead. Delay
+    # calling this optimization until now, when all source files have been
+    # written and their contents finalized.
+    #
+    # Note that the ray yaml file will be copied into that special dir (i.e.,
+    # uploaded as part of the file_mounts), so the restore for backward
+    # compatibility should go before this call.
+    if not isinstance(cloud, clouds.Local):
+        # Only optimize the file mounts for public clouds now, as local has not
+        # been fully tested yet.
+        _optimize_file_mounts(tmp_yaml_path)
+
     # Rename the tmp file to the final YAML path.
     os.rename(tmp_yaml_path, yaml_path)
-
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
+
     # For TPU nodes. TPU VMs do not need TPU_NAME.
     if (resources_vars.get('tpu_type') is not None and
             resources_vars.get('tpu_vm') is None):
@@ -1022,7 +1027,8 @@ def wait_until_ray_cluster_ready(
     last_nodes_so_far = 0
     start = time.time()
     runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
-    with console.status('[bold cyan]Waiting for workers...') as worker_status:
+    with log_utils.console.status(
+            '[bold cyan]Waiting for workers...') as worker_status:
         while True:
             rc, output, stderr = runner.run('ray status',
                                             log_path=log_path,
@@ -1188,7 +1194,7 @@ def parallel_data_transfer_to_nodes(
                f': {style.BRIGHT}{origin_source}{style.RESET_ALL} -> '
                f'{style.BRIGHT}{target}{style.RESET_ALL}')
     logger.info(message)
-    with safe_console_status(f'[bold cyan]{action_message}[/]'):
+    with log_utils.safe_rich_status(f'[bold cyan]{action_message}[/]'):
         subprocess_utils.run_in_parallel(_sync_node, runners)
 
 
@@ -2292,23 +2298,6 @@ def get_backend_from_handle(
         raise NotImplementedError(
             f'Handle type {type(handle)} is not supported yet.')
     return backend
-
-
-class NoOpConsole:
-    """An empty class for multi-threaded console.status."""
-
-    def __enter__(self):
-        pass
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
-
-
-def safe_console_status(msg: str):
-    """A wrapper for multi-threaded console.status."""
-    if threading.current_thread() is threading.main_thread():
-        return console.status(msg)
-    return NoOpConsole()
 
 
 def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
