@@ -2834,7 +2834,7 @@ def check():
               '-a',
               is_flag=True,
               default=False,
-              help='Show detailed information for the listed GPUs/TPUs.')
+              help='Show detailed information.')
 @click.option('--cloud',
               default=None,
               type=str,
@@ -2864,7 +2864,8 @@ def show_gpus(
     To show the detailed information of a GPU/TPU type (which clouds offer it,
     the quantity in each VM type, etc.), use ``sky show-gpus <gpu>``.
 
-    Append ``--all`` to show detailed information for the listed GPUs/TPUs.
+    Append ``--all`` to show detailed information for queried GPUs/TPUs, e.g.
+    ``sky show-gpus --all``.
 
     NOTE: If region is not specified, the price displayed for each instance type
     is the lowest across all regions for both on-demand and spot instances.
