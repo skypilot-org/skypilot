@@ -279,7 +279,16 @@ def check_accelerator_attachable_to_host(instance_type: str,
 def get_common_gpus() -> List[str]:
     """Returns a list of commonly used GPU names."""
     return [
-        'V100', 'V100-32GB', 'A100', 'A100-80GB', 'P100', 'K80', 'T4', 'M60'
+        'V100',
+        'V100-32GB',
+        'A100',
+        'A100-80GB',
+        'P100',
+        'K80',
+        'T4',
+        'M60',
+        'A10',
+        'A10G',
     ]
 
 
