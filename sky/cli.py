@@ -2864,8 +2864,7 @@ def show_gpus(
     To show the detailed information of a GPU/TPU type (which clouds offer it,
     the quantity in each VM type, etc.), use ``sky show-gpus <gpu>``.
 
-    To show all accelerators, including less common ones and their detailed
-    information, use ``sky show-gpus --all``.
+    To show detailed pricing information, use ``sky show-gpus --all``.
 
     NOTE: If region is not specified, the price displayed for each instance type
     is the lowest across all regions for both on-demand and spot instances.
@@ -2884,7 +2883,7 @@ def show_gpus(
 
     def _output():
         gpu_table = log_utils.create_table(
-            ['NVIDIA_GPU', 'AVAILABLE_QUANTITIES'])
+            ['COMMON_GPU', 'AVAILABLE_QUANTITIES'])
         tpu_table = log_utils.create_table(
             ['GOOGLE_TPU', 'AVAILABLE_QUANTITIES'])
         other_table = log_utils.create_table(
@@ -2896,7 +2895,7 @@ def show_gpus(
                 clouds=cloud,
                 region_filter=region,
             )
-            # NVIDIA GPUs
+            # Common GPUs
             for gpu in service_catalog.get_common_gpus():
                 if gpu in result:
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
@@ -2911,14 +2910,15 @@ def show_gpus(
             yield from tpu_table.get_string()
 
             # Other GPUs
-            if show_all:
+            for gpu, qty in sorted(result.items()):
+                other_table.add_row([gpu, _list_to_str(qty)])
+            if len(other_table.get_string()) > 0:
                 yield '\n\n'
-                for gpu, qty in sorted(result.items()):
-                    other_table.add_row([gpu, _list_to_str(qty)])
-                yield from other_table.get_string()
-                yield '\n\n'
-            else:
+            yield from other_table.get_string()
+
+            if not show_all:
                 return
+            yield '\n\n'
 
         # Show detailed accelerator information
         result = service_catalog.list_accelerators(gpus_only=True,
@@ -2946,7 +2946,7 @@ def show_gpus(
                 'HOURLY_PRICE',
                 'HOURLY_SPOT_PRICE',
             ]
-            if not show_all:
+            if gpu_name is not None:
                 accelerator_table_headers.append('REGION')
             accelerator_table = log_utils.create_table(
                 accelerator_table_headers)
@@ -2978,7 +2978,7 @@ def show_gpus(
                     price_str,
                     spot_price_str,
                 ]
-                if not show_all:
+                if gpu_name is not None:
                     accelerator_table_vals.append(region_str)
                 accelerator_table.add_row(accelerator_table_vals)
 
