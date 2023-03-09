@@ -2834,7 +2834,7 @@ def check():
               '-a',
               is_flag=True,
               default=False,
-              help='Show details of all GPU/TPU/accelerator offerings.')
+              help='Show detailed information for the listed GPUs/TPUs.')
 @click.option('--cloud',
               default=None,
               type=str,
