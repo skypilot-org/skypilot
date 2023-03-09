@@ -2864,7 +2864,7 @@ def show_gpus(
     To show the detailed information of a GPU/TPU type (which clouds offer it,
     the quantity in each VM type, etc.), use ``sky show-gpus <gpu>``.
 
-    To show detailed pricing information, use ``sky show-gpus --all``.
+    Append ``--all`` to show detailed information for the listed GPUs/TPUs.
 
     NOTE: If region is not specified, the price displayed for each instance type
     is the lowest across all regions for both on-demand and spot instances.
@@ -2926,14 +2926,14 @@ def show_gpus(
                                                    region_filter=region,
                                                    clouds=cloud)
         if len(result) == 0:
-            yield f'Resources \'{gpu_name}\' not found. '
-            yield 'Try \'sky show-gpus --all\' '
-            yield 'to show available accelerators.'
+            yield f'Resources \'{gpu_name}\' not found.'
             return
 
-        yield '*NOTE*: for most GCP accelerators, '
-        yield 'INSTANCE_TYPE == (attachable) means '
-        yield 'the host VM\'s cost is not included.\n\n'
+        if cloud is None or cloud == 'gcp':
+            yield '*NOTE*: for most GCP accelerators, '
+            yield 'INSTANCE_TYPE == (attachable) means '
+            yield 'the host VM\'s cost is not included.\n\n'
+
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table_headers = [
