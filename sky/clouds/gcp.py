@@ -366,7 +366,7 @@ class GCP(clouds.Cloud):
         assert len(resources.accelerators.items()
                   ) == 1, 'cannot handle more than one accelerator candidates.'
         acc, acc_count = list(resources.accelerators.items())[0]
-        use_tpu_vm = True if 'tpu' in acc else False
+        use_tpu_vm = 'tpu' in acc
 
         # For TPU VMs, the instance type is fixed to 'TPU-VM'. However, we still
         # need to call the below function to get the fuzzy candidate list.
