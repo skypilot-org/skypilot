@@ -10,10 +10,10 @@ import re
 import subprocess
 import tempfile
 import textwrap
-import threading
 import time
 import typing
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing_extensions import Literal
 import uuid
 
 import colorama
@@ -24,7 +24,6 @@ from packaging import version
 import requests
 from requests import adapters
 from requests.packages.urllib3.util import retry as retry_lib
-import rich.console as rich_console
 import rich.progress as rich_progress
 import yaml
 
@@ -45,6 +44,7 @@ from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import env_options
+from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
@@ -55,9 +55,10 @@ from sky.usage import usage_lib
 if typing.TYPE_CHECKING:
     from sky import resources
     from sky import task as task_lib
+    from sky.backends import cloud_vm_ray_backend
+    from sky.backends import local_docker_backend
 
 logger = sky_logging.init_logger(__name__)
-console = rich_console.Console()
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
@@ -94,7 +95,7 @@ DEFAULT_TASK_CPU_DEMAND = 0.5
 # Mapping from reserved cluster names to the corresponding group name (logging
 # purpose).
 # NOTE: each group can only have one reserved cluster name for now.
-SKY_RESERVED_CLUSTER_NAMES = {
+SKY_RESERVED_CLUSTER_NAMES: Dict[str, str] = {
     spot_lib.SPOT_CONTROLLER_NAME: 'Managed spot controller'
 }
 
@@ -153,15 +154,15 @@ def fill_template(template_name: str,
     with open(template_path) as fin:
         template = fin.read()
     if output_path is None:
-        assert ('cluster_name' in variables), ('cluster_name is required.')
         cluster_name = variables.get('cluster_name')
+        assert isinstance(cluster_name, str), cluster_name
         output_path = _get_yaml_path_from_cluster_name(cluster_name,
                                                        output_prefix)
     output_path = os.path.abspath(output_path)
 
     # Write out yaml config.
-    template = jinja2.Template(template)
-    content = template.render(**variables)
+    j2_template = jinja2.Template(template)
+    content = j2_template.render(**variables)
     with open(output_path, 'w') as fout:
         fout.write(content)
     return output_path
@@ -501,8 +502,9 @@ class SSHConfigHelper(object):
         external_worker_ips = list(sorted(external_worker_ips))
 
         overwrites = [False] * len(external_worker_ips)
-        overwrite_begin_idxs = [None] * len(external_worker_ips)
-        codegens = [None] * len(external_worker_ips)
+        overwrite_begin_idxs: List[Optional[int]] = [None
+                                                    ] * len(external_worker_ips)
+        codegens: List[Optional[str]] = [None] * len(external_worker_ips)
         worker_names = []
         extra_path_name = cls.ssh_multinode_path.format(cluster_name)
 
@@ -583,6 +585,7 @@ class SSHConfigHelper(object):
             overwrite = overwrites[idx]
             overwrite_begin_idx = overwrite_begin_idxs[idx]
             codegen = codegens[idx]
+            assert codegen is not None, (codegens, idx)
             if overwrite:
                 assert overwrite_begin_idx is not None
                 updated_lines = codegen.splitlines(keepends=True) + ['\n']
@@ -702,9 +705,9 @@ class SSHConfigHelper(object):
                 break
 
 
-def _replace_yaml_dicts(new_yaml: str, old_yaml: str,
-                        restore_key_names: Set[str],
-                        restore_key_names_exceptions: List[List[str]]) -> str:
+def _replace_yaml_dicts(
+        new_yaml: str, old_yaml: str, restore_key_names: Set[str],
+        restore_key_names_exceptions: Sequence[Sequence[str]]) -> str:
     """Replaces 'new' with 'old' for all keys in restore_key_names.
 
     The replacement will be applied recursively and only for the blocks
@@ -766,7 +769,6 @@ def write_cluster_config(
         wheel_hash: str,
         region: Optional[clouds.Region] = None,
         zones: Optional[List[clouds.Zone]] = None,
-        auth_config: Optional[Dict[str, str]] = None,
         dryrun: bool = False,
         keep_launch_fields_in_existing_config: bool = True) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
@@ -820,22 +822,16 @@ def write_cluster_config(
     if (isinstance(ssh_proxy_command_config, str) or
             ssh_proxy_command_config is None):
         ssh_proxy_command = ssh_proxy_command_config
-    elif isinstance(ssh_proxy_command_config, dict):
-        ssh_proxy_command = ssh_proxy_command_config.get(region_name, None)
-        if ssh_proxy_command is None:
+    else:
+        # ssh_proxy_command_config: Dict[str, str], region_name -> command
+        # This type check is done by skypilot_config at config load time.
+        if region_name not in ssh_proxy_command_config:
             # Skip this region. The upper layer will handle the failover to
             # other regions.
             raise exceptions.ResourcesUnavailableError(
                 f'No ssh_proxy_command provided for region {region_name}. Skipped.'
             )
-        elif not isinstance(ssh_proxy_command, str):
-            raise ValueError(
-                'Invalid ssh_proxy_command config (expected a str): '
-                f'{ssh_proxy_command_config!r}')
-    else:
-        raise ValueError(
-            'Invalid ssh_proxy_command config (expected a str or a dict with '
-            f'region names as keys): {ssh_proxy_command_config!r}')
+        ssh_proxy_command = ssh_proxy_command_config[region_name]
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
@@ -906,12 +902,6 @@ def write_cluster_config(
         config_dict['ray'] = tmp_yaml_path
         return config_dict
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
-    # Delay the optimization of the config until the authentication files is
-    # added.
-    if not isinstance(cloud, clouds.Local):
-        # Only optimize the file mounts for public clouds now, as local has not
-        # been fully tested yet.
-        _optimize_file_mounts(tmp_yaml_path)
 
     # Restore the old yaml content for backward compatibility.
     if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
@@ -926,10 +916,23 @@ def write_cluster_config(
         with open(tmp_yaml_path, 'w') as f:
             f.write(restored_yaml_content)
 
+    # Optimization: copy the contents of source files in file_mounts to a
+    # special dir, and upload that as the only file_mount instead. Delay
+    # calling this optimization until now, when all source files have been
+    # written and their contents finalized.
+    #
+    # Note that the ray yaml file will be copied into that special dir (i.e.,
+    # uploaded as part of the file_mounts), so the restore for backward
+    # compatibility should go before this call.
+    if not isinstance(cloud, clouds.Local):
+        # Only optimize the file mounts for public clouds now, as local has not
+        # been fully tested yet.
+        _optimize_file_mounts(tmp_yaml_path)
+
     # Rename the tmp file to the final YAML path.
     os.rename(tmp_yaml_path, yaml_path)
-
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
+
     # For TPU nodes. TPU VMs do not need TPU_NAME.
     if (resources_vars.get('tpu_type') is not None and
             resources_vars.get('tpu_vm') is None):
@@ -1008,7 +1011,7 @@ def wait_until_ray_cluster_ready(
 ) -> bool:
     """Returns whether the entire ray cluster is ready."""
     if num_nodes <= 1:
-        return
+        return True
 
     # Manually fetching head ip instead of using `ray exec` to avoid the bug
     # that `ray exec` fails to connect to the head node after some workers
@@ -1024,7 +1027,8 @@ def wait_until_ray_cluster_ready(
     last_nodes_so_far = 0
     start = time.time()
     runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
-    with console.status('[bold cyan]Waiting for workers...') as worker_status:
+    with log_utils.console.status(
+            '[bold cyan]Waiting for workers...') as worker_status:
         while True:
             rc, output, stderr = runner.run('ray status',
                                             log_path=log_path,
@@ -1134,7 +1138,7 @@ def ssh_credential_from_yaml(cluster_yaml: str) -> Dict[str, str]:
 
 def parallel_data_transfer_to_nodes(
     runners: List[command_runner.SSHCommandRunner],
-    source: str,
+    source: Optional[str],
     target: str,
     cmd: Optional[str],
     run_rsync: bool,
@@ -1147,9 +1151,9 @@ def parallel_data_transfer_to_nodes(
     """Runs a command on all nodes and optionally runs rsync from src->dst.
 
     Args:
-        runners: A list of SSHCommandRunner's that represent multiple nodes.
-        source_target: Tuple[str, str]; Source for rsync on local node and
-            Destination on remote node for rsync
+        runners: A list of SSHCommandRunner objects that represent multiple nodes.
+        source: Optional[str]; Source for rsync on local node
+        target: str; Destination on remote node for rsync
         cmd: str; Command to be executed on all nodes
         action_message: str; Message to be printed while the command runs
         log_path: str; Path to the log file
@@ -1173,8 +1177,9 @@ def parallel_data_transfer_to_nodes(
                 stderr=stdout + stderr)
 
         if run_rsync:
+            assert source is not None
             # TODO(zhwu): Optimize for large amount of files.
-            # zip / transfer/ unzip
+            # zip / transfer / unzip
             runner.rsync(
                 source=source,
                 target=target,
@@ -1189,7 +1194,7 @@ def parallel_data_transfer_to_nodes(
                f': {style.BRIGHT}{origin_source}{style.RESET_ALL} -> '
                f'{style.BRIGHT}{target}{style.RESET_ALL}')
     logger.info(message)
-    with safe_console_status(f'[bold cyan]{action_message}[/]'):
+    with log_utils.safe_rich_status(f'[bold cyan]{action_message}[/]'):
         subprocess_utils.run_in_parallel(_sync_node, runners)
 
 
@@ -1261,8 +1266,8 @@ def _query_head_ip_with_retries(cluster_yaml: str,
                 f'ray get-head-ip {full_cluster_yaml!r}',
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL).stdout.decode().strip()
-            head_ip = re.findall(IP_ADDR_REGEX, out)
-            if len(head_ip) > 1:
+            head_ip_list = re.findall(IP_ADDR_REGEX, out)
+            if len(head_ip_list) > 1:
                 # This could be triggered if e.g., some logging is added in
                 # skypilot_config, a module that has some code executed
                 # whenever `sky` is imported.
@@ -1271,12 +1276,12 @@ def _query_head_ip_with_retries(cluster_yaml: str,
                     'the `ray get-head-ip` command. This could '
                     'happen if there is extra output from it, '
                     'which should be inspected below.\nProceeding with '
-                    f'the last detected IP ({head_ip[-1]}) as head IP.'
+                    f'the last detected IP ({head_ip_list[-1]}) as head IP.'
                     f'\n== Output ==\n{out}'
                     f'\n== Output ends ==')
-                head_ip = head_ip[-1:]
-            assert 1 == len(head_ip), (out, head_ip)
-            head_ip = head_ip[0]
+                head_ip_list = head_ip_list[-1:]
+            assert 1 == len(head_ip_list), (out, head_ip_list)
+            head_ip = head_ip_list[0]
             break
         except subprocess.CalledProcessError as e:
             if i == max_attempts - 1:
@@ -1290,7 +1295,8 @@ def _query_head_ip_with_retries(cluster_yaml: str,
 @timeline.event
 def get_node_ips(cluster_yaml: str,
                  expected_num_nodes: int,
-                 handle: Optional[backends.Backend.ResourceHandle] = None,
+                 handle: Optional[
+                     'cloud_vm_ray_backend.CloudVmRayResourceHandle'] = None,
                  head_ip_max_attempts: int = 1,
                  worker_ip_max_attempts: int = 1,
                  get_internal_ips: bool = False) -> List[str]:
@@ -1304,6 +1310,7 @@ def get_node_ips(cluster_yaml: str,
     if use_tpu_vm:
         assert expected_num_nodes == 1, (
             'TPU VM only supports single node for now.')
+        assert handle is not None, 'handle is required for TPU VM.'
         try:
             ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
         except exceptions.CommandError as e:
@@ -1329,7 +1336,7 @@ def get_node_ips(cluster_yaml: str,
     except RuntimeError as e:
         raise exceptions.FetchIPError(
             exceptions.FetchIPError.Reason.HEAD) from e
-    head_ip = [head_ip]
+    head_ip_list = [head_ip]
     if expected_num_nodes > 1:
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
 
@@ -1363,7 +1370,7 @@ def get_node_ips(cluster_yaml: str,
             worker_ips = re.findall(IP_ADDR_REGEX, out)
             # Remove head ip from worker ip list.
             for i, ip in enumerate(worker_ips):
-                if ip == head_ip[0]:
+                if ip == head_ip_list[0]:
                     del worker_ips[i]
                     break
         if len(worker_ips) != expected_num_nodes - 1:
@@ -1387,7 +1394,7 @@ def get_node_ips(cluster_yaml: str,
                     exceptions.FetchIPError.Reason.WORKER)
     else:
         worker_ips = []
-    return head_ip + worker_ips
+    return head_ip_list + worker_ips
 
 
 @timeline.event
@@ -1460,7 +1467,7 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
 
 @timeline.event
 def get_head_ip(
-    handle: backends.Backend.ResourceHandle,
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
     use_cached_head_ip: bool = True,
     max_attempts: int = 1,
 ) -> str:
@@ -1479,87 +1486,6 @@ def get_head_ip(
     return head_ip
 
 
-def run_command_and_handle_ssh_failure(
-        runner: command_runner.SSHCommandRunner,
-        command: str,
-        failure_message: Optional[str] = None) -> str:
-    """Runs command remotely and returns output with proper error handling."""
-    rc, stdout, stderr = runner.run(command,
-                                    require_outputs=True,
-                                    stream_logs=False)
-    if rc == 255:
-        # SSH failed
-        raise RuntimeError(
-            f'SSH with user {runner.ssh_user} and key {runner.ssh_private_key} '
-            f'to {runner.ip} failed. This is most likely due to incorrect '
-            'credentials or incorrect permissions for the key file. Check '
-            'your credentials and try again.')
-    subprocess_utils.handle_returncode(rc,
-                                       command,
-                                       failure_message,
-                                       stderr=stderr)
-    return stdout
-
-
-def do_filemounts_and_setup_on_local_workers(
-        cluster_config_file: str,
-        worker_ips: List[str] = None,
-        extra_setup_cmds: List[str] = None):
-    """Completes filemounting and setup on worker nodes.
-
-    Syncs filemounts and runs setup on worker nodes for a local cluster. This
-    is a workaround for a Ray Autoscaler bug where `ray up` does not perform
-    filemounting or setup for local cluster worker nodes.
-    """
-    config = common_utils.read_yaml(cluster_config_file)
-
-    ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
-    if worker_ips is None:
-        worker_ips = config['provider']['worker_ips']
-    file_mounts = config['file_mounts']
-
-    setup_cmds = config['setup_commands']
-    if extra_setup_cmds is not None:
-        setup_cmds += extra_setup_cmds
-    setup_script = log_lib.make_task_bash_script('\n'.join(setup_cmds))
-
-    worker_runners = command_runner.SSHCommandRunner.make_runner_list(
-        worker_ips, **ssh_credentials)
-
-    # Uploads setup script to the worker node
-    with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
-        f.write(setup_script)
-        f.flush()
-        setup_sh_path = f.name
-        setup_file = os.path.basename(setup_sh_path)
-        file_mounts[f'/tmp/{setup_file}'] = setup_sh_path
-
-        # Ray Autoscaler Bug: Filemounting + Ray Setup
-        # does not happen on workers.
-        def _setup_local_worker(runner: command_runner.SSHCommandRunner):
-            for dst, src in file_mounts.items():
-                mkdir_dst = f'mkdir -p {os.path.dirname(dst)}'
-                run_command_and_handle_ssh_failure(
-                    runner,
-                    mkdir_dst,
-                    failure_message=f'Failed to run {mkdir_dst} on remote.')
-                if os.path.isdir(src):
-                    src = os.path.join(src, '')
-                runner.rsync(source=src, target=dst, up=True, stream_logs=False)
-
-            setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
-            rc, stdout, _ = runner.run(setup_cmd,
-                                       stream_logs=False,
-                                       require_outputs=True)
-            subprocess_utils.handle_returncode(
-                rc,
-                setup_cmd,
-                'Failed to setup Ray autoscaler commands on remote.',
-                stderr=stdout)
-
-        subprocess_utils.run_in_parallel(_setup_local_worker, worker_runners)
-
-
 def check_network_connection():
     # Tolerate 3 retries as it is observed that connections can fail.
     adapter = adapters.HTTPAdapter(max_retries=retry_lib.Retry(total=3))
@@ -1568,7 +1494,7 @@ def check_network_connection():
     http.mount('http://', adapter)
     try:
         http.head(_TEST_IP, timeout=3)
-    except requests.Timeout as e:
+    except (requests.Timeout, requests.exceptions.ConnectionError) as e:
         raise exceptions.NetworkError(
             'Could not refresh the cluster. Network seems down.') from e
 
@@ -1678,9 +1604,10 @@ def _query_status_gcp(
                      f'--filter="(labels.ray-cluster-name={cluster})" '
                      '--format="value(state)"')
     else:
+        # Ref: https://cloud.google.com/compute/docs/instances/instance-life-cycle
         status_map = {
             'PROVISIONING': global_user_state.ClusterStatus.INIT,
-            'STARTING': global_user_state.ClusterStatus.INIT,
+            'STAGING': global_user_state.ClusterStatus.INIT,
             'RUNNING': global_user_state.ClusterStatus.UP,
             'REPAIRING': global_user_state.ClusterStatus.INIT,
             # 'TERMINATED' in GCP means stopped, with disk preserved.
@@ -1795,7 +1722,7 @@ def check_owner_identity(cluster_name: str) -> None:
     if record is None:
         return
     handle = record['handle']
-    if not isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return
 
     cloud = handle.launched_resources.cloud
@@ -1823,7 +1750,7 @@ def check_owner_identity(cluster_name: str) -> None:
 
 
 def _get_cluster_status_via_cloud_cli(
-    handle: 'backends.CloudVmRayBackend.ResourceHandle'
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
 ) -> List[global_user_state.ClusterStatus]:
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
@@ -1838,7 +1765,7 @@ def _update_cluster_status_no_lock(
     if record is None:
         return None
     handle = record['handle']
-    if not isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return record
 
     cluster_name = handle.cluster_name
@@ -2033,7 +1960,10 @@ def _refresh_cluster_record(
 
     Args:
         cluster_name: The name of the cluster.
-        force_refresh: refresh the cluster status as long as the cluster exists.
+        force_refresh: if True, refresh the cluster status even if it may be
+            skipped. Otherwise (the default), only refresh if the cluster:
+                1. is a spot cluster, or
+                2. is a non-spot cluster, is not STOPPED, and autostop is set.
         acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
             before updating the status.
 
@@ -2057,7 +1987,7 @@ def _refresh_cluster_record(
     check_owner_identity(cluster_name)
 
     handle = record['handle']
-    if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+    if isinstance(handle, backends.CloudVmRayResourceHandle):
         use_spot = handle.launched_resources.use_spot
         has_autostop = (
             record['status'] != global_user_state.ClusterStatus.STOPPED and
@@ -2076,7 +2006,7 @@ def refresh_cluster_status_handle(
     force_refresh: bool = False,
     acquire_per_cluster_status_lock: bool = True,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
-           Optional[backends.Backend.ResourceHandle]]:
+           Optional[backends.ResourceHandle]]:
     """Refresh the cluster, and return the possibly updated status and handle.
 
     This is a wrapper of refresh_cluster_record, which returns the status and
@@ -2092,12 +2022,32 @@ def refresh_cluster_status_handle(
     return record['status'], record['handle']
 
 
+@typing.overload
+def check_cluster_available(
+    cluster_name: str,
+    *,
+    operation: str,
+    check_cloud_vm_ray_backend: Literal[True] = True,
+) -> 'cloud_vm_ray_backend.CloudVmRayResourceHandle':
+    ...
+
+
+@typing.overload
+def check_cluster_available(
+    cluster_name: str,
+    *,
+    operation: str,
+    check_cloud_vm_ray_backend: Literal[False],
+) -> backends.ResourceHandle:
+    ...
+
+
 def check_cluster_available(
     cluster_name: str,
     *,
     operation: str,
     check_cloud_vm_ray_backend: bool = True,
-) -> backends.Backend.ResourceHandle:
+) -> backends.ResourceHandle:
     """Check if the cluster is available.
 
     Raises:
@@ -2149,20 +2099,23 @@ def check_cluster_available(
         if onprem_utils.check_if_local_cloud(cluster_name):
             raise exceptions.ClusterNotUpError(
                 constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
-                    cluster_name))
+                    cluster_name),
+                cluster_status=cluster_status)
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
                 f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for '
                 f'cluster {cluster_name!r} (status: {cluster_status.value}). '
                 'It is only allowed for '
                 f'{global_user_state.ClusterStatus.UP.value} clusters.'
-                f'{colorama.Style.RESET_ALL}')
+                f'{colorama.Style.RESET_ALL}',
+                cluster_status=cluster_status)
 
     if handle.head_ip is None:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
                 f'Cluster {cluster_name!r} has been stopped or not properly '
-                'set up. Please re-launch it with `sky start`.')
+                'set up. Please re-launch it with `sky start`.',
+                cluster_status=cluster_status)
     return handle
 
 
@@ -2178,7 +2131,7 @@ class CloudFilter(enum.Enum):
 def get_clusters(
     include_reserved: bool,
     refresh: bool,
-    cloud_filter: str = CloudFilter.CLOUDS_AND_DOCKER,
+    cloud_filter: CloudFilter = CloudFilter.CLOUDS_AND_DOCKER,
     cluster_names: Optional[Union[str, Sequence[str]]] = None,
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached or optionally refreshed cluster records.
@@ -2234,7 +2187,7 @@ def get_clusters(
 
     def _is_local_cluster(record):
         handle = record['handle']
-        if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
+        if isinstance(handle, backends.LocalDockerResourceHandle):
             return False
         cluster_resources = handle.launched_resources
         return isinstance(cluster_resources.cloud, clouds.Local)
@@ -2318,15 +2271,30 @@ def get_clusters(
     return kept_records
 
 
+@typing.overload
 def get_backend_from_handle(
-        handle: backends.Backend.ResourceHandle) -> backends.Backend:
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
+) -> 'cloud_vm_ray_backend.CloudVmRayBackend':
+    ...
+
+
+@typing.overload
+def get_backend_from_handle(
+    handle: 'local_docker_backend.LocalDockerResourceHandle'
+) -> 'local_docker_backend.LocalDockerBackend':
+    ...
+
+
+def get_backend_from_handle(
+        handle: backends.ResourceHandle) -> backends.Backend:
     """Gets a Backend object corresponding to a handle.
 
     Inspects handle type to infer the backend used for the resource.
     """
-    if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+    backend: backends.Backend
+    if isinstance(handle, backends.CloudVmRayResourceHandle):
         backend = backends.CloudVmRayBackend()
-    elif isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
+    elif isinstance(handle, backends.LocalDockerResourceHandle):
         backend = backends.LocalDockerBackend()
     else:
         raise NotImplementedError(
@@ -2334,25 +2302,7 @@ def get_backend_from_handle(
     return backend
 
 
-class NoOpConsole:
-    """An empty class for multi-threaded console.status."""
-
-    def __enter__(self):
-        pass
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
-
-
-def safe_console_status(msg: str):
-    """A wrapper for multi-threaded console.status."""
-    if threading.current_thread() is threading.main_thread():
-        return console.status(msg)
-    return NoOpConsole()
-
-
-def get_task_demands_dict(
-        task: 'task_lib.Task') -> Optional[Tuple[Optional[str], int]]:
+def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
     """Returns the accelerator dict of the task"""
     # TODO: CPU and other memory resources are not supported yet.
     accelerator_dict = None
@@ -2466,3 +2416,24 @@ def check_public_cloud_enabled():
             raise RuntimeError(
                 'Cloud access is not set up. Run: '
                 f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
+
+
+def run_command_and_handle_ssh_failure(runner: command_runner.SSHCommandRunner,
+                                       command: str,
+                                       failure_message: str) -> str:
+    """Runs command remotely and returns output with proper error handling."""
+    rc, stdout, stderr = runner.run(command,
+                                    require_outputs=True,
+                                    stream_logs=False)
+    if rc == 255:
+        # SSH failed
+        raise RuntimeError(
+            f'SSH with user {runner.ssh_user} and key {runner.ssh_private_key} '
+            f'to {runner.ip} failed. This is most likely due to incorrect '
+            'credentials or incorrect permissions for the key file. Check '
+            'your credentials and try again.')
+    subprocess_utils.handle_returncode(rc,
+                                       command,
+                                       failure_message,
+                                       stderr=stderr)
+    return stdout

@@ -9,6 +9,7 @@ from sky.clouds.service_catalog.constants import (
     CATALOG_SCHEMA_VERSION,
     LOCAL_CATALOG_DIR,
 )
+from sky.clouds.service_catalog.config import use_default_catalog
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -46,6 +47,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     return results
 
 
+@use_default_catalog
 def list_accelerators(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
@@ -54,6 +56,9 @@ def list_accelerators(
     case_sensitive: bool = True,
 ) -> 'Dict[str, List[common.InstanceTypeInfo]]':
     """List the names of all accelerators offered by Sky.
+
+    This will include all accelerators offered by Sky, including those
+    that may not be available in the user's account.
 
     Returns: A dictionary of canonical accelerator names mapped to a list
     of instance type offerings. See usage in cli.py.
@@ -121,6 +126,13 @@ def accelerator_in_region_or_zone(
     """Returns True if the accelerator is in the region or zone."""
     return _map_clouds_catalog(clouds, 'accelerator_in_region_or_zone',
                                acc_name, acc_count, region, zone)
+
+
+def regions(clouds: CloudFilter = None) -> 'List[cloud.Region]':
+    """Returns the list of regions in a Cloud's catalog.
+    Each Region object contains a list of Zones, if available.
+    """
+    return _map_clouds_catalog(clouds, 'regions')
 
 
 def get_region_zones_for_instance_type(
@@ -309,6 +321,8 @@ __all__ = [
     # Images
     'get_image_id_from_tag',
     'is_image_tag_valid',
+    # Configuration
+    'use_default_catalog',
     # Constants
     'HOSTED_CATALOG_DIR_URL',
     'CATALOG_SCHEMA_VERSION',

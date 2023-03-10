@@ -11,10 +11,11 @@ import json
 import os
 import pathlib
 import pickle
+import sqlite3
 import time
-import uuid
 import typing
 from typing import Any, Dict, List, Tuple, Optional, Set
+import uuid
 
 import colorama
 
@@ -39,7 +40,14 @@ def create_table(cursor, conn):
     # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
     #  This may cause the database locked problem from WSL issue #1441.
     if not common_utils.is_wsl():
-        cursor.execute('PRAGMA journal_mode=WAL')
+        try:
+            cursor.execute('PRAGMA journal_mode=WAL')
+        except sqlite3.OperationalError as e:
+            if 'database is locked' not in str(e):
+                raise
+            # If the database is locked, it is OK to continue, as the WAL mode
+            # is not critical and is likely to be enabled by other processes.
+
     # Table for Clusters
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS clusters (
@@ -155,7 +163,7 @@ class StorageStatus(enum.Enum):
 
 
 def add_or_update_cluster(cluster_name: str,
-                          cluster_handle: 'backends.Backend.ResourceHandle',
+                          cluster_handle: 'backends.ResourceHandle',
                           requested_resources: Optional[Set[Any]],
                           ready: bool,
                           is_launch: bool = True):
@@ -163,7 +171,7 @@ def add_or_update_cluster(cluster_name: str,
 
     Args:
         cluster_name: Name of the cluster.
-        cluster_handle: Backend.ResourceHandle of the cluster.
+        cluster_handle: backends.ResourceHandle of the cluster.
         requested_resources: Resources requested for cluster.
         ready: Whether the cluster is ready to use. If False, the cluster will
             be marked as INIT, otherwise it will be marked as UP.
@@ -339,7 +347,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> float:
 
 
 def get_handle_from_cluster_name(
-        cluster_name: str) -> Optional['backends.Backend.ResourceHandle']:
+        cluster_name: str) -> Optional['backends.ResourceHandle']:
     assert cluster_name is not None, 'cluster_name cannot be None'
     rows = _DB.cursor.execute('SELECT handle FROM clusters WHERE name=(?)',
                               (cluster_name,))

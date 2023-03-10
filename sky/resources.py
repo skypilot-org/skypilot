@@ -10,6 +10,7 @@ from sky.utils import accelerator_registry
 from sky.utils import schemas
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
+from sky import skypilot_config
 
 logger = sky_logging.init_logger(__name__)
 
@@ -370,10 +371,14 @@ class Resources:
         self._region, self._zone = self._cloud.validate_region_zone(
             region, zone)
 
-    def get_offering_regions_for_launchable(self) -> List[clouds.Region]:
+    def get_valid_regions_for_launchable(self) -> List[clouds.Region]:
         """Returns a set of `Region`s that can provision this Resources.
 
         Each `Region` has a list of `Zone`s that can provision this Resources.
+
+        (Internal) This function respects any config in skypilot_config that
+        may have restricted the regions to be considered (e.g., a
+        ssh_proxy_command dict with region names as keys).
         """
         assert self.is_launchable()
         regions = self._cloud.regions_with_offering(self._instance_type,
@@ -382,7 +387,26 @@ class Resources:
                                                     self._region, self._zone)
         if self._image_id is not None and None not in self._image_id:
             regions = [r for r in regions if r.name in self._image_id]
-        return regions
+
+        # Filter the regions by the skypilot_config
+        ssh_proxy_command_config = skypilot_config.get_nested(
+            (str(self._cloud).lower(), 'ssh_proxy_command'), None)
+        if (isinstance(ssh_proxy_command_config, str) or
+                ssh_proxy_command_config is None):
+            # All regions are valid as the regions are not specified for the
+            # ssh_proxy_command config.
+            return regions
+
+        # ssh_proxy_command_config: Dict[str, str], region_name -> command
+        # This type check is done by skypilot_config at config load time.
+        filtered_regions = []
+        for region in regions:
+            region_name = region.name
+            if region_name not in ssh_proxy_command_config:
+                continue
+            # TODO: filter out the zones not available in the vpc_name
+            filtered_regions.append(region)
+        return filtered_regions
 
     def _try_validate_instance_type(self) -> None:
         if self.instance_type is None:
@@ -738,7 +762,7 @@ class Resources:
         backend_utils.validate_schema(config, schemas.get_resources_schema(),
                                       'Invalid resources YAML: ')
 
-        resources_fields = dict()
+        resources_fields = {}
         if config.get('cloud') is not None:
             resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
                 config.pop('cloud'))

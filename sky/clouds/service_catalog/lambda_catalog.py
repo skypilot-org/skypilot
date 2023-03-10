@@ -93,6 +93,10 @@ def get_instance_type_for_accelerator(
                                                          zone=zone)
 
 
+def regions() -> List['cloud.Region']:
+    return common.get_region_zones(_df, use_spot=False)
+
+
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
     df = _df[_df['InstanceType'] == instance_type]
