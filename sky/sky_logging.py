@@ -31,7 +31,6 @@ class NewLineFormatter(logging.Formatter):
 _root_logger = logging.getLogger('sky')
 _default_handler = None
 _logging_config = threading.local()
-_logging_config.is_silent = False
 
 # All code inside the library should use sky_logging.print()
 # rather than print().
@@ -79,7 +78,7 @@ def silent():
     global print
     global _logging_config
     previous_level = _root_logger.level
-    previous_is_silent = _logging_config.is_silent
+    previous_is_silent = is_silent()
     previous_print = print
 
     # Turn off logger
@@ -95,4 +94,10 @@ def silent():
 
 
 def is_silent():
+    if not hasattr(_logging_config, 'is_silent'):
+        # Should not set it globally, as the global assignment
+        # will be executed only once if the module is imported
+        # in the main thread, and will not be executed in other
+        # threads.
+        _logging_config.is_silent = False
     return _logging_config.is_silent

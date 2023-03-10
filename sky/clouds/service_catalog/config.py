@@ -5,18 +5,11 @@ import functools
 import threading
 
 _thread_local_config = threading.local()
-# Whether the caller requires the catalog to be narrowed down
-# to the account-specific catalog (e.g., removing regions not
-# enabled for the current account) or just the raw catalog
-# fetched from SkyPilot catalog service. The former is used
-# for launching clusters, while the latter for commands like
-# `show-gpus`.
-_thread_local_config.use_default_catalog = False
 
 
 @contextlib.contextmanager
 def _set_use_default_catalog(value: bool):
-    old_value = _thread_local_config.use_default_catalog
+    old_value = get_use_default_catalog()
     _thread_local_config.use_default_catalog = value
     try:
         yield
@@ -24,7 +17,15 @@ def _set_use_default_catalog(value: bool):
         _thread_local_config.use_default_catalog = old_value
 
 
+# Whether the caller requires the catalog to be narrowed down
+# to the account-specific catalog (e.g., removing regions not
+# enabled for the current account) or just the raw catalog
+# fetched from SkyPilot catalog service. The former is used
+# for launching clusters, while the latter for commands like
+# `show-gpus`.
 def get_use_default_catalog() -> bool:
+    if not hasattr(_thread_local_config, 'use_default_catalog'):
+        _thread_local_config.use_default_catalog = False
     return _thread_local_config.use_default_catalog
 
 

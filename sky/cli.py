@@ -1568,7 +1568,15 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed spot jobs{colorama.Style.RESET_ALL}')
             with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
-                num_in_progress_jobs, msg = spot_jobs_future.get()
+                try:
+                    num_in_progress_jobs, msg = spot_jobs_future.get()
+                except KeyboardInterrupt:
+                    pool.terminate()
+                    # Set to -1, so that the controller is not considered
+                    # down, and the hint for showing sky spot queue
+                    # will still be shown.
+                    num_in_progress_jobs = -1
+                    msg = f'KeyboardInterrupt'
 
                 try:
                     pool.close()
@@ -1598,7 +1606,7 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                             'shown)')
                     job_info += '. '
                 hints.append(
-                    f'* {job_info}To see all jobs: {colorama.Style.BRIGHT}'
+                    f'* {job_info}To see all spot jobs: {colorama.Style.BRIGHT}'
                     f'sky spot queue{colorama.Style.RESET_ALL}')
 
         if num_pending_autostop > 0:
