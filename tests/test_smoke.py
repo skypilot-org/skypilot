@@ -836,14 +836,23 @@ def test_large_job_queue(generic_cloud: str):
             f'sky launch -y -c {name} --cloud {generic_cloud}',
             f'for i in `seq 1 75`; do sky exec {name} -n {name}-$i -d "echo $i; sleep 100000000"; done',
             f'sky cancel -y {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
-            'sleep 90',
+            'sleep 60',
             # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.
             # The first 16 jobs are canceled, so there should be 75 - 32 = 43 jobs PENDING.
             f'sky queue {name} | grep -v grep | grep PENDING | wc -l | grep 43',
-            f'sky queue {name} | grep {name}-15 | grep CANCELLED',
-            f'sky queue {name} | grep {name}-32 | grep RUNNING',
-            f'sky queue {name} | grep {name}-33 | grep PENDING',
-            f'sky queue {name} | grep {name}-50 | grep PENDING',
+            # Make sure the jobs are scheduled in FIFO order
+            *[
+                f'sky queue {name} | grep {name}-{i} | grep CANCELLED'
+                for i in range(17)
+            ],
+            *[
+                f'sky queue {name} | grep {name}-{i} | grep RUNNING'
+                for i in range(17, 33)
+            ],
+            *[
+                f'sky queue {name} | grep {name}-{i} | grep PENDING'
+                for i in range(33, 75)
+            ],
         ],
         f'sky down -y {name}',
         timeout=20 * 60,

@@ -3,6 +3,7 @@
 This is a remote utility module that provides job queue functionality.
 """
 import enum
+import multiprocessing
 import os
 import pathlib
 import psutil
@@ -186,14 +187,18 @@ class JobScheduler:
                 self._run_job(job_id, run_cmd)
                 return
 
-    def _get_jobs(self) -> List:
+    def async_schedule_step(self) -> None:
+        p = multiprocessing.Process(target=self.schedule_step)
+        p.start()
+
+    def _get_jobs(self) -> List[str]:
         raise NotImplementedError
 
 
 class FIFOScheduler(JobScheduler):
     """First in first out job scheduler"""
 
-    def _get_jobs(self) -> List:
+    def _get_jobs(self) -> List[str]:
         return list(
             _CURSOR.execute('SELECT * FROM pending_jobs ORDER BY job_id'))
 
@@ -689,7 +694,7 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
         job_id = make_ray_job_id(job['job_id'], job_owner)
         # Job is locked to ensure that pending queue does not start it while
         # it is being cancelled
-        with filelock.FileLock(_get_lock_path(job['job_id'],)):
+        with filelock.FileLock(_get_lock_path(job['job_id'])):
             try:
                 # TODO(mraheja): remove pylint disabling when filelock
                 # version updated
