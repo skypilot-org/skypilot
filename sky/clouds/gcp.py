@@ -287,7 +287,7 @@ class GCP(clouds.Cloud):
             'gpu': None,
             'gpu_count': None,
             'tpu': None,
-            'tpu_vm': True,
+            'tpu_vm': False,
             'custom_resources': None,
             'use_spot': r.use_spot,
         }
@@ -362,14 +362,11 @@ class GCP(clouds.Cloud):
                 )
                 return ([r], [])
 
-        use_tpu_vm = True
-        if resources.accelerator_args is not None:
-            use_tpu_vm = resources.accelerator_args.get('tpu_vm', True)
-
         # Find instance candidates to meet user's requirements
         assert len(resources.accelerators.items()
                   ) == 1, 'cannot handle more than one accelerator candidates.'
         acc, acc_count = list(resources.accelerators.items())[0]
+        use_tpu_vm = True if 'tpu' in acc else False
 
         # For TPU VMs, the instance type is fixed to 'TPU-VM'. However, we still
         # need to call the below function to get the fuzzy candidate list.
