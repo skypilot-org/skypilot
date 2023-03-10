@@ -287,7 +287,7 @@ class GCP(clouds.Cloud):
             'gpu': None,
             'gpu_count': None,
             'tpu': None,
-            'tpu_vm': False,
+            'tpu_vm': True,
             'custom_resources': None,
             'use_spot': r.use_spot,
         }
@@ -362,9 +362,9 @@ class GCP(clouds.Cloud):
                 )
                 return ([r], [])
 
-        use_tpu_vm = False
+        use_tpu_vm = True
         if resources.accelerator_args is not None:
-            use_tpu_vm = resources.accelerator_args.get('tpu_vm', False)
+            use_tpu_vm = resources.accelerator_args.get('tpu_vm', True)
 
         # Find instance candidates to meet user's requirements
         assert len(resources.accelerators.items()

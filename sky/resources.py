@@ -327,7 +327,7 @@ class Resources:
                     clouds.GCP()), 'Cloud must be GCP.'
                 if accelerator_args is None:
                     accelerator_args = {}
-                use_tpu_vm = accelerator_args.get('tpu_vm', False)
+                use_tpu_vm = accelerator_args.get('tpu_vm', True)
                 if use_tpu_vm:
                     tpu_utils.check_gcp_cli_include_tpu_vm()
                 if self.instance_type is not None and use_tpu_vm:
