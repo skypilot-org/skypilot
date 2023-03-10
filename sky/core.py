@@ -1,4 +1,5 @@
 """SDK functions for cluster/job management."""
+from asyncio import subprocess
 import getpass
 import sys
 from typing import Any, Dict, List, Optional, Sequence, Union
@@ -18,7 +19,7 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
-from sky.utils import tpu_utils
+from sky.utils import common_utils, tpu_utils
 from sky.utils import ux_utils
 from sky.utils import subprocess_utils
 
@@ -930,3 +931,55 @@ def storage_delete(name: str) -> None:
                                     source=handle.source,
                                     sync_on_reconstruction=False)
         store_object.delete()
+
+@usage_lib.entrypoint
+def add_port(cluster_name: str, port: int) -> None:
+    import subprocess as sp
+    import random
+
+    handle = backend_utils.check_cluster_available(
+        cluster_name,
+        operation='getting the job queue',
+    )
+    backend = backend_utils.get_backend_from_handle(handle)
+    ray_config = common_utils.read_yaml(handle.cluster_yaml)
+
+    returncode, full_name, _ = backend.run_on_head(handle,
+                                                           "hostname",
+                                                           require_outputs=True,
+                                                           separate_stderr=True)
+
+    returncode, external_ip, _ = backend.run_on_head(handle,
+                                                           "curl ifconfig.me",
+                                                           require_outputs=True,
+                                                           separate_stderr=True)
+
+    full_name = full_name.strip()
+    region = ray_config['provider']['availability_zone'].strip()               
+    
+    sp.run(f"gcloud compute instances add-tags {full_name} --tags={full_name} --zone={region}", shell=True)
+    sp.run(f"gcloud compute firewall-rules create {full_name}-{port} --allow tcp:{port} --source-tags={full_name} --source-ranges=0.0.0.0/0 --description=\"custom sky rule\" --network=skypilot-vpc", shell=True)
+
+    print('You can now access open port on:', f'{external_ip}:{port}')
+
+@usage_lib.entrypoint
+def remove_port(cluster_name: str, port: int) -> None:
+    import subprocess as sp
+    import random
+
+    handle = backend_utils.check_cluster_available(
+        cluster_name,
+        operation='getting the job queue',
+    )
+    backend = backend_utils.get_backend_from_handle(handle)
+    ray_config = common_utils.read_yaml(handle.cluster_yaml)
+
+    returncode, full_name, _ = backend.run_on_head(handle,
+                                                           "hostname",
+                                                           require_outputs=True,
+                                                           separate_stderr=True)
+
+    full_name = full_name.strip()
+    region = ray_config['provider']['availability_zone'].strip()               
+
+    sp.run(f"gcloud compute firewall-rules delete {full_name}-{port} --quiet", shell=True)
