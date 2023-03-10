@@ -25,6 +25,10 @@ def _set_use_default_catalog(value: bool):
 # `show-gpus`.
 def get_use_default_catalog() -> bool:
     if not hasattr(_thread_local_config, 'use_default_catalog'):
+        # Should not set it globally, as the global assignment
+        # will be executed only once if the module is imported
+        # in the main thread, and will not be executed in other
+        # threads.
         _thread_local_config.use_default_catalog = False
     return _thread_local_config.use_default_catalog
 
