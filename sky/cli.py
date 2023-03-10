@@ -1576,7 +1576,7 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                     # down, and the hint for showing sky spot queue
                     # will still be shown.
                     num_in_progress_jobs = -1
-                    msg = f'KeyboardInterrupt'
+                    msg = 'KeyboardInterrupt'
 
                 try:
                     pool.close()
