@@ -1439,6 +1439,9 @@ def _get_spot_jobs(
     except RuntimeError:
         msg = ('Failed to query spot jobs due to connection '
                'issues. Try again later.')
+    except Exception as e:  # pylint: disable=broad-except
+        msg = ('Failed to query spot jobs: '
+               f'{common_utils.format_exception(e, use_bracket=True)}')
     else:
         max_jobs_to_show = (_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS
                             if limit_num_jobs_to_show else None)
@@ -1565,7 +1568,15 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed spot jobs{colorama.Style.RESET_ALL}')
             with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
-                num_in_progress_jobs, msg = spot_jobs_future.get()
+                try:
+                    num_in_progress_jobs, msg = spot_jobs_future.get()
+                except KeyboardInterrupt:
+                    pool.terminate()
+                    # Set to -1, so that the controller is not considered
+                    # down, and the hint for showing sky spot queue
+                    # will still be shown.
+                    num_in_progress_jobs = -1
+                    msg = 'KeyboardInterrupt'
 
                 try:
                     pool.close()
@@ -1595,7 +1606,7 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                             'shown)')
                     job_info += '. '
                 hints.append(
-                    f'* {job_info}To see all jobs: {colorama.Style.BRIGHT}'
+                    f'* {job_info}To see all spot jobs: {colorama.Style.BRIGHT}'
                     f'sky spot queue{colorama.Style.RESET_ALL}')
 
         if num_pending_autostop > 0:
