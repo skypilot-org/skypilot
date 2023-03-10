@@ -64,6 +64,8 @@ def generate_random_dag(
                 instance_type = candidate.instance_type
                 if pd.isna(instance_type):
                     instance_type = GCP_HOST_VM
+                if 'tpu' in candidate.accelerator_name:
+                    instance_type = None
                 resources = sky.Resources(
                     cloud=clouds.CLOUD_REGISTRY.from_str(candidate.cloud),
                     instance_type=instance_type,
