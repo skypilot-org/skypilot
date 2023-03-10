@@ -262,8 +262,9 @@ class GCP(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None) -> Optional[str]:
-        return service_catalog.get_default_instance_type(
-            cpus=cpus, memory_gb_or_ratio=memory, clouds='gcp')
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
+                                                         clouds='gcp')
 
     def make_deploy_resources_variables(
             self, resources: 'resources.Resources', region: 'clouds.Region',
@@ -382,7 +383,7 @@ class GCP(clouds.Cloud):
             acc,
             acc_count,
             cpus=resources.cpus if not use_tpu_vm else None,
-            memory_gb_or_ratio=resources.memory if not use_tpu_vm else None,
+            memory=resources.memory if not use_tpu_vm else None,
             use_spot=resources.use_spot,
             region=resources.region,
             zone=resources.zone,

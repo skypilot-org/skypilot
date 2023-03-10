@@ -308,7 +308,7 @@ def _filter_with_mem(df: pd.DataFrame,
     if memory_gb_or_ratio is None:
         return df
 
-    # The following code is redundant with the code in
+    # The following code is partially redundant with the code in
     # resources.py::_set_memory() but we add it here for safety.
     if memory_gb_or_ratio.endswith(('+', 'x', 'X')):
         memory_gb_str = memory_gb_or_ratio[:-1]
@@ -330,9 +330,21 @@ def _filter_with_mem(df: pd.DataFrame,
 
 
 def get_instance_type_for_cpus_mem_impl(
-        df: pd.DataFrame,
-        cpus: Optional[str] = None,
-        memory_gb_or_ratio: Optional[str] = None) -> Optional[str]:
+        df: pd.DataFrame, cpus: Optional[str],
+        memory_gb_or_ratio: Optional[str]) -> Optional[str]:
+    """Returns the cheapest instance type that satisfies the requirements.
+
+    Args:
+        df: The catalog cloud catalog data frame.
+        cpus: The number of vCPUs. Can be a number or a string "<number>+". If
+            the string ends with "+", then the returned instance type should
+            have at least the given number of vCPUs.
+        memory_gb_or_ratio: The memory size in GB. Can be a number or a string
+            "<number>+" or "<number>x". If the string ends with "+", then the
+            returned instance type should have at least the given memory size.
+            If the string ends with "x", then the returned instance type should
+            have at least the given number of vCPUs times the given ratio.
+    """
     df = _filter_with_cpus(df, cpus)
     df = _filter_with_mem(df, memory_gb_or_ratio)
     if df.empty:
@@ -362,7 +374,7 @@ def get_instance_type_for_accelerator_impl(
     acc_name: str,
     acc_count: int,
     cpus: Optional[str] = None,
-    memory_gb_or_ratio: Optional[str] = None,
+    memory: Optional[str] = None,
     use_spot: bool = False,
     region: Optional[str] = None,
     zone: Optional[str] = None,
@@ -388,7 +400,7 @@ def get_instance_type_for_accelerator_impl(
         return (None, fuzzy_candidate_list)
 
     result = _filter_with_cpus(result, cpus)
-    result = _filter_with_mem(result, memory_gb_or_ratio)
+    result = _filter_with_mem(result, memory)
     if region is not None:
         result = result[result['Region'] == region]
     if zone is not None:

@@ -173,16 +173,21 @@ def get_vcpus_mem_from_instance_type(
 
 
 def get_default_instance_type(cpus: Optional[str] = None,
-                              memory_gb_or_ratio: Optional[str] = None,
+                              memory: Optional[str] = None,
                               clouds: CloudFilter = None) -> Optional[str]:
-    """Returns the cloud's default instance type for the given number of vCPUs.
+    """Returns the cloud's default instance type for given #vCPUs and memory.
 
     For example, if cpus='4', this method returns the default instance type
     with 4 vCPUs.  If cpus='4+', this method returns the default instance
     type with 4 or more vCPUs.
+
+    If memory_gb_or_ratio is not specified, this method returns the General
+    Purpose instance type with the given number of vCPUs.  If memory_gb_or_ratio
+    is specified, this method returns the cheapest instance type that meets
+    the given CPU and memory requirement.
     """
     return _map_clouds_catalog(clouds, 'get_default_instance_type', cpus,
-                               memory_gb_or_ratio)
+                               memory)
 
 
 def get_accelerators_from_instance_type(
@@ -197,7 +202,7 @@ def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
     cpus: Optional[str] = None,
-    memory_gb_or_ratio: Optional[str] = None,
+    memory: Optional[str] = None,
     use_spot: bool = False,
     region: Optional[str] = None,
     zone: Optional[str] = None,
@@ -208,8 +213,8 @@ def get_instance_type_for_accelerator(
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
     return _map_clouds_catalog(clouds, 'get_instance_type_for_accelerator',
-                               acc_name, acc_count, cpus, memory_gb_or_ratio,
-                               use_spot, region, zone)
+                               acc_name, acc_count, cpus, memory, use_spot,
+                               region, zone)
 
 
 def get_accelerator_hourly_cost(

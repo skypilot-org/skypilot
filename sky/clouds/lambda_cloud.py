@@ -116,8 +116,9 @@ class Lambda(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None) -> Optional[str]:
-        return service_catalog.get_default_instance_type(
-            cpus=cpus, memory_gb_or_ratio=memory, clouds='lambda')
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
+                                                         clouds='lambda')
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -201,7 +202,7 @@ class Lambda(clouds.Cloud):
             acc_count,
             use_spot=resources.use_spot,
             cpus=resources.cpus,
-            memory_gb_or_ratio=resources.memory,
+            memory=resources.memory,
             region=resources.region,
             zone=resources.zone,
             clouds='lambda')

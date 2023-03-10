@@ -113,8 +113,9 @@ class Azure(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None) -> Optional[str]:
-        return service_catalog.get_default_instance_type(
-            cpus=cpus, memory_gb_or_ratio=memory, clouds='azure')
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
+                                                         clouds='azure')
 
     def _get_image_config(self, gen_version, instance_type):
         # az vm image list \
@@ -281,7 +282,7 @@ class Azure(clouds.Cloud):
             acc,
             acc_count,
             cpus=resources.cpus,
-            memory_gb_or_ratio=resources.memory,
+            memory=resources.memory,
             use_spot=resources.use_spot,
             region=resources.region,
             zone=resources.zone,

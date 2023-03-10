@@ -225,10 +225,6 @@ class Resources:
         (Developer note: The memory field is only used to select the instance
         type at launch time. Thus, Resources in the backend's ResourceHandle
         will always have the memory field set to None.)
-        (Developer note 2: The memory field can also end with 'x' or 'X', e.g.
-        memory='4x' means each instance must have 4 times the number of CPUs
-        of memory, e.g. if cpus='4', then memory='4x' means each instance must
-        have at least 16GB memory)
         """
         return self._memory
 
@@ -311,22 +307,22 @@ class Resources:
 
         self._memory = str(memory)
         if isinstance(memory, str):
-            if memory.endswith(('+', 'x', 'X')):
+            if memory.endswith('+'):
                 num_memory_gb = memory[:-1]
             else:
                 num_memory_gb = memory
 
             try:
-                memory_gb_or_ratio = float(num_memory_gb)
+                memory_gb = float(num_memory_gb)
             except ValueError:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'The "memory" field should be either a number or '
                         f'a string "<number>+". Found: {memory!r}') from None
         else:
-            memory_gb_or_ratio = float(memory)
+            memory_gb = float(memory)
 
-        if memory_gb_or_ratio <= 0:
+        if memory_gb <= 0:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'The "cpus" field should be positive. Found: {memory!r}')

@@ -177,13 +177,14 @@ def get_vcpus_mem_from_instance_type(
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(
-        cpus: Optional[str] = None,
-        memory_gb_or_ratio: Optional[str] = None) -> Optional[str]:
-    if cpus is None and memory_gb_or_ratio is None:
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory: Optional[str] = None) -> Optional[str]:
+    if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
-    if memory_gb_or_ratio is None:
+    if memory is None:
         memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
+    else:
+        memory_gb_or_ratio = memory
     instance_type_prefix = tuple(
         f'{family}-' for family in _DEFAULT_INSTANCE_FAMILY)
     df = _df[_df['InstanceType'].notna()]
@@ -196,7 +197,7 @@ def get_instance_type_for_accelerator(
         acc_name: str,
         acc_count: int,
         cpus: Optional[str] = None,
-        memory_gb_or_ratio: Optional[str] = None,
+        memory: Optional[str] = None,
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
@@ -208,8 +209,7 @@ def get_instance_type_for_accelerator(
     """
     (instance_list,
      fuzzy_candidate_list) = common.get_instance_type_for_accelerator_impl(
-         _df, acc_name, acc_count, cpus, memory_gb_or_ratio, use_spot, region,
-         zone)
+         _df, acc_name, acc_count, cpus, memory, use_spot, region, zone)
     if instance_list is None:
         return None, fuzzy_candidate_list
 
@@ -223,7 +223,7 @@ def get_instance_type_for_accelerator(
 
         # Check the cpus and memory specified by the user.
         instance_type = common.get_instance_type_for_cpus_mem_impl(
-            df, cpus, memory_gb_or_ratio)
+            df, cpus, memory)
         if instance_type is None:
             return None, []
         return [instance_type], []
@@ -233,15 +233,14 @@ def get_instance_type_for_accelerator(
 
     assert _DEFAULT_HOST_VM_FAMILY == 'n1'
 
-    if cpus is None and memory_gb_or_ratio is None:
+    if cpus is None and memory is None:
         cpus = f'{_NUM_ACC_TO_NUM_CPU[acc_name].get(acc_count, None)}+'
-    if memory_gb_or_ratio is None:
-        memory_gb_or_ratio = f'{_DEFAULT_GPU_MEMORY_CPU_RATIO}x'
+    if memory is None:
+        memory = f'{_DEFAULT_GPU_MEMORY_CPU_RATIO}x'
     df = _df[_df['InstanceType'].notna()]
     df = df[df['InstanceType'].str.startswith(f'{_DEFAULT_HOST_VM_FAMILY}-')]
 
-    instance_type = common.get_instance_type_for_cpus_mem_impl(
-        df, cpus, memory_gb_or_ratio)
+    instance_type = common.get_instance_type_for_cpus_mem_impl(df, cpus, memory)
     # The fuzzy candidate should have already been fetched in the caller.
     if instance_type is None:
         return None, []
