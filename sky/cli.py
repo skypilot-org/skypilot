@@ -1439,6 +1439,9 @@ def _get_spot_jobs(
     except RuntimeError:
         msg = ('Failed to query spot jobs due to connection '
                'issues. Try again later.')
+    except Exception as e:  # pylint: disable=broad-except
+        msg = ('Failed to query spot jobs: '
+               f'{common_utils.format_exception(e, use_bracket=True)}')
     else:
         max_jobs_to_show = (_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS
                             if limit_num_jobs_to_show else None)
