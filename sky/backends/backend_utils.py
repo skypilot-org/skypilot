@@ -51,6 +51,7 @@ from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import validator
 from sky.usage import usage_lib
+from sky.adaptors import ibm
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -1712,8 +1713,7 @@ def _query_status_ibm(
     returns a list of Statuses for each of the cluster's nodes.
     this function gets called when running `sky status` with -r flag and the cluster's head node is either stopped or down.
     """
-    # pylint: disable=C0415
-    from sky.adaptors import ibm
+
     status_map = {
         'pending': global_user_state.ClusterStatus.INIT,
         'starting': global_user_state.ClusterStatus.INIT,
@@ -1722,7 +1722,7 @@ def _query_status_ibm(
         'stopping': global_user_state.ClusterStatus.STOPPED,
         'stopped': global_user_state.ClusterStatus.STOPPED,
         'deleting': None,
-        'failed': None,
+        'failed': global_user_state.ClusterStatus.INIT,
         'cluster_deleted': []
     }
 
