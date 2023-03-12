@@ -4,6 +4,7 @@ for Ray's cluster. used by the node_provider module to group the
 nodes under the same subnet, tagged by the same cluster name.
 """
 
+from concurrent.futures import ThreadPoolExecutor
 import uuid
 import copy
 import time
@@ -16,7 +17,9 @@ from ibm_cloud_sdk_core import ApiException
 
 # pylint: disable=line-too-long
 logger = get_logger('vpc_provider_')
-REQUIRED_RULES = {'outbound_tcp_all': 'selected security group is missing rule permitting outbound TCP access\n', 'outbound_udp_all': 'selected security group is missing rule permitting outbound UDP access\n', 'inbound_tcp_sg': 'selected security group is missing rule permitting inbound tcp traffic inside selected security group\n',
+REQUIRED_RULES = {'outbound_tcp_all': 'selected security group is missing rule permitting outbound TCP access\n',
+                   'outbound_udp_all': 'selected security group is missing rule permitting outbound UDP access\n',
+                   'inbound_tcp_sg': 'selected security group is missing rule permitting inbound tcp traffic inside selected security group\n',
                   'inbound_tcp_22': 'selected security group is missing rule permitting inbound traffic to tcp port 22 required for ssh\n'}
 INSECURE_RULES = {'inbound_tcp_6379': 'selected security group is missing rule permitting inbound traffic to tcp port 6379 required for Redis\n',
                   'inbound_tcp_8265': 'selected security group is missing rule permitting inbound traffic to tcp port 8265 required to access Ray Dashboard\n'}
@@ -58,27 +61,29 @@ class IBMVPCProvider():
             if vpc_data['status'] == 'available':
                 reused_vpc_data = vpc_data
                 break
+        # found vpc tagged with cluster name in the required region 
         if reused_vpc_data:
-            # verify subnet and gateway
-            # cached vpc is in the same region as self.region
+            # using self.region since tagged vpc is in the same region
             subnets = self.get_vpc_subnets(reused_vpc_data, self.region)
             subnet_in_zone = next(
                 (subnet for subnet in subnets if
                  subnet['zone']['name'] == self.zone), None)
+            # found a subnet in the required zone
             if subnet_in_zone:
                 subnet_id = subnet_in_zone['id']
                 public_gateway = subnet_in_zone.get('public_gateway')
                 if not public_gateway:
                     public_gateway = self.create_public_gateway(
                         reused_vpc_data['id'], self.zone, subnet_in_zone)
-            else:  # create new subnet and gateway
+            # tagged vpc found doesn't have a subnet in the required zone  
+            else:
                 subnet_data = self.create_subnet(
                     reused_vpc_data['id'], self.zone)
                 subnet_id = subnet_data['id']
                 public_gateway = self.create_public_gateway(
                     reused_vpc_data['id'], self.zone, subnet_data)
 
-            # add missing security group rules if missing
+            # add missing security group rules if needed
             security_group = reused_vpc_data.get('default_security_group')
             if security_group:
                 sg_id = security_group['id']
@@ -88,8 +93,11 @@ class IBMVPCProvider():
                 logger.info(
                     f"Reusing VPC {reused_vpc_data['id']} named: {reused_vpc_data['name']}")
                 return {'vpc_id': reused_vpc_data['id'], 'subnet_id': subnet_id, 'security_group_id': sg_id}
-            else:
-                self.delete_vpc(reused_vpc_data['id'], self.region)
+
+        # delete a tagged vpc that doesn't meet requirements
+        if reused_vpc_data:
+            self.delete_vpc(reused_vpc_data['id'], self.region)
+        # create a new vpc
         vpc_tags = self.create_vpc()
         return vpc_tags
 
@@ -180,11 +188,11 @@ class IBMVPCProvider():
 
         return sg_id
 
-    def get_vpc_data(self, vpc_id, old_region):
+    def get_vpc_data(self, vpc_id, region):
         """returns vpc data if exists, else None"""
         if not vpc_id:
             return None
-        tmp_vpc_client = ibm.client(region=old_region)
+        tmp_vpc_client = ibm.client(region=region)
         try:
             vpc_data = tmp_vpc_client.get_vpc(vpc_id).result
             return vpc_data
@@ -196,6 +204,21 @@ class IBMVPCProvider():
                 raise
 
     def get_vpc_subnets(self, vpc_data, region, field=''):
+        """return data on subnets belonging to specified vpc within
+        the specified region.
+
+        if 'field' is specified narrowing data returned to
+        data['field'] (for each subnet)
+
+        Args:
+            vpc_data (str): vpc data as received from vpc client.
+            region (str): ibm vpc region.
+            field (str, optional): field within the subnet data response from vpc
+              client's list_subnets()/get_subnet() response. Defaults to ''.
+
+        Returns:
+            str: data on all subnets belonging to the specified vpc.
+        """
         if not vpc_data:
             return None
         # pylint: disable=line-too-long
@@ -207,21 +230,51 @@ class IBMVPCProvider():
         else:
             return subnets_attached_to_routing_table
 
-    def delete_vpc(self, vpc_id, old_region):
+    def delete_vpc(self, vpc_id, region):
         """
         deletes a vpc with the specified id and region.
         an entry point to this module (alongside create_or_fetch_vpc) 
         """
-        logger.info(f'Deleting vpc:{vpc_id}')
-        tmp_vpc_client = ibm.client(region=old_region)
-        vpc_data = self.get_vpc_data(vpc_id, old_region)
+        logger.info(f'Deleting vpc: {vpc_id}')
+        tmp_vpc_client = ibm.client(region=region)
+        vpc_data = self.get_vpc_data(vpc_id, region)
         if not vpc_data:
+            logger.warn(f'vpc:{vpc_id} not found')
             return None
-        self.delete_subnets(tmp_vpc_client, vpc_data, old_region)
+        self.delete_vms(tmp_vpc_client, vpc_id)
+        self.delete_subnets(tmp_vpc_client, vpc_data, region)
         self.delete_gateways(tmp_vpc_client, vpc_id)
         # at this point vpc was already verified to be existing
         # thus no relevant exception to catch when deleting.
         tmp_vpc_client.delete_vpc(vpc_id)
+
+    def delete_vms(self, vpc_client, vpc_id):
+        def _poll_vpc_contains_vms(vpc_id):
+            tries = 60
+            sleep_interval = 3
+            while tries:
+                # list_instances() never raise an exception, check values instead
+                res = vpc_client.list_instances(vpc_id=vpc_id).get_result()
+                if not res['total_count']:
+                    return True
+                else:
+                    tries -= 1
+                    time.sleep(sleep_interval)
+            raise Exception("Failed to delete VPC's instances within "
+                            "the expected time frame. Cannot "
+                            "continue to delete VPC.")
+        # Delete VSIs if exist
+        # pylint: disable=line-too-long E1136
+        res = vpc_client.list_instances(vpc_id=vpc_id).get_result()
+        num_instances = res['total_count']
+        if num_instances:
+            vsi_ids = [vsi_id['id'] for vsi_id in res['instances']]
+            logger.info(f"Deleting VMs: {vsi_ids}")
+            with ThreadPoolExecutor(num_instances) as ex:
+                for i in range(num_instances):
+                    ex.submit(vpc_client.delete_instance, vsi_ids[i])
+            # wait until all vms are deleted to proceed
+            _poll_vpc_contains_vms(vpc_id)
 
     def delete_subnets(self, vpc_client, vpc_data, region):
         def _poll_subnet_deleted(subnet_id):
@@ -229,7 +282,7 @@ class IBMVPCProvider():
             sleep_interval = 2
             while tries:
                 try:
-                    self.vpc_client.get_subnet(subnet_id).get_result()
+                    vpc_client.get_subnet(subnet_id).get_result()
                 except ApiException:
                     logger.debug(f'Deleted subnet id: {subnet_id}')
                     return True
@@ -239,6 +292,7 @@ class IBMVPCProvider():
             return False
         for subnet_id in self.get_vpc_subnets(vpc_data, region, field='id'):
             # get_result() used for synchronization
+            logger.debug(f"Deleting subnet: {subnet_id}")
             vpc_client.delete_subnet(subnet_id).get_result()
             _poll_subnet_deleted(subnet_id)
 
@@ -251,6 +305,7 @@ class IBMVPCProvider():
                                for gateway in gateways if gateway['vpc']['id'] == vpc_id]
         for gateway_id in gateways_ids_of_vpc:
             # get_result() used for synchronization
+            logger.debug(f"Deleting gateway: {gateway_id}")
             vpc_client.delete_public_gateway(gateway_id).get_result()
 
     def add_missing_sg_rules(self, sec_group_id):
@@ -366,9 +421,14 @@ class ClusterCleaner:
     resources. Used when the remote cluster head is requested to
     dismantle its cluster. """
 
+    # default region for the cloud function namespace
     namespace_region = "us-east"
+    # default name for the cloud function namespace (cf doesn't support tagging)
     namespace_name = "skypilot-namespace"
+    # default name for the cloud function action.
     action_name = "skypilot-vpc-cleaner-action"
+    # url to cloud function's namespaces in the chosen region: `namespace_region`
+    cf_namespaces_url = f"https://{namespace_region}.functions.cloud.ibm.com/api/v1/namespaces"
 
     def __init__(self, resource_group_id, vpc_id, vpc_region) -> None:
         self.resource_group_id = resource_group_id
@@ -536,8 +596,7 @@ class ClusterCleaner:
             data = {"name": self.namespace_name, "resource_group_id": self.resource_group_id,
                 "resource_plan_id": "functions-base-plan"}
         
-            res = requests.post(f'https://{self.namespace_region}.functions.cloud.ibm.com/api/v1/namespaces',
-                                    headers=self.get_headers(), json=data).json()
+            res = requests.post(self.cf_namespaces_url, headers=self.get_headers(), json=data).json()
             if res.status_code!=200:
                 logger.error(res.text)                                    
             namespace_id = res['id']                            
@@ -549,7 +608,7 @@ class ClusterCleaner:
             :param offset - offset from the beginning of the list of results attained from the GET request,
                             which may contain up to 200 namespaces per http response"""
 
-            res = requests.get(f"https://{self.namespace_region}.functions.cloud.ibm.com/api/v1/namespaces?limit=200&offset={offset}",
+            res = requests.get(f"{self.cf_namespaces_url}?limit=200&offset={offset}",
                  headers=self.get_headers())
             return json.loads(res.text)
             
@@ -599,7 +658,8 @@ class ClusterCleaner:
         :param offset - offset from the beginning of the list of results attained from the GET request,
                         which may contain up to 200 namespaces per http response"""
 
-        res = requests.get(f"https://{self.namespace_region}.functions.cloud.ibm.com/api/v1/namespaces/{namespace_id}/actions?limit=200", headers=self.get_headers())
+        res = requests.get(f"{self.cf_namespaces_url}/{namespace_id}/actions?limit=200",
+                            headers=self.get_headers())
         return json.loads(res.text)
 
     def create_action(self, namespace_id):
@@ -614,7 +674,8 @@ class ClusterCleaner:
                 "timeout":600000
             }
         }
-        res = requests.put(f"https://{self.namespace_region}.functions.cloud.ibm.com/api/v1/namespaces/{namespace_id}/actions/{self.action_name}?blocking=true&overwrite=true", headers=self.get_headers(), data=json.dumps(function_params))
+        res = requests.put(f"{self.cf_namespaces_url}/{namespace_id}/actions/{self.action_name}?blocking=true&overwrite=true",
+                            headers=self.get_headers(), data=json.dumps(function_params))
         if res.status_code!=200:
             logger.error(res.text)        
         return json.loads(res.text)
@@ -622,7 +683,8 @@ class ClusterCleaner:
     def delete_action(self, namespace_id):
         """return the deleted function's metadata if it existed."""
         logger.info(f"deleting action on namespace: {namespace_id}")
-        res = requests.delete(f"https://{self.namespace_region}.functions.cloud.ibm.com/api/v1/namespaces/{namespace_id}/actions/{self.action_name}?blocking=true", headers=self.get_headers())
+        res = requests.delete(f"{self.cf_namespaces_url}/{namespace_id}/actions/{self.action_name}?blocking=true",
+                               headers=self.get_headers())
         if res.status_code!=200:
             logger.warn(res.text)
         return json.loads(res.text)
@@ -630,7 +692,8 @@ class ClusterCleaner:
     def invoke_action(self, namespace_id:str):
         logger.info(f"invoking action on namespace: {namespace_id}")
         payload = {'iam_api_key':ibm.get_api_key(),'resource_group_id':self.resource_group_id, 'vpc_id':self.vpc_id, 'region': self.vpc_region}
-        res = requests.post(f"https://{self.namespace_region}.functions.cloud.ibm.com/api/v1/namespaces/{namespace_id}/actions/{self.action_name}?blocking=true", headers=self.get_headers(), data=json.dumps(payload))
+        res = requests.post(f"{self.cf_namespaces_url}/{namespace_id}/actions/{self.action_name}?blocking=true",
+                             headers=self.get_headers(), data=json.dumps(payload))
         if res.status_code!=200:
             logger.error(res.text)
         return json.loads(res.text)

@@ -369,6 +369,8 @@ class IBM(clouds.Cloud):
             return images
 
         # if user specified an image id for the region, return it.
+        # IBM-TODO take into account user input when --image-id
+        # is implemented
         user_image = get_cred_file_field('image_id')
         if user_image and region in user_image:
             logger.debug(f'using user image: {user_image[region]} '
@@ -386,10 +388,10 @@ class IBM(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         # IBM-TODO - create a configuration script.
         required_fields = ['iam_api_key', 'resource_group_id']
-        help_str = ('\tStore your API key and Resource Group id '
+        help_str = ('    Store your API key and Resource Group id '
                     f'in {CREDENTIAL_FILE} in the following format:\n'
-                    '\tiam_api_key: <IAM_API_KEY>\n'
-                    '\tresource_group_id: <RESOURCE_GROUP_ID>')
+                    '      iam_api_key: <IAM_API_KEY>\n'
+                    '      resource_group_id: <RESOURCE_GROUP_ID>')
 
         base_config = _read_credential_file()
         if not base_config:
@@ -401,7 +403,7 @@ class IBM(clouds.Cloud):
                 return (False, f'Missing field "{field}" in '
                         f'{os.path.expanduser(CREDENTIAL_FILE)}.\n' + help_str)
 
-        # verify ability of user to create a client,
+        # verifies ability of user to create a client,
         # e.g. bad API KEY.
         try:
             ibm.client()
