@@ -342,8 +342,6 @@ def setup_ibm_authentication(config):
     and updates config file.
     keys default location: '~/.ssh/sky-key' and '~/.ssh/sky-key.pub'
     """
-    # pylint: disable=C0415
-    import ibm_cloud_sdk_core
 
     def _get_unique_key_name():
         suffix_len = 10
@@ -368,7 +366,7 @@ def setup_ibm_authentication(config):
         vpc_key_id = res['id']
         logger.debug(f'Created new key: {res["name"]}')
 
-    except ibm_cloud_sdk_core.ApiException as e:
+    except ibm.ibm_cloud_sdk_core.ApiException as e:
         if 'Key with fingerprint already exists' in e.message:
             for key in client.list_keys().result['keys']:
                 if (ssh_key_data in key['public_key'] or
@@ -383,12 +381,9 @@ def setup_ibm_authentication(config):
         else:
             raise Exception('Failed to register a key') from e
 
-    config['auth']['ssh_private_key'] = PUBLIC_SSH_KEY_PATH.rsplit('.', 1)[0]
-    # Currently cannot add ssh_public_key. it will impact the
-    # calculation of launch_hash by ray.
-    # config['auth'].update({'ssh_public_key': PUBLIC_SSH_KEY_PATH})
+    config['auth']['ssh_private_key'] = PRIVATE_SSH_KEY_PATH
+
     for node_type in config['available_node_types']:
-        # pylint: disable=line-too-long
         config['available_node_types'][node_type]['node_config'][
             'key_id'] = vpc_key_id
 
