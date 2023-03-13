@@ -1303,15 +1303,16 @@ def get_node_ips(cluster_yaml: str,
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
         assert handle is not None, 'handle is required for TPU VM.'
+        per_tpu_devices = tpu_utils.get_num_tpu_devices(
+            handle.launched_resources)
+        num_total_devices = expected_num_nodes * per_tpu_devices
         try:
-            ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
+            ips = _get_tpu_vm_pod_ips(ray_config, num_total_devices,
+                                      get_internal_ips)
         except exceptions.CommandError as e:
             raise exceptions.FetchIPError(
                 exceptions.FetchIPError.Reason.HEAD) from e
-        num_tpu_devices = tpu_utils.get_num_tpu_devices(
-            handle.launched_resources)
-        if num_tpu_devices is None or (len(ips) !=
-                                       expected_num_nodes * num_tpu_devices):
+        if len(ips) != num_total_devices:
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
         return ips
 
@@ -1394,6 +1395,7 @@ def get_node_ips(cluster_yaml: str,
 
 @timeline.event
 def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
+                        expected_num_ips: int,
                         get_internal_ips: bool = False) -> List[str]:
     """Returns the IPs of all TPU VM Pod workers using gcloud.
 
@@ -1419,10 +1421,11 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
         logger.debug('No TPU VMs found with cluster name '
                      f'{cluster_name} in zone {zone}.')
     all_json = json.loads(stdout)
-    if len(all_json) > 1:
+    if len(all_json) != expected_num_ips:
         # Rare case, this could mean resource leakage. Hint user.
-        logger.warning('Found more than one TPU VM/Pod with the same cluster '
-                       f'name {cluster_name} in zone {zone}.')
+        logger.warning(f'Found {len(all_json)} IPs with the same cluster '
+                       f'name tag "{cluster_name}" in zone {zone} '
+                       f'(expected: {expected_num_ips}).')
 
     all_ips: List[str] = []
     for tpuvm_json in all_json:

@@ -1004,13 +1004,14 @@ def _make_task_from_entrypoint_with_overrides(
     task.set_envs(env)
     # TODO(wei-lin): move this validation into Python API.
     if task.num_nodes > 1 and tpu_utils.is_tpu(new_resources):
-        if not tpu_utils.is_tpu_vm(new_resources):
-            raise ValueError(
-                'For TPU Node, multi-node cluster is not supported. '
-                f'Got num_nodes={task.num_nodes}.')
-        if tpu_utils.is_tpu_vm_pod(new_resources):
-            raise ValueError('Multi-node TPU Pod cluster is not supported. '
-                             f'Got num_nodes={task.num_nodes}.')
+        with ux_utils.print_exception_no_traceback():
+            if not tpu_utils.is_tpu_vm(new_resources):
+                raise ValueError(
+                    'For TPU Node, multi-node cluster is not supported. '
+                    f'Got --num-nodes={task.num_nodes}.')
+            if tpu_utils.is_tpu_vm_pod(new_resources):
+                raise ValueError('Multi-node TPU Pod cluster is not supported. '
+                                 f'Got --num-nodes={task.num_nodes}.')
     return task
 
 
