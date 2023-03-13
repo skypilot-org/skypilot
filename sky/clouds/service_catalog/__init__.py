@@ -182,7 +182,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
     type with 4 or more vCPUs.
 
     If memory_gb_or_ratio is not specified, this method returns the General
-    Purpose instance type with the given number of vCPUs.  If memory_gb_or_ratio
+    Purpose instance type with the given number of vCPUs. If memory_gb_or_ratio
     is specified, this method returns the cheapest instance type that meets
     the given CPU and memory requirement.
     """

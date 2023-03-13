@@ -253,6 +253,12 @@ def get_hourly_cost_impl(
     return cheapest[price_str]
 
 
+def _get_value(value):
+    if pd.isna(value):
+        return None
+    return float(value)
+
+
 def get_vcpus_mem_from_instance_type_impl(
     df: pd.DataFrame,
     instance_type: str,
@@ -272,12 +278,7 @@ def get_vcpus_mem_from_instance_type_impl(
     vcpus = df['vCPUs'].iloc[0]
     mem = df['MemoryGiB'].iloc[0]
 
-    def get_value(value):
-        if pd.isna(value):
-            return None
-        return float(value)
-
-    return get_value(vcpus), get_value(mem)
+    return _get_value(vcpus), _get_value(mem)
 
 
 def _filter_with_cpus(df: pd.DataFrame, cpus: Optional[str]) -> pd.DataFrame:
@@ -310,7 +311,7 @@ def _filter_with_mem(df: pd.DataFrame,
 
     # The following code is partially redundant with the code in
     # resources.py::_set_memory() but we add it here for safety.
-    if memory_gb_or_ratio.endswith(('+', 'x', 'X')):
+    if memory_gb_or_ratio.endswith(('+', 'x')):
         memory_gb_str = memory_gb_or_ratio[:-1]
     else:
         memory_gb_str = memory_gb_or_ratio
@@ -323,7 +324,7 @@ def _filter_with_mem(df: pd.DataFrame,
                              f'{memory_gb_or_ratio!r}') from None
     if memory_gb_or_ratio.endswith('+'):
         return df[df['MemoryGiB'] >= memory]
-    elif memory_gb_or_ratio.endswith(('x', 'X')):
+    elif memory_gb_or_ratio.endswith('x'):
         return df[df['MemoryGiB'] >= df['vCPUs'] * memory]
     else:
         return df[df['MemoryGiB'] == memory]

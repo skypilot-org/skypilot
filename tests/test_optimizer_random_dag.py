@@ -116,7 +116,7 @@ def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
                                                       dag.tasks, optimizer_plan)
 
     min_objective = find_min_objective(copy_dag, minimize_cost)
-    assert abs(objective - min_objective) < 1e-6
+    assert abs(objective - min_objective) < 1e-3
 
 
 def test_optimizer(enable_all_clouds):

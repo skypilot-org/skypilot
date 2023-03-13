@@ -3641,6 +3641,7 @@ def benchmark_launch(
     # The user can specify the benchmark candidates in either of the two ways:
     # 1. By specifying resources.candidates in the YAML.
     # 2. By specifying gpu types as a command line argument (--gpus).
+    override_gpu = None
     if gpus is not None:
         gpu_list = gpus.split(',')
         gpu_list = [gpu.strip() for gpu in gpu_list]

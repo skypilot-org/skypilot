@@ -987,10 +987,9 @@ def _fill_in_launchable_resources(
                                     'or add "+" to the end of the CPU count '
                                     'to allow for larger instances.')
                     if resources.memory is not None:
-                        logger.info(
-                            'Try specifying a different memory amount, '
-                            'or add "+" to the end of the memory amount '
-                            'to allow for larger instances.')
+                        logger.info('Try specifying a different memory size, '
+                                    'or add "+" to the end of the memory size '
+                                    'to allow for larger instances.')
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)

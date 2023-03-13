@@ -25,12 +25,21 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# This is the latest general-purpose instance family as of Jan 2023.
-# CPU: Intel Ice Lake 8375C.
-# Memory: m6i - 4 GiB RAM per 1 vCPU;
-#         r6i - 8 GiB RAM per 1 vCPU;
-#         c6i - 2 GiB RAM per 1 vCPU.
-_DEFAULT_INSTANCE_FAMILY = ['m6i', 'r6i', 'c6i']
+# We will select from the following three instance families:
+_DEFAULT_INSTANCE_FAMILY = [
+    # This is the latest general-purpose instance family as of Mar 2023.
+    # CPU: Intel Ice Lake 8375C.
+    # Memory: 4 GiB RAM per 1 vCPU;
+    'm6i',
+    # This is the latest memory-optimized instance family as of Mar 2023.
+    # CPU: TBD
+    # Memory: 8 GiB RAM per 1 vCPU;
+    'r6i',
+    # This is the latest compute-optimized instance family as of Mar 2023.
+    # CPU: TBD
+    # Memory: 2 GiB RAM per 1 vCPU;
+    'c6i',
+]
 _DEFAULT_NUM_VCPUS = 8
 _DEFAULT_MEMORY_CPU_RATIO = 4
 

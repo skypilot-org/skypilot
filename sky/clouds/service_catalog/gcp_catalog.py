@@ -25,18 +25,26 @@ _TPU_REGIONS = [
     'asia-east1',
 ]
 
-# Default instance family for CPU-only VMs.
-# This is the latest general-purpose instance family as of Jan 2023.
-# CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
-# Memory: n2-standard -- 4 GiB RAM per 1 vCPU;
-#         n2-highmem -- 8 GiB RAM per 1 vCPU;
-#         n2-highcpu -- 1 GiB RAM per 1 vCPU.
-_DEFAULT_INSTANCE_FAMILY = ['n2-standard', 'n2-highmem', 'n2-highcpu']
+# We will select from the following three CPU instance families:
+_DEFAULT_INSTANCE_FAMILY = [
+    # This is the latest general-purpose instance family as of Jan 2023.
+    # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
+    # Memory: 4 GiB RAM per 1 vCPU;
+    'n2-standard',
+    # This is the latest memory-optimized instance family as of Jan 2023.
+    # CPU: TBD
+    # Memory: 8 GiB RAM per 1 vCPU;
+    'n2-highmem',
+    # This is the latest compute-optimized instance family as of Jan 2023.
+    # CPU: TBD
+    # Memory: 1 GiB RAM per 1 vCPU;
+    'n2-highcpu',
+]
 _DEFAULT_NUM_VCPUS = 8
 _DEFAULT_MEMORY_CPU_RATIO = 4
 
 # This can be switched between n1 and n2.
-# n2 is not allowed for launching GPUs right now.
+# n2 is not allowed for launching GPUs.
 _DEFAULT_HOST_VM_FAMILY = 'n1'
 _DEFAULT_GPU_MEMORY_CPU_RATIO = 4
 

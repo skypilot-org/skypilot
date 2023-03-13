@@ -397,8 +397,10 @@ class GCP(clouds.Cloud):
 
         if use_tpu_vm:
             host_vm_type = 'TPU-VM'
-            # FIXME(woosuk): This leverages the fact that TPU VMs have 96 vCPUs.
-            num_cpus_in_tpu_vm = 96
+            # FIXME(woosuk): This leverages the fact that TPU VMs have 96 vCPUs,
+            # and 240 vCPUs for tpu-v4.
+            # TODO(wei-lin): Move this to service catalog, instead.
+            num_cpus_in_tpu_vm = 240 if 'v4' in acc else 96
             if resources.cpus is not None:
                 if resources.cpus.endswith('+'):
                     cpus = float(resources.cpus[:-1])
@@ -408,15 +410,14 @@ class GCP(clouds.Cloud):
                     cpus = float(resources.cpus)
                     if cpus != num_cpus_in_tpu_vm:
                         return ([], fuzzy_candidate_list)
-            memory_in_tpu_vm = 624
+            # TODO(wei-lin): Move this to service catalog, instead.
+            # The number needs to be confirmed for tpu vms earlier than
+            # v4.
+            memory_in_tpu_vm = 400 if 'v4' in acc else 334
             if resources.memory is not None:
                 if resources.memory.endswith('+'):
                     memory = float(resources.memory[:-1])
                     if memory > memory_in_tpu_vm:
-                        return ([], fuzzy_candidate_list)
-                elif resources.memory.endswith(('x', 'X')):
-                    memory = float(resources.memory[:-1])
-                    if memory * num_cpus_in_tpu_vm > memory_in_tpu_vm:
                         return ([], fuzzy_candidate_list)
                 else:
                     memory = float(resources.memory)

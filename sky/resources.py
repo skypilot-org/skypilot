@@ -531,15 +531,6 @@ class Resources:
                                 f'{self.instance_type} does not have enough '
                                 f'memory. {self.instance_type} has {mem} GB '
                                 f'memory, but {self.memory} is requested.')
-                elif self.memory.endswith(('x', 'X')):
-                    requested_mem = float(self.memory[:-1] * cpus)
-                    if mem < requested_mem:
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError(
-                                f'{self.instance_type} does not have the '
-                                f'requested memory. {self.instance_type} has '
-                                f'{cpus} CPUsand {mem} GB memory, but '
-                                f'{self.memory} is requested.')
                 elif mem != float(self.memory):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
