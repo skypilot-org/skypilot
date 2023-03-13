@@ -1311,8 +1311,7 @@ def get_node_ips(cluster_yaml: str,
                 exceptions.FetchIPError.Reason.HEAD) from e
         per_tpu_devices = tpu_utils.get_num_tpu_devices(
             handle.launched_resources)
-        num_total_devices = expected_num_nodes * per_tpu_devices
-        if len(ips) != num_total_devices:
+        if len(ips) != expected_num_nodes * per_tpu_devices:
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
         return ips
 
