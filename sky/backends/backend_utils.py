@@ -1766,35 +1766,34 @@ def _update_cluster_status_no_lock(
 
     cluster_name = handle.cluster_name
     use_spot = handle.launched_resources.use_spot
-    # For non-spot clusters, this is an optimization: we call external_ips()
-    # and/or SSH into the cluster to run 'ray status' in various cases to
-    # determine cluster health, because these may be faster than querying
-    # the true node statuses from the cloud provider.
-    # For spot clusters, the above can be unsafe.
-    # Therefore we directly query the cloud provider.
-    if not use_spot:
-        try:
-            # TODO(zhwu): This function cannot distinguish transient network error
-            # in ray's get IPs vs. ray runtime failing.
-            external_ips = handle.external_ips(use_cached_ips=False)
-            # This happens to a stopped TPU VM as we use gcloud to query the IP.
-            if external_ips is None or len(external_ips) == 0:
+    ray_cluster_up = False
+    try:
+        # TODO(zhwu): This function cannot distinguish transient network error
+        # in ray's get IPs vs. ray runtime failing.
+        external_ips = handle.external_ips(use_cached_ips=False)
+        # This happens to a stopped TPU VM as we use gcloud to query the IP.
+        if external_ips is None or len(external_ips) == 0:
+            raise exceptions.FetchIPError(
+                reason=exceptions.FetchIPError.Reason.HEAD)
+        if handle.launched_nodes == 1:
+            # Check the ray cluster status. We have to check it for single node
+            # case, since the get_node_ips() does not require ray cluster to be
+            # running.
+            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
+            runner = command_runner.SSHCommandRunner(external_ips[0],
+                                                     **ssh_credentials)
+            returncode = runner.run('ray status', stream_logs=False)
+            if returncode:
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
-            if handle.launched_nodes == 1:
-                # Check the ray cluster status. We have to check it for single node
-                # case, since the get_node_ips() does not require ray cluster to be
-                # running.
-                ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
-                runner = command_runner.SSHCommandRunner(
-                    external_ips[0], **ssh_credentials)
-                returncode = runner.run('ray status', stream_logs=False)
-                if returncode:
-                    raise exceptions.FetchIPError(
-                        reason=exceptions.FetchIPError.Reason.HEAD)
-            # If we get node ips correctly, the cluster is UP. It is safe to
-            # set the status to UP, as the `handle.external_ips` function uses ray
-            # to fetch IPs and starting ray is the final step of sky launch.
+        ray_cluster_up = True
+        # For non-spot clusters:
+        # If we get node ips correctly, the cluster is UP. It is safe to
+        # set the status to UP, as the `handle.external_ips` function uses ray
+        # to fetch IPs and starting ray is the final step of sky launch.
+        # For spot clusters, the above can be unsafe.
+        # Additionally, we need to query the cloud provider.
+        if not use_spot:
             record['status'] = global_user_state.ClusterStatus.UP
             global_user_state.add_or_update_cluster(cluster_name,
                                                     handle,
@@ -1802,17 +1801,18 @@ def _update_cluster_status_no_lock(
                                                     ready=True,
                                                     is_launch=False)
             return record
-        except exceptions.FetchIPError:
-            logger.debug('Refreshing status: Failed to get IPs from cluster '
-                         f'{cluster_name!r}, trying to fetch from provider.')
+    except exceptions.FetchIPError:
+        logger.debug('Refreshing status: Failed to get IPs from cluster '
+                     f'{cluster_name!r}, trying to fetch from provider.')
     # For all code below, we query cluster status by cloud CLI for two cases:
     # 1) ray fails to get IPs for the cluster.
     # 2) the cluster is a spot cluster.
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
 
-    all_up = all(status == global_user_state.ClusterStatus.UP
-                 for status in node_statuses)
-    if all_up and len(node_statuses) == handle.launched_nodes:
+    all_up = (all(status == global_user_state.ClusterStatus.UP
+                  for status in node_statuses) and
+              len(node_statuses) == handle.launched_nodes)
+    if ray_cluster_up and all_up:
         record['status'] = global_user_state.ClusterStatus.UP
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
