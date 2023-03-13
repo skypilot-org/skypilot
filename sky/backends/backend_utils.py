@@ -1450,7 +1450,7 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
                 for endpoint in tpuvm_json['networkEndpoints']
             ]
         is_head = tpuvm_json['labels']['ray-node-type'] == 'head'
-        # make sure the head ip is placed at the front of the list
+        # Make sure the head ip is placed at the front of the list
         all_ips = ips + all_ips if is_head else all_ips + ips
 
     return all_ips
