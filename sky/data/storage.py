@@ -20,6 +20,7 @@ from sky.data import mounting_utils
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky.utils import log_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -932,7 +933,7 @@ class S3Store(AbstractStore):
         else:
             source_message = source_path_list[0]
 
-        with backend_utils.safe_console_status(
+        with log_utils.safe_rich_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]s3://{self.name}/[/]'):
             data_utils.parallel_upload(
@@ -1065,7 +1066,7 @@ class S3Store(AbstractStore):
         # which removes the bucket by force.
         remove_command = f'aws s3 rb s3://{bucket_name} --force'
         try:
-            with backend_utils.safe_console_status(
+            with log_utils.safe_rich_status(
                     f'[bold cyan]Deleting S3 bucket {bucket_name}[/]'):
                 subprocess.check_output(remove_command.split(' '))
         except subprocess.CalledProcessError as e:
@@ -1200,7 +1201,7 @@ class GcsStore(AbstractStore):
         sync_command = (f'echo "{copy_list}" | '
                         f'gsutil -m cp -e -n -r -I gs://{self.name}')
 
-        with backend_utils.safe_console_status(
+        with log_utils.safe_rich_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
             data_utils.run_upload_cli(sync_command,
@@ -1246,7 +1247,7 @@ class GcsStore(AbstractStore):
         else:
             source_message = source_path_list[0]
 
-        with backend_utils.safe_console_status(
+        with log_utils.safe_rich_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
             data_utils.parallel_upload(
@@ -1374,7 +1375,7 @@ class GcsStore(AbstractStore):
                     'external bucket.') from e
 
         try:
-            with backend_utils.safe_console_status(
+            with log_utils.safe_rich_status(
                     f'[bold cyan]Deleting GCS bucket {bucket_name}[/]'):
                 remove_obj_command = ('gsutil -m rm -r'
                                       f' gs://{bucket_name}')

@@ -331,7 +331,7 @@ def format_exception(e: Union[Exception, SystemExit],
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
     if use_bracket:
-        return f'{bright}[{class_fullname(e.__class__)}]:{reset} {e}'
+        return f'{bright}[{class_fullname(e.__class__)}]{reset} {e}'
     return f'{bright}{class_fullname(e.__class__)}:{reset} {e}'
 
 
