@@ -434,7 +434,7 @@ class SSHConfigHelper(object):
             # If an existing config with `cluster_name` exists, raise a warning.
             for i, line in enumerate(config):
                 if line.strip() == f'Host {cluster_name}':
-                    prev_line = config[i - 1] if i - 1 > 0 else ''
+                    prev_line = config[i - 1] if i - 1 >= 0 else ''
                     if prev_line.strip().startswith(sky_autogen_comment):
                         overwrite = True
                         overwrite_begin_idx = i - 1
@@ -445,7 +445,7 @@ class SSHConfigHelper(object):
                         logger.warning(f'Using {ip} to identify host instead.')
 
                 if line.strip() == f'Host {ip}':
-                    prev_line = config[i - 1] if i - 1 > 0 else ''
+                    prev_line = config[i - 1] if i - 1 >= 0 else ''
                     if prev_line.strip().startswith(sky_autogen_comment):
                         overwrite = True
                         overwrite_begin_idx = i - 1
