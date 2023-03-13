@@ -741,7 +741,4 @@ class AWSNodeProviderV2(AWSNodeProvider):
 
     @staticmethod
     def bootstrap_config(cluster_config):
-        raise Exception("!!!!!!", cluster_config)
-        result = bootstrap_aws(cluster_config, skypilot_iam_role=True)
-        raise Exception("!!!!!!", result)
-        return result
+        return bootstrap_aws(cluster_config, skypilot_iam_role=True)

@@ -170,7 +170,7 @@ class LambdaNodeProvider(NodeProvider):
         config_tags = node_config.get('tags', {}).copy()
         config_tags.update(tags)
         config_tags[TAG_RAY_CLUSTER_NAME] = self.cluster_name
-        raise lambda_utils.LambdaCloudError("!!!!!!!!!!!!!", config_tags)
+
 
         # create the node
         ttype = node_config['InstanceType']
@@ -213,7 +213,3 @@ class LambdaNodeProvider(NodeProvider):
             return self.cached_nodes[node_id]
         return self._get_node(node_id=node_id)
 
-    @staticmethod
-    def bootstrap_config(cluster_config):
-
-        return cluster_config
