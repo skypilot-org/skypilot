@@ -24,14 +24,14 @@ class Metadata:
         # In case parent directory does not exist
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
 
-    def __getitem__(self, instance_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, instance_id: str) -> Optional[Dict[str, Any]]:
         if not os.path.exists(self.path):
             return None
         with open(self.path, 'r') as f:
             metadata = json.load(f)
         return metadata.get(instance_id)
 
-    def __setitem__(self, instance_id: str, value: Dict[str, Any]) -> None:
+    def set(self, instance_id: str, value: Optional[Dict[str, Any]]) -> None:
         # Read from metadata file
         if os.path.exists(self.path):
             with open(self.path, 'r') as f:

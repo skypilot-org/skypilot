@@ -60,28 +60,30 @@ class LambdaNodeProvider(NodeProvider):
     def _guess_and_add_missing_tags(self, vms: Dict[str, Any]) -> None:
         """Adds missing vms to local tag file and guesses their tags."""
         for node in vms:
-            if self.metadata[node['id']] is not None:
+            if self.metadata.get(node['id']) is not None:
                 pass
             elif node['name'] == f'{self.cluster_name}-head':
-                self.metadata[node['id']] = {
-                    'tags': {
-                        TAG_RAY_CLUSTER_NAME: self.cluster_name,
-                        TAG_RAY_NODE_STATUS: STATUS_UP_TO_DATE,
-                        TAG_RAY_NODE_KIND: NODE_KIND_HEAD,
-                        TAG_RAY_USER_NODE_TYPE: 'ray_head_default',
-                        TAG_RAY_NODE_NAME: f'ray-{self.cluster_name}-head',
-                    }
-                }
+                self.metadata.set(
+                    node['id'], {
+                        'tags': {
+                            TAG_RAY_CLUSTER_NAME: self.cluster_name,
+                            TAG_RAY_NODE_STATUS: STATUS_UP_TO_DATE,
+                            TAG_RAY_NODE_KIND: NODE_KIND_HEAD,
+                            TAG_RAY_USER_NODE_TYPE: 'ray_head_default',
+                            TAG_RAY_NODE_NAME: f'ray-{self.cluster_name}-head',
+                        }
+                    })
             elif node['name'] == f'{self.cluster_name}-worker':
-                self.metadata[node['id']] = {
-                    'tags': {
-                        TAG_RAY_CLUSTER_NAME: self.cluster_name,
-                        TAG_RAY_NODE_STATUS: STATUS_UP_TO_DATE,
-                        TAG_RAY_NODE_KIND: NODE_KIND_WORKER,
-                        TAG_RAY_USER_NODE_TYPE: 'ray_worker_default',
-                        TAG_RAY_NODE_NAME: f'ray-{self.cluster_name}-worker',
-                    }
-                }
+                self.metadata.set(
+                    node['id'], {
+                        'tags': {
+                            TAG_RAY_CLUSTER_NAME: self.cluster_name,
+                            TAG_RAY_NODE_STATUS: STATUS_UP_TO_DATE,
+                            TAG_RAY_NODE_KIND: NODE_KIND_WORKER,
+                            TAG_RAY_USER_NODE_TYPE: 'ray_worker_default',
+                            TAG_RAY_NODE_NAME: f'ray-{self.cluster_name}-worker',
+                        }
+                    })
 
     def _list_instances_in_cluster(self) -> Dict[str, Any]:
         """List running instances in cluster."""
@@ -97,14 +99,14 @@ class LambdaNodeProvider(NodeProvider):
 
         def _extract_metadata(vm: Dict[str, Any]) -> Dict[str, Any]:
             metadata = {'id': vm['id'], 'status': vm['status'], 'tags': {}}
-            instance_info = self.metadata[vm['id']]
+            instance_info = self.metadata.get(vm['id'])
             if instance_info is not None:
                 metadata['tags'] = instance_info['tags']
             metadata['external_ip'] = vm['ip']
             return metadata
 
         def _match_tags(vm: Dict[str, Any]):
-            vm_info = self.metadata[vm['id']]
+            vm_info = self.metadata.get(vm['id'])
             tags = {} if vm_info is None else vm_info['tags']
             for k, v in tag_filters.items():
                 if tags.get(k) != v:
@@ -195,7 +197,7 @@ class LambdaNodeProvider(NodeProvider):
                 region=region,
                 quantity=1,
                 name=name)[0]
-            self.metadata[vm_id] = {'tags': config_tags}
+            self.metadata.set(vm_id, {'tags': config_tags})
             booting_list.append(vm_id)
             time.sleep(10)  # Avoid api rate limits
 
@@ -215,12 +217,12 @@ class LambdaNodeProvider(NodeProvider):
         """Sets the tag values (string dict) for the specified node."""
         node = self._get_node(node_id)
         node['tags'].update(tags)
-        self.metadata[node_id] = {'tags': node['tags']}
+        self.metadata.set(node_id, {'tags': node['tags']})
 
     def terminate_node(self, node_id: str) -> None:
         """Terminates the specified node."""
         self.lambda_client.remove_instances(node_id)
-        self.metadata[node_id] = None
+        self.metadata.set(node_id, None)
 
     def _get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         self._get_filtered_nodes({})  # Side effect: updates cache
