@@ -19,6 +19,7 @@ from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky import authentication as auth
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
 _TAG_PATH_PREFIX = '~/.sky/generated/lambda_cloud/metadata'
 _REMOTE_RAY_SSH_KEY = '~/ray_bootstrap_key.pem'
@@ -102,6 +103,15 @@ class LambdaNodeProvider(NodeProvider):
             instance_info = self.metadata.get(vm['id'])
             if instance_info is not None:
                 metadata['tags'] = instance_info['tags']
+            with ux_utils.print_exception_no_traceback():
+                if 'ip' not in vm:
+                    raise lambda_utils.LambdaCloudError(
+                        'A node ip address was not found. Either '
+                        '(1) Lambda Cloud has internally errored, or '
+                        '(2) the cluster is still booting. '
+                        'You can manually terminate the cluster on the '
+                        'Lambda Cloud console or (in case 2) wait for '
+                        'booting to finish (~2 minutes).')
             metadata['external_ip'] = vm['ip']
             return metadata
 
