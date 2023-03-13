@@ -95,6 +95,7 @@ class LambdaCloudClient:
             self._credentials = {
                 line.split(' = ')[0]: line.split(' = ')[1] for line in lines
             }
+
         self.api_key = self._credentials['api_key']
         self.ssh_key_name = self._credentials.get('ssh_key_name', None)
         self.headers = {'Authorization': f'Bearer {self.api_key}'}

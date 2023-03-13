@@ -3,6 +3,7 @@ import os
 import time
 from threading import RLock
 from typing import Any, Dict, List, Optional
+import copy
 
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import (
@@ -18,6 +19,8 @@ from ray.autoscaler.tags import (
 )
 from ray.autoscaler._private.util import hash_launch_conf
 from sky.skylet.providers.scp import scp_utils
+from sky.skylet.providers.scp.config import ZoneConfig
+from sky.skylet.providers.scp.scp_utils import SCPClientError
 from sky.utils import common_utils
 
 TAG_PATH_PREFIX = '~/.sky/generated/scp/metadata'
@@ -37,18 +40,24 @@ def synchronized(f):
     return wrapper
 
 
+
+
+class SCPError(Exception):
+    pass
+
+
 class SCPNodeProvider(NodeProvider):
     """Node Provider for Lambda Cloud.
 
     This provider assumes Lambda Cloud credentials are set.
     """
-
     def __init__(self,
                  provider_config: Dict[str, Any],
                  cluster_name: str) -> None:
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
         self.scp_client = scp_utils.SCPClient()
+
         self.cached_nodes = {}
         self.metadata = scp_utils.Metadata(TAG_PATH_PREFIX, cluster_name)
         vms = self._list_instances_in_cluster()
@@ -164,33 +173,138 @@ class SCPNodeProvider(NodeProvider):
         """Returns the internal ip (Ray ip) of the given node."""
         return self._get_cached_node(node_id=node_id)['internal_ip']
 
+    def _config_security_group(self, zone_id, product_group,vpc, sg_name):
+        response = self.scp_client.create_security_group(zone_id, product_group, vpc, sg_name)
+        sg_id = response['resourceId']
+
+        while True:
+            sg_contents = self.scp_client.list_security_groups( vpc_id=vpc, sg_name=sg_name)
+            sg = [sg["securityGroupState"] for sg in sg_contents if sg["securityGroupId"] == sg_id]
+            if len(sg) !=0 and sg[0] == "ACTIVE" : break
+            time.sleep(5)
+
+        self.scp_client.add_security_group_rule(sg_id)
+        return sg_id
+
+    def _del_security_group(self, sg_id):
+        self.scp_client.del_security_group(sg_id)
+        while True:
+            time.sleep(5)
+            sg_contents = self.scp_client.list_security_groups()
+            sg = [sg["securityGroupState"] for sg in sg_contents if sg["securityGroupId"] == sg_id]
+            if len(sg) ==0: break
+
+
+
+    def _del_vm(self, vm_id):
+        self.scp_client.terminate_instance(vm_id)
+        while True:
+            time.sleep(10)
+            vm_contents = self.scp_client.list_instances()
+            vms = [vm["virtualServerId"] for vm in vm_contents if vm["virtualServerId"] == vm_id]
+            if len(vms) == 0: break
+
+    def _del_firwall_inbound(self, firewall_id, rule_id):
+        self.scp_client.del_firwall_rule(firewall_id, rule_id)
+
+
+
+    def _add_firewall_inbound(self, vpc_id, internal_ip):
+
+        firewall_contents = self.scp_client.list_firwalls()
+        firewall_id = [firewall['firewallId'] for firewall in firewall_contents
+                       if firewall['vpcId']==vpc_id and firewall['firewallState']=='ACTIVE'][0]
+        rule_info = self.scp_client.add_firewall_inbound_rule(firewall_id, internal_ip)
+        rule_id = rule_info['resourceId']
+        while True:
+            time.sleep(5)
+            rule_info = self.scp_client.get_firewal_rule_info(firewall_id, rule_id)
+            if rule_info['ruleState'] == "ACTIVE" : break
+        return firewall_id, rule_id
+
+
+
+    def _create_instance_sequence(self, vpc, instance_config):
+        subnet_undo_func_stack = []
+        try:
+            response = self.scp_client.create_instance(instance_config)
+            vm_id = response.get('resourceId', None)
+            while True:
+                time.sleep(10)
+                vm_info = self.scp_client.get_vm_info(vm_id)
+                if vm_info["virtualServerState"] == "RUNNING": break
+
+            subnet_undo_func_stack.append(lambda: self._del_vm(vm_id))
+
+            firewall_id, rule_id = self._add_firewall_inbound(vpc, vm_info['ip'])
+            subnet_undo_func_stack.append(lambda: self._del_firwall_inbound(firewall_id, rule_id))
+            # raise Exception("!!!!!!!!!!!!!!!!!!!!! vvvv")
+
+            return vm_id
+        except Exception as e:
+            print(e)
+            self._undo_funcs(subnet_undo_func_stack)
+            return None
+
+
+    def _undo_funcs(self, undo_func_list):
+        while len(undo_func_list) >0:
+            func = undo_func_list.pop()
+            func()
+
     def create_node(self,
                     node_config: Dict[str, Any],
                     tags: Dict[str, str],
                     count: int) -> None:
         """Creates a number of nodes within the namespace."""
         assert count == 1, count   # Only support 1-node clusters for now
-
-        # get the tags
+        # raise SCPError("!!!!!!!", node_config)
+        """
+        0. need VPC where IGW attached, and its public subnets
+        1. select a VPC
+        2. create a security-group belongs to VPC 
+        3. add an inbound rule into the security-group: 0.0.0.0/0 22port
+        4. select a subnet
+        5. create a VM
+        6. get the VM info including IP
+        7. add an inbound rule to a Firewall of the VPC: 0.0.0.0/0 22port -> VM IP 
+        """
         config_tags = node_config.get('tags', {}).copy()
         config_tags.update(tags)
         config_tags[TAG_RAY_CLUSTER_NAME] = self.cluster_name
 
-        # create the node
-        # ttype = node_config['InstanceType']
-        # region = self.provider_config['region']
-        vm_info = self.scp_client.create_instances(server_name=self.cluster_name)
-        # assert len(vm_list) == 1, len(vm_list)
-        virtualServerId = vm_info.get('resourceId', None)
 
-        # Wait for booting to finish
-        # TODO(ewzeng): For multi-node, launch all vms first and then wait.
-        while True:
-            vms = self.scp_client.list_instances()
-            for vm in vms:
-                if vm['virtualServerId'] == virtualServerId and vm['virtualServerState'] == 'RUNNING':
-                    return
-            time.sleep(10)
+        zone_config = ZoneConfig(self.scp_client, node_config['region'])
+        vpc_subnets = zone_config.get_vcp_subnets()
+        if (len(vpc_subnets) ==0) : raise SCPError("This region/zone does not have available VPCS.")
+
+        instance_config = zone_config.bootstrap_instance_config(node_config)
+        instance_config['virtualServerName'] = self.cluster_name
+
+        SUCCESS = False
+        for vpc, subnets in vpc_subnets.items():
+            sg_id = self._config_security_group(zone_config.zone_id,
+                                        zone_config.get_product_group("NETWORKING:Security Group"),
+                                        vpc, self.cluster_name+"_sg") #sg_name
+
+            instance_config['securityGroupIds'] =[sg_id]
+
+            for subnet in subnets:
+                instance_config['nic']['subnetId'] = subnet
+                vm_id = self._create_instance_sequence(vpc, instance_config)
+                if vm_id:
+                    SUCCESS = True
+                    break
+            if SUCCESS: break
+            else: self._del_security_group(sg_id)
+
+        # raise Exception("!!!!!!!!!!!!", instance_config)
+
+        if not SUCCESS:
+            raise SCPError("VM is not")
+
+        self.metadata[vm_id] = {'tags': config_tags}
+
 
     @synchronized
     def set_node_tags(self, node_id: str, tags: Dict[str, str]) -> None:
@@ -212,3 +326,14 @@ class SCPNodeProvider(NodeProvider):
         if node_id in self.cached_nodes:
             return self.cached_nodes[node_id]
         return self._get_node(node_id=node_id)
+
+    @staticmethod
+    def bootstrap_config(cluster_config):
+
+        node_config = cluster_config['available_node_types']['ray_head_default']['node_config']
+
+        provider_config = cluster_config['provider']
+        node_config['region'] = provider_config['region']
+        node_config['security_group_name'] = provider_config['security_group']['GroupName']
+
+        return cluster_config

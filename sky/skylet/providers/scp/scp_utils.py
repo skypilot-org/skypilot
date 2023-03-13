@@ -8,13 +8,15 @@ import hashlib
 import hmac
 import base64
 from typing import Any, Dict, List
+from urllib import parse
 
 CREDENTIALS_PATH = '~/.scp/scp_credential'
-API_ENDPOINT = 'https://openapi.samsungsdscloud.com/virtual-server'
+API_ENDPOINT = 'https://openapi.samsungsdscloud.com'
 TEMP_VM_JSON_PATH = '/tmp/json/tmp_vm_body.json'
 
 
-class SCPError(Exception):
+
+class SCPClientError(Exception):
     pass
 
 
@@ -78,18 +80,24 @@ def raise_scp_error(response: requests.Response) -> None:
     status_code = response.status_code
     if status_code == 200 or status_code == 202 :
         return
-    if status_code == 429:
-        # https://docs.lambdalabs.com/cloud/rate-limiting/
-        raise SCPError('Your API requests are being rate limited.')
     try:
         resp_json = response.json()
-        code = resp_json['error']['code']
-        message = resp_json['error']['message']
+        message = resp_json['message']
     except (KeyError, json.decoder.JSONDecodeError):
-        raise SCPError(f'Unexpected error. Status code: {status_code}')
-    raise SCPError(f'{code}: {message}')
+        raise SCPClientError(f'Unexpected error. Status code: {status_code}')
+    raise SCPClientError(f'{status_code}: {message}')
 
 
+
+def singleton(class_):
+    instances = {}
+    def get_instance(*args, **kwargs):
+        if class_ not in instances:
+            instances[class_] = class_(*args, **kwargs)
+        return instances[class_]
+    return get_instance
+
+@singleton
 class SCPClient:
     """Wrapper functions for SCP Cloud API."""
 
@@ -117,46 +125,84 @@ class SCPClient:
             'X-Cmp-Signature': f'{self.signature}'
          }
 
-    def create_instances(self, server_name=None):
+    def create_instance(self, instance_config):
         """Launch new instances."""
-        # assert self.ssh_key_name is not None
+        url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers'
+        return self._post(url, instance_config)
 
-        # Optimization:
-        # Most API requests are rate limited at ~1 request every second but
-        # launch requests are rate limited at ~1 request every 10 seconds.
-        # So don't use launch requests to check availability.
-        # See https://docs.lambdalabs.com/cloud/rate-limiting/ for more.
-        # available_regions = self.list_catalog()[instance_type]\
-        #         ['regions_with_capacity_available']
-        # available_regions = [reg['name'] for reg in available_regions]
-        # if region not in available_regions:
-        #     if len(available_regions) > 0:
-        #         aval_reg = ' '.join(available_regions)
-        #     else:
-        #         aval_reg = 'None'
-        #     raise SCPCloudError(('instance-operations/launch/'
-        #                            'insufficient-capacity: Not enough '
-        #                            'capacity to fulfill launch request. '
-        #                            'Regions with capacity available: '
-        #                            f'{aval_reg}'))
-
-        url = f'{API_ENDPOINT}/v2/virtual-servers'
-        method = 'POST'
-
+    def _get(self, url, contents_key='contents'):
+        method = 'GET'
         self.set_timestamp()
         self.set_signature(url=url, method=method)
 
-        # f = open('./test.json', )
-        f = open(TEMP_VM_JSON_PATH, )
-        data = json.load(f)
+        response = requests.get(url, headers=self.headers)
+        raise_scp_error(response)
+        if contents_key is not None : return response.json().get(contents_key, [])
+        else:  return response.json()
 
-        if server_name:
-            data['virtualServerName'] = server_name
-        response = requests.post(f'{API_ENDPOINT}/v2/virtual-servers',
-                                 json=data,
-                                 headers=self.headers)
+    def _post(self, url, request_body):
+        method = 'POST'
+        self.set_timestamp()
+        self.set_signature(url=url, method=method)
+
+        response = requests.post(url, json=request_body, headers=self.headers)
+
         raise_scp_error(response)
         return response.json()
+
+    def _delete(self, url, request_body=None):
+        method = 'DELETE'
+        self.set_timestamp()
+        self.set_signature(url=url, method=method)
+        if request_body: response = requests.delete(url, json=request_body, headers=self.headers)
+        else: response = requests.delete(url,  headers=self.headers)
+        raise_scp_error(response)
+        return response.json()
+
+    def create_security_group(self, zone_id, product_group, vpc, sg_name):
+        url = f'{API_ENDPOINT}/security-group/v2/security-groups'
+        request_body = {
+            "productGroupId": product_group,
+            "securityGroupName": sg_name,
+            "serviceZoneId": zone_id,
+            "tags": [{
+                "tagKey": "tagKey",
+                "tagValue": "tagValue"
+            }],
+            "vpcId": vpc,
+            "securityGroupDescription": "skypilot sg"
+        }
+        return self._post(url, request_body)
+
+    def add_security_group_rule(self, sg_id):
+        url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}/rules'
+        request_body = {
+              "ruleDirection" : "IN",
+              "services" : [ {
+                "serviceType" : "TCP",
+                "serviceValue" : "22"
+              } ],
+              "sourceIpAddresses" : [ "0.0.0.0/0"],
+              "ruleDescription" : "skypilot ssh rue"
+            }
+        return self._post(url, request_body)
+
+    def add_firewall_inbound_rule(self, firewall_id, internal_ip):
+        url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules'
+        request_body = {
+          "sourceIpAddresses" : ["0.0.0.0/0"],
+          "destinationIpAddresses" : [internal_ip],
+          "services" : [ {
+            "serviceType" : "TCP",
+            "serviceValue" : "22"
+          } ],
+          "ruleDirection" : "IN",
+          "ruleAction" : "ALLOW",
+          "isRuleEnabled" : True,
+          "ruleLocationType" : "FIRST",
+          "ruleDescription" : "description"
+        }
+        return self._post(url, request_body)
 
     def remove_instances(self, *instance_ids: str) -> Dict[str, Any]:
         """Terminate instances."""
@@ -165,23 +211,25 @@ class SCPClient:
                 instance_ids[0] # TODO(ewzeng) don't hardcode
             ]
         })
-        response = requests.post(f'{API_ENDPOINT}/instance-operations/terminate',
+        response = requests.post(f'{API_ENDPOINT}/virtual-server/instance-operations/terminate',
                                  data=data,
                                  headers=self.headers)
         raise_scp_error(response)
         return response.json().get('data', []).get('terminated_instances', [])
 
+    def terminate_instance(self, vm_id):
+        url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{vm_id}'
+        return self._delete(url)
+
+
     def list_instances(self) -> List[dict]:
         """List existing instances."""
-        url = f'{API_ENDPOINT}/v2/virtual-servers'
-        method = 'GET'
+        url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers'
+        return self._get(url)
 
-        self.set_timestamp()
-        self.set_signature(url=url, method=method)
 
-        response = requests.get(url, headers=self.headers)
-        raise_scp_error(response)
-        return response.json().get('contents', [])
+
+
 
     def set_ssh_key(self, name: str, pub_key: str) -> None:
         """Set ssh key."""
@@ -206,11 +254,18 @@ class SCPClient:
         return response.json().get('data', [])
 
     def get_signature(self, method:str, url:str) -> str:
-        message = method + url + self.timestamp + self.access_key + self.project_id + self.client_type
+        url_info = parse.urlsplit(url)
+        url = f'{url_info.scheme}://{url_info.netloc}{parse.quote(url_info.path)}'
+        if url_info.query:
+            enc_params = list(map(lambda item: (item[0], parse.quote(item[1][0])), parse.parse_qs(url_info.query).items()))
+            url = f'{url}?{parse.urlencode(enc_params)}'
 
+
+        print(url)
+
+        message = method + url + self.timestamp + self.access_key + self.project_id + self.client_type
         message = bytes(message, 'utf-8')
         secret = bytes(self.secret_key, 'utf-8')
-
         signature = str(base64.b64encode(hmac.new(secret, message, digestmod=hashlib.sha256).digest()), 'utf-8')
 
         return str(signature)
@@ -223,3 +278,73 @@ class SCPClient:
         self.signature = self.get_signature(url=url, method=method)
         self.headers['X-Cmp-Signature'] = self.signature
 
+
+
+
+    def list_zones(self) -> List[dict]:
+        """List zone ids for the project."""
+        url = f'{API_ENDPOINT}/project/v3/projects/{self.project_id}/zones'
+        return self._get(url)
+
+    def list_products(self, service_zone_id) -> List[dict]:
+        """List zone ids for the project."""
+        url = f'{API_ENDPOINT}/product/v2/zones/{service_zone_id}/products'
+        return self._get(url)
+
+    def list_product_groups(self, service_zone_id) -> List[dict]:
+        """List zone ids for the project."""
+        url = f'{API_ENDPOINT}/product/v2/zones/{service_zone_id}/product-groups'
+        return self._get(url)
+
+    def list_vpcs(self, service_zone_id) -> List[dict]:
+        """List zone ids for the project."""
+        url = f'{API_ENDPOINT}/vpc/v2/vpcs?serviceZoneId={service_zone_id}'
+        return self._get(url)
+
+    def list_subnets(self) -> List[dict]:
+        """List zone ids for the project."""
+        url = f'{API_ENDPOINT}/subnet/v2/subnets?subnetTypes=PUBLIC'
+        return self._get(url)
+
+    def del_security_group(self, sg_id):
+        url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}'
+        return self._delete(url)
+
+    def del_firwall_rule(self, firewall_id, rule_id):
+        url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules'
+        request_body={
+              "ruleDeletionType" : "PARTIAL",
+              "ruleIds" : [ rule_id ]
+            }
+        print(firewall_id)
+        print(request_body)
+
+        return self._delete(url, request_body=request_body)
+
+
+
+    def list_security_groups(self,  vpc_id=None, sg_name=None):
+        url = f'{API_ENDPOINT}/security-group/v2/security-groups'
+        parameter =[]
+        if vpc_id is not None: parameter.append("vpcId="+vpc_id)
+        if sg_name is not None: parameter.append("securityGroupName=" + sg_name)
+        if len(parameter) >0 : url = url+"?"+"&".join(parameter)
+        return self._get(url)
+
+    def list_igw(self):
+        url = f'{API_ENDPOINT}/internet-gateway/v2/internet-gateways'
+        return self._get(url)
+
+
+    def get_vm_info(self, vm_id):
+        url = f'{API_ENDPOINT}/virtual-server/v3/virtual-servers/{vm_id}'
+        return self._get(url, contents_key=None)
+
+    def get_firewal_rule_info(self, firewall_id, rule_id):
+        url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules/{rule_id}'
+        return self._get(url, contents_key=None)
+
+
+    def list_firwalls(self):
+        url = f'{API_ENDPOINT}/firewall/v2/firewalls'
+        return self._get(url)

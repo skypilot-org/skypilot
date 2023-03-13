@@ -405,6 +405,8 @@ class AWSNodeProvider(NodeProvider):
                 tag_specs += [user_tag_spec]
 
     def _create_node(self, node_config, tags, count):
+
+
         created_nodes_dict = {}
 
         tags = to_aws_format(tags)
@@ -456,6 +458,11 @@ class AWSNodeProvider(NodeProvider):
         # NOTE: This ensures that we try ALL availability zones before
         # throwing an error.
         max_tries = max(BOTO_CREATE_MAX_RETRIES, len(subnet_ids))
+
+
+
+
+
         for attempt in range(1, max_tries + 1):
             try:
                 if "NetworkInterfaces" in conf:
@@ -469,6 +476,7 @@ class AWSNodeProvider(NodeProvider):
                     conf["SubnetId"] = subnet_id
                     cli_logger_tags["subnet_id"] = subnet_id
 
+                raise Exception("!!!!!!", conf)
                 created = self.ec2_fail_fast.create_instances(**conf)
                 created_nodes_dict = {n.id: n for n in created}
 
@@ -645,6 +653,10 @@ class AWSNodeProvider(NodeProvider):
     def fillout_available_node_types_resources(
         cluster_config: Dict[str, Any]
     ) -> Dict[str, Any]:
+
+
+
+
         """Fills out missing "resources" field for available_node_types."""
         if "available_node_types" not in cluster_config:
             return cluster_config
@@ -657,6 +669,9 @@ class AWSNodeProvider(NodeProvider):
         instances_dict = {
             instance["InstanceType"]: instance for instance in instances_list
         }
+
+
+
         available_node_types = cluster_config["available_node_types"]
         head_node_type = cluster_config["head_node_type"]
         for node_type in available_node_types:
@@ -726,4 +741,7 @@ class AWSNodeProviderV2(AWSNodeProvider):
 
     @staticmethod
     def bootstrap_config(cluster_config):
-        return bootstrap_aws(cluster_config, skypilot_iam_role=True)
+        raise Exception("!!!!!!", cluster_config)
+        result = bootstrap_aws(cluster_config, skypilot_iam_role=True)
+        raise Exception("!!!!!!", result)
+        return result

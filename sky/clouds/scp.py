@@ -6,7 +6,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky.clouds import service_catalog
 from sky.skylet.providers.scp import scp_utils
-
+from sky import exceptions
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
@@ -52,7 +52,9 @@ class SCP(clouds.Cloud):
         if not cls._regions:
             cls._regions = [
                 # Popular US regions
-                clouds.Region('kr-west-2')
+                clouds.Region('KOREA-WEST-2-SCP-B001'),
+                clouds.Region('KOREA-EAST-1-SCP-B001'),
+                clouds.Region('KOREA-EAST-1-CCN-FIN-B001'),
             ]
         return cls._regions
 
@@ -141,6 +143,8 @@ class SCP(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[float]:
+
+
         return service_catalog.get_vcpus_from_instance_type(instance_type,
                                                             clouds='scp')
 
@@ -158,16 +162,71 @@ class SCP(clouds.Cloud):
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+
+
+
         if acc_dict is not None:
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
-
+        image_id = self._get_image_id(r.image_id, region.name, r.instance_type)
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
+            'image_id': image_id,
         }
+
+    @classmethod
+    def _get_image_id(
+            cls,
+            image_id: Optional[Dict[Optional[str], str]],
+            region_name: str,
+            instance_type: str,
+    ) -> str:
+        if image_id is None:
+            return cls._get_default_ami(region_name, instance_type)
+        if None in image_id:
+            image_id_str = image_id[None]
+        else:
+            assert region_name in image_id, image_id
+            image_id_str = image_id[region_name]
+        if image_id_str.startswith('skypilot:'):
+            image_id_str = service_catalog.get_image_id_from_tag(image_id_str,
+                                                                 region_name,
+                                                                 clouds='scp')
+            if image_id_str is None:
+                # Raise ResourcesUnavailableError to make sure the failover
+                # in CloudVMRayBackend will be correctly triggered.
+                # TODO(zhwu): This is a information leakage to the cloud
+                # implementor, we need to find a better way to handle this.
+                raise exceptions.ResourcesUnavailableError(
+                    f'No image found for region {region_name}')
+        return image_id_str
+
+
+    @classmethod
+    def _get_default_ami(cls, region_name: str, instance_type: str) -> str:
+        acc = cls.get_accelerators_from_instance_type(instance_type)
+        image_id = service_catalog.get_image_id_from_tag(
+            'skypilot:gpu-ubuntu-2004', region_name, clouds='scp')
+        if acc is not None:
+            assert len(acc) == 1, acc
+            acc_name = list(acc.keys())[0]
+            if acc_name == 'K80':
+                image_id = service_catalog.get_image_id_from_tag(
+                    'skypilot:k80-ubuntu-2004', region_name, clouds='scp')
+        if image_id is not None:
+            return image_id
+        # Raise ResourcesUnavailableError to make sure the failover in
+        # CloudVMRayBackend will be correctly triggered.
+        # TODO(zhwu): This is a information leakage to the cloud implementor,
+        # we need to find a better way to handle this.
+        raise exceptions.ResourcesUnavailableError(
+            'No image found in catalog for region '
+            f'{region_name}. Try setting a valid image_id.')
+
+
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):

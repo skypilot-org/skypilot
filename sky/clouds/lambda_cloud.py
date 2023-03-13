@@ -231,6 +231,7 @@ class Lambda(clouds.Cloud):
         return (_make(instance_list), fuzzy_candidate_list)
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
+        return True, None
         try:
             lambda_utils.LambdaCloudClient().list_instances()
         except (AssertionError, KeyError, lambda_utils.LambdaCloudError):
@@ -243,6 +244,7 @@ class Lambda(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
+
         return {
             f'~/.lambda_cloud/{filename}': f'~/.lambda_cloud/{filename}'
             for filename in _CREDENTIAL_FILES

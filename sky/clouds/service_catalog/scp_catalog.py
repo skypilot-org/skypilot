@@ -13,7 +13,7 @@ if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
 _df = common.read_catalog('scp/vms.csv')
-
+_image_df = common.read_catalog('scp/images.csv')
 # Number of vCPUS for gpu_1x_a100_sxm4
 _DEFAULT_NUM_VCPUS = 30
 
@@ -56,6 +56,8 @@ def get_hourly_cost(instance_type: str,
 
 
 def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
+
+
     return common.get_vcpus_from_instance_type_impl(_df, instance_type)
 
 
@@ -123,3 +125,8 @@ def list_accelerators(
     """Returns all instance types in SCP offering GPUs."""
     return common.list_accelerators_impl('SCP', _df, gpus_only, name_filter,
                                          region_filter, case_sensitive)
+
+
+def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
+    """Returns the image id from the tag."""
+    return common.get_image_id_from_tag_impl(_image_df, tag, region)

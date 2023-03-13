@@ -9,6 +9,9 @@ provider:
   type: external
   module: sky.skylet.providers.scp.SCPNodeProvider
   region: {{region}}
+  security_group:
+    # AWS config file must include security group name
+    GroupName: {{security_group}}
 
 auth:
   ssh_user: root
@@ -19,6 +22,7 @@ available_node_types:
     resources: {}
     node_config:
       InstanceType: {{instance_type}}
+      imageId: {{image_id}}
 {% if num_nodes > 1 %}
   ray_worker_default:
     min_workers: {{num_nodes - 1}}
@@ -26,6 +30,8 @@ available_node_types:
     resources: {}
     node_config:
       InstanceType: {{instance_type}}
+      imageId: {{image_id}}
+
 {%- endif %}
 
 head_node_type: ray_head_default
