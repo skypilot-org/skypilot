@@ -190,10 +190,9 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                      'Please check your network connection.')
         raise
 
-    project_oslogin: str = next(
+    project_oslogin: str = next(  # type: ignore
         (item for item in project['commonInstanceMetadata'].get('items', [])
-         if item['key'] == 'enable-oslogin'), {}).get('value',
-                                                      'False')  # type: ignore
+         if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
 
     if project_oslogin.lower() == 'true':
         # project.
@@ -253,9 +252,9 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # TODO(zhwu): Use cloud init to add ssh public key, to avoid the permission
     # issue. A blocker is that the cloud init is not installed in the debian
     # image by default.
-    project_keys: str = next(
+    project_keys: str = next(  # type: ignore
         (item for item in project['commonInstanceMetadata'].get('items', [])
-         if item['key'] == 'ssh-keys'), {}).get('value', '')  # type: ignore
+         if item['key'] == 'ssh-keys'), {}).get('value', '')
     ssh_keys = project_keys.split('\n') if project_keys else []
 
     # Get public key from file.
