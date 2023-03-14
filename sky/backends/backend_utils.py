@@ -1777,17 +1777,14 @@ def _update_cluster_status_no_lock(
         if external_ips is None or len(external_ips) == 0:
             raise exceptions.FetchIPError(
                 reason=exceptions.FetchIPError.Reason.HEAD)
-        if handle.launched_nodes == 1:
-            # Check the ray cluster status. We have to check it for single node
-            # case, since the get_node_ips() does not require ray cluster to be
-            # running.
-            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
-            runner = command_runner.SSHCommandRunner(external_ips[0],
-                                                     **ssh_credentials)
-            returncode = runner.run('ray status', stream_logs=False)
-            if returncode:
-                raise exceptions.FetchIPError(
-                    reason=exceptions.FetchIPError.Reason.HEAD)
+        # Check if ray cluster status is healthy.
+        ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
+        runner = command_runner.SSHCommandRunner(external_ips[0],
+                                                 **ssh_credentials)
+        returncode = runner.run('ray status', stream_logs=False)
+        if returncode:
+            raise exceptions.FetchIPError(
+                reason=exceptions.FetchIPError.Reason.HEAD)
         ray_cluster_up = True
         # For non-spot clusters:
         # If we get node ips correctly, the cluster is UP. It is safe to
