@@ -1762,14 +1762,13 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
               is_flag=True,
               required=False,
               help='Show all information in full.')
-@click.option('--cluster',
-              '-c',
-              default=None,
-              type=str,
-              required=False,
-              help='Specify a cluster name to report cost for.')
+@click.argument('cluster',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
-def cost_report(all: bool, cluster: str):  # pylint: disable=redefined-builtin
+def cost_report(all: bool, cluster: Optional[str]):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show estimated costs for launched clusters.
 
@@ -1788,7 +1787,7 @@ def cost_report(all: bool, cluster: str):  # pylint: disable=redefined-builtin
 
     - Clusters that were terminated/stopped on the cloud console.
     """
-
+    cluster = cluster[0]
     if all and cluster is not None:
         click.secho('Either specify --all or --cluster, not both', fg='yellow')
         return
