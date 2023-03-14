@@ -349,20 +349,6 @@ class SCPClient:
 
         client.close()
 
-    def get_new_ip(self):
-        used_ip_list = []
-        vm_list = self.list_instances()
-        for vm in vm_list:
-            used_ip_list.append(vm['ip'])
-
-        print('Creating new IP for SCP VM')
-        while True:
-            rand_num = random.randint(1, 255)
-            ip = f'192.168.0.{rand_num}'
-            if ip not in used_ip_list:
-                print("Success to create new IP")
-                return ip
-
     def list_zones(self) -> List[dict]:
         """List zone ids for the project."""
         url = f'{API_ENDPOINT}/project/v3/projects/{self.project_id}/zones'
