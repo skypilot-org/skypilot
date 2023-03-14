@@ -88,7 +88,7 @@ class SCPNodeProvider(NodeProvider):
             launch_hash = hash_launch_conf(head_node_config, config['auth'])
             # Populate tags
             for node in vms:
-                self.metadata[node['id']] = {'tags':
+                self.metadata[node['virtualServerId']] = {'tags':
                     {
                         TAG_RAY_CLUSTER_NAME: cluster_name,
                         TAG_RAY_NODE_STATUS: STATUS_UP_TO_DATE,
@@ -98,21 +98,24 @@ class SCPNodeProvider(NodeProvider):
                         TAG_RAY_LAUNCH_CONFIG: launch_hash,
                     }}
 
-    def _list_instances_in_cluster(self) -> Dict[str, Any]:
+    def _list_instances_in_cluster(self) -> List[Dict[str, Any]]:
         """List running instances in cluster."""
         vms = self.scp_client.list_instances()
-        return [
-            node for node in vms
-            if node['virtualServerName'] == self.cluster_name
-        ]
+        node_list = []
+        for node in vms:
+            if node['virtualServerName'] == self.cluster_name:
+                node['external_ip'] = self.scp_client.get_external_ip(virtual_server_id=node['virtualServerId'],
+                                                                      ip=node['ip'])
+                node_list.append(node)
+
+        return node_list
 
     @synchronized
     def _get_filtered_nodes(self,
                             tag_filters: Dict[str, str]) -> Dict[str, Any]:
 
         def match_tags(vm):
-            return True
-            vm_info = self.metadata[vm['virtualServerName']]
+            vm_info = self.metadata[vm['virtualServerId']]
             tags = {} if vm_info is None else vm_info['tags']
             for k, v in tag_filters.items():
                 if tags.get(k) != v:
@@ -121,20 +124,20 @@ class SCPNodeProvider(NodeProvider):
 
         vms = self._list_instances_in_cluster()
         nodes = [self._extract_metadata(vm) for vm in filter(match_tags, vms)]
-        self.cached_nodes = {node['virtualServerName']: node for node in nodes}
+        self.cached_nodes = {node['virtualServerId']: node for node in nodes}
         return self.cached_nodes
 
     def _extract_metadata(self, vm: Dict[str, Any]) -> Dict[str, Any]:
-        metadata = {'virtualServerName': vm['virtualServerName'], 'status': vm['virtualServerState'], 'tags': {}}
-        # instance_info = self.metadata[vm['virtualServerName']]
-        # if instance_info is not None:
-        #     metadata['tags'] = instance_info['tags']
-        ip = vm['ip']
-        metadata['external_ip'] = ip
+        metadata = { 'virtualServerId': vm['virtualServerId'], 'virtualServerName': vm['virtualServerName'],
+                    'status': vm['virtualServerState'], 'tags': {}}
+        instance_info = self.metadata[vm['virtualServerId']]
+        if instance_info is not None:
+            metadata['tags'] = instance_info['tags']
         # TODO(ewzeng): The internal ip is hard to get, so set it to the
         # external ip as a hack. This should be changed in the future.
         #   https://docs.lambdalabs.com/cloud/learn-private-ip-address/
-        metadata['internal_ip'] = ip
+        metadata['internal_ip'] = vm['ip']
+        metadata['external_ip'] = vm['external_ip']
         return metadata
 
     def non_terminated_nodes(self, tag_filters: Dict[str, str]) -> List[str]:
@@ -234,17 +237,22 @@ class SCPNodeProvider(NodeProvider):
                 vm_info = self.scp_client.get_vm_info(vm_id)
                 if vm_info["virtualServerState"] == "RUNNING": break
 
+            external_ip = self.scp_client.get_external_ip(virtual_server_id=vm_info['virtualServerId'],
+                                                          ip=vm_info['ip'])
+            self.scp_client.set_ssh_key(external_ip=external_ip)
+            self.scp_client.set_default_config(external_ip=external_ip)
+
             subnet_undo_func_stack.append(lambda: self._del_vm(vm_id))
             vm_internal_ip = vm_info['ip']
             firewall_id, rule_id = self._add_firewall_inbound(vpc, vm_internal_ip)
             subnet_undo_func_stack.append(lambda: self._del_firwall_inbound(firewall_id, rule_id))
             # raise Exception("!!!!!!!!!!!!!!!!!!!!! vvvv")
 
-            return vm_id, vm_internal_ip, firewall_id, rule_id
+            return vm_id, vm_internal_ip, firewall_id, rule_id, external_ip
         except Exception as e:
             print(e)
             self._undo_funcs(subnet_undo_func_stack)
-            return None, None, None, None
+            return None, None, None, None, None
 
 
     def _undo_funcs(self, undo_func_list):
@@ -291,7 +299,7 @@ class SCPNodeProvider(NodeProvider):
 
             for subnet in subnets:
                 instance_config['nic']['subnetId'] = subnet
-                vm_id, vm_internal_ip, firewall_id, firewall_rule_id = self._create_instance_sequence(vpc, instance_config)
+                vm_id, vm_internal_ip, firewall_id, firewall_rule_id, vm_external_ip = self._create_instance_sequence(vpc, instance_config)
                 if vm_id:
                     SUCCESS = True
                     break
@@ -307,9 +315,10 @@ class SCPNodeProvider(NodeProvider):
         config_tags['firewallId'] = firewall_id
         config_tags['firewallRuleId'] = firewall_rule_id
         config_tags['securityGroupId'] = sg_id
+        config_tags['vmExternalIp'] = vm_external_ip
 
 
-        self.metadata[self.cluster_name] = {'tags': config_tags}
+        self.metadata[vm_id] = {'tags': config_tags}
 
 
     @synchronized
