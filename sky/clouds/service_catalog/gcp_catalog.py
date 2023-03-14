@@ -27,16 +27,16 @@ _TPU_REGIONS = [
 
 # We will select from the following three CPU instance families:
 _DEFAULT_INSTANCE_FAMILY = [
-    # This is the latest general-purpose instance family as of Jan 2023.
+    # This is the latest general-purpose instance family as of Mar 2023.
     # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
     # Memory: 4 GiB RAM per 1 vCPU;
     'n2-standard',
-    # This is the latest memory-optimized instance family as of Jan 2023.
-    # CPU: TBD
+    # This is the latest memory-optimized instance family as of Mar 2023.
+    # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
     # Memory: 8 GiB RAM per 1 vCPU;
     'n2-highmem',
-    # This is the latest compute-optimized instance family as of Jan 2023.
-    # CPU: TBD
+    # This is the latest compute-optimized instance family as of Mar 2023.
+    # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
     # Memory: 1 GiB RAM per 1 vCPU;
     'n2-highcpu',
 ]

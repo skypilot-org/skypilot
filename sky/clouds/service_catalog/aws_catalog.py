@@ -32,11 +32,11 @@ _DEFAULT_INSTANCE_FAMILY = [
     # Memory: 4 GiB RAM per 1 vCPU;
     'm6i',
     # This is the latest memory-optimized instance family as of Mar 2023.
-    # CPU: TBD
+    # CPU: Intel Ice Lake 8375C
     # Memory: 8 GiB RAM per 1 vCPU;
     'r6i',
     # This is the latest compute-optimized instance family as of Mar 2023.
-    # CPU: TBD
+    # CPU: Intel Ice Lake 8375C
     # Memory: 2 GiB RAM per 1 vCPU;
     'c6i',
 ]
