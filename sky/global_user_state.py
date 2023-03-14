@@ -396,6 +396,7 @@ def get_cluster_from_history_by_name(cluster_name: str) -> List[Optional[Any]]:
                               (cluster_name,)).fetchall()
     return rows
 
+
 def get_distinct_cluster_names_from_history() -> List[Optional[str]]:
     rows = _DB.cursor.execute(
         'SELECT DISTINCT name from cluster_history').fetchall()
@@ -406,6 +407,7 @@ def get_cluster_from_history_by_name(cluster_name: str) -> List[Optional[Any]]:
     rows = _DB.cursor.execute('SELECT * from cluster_history WHERE name=(?)',
                               (cluster_name,)).fetchall()
     return rows
+    
 
 def _get_cluster_usage_intervals(
         cluster_hash: Optional[str]
