@@ -397,18 +397,6 @@ def get_cluster_from_history_by_name(cluster_name: str) -> List[Optional[Any]]:
     return rows
 
 
-def get_distinct_cluster_names_from_history() -> List[Optional[str]]:
-    rows = _DB.cursor.execute(
-        'SELECT DISTINCT name from cluster_history').fetchall()
-    return rows
-
-
-def get_cluster_from_history_by_name(cluster_name: str) -> List[Optional[Any]]:
-    rows = _DB.cursor.execute('SELECT * from cluster_history WHERE name=(?)',
-                              (cluster_name,)).fetchall()
-    return rows
-
-
 def aggregate_records_by_name(cluster_name: str) -> Optional[Dict[str, Any]]:
 
     rows = _DB.cursor.execute('SELECT * from cluster_history WHERE name=(?)',
@@ -435,37 +423,25 @@ def aggregate_records_by_name(cluster_name: str) -> Optional[Dict[str, Any]]:
         else:
             record['duration'] += _get_cluster_duration(cluster_hash)
             record['usage_intervals'] += pickle.loads(usage_intervals)
-<<<<<<< HEAD
-=======
-            record['resources'] = pickle.loads(launched_resources)
-            record['num_nodes'] = num_nodes
->>>>>>> 97a20536 (lint and format)
 
     return record
->>>>>>> 61c23eae (add spot cost report)
 
-
-<<<<<<< HEAD
-def get_distinct_cluster_names_from_history() -> List[Optional[str]]:
-    rows = _DB.cursor.execute(
-        'SELECT DISTINCT name from cluster_history').fetchall()
-    return rows
-
-
-def get_cluster_from_history_by_name(cluster_name: str) -> List[Optional[Any]]:
-    rows = _DB.cursor.execute('SELECT * from cluster_history WHERE name=(?)',
-                              (cluster_name,)).fetchall()
-    return rows
-    
 
 def _get_cluster_usage_intervals(
         cluster_hash: Optional[str]
 ) -> Optional[List[Tuple[int, Optional[int]]]]:
     if cluster_hash is None:
         return None
-=======
-<<<<<<< HEAD
-=======
+    rows = _DB.cursor.execute(
+        'SELECT usage_intervals FROM cluster_history WHERE cluster_hash=(?)',
+        (cluster_hash,))
+    for (usage_intervals,) in rows:
+        if usage_intervals is None:
+            return None
+        return pickle.loads(usage_intervals)
+    return None
+
+    
 def get_split_view_records_by_name(
         cluster_name: str) -> Optional[Dict[str, Any]]:
 
@@ -495,19 +471,6 @@ def get_split_view_records_by_name(
         records.append(record)
 
     return records
-
-
->>>>>>> 97a20536 (lint and format)
-def _get_cluster_usage_intervals(cluster_hash: str) -> Optional[Dict[str, Any]]:
->>>>>>> 8df22022 (lint and format)
-    rows = _DB.cursor.execute(
-        'SELECT usage_intervals FROM cluster_history WHERE cluster_hash=(?)',
-        (cluster_hash,))
-    for (usage_intervals,) in rows:
-        if usage_intervals is None:
-            return None
-        return pickle.loads(usage_intervals)
-    return None
 
 
 def _get_cluster_launch_time(cluster_hash: str) -> Optional[int]:

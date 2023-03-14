@@ -714,6 +714,7 @@ def load_spot_cost_report(payload: str) -> List[Dict[str, Any]]:
     cost_report = common_utils.decode_payload(payload)
     return cost_report
 
+
 def format_cost_table(reports: List[Dict[str, Any]]) -> str:
     """Show all spot costs."""
     columns = [

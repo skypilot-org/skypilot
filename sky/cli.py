@@ -1762,7 +1762,6 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
               is_flag=True,
               required=False,
               help='Show all information in full.')
-<<<<<<< HEAD
 @click.option('--condensed',
               '-c',
               default=False,
@@ -1776,16 +1775,6 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
 def cost_report(all: bool, condensed: bool, clusters: List[str]):  # pylint: disable=redefined-builtin
-=======
-@click.option('--cluster',
-              '-c',
-              default=None,
-              type=str,
-              required=False,
-              help='Specify a cluster name to report cost for.')
-@usage_lib.entrypoint
-def cost_report(all: bool, cluster: str):  # pylint: disable=redefined-builtin
->>>>>>> 21bad003 (address almost all PR comments)
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show estimated costs for launched clusters.
 
@@ -1804,8 +1793,6 @@ def cost_report(all: bool, cluster: str):  # pylint: disable=redefined-builtin
 
     - Clusters that were terminated/stopped on the cloud console.
     """
-<<<<<<< HEAD
-<<<<<<< HEAD
     if all and len(clusters) > 0:
         click.secho('Either specify --all or --cluster, not both', fg='yellow')
         return
@@ -1816,24 +1803,6 @@ def cost_report(all: bool, cluster: str):  # pylint: disable=redefined-builtin
         return
     cluster_records = core.cost_report(clusters, condensed)
 
-=======
-<<<<<<< HEAD
-    cluster_records = core.cost_report()
-=======
-=======
->>>>>>> 97a20536 (lint and format)
-
-    if all and cluster is not None:
-        click.secho('Either specify --all or --cluster, not both', fg='yellow')
-        return
-    cluster_records = core.cost_report(cluster)
-<<<<<<< HEAD
-    
->>>>>>> 2bad0924 (address almost all PR comments)
->>>>>>> 21bad003 (address almost all PR comments)
-=======
-
->>>>>>> 97a20536 (lint and format)
     nonreserved_cluster_records = []
     reserved_clusters = dict()
     for cluster_record in cluster_records:
@@ -3680,17 +3649,7 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
 _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 
 
-<<<<<<< HEAD
 @spot.command('cost-report', cls=_DocumentedCodeCommand)
-=======
-@spot.command('cost', cls=_DocumentedCodeCommand)
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all information in full.')
->>>>>>> 8fa31ba9 (add spot cost report)
 @click.option(
     '--refresh',
     '-r',
@@ -3699,7 +3658,6 @@ _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
     required=False,
     help='Query the latest statuses, restarting the spot controller if stopped.'
 )
-<<<<<<< HEAD
 @click.option('--condensed',
               '-c',
               default=False,
@@ -3709,29 +3667,12 @@ _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def spot_cost_report(refresh: bool, condensed: bool):
-=======
-@click.option(
-    '--verbose',
-    '-s',
-    default=True,
-    is_flag=True,
-    required=False,
-    help='Query the latest statuses, restarting the spot controller if stopped.'
-)
-@usage_lib.entrypoint
-# pylint: disable=redefined-builtin
-def spot_cost_report(refresh: bool, verbose: bool):
->>>>>>> f6f00092 (untested changes to address feature reqs in pr comments)
     """Show cost report of managed spot jobs.
     """
     click.secho('Fetching managed spot job costs...', fg='yellow')
     no_costs_found_str = '  No job costs found.'
     try:
-<<<<<<< HEAD
         cost_table = core.spot_cost_report(refresh, condensed)
-=======
-        cost_table = core.spot_cost_report(refresh, verbose)
->>>>>>> f6f00092 (untested changes to address feature reqs in pr comments)
     except exceptions.ClusterNotUpError:
         with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
             _, msg = _get_spot_jobs(refresh=refresh,
