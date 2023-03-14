@@ -50,8 +50,8 @@ def session():
 
 @functools.lru_cache()
 @import_package
-def resource(resource_name: str):
-    """Create an Cloudflare resource.
+def resource(resource_name: str, **kwargs):
+    """Create a Cloudflare resource.
 
     Args:
         resource_name: Cloudflare resource name (e.g., 's3').
