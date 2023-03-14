@@ -66,7 +66,7 @@ class SCPNodeProvider(NodeProvider):
         # a previous cluster was autodowned and has the same name as the
         # current cluster, then self.metadata might load the old tag file.
         # We prevent this by removing any old vms in the tag file.
-        self.metadata.refresh([node['id'] for node in vms])
+        self.metadata.refresh([node['virtualServerId'] for node in vms])
 
         # If tag file does not exist on head, create it and add basic tags.
         # This is a hack to make sure that ray on head can access some
@@ -235,16 +235,16 @@ class SCPNodeProvider(NodeProvider):
                 if vm_info["virtualServerState"] == "RUNNING": break
 
             subnet_undo_func_stack.append(lambda: self._del_vm(vm_id))
-
-            firewall_id, rule_id = self._add_firewall_inbound(vpc, vm_info['ip'])
+            vm_internal_ip = vm_info['ip']
+            firewall_id, rule_id = self._add_firewall_inbound(vpc, vm_internal_ip)
             subnet_undo_func_stack.append(lambda: self._del_firwall_inbound(firewall_id, rule_id))
             # raise Exception("!!!!!!!!!!!!!!!!!!!!! vvvv")
 
-            return vm_id
+            return vm_id, vm_internal_ip, firewall_id, rule_id
         except Exception as e:
             print(e)
             self._undo_funcs(subnet_undo_func_stack)
-            return None
+            return None, None, None, None
 
 
     def _undo_funcs(self, undo_func_list):
@@ -291,19 +291,25 @@ class SCPNodeProvider(NodeProvider):
 
             for subnet in subnets:
                 instance_config['nic']['subnetId'] = subnet
-                vm_id = self._create_instance_sequence(vpc, instance_config)
+                vm_id, vm_internal_ip, firewall_id, firewall_rule_id = self._create_instance_sequence(vpc, instance_config)
                 if vm_id:
                     SUCCESS = True
                     break
             if SUCCESS: break
             else: self._del_security_group(sg_id)
 
-        # raise Exception("!!!!!!!!!!!!", instance_config)
 
         if not SUCCESS:
-            raise SCPError("VM is not")
+            raise SCPError("VM cannot created")
 
-        self.metadata[vm_id] = {'tags': config_tags}
+        config_tags['virtualServerId'] = vm_id
+        config_tags['vmInternalIp'] =vm_internal_ip
+        config_tags['firewallId'] = firewall_id
+        config_tags['firewallRuleId'] = firewall_rule_id
+        config_tags['securityGroupId'] = sg_id
+
+
+        self.metadata[self.cluster_name] = {'tags': config_tags}
 
 
     @synchronized
@@ -315,6 +321,7 @@ class SCPNodeProvider(NodeProvider):
 
     def terminate_node(self, node_id: str) -> None:
         """Terminates the specified node."""
+        raise Exception("!!!!!!!!!!", node_id)
         self.scp_client.remove_instances(node_id)
         self.metadata[node_id] = None
 
