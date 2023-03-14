@@ -150,7 +150,8 @@ def cost_report(cluster_names: List[str],
 
     filtered_reports = []
     for cluster_report in cluster_reports:
-        cluster_report['total_cost'] = cost_utils.get_total_cost(cluster_report)
+        cluster_report['total_cost'] = global_user_state.get_total_cost(
+            cluster_report)
         if len(cluster_names) == 0:
             filtered_reports.append(cluster_report)
         elif cluster_report['name'] in cluster_names:
