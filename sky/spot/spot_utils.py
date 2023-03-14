@@ -709,6 +709,10 @@ def dump_spot_cost(condensed: bool) -> str:
     return common_utils.encode_payload(cluster_reports)
 
 
+def load_spot_cost_report(payload: str) -> List[Dict[str, Any]]:
+    """Load job costs from json string."""
+    cost_report = common_utils.decode_payload(payload)
+    return cost_report
 
 def format_cost_table(reports: List[Dict[str, Any]]) -> str:
     """Show all spot costs."""
