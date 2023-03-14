@@ -1454,8 +1454,10 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
         for endpoint in tpuvm_json['networkEndpoints']:
             # Note: if TPU VM is being preempted, its IP field may not exist.
             # We use get() to avoid KeyError.
-            ip = (endpoint.get('ipAddress', None) if get_internal_ips else
-                  endpoint['accessConfig'].get('externalIp', None))
+            if get_internal_ips:
+                ip = endpoint.get('ipAddress', None)
+            else:
+                ip = endpoint['accessConfig'].get('externalIp', None)
             if ip is not None:
                 ips.append(ip)
         all_ips.extend(ips)
@@ -1791,8 +1793,10 @@ def _update_cluster_status_no_lock(
         # If we get node ips correctly, the cluster is UP. It is safe to
         # set the status to UP, as the `handle.external_ips` function uses ray
         # to fetch IPs and starting ray is the final step of sky launch.
-        # For spot clusters, the above can be unsafe.
-        # Additionally, we need to query the cloud provider.
+        # For spot clusters, the above can be unsafe because the Ray cluster
+        # may remain healty for a while before the cloud completely
+        # terminates the VMs.
+        # Additionally, we query the VM state from the cloud provider.
         if not use_spot:
             record['status'] = global_user_state.ClusterStatus.UP
             global_user_state.add_or_update_cluster(cluster_name,
@@ -1809,10 +1813,10 @@ def _update_cluster_status_no_lock(
     # 2) the cluster is a spot cluster.
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
 
-    all_up = (all(status == global_user_state.ClusterStatus.UP
-                  for status in node_statuses) and
-              len(node_statuses) == handle.launched_nodes)
-    if ray_cluster_up and all_up:
+    all_nodes_up = (all(status == global_user_state.ClusterStatus.UP
+                        for status in node_statuses) and
+                    len(node_statuses) == handle.launched_nodes)
+    if ray_cluster_up and all_nodes_up:
         record['status'] = global_user_state.ClusterStatus.UP
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
