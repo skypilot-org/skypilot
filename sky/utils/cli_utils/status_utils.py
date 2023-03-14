@@ -161,7 +161,7 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
                      _get_price_for_cost_report,
                      show_by_default=True),
         StatusColumn('COST (est.)',
-                     _get_estimated_cost_for_cost_report)
+                     _get_estimated_cost_for_cost_report),
     ]
 
     columns = []

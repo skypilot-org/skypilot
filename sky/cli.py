@@ -1762,13 +1762,19 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
               is_flag=True,
               required=False,
               help='Show all information in full.')
-@click.argument('cluster',
+@click.option('--condensed',
+              '-c',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Aggregate entries by cluster name(s)')
+@click.argument('clusters',
                 required=False,
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
-def cost_report(all: bool, cluster: Optional[str]):  # pylint: disable=redefined-builtin
+def cost_report(all: bool, condensed: bool, clusters: List[str]):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show estimated costs for launched clusters.
 
@@ -1787,11 +1793,15 @@ def cost_report(all: bool, cluster: Optional[str]):  # pylint: disable=redefined
 
     - Clusters that were terminated/stopped on the cloud console.
     """
-    cluster = cluster[0]
-    if all and cluster is not None:
+    if all and len(clusters) > 0:
         click.secho('Either specify --all or --cluster, not both', fg='yellow')
         return
-    cluster_records = core.cost_report(cluster)
+    if condensed and len(clusters) == 0:
+        click.secho(
+            'Please specify cluster name(s) to aggregate by for --condensed',
+            fg='yellow')
+        return
+    cluster_records = core.cost_report(clusters, condensed)
 
     nonreserved_cluster_records = []
     reserved_clusters = dict()
@@ -1804,7 +1814,7 @@ def cost_report(all: bool, cluster: Optional[str]):  # pylint: disable=redefined
             # to display most recent entry for each reserved cluster
             # TODO(sgurram): fix assumption of sorted order of clusters
             if cluster_group_name not in reserved_clusters:
-                for aggregated_record in core.cost_report(cluster_name):
+                for aggregated_record in core.cost_report(cluster_name, True):
                     reserved_clusters[cluster_group_name] = aggregated_record
         else:
             nonreserved_cluster_records.append(cluster_record)
@@ -3639,13 +3649,8 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
 _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 
 
-@spot.command('cost', cls=_DocumentedCodeCommand)
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all information in full.')
+
+@spot.command('cost-report', cls=_DocumentedCodeCommand)
 @click.option(
     '--refresh',
     '-r',
@@ -3659,7 +3664,7 @@ _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
               default=False,
               is_flag=True,
               required=False,
-              help='If true, do not show verbose breakdown of spot job costs.')
+              help='If true,  breakdown of spot job preemptions.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def spot_cost_report(refresh: bool, condensed: bool):
@@ -3667,11 +3672,17 @@ def spot_cost_report(refresh: bool, condensed: bool):
     """
     click.secho('Fetching managed spot job costs...', fg='yellow')
     no_costs_found_str = '  No job costs found.'
-    verbose = not condensed
     try:
-        cost_table = core.spot_cost_report(refresh, verbose)
+        cost_table = core.spot_cost_report(refresh, condensed)
     except exceptions.ClusterNotUpError:
+        with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
+            _, msg = _get_spot_jobs(refresh=refresh,
+                                    skip_finished=False,
+                                    show_all=True)
 
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Managed spot jobs{colorama.Style.RESET_ALL}'
+                   f'\n{msg}')
         return
 
     if not cost_table:

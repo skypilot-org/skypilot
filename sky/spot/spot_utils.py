@@ -542,6 +542,7 @@ def format_job_table(
       list of "rows" (each of which is a list of str).
     """
 
+
     columns = [
         'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
         'JOB DURATION', '#RECOVERIES', 'STATUS'
@@ -687,8 +688,8 @@ def load_spot_cost_report(payload: str) -> List[Dict[str, Any]]:
     cost_report = common_utils.decode_payload(payload)
     return cost_report
 
-def dump_spot_cost(verbose: bool) -> str:
-    cluster_reports = cost_utils.aggregate_all_records(verbose)
+def dump_spot_cost(condensed: bool) -> str:
+    cluster_reports = cost_utils.aggregate_all_records(condensed)
 
     seen_cluster_names = set()
 
@@ -712,12 +713,6 @@ def dump_spot_cost(verbose: bool) -> str:
             cluster_report['name'] = ''
 
     return common_utils.encode_payload(cluster_reports)
-
-
-def load_spot_cost_report(payload: str) -> List[Dict[str, Any]]:
-    """Load job costs from json string."""
-    cost_report = common_utils.decode_payload(payload)
-    return cost_report
 
 
 def format_cost_table(reports: List[Dict[str, Any]]) -> str:
@@ -836,9 +831,9 @@ class SpotCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_cost_report(cls, verbose: bool) -> str:
+    def get_cost_report(cls, condensed: bool) -> str:
         code = [
-            f'spot_cost_table=spot_utils.dump_spot_cost(verbose={verbose})',
+            f'spot_cost_table=spot_utils.dump_spot_cost({condensed})',
             'print(spot_cost_table, flush=True)',
         ]
         return cls._build(code)

@@ -111,7 +111,8 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
 
 
 @usage_lib.entrypoint
-def cost_report(cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
+def cost_report(cluster_names: List[str],
+                aggregate_by_cluster_name: bool) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
@@ -142,20 +143,18 @@ def cost_report(cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
         A list of dicts, with each dict containing the cost information of a
         cluster.
     """
-    # aggregate records for spot controller
-    if cluster_name is not None:
-        cluster_reports = cost_utils.aggregate_all_records(verbose=False)
+    if aggregate_by_cluster_name:
+        cluster_reports = cost_utils.aggregate_all_records(condensed=True)
     else:
         cluster_reports = global_user_state.get_clusters_from_history()
 
     filtered_reports = []
     for cluster_report in cluster_reports:
         cluster_report['total_cost'] = cost_utils.get_total_cost(cluster_report)
-        if cluster_name is None:
+        if len(cluster_names) == 0:
             filtered_reports.append(cluster_report)
-        elif cluster_report['name'] == cluster_name:
+        elif cluster_report['name'] in cluster_names:
             filtered_reports.append(cluster_report)
-
     return filtered_reports
 
 
@@ -931,7 +930,7 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
 
 
 @usage_lib.entrypoint
-def spot_cost_report(refresh: bool, verbose: bool) -> List[Dict[str, Any]]:
+def spot_cost_report(refresh: bool, condensed: bool) -> List[Dict[str, Any]]:
 
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get statuses of managed spot jobs.
@@ -985,7 +984,7 @@ def spot_cost_report(refresh: bool, verbose: bool) -> List[Dict[str, Any]]:
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = spot.SpotCodeGen.get_cost_report(verbose)
+    code = spot.SpotCodeGen.get_cost_report(condensed)
 
     returncode, job_costs_payload, stderr = backend.run_on_head(
         handle,

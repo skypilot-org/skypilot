@@ -4,8 +4,8 @@ import colorama
 from sky import global_user_state
 
 
-def get_cost_report(cluster_status):
-    cost = cluster_status['total_cost']
+def get_cost_from_record(record):
+    cost = record['total_cost']
 
     if not cost:
         return '-'
@@ -13,19 +13,19 @@ def get_cost_report(cluster_status):
     return f'${cost:.3f}'
 
 
-def get_status_for_cost_report(cluster_status):
+def get_status_for_cost_report(record):
     status = None
-    if 'status' in cluster_status:
-        status = cluster_status['status']
+    if 'status' in record:
+        status = record['status']
 
     if status is None:
         return f'{colorama.Style.DIM}{"TERMINATED"}{colorama.Style.RESET_ALL}'
     return status.colored_str()
 
 
-def get_resources_for_cost_report(cluster_status):
-    launched_nodes = cluster_status['num_nodes']
-    launched_resources = cluster_status['resources']
+def get_resources_for_cost_report(record):
+    launched_nodes = record['num_nodes']
+    launched_resources = record['resources']
 
     launched_resource_str = str(launched_resources)
     resources_str = (f'{launched_nodes}x '
@@ -34,23 +34,25 @@ def get_resources_for_cost_report(cluster_status):
     return resources_str
 
 
-def aggregate_all_records(verbose: bool) -> List[Dict[str, Any]]:
+def aggregate_all_records(condensed: bool) -> List[Dict[str, Any]]:
     rows = global_user_state.get_distinct_cluster_names_from_history()
     records = global_user_state.get_clusters_from_history()
 
     agg_records: List[Dict[str, Any]] = []
 
     for (cluster_name,) in rows:
-        if verbose:
-            agg_records += get_split_view_records_by_name(cluster_name, records)
+        if condensed:
+            agg_records.append(_aggregate_records_by_name(
+                cluster_name, records))
         else:
-            agg_records.append(aggregate_records_by_name(cluster_name, records))
+            agg_records += _get_non_condensed_records_by_name(
+                cluster_name, records)
 
     return agg_records
 
 
-def aggregate_records_by_name(cluster_name: str,
-                              records: List[Any]) -> Dict[str, Any]:
+def _aggregate_records_by_name(cluster_name: str,
+                               records: List[Any]) -> Dict[str, Any]:
     agg_record: Dict[str, Any] = {}
 
     for record in records:
@@ -75,8 +77,8 @@ def aggregate_records_by_name(cluster_name: str,
     return agg_record
 
 
-def get_split_view_records_by_name(cluster_name: str,
-                                   records: List[Any]) -> List[Dict[str, Any]]:
+def _get_non_condensed_records_by_name(
+        cluster_name: str, records: List[Any]) -> List[Dict[str, Any]]:
 
     agg_records: List[Dict[str, Any]] = []
     total_duration = 0
