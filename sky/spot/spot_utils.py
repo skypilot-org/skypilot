@@ -536,7 +536,6 @@ def format_job_table(
       list of "rows" (each of which is a list of str).
     """
 
-
     columns = [
         'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
         'JOB DURATION', '#RECOVERIES', 'STATUS'
@@ -677,10 +676,6 @@ def format_job_table(
         return job_table.rows
     return output
 
-def load_spot_cost_report(payload: str) -> List[Dict[str, Any]]:
-    """Load job costs from json string."""
-    cost_report = common_utils.decode_payload(payload)
-    return cost_report
 
 def dump_spot_cost(condensed: bool) -> str:
     cluster_reports = cost_utils.aggregate_all_records(condensed)
