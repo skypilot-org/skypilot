@@ -362,8 +362,7 @@ class Azure(clouds.Cloud):
                         'Failed to import knack. To install the dependencies for Azure, '
                         'Please install SkyPilot with: '
                         f'{colorama.Style.BRIGHT}pip install skypilot[azure]'
-                        f'{colorama.Style.RESET_ALL}'
-                    ) from e
+                        f'{colorama.Style.RESET_ALL}') from e
             try:
                 account_email = azure.get_current_account_user()
                 break
