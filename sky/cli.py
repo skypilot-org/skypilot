@@ -3218,13 +3218,13 @@ def spot():
 @click.option(
     '--retry-until-up',
     '-r',
-    default=False,
+    default=True,
     is_flag=True,
     required=False,
     help=('Whether to retry provisioning infinitely until the cluster is up, '
           'if we fail to launch the cluster on any possible region/cloud due '
           'to unavailability errors. This applies to launching the the spot '
-          'clusters (both initial and recovery attempts).'))
+          'clusters (both initial and recovery attempts). Default: True.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
