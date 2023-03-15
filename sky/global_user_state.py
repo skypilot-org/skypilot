@@ -110,6 +110,8 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'cluster_hash',
                                  'TEXT DEFAULT null')
 
+    db_utils.add_column_to_table(cursor, conn, 'cluster_history', 'autostop',
+                                 'INTEGER DEFAULT -1')
     conn.commit()
 
 
@@ -275,7 +277,7 @@ def add_or_update_cluster(cluster_name: str,
     _DB.cursor.execute(
         'INSERT or REPLACE INTO cluster_history'
         '(cluster_hash, name, num_nodes, requested_resources, '
-        'launched_resources, usage_intervals) '
+        'launched_resources, usage_intervals, autostop) '
         'VALUES ('
         # hash
         '?, '
@@ -288,7 +290,13 @@ def add_or_update_cluster(cluster_name: str,
         # number of nodes
         '?, '
         # usage intervals
-        '?)',
+        '?, '
+        # autostop
+        # Keep the old autostop value if it exists, otherwise set it to
+        # default -1.
+        'COALESCE('
+        '(SELECT autostop FROM clusters WHERE name=? AND status!=?), -1) '
+        ')',
         (
             # hash
             cluster_hash,
@@ -302,6 +310,9 @@ def add_or_update_cluster(cluster_name: str,
             pickle.dumps(cluster_handle.launched_resources),
             # usage intervals
             pickle.dumps(usage_intervals),
+            # autostop
+            cluster_name,
+            ClusterStatus.STOPPED.value,
         ))
 
     _DB.conn.commit()
@@ -558,7 +569,8 @@ def get_clusters() -> List[Dict[str, Any]]:
 def get_clusters_from_history() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
         'SELECT ch.cluster_hash, ch.name, ch.num_nodes, '
-        'ch.launched_resources, ch.usage_intervals, clusters.status  '
+        'ch.launched_resources, ch.usage_intervals,  '
+        'ch.autostop, clusters.status '
         'FROM cluster_history ch '
         'LEFT OUTER JOIN clusters '
         'ON ch.cluster_hash=clusters.cluster_hash ').fetchall()
@@ -576,8 +588,9 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             num_nodes,
             launched_resources,
             usage_intervals,
+            autostop,
             status,
-        ) = row[:6]
+        ) = row[:7]
 
         if status is not None:
             status = ClusterStatus[status]
@@ -590,6 +603,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             'resources': pickle.loads(launched_resources),
             'cluster_hash': cluster_hash,
             'usage_intervals': pickle.loads(usage_intervals),
+            'autostop': autostop,
             'status': status,
         }
 

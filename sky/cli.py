@@ -1649,13 +1649,13 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     nonreserved_cluster_records = []
     reserved_clusters = dict()
     for cluster_record in cluster_records:
+        cluster_record = status_utils.nullify_cost_for_autostop(cluster_record)
         cluster_name = cluster_record['name']
         if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
             cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
                 cluster_name]
-            reserved_clusters[
-                cluster_group_name] = status_utils.nullify_cost_for_autostop(
-                    cluster_record)
+            if cluster_group_name not in reserved_clusters:
+                reserved_clusters[cluster_group_name] = cluster_record
         else:
             nonreserved_cluster_records.append(cluster_record)
 

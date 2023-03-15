@@ -105,7 +105,9 @@ def show_status_table(cluster_records: List[_ClusterRecord],
 
 
 def nullify_cost_for_autostop(cluster_record: Dict[str, Any]):
-    cluster_record['total_cost'] = 0
+    # check that cluster has autostop
+    if cluster_record['autostop'] >= 0:
+        cluster_record['total_cost'] = 0
     return cluster_record
 
 
