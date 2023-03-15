@@ -8,7 +8,7 @@ files required by the task. Think of it as a bucket of files that can be attache
 to your task. Compared to file_mounts, storage is faster and
 can persist across runs, requiring fewer uploads from your local machine.
 Behind the scenes, storage automatically uploads all data in the source
-to a backing object store in a particular cloud (S3/GCS/Azure Blob).
+to a backing object store in a particular cloud (S3/GCS/R2).
 
 A storage object is used by "mounting" it to a task. On mounting, the data
 specified in the source becomes available at the destination mount path.
@@ -32,7 +32,7 @@ SkyPilot Storage can be used by specifying additional fields in the
 :code:`file_mounts`. By default, :code:`file_mounts` uses rsync to
 directly copy files from local to remote VM.
 However, you can have them backed by SkyPilot Storage, which uploads
-the files to a cloud store (e.g. S3, GCS) and have them persist there by
+the files to a cloud store (e.g. S3, GCS, R2) and have them persist there by
 specifying the :code:`name`, :code:`source` and :code:`persistent` fields. By
 enabling persistence, file_mount sync can be made significantly faster.
 
@@ -42,13 +42,13 @@ Your usage of SkyPilot Storage can fall under four broad use cases:
     source fields. Name sets the bucket name that will be used, and source
     specifies the local path to be uploaded.
 
-2.  **You want to mount an existing S3/GCS bucket to your remote VM -** specify
-    just the source field (e.g., s3://my-bucket/)
+2.  **You want to mount an existing S3/GCS/R2 bucket to your remote VM -** specify
+    just the source field (e.g., s3://my-bucket/, gs://my-bucket/ or r2://my-bucket/).
 
-3.  **You want to have a write-able path to directly write files to S3 or GCS buckets
+3.  **You want to have a write-able path to directly write files to cloud buckets
     -** specify a name (to create a bucket if it doesn't exist) and set the mode
     to MOUNT. This is useful for writing code outputs, such as checkpoints or
-    logs directly to a S3 or GCS bucket.
+    logs directly to a cloud bucket.
 
 4.  **You want to have a shared file-system across workers running on different
     nodes -** specify a name (to create a bucket if it doesn't exist) and set
@@ -273,12 +273,12 @@ Storage YAML reference
       sky.Storage.source: str
         The source attribute specifies the local path that must be made available
         in the storage object. It can either be a local path or a list of local
-        paths or it can be a remote path (s3://, gs://).
+        paths or it can be a remote path (s3://, gs://, r2://).
         If the source is local, data is uploaded to the cloud to an appropriate
-        object store (s3 or gcs). If the path is remote, the data is copied
+        object store (s3, gcs or r2). If the path is remote, the data is copied
         or mounted directly (see mode flag below).
 
-      sky.Storage.store: str; either of 's3' or 'gcs'
+      sky.Storage.store: str; either of 's3', 'gcs' or 'r2'
         If you wish to force sky.Storage to be backed by a specific cloud object
         store, you can specify it here.
 
