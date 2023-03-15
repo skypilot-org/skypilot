@@ -4,7 +4,7 @@ import colorama
 from sky import global_user_state
 
 
-def get_cost_from_record(record):
+def get_cost_from_record(record: Dict[str, Any]) -> str:
     cost = record['total_cost']
 
     if not cost:
@@ -13,7 +13,7 @@ def get_cost_from_record(record):
     return f'${cost:.3f}'
 
 
-def get_status_for_cost_report(record):
+def get_status_for_cost_report(record: Dict[str, Any]) -> str:
     status = None
     if 'status' in record:
         status = record['status']
@@ -23,7 +23,7 @@ def get_status_for_cost_report(record):
     return status.colored_str()
 
 
-def get_resources_for_cost_report(record):
+def get_resources_for_cost_report(record: Dict[str, Any]) -> str:
     launched_nodes = record['num_nodes']
     launched_resources = record['resources']
 

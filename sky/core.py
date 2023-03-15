@@ -955,6 +955,8 @@ def spot_cost_report(refresh: bool, condensed: bool) -> List[Dict[str, Any]]:
         ]
     Raises:
         sky.exceptions.ClusterNotUpError: the spot controller is not up.
+        RuntimeError: failed to fetch job cost report.
+
     """
 
     stop_msg = ''

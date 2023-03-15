@@ -700,6 +700,9 @@ def dump_spot_cost(condensed: bool) -> str:
 
         else:
             cluster_report['name'] = ''
+            cluster_report['resources'] = '-'
+            cluster_report['num_nodes'] = '-'
+            cluster_report['region'] = '-'
 
     return common_utils.encode_payload(cluster_reports)
 
