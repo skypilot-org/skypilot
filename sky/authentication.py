@@ -20,7 +20,6 @@ from sky import sky_logging
 from sky.adaptors import gcp
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
-from sky.utils import ux_utils
 from sky.skylet.providers.lambda_cloud import lambda_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -199,26 +198,8 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(
             f'OS Login is enabled for GCP project {project_id}. Running '
             'additional authentication steps.')
-        # Read the account information from the credential file, since the user
-        # should be set according the account, when the oslogin is enabled.
-        config_path = os.path.expanduser(clouds.gcp.GCP_CONFIG_PATH)
-        sky_backup_config_path = os.path.expanduser(
-            clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH)
-        assert os.path.exists(sky_backup_config_path), (
-            'GCP credential backup file '
-            f'{sky_backup_config_path!r} does not exist.')
-
-        with open(sky_backup_config_path, 'r') as infile:
-            for line in infile:
-                if line.startswith('account'):
-                    account = line.split('=')[1].strip()
-                    break
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        'GCP authentication failed, as the oslogin is enabled '
-                        f'but the file {config_path} does not contain the '
-                        'account information.')
+        account = clouds.gcp.GCP.get_current_user_identity()
+        account = account.split(' ')[0]
         config['auth']['ssh_user'] = account.replace('@', '_').replace('.', '_')
 
         # Add ssh key to GCP with oslogin
