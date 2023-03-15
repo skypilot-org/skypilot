@@ -465,7 +465,7 @@ class GCP(clouds.Cloud):
             project_id = cls.get_project_id()
 
             # Check if the user is activated.
-            cls.get_current_user_identity()
+            identity = cls.get_current_user_identity()
         except (auth.exceptions.DefaultCredentialsError,
                 subprocess.CalledProcessError,
                 exceptions.CloudUserIdentityError, FileNotFoundError,
@@ -550,11 +550,10 @@ class GCP(clouds.Cloud):
             diffs = set(GCP_PREMISSION_CHECK_LIST).difference(
                 set(ret_permissions))
             return False, (
-                'You do not have below required permissions to access '
-                'the project.\n    '
+                'The following permissions are not enabled for the current '
+                f'GCP identity ({identity}):\n    '
                 f'{diffs}\n    '
-                'Visit https://skypilot.readthedocs.io/en/latest/reference/faq.html#what-are-the-required-iam-permissons-on-gcp-for-skypilot for details.')  # pylint: disable=line-too-long
-
+                'For more details, visit: https://skypilot.readthedocs.io/en/latest/reference/faq.html#what-are-the-required-iam-permissons-on-gcp-for-skypilot')  # pylint: disable=line-too-long
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
