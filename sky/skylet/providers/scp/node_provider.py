@@ -228,7 +228,7 @@ class SCPNodeProvider(NodeProvider):
 
 
     def _create_instance_sequence(self, vpc, instance_config):
-        subnet_undo_func_stack = []
+        undo_func_stack = []
         try:
             response = self.scp_client.create_instance(instance_config)
             vm_id = response.get('resourceId', None)
@@ -237,22 +237,17 @@ class SCPNodeProvider(NodeProvider):
                 vm_info = self.scp_client.get_vm_info(vm_id)
                 if vm_info["virtualServerState"] == "RUNNING": break
 
-            external_ip = self.scp_client.get_external_ip(virtual_server_id=vm_info['virtualServerId'],
-                                                          ip=vm_info['ip'])
-            self.scp_client.set_ssh_key(external_ip=external_ip)
-            self.scp_client.set_default_config(external_ip=external_ip)
-
-            subnet_undo_func_stack.append(lambda: self._del_vm(vm_id))
             vm_internal_ip = vm_info['ip']
+            undo_func_stack.append(lambda: self._del_vm(vm_id))
             firewall_id, rule_id = self._add_firewall_inbound(vpc, vm_internal_ip)
-            subnet_undo_func_stack.append(lambda: self._del_firwall_inbound(firewall_id, rule_id))
-            # raise Exception("!!!!!!!!!!!!!!!!!!!!! vvvv")
+            undo_func_stack.append(lambda: self._del_firwall_inbound(firewall_id, rule_id))
 
-            return vm_id, vm_internal_ip, firewall_id, rule_id, external_ip
+            return vm_id, vm_internal_ip, firewall_id, rule_id
+
         except Exception as e:
             print(e)
-            self._undo_funcs(subnet_undo_func_stack)
-            return None, None, None, None, None
+            self._undo_funcs(undo_func_stack)
+            return None, None, None, None
 
 
     def _undo_funcs(self, undo_func_list):
@@ -294,28 +289,32 @@ class SCPNodeProvider(NodeProvider):
             sg_id = self._config_security_group(zone_config.zone_id,
                                         zone_config.get_product_group("NETWORKING:Security Group"),
                                         vpc, self.cluster_name+"_sg") #sg_name
-
             instance_config['securityGroupIds'] =[sg_id]
-
             for subnet in subnets:
                 instance_config['nic']['subnetId'] = subnet
-                vm_id, vm_internal_ip, firewall_id, firewall_rule_id, vm_external_ip = self._create_instance_sequence(vpc, instance_config)
+                vm_id, vm_internal_ip, firewall_id, firewall_rule_id = self._create_instance_sequence(vpc, instance_config)
                 if vm_id:
                     SUCCESS = True
                     break
             if SUCCESS: break
             else: self._del_security_group(sg_id)
 
-
         if not SUCCESS:
-            raise SCPError("VM cannot created")
+            raise SCPError("Cannot create VM")
+
+        try:
+            external_ip = self.scp_client.get_external_ip(virtual_server_id=vm_id, ip=vm_internal_ip)
+            self.scp_client.set_ssh_key(external_ip=external_ip)
+            self.scp_client.set_default_config(external_ip=external_ip)
+        except: raise SCPError("SSH Init Error")
+
 
         config_tags['virtualServerId'] = vm_id
         config_tags['vmInternalIp'] =vm_internal_ip
         config_tags['firewallId'] = firewall_id
         config_tags['firewallRuleId'] = firewall_rule_id
         config_tags['securityGroupId'] = sg_id
-        config_tags['vmExternalIp'] = vm_external_ip
+        config_tags['vmExternalIp'] = external_ip
 
 
         self.metadata[vm_id] = {'tags': config_tags}
@@ -330,7 +329,7 @@ class SCPNodeProvider(NodeProvider):
 
     def terminate_node(self, node_id: str) -> None:
         """Terminates the specified node."""
-        raise Exception("!!!!!!!!!!", node_id)
+        raise Exception("!!!!!!!!!!", self.metadata[node_id])
         self.scp_client.remove_instances(node_id)
         self.metadata[node_id] = None
 

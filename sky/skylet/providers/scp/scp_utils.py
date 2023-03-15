@@ -218,11 +218,9 @@ class SCPClient:
                 instance_ids[0] # TODO(ewzeng) don't hardcode
             ]
         })
-        response = requests.post(f'{API_ENDPOINT}/virtual-server/instance-operations/terminate',
-                                 data=data,
-                                 headers=self.headers)
-        raise_scp_error(response)
-        return response.json().get('data', []).get('terminated_instances', [])
+        url = f'{API_ENDPOINT}/virtual-server/instance-operations/terminate'
+
+        return self._post(url, data).get('data', []).get('terminated_instances', [])
 
     def terminate_instance(self, vm_id):
         url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{vm_id}'
@@ -288,14 +286,7 @@ class SCPClient:
     def list_nic_details(self, virtual_server_id) -> List[dict]:
         """List existing instances."""
         url = f'{API_ENDPOINT}/v2/virtual-servers/{virtual_server_id}/nics'
-        method = 'GET'
-
-        self.set_timestamp()
-        self.set_signature(url=url, method=method)
-
-        response = requests.get(url, headers=self.headers)
-        raise_scp_error(response)
-        return response.json().get('contents', [])
+        return self._get(url)
 
     def get_external_ip(self, virtual_server_id, ip):
         nic_details_list = self.list_nic_details(virtual_server_id=virtual_server_id)
@@ -350,27 +341,22 @@ class SCPClient:
         client.close()
 
     def list_zones(self) -> List[dict]:
-        """List zone ids for the project."""
         url = f'{API_ENDPOINT}/project/v3/projects/{self.project_id}/zones'
         return self._get(url)
 
     def list_products(self, service_zone_id) -> List[dict]:
-        """List zone ids for the project."""
         url = f'{API_ENDPOINT}/product/v2/zones/{service_zone_id}/products'
         return self._get(url)
 
     def list_product_groups(self, service_zone_id) -> List[dict]:
-        """List zone ids for the project."""
         url = f'{API_ENDPOINT}/product/v2/zones/{service_zone_id}/product-groups'
         return self._get(url)
 
     def list_vpcs(self, service_zone_id) -> List[dict]:
-        """List zone ids for the project."""
         url = f'{API_ENDPOINT}/vpc/v2/vpcs?serviceZoneId={service_zone_id}'
         return self._get(url)
 
     def list_subnets(self) -> List[dict]:
-        """List zone ids for the project."""
         url = f'{API_ENDPOINT}/subnet/v2/subnets?subnetTypes=PUBLIC'
         return self._get(url)
 
@@ -384,12 +370,7 @@ class SCPClient:
               "ruleDeletionType" : "PARTIAL",
               "ruleIds" : [ rule_id ]
             }
-        print(firewall_id)
-        print(request_body)
-
         return self._delete(url, request_body=request_body)
-
-
 
     def list_security_groups(self,  vpc_id=None, sg_name=None):
         url = f'{API_ENDPOINT}/security-group/v2/security-groups'
@@ -403,7 +384,6 @@ class SCPClient:
         url = f'{API_ENDPOINT}/internet-gateway/v2/internet-gateways'
         return self._get(url)
 
-
     def get_vm_info(self, vm_id):
         url = f'{API_ENDPOINT}/virtual-server/v3/virtual-servers/{vm_id}'
         return self._get(url, contents_key=None)
@@ -411,7 +391,6 @@ class SCPClient:
     def get_firewal_rule_info(self, firewall_id, rule_id):
         url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules/{rule_id}'
         return self._get(url, contents_key=None)
-
 
     def list_firwalls(self):
         url = f'{API_ENDPOINT}/firewall/v2/firewalls'
