@@ -688,7 +688,7 @@ def dump_spot_cost(condensed: bool) -> str:
         launched_resources = cluster_report['resources']
 
         cluster_report['resources'] = f'{launched_resources}'
-        cluster_report['region'] = launched_resources.region
+        cluster_report['zone'] = launched_resources.zone
 
         cluster_name = cluster_report['name']
         if cluster_name not in seen_cluster_names:
@@ -702,7 +702,7 @@ def dump_spot_cost(condensed: bool) -> str:
             cluster_report['name'] = ''
             cluster_report['resources'] = '-'
             cluster_report['num_nodes'] = '-'
-            cluster_report['region'] = '-'
+            cluster_report['zone'] = '-'
 
     return common_utils.encode_payload(cluster_reports)
 
@@ -720,7 +720,7 @@ def format_cost_table(reports: List[Dict[str, Any]]) -> str:
         'JOB ID',
         'RESOURCES',
         'NODES',
-        'REGION',
+        'ZONE',
         'LAUNCH TIME',
         'TOT. DURATION',
         'TOT. COST',
@@ -743,7 +743,7 @@ def format_cost_table(reports: List[Dict[str, Any]]) -> str:
             report['job_id'],
             report['resources'],
             report['num_nodes'],
-            report['region'],
+            report['zone'],
             launch_time,
             duration,
             f'${cost:.3f}',
