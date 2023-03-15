@@ -6,6 +6,8 @@ import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
+import colorama
+
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
@@ -354,16 +356,18 @@ class Azure(clouds.Cloud):
             retry_cnt += 1
             try:
                 import knack  # pylint: disable=import-outside-toplevel
-            except FileNotFoundError as e:
+            except ModuleNotFoundError as e:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.CloudUserIdentityError(
                         'Failed to import knack. To install the dependencies for Azure, '
-                        'Please install SkyPilot with: pip install skypilot[azure]'
+                        'Please install SkyPilot with: '
+                        f'{colorama.Style.BRIGHT}pip install skypilot[azure]'
+                        f'{colorama.Style.RESET_ALL}'
                     ) from e
             try:
                 account_email = azure.get_current_account_user()
                 break
-            except knack.util.CLIError as e:
+            except (FileNotFoundError, knack.util.CLIError) as e:
                 error = exceptions.CloudUserIdentityError(
                     'Failed to get activated Azure account.\n'
                     '  Reason: '
