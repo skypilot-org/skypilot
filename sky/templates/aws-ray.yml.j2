@@ -22,12 +22,6 @@ provider:
   vpc_name: {{vpc_name}}
 {% endif %}
   use_internal_ips: {{use_internal_ips}}
-  # Disable launch config check for worker nodes as it can cause resource
-  # leakage.
-  # Reference: https://github.com/ray-project/ray/blob/840215bc09e942b50cad0ab2db96a8fdc79217c1/python/ray/autoscaler/_private/autoscaler.py#L1101
-  # The upper-level SkyPilot code has make sure there will not be resource
-  # leakage.
-  disable_launch_config_check: true
 
 auth:
   ssh_user: ubuntu
@@ -145,6 +139,7 @@ setup_commands:
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
+    pip3 install -U  paramiko;
     python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
 
