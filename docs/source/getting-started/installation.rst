@@ -18,9 +18,9 @@ Install SkyPilot using pip:
   $ # pip install "skypilot[all]"
 
 
-SkyPilot currently supports four cloud providers: AWS, GCP, Azure, and Lambda Cloud.
+SkyPilot currently supports five cloud providers: AWS, GCP, Azure, Lambda Cloud and Cloudflare (R2).
 If you only have access to certain clouds, use any combination of
-:code:`"[aws,azure,gcp,lambda]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
+:code:`"[aws,azure,gcp,lambda,cloudflare]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
 dependencies installed.
 
 You may also install SkyPilot from source.
@@ -115,6 +115,39 @@ To configure Lambda Cloud access, go to the `API Keys <https://cloud.lambdalabs.
 .. note::
 
   Multi-node clusters and stopping instances are currently not supported on Lambda Cloud.
+
+
+Cloudflare R2
+~~~~~~~~~~~~~~~~~~
+
+Cloudflare offers `R2 <https://www.cloudflare.com/products/r2>`_, an S3-compatible object storage without any egress charges.
+SkyPilot can download/upload data to R2 buckets and mount them as local filesystem on clusters launched by SkyPilot.
+
+To set up R2 support, follow these `instructions <https://developers.cloudflare.com/r2/data-access/s3-api/tokens/>`_ to generate your  generate the your R2 Access Key ID and Secret Access Key. Then run:
+
+.. code-block:: console
+  $ # Install boto
+  $ pip install boto3
+  $ # Configure your R2 credentials
+  $ aws configure --profile r2
+
+In the prompt, enter your R2 Access Key ID and Secret Access Key. Select 'auto' for the default region and 'json' for the default output format.
+
+.. code-block:: text
+  AWS Access Key ID [None]: <access_key_id>
+  AWS Secret Access Key [None]: <access_key_secret>
+  Default region name [None]: auto
+  Default output format [None]: json
+
+Next get your `Account ID <https://developers.cloudflare.com/fundamentals/get-started/basic-tasks/find-account-and-zone-ids/>`_ from your R2 dashboard and store it in :code:`~/.cloudflare/accountid` by running the following commands:
+
+.. code-block:: console
+  mkdir -p ~/.cloudflare
+  echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid
+
+.. note::
+
+  Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
 .. _verify-cloud-access:
 
