@@ -1627,6 +1627,12 @@ def _query_status_gcp(
     # TODO(wei-lin): handle multi-node cases.
     if use_tpu_vm and len(status_list) == 0:
         # Cleanup the preempted TPU directly with gcloud CLI.
+        # We don't use the backend.teardown_no_lock because:
+        # 1. It is safe to call the CLI to terminate the cluster
+        #    as the cluster has none of the nodes is UP and
+        #    the ray autoscaler should have been disabled.
+        # 2. backend.teardown_no_lock eventually calls gcloud CLI
+        #    as ray down can't handle non-UP VMs.
         # The caller of this function, `_update_cluster_status_no_lock() ->
         # _get_cluster_status_via_cloud_cli()`, will do the post teardown
         # cleanup, which will remove the cluster entry from the status table
