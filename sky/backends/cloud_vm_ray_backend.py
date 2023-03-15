@@ -2444,6 +2444,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
+        print(handle)
         start = time.time()
         style = colorama.Style
         fore = colorama.Fore

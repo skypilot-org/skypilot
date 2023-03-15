@@ -59,6 +59,7 @@ class Resources:
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
+        ports: Optional[str] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
@@ -95,6 +96,8 @@ class Resources:
                 self._image_id = {
                     k.strip(): v.strip() for k, v in image_id.items()
                 }
+        
+        self.ports = ports
 
         self._set_cpus(cpus)
         self._set_accelerators(accelerators, accelerator_args)
@@ -789,6 +792,8 @@ class Resources:
             logger.warning('image_id in resources is experimental. It only '
                            'supports AWS/GCP.')
             resources_fields['image_id'] = config.pop('image_id')
+        if config.get('ports') is not None:
+            resources_fields['ports'] = config.pop('ports')
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)

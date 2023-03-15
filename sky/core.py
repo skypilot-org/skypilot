@@ -949,10 +949,7 @@ def add_port(cluster_name: str, port: int) -> None:
                                                            require_outputs=True,
                                                            separate_stderr=True)
 
-    returncode, external_ip, _ = backend.run_on_head(handle,
-                                                           "curl ifconfig.me",
-                                                           require_outputs=True,
-                                                           separate_stderr=True)
+    external_ip = handle.head_ip
 
     full_name = full_name.strip()
     region = ray_config['provider']['availability_zone'].strip()               

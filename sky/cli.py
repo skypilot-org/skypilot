@@ -4025,6 +4025,32 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
         progress.live.transient = False
         progress.refresh()
 
+@cli.command('add_port')
+@click.argument('cluster',
+                required=True,
+                type=str,
+                **_get_shell_complete_args(_complete_cluster_name))
+@click.argument('port',
+                required=True,
+                type=int,
+                **_get_shell_complete_args(_complete_cluster_name))
+@usage_lib.entrypoint
+def add_port(cluster: str, port: int):
+    core.add_port(cluster, port)
+
+
+@cli.command('remove_port')
+@click.argument('cluster',
+                required=True,
+                type=str,
+                **_get_shell_complete_args(_complete_cluster_name))
+@click.argument('port',
+                required=True,
+                type=int,
+                **_get_shell_complete_args(_complete_cluster_name))
+@usage_lib.entrypoint
+def add_port(cluster: str, port: int):
+    core.remove_port(cluster, port)
 
 def main():
     return cli()
