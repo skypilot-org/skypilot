@@ -112,9 +112,12 @@ class Lambda(clouds.Cloud):
         return isinstance(other, Lambda)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None) -> Optional[str]:
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
                                                          clouds='lambda')
 
     @classmethod
@@ -126,12 +129,12 @@ class Lambda(clouds.Cloud):
             instance_type, clouds='lambda')
 
     @classmethod
-    def get_vcpus_from_instance_type(
+    def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[float]:
-        return service_catalog.get_vcpus_from_instance_type(instance_type,
-                                                            clouds='lambda')
+    ) -> Tuple[Optional[float], Optional[float]]:
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='lambda')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -175,6 +178,7 @@ class Lambda(clouds.Cloud):
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
                     cpus=None,
+                    memory=None,
                 )
                 resource_list.append(r)
             return resource_list
@@ -184,7 +188,7 @@ class Lambda(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             default_instance_type = Lambda.get_default_instance_type(
-                cpus=resources.cpus)
+                cpus=resources.cpus, memory=resources.memory)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -198,6 +202,7 @@ class Lambda(clouds.Cloud):
             acc_count,
             use_spot=resources.use_spot,
             cpus=resources.cpus,
+            memory=resources.memory,
             region=resources.region,
             zone=resources.zone,
             clouds='lambda')
