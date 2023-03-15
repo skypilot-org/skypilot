@@ -9,6 +9,8 @@ import hmac
 import base64
 from typing import Any, Dict, List
 from urllib import parse
+import paramiko
+import random
 
 CREDENTIALS_PATH = '~/.scp/scp_credential'
 API_ENDPOINT = 'https://openapi.samsungsdscloud.com'
@@ -116,6 +118,11 @@ class SCPClient:
         self.project_id = self._credentials.get('scp_project_id', None)
         self.timestamp = self._credentials.get('scp_timestamp', None)
         self.signature = self._credentials.get('scp_signature', None)
+
+        self.user_name = self._credentials.get('user_name', None)
+        self.password = self._credentials.get('password', None)
+        self.ssh_private_key_path = self._credentials.get('ssh_private_key_path', None)
+        self.ssh_public_key_path = self._credentials.get('ssh_public_key_path', None)
 
         self.headers = {
             'X-Cmp-AccessKey': f'{self.access_key}',
@@ -278,8 +285,69 @@ class SCPClient:
         self.signature = self.get_signature(url=url, method=method)
         self.headers['X-Cmp-Signature'] = self.signature
 
+    def list_nic_details(self, virtual_server_id) -> List[dict]:
+        """List existing instances."""
+        url = f'{API_ENDPOINT}/v2/virtual-servers/{virtual_server_id}/nics'
+        method = 'GET'
 
+        self.set_timestamp()
+        self.set_signature(url=url, method=method)
 
+        response = requests.get(url, headers=self.headers)
+        raise_scp_error(response)
+        return response.json().get('contents', [])
+
+    def get_external_ip(self, virtual_server_id, ip):
+        nic_details_list = self.list_nic_details(virtual_server_id=virtual_server_id)
+        for nic_details in nic_details_list:
+            if nic_details['ip'] == ip and nic_details['subnetType'] == 'PUBLIC':
+                return nic_details['natIp']
+        return None
+
+    def set_ssh_key(self, external_ip: str) -> None:
+
+        try:
+            with open(self.ssh_public_key_path, 'r') as f:
+                key = f.read()
+        # Load configuration file values
+        except FileNotFoundError:
+            print('Public SSH key does not exist.')
+
+        command_list = ['mkdir -p ~/.ssh/',
+                        'echo "%s" > ~/.ssh/authorized_keys' % key,
+                        'chmod 644 ~/.ssh/authorized_keys',
+                        'chmod 700 ~/.ssh/']
+        self.exec_ssh_command(command_list=command_list, external_ip=external_ip)
+
+    def set_default_config(self, external_ip) -> None:
+        command_list = [
+            'echo "nameserver 8.8.8.8" > /etc/resolv.conf',
+            'pip3 install --upgrade --ignore-installed pip setuptools',
+            'pip3 install -U "ray[default]"',
+            'echo export LANG=ko_KR.utf8 >> ~/.bashrc',
+            'echo export LC_ALL=ko_KR.utf8 >> ~/.bashrc',
+            'source ~/.bashrc',
+            'yum -y install rsync'
+        ]
+        self.exec_ssh_command(command_list=command_list, external_ip=external_ip)
+
+    def exec_ssh_command(self, command_list: List[str], external_ip: str):
+
+        if len(command_list) <= 0 or external_ip is None:
+            return
+
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(external_ip, username=self.user_name, password=self.password)
+        for command in command_list:
+            stdin, stdout, stderr = client.exec_command(command)
+            exit_status = stdout.channel.recv_exit_status()
+            if exit_status == 0:
+                print("Process finished")
+            else:
+                print("Error", exit_status)
+
+        client.close()
 
     def list_zones(self) -> List[dict]:
         """List zone ids for the project."""
