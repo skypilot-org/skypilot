@@ -303,9 +303,9 @@ class SCPNodeProvider(NodeProvider):
             raise SCPError("Cannot create VM")
 
         try:
-            external_ip = self.scp_client.get_external_ip(virtual_server_id=vm_id, ip=vm_internal_ip)
-            self.scp_client.set_ssh_key(external_ip=external_ip)
-            self.scp_client.set_default_config(external_ip=external_ip)
+            vm_external_ip = self.scp_client.get_external_ip(virtual_server_id=vm_id, ip=vm_internal_ip)
+            self.scp_client.set_ssh_key(external_ip=vm_external_ip)
+            self.scp_client.set_default_config(external_ip=vm_external_ip)
         except: raise SCPError("SSH Init Error")
 
 
@@ -314,7 +314,7 @@ class SCPNodeProvider(NodeProvider):
         config_tags['firewallId'] = firewall_id
         config_tags['firewallRuleId'] = firewall_rule_id
         config_tags['securityGroupId'] = sg_id
-        config_tags['vmExternalIp'] = external_ip
+        config_tags['vmExternalIp'] = vm_external_ip
 
 
         self.metadata[vm_id] = {'tags': config_tags}
