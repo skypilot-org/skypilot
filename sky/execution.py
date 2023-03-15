@@ -17,6 +17,7 @@ import enum
 import getpass
 import tempfile
 import os
+import uuid
 from typing import Any, Dict, List, Optional, Union
 
 import colorama
@@ -572,6 +573,7 @@ def spot_launch(
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
+        task.name = name
         task_config = task.to_yaml_config()
         common_utils.dump_yaml(f.name, task_config)
 
@@ -581,7 +583,8 @@ def spot_launch(
             'user_yaml_path': f.name,
             'user_config_path': None,
             'spot_controller': controller_name,
-            'cluster_name': name,
+            'task_name': name,
+            'uuid': str(uuid.uuid4().hex[:4]),
             'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
             'is_dev': env_options.Options.IS_DEVELOPER.get(),
             'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
