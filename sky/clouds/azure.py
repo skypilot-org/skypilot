@@ -359,7 +359,7 @@ class Azure(clouds.Cloud):
             except ModuleNotFoundError as e:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.CloudUserIdentityError(
-                        'Failed to import knack. To install the dependencies for Azure, '
+                        'Failed to import \'knack\'. To install the dependencies for Azure, '
                         'Please install SkyPilot with: '
                         f'{colorama.Style.BRIGHT}pip install skypilot[azure]'
                         f'{colorama.Style.RESET_ALL}') from e
