@@ -36,6 +36,7 @@ GCP_CONFIG_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
 # and hint users if not sufficient during sky check.
 GCP_PREMISSION_CHECK_LIST = [
     'compute.projects.get',
+    'iam.serviceAccounts.actAs',
 ]
 
 # Minimum set of files under ~/.config/gcloud that grant GCP access.
