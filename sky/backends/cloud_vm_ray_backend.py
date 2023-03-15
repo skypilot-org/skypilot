@@ -3032,7 +3032,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # that uses Python API rather than CLI
                 if use_tpu_vm:
                     terminate_cmd = tpu_utils.terminate_tpu_vm_cluster_cmd(
-                        cluster_name, zone, log_abs_path)
+                        cluster_name, zone, log_path=log_abs_path)
                 else:
                     query_cmd = (f'gcloud compute instances list --filter='
                                  f'"(labels.ray-cluster-name={cluster_name})" '

@@ -76,19 +76,26 @@ def check_gcp_cli_include_tpu_vm() -> None:
                     ' TPU VM APIs, check "gcloud version" for details.')
 
 
-def terminate_tpu_vm_cluster_cmd(cluster_name: str,
-                                 zone: str,
-                                 log_path: str = os.devnull) -> str:
+def terminate_tpu_vm_cluster_cmd(
+    cluster_name: str,
+    zone: str,
+    log_path: str = os.devnull,
+    preempted_only: bool = False,
+) -> str:
     check_gcp_cli_include_tpu_vm()
-    query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
-                 f'"(labels.ray-cluster-name={cluster_name})" '
-                 f'--zone={zone} --format="value(name)"')
+    if preempted_only:
+        query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
+                     f'"(labels.ray-cluster-name={cluster_name} AND '
+                     f'state=PREEMPTED)" --zone={zone} --format="value(name)"')
+    else:
+        query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
+                     f'"(labels.ray-cluster-name={cluster_name})" '
+                     f'--zone={zone} --format="value(name)"')
     returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
                                                       log_path,
                                                       shell=True,
                                                       stream_logs=False,
                                                       require_outputs=True)
-
     # Skip the termination command, if the TPU ID
     # query command fails.
     if returncode != 0:

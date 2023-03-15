@@ -1623,9 +1623,9 @@ def _query_status_gcp(
     status_list = _process_cli_query('GCP', cluster, query_cmd, '\n',
                                      status_map)
 
-    # GCP does not clean up preempted TPU VMs. We remove it ourselves.
-    # TODO(wei-lin): handle multi-node cases.
-    if use_tpu_vm and len(status_list) == 0:
+    # GCP does not clean up preempted TPU VMs automatically.
+    # We check if there's any preempted TPU and remove it.
+    if use_tpu_vm:
         # Cleanup the preempted TPU directly with gcloud CLI.
         # We don't use the backend.teardown_no_lock because:
         # 1. It is safe to call the CLI to terminate the cluster
@@ -1637,18 +1637,21 @@ def _query_status_gcp(
         # _get_cluster_status_via_cloud_cli()`, will do the post teardown
         # cleanup, which will remove the cluster entry from the status table
         # & the ssh config file.
-        logger.debug(f'Terminating preempted TPU VM cluster {cluster}')
         zone = ray_config['provider']['availability_zone']
-        terminate_cmd = tpu_utils.terminate_tpu_vm_cluster_cmd(cluster, zone)
-        returncode, stdout, stderr = log_lib.run_with_log(terminate_cmd,
-                                                          os.devnull,
-                                                          shell=True,
-                                                          stream_logs=False,
-                                                          require_outputs=True)
-        if returncode != 0:
-            logger.error(
-                f'Failed to use gcloud to terminate TPU: {stdout+stderr}\n'
-                f'command: {terminate_cmd}')
+        terminate_cmd = tpu_utils.terminate_tpu_vm_cluster_cmd(
+            cluster, zone, preempted_only=True)
+        if terminate_cmd != '':
+            logger.debug(f'Terminating preempted TPU VM cluster {cluster}')
+            returncode, stdout, stderr = log_lib.run_with_log(
+                terminate_cmd,
+                os.devnull,
+                shell=True,
+                stream_logs=False,
+                require_outputs=True)
+            if returncode != 0:
+                logger.error(
+                    f'Failed to use gcloud to terminate TPU: {stdout+stderr}\n'
+                    f'command: {terminate_cmd}')
     return status_list
 
 
