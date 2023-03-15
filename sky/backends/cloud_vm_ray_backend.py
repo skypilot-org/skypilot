@@ -2968,8 +2968,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          handle: CloudVmRayResourceHandle,
                          terminate: bool,
                          purge: bool = False,
-                         post_teardown_cleanup: bool = True,
-                         refresh_cluster_status: bool = True) -> bool:
+                         post_teardown_cleanup: bool = True) -> bool:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
@@ -2978,15 +2977,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         refresh_cluster_status is only used internally in the status refresh
         process, and should not be set to False in other cases.
         """
-        if refresh_cluster_status:
-            prev_cluster_status, _ = (
-                backend_utils.refresh_cluster_status_handle(
-                    handle.cluster_name, acquire_per_cluster_status_lock=False))
-        else:
-            record = global_user_state.get_cluster_from_name(
-                handle.cluster_name)
-            prev_cluster_status = record[
-                'status'] if record is not None else None
+        prev_cluster_status, _ = (backend_utils.refresh_cluster_status_handle(
+            handle.cluster_name, acquire_per_cluster_status_lock=False))
         if prev_cluster_status is None:
             # When the cluster is not in the cluster table, we guarantee that
             # all related resources / cache / config are cleaned up, i.e. it
@@ -3018,7 +3010,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     require_outputs=True)
         elif (terminate and
               (prev_cluster_status == global_user_state.ClusterStatus.STOPPED)):
-            # For TPU VMs, gcloud CLI is used for VM termination.
+            # NOTE: the reason for this code path is that ray down ignore
+            # all the nodes that are not UP.
             if isinstance(cloud, clouds.AWS):
                 # TODO(zhwu): Room for optimization. We can move these cloud
                 # specific handling to the cloud class.

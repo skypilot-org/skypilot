@@ -1315,9 +1315,9 @@ def get_node_ips(cluster_yaml: str,
         except exceptions.CommandError as e:
             raise exceptions.FetchIPError(
                 exceptions.FetchIPError.Reason.HEAD) from e
-        per_tpu_devices = tpu_utils.get_num_tpu_devices(
+        num_workers_per_tpu_type = tpu_utils.get_num_tpu_devices(
             handle.launched_resources)
-        if len(ips) != expected_num_nodes * per_tpu_devices:
+        if len(ips) != expected_num_nodes * num_workers_per_tpu_type:
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
         return ips
 
@@ -1635,7 +1635,7 @@ def _query_status_gcp(
         zone = ray_config['provider']['availability_zone']
         terminate_cmd = tpu_utils.terminate_tpu_vm_cluster_cmd(cluster, zone)
         returncode, stdout, stderr = log_lib.run_with_log(terminate_cmd,
-                                                          '/dev/null',
+                                                          os.devnull,
                                                           shell=True,
                                                           stream_logs=False,
                                                           require_outputs=True)

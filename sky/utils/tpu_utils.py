@@ -31,6 +31,10 @@ def is_tpu_vm_pod(resources: Optional[resources_lib.Resources]) -> bool:
 
 
 def get_num_tpu_devices(resources: Optional[resources_lib.Resources]) -> int:
+    """Returns the number of TPU devices in the TPU VM/pod.
+
+    Each device has 8 cores and is associated with an IP address.
+    """
     if resources is None or not is_tpu(resources):
         return 0
     acc, _ = list(resources.accelerators.items())[0]
