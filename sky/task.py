@@ -737,8 +737,9 @@ class Task:
                         mnt_path: blob_path,
                     })
                 elif store_type is storage_lib.StoreType.R2:
-                    if storage.source is not None and storage.source.startswith(
-                            'r2://'):
+                    if storage.source is not None and not isinstance(
+                            storage.source,
+                            list) and storage.source.startswith('r2://'):
                         blob_path = storage.source
                     else:
                         blob_path = 'r2://' + storage.name
