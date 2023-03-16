@@ -698,9 +698,10 @@ def dump_spot_cost(condensed: bool) -> str:
             cluster_report['name'] = get_job_name_from_spot_cluster_name(
                 cluster_name)
 
-            cluster_report['resources'] = '-'
-            cluster_report['num_nodes'] = '-'
-            cluster_report['zone'] = '-'
+            if cluster_report['num_recoveries'] > 0:
+                cluster_report['resources'] = '-'
+                cluster_report['num_nodes'] = '-'
+                cluster_report['zone'] = '-'
 
         else:
             cluster_report['name'] = ''
