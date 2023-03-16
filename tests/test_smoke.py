@@ -2063,7 +2063,7 @@ class TestStorageWithCredentials:
             ),  
         ],  
     )
-    def test_increment(n, expected):
+    def test_increment(self, n, expected):
         assert n + 1 == expected
 
 
