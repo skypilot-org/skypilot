@@ -29,6 +29,28 @@ SPOT_DEFAULT_STRATEGY = None
 MAX_JOB_CHECKING_RETRY = 10
 
 
+def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
+    """Terminate the spot cluster."""
+    retry_cnt = 0
+    while True:
+        try:
+            usage_lib.messages.usage.set_internal()
+            sky.down(cluster_name)
+            return
+        except ValueError:
+            # The cluster is already down.
+            return
+        except Exception as e:  # pylint: disable=broad-except
+            retry_cnt += 1
+            if retry_cnt >= max_retry:
+                raise RuntimeError('Failed to terminate the spot cluster '
+                                   f'{cluster_name}.') from e
+            logger.error('Failed to terminate the spot cluster '
+                         f'{cluster_name}. Retrying.'
+                         f'Details: {common_utils.format_exception(e)}')
+            logger.error(f'  Traceback: {traceback.format_exc()}')
+
+
 class StrategyExecutor:
     """Handle each launching, recovery and termination of the spot clusters."""
 
@@ -100,27 +122,6 @@ class StrategyExecutor:
         Returns: The timestamp job started.
         """
         raise NotImplementedError
-
-    def terminate_cluster(self, max_retry: int = 3) -> None:
-        """Terminate the spot cluster."""
-        retry_cnt = 0
-        while True:
-            try:
-                usage_lib.messages.usage.set_internal()
-                sky.down(self.cluster_name)
-                return
-            except ValueError:
-                # The cluster is already down.
-                return
-            except Exception as e:  # pylint: disable=broad-except
-                retry_cnt += 1
-                if retry_cnt >= max_retry:
-                    raise RuntimeError('Failed to terminate the spot cluster '
-                                       f'{self.cluster_name}.') from e
-                logger.error('Failed to terminate the spot cluster '
-                             f'{self.cluster_name}. Retrying.'
-                             f'Details: {common_utils.format_exception(e)}')
-                logger.error(f'  Traceback: {traceback.format_exc()}')
 
     def _try_cancel_all_jobs(self):
         handle = global_user_state.get_handle_from_cluster_name(
@@ -306,7 +307,7 @@ class StrategyExecutor:
                     'launched cluster, due to unexpected submission errors or '
                     'the cluster being preempted during job submission.')
 
-            self.terminate_cluster()
+            terminate_cluster(self.cluster_name)
             if max_retry is not None and retry_cnt >= max_retry:
                 # Retry forever if max_retry is None.
                 if raise_on_failure:
@@ -385,7 +386,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             logger.debug('Terminating unhealthy spot cluster and '
                          'reset cloud region.')
             self._launched_cloud_region = None
-            self.terminate_cluster()
+            terminate_cluster(self.cluster_name)
 
             # Step 3
             logger.debug('Relaunch the cluster  without constraining to prior '
