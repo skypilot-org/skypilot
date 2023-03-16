@@ -182,6 +182,8 @@ class R2CloudStorage(CloudStorage):
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
         endpoint_url = cloudflare.create_endpoint()
+        if "r2://" in source:
+            source = "s3://" + source[5:]
         download_via_awscli = ('aws s3 sync --no-follow-symlinks '
                                f'{source} s3://{destination} '
                                f'--endpoint {endpoint_url} '

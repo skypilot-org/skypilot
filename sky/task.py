@@ -742,7 +742,7 @@ class Task:
                             list) and storage.source.startswith('r2://'):
                         blob_path = storage.source
                     else:
-                        blob_path = 's3://' + storage.name
+                        blob_path = 'r2://' + storage.name
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
