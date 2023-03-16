@@ -1823,7 +1823,7 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, 
-            marks=pytest.mark.skipif(os.path.exists(cloudflare.ACCOUNT_ID_PATH) == False, 
+            marks=pytest.mark.skipif(not R2_AVAILABLE, 
             reason="R2 is not configured"))])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
                                               store_type):
@@ -2048,6 +2048,23 @@ class TestStorageWithCredentials:
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
+                                                        
+    @pytest.mark.parametrize(
+    ("n", "expected"),
+        [   
+            (1, 2), 
+            pytest.param(1, 0, marks=pytest.mark.xfail),
+            pytest.param(1, 3, marks=pytest.mark.xfail(reason="some bug")),
+            (2, 3), 
+            (3, 4), 
+            (4, 5), 
+            pytest.param(
+                10, 11, marks=pytest.mark.skipif(sys.version_info >= (3, 0), reason="py2k")
+            ),  
+        ],  
+    )
+    def test_increment(n, expected):
+        assert n + 1 == expected
 
 
 # ---------- Testing YAML Specs ----------
