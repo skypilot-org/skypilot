@@ -1819,6 +1819,7 @@ class TestStorageWithCredentials:
         yield storage_obj
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
+
     """
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1826,12 +1827,14 @@ class TestStorageWithCredentials:
             marks=pytest.mark.skipif(not R2_AVAILABLE, 
             reason="R2 is not configured"))])
     """
+
     @pytest.mark.parametrize('store_type', [
-        storage_lib.StoreType.S3, storage_lib.StoreType.GCS, 
-        storage_lib.StoreType.R2])
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        storage_lib.StoreType.R2
+    ])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
                                               store_type):
-        
+
         # Igore testing for R2 when it's not configured
         if store_type == storage_lib.StoreType.R2 and not R2_AVAILABLE:
             return
@@ -1854,17 +1857,18 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        storage_lib.StoreType.R2])
+        storage_lib.StoreType.R2
+    ])
     def test_bucket_bulk_deletion(self, store_type):
         # Create a temp folder with over 256 files and folders, upload
         # files and folders to a new bucket, then delete bucket.
         # TODO(Doyoung): following subprocess commands does not create
         # 256 files as expected. It creates a directory called "folder{000...255}"
         # make a fix so it actually creates bulk files.
-         
+
         # Igore testing for R2 when it's not configured
         if store_type == storage_lib.StoreType.R2 and not R2_AVAILABLE:
-            return       
+            return
 
         with tempfile.TemporaryDirectory() as tmpdir:
             subprocess.check_output(f'mkdir -p {tmpdir}/folder{{000..255}}',
@@ -1901,8 +1905,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize(
         'nonexist_bucket_url',
-        ['s3://{random_name}', 'gs://{random_name}', 
-        'r2://{random_name}'])
+        ['s3://{random_name}', 'gs://{random_name}', 'r2://{random_name}'])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
         # Attempts to create fetch a stroage with a non-existent source.
         # Generate a random bucket name and verify it doesn't exist:
@@ -2047,7 +2050,8 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        storage_lib.StoreType.R2])
+        storage_lib.StoreType.R2
+    ])
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
@@ -2072,8 +2076,8 @@ class TestStorageWithCredentials:
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
-                                                        
-                                                        
+
+
 # ---------- Testing YAML Specs ----------
 # Our sky storage requires credentials to check the bucket existance when
 # loading a task from the yaml file, so we cannot make it a unit test.
