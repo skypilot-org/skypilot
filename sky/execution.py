@@ -176,7 +176,8 @@ def _execute(
             cluster_name)
         cluster_exists = existing_handle is not None
         # TODO(woosuk): If the cluster exists, print a warning that
-        # `cpus` is not used as a job scheduling constraint, unlike `gpus`.
+        # `cpus` and `memory` are not used as a job scheduling constraint,
+        # unlike `gpus`.
 
     stages = stages if stages is not None else list(Stage)
 
