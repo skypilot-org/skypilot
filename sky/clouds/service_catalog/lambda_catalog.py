@@ -16,6 +16,7 @@ _df = common.read_catalog('lambda/vms.csv')
 
 # Number of vCPUS for gpu_1x_a100_sxm4
 _DEFAULT_NUM_VCPUS = 30
+_DEFAULT_MEMORY_CPU_RATIO = 4
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -55,19 +56,28 @@ def get_hourly_cost(instance_type: str,
                                        zone)
 
 
-def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
-    return common.get_vcpus_from_instance_type_impl(_df, instance_type)
+def get_vcpus_mem_from_instance_type(
+        instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+    return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
-    if cpus is None:
-        cpus = str(_DEFAULT_NUM_VCPUS)
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory: Optional[str] = None) -> Optional[str]:
+    if cpus is None and memory is None:
+        cpus = f'{_DEFAULT_NUM_VCPUS}+'
+    if memory is None:
+        memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
+    else:
+        memory_gb_or_ratio = memory
+
     # Set to gpu_1x_a100_sxm4 to be the default instance type if match vCPU
     # requirement.
     df = _df[_df['InstanceType'].eq('gpu_1x_a100_sxm4')]
-    instance = common.get_instance_type_for_cpus_impl(df, cpus)
+    instance = common.get_instance_type_for_cpus_mem_impl(
+        df, cpus, memory_gb_or_ratio)
     if not instance:
-        instance = common.get_instance_type_for_cpus_impl(_df, cpus)
+        instance = common.get_instance_type_for_cpus_mem_impl(
+            _df, cpus, memory_gb_or_ratio)
     return instance
 
 
@@ -80,6 +90,7 @@ def get_instance_type_for_accelerator(
         acc_name: str,
         acc_count: int,
         cpus: Optional[str] = None,
+        memory: Optional[str] = None,
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
@@ -94,6 +105,7 @@ def get_instance_type_for_accelerator(
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
                                                          cpus=cpus,
+                                                         memory=memory,
                                                          use_spot=use_spot,
                                                          region=region,
                                                          zone=zone)

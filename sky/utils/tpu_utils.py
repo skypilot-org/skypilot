@@ -27,7 +27,7 @@ def is_tpu_vm_pod(resources: Optional[resources_lib.Resources]) -> bool:
     if resources is None or not is_tpu_vm(resources):
         return False
     acc, _ = list(resources.accelerators.items())[0]
-    return acc not in ['tpu-v2-8', 'tpu-v3-8']
+    return acc not in ['tpu-v2-8', 'tpu-v3-8', 'tpu-v4-8']
 
 
 def get_num_tpu_devices(resources: Optional[resources_lib.Resources]) -> int:

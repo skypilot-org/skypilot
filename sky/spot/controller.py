@@ -31,8 +31,8 @@ class SpotController:
     def __init__(self, job_id: int, task_yaml: str,
                  retry_until_up: bool) -> None:
         self._job_id = job_id
-        self._task_name = pathlib.Path(task_yaml).stem
         self._task = sky.Task.from_yaml(task_yaml)
+        self._task_name = self._task.name
 
         self._retry_until_up = retry_until_up
         # TODO(zhwu): this assumes the specific backend.
@@ -330,7 +330,6 @@ if __name__ == '__main__':
                         help='Retry until the spot cluster is up.')
     parser.add_argument('task_yaml',
                         type=str,
-                        help='The path to the user spot task yaml file. '
-                        'The file name is the spot task name.')
+                        help='The path to the user spot task yaml file.')
     args = parser.parse_args()
     start(args.job_id, args.task_yaml, args.retry_until_up)

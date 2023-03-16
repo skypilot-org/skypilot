@@ -1,5 +1,6 @@
 """The strategy to handle launching/recovery/termination of spot clusters."""
 import time
+import traceback
 import typing
 from typing import Optional, Tuple
 
@@ -117,7 +118,9 @@ class StrategyExecutor:
                     raise RuntimeError('Failed to terminate the spot cluster '
                                        f'{self.cluster_name}.') from e
                 logger.error('Failed to terminate the spot cluster '
-                             f'{self.cluster_name}. Retrying.')
+                             f'{self.cluster_name}. Retrying.'
+                             f'Details: {common_utils.format_exception(e)}')
+                logger.error(f'  Traceback: {traceback.format_exc()}')
 
     def _try_cancel_all_jobs(self):
         handle = global_user_state.get_handle_from_cluster_name(
@@ -288,7 +291,6 @@ class StrategyExecutor:
                 # code.
                 logger.info('Failed to launch the spot cluster with error: '
                             f'{common_utils.format_exception(e)})')
-                import traceback  # pylint: disable=import-outside-toplevel
                 logger.info(f'  Traceback: {traceback.format_exc()}')
             else:  # No exception, the launch succeeds.
                 # At this point, a sky.launch() has succeeded. Cluster may be

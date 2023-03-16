@@ -187,6 +187,14 @@ def _interactive_node_cli_command(cli_func):
         help=('Number of vCPUs each instance must have '
               '(e.g., ``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
               'This is used to automatically select the instance type.'))
+    memory = click.option(
+        '--memory',
+        default=None,
+        type=str,
+        required=False,
+        help=('Amount of memory each instance must have in GB (e.g., '
+              '``--memory=16`` (exactly 16GB), ``--memory=16+`` (at least '
+              '16GB))'))
     gpus = click.option('--gpus',
                         default=None,
                         type=str,
@@ -282,6 +290,7 @@ def _interactive_node_cli_command(cli_func):
         zone_option,
         instance_type_option,
         cpus,
+        memory,
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
         spot_option,
@@ -576,6 +585,7 @@ def _parse_override_params(cloud: Optional[str] = None,
                            zone: Optional[str] = None,
                            gpus: Optional[str] = None,
                            cpus: Optional[str] = None,
+                           memory: Optional[str] = None,
                            instance_type: Optional[str] = None,
                            use_spot: Optional[bool] = None,
                            image_id: Optional[str] = None,
@@ -607,6 +617,11 @@ def _parse_override_params(cloud: Optional[str] = None,
             override_params['cpus'] = None
         else:
             override_params['cpus'] = cpus
+    if memory is not None:
+        if memory.lower() == 'none':
+            override_params['memory'] = None
+        else:
+            override_params['memory'] = memory
     if instance_type is not None:
         if instance_type.lower() == 'none':
             override_params['instance_type'] = None
@@ -937,6 +952,7 @@ def _make_task_from_entrypoint_with_overrides(
     zone: Optional[str] = None,
     gpus: Optional[str] = None,
     cpus: Optional[str] = None,
+    memory: Optional[str] = None,
     instance_type: Optional[str] = None,
     num_nodes: Optional[int] = None,
     use_spot: Optional[bool] = None,
@@ -980,6 +996,7 @@ def _make_task_from_entrypoint_with_overrides(
                                              zone=zone,
                                              gpus=gpus,
                                              cpus=cpus,
+                                             memory=memory,
                                              instance_type=instance_type,
                                              use_spot=use_spot,
                                              image_id=image_id,
@@ -1132,6 +1149,13 @@ def cli():
               help=('Number of vCPUs each instance must have (e.g., '
                     '``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
                     'This is used to automatically select the instance type.'))
+@click.option(
+    '--memory',
+    default=None,
+    type=str,
+    required=False,
+    help=('Amount of memory each instance must have in GB (e.g., '
+          '``--memory=16`` (exactly 16GB), ``--memory=16+`` (at least 16GB))'))
 @click.option('--disk-size',
               default=None,
               type=int,
@@ -1197,6 +1221,7 @@ def launch(
     zone: Optional[str],
     gpus: Optional[str],
     cpus: Optional[str],
+    memory: Optional[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -1242,6 +1267,7 @@ def launch(
         zone=zone,
         gpus=gpus,
         cpus=cpus,
+        memory=memory,
         instance_type=instance_type,
         num_nodes=num_nodes,
         use_spot=use_spot,
@@ -1388,6 +1414,7 @@ def exec(
         zone=zone,
         gpus=gpus,
         cpus=None,
+        memory=None,
         instance_type=instance_type,
         use_spot=use_spot,
         image_id=image_id,
@@ -1667,6 +1694,11 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     for cluster_group_name, cluster_record in reserved_clusters.items():
         status_utils.show_cost_report_table(
             [cluster_record], all, reserved_group_name=cluster_group_name)
+    click.secho(
+        'NOTE: This feature is experimental. '
+        'Costs for clusters with auto{stop,down} '
+        'scheduled may not be accurate.',
+        fg='yellow')
 
 
 @cli.command()
@@ -2597,10 +2629,11 @@ def _down_or_stop_clusters(
 def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], region: Optional[str], zone: Optional[str],
             instance_type: Optional[str], cpus: Optional[str],
-            gpus: Optional[str], use_spot: Optional[bool],
-            screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
-            down: bool, retry_until_up: bool):
+            memory: Optional[str], gpus: Optional[str],
+            use_spot: Optional[bool], screen: Optional[bool],
+            tmux: Optional[bool], disk_size: Optional[int],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
 
     Examples:
@@ -2639,8 +2672,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
     user_requested_resources = not (cloud is None and region is None and
                                     zone is None and instance_type is None and
-                                    cpus is None and gpus is None and
-                                    use_spot is None)
+                                    cpus is None and memory is None and
+                                    gpus is None and use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
     if gpus is None and instance_type is None:
@@ -2654,6 +2687,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               zone=zone,
                               instance_type=instance_type,
                               cpus=cpus,
+                              memory=memory,
                               accelerators=gpus,
                               use_spot=use_spot,
                               disk_size=disk_size)
@@ -2678,10 +2712,10 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], region: Optional[str], zone: Optional[str],
             instance_type: Optional[str], cpus: Optional[str],
-            use_spot: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool], disk_size: Optional[int],
-            idle_minutes_to_autostop: Optional[int], down: bool,
-            retry_until_up: bool):
+            memory: Optional[str], use_spot: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
 
     Examples:
@@ -2719,7 +2753,8 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
     user_requested_resources = not (cloud is None and region is None and
                                     zone is None and instance_type is None and
-                                    cpus is None and use_spot is None)
+                                    cpus is None and memory is None and
+                                    use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
     if instance_type is None:
@@ -2731,6 +2766,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               zone=zone,
                               instance_type=instance_type,
                               cpus=cpus,
+                              memory=memory,
                               use_spot=use_spot,
                               disk_size=disk_size)
 
@@ -2754,11 +2790,11 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             region: Optional[str], zone: Optional[str],
             instance_type: Optional[str], cpus: Optional[str],
-            tpus: Optional[str], use_spot: Optional[bool],
-            tpu_vm: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool], disk_size: Optional[int],
-            idle_minutes_to_autostop: Optional[int], down: bool,
-            retry_until_up: bool):
+            memory: Optional[str], tpus: Optional[str],
+            use_spot: Optional[bool], tpu_vm: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
 
     Examples:
@@ -2796,7 +2832,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
     user_requested_resources = not (region is None and zone is None and
                                     instance_type is None and cpus is None and
-                                    tpus is None and use_spot is None)
+                                    memory is None and tpus is None and
+                                    use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
     accelerator_args = default_resources.accelerator_args
     if tpu_vm:
@@ -2813,6 +2850,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               zone=zone,
                               instance_type=instance_type,
                               cpus=cpus,
+                              memory=memory,
                               accelerators=tpus,
                               accelerator_args=accelerator_args,
                               use_spot=use_spot,
@@ -3164,6 +3202,13 @@ def spot():
               help=('Number of vCPUs each instance must have (e.g., '
                     '``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
                     'This is used to automatically select the instance type.'))
+@click.option(
+    '--memory',
+    default=None,
+    type=str,
+    required=False,
+    help=('Amount of memory each instance must have in GB (e.g., '
+          '``--memory=16`` (exactly 16GB), ``--memory=16+`` (at least 16GB))'))
 @click.option('--spot-recovery',
               default=None,
               type=str,
@@ -3207,6 +3252,7 @@ def spot_launch(
     zone: Optional[str],
     gpus: Optional[str],
     cpus: Optional[str],
+    memory: Optional[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -3244,6 +3290,7 @@ def spot_launch(
         zone=zone,
         gpus=gpus,
         cpus=cpus,
+        memory=memory,
         instance_type=instance_type,
         num_nodes=num_nodes,
         use_spot=use_spot,
@@ -3604,6 +3651,7 @@ def benchmark_launch(
     # The user can specify the benchmark candidates in either of the two ways:
     # 1. By specifying resources.candidates in the YAML.
     # 2. By specifying gpu types as a command line argument (--gpus).
+    override_gpu = None
     if gpus is not None:
         gpu_list = gpus.split(',')
         gpu_list = [gpu.strip() for gpu in gpu_list]
