@@ -266,8 +266,8 @@ def _handle_signal(job_id):
 def _cleanup(job_id: int, task_yaml: str):
     # NOTE: The code to get cluster name is same as what we did in the spot
     # controller, we should keep it in sync with SpotController.__init__()
-    task_name = pathlib.Path(task_yaml).stem
     task = sky.Task.from_yaml(task_yaml)
+    task_name = task.name
     cluster_name = spot_utils.generate_spot_cluster_name(task_name, job_id)
     recovery_strategy.terminate_cluster(cluster_name)
     # Clean up Storages with persistent=False.
