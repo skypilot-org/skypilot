@@ -1282,7 +1282,7 @@ def test_spot(generic_cloud: str):
         # TODO(zhwu): Change to _SPOT_CANCEL_WAIT.format(job_name=f'{name}-1 -n {name}-2') when
         # canceling multiple job names is supported.
         (_SPOT_CANCEL_WAIT.format(job_name=f'{name}-1') + '; ' +
-        _SPOT_CANCEL_WAIT.format(job_name=f'{name}-2')),
+         _SPOT_CANCEL_WAIT.format(job_name=f'{name}-2')),
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
