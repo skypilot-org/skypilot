@@ -1819,12 +1819,15 @@ class TestStorageWithCredentials:
         yield storage_obj
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
-
+    """
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, 
             marks=pytest.mark.skipif(not R2_AVAILABLE, 
             reason="R2 is not configured"))])
+    """
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS] + ([storage_lib.StoreType.R2] if R2_AVAILABLE else []))
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
                                               store_type):
         # Creates a new bucket with a local source, uploads files to it
