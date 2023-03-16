@@ -185,7 +185,7 @@ class R2CloudStorage(CloudStorage):
         if "r2://" in source:
             source = "s3://" + source[5:]
         download_via_awscli = ('aws s3 sync --no-follow-symlinks '
-                               f'{source} s3://{destination} '
+                               f'{source} {destination} '
                                f'--endpoint {endpoint_url} '
                                f'--profile={cloudflare.R2_PROFILE_NAME}')
 
