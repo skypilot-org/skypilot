@@ -1,37 +1,6 @@
 """Utilities for sky cost report and sky spot cost."""
 from typing import Any, Dict, List
-import colorama
 from sky import global_user_state
-
-
-def get_cost_from_record(record: Dict[str, Any]) -> str:
-    cost = record['total_cost']
-
-    if not cost:
-        return '-'
-
-    return f'${cost:.3f}'
-
-
-def get_status_for_cost_report(record: Dict[str, Any]) -> str:
-    status = None
-    if 'status' in record:
-        status = record['status']
-
-    if status is None:
-        return f'{colorama.Style.DIM}{"TERMINATED"}{colorama.Style.RESET_ALL}'
-    return status.colored_str()
-
-
-def get_resources_for_cost_report(record: Dict[str, Any]) -> str:
-    launched_nodes = record['num_nodes']
-    launched_resources = record['resources']
-
-    launched_resource_str = str(launched_resources)
-    resources_str = (f'{launched_nodes}x '
-                     f'{launched_resource_str}')
-
-    return resources_str
 
 
 def aggregate_all_records(condensed: bool) -> List[Dict[str, Any]]:
