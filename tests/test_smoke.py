@@ -1821,11 +1821,15 @@ class TestStorageWithCredentials:
     # R2 tests would be done only when the user configured for R2 credentials.
     R2_AVAILABLE = os.path.exists(cloudflare.ACCOUNT_ID_PATH)
 
+    '''
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, 
             marks=pytest.mark.skipif(not R2_AVAILABLE, 
             reason="R2 is not configured"))])
+    '''
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS] + ([storage_lib.StoreType.R2] if R2_AVAILABLE else []))
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
                                               store_type):
         # Creates a new bucket with a local source, uploads files to it
@@ -1833,8 +1837,7 @@ class TestStorageWithCredentials:
         tmp_local_storage_obj.add_store(store_type)
 
         # Run sky storage ls to check if storage object exists in the output
-        #out = subprocess.check_output(['sky', 'storage', 'ls'])
-        out = subprocess.check_output(['sky', 'storage', 'lsl'])
+        out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name in out.decode('utf-8')
 
         # Run sky storage delete to delete the storage object
