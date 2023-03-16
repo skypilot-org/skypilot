@@ -32,6 +32,7 @@ import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 import urllib.parse
 import uuid
+import os
 
 import colorama
 import jinja2
@@ -1816,11 +1817,15 @@ class TestStorageWithCredentials:
         yield storage_obj
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
+    
+    # R2 tests would be done only when the user configured for R2 credentials.
+    R2_AVAILABLE = os.path.exists(cloudflare.ACCOUNT_ID_PATH)
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        storage_lib.StoreType.R2
-    ])
+        pytest.param(storage_lib.StoreType.R2, 
+            marks=pytest.mark.skipif(not R2_AVAILABLE, 
+            reason="R2 is not configured"))])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
                                               store_type):
         # Creates a new bucket with a local source, uploads files to it
