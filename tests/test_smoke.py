@@ -2053,24 +2053,7 @@ class TestStorageWithCredentials:
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
                                                         
-    @pytest.mark.parametrize(
-    ("n", "expected"),
-        [   
-            (1, 2), 
-            pytest.param(1, 0, marks=pytest.mark.xfail),
-            pytest.param(1, 3, marks=pytest.mark.xfail(reason="some bug")),
-            (2, 3), 
-            (3, 4), 
-            (4, 5), 
-            pytest.param(
-                10, 11, marks=pytest.mark.skipif(sys.version_info >= (3, 0), reason="py2k")
-            ),  
-        ],  
-    )
-    def test_increment(self, n, expected):
-        assert n + 1 == expected
-
-
+                                                        
 # ---------- Testing YAML Specs ----------
 # Our sky storage requires credentials to check the bucket existance when
 # loading a task from the yaml file, so we cannot make it a unit test.
