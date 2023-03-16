@@ -1568,7 +1568,7 @@ class R2Store(AbstractStore):
         else:
             source_message = source_path_list[0]
 
-        with backend_utils.safe_console_status(
+        with log_utils.safe_rich_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]r2://{self.name}/[/]'):
             data_utils.parallel_upload(
