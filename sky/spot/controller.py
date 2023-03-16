@@ -297,6 +297,7 @@ def start(job_id, task_yaml, retry_until_up):
             time.sleep(1)
     except exceptions.SpotUserCancelledError:
         logger.info(f'Cancelling spot job {job_id}...')
+        spot_state.set_cancelling(job_id)
         cancelling = True
     finally:
         if controller_process is not None:
@@ -321,9 +322,6 @@ def start(job_id, task_yaml, retry_until_up):
         _cleanup(job_id, task_yaml=task_yaml)
         logger.info(f'Spot clusters of job {job_id} has been taken down.')
 
-        # TODO(suquark): It could take a long time cleaning up the cluster.
-        #  In the future, we may add a "cancelling" state for the spot
-        #  controller.
         if cancelling:
             spot_state.set_cancelled(job_id)
 

@@ -103,6 +103,9 @@ class SpotStatus(enum.Enum):
     # Terminal statuses
     # SUCCEEDED: The job is finished successfully.
     SUCCEEDED = 'SUCCEEDED'
+    # CANCELLING: The job is requested to be cancelled by the user, and the
+    # controller is cleaning up the spot cluster.
+    CANCELLING = 'CANCELLING'
     # CANCELLED: The job is cancelled by the user.
     CANCELLED = 'CANCELLED'
     # FAILED: The job is finished with failure from the user's program.
@@ -143,6 +146,7 @@ class SpotStatus(enum.Enum):
             cls.FAILED_PRECHECKS,
             cls.FAILED_NO_RESOURCE,
             cls.FAILED_CONTROLLER,
+            cls.CANCELLING,
             cls.CANCELLED,
         ]
 
@@ -158,7 +162,7 @@ _SPOT_STATUS_TO_COLOR = {
     SpotStatus.PENDING: colorama.Fore.BLUE,
     SpotStatus.SUBMITTED: colorama.Fore.BLUE,
     SpotStatus.STARTING: colorama.Fore.BLUE,
-    SpotStatus.RUNNING: colorama.Fore.GREEN,
+    SpotStatus.RUNNING: colorama.Fore.BLACK,
     SpotStatus.RECOVERING: colorama.Fore.CYAN,
     SpotStatus.SUCCEEDED: colorama.Fore.GREEN,
     SpotStatus.FAILED: colorama.Fore.RED,
@@ -166,6 +170,7 @@ _SPOT_STATUS_TO_COLOR = {
     SpotStatus.FAILED_SETUP: colorama.Fore.RED,
     SpotStatus.FAILED_NO_RESOURCE: colorama.Fore.RED,
     SpotStatus.FAILED_CONTROLLER: colorama.Fore.RED,
+    SpotStatus.CANCELLING: colorama.Fore.YELLOW,
     SpotStatus.CANCELLED: colorama.Fore.YELLOW,
 }
 
@@ -286,13 +291,25 @@ def set_failed(job_id: int,
     logger.info(failure_reason)
 
 
-def set_cancelled(job_id: int):
+def set_cancelling(job_id: int):
     _CURSOR.execute(
         """\
         UPDATE spot SET
         status=(?), end_at=(?)
         WHERE job_id=(?) AND end_at IS null""",
-        (SpotStatus.CANCELLED.value, time.time(), job_id))
+        (SpotStatus.CANCELLING.value, time.time(), job_id))
+    _CONN.commit()
+    logger.info('Cancelling the job...')
+
+
+def set_cancelled(job_id: int):
+    _CURSOR.execute(
+        """\
+        UPDATE spot SET
+        status=(?), end_at=(?)
+        WHERE job_id=(?) AND status=(?)""",
+        (SpotStatus.CANCELLED.value, time.time(), job_id,
+         SpotStatus.CANCELLING.value))
     _CONN.commit()
     logger.info('Job cancelled.')
 
