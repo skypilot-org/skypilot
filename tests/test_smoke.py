@@ -1822,9 +1822,10 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.R2, 
-            marks=pytest.mark.skipif(not R2_AVAILABLE, 
-            reason="R2 is not configured"))])
+        pytest.param(storage_lib.StoreType.R2,
+                     marks=pytest.mark.skipif(not R2_AVAILABLE,
+                                              reason="R2 is not configured"))
+    ])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
                                               store_type):
         # Creates a new bucket with a local source, uploads files to it
@@ -1845,9 +1846,10 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.R2, 
-            marks=pytest.mark.skipif(not R2_AVAILABLE, 
-            reason="R2 is not configured"))])
+        pytest.param(storage_lib.StoreType.R2,
+                     marks=pytest.mark.skipif(not R2_AVAILABLE,
+                                              reason="R2 is not configured"))
+    ])
     def test_bucket_bulk_deletion(self, store_type):
         # Create a temp folder with over 256 files and folders, upload
         # files and folders to a new bucket, then delete bucket.
@@ -1887,12 +1889,12 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
 
-    @pytest.mark.parametrize(
-        'nonexist_bucket_url',
-        ['s3://{random_name}', 'gs://{random_name}', 
-        pytest.param('r2://{random_name}', 
-            marks=pytest.mark.skipif(not R2_AVAILABLE, 
-            reason="R2 is not configured"))])
+    @pytest.mark.parametrize('nonexist_bucket_url', [
+        's3://{random_name}', 'gs://{random_name}',
+        pytest.param('r2://{random_name}',
+                     marks=pytest.mark.skipif(not R2_AVAILABLE,
+                                              reason="R2 is not configured"))
+    ])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
         # Attempts to create fetch a stroage with a non-existent source.
         # Generate a random bucket name and verify it doesn't exist:
@@ -1986,9 +1988,10 @@ class TestStorageWithCredentials:
         'ext_bucket_fixture, store_type',
         [('tmp_awscli_bucket', storage_lib.StoreType.S3),
          ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
-        pytest.param('tmp_awscli_bucket_r2', storage_lib.StoreType.R2, 
-            marks=pytest.mark.skipif(not R2_AVAILABLE, 
-            reason="R2 is not configured"))])
+         pytest.param('tmp_awscli_bucket_r2',
+                      storage_lib.StoreType.R2,
+                      marks=pytest.mark.skipif(not R2_AVAILABLE,
+                                               reason="R2 is not configured"))])
     def test_upload_to_existing_bucket(self, ext_bucket_fixture, request,
                                        tmp_source, store_type):
         # Tries uploading existing files to newly created bucket (outside of
@@ -2029,9 +2032,10 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.R2, 
-            marks=pytest.mark.skipif(not R2_AVAILABLE, 
-            reason="R2 is not configured"))])
+        pytest.param(storage_lib.StoreType.R2,
+                     marks=pytest.mark.skipif(not R2_AVAILABLE,
+                                              reason="R2 is not configured"))
+    ])
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
