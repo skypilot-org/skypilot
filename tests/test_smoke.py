@@ -1846,7 +1846,7 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, 
-            marks=pytest.mark.skipif(R2_AVAILABLE == False, 
+            marks=pytest.mark.skipif(not R2_AVAILABLE, 
             reason="R2 is not configured"))])
     def test_bucket_bulk_deletion(self, store_type):
         # Create a temp folder with over 256 files and folders, upload
@@ -1986,7 +1986,9 @@ class TestStorageWithCredentials:
         'ext_bucket_fixture, store_type',
         [('tmp_awscli_bucket', storage_lib.StoreType.S3),
          ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
-         ('tmp_awscli_bucket_r2', storage_lib.StoreType.R2)])
+        pytest.param('tmp_awscli_bucket_r2', storage_lib.StoreType.R2, 
+            marks=pytest.mark.skipif(not R2_AVAILABLE, 
+            reason="R2 is not configured"))])
     def test_upload_to_existing_bucket(self, ext_bucket_fixture, request,
                                        tmp_source, store_type):
         # Tries uploading existing files to newly created bucket (outside of
@@ -2027,7 +2029,9 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        storage_lib.StoreType.R2
+        pytest.param(storage_lib.StoreType.R2, 
+            marks=pytest.mark.skipif(not R2_AVAILABLE, 
+            reason="R2 is not configured"))
     ])
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
         # Uses a list in the source field to specify a file and a directory to
