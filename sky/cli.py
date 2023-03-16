@@ -818,23 +818,22 @@ def _create_and_ssh_into_node(
         cluster_name)
     if maybe_status is not None:
         if user_requested_resources:
-            # Reuse existing interactive node if resources = launched resources
-            same_resources = (
-                resources.less_demanding_than(handle.launched_resources) and
-                handle.launched_resources.less_demanding_than(resources))
-            if not same_resources:
+            if not resources.less_demanding_than(handle.launched_resources):
                 name_arg = ''
                 if cluster_name != _default_interactive_node_name(node_type):
                     name_arg = f' -c {cluster_name}'
                 raise click.UsageError(
-                    f'Relaunching existing interactive node {cluster_name!r} '
-                    'with different resource specification. To login to '
-                    f'existing cluster, use {colorama.Style.BRIGHT}'
-                    f'sky {node_type}{name_arg}{colorama.Style.RESET_ALL}. '
-                    f'To launch a new cluster, use {colorama.Style.BRIGHT}'
-                    f'sky {node_type} -c NEW_NAME {colorama.Style.RESET_ALL}')
+                    f'Relaunching interactive node {cluster_name!r} with '
+                    'mismatched resources.\n    '
+                    f'Requested resources: {resources}\n    '
+                    f'Launched resources: {handle.launched_resources}\n'
+                    'To login to existing cluster, use '
+                    f'{colorama.Style.BRIGHT}sky {node_type}{name_arg}'
+                    f'{colorama.Style.RESET_ALL}. To launch a new cluster, '
+                    f'use {colorama.Style.BRIGHT}sky {node_type} -c NEW_NAME '
+                    f'{colorama.Style.RESET_ALL}')
         else:
-            # Use existing interactive node if it already exists and no user
+            # Use existing interactive node if it exists and no user
             # resources were specified.
             resources = handle.launched_resources
 
