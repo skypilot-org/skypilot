@@ -1820,8 +1820,6 @@ class TestStorageWithCredentials:
     
     # R2 tests would be done only when the user configured for R2 credentials.
     R2_AVAILABLE = os.path.exists(cloudflare.ACCOUNT_ID_PATH)
-
-    
     '''
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS] + ([storage_lib.StoreType.R2] if R2_AVAILABLE else []))
