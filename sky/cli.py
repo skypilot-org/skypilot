@@ -1663,8 +1663,9 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
         status_utils.show_cost_report_table(
             [cluster_record], all, reserved_group_name=cluster_group_name)
     click.secho(
-        'NOTE: This feature is experimental.'
-        '\nCosts for autostop clusters may not be accurate.',
+        'NOTE: This feature is experimental. '
+        'Costs for clusters with auto{stop,down} '
+        'scheduled may not be accurate.',
         fg='yellow')
 
 
