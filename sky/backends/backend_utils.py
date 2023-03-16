@@ -996,6 +996,37 @@ def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
         run_timestamp.partition('-')[2], '%Y-%m-%d-%H-%M-%S-%f').timestamp()
 
 
+def _count_healthy_nodes_from_ray(output: str,
+                                  is_local_cloud: bool = False
+                                 ) -> Tuple[int, int]:
+    """Count the number of healthy nodes from the output of `ray status`."""
+
+    def get_ready_nodes(pattern, output):
+        result = pattern.findall(output)
+        # On-prem/local case is handled differently.
+        # `ray status` produces different output for local case, and
+        # we poll for number of nodes launched instead of counting for
+        # head and number of worker nodes separately (it is impossible
+        # to distinguish between head and worker node for local case).
+        if is_local_cloud:
+            # In the local case, ready_workers mean the total number
+            # of nodes launched, including head.
+            return len(result)
+        if len(result) == 0:
+            return 0
+        assert len(result) == 1, result
+        return int(result[0])
+
+    if is_local_cloud:
+        ready_head = 0
+        ready_workers = get_ready_nodes(_LAUNCHED_LOCAL_WORKER_PATTERN, output)
+    else:
+        ready_head = get_ready_nodes(_LAUNCHED_HEAD_PATTERN, output)
+        ready_workers = get_ready_nodes(_LAUNCHED_WORKER_PATTERN, output)
+    assert ready_head <= 1, f'#head node should be <=1 (Got {ready_head}).'
+    return ready_head, ready_workers
+
+
 @timeline.event
 def wait_until_ray_cluster_ready(
     cluster_config_file: str,
@@ -1035,32 +1066,8 @@ def wait_until_ray_cluster_ready(
                 stderr)
             logger.debug(output)
 
-            # Workers that are ready
-            ready_workers = 0
-            # On-prem/local case is handled differently.
-            # `ray status` produces different output for local case, and
-            # we poll for number of nodes launched instead of counting for
-            # head and number of worker nodes separately (it is impossible
-            # to distinguish between head and worker node for local case).
-            if is_local_cloud:
-                result = _LAUNCHED_LOCAL_WORKER_PATTERN.findall(output)
-                # In the local case, ready_workers mean the total number
-                # of nodes launched, including head.
-                ready_workers = len(result)
-            else:
-                result = _LAUNCHED_WORKER_PATTERN.findall(output)
-                if len(result) == 0:
-                    ready_workers = 0
-                else:
-                    assert len(result) == 1, result
-                    ready_workers = int(result[0])
-
-            result = _LAUNCHED_HEAD_PATTERN.findall(output)
-            ready_head = 0
-            if result:
-                assert len(result) == 1, result
-                ready_head = int(result[0])
-                assert ready_head <= 1, ready_head
+            ready_head, ready_workers = _count_healthy_nodes_from_ray(
+                output, is_local_cloud=is_local_cloud)
 
             worker_status.update('[bold cyan]'
                                  f'{ready_workers} out of {num_nodes - 1} '
@@ -1445,16 +1452,16 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
                          'Hint: make sure it is not leaked.')
             continue
 
-        if not get_internal_ips:
-            ips = [
-                endpoint['accessConfig']['externalIp']
-                for endpoint in tpuvm_json['networkEndpoints']
-            ]
-        else:
-            ips = [
-                endpoint['ipAddress']
-                for endpoint in tpuvm_json['networkEndpoints']
-            ]
+        ips = []
+        for endpoint in tpuvm_json['networkEndpoints']:
+            # Note: if TPU VM is being preempted, its IP field may not exist.
+            # We use get() to avoid KeyError.
+            if get_internal_ips:
+                ip = endpoint.get('ipAddress', None)
+            else:
+                ip = endpoint['accessConfig'].get('externalIp', None)
+            if ip is not None:
+                ips.append(ip)
         all_ips.extend(ips)
 
     return all_ips
@@ -1762,6 +1769,8 @@ def _update_cluster_status_no_lock(
         return record
 
     cluster_name = handle.cluster_name
+    use_spot = handle.launched_resources.use_spot
+    ray_cluster_up = False
     try:
         # TODO(zhwu): This function cannot distinguish transient network error
         # in ray's get IPs vs. ray runtime failing.
@@ -1770,20 +1779,50 @@ def _update_cluster_status_no_lock(
         if external_ips is None or len(external_ips) == 0:
             raise exceptions.FetchIPError(
                 reason=exceptions.FetchIPError.Reason.HEAD)
-        if handle.launched_nodes == 1:
-            # Check the ray cluster status. We have to check it for single node
-            # case, since the get_node_ips() does not require ray cluster to be
-            # running.
-            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
-            runner = command_runner.SSHCommandRunner(external_ips[0],
-                                                     **ssh_credentials)
-            returncode = runner.run('ray status', stream_logs=False)
-            if returncode:
-                raise exceptions.FetchIPError(
-                    reason=exceptions.FetchIPError.Reason.HEAD)
-        # If we get node ips correctly, the cluster is UP. It is safe to
-        # set the status to UP, as the `handle.external_ips` function uses ray
-        # to fetch IPs and starting ray is the final step of sky launch.
+        # Check if ray cluster status is healthy.
+        ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
+        runner = command_runner.SSHCommandRunner(external_ips[0],
+                                                 **ssh_credentials)
+        rc, output, _ = runner.run('ray status',
+                                   stream_logs=False,
+                                   require_outputs=True,
+                                   separate_stderr=True)
+        if rc:
+            raise exceptions.FetchIPError(
+                reason=exceptions.FetchIPError.Reason.HEAD)
+
+        ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
+
+        if ready_head + ready_workers == handle.launched_nodes:
+            ray_cluster_up = True
+
+        # For non-spot clusters:
+        # If ray status shows all nodes are healthy, it is safe to set
+        # the status to UP as starting ray is the final step of sky launch.
+        # For spot clusters, the above can be unsafe because the Ray cluster
+        # may remain healthy for a while before the cloud completely
+        # preempts the VMs.
+        # Additionally, we query the VM state from the cloud provider.
+        if ray_cluster_up and not use_spot:
+            record['status'] = global_user_state.ClusterStatus.UP
+            global_user_state.add_or_update_cluster(cluster_name,
+                                                    handle,
+                                                    requested_resources=None,
+                                                    ready=True,
+                                                    is_launch=False)
+            return record
+    except exceptions.FetchIPError:
+        logger.debug('Refreshing status: Failed to get IPs from cluster '
+                     f'{cluster_name!r}, trying to fetch from provider.')
+    # For all code below, we query cluster status by cloud CLI for two cases:
+    # 1) ray fails to get IPs for the cluster.
+    # 2) the cluster is a spot cluster.
+    node_statuses = _get_cluster_status_via_cloud_cli(handle)
+
+    all_nodes_up = (all(status == global_user_state.ClusterStatus.UP
+                        for status in node_statuses) and
+                    len(node_statuses) == handle.launched_nodes)
+    if ray_cluster_up and all_nodes_up:
         record['status'] = global_user_state.ClusterStatus.UP
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
@@ -1791,11 +1830,6 @@ def _update_cluster_status_no_lock(
                                                 ready=True,
                                                 is_launch=False)
         return record
-    except exceptions.FetchIPError:
-        logger.debug('Refreshing status: Failed to get IPs from cluster '
-                     f'{cluster_name!r}, trying to fetch from provider.')
-    # For all code below, ray fails to get IPs for the cluster.
-    node_statuses = _get_cluster_status_via_cloud_cli(handle)
 
     if len(node_statuses) > handle.launched_nodes:
         # Unexpected: in the queried region more than 1 cluster with the same
