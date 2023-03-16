@@ -1781,18 +1781,34 @@ def _update_cluster_status_no_lock(
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
         runner = command_runner.SSHCommandRunner(external_ips[0],
                                                  **ssh_credentials)
-        returncode = runner.run('ray status', stream_logs=False)
-        if returncode:
+        rc, output, _ = runner.run('ray status',
+                                   stream_logs=False,
+                                   require_outputs=True,
+                                   separate_stderr=True)
+        if rc:
             raise exceptions.FetchIPError(
                 reason=exceptions.FetchIPError.Reason.HEAD)
-        ray_cluster_up = True
+
+        def get_ready_nodes(pattern, output):
+            result = pattern.findall(output)
+            if len(result) == 0:
+                return 0
+            assert len(result) == 1, result
+            return int(result[0])
+
+        ready_workers = get_ready_nodes(_LAUNCHED_WORKER_PATTERN, output)
+        ready_head = get_ready_nodes(_LAUNCHED_HEAD_PATTERN, output)
+        assert ready_head <= 1, f'#head node should be <=1 (Got {ready_head}).'
+
+        if ready_head + ready_workers == handle.launched_nodes:
+            ray_cluster_up = True
+
         # For non-spot clusters:
-        # If we get node ips correctly, the cluster is UP. It is safe to
-        # set the status to UP, as the `handle.external_ips` function uses ray
-        # to fetch IPs and starting ray is the final step of sky launch.
+        # If ray status shows all nodes are healthy, it is safe to set
+        # the status to UP as starting ray is the final step of sky launch.
         # For spot clusters, the above can be unsafe because the Ray cluster
-        # may remain healty for a while before the cloud completely
-        # terminates the VMs.
+        # may remain healthy for a while before the cloud completely
+        # preempts the VMs.
         # Additionally, we query the VM state from the cloud provider.
         if not use_spot:
             record['status'] = global_user_state.ClusterStatus.UP
