@@ -1712,7 +1712,7 @@ class R2Store(AbstractStore):
         endpoint_url = cloudflare.create_endpoint()
         remove_command = (f'aws s3 rb s3://{bucket_name} --force '
                           f'--endpoint {endpoint_url} '
-                          f'--profile={cloudflare.R2_PROFILE_NAMES}')
+                          f'--profile={cloudflare.R2_PROFILE_NAME}')
         try:
             with log_utils.safe_rich_status(
                     f'[bold cyan]Deleting R2 bucket {bucket_name}[/]'):
