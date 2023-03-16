@@ -69,8 +69,8 @@ def get_default_instance_type(cpus: Optional[str] = None,
         memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
     else:
         memory_gb_or_ratio = memory
-    return common.get_instance_type_for_cpus_mem_impl(
-            _df, cpus, memory_gb_or_ratio)
+    return common.get_instance_type_for_cpus_mem_impl(_df, cpus,
+                                                      memory_gb_or_ratio)
 
 
 def get_accelerators_from_instance_type(
