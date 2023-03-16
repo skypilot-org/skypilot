@@ -46,7 +46,9 @@ def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
                 raise RuntimeError('Failed to terminate the spot cluster '
                                    f'{cluster_name}.') from e
             logger.error('Failed to terminate the spot cluster '
-                         f'{cluster_name}. Retrying.')
+                         f'{cluster_name}. Retrying.'
+                         f'Details: {common_utils.format_exception(e)}')
+            logger.error(f'  Traceback: {traceback.format_exc()}')
 
 
 class StrategyExecutor:
