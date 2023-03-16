@@ -1001,6 +1001,40 @@ def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
         run_timestamp.partition('-')[2], '%Y-%m-%d-%H-%M-%S-%f').timestamp()
 
 
+def count_healthy_nodes_from_ray(output,
+                                 is_local_cloud: bool = False
+                                ) -> Tuple[int, int]:
+    """Count the number of healthy nodes from the output of `ray status`."""
+
+    def get_ready_nodes(pattern, output, local=False):
+        result = pattern.findall(output)
+        # On-prem/local case is handled differently.
+        # `ray status` produces different output for local case, and
+        # we poll for number of nodes launched instead of counting for
+        # head and number of worker nodes separately (it is impossible
+        # to distinguish between head and worker node for local case).
+        if local:
+            # In the local case, ready_workers mean the total number
+            # of nodes launched, including head.
+            return len(result)
+        if len(result) == 0:
+            return 0
+        assert len(result) == 1, result
+        return int(result[0])
+
+    if is_local_cloud:
+        ready_workers = get_ready_nodes(_LAUNCHED_LOCAL_WORKER_PATTERN,
+                                        output,
+                                        local=True)
+    else:
+        ready_workers = get_ready_nodes(_LAUNCHED_WORKER_PATTERN,
+                                        output,
+                                        local=False)
+    ready_head = get_ready_nodes(_LAUNCHED_HEAD_PATTERN, output)
+    assert ready_head <= 1, f'#head node should be <=1 (Got {ready_head}).'
+    return ready_head, ready_workers
+
+
 @timeline.event
 def wait_until_ray_cluster_ready(
     cluster_config_file: str,
@@ -1040,32 +1074,8 @@ def wait_until_ray_cluster_ready(
                 stderr)
             logger.debug(output)
 
-            # Workers that are ready
-            ready_workers = 0
-            # On-prem/local case is handled differently.
-            # `ray status` produces different output for local case, and
-            # we poll for number of nodes launched instead of counting for
-            # head and number of worker nodes separately (it is impossible
-            # to distinguish between head and worker node for local case).
-            if is_local_cloud:
-                result = _LAUNCHED_LOCAL_WORKER_PATTERN.findall(output)
-                # In the local case, ready_workers mean the total number
-                # of nodes launched, including head.
-                ready_workers = len(result)
-            else:
-                result = _LAUNCHED_WORKER_PATTERN.findall(output)
-                if len(result) == 0:
-                    ready_workers = 0
-                else:
-                    assert len(result) == 1, result
-                    ready_workers = int(result[0])
-
-            result = _LAUNCHED_HEAD_PATTERN.findall(output)
-            ready_head = 0
-            if result:
-                assert len(result) == 1, result
-                ready_head = int(result[0])
-                assert ready_head <= 1, ready_head
+            ready_head, ready_workers = count_healthy_nodes_from_ray(
+                output, is_local_cloud=is_local_cloud)
 
             worker_status.update('[bold cyan]'
                                  f'{ready_workers} out of {num_nodes - 1} '
@@ -1789,16 +1799,7 @@ def _update_cluster_status_no_lock(
             raise exceptions.FetchIPError(
                 reason=exceptions.FetchIPError.Reason.HEAD)
 
-        def get_ready_nodes(pattern, output):
-            result = pattern.findall(output)
-            if len(result) == 0:
-                return 0
-            assert len(result) == 1, result
-            return int(result[0])
-
-        ready_workers = get_ready_nodes(_LAUNCHED_WORKER_PATTERN, output)
-        ready_head = get_ready_nodes(_LAUNCHED_HEAD_PATTERN, output)
-        assert ready_head <= 1, f'#head node should be <=1 (Got {ready_head}).'
+        ready_head, ready_workers = count_healthy_nodes_from_ray(output)
 
         if ready_head + ready_workers == handle.launched_nodes:
             ray_cluster_up = True
