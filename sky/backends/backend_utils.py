@@ -1810,7 +1810,7 @@ def _update_cluster_status_no_lock(
         # may remain healthy for a while before the cloud completely
         # preempts the VMs.
         # Additionally, we query the VM state from the cloud provider.
-        if not use_spot:
+        if ray_cluster_up and not use_spot:
             record['status'] = global_user_state.ClusterStatus.UP
             global_user_state.add_or_update_cluster(cluster_name,
                                                     handle,
