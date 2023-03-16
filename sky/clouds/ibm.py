@@ -10,7 +10,7 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 from sky.adaptors.ibm import CREDENTIAL_FILE
 
-from sky.clouds.cloud import Region, Zone
+from sky.clouds.cloud import Zone
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
@@ -23,6 +23,11 @@ class IBM(clouds.Cloud):
     """IBM Web Services."""
 
     _REPR = 'IBM'
+    # IBM's VPC instance name length is limited to 63 chars.
+    # since Ray names the instances using the following
+    # format: ray-{cluster_name}-{node_type}-{8-char-uuid}
+    # it leaves 63-3-5-8=47 characters for the cluster name.
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 47
     _regions: List[clouds.Region] = []
 
     @classmethod
@@ -79,48 +84,44 @@ class IBM(clouds.Cloud):
         return cls._regions
 
     @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
+    def _cloud_unsupported_features(
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+        return dict()
+
+    @classmethod
+    def _max_cluster_name_length(cls) -> Optional[int]:
+        return cls._MAX_CLUSTER_NAME_LEN_LIMIT
+
+    @classmethod
+    def regions_with_offering(cls, instance_type: str,
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[Region]:
-        """Returns the regions that offer the specified resources.
-
-        The order of the regions follow the order of the regions returned by
-        service_catalog/common.py#get_region_zones().
-        When region or zone is not None, the returned value will be limited to
-        the specified region/zone.
-
-        Returns:
-            A set of `Region`s that have the offerings for the specified
-            resources.
-            For each `Region` in the set, `region.zones` is the list of `Zone`s
-            which have the offerings. For the clouds that do not expose `Zone`s,
-            `region.zones` is an empty list.
-        """
+                              zone: Optional[str]) -> List[clouds.Region]:
         del accelerators  # unused
-        if instance_type is None:
-            # Fall back to default regions
-            regions = cls.regions()
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'ibm')
+        assert use_spot is False, (
+            'current IBM implementation doesn\'t support spot instances')
+        regions = service_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'ibm')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
         if zone is not None:
             for r in regions:
+                assert r.zones is not None, r
                 r.set_zones([z for z in r.zones if z.name == zone])
             regions = [r for r in regions if r.zones]
         return regions
 
     @classmethod
-    def region_zones_provision_loop(
+    def zones_provision_loop(
         cls,
         *,
-        instance_type: Optional[str] = None,
+        region: str,
+        num_nodes: int,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: Optional[bool] = False,
-    ) -> Iterator[Tuple[Region, List[Zone]]]:
+        use_spot: bool = False,
+    ) -> Iterator[Optional[List[Zone]]]:
         """Loops over (region, zones) to retry for provisioning.
 
         returning a single zone list with its region,
@@ -132,19 +133,21 @@ class IBM(clouds.Cloud):
             accelerators: The accelerators to provision.
             use_spot: Whether to use spot instances.
         """
-        del accelerators  # unused
-        del use_spot  # unsupported
+        # del accelerators  # unused
+        del num_nodes  # unused
+        assert use_spot is False, (
+            'current IBM implementation doesn\'t support spot instances')
 
-        if instance_type is None:
-            # fallback to manually specified region/zones
-            regions = cls.regions()
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, False, 'ibm')
-
-        for region in regions:
-            for zone in region.zones:
-                yield region, [zone]
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot,
+                                            region=region,
+                                            zone=None)
+        # IBM provisioner currently takes 1 zone per request.
+        for r in regions:
+            assert r.zones is not None, r
+            for zone in r.zones:
+                yield [zone]
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -237,7 +240,7 @@ class IBM(clouds.Cloud):
             assert zones is not None, (
                 'Set either both or neither for: region, zones.')
         region_name = region.name
-        zone_names = [zone.name for zone in zones]
+        zone_names = [zone.name for zone in zones]  # type: ignore[union-attr]
 
         r = resources
         assert not r.use_spot, \
@@ -290,11 +293,13 @@ class IBM(clouds.Cloud):
             instance_type, clouds='ibm')
 
     @classmethod
-    def get_default_instance_type(cls) -> str:
-        # 8 vCpus, 32 GB RAM.
-        return get_cred_file_field('instance_profile_name', 'bx2-8x32')
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None) -> Optional[str]:
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         clouds='ibm')
 
-    def get_feasible_launchable_resources(self, resources):
+    def get_feasible_launchable_resources(self,
+                                          resources: 'resources_lib.Resources'):
         """Returns a list of feasible and launchable resources.
 
         Feasible resources refer to an offering respecting the resource
@@ -303,7 +308,7 @@ class IBM(clouds.Cloud):
 
         Launchable resources require a cloud and an instance type be assigned.
         """
-        fuzzy_candidate_list = []
+        fuzzy_candidate_list: Optional[List[str]] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
@@ -318,6 +323,7 @@ class IBM(clouds.Cloud):
                     # Setting this to None as IBM doesn't separately bill /
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
+                    cpus=None,
                 )
                 resource_list.append(r)
             return resource_list
@@ -332,9 +338,13 @@ class IBM(clouds.Cloud):
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
         (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(acc,
-                                                              acc_count,
-                                                              clouds='ibm')
+        ) = service_catalog.get_instance_type_for_accelerator(
+            acc,
+            acc_count,
+            cpus=resources.cpus,
+            region=resources.region,
+            zone=resources.zone,
+            clouds='ibm')
         if instance_list is None:
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
@@ -384,7 +394,8 @@ class IBM(clouds.Cloud):
             and img['operating_system']['architecture'].startswith(
                 'amd')))['id']
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         # IBM-TODO - create a configuration script.
         required_fields = ['iam_api_key', 'resource_group_id']
