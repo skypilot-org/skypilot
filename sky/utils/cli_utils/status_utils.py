@@ -11,6 +11,7 @@ from sky.utils import common_utils
 from sky.utils import log_utils
 
 _COMMAND_TRUNC_LENGTH = 25
+_NUM_COST_REPORT_LINES = 5
 
 # A record in global_user_state's 'clusters' table.
 _ClusterRecord = Dict[str, Any]
@@ -153,7 +154,11 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
             columns.append(status_column.name)
     cluster_table = log_utils.create_table(columns)
 
-    for record in cluster_records:
+    num_lines_to_display = _NUM_COST_REPORT_LINES
+    if show_all:
+        num_lines_to_display = len(cluster_records)
+
+    for record in cluster_records[:num_lines_to_display]:
         row = []
         for status_column in status_columns:
             if status_column.show_by_default or show_all:
@@ -378,3 +383,16 @@ def _get_estimated_cost_for_cost_report(
         return '-'
 
     return f'${cost:.3f}'
+
+
+def get_estimated_total_cost_for_all_records(
+        cluster_cost_report_records: List[_ClusterCostReportRecord]) -> str:
+    cost = 0
+
+    for cluster_cost_report_record in cluster_cost_report_records:
+        cost += cluster_cost_report_record['total_cost']
+
+    if not cost:
+        return '-'
+
+    return f'TOTAL COST: ${cost:.3f}'
