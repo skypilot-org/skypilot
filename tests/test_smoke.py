@@ -1833,7 +1833,8 @@ class TestStorageWithCredentials:
         tmp_local_storage_obj.add_store(store_type)
 
         # Run sky storage ls to check if storage object exists in the output
-        out = subprocess.check_output(['sky', 'storage', 'ls'])
+        #out = subprocess.check_output(['sky', 'storage', 'ls'])
+        out = subprocess.check_output(['sky', 'storage', 'lsl'])
         assert tmp_local_storage_obj.name in out.decode('utf-8')
 
         # Run sky storage delete to delete the storage object
