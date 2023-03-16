@@ -867,7 +867,7 @@ def write_cluster_config(
                 'gcp_project_id': gcp_project_id,
 
                 # Port of Ray (GCS server).
-                # We avoid default port 6379 to avoid conflicts with Redis.
+                # Ray's default port 6379 is conflicted with Redis.
                 'ray_port': 6380,
                 # Ray version.
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
