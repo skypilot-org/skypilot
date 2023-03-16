@@ -142,10 +142,8 @@ def _get_yaml_path_from_cluster_name(cluster_name: str,
     return str(output_path)
 
 
-def fill_template(template_name: str,
-                  variables: Dict,
-                  output_path: Optional[str] = None,
-                  output_prefix: str = SKY_USER_FILE_PATH) -> str:
+def fill_template(template_name: str, variables: Dict,
+                  output_path: str) -> None:
     """Create a file from a Jinja template and return the filename."""
     assert template_name.endswith('.j2'), template_name
     template_path = os.path.join(sky.__root_dir__, 'templates', template_name)
@@ -153,19 +151,13 @@ def fill_template(template_name: str,
         raise FileNotFoundError(f'Template "{template_name}" does not exist.')
     with open(template_path) as fin:
         template = fin.read()
-    if output_path is None:
-        cluster_name = variables.get('cluster_name')
-        assert isinstance(cluster_name, str), cluster_name
-        output_path = _get_yaml_path_from_cluster_name(cluster_name,
-                                                       output_prefix)
-    output_path = os.path.abspath(output_path)
+    output_path = os.path.abspath(os.path.expanduser(output_path))
 
     # Write out yaml config.
     j2_template = jinja2.Template(template)
     content = j2_template.render(**variables)
     with open(output_path, 'w') as fout:
         fout.write(content)
-    return output_path
 
 
 def _optimize_file_mounts(yaml_path: str) -> None:
@@ -837,7 +829,7 @@ def write_cluster_config(
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
-    tmp_yaml_path = fill_template(
+    fill_template(
         cluster_config_template,
         dict(
             resources_vars,
@@ -946,7 +938,10 @@ def write_cluster_config(
         config = common_utils.read_yaml(os.path.expanduser(config_dict['ray']))
         vpc_name = gcp_config.get_usable_vpc(config)
 
-        scripts = tuple(
+        scripts = []
+        for template_name in ('gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2'):
+            script_path = os.path.join(user_file_dir, template_name).replace(
+                '.sh.j2', f'.{cluster_name}.sh')
             fill_template(
                 template_name,
                 dict(
@@ -958,10 +953,10 @@ def write_cluster_config(
                 # Use new names for TPU scripts so that different runs can use
                 # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
                 # with cluster yamls.
-                output_path=os.path.join(user_file_dir, template_name).replace(
-                    '.sh.j2', f'.{cluster_name}.sh'),
-            ) for template_name in
-            ['gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2'])
+                output_path=script_path,
+            )
+            scripts.append(script_path)
+
         config_dict['tpu-create-script'] = scripts[0]
         config_dict['tpu-delete-script'] = scripts[1]
         config_dict['tpu_name'] = tpu_name

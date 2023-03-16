@@ -573,7 +573,8 @@ def spot_launch(
     if name is None:
         if task.name is not None:
             name = task.name
-        name = backend_utils.generate_cluster_name()
+        else:
+            name = backend_utils.generate_cluster_name()
     # Override the task name with the specified name or generated name, so that
     # the controller process can retrieve the task name from the task config.
     task.name = name
@@ -589,6 +590,7 @@ def spot_launch(
             'user_yaml_path': f.name,
             'user_config_path': None,
             'spot_controller': controller_name,
+            # Note: actual spot cluster name will be <task_name>-<spot job ID>
             'task_name': name,
             'uuid': task_uuid,
             'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
@@ -639,9 +641,8 @@ def spot_launch(
                         skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
                 })
 
-        yaml_path = os.path.expanduser(
-            os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
-                         f'{name}-{task_uuid}.yaml'))
+        yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
+                                 f'{name}-{task_uuid}.yaml')
         backend_utils.fill_template(spot.SPOT_CONTROLLER_TEMPLATE,
                                     vars_to_fill,
                                     output_path=yaml_path)
