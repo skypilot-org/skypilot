@@ -698,11 +698,13 @@ def dump_spot_cost(condensed: bool) -> str:
             cluster_report['name'] = get_job_name_from_spot_cluster_name(
                 cluster_name)
 
-        else:
-            cluster_report['name'] = ''
             cluster_report['resources'] = '-'
             cluster_report['num_nodes'] = '-'
             cluster_report['zone'] = '-'
+
+        else:
+            cluster_report['name'] = ''
+            cluster_report['num_recoveries'] = ''
 
     return common_utils.encode_payload(cluster_reports)
 
@@ -718,6 +720,7 @@ def format_cost_table(reports: List[Dict[str, Any]]) -> str:
     columns = [
         'JOB NAME',
         'JOB ID',
+        '# RECOVERIES',
         'RESOURCES',
         'NODES',
         'ZONE',
@@ -728,7 +731,9 @@ def format_cost_table(reports: List[Dict[str, Any]]) -> str:
 
     cost_table = log_utils.create_table(columns)
 
-    for report in reports:
+    empty_row = ['' for _ in range(len(columns))]
+
+    for i, report in enumerate(reports):
         # The job['job_duration'] is already calculated in
         # dump_spot_job_queue().
         duration = log_utils.readable_time_duration(0,
@@ -738,16 +743,30 @@ def format_cost_table(reports: List[Dict[str, Any]]) -> str:
         launch_time = log_utils.readable_time_duration(report['launched_at'])
 
         cost = report['total_cost']
+
+        cost_str = f'${cost:.3f}'
+        duration_str = duration
+
+        is_main_row = len(report['name']) > 0
+
+        if not is_main_row:
+            cost_str = f' ${cost:.3f}'
+            duration_str = f' {duration}'
+
         values = [
             report['name'],
             report['job_id'],
+            report['num_recoveries'],
             report['resources'],
             report['num_nodes'],
             report['zone'],
             launch_time,
-            duration,
-            f'${cost:.3f}',
+            duration_str,
+            cost_str,
         ]
+
+        if i > 0 and is_main_row:
+            cost_table.add_row(empty_row)
 
         cost_table.add_row(values)
 

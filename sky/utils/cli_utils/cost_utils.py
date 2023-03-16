@@ -51,6 +51,7 @@ def _get_non_condensed_records_by_name(
 
     agg_records: List[Dict[str, Any]] = []
     total_duration = 0
+    num_recoveries = 0
 
     for record in records:
 
@@ -64,9 +65,11 @@ def _get_non_condensed_records_by_name(
                 'launched_at': record['launched_at'],
                 'duration': record['duration'],
                 'usage_intervals': record['usage_intervals'],
+                'num_recoveries': 0,
             }
 
             total_duration += record['duration']
+            num_recoveries += 1
 
             agg_records.append(agg_record)
 
@@ -79,6 +82,8 @@ def _get_non_condensed_records_by_name(
         head_record[k] = v
 
     head_record['duration'] = total_duration
+    head_record['num_recoveries'] = num_recoveries
+
     agg_records = [head_record] + agg_records
 
     return agg_records
