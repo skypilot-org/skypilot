@@ -18,7 +18,7 @@ Install SkyPilot using pip:
   $ # pip install "skypilot[all]"
 
 
-SkyPilot currently supports five cloud providers: AWS, GCP, Azure, Lambda Cloud, and Cloudflare(R2, storage only).
+SkyPilot currently supports four cloud providers: AWS, GCP, Azure, and Lambda Cloud.
 If you only have access to certain clouds, use any combination of
 :code:`"[aws,azure,gcp,lambda]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
 dependencies installed.
@@ -117,44 +117,6 @@ To configure Lambda Cloud access, go to the `API Keys <https://cloud.lambdalabs.
   Multi-node clusters and stopping instances are currently not supported on Lambda Cloud.
 
 .. _verify-cloud-access:
-
-Cloudflare R2
-~~~~~~~~~~~~~~~~~~
-
-As R2 is S3 compatible, we would need to set up AWS credentials for R2 with :code:`aws configure`. To generate the Access Key ID and Secret Access Key for R2, please follow these `instructions <https://developers.cloudflare.com/r2/data-access/s3-api/tokens/>`_. With the given Key values, you can set up the credentials. If you already configured for AWS, you can skip this step.
-
-.. code-block:: console
-
-  $ # Install boto
-  $ pip install boto3
-
-  $ # Configure your R2 credentials
-  $ aws configure
-  
-Then, set the following.
-
-.. code-block:: text
-
-  AWS Access Key ID [None]: <access_key_id>
-  AWS Secret Access Key [None]: <access_key_secret>
-  Default region name [None]: auto
-  Default output format [None]: json
-
-Open :code:`~/.aws/credentials`, and if you did not configure for AWS, change :code:`[default]` to :code:`[r2]`. If you already have configured for AWS and skipped the step above, create another configuration for r2 below your configuration for AWS.
-
-.. code-block:: text
-
-  ...
-  
-  [r2]
-  aws_access_key_id = <access_key_id>
-  aws_secret_access_key = <access_key_secret>
-  
-Get your Account ID from your R2 dashboard and store it in :code:`~/.cloudflare/accountid`.
-
-.. code-block:: text
-
-  <account_id>
 
 Verifying cloud access
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
