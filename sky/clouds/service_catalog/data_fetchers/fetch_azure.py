@@ -33,6 +33,7 @@ EXCLUDED_REGIONS = {
     'centraluseuap',
 }
 
+
 def get_regions() -> List[str]:
     """Get all available regions."""
     proc = subprocess.run(
