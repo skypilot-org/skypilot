@@ -234,9 +234,9 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_vcpus_from_instance_type(cls,
-                                     instance_type: str) -> Optional[float]:
-        """Returns the number of virtual CPUs that the instance type offers."""
+    def get_vcpus_mem_from_instance_type(
+            cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+        """Returns the #vCPUs and memory that the instance type offers."""
         raise NotImplementedError
 
     @classmethod
@@ -248,15 +248,21 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None) -> Optional[str]:
-        """Returns the default instance type with the given number of vCPUs.
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None) -> Optional[str]:
+        """Returns the default instance type with the given #vCPUs and memory.
 
         For example, if cpus='4', this method returns the default instance type
         with 4 vCPUs.  If cpus='4+', this method returns the default instance
         type with 4 or more vCPUs.
 
-        When cpus is None, this method will never return None.
+        If 'memory=4', this method returns the default instance type with 4GB
+        memory.  If 'memory=4+', this method returns the default instance
+        type with 4GB or more memory.
+
+        When cpus is None or memory is None, this method will never return None.
         This method may return None if the cloud's default instance family
         does not have a VM with the given number of vCPUs (e.g., when cpus='7').
         """

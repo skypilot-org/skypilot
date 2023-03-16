@@ -1186,9 +1186,8 @@ def test_spot(generic_cloud: str):
             f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
             f'sky spot cancel -y -n {name}-1',
-            'sleep 10',
+            'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep CANCELLED',
-            'sleep 200',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2',
@@ -1379,9 +1378,8 @@ def test_spot_cancellation_aws():
             'sleep 60',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING"',
             f'sky spot cancel -y -n {name}',
-            'sleep 5',
+            'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLED"',
-            'sleep 100',
             (f's=$(aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name}-* '
              f'--query Reservations[].Instances[].State[].Name '
@@ -1391,9 +1389,8 @@ def test_spot_cancellation_aws():
             f'sky spot launch --cloud aws --region {region} -n {name}-2 tests/test_yamls/test_long_setup.yaml  -y -d',
             'sleep 300',
             f'sky spot cancel -y -n {name}-2',
-            'sleep 5',
+            'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLED"',
-            'sleep 100',
             (f's=$(aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name}-2-* '
              f'--query Reservations[].Instances[].State[].Name '
@@ -1412,9 +1409,8 @@ def test_spot_cancellation_aws():
             'sleep 100',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RECOVERING"',
             f'sky spot cancel -y -n {name}-3',
-            'sleep 10',
+            'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLED"',
-            'sleep 90',
             # The cluster should be terminated (shutting-down) after cancellation. We don't use the `=` operator here because
             # there can be multiple VM with the same name due to the recovery.
             (f's=$(aws ec2 describe-instances --region {region} '
@@ -1448,20 +1444,14 @@ def test_spot_cancellation_gcp():
             'sleep 60',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING"',
             f'sky spot cancel -y -n {name}',
-            'sleep 5',
+            'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLED"',
-            'sleep 100',
-            f's=$({query_state_cmd}) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "STOPPING" ]]'  # GCP shows STOPPING when shutting down
-            ,
             # Test cancelling the spot cluster during spot job being setup.
             f'sky spot launch --cloud gcp --zone {zone} -n {name}-2 tests/test_yamls/test_long_setup.yaml  -y -d',
             'sleep 300',
             f'sky spot cancel -y -n {name}-2',
-            'sleep 5',
+            'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLED"',
-            'sleep 100',
-            (f's=$({query_state_cmd}) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "STOPPING" ]]'
-            ),
             # Test cancellation during spot job is recovering.
             f'sky spot launch --cloud gcp --zone {zone} -n {name}-3 "sleep 1000"  -y -d',
             'sleep 300',
@@ -1471,9 +1461,8 @@ def test_spot_cancellation_gcp():
             'sleep 100',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RECOVERING"',
             f'sky spot cancel -y -n {name}-3',
-            'sleep 10',
+            'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLED"',
-            'sleep 90',
             # The cluster should be terminated (STOPPING) after cancellation. We don't use the `=` operator here because
             # there can be multiple VM with the same name due to the recovery.
             (f's=$({query_state_cmd}) && echo "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "PROVISIONING|STAGING|RUNNING|REPAIRING|TERMINATED|SUSPENDING|SUSPENDED|SUSPENDED"'

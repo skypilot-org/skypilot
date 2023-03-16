@@ -12,11 +12,23 @@ from sky.utils import ux_utils
 
 _df = common.read_catalog('azure/vms.csv')
 
-# This is the latest general-purpose instance family as of Jan 2023.
-# CPU: Intel Ice Lake 8370C.
-# Memory: 4 GiB RAM per 1 vCPU.
-_DEFAULT_INSTANCE_FAMILY = 'D_v5'
+# We will select from the following three instance families:
+_DEFAULT_INSTANCE_FAMILY = [
+    # The latest general-purpose instance family as of Mar. 2023.
+    # CPU: Intel Ice Lake 8370C.
+    # Memory: 4 GiB RAM per 1 vCPU;
+    'D_v5',
+    # The latest memory-optimized instance family as of Mar. 2023.
+    # CPU: Intel Ice Lake 8370C.
+    # Memory: 8 GiB RAM per 1 vCPU.
+    'E_v5',
+    # The latest compute-optimized instance family as of Mar 2023.
+    # CPU: Intel Ice Lake 8370C, Cascade Lake 8272CL, or Skylake 8168.
+    # Memory: 2 GiB RAM per 1 vCPU.
+    'Fs_v2'
+]
 _DEFAULT_NUM_VCPUS = 8
+_DEFAULT_MEMORY_CPU_RATIO = 4
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -56,8 +68,9 @@ def get_hourly_cost(instance_type: str,
                                        zone)
 
 
-def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
-    return common.get_vcpus_from_instance_type_impl(_df, instance_type)
+def get_vcpus_mem_from_instance_type(
+        instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+    return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
 def _get_instance_family(instance_type: str) -> str:
@@ -83,12 +96,18 @@ def _get_instance_family(instance_type: str) -> str:
     return instance_family
 
 
-def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
-    if cpus is None:
-        cpus = str(_DEFAULT_NUM_VCPUS)
-    df = _df[_df['InstanceType'].apply(_get_instance_family) ==
-             _DEFAULT_INSTANCE_FAMILY]
-    return common.get_instance_type_for_cpus_impl(df, cpus)
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory: Optional[str] = None) -> Optional[str]:
+    if cpus is None and memory is None:
+        cpus = f'{_DEFAULT_NUM_VCPUS}+'
+    if memory is None:
+        memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
+    else:
+        memory_gb_or_ratio = memory
+    df = _df[_df['InstanceType'].apply(_get_instance_family).isin(
+        _DEFAULT_INSTANCE_FAMILY)]
+    return common.get_instance_type_for_cpus_mem_impl(df, cpus,
+                                                      memory_gb_or_ratio)
 
 
 def get_accelerators_from_instance_type(
@@ -100,6 +119,7 @@ def get_instance_type_for_accelerator(
         acc_name: str,
         acc_count: int,
         cpus: Optional[str] = None,
+        memory: Optional[str] = None,
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
@@ -114,6 +134,7 @@ def get_instance_type_for_accelerator(
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
                                                          cpus=cpus,
+                                                         memory=memory,
                                                          use_spot=use_spot,
                                                          region=region,
                                                          zone=zone)

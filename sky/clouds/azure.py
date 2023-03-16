@@ -6,6 +6,8 @@ import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
+import colorama
+
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
@@ -109,9 +111,12 @@ class Azure(clouds.Cloud):
         return isinstance(other, Azure)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None) -> Optional[str]:
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
                                                          clouds='azure')
 
     def _get_image_config(self, gen_version, instance_type):
@@ -194,12 +199,12 @@ class Azure(clouds.Cloud):
             instance_type, clouds='azure')
 
     @classmethod
-    def get_vcpus_from_instance_type(
+    def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[float]:
-        return service_catalog.get_vcpus_from_instance_type(instance_type,
-                                                            clouds='azure')
+    ) -> Tuple[Optional[float], Optional[float]]:
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='azure')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -256,6 +261,7 @@ class Azure(clouds.Cloud):
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
                     cpus=None,
+                    memory=None,
                 )
                 resource_list.append(r)
             return resource_list
@@ -265,7 +271,7 @@ class Azure(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             default_instance_type = Azure.get_default_instance_type(
-                cpus=resources.cpus)
+                cpus=resources.cpus, memory=resources.memory)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -278,6 +284,7 @@ class Azure(clouds.Cloud):
             acc,
             acc_count,
             cpus=resources.cpus,
+            memory=resources.memory,
             use_spot=resources.use_spot,
             region=resources.region,
             zone=resources.zone,
@@ -349,6 +356,14 @@ class Azure(clouds.Cloud):
             retry_cnt += 1
             try:
                 import knack  # pylint: disable=import-outside-toplevel
+            except ModuleNotFoundError as e:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.CloudUserIdentityError(
+                        'Failed to import \'knack\'. To install the dependencies for Azure, '
+                        'Please install SkyPilot with: '
+                        f'{colorama.Style.BRIGHT}pip install skypilot[azure]'
+                        f'{colorama.Style.RESET_ALL}') from e
+            try:
                 account_email = azure.get_current_account_user()
                 break
             except (FileNotFoundError, knack.util.CLIError) as e:

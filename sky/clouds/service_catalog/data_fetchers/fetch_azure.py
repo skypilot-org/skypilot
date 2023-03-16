@@ -189,7 +189,7 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
         gpu_name = None
         gpu_count = np.nan
         vcpus = np.nan
-        memory_gb = np.nan
+        memory = np.nan
         gen_version = None
         caps = row['capabilities']
         for item in caps:
@@ -201,19 +201,18 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
             elif item['name'] == 'vCPUs':
                 vcpus = float(item['value'])
             elif item['name'] == 'MemoryGB':
-                memory_gb = item['value']
+                memory = item['value']
             elif item['name'] == 'HyperVGenerations':
                 gen_version = item['value']
-        return gpu_name, gpu_count, vcpus, memory_gb, gen_version
+        return gpu_name, gpu_count, vcpus, memory, gen_version
 
     def get_additional_columns(row):
-        gpu_name, gpu_count, vcpus, memory_gb, gen_version = get_capabilities(
-            row)
+        gpu_name, gpu_count, vcpus, memory, gen_version = get_capabilities(row)
         return pd.Series({
             'AcceleratorName': gpu_name,
             'AcceleratorCount': gpu_count,
             'vCPUs': vcpus,
-            'MemoryGiB': memory_gb,
+            'MemoryGiB': memory,
             'GpuInfo': gpu_name,
             'Generation': gen_version,
         })
