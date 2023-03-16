@@ -60,7 +60,7 @@ test_id = str(uuid.uuid4())[-2:]
 
 LAMBDA_TYPE = '--cloud lambda --gpus A100'
 # R2 tests would be done only when the user configured for R2 credentials.
-R2_AVAILABLE = os.path.exists(cloudflare.ACCOUNT_ID_PATH)
+R2_AVAILABLE = os.path.exists(os.path.expanduser(cloudflare.ACCOUNT_ID_PATH))
 
 storage_setup_commands = [
     'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
