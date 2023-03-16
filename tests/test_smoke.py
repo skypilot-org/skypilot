@@ -1820,10 +1820,7 @@ class TestStorageWithCredentials:
     
     # R2 tests would be done only when the user configured for R2 credentials.
     R2_AVAILABLE = os.path.exists(cloudflare.ACCOUNT_ID_PATH)
-    '''
-    @pytest.mark.parametrize('store_type', [
-        storage_lib.StoreType.S3, storage_lib.StoreType.GCS] + ([storage_lib.StoreType.R2] if R2_AVAILABLE else []))
-    '''
+
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, 
@@ -1849,8 +1846,9 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        storage_lib.StoreType.R2
-    ])
+        pytest.param(storage_lib.StoreType.R2, 
+            marks=pytest.mark.skipif(not R2_AVAILABLE, 
+            reason="R2 is not configured"))])
     def test_bucket_bulk_deletion(self, store_type):
         # Create a temp folder with over 256 files and folders, upload
         # files and folders to a new bucket, then delete bucket.
@@ -1892,7 +1890,10 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize(
         'nonexist_bucket_url',
-        ['s3://{random_name}', 'gs://{random_name}', 'r2://{random_name}'])
+        ['s3://{random_name}', 'gs://{random_name}', 
+        pytest.param('r2://{random_name}', 
+            marks=pytest.mark.skipif(not R2_AVAILABLE, 
+            reason="R2 is not configured"))])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
         # Attempts to create fetch a stroage with a non-existent source.
         # Generate a random bucket name and verify it doesn't exist:
