@@ -119,7 +119,7 @@ class StrategyExecutor:
                                        f'{self.cluster_name}.') from e
                 logger.error('Failed to terminate the spot cluster '
                              f'{self.cluster_name}. Retrying.'
-                             f'{common_utils.format_exception(e)}')
+                             f'Details: {common_utils.format_exception(e)}')
                 logger.error(f'  Traceback: {traceback.format_exc()}')
 
     def _try_cancel_all_jobs(self):
