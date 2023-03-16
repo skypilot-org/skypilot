@@ -59,6 +59,7 @@ _smoke_test_hash = hashlib.md5(
 test_id = str(uuid.uuid4())[-2:]
 
 LAMBDA_TYPE = '--cloud lambda --gpus A100'
+R2_AVAILABLE = os.path.exists(cloudflare.ACCOUNT_ID_PATH)
 
 storage_setup_commands = [
     'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
@@ -1848,7 +1849,7 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, 
-            marks=pytest.mark.skipif(not R2_AVAILABLE, 
+            marks=pytest.mark.skipif(R2_AVAILABLE == False, 
             reason="R2 is not configured"))])
     def test_bucket_bulk_deletion(self, store_type):
         # Create a temp folder with over 256 files and folders, upload
