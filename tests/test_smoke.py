@@ -1827,9 +1827,13 @@ class TestStorageWithCredentials:
             reason="R2 is not configured"))])
     """
     @pytest.mark.parametrize('store_type', [
-        storage_lib.StoreType.S3, storage_lib.StoreType.GCS] + ([storage_lib.StoreType.R2] if R2_AVAILABLE else []))
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS, 
+        storage_lib.StoreType.R2])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
                                               store_type):
+        
+        if store_type == storage_lib.StoreType.R2 and not R2_AVAILABLE:
+            return
         # Creates a new bucket with a local source, uploads files to it
         # and deletes it.
         tmp_local_storage_obj.add_store(store_type)
