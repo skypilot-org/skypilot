@@ -59,6 +59,7 @@ _smoke_test_hash = hashlib.md5(
 test_id = str(uuid.uuid4())[-2:]
 
 LAMBDA_TYPE = '--cloud lambda --gpus A100'
+# R2 tests would be done only when the user configured for R2 credentials.
 R2_AVAILABLE = os.path.exists(cloudflare.ACCOUNT_ID_PATH)
 
 storage_setup_commands = [
@@ -1818,15 +1819,11 @@ class TestStorageWithCredentials:
         yield storage_obj
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
-    
-    # R2 tests would be done only when the user configured for R2 credentials.
-
-    R2_AVAILABLE = os.path.exists(cloudflare.ACCOUNT_ID_PATH)
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, 
-            marks=pytest.mark.skipif(R2_AVAILABLE == False, 
+            marks=pytest.mark.skipif(os.path.exists(cloudflare.ACCOUNT_ID_PATH) == False, 
             reason="R2 is not configured"))])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
                                               store_type):
