@@ -304,8 +304,8 @@ class SCPNodeProvider(NodeProvider):
 
         try:
             vm_external_ip = self.scp_client.get_external_ip(virtual_server_id=vm_id, ip=vm_internal_ip)
-            # self.scp_client.set_ssh_key(external_ip=vm_external_ip)
-            # self.scp_client.set_default_config(external_ip=vm_external_ip)
+            self.scp_client.set_ssh_key(external_ip=vm_external_ip)
+            self.scp_client.set_default_config(external_ip=vm_external_ip)
         except: raise SCPError("SSH Init Error")
 
 
