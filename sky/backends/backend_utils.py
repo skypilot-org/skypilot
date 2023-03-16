@@ -1001,7 +1001,7 @@ def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
         run_timestamp.partition('-')[2], '%Y-%m-%d-%H-%M-%S-%f').timestamp()
 
 
-def count_healthy_nodes_from_ray(output,
+def count_healthy_nodes_from_ray(output: str,
                                  is_local_cloud: bool = False
                                 ) -> Tuple[int, int]:
     """Count the number of healthy nodes from the output of `ray status`."""
