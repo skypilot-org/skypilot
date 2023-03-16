@@ -310,22 +310,6 @@ def test_aws_zone():
     run_one_test(test)
 
 
-@pytest.mark.gcp
-def test_gcp_zone():
-    name = _get_cluster_name()
-    test = Test(
-        'gcp_zone',
-        [
-            f'sky launch -y -c {name} --zone us-central1-a --cloud gcp tests/test_yamls/minimal.yaml',
-            f'sky exec {name} --zone us-central1-a --cloud gcp tests/test_yamls/minimal.yaml',
-            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-central1-a',  # Ensure the zone is correct.
-        ],
-        f'sky down -y {name}',
-    )
-    run_one_test(test)
-
-
 @pytest.mark.ibm
 def test_ibm_zone():
     name = _get_cluster_name()
@@ -339,6 +323,22 @@ def test_ibm_zone():
             f'sky status --all | grep {name} | grep {zone}',  # Ensure the zone is correct.
         ],
         f'sky down -y {name} {name}-2 {name}-3',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_gcp_zone():
+    name = _get_cluster_name()
+    test = Test(
+        'gcp_zone',
+        [
+            f'sky launch -y -c {name} --zone us-central1-a --cloud gcp tests/test_yamls/minimal.yaml',
+            f'sky exec {name} --zone us-central1-a --cloud gcp tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status --all | grep {name} | grep us-central1-a',  # Ensure the zone is correct.
+        ],
+        f'sky down -y {name}',
     )
     run_one_test(test)
 
@@ -867,10 +867,10 @@ def test_ibm_job_queue():
             f'sky queue {name} | grep {name}-1 | grep RUNNING',
             f'sky queue {name} | grep {name}-2 | grep RUNNING',
             f'sky queue {name} | grep {name}-3 | grep PENDING',
-            f'sky cancel {name} 2',
+            f'sky cancel -y {name} 2',
             'sleep 5',
             f'sky queue {name} | grep {name}-3 | grep RUNNING',
-            f'sky cancel {name} 3',
+            f'sky cancel -y {name} 3',
         ],
         f'sky down -y {name}',
     )
@@ -944,7 +944,7 @@ def test_ibm_n_node_job_queue():
             f'sky launch -y -c {name} --cloud ibm --gpus v100 --num-nodes 2',
             f'sky exec {name} -n {name}-1 -d {task_file}',
             f'sky exec {name} -n {name}-2 -d {task_file}',
-            f'sky launch -c {name} -n {name}-3 --detach-setup -d {task_file}',
+            f'sky launch -y -c {name} -n {name}-3 --detach-setup -d {task_file}',
             f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-1 | grep RUNNING)',
             f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-2 | grep RUNNING)',
             f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-3 | grep SETTING_UP)',
