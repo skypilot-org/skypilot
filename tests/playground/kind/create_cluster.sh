@@ -1,3 +1,4 @@
+set -e
 kind delete cluster
 kind create cluster --config cluster.yaml
 # Load local skypilot image

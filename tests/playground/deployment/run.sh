@@ -1,4 +1,4 @@
-kubectl create secret generic ssh-key-secret --from-file=ssh-publickey=/home/romilb/.ssh/sky-key.pub
+kubectl create secret generic ssh-key-secret --from-file=ssh-publickey=/Users/romilb/.ssh/sky-key.pub
 kubectl apply -f skypilot_ssh_k8s_deployment.yaml
 # Use kubectl describe service skypilot-service to get the port of the service
 kubectl describe service skypilot-service | grep NodePort

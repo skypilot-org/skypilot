@@ -3,7 +3,7 @@ FROM continuumio/miniconda3:4.11.0
 
 # Initialize conda for root user, install ssh and other local dependencies
 RUN apt update -y && \
-    apt install rsync sudo patch openssh-server pciutils nano -y && \
+    apt install gcc rsync sudo patch openssh-server pciutils nano -y && \
     rm -rf /var/lib/apt/lists/* && \
     apt remove -y python3 && \
     conda init
@@ -24,17 +24,16 @@ RUN useradd -m -s /bin/bash sky && \
 USER sky
 
 # Install SkyPilot pip dependencies
-# Hack: we only install SkyPilot[aws] to optimize build time
 RUN pip install wheel Click colorama cryptography jinja2 jsonschema && \
     pip install networkx oauth2client pandas pendulum PrettyTable && \
-    pip install ray[default]==2.01 rich tabulate filelock 'grpcio<=1.43.0' && \
-    pip install packaging 'protobuf<4.0.0' psutil pulp && \
+    pip install ray==2.3.0 rich tabulate filelock 'grpcio<=1.43.0' && \
+    pip install packaging 'protobuf<4.0.0' pulp && \
     pip install awscli boto3 pycryptodome==3.12.0 && \
     pip install docker
 
 # Install SkyPilot. This is purposely separate from installing SkyPilot
 # dependencies to optimize rebuild time
-COPY . /skypilot/sky/
+COPY --chown=sky . /skypilot/sky/
 
 RUN cd /skypilot/ && \
     sudo mv -v sky/setup_files/* . && \

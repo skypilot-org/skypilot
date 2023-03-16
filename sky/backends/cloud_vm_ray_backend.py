@@ -1854,7 +1854,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                  launched_resources: resources_lib.Resources,
                  stable_internal_external_ips: Optional[List[Tuple[
                      str, str]]] = None,
-                 stable_ssh_ports: Optional[List[int]] = None,
+                      stable_ssh_ports: Optional[List[int]] = None,
                  tpu_create_script: Optional[str] = None,
                  tpu_delete_script: Optional[str] = None) -> None:
         self._version = self._VERSION
@@ -2374,7 +2374,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # to None.
             self._update_after_cluster_provisioned(handle, task,
                                                    prev_cluster_status, ip_list,
-                                                   ssh_port_list,
+ssh_port_list,
                                                    lock_path)
             return handle
 

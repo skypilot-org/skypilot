@@ -116,6 +116,32 @@ class Kubernetes(clouds.Cloud):
             instance_type, clouds='kubernetes')
 
     @classmethod
+    def get_vcpus_mem_from_instance_type(
+            cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+        """Returns the #vCPUs and memory that the instance type offers."""
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='kubernetes')
+
+    @classmethod
+    def zones_provision_loop(
+            cls,
+            *,
+            region: str,
+            num_nodes: int,
+            instance_type: str,
+            accelerators: Optional[Dict[str, int]] = None,
+            use_spot: bool = False,
+    ) -> Iterator[None]:
+        del num_nodes  # Unused.
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot=use_spot,
+                                            region=region,
+                                            zone=None)
+        for r in regions:
+            yield r.zones
+
+    @classmethod
     def get_vcpus_from_instance_type(
         cls,
         instance_type: str,
