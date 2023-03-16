@@ -71,7 +71,8 @@ def resource(resource_name: str, **kwargs):
         endpoint_url=endpoint,
         aws_access_key_id=cloudflare_credentials.access_key,
         aws_secret_access_key=cloudflare_credentials.secret_key,
-        region_name='auto')
+        region_name='auto',
+        **kwargs)
 
 
 @functools.lru_cache()
