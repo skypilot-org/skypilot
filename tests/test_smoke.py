@@ -1854,15 +1854,18 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.R2, 
-            marks=pytest.mark.skipif(not R2_AVAILABLE, 
-            reason="R2 is not configured"))])
+        storage_lib.StoreType.R2])
     def test_bucket_bulk_deletion(self, store_type):
         # Create a temp folder with over 256 files and folders, upload
         # files and folders to a new bucket, then delete bucket.
         # TODO(Doyoung): following subprocess commands does not create
         # 256 files as expected. It creates a directory called "folder{000...255}"
         # make a fix so it actually creates bulk files.
+         
+        # Igore testing for R2 when it's not configured
+        if store_type == storage_lib.StoreType.R2 and not R2_AVAILABLE:
+            return       
+
         with tempfile.TemporaryDirectory() as tmpdir:
             subprocess.check_output(f'mkdir -p {tmpdir}/folder{{000..255}}',
                                     shell=True)
@@ -1905,7 +1908,7 @@ class TestStorageWithCredentials:
         # Generate a random bucket name and verify it doesn't exist:
 
         # Igore testing for R2 when it's not configured
-        if 'r2://' in nonexist_bucket_name and not R2_AVAILABLE:
+        if 'r2://' in nonexist_bucket_url and not R2_AVAILABLE:
             return
 
         retry_count = 0
@@ -2044,10 +2047,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.R2, 
-            marks=pytest.mark.skipif(not R2_AVAILABLE, 
-            reason="R2 is not configured"))
-    ])
+        storage_lib.StoreType.R2])
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
@@ -2055,7 +2055,7 @@ class TestStorageWithCredentials:
         # Igore testing for R2 when it's not configured
         if store_type == storage_lib.StoreType.R2 and not R2_AVAILABLE:
             return
-                    
+
         tmp_local_list_storage_obj.add_store(store_type)
 
         # Check if tmp-file exists in the bucket root using cli
