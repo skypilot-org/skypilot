@@ -62,6 +62,7 @@ logger = sky_logging.init_logger(__name__)
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
+SKY_RAY_PORT = 6380
 SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_PATH = '~/.sky/wheels'
@@ -868,7 +869,7 @@ def write_cluster_config(
 
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
-                'ray_port': 6380,
+                'ray_port': SKY_RAY_PORT,
                 # Ray version.
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
                 # Cloud credentials for cloud storage.
