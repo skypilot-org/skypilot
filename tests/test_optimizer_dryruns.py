@@ -18,6 +18,15 @@ def _test_parse_cpus(spec, expected_cpus):
             assert list(task.resources)[0].cpus == expected_cpus
 
 
+def _test_parse_memory(spec, expected_memory):
+    with tempfile.NamedTemporaryFile('w') as f:
+        f.write(spec)
+        f.flush()
+        with sky.Dag():
+            task = sky.Task.from_yaml(f.name)
+            assert list(task.resources)[0].memory == expected_memory
+
+
 def _test_parse_accelerators(spec, expected_accelerators):
     with tempfile.NamedTemporaryFile('w') as f:
         f.write(spec)
@@ -105,6 +114,12 @@ def test_partial_cpus(monkeypatch):
     _test_resources_launch(monkeypatch, cpus='7+')
 
 
+def test_partial_memory(monkeypatch):
+    _test_resources_launch(monkeypatch, memory=32)
+    _test_resources_launch(monkeypatch, memory='32')
+    _test_resources_launch(monkeypatch, memory='32+')
+
+
 def test_partial_k80(monkeypatch):
     _test_resources_launch(monkeypatch, accelerators='K80')
 
@@ -179,6 +194,22 @@ def test_instance_type_mismatches_cpus(monkeypatch):
         assert 'does not have the requested number of vCPUs' in str(e.value)
 
 
+def test_instance_type_mismatches_memory(monkeypatch):
+    bad_instance_and_memory = [
+        # Actual: 32
+        ('m6i.2xlarge', 4),
+        # Actual: 4
+        ('c6i.large', 2),
+    ]
+    for instance, memory in bad_instance_and_memory:
+        with pytest.raises(ValueError) as e:
+            _test_resources_launch(monkeypatch,
+                                   sky.AWS(),
+                                   instance_type=instance,
+                                   memory=memory)
+        assert 'does not have the requested memory' in str(e.value)
+
+
 def test_instance_type_matches_cpus(monkeypatch):
     _test_resources_launch(monkeypatch,
                            sky.AWS(),
@@ -196,6 +227,84 @@ def test_instance_type_matches_cpus(monkeypatch):
                            sky.AWS(),
                            instance_type='g4dn.2xlarge',
                            cpus=8.0)
+
+
+def test_instance_type_matches_memory(monkeypatch):
+    _test_resources_launch(monkeypatch,
+                           sky.AWS(),
+                           instance_type='c6i.8xlarge',
+                           memory=64)
+    _test_resources_launch(monkeypatch,
+                           sky.Azure(),
+                           instance_type='Standard_E8s_v5',
+                           memory='64')
+    _test_resources_launch(monkeypatch,
+                           sky.GCP(),
+                           instance_type='n1-standard-8',
+                           memory='30+')
+    _test_resources_launch(monkeypatch,
+                           sky.AWS(),
+                           instance_type='g4dn.2xlarge',
+                           memory=32)
+
+
+def test_instance_type_from_cpu_memory(monkeypatch, capfd):
+    _test_resources_launch(monkeypatch, cpus=8)
+    stdout, _ = capfd.readouterr()
+    # Choose General Purpose instance types
+    assert 'm6i.2xlarge' in stdout  # AWS, 8 vCPUs, 32 GB memory
+    assert 'Standard_D8_v5' in stdout  # Azure, 8 vCPUs, 32 GB memory
+    assert 'n2-standard-8' in stdout  # GCP, 8 vCPUs, 32 GB memory
+
+    _test_resources_launch(monkeypatch, memory=32)
+    stdout, _ = capfd.readouterr()
+    # Choose memory-optimized instance types, when the memory
+    # is specified
+    assert 'r6i.xlarge' in stdout  # AWS, 4 vCPUs, 32 GB memory
+    assert 'Standard_E4_v5' in stdout  # Azure, 4 vCPUs, 32 GB memory
+    assert 'n2-highmem-4' in stdout  # GCP, 4 vCPUs, 32 GB memory
+
+    _test_resources_launch(monkeypatch, memory='64+')
+    stdout, _ = capfd.readouterr()
+    # Choose memory-optimized instance types
+    assert 'r6i.2xlarge' in stdout  # AWS, 8 vCPUs, 64 GB memory
+    assert 'Standard_E8_v5' in stdout  # Azure, 8 vCPUs, 64 GB memory
+    assert 'n2-highmem-8' in stdout  # GCP, 8 vCPUs, 64 GB memory
+    assert 'gpu_1x_a100_sxm4' in stdout  # Lambda, 30 vCPUs, 200 GB memory
+
+    _test_resources_launch(monkeypatch, cpus='4+', memory='4+')
+    stdout, _ = capfd.readouterr()
+    # Choose compute-optimized instance types, when the memory
+    # requirement is less than the memory of General Purpose
+    # instance types.
+    assert 'n2-highcpu-4' in stdout  # GCP, 4 vCPUs, 4 GB memory
+    assert 'c6i.xlarge' in stdout  # AWS, 4 vCPUs, 8 GB memory
+    assert 'Standard_F4s_v2' in stdout  # Azure, 4 vCPUs, 8 GB memory
+    assert 'gpu_1x_a100_sxm4' in stdout  # Lambda, 30 vCPUs, 200 GB memory
+
+    _test_resources_launch(monkeypatch, accelerators='T4')
+    stdout, _ = capfd.readouterr()
+    # Choose cheapest T4 instance type
+    assert 'g4dn.xlarge' in stdout  # AWS, 4 vCPUs, 16 GB memory, 1 T4 GPU
+    assert 'Standard_NC4as_T4_v3' in stdout  # Azure, 4 vCPUs, 28 GB memory, 1 T4 GPU
+    assert 'n1-highmem-4' in stdout  # GCP, 4 vCPUs, 26 GB memory, 1 T4 GPU
+
+    _test_resources_launch(monkeypatch,
+                           cpus='16+',
+                           memory='32+',
+                           accelerators='T4')
+    stdout, _ = capfd.readouterr()
+    # Choose cheapest T4 instance type that satisfies the requirement
+    assert 'n1-standard-16' in stdout  # GCP, 16 vCPUs, 60 GB memory, 1 T4 GPU
+    assert 'g4dn.4xlarge' in stdout  # AWS, 16 vCPUs, 64 GB memory, 1 T4 GPU
+    assert 'Standard_NC16as_T4_v3' in stdout  # Azure, 16 vCPUs, 110 GB memory, 1 T4 GPU
+
+    _test_resources_launch(monkeypatch, memory='200+', accelerators='T4')
+    stdout, _ = capfd.readouterr()
+    # Choose cheapest T4 instance type that satisfies the requirement
+    assert 'n1-highmem-32' in stdout  # GCP, 32 vCPUs, 208 GB memory, 1 T4 GPU
+    assert 'g4dn.16xlarge' in stdout  # AWS, 64 vCPUs, 256 GB memory, 1 T4 GPU
+    assert 'Azure' not in stdout  # Azure does not have a 1 T4 GPU instance type with 200+ GB memory
 
 
 def test_instance_type_mistmatches_accelerators(monkeypatch):
@@ -266,6 +375,13 @@ def test_invalid_cpus(monkeypatch):
         assert '"cpus" field should be' in str(e.value)
 
 
+def test_invalid_memory(monkeypatch):
+    for cloud in [sky.AWS(), sky.Azure(), sky.GCP(), None]:
+        with pytest.raises(ValueError) as e:
+            _test_resources(monkeypatch, cloud, memory='invalid')
+        assert '"memory" field should be' in str(e.value)
+
+
 def test_invalid_region(monkeypatch):
     for cloud in [sky.AWS(), sky.Azure(), sky.GCP()]:
         with pytest.raises(ValueError) as e:
@@ -334,13 +450,13 @@ def test_valid_image(monkeypatch):
         cloud=sky.GCP(),
         region='us-central1',
         image_id=
-        'projects/deeplearning-platform-release/global/images/family/common-cpu'
+        'projects/deeplearning-platform-release/global/images/family/common-cpu-v20230126'
     )
     _test_resources(
         monkeypatch,
         cloud=sky.GCP(),
         image_id=
-        'projects/deeplearning-platform-release/global/images/family/common-cpu'
+        'projects/deeplearning-platform-release/global/images/family/common-cpu-v20230126'
     )
 
 
@@ -359,6 +475,33 @@ def test_parse_cpus_from_yaml():
         resources:
             cpus: '3+' """)
     _test_parse_cpus(spec, '3+')
+
+    spec = textwrap.dedent("""\
+        resources:
+            cpus: 3+ """)
+    _test_parse_cpus(spec, '3+')
+
+
+def test_parse_memory_from_yaml():
+    spec = textwrap.dedent("""\
+        resources:
+            memory: 32""")
+    _test_parse_memory(spec, '32')
+
+    spec = textwrap.dedent("""\
+        resources:
+            memory: 1.5""")
+    _test_parse_memory(spec, '1.5')
+
+    spec = textwrap.dedent("""\
+        resources:
+            memory: '3+' """)
+    _test_parse_memory(spec, '3+')
+
+    spec = textwrap.dedent("""\
+        resources:
+            memory: 3+ """)
+    _test_parse_memory(spec, '3+')
 
 
 def test_parse_accelerators_from_yaml():

@@ -13,8 +13,11 @@ from sky.skylet.providers.gcp.config import (
     get_node_type,
 )
 
-from ray.autoscaler.tags import (TAG_RAY_LAUNCH_CONFIG, TAG_RAY_NODE_KIND,
-                                 TAG_RAY_USER_NODE_TYPE)
+from ray.autoscaler.tags import (
+    TAG_RAY_LAUNCH_CONFIG,
+    TAG_RAY_NODE_KIND,
+    TAG_RAY_USER_NODE_TYPE,
+)
 from ray.autoscaler._private.cli_logger import cf, cli_logger
 
 
@@ -75,8 +78,7 @@ class GCPNodeProvider(NodeProvider):
         # Cache of node objects from the last nodes() call. This avoids
         # excessive DescribeInstances requests.
         self.cached_nodes: Dict[str, GCPNode] = {}
-        self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes",
-                                                       True)
+        self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
 
     def _construct_clients(self):
         _, _, compute, tpu = construct_clients_from_provider_config(
@@ -182,10 +184,9 @@ class GCPNodeProvider(NodeProvider):
         instances.
         """
         with self.lock:
-            result_dict = dict()
+            result_dict = {}
             labels = tags  # gcp uses "labels" instead of aws "tags"
             labels = dict(sorted(copy.deepcopy(labels).items()))
-
 
             node_type = get_node_type(base_config)
             resource = self.resources[node_type]
@@ -194,11 +195,18 @@ class GCPNodeProvider(NodeProvider):
             if self.cache_stopped_nodes:
                 filters = {
                     TAG_RAY_NODE_KIND: labels[TAG_RAY_NODE_KIND],
-                    TAG_RAY_LAUNCH_CONFIG: labels[TAG_RAY_LAUNCH_CONFIG]
+                    # SkyPilot: removed TAG_RAY_LAUNCH_CONFIG to allow reusing nodes
+                    # with different launch configs.
+                    # Reference: https://github.com/skypilot-org/skypilot/pull/1671
                 }
                 # This tag may not always be present.
                 if TAG_RAY_USER_NODE_TYPE in labels:
                     filters[TAG_RAY_USER_NODE_TYPE] = labels[TAG_RAY_USER_NODE_TYPE]
+                filters_with_launch_config = copy.copy(filters)
+                filters_with_launch_config[TAG_RAY_LAUNCH_CONFIG] = labels[
+                    TAG_RAY_LAUNCH_CONFIG
+                ]
+
                 # SKY: "TERMINATED" for compute VM, "STOPPED" for TPU VM
                 # "STOPPING" means the VM is being stopped, which needs
                 # to be included to avoid creating a new VM.
@@ -206,8 +214,57 @@ class GCPNodeProvider(NodeProvider):
                     STOPPED_STATUS = ["TERMINATED", "STOPPING"]
                 else:
                     STOPPED_STATUS = ["STOPPED", "STOPPING"]
-                reuse_nodes = resource._list_instances(
-                    filters, STOPPED_STATUS)[:count]
+
+                # SkyPilot: We try to use the instances with the same matching launch_config first. If
+                # there is not enough instances with matching launch_config, we then use all the
+                # instances with the same matching launch_config plus some instances with wrong
+                # launch_config.
+                def get_order_key(node):
+                    import datetime
+
+                    timestamp = node.get("lastStartTimestamp")
+                    if timestamp is not None:
+                        return datetime.datetime.strptime(
+                            timestamp, "%Y-%m-%dT%H:%M:%S.%f%z"
+                        )
+                    return node.id
+
+                nodes_matching_launch_config = resource._list_instances(
+                    filters_with_launch_config, STOPPED_STATUS
+                )
+                nodes_matching_launch_config.sort(
+                    key=lambda n: get_order_key(n), reverse=True
+                )
+                if len(nodes_matching_launch_config) >= count:
+                    reuse_nodes = nodes_matching_launch_config[:count]
+                else:
+                    nodes_all = resource._list_instances(filters, STOPPED_STATUS)
+                    nodes_matching_launch_config_ids = set(
+                        n.id for n in nodes_matching_launch_config
+                    )
+                    nodes_non_matching_launch_config = [
+                        n
+                        for n in nodes_all
+                        if n.id not in nodes_matching_launch_config_ids
+                    ]
+                    # This is for backward compatibility, where the uesr already has leaked
+                    # stopped nodes with the different launch config before update to #1671,
+                    # and the total number of the leaked nodes is greater than the number of
+                    # nodes to be created. With this, we will make sure we will reuse the
+                    # most recently used nodes.
+                    # This can be removed in the future when we are sure all the users
+                    # have updated to #1671.
+                    nodes_non_matching_launch_config.sort(
+                        key=lambda n: get_order_key(n), reverse=True
+                    )
+                    reuse_nodes = (
+                        nodes_matching_launch_config + nodes_non_matching_launch_config
+                    )
+                    # The total number of reusable nodes can be less than the number of nodes to be created.
+                    # This `[:count]` is fine, as it will get all the reusable nodes, even if there are
+                    # less nodes.
+                    reuse_nodes = reuse_nodes[:count]
+
                 reuse_node_ids = [n.id for n in reuse_nodes]
                 if reuse_nodes:
                     # TODO(suquark): Some instances could still be stopping.
@@ -226,9 +283,10 @@ class GCPNodeProvider(NodeProvider):
                     count -= len(reuse_node_ids)
             if count:
                 results = resource.create_instances(base_config, labels, count)
-                result_dict.update({instance_id: result for result, instance_id in results})
+                result_dict.update(
+                    {instance_id: result for result, instance_id in results}
+                )
             return result_dict
-
 
     @_retry
     def terminate_node(self, node_id: str):
@@ -257,14 +315,17 @@ class GCPNodeProvider(NodeProvider):
                         elif instance.is_stopping():
                             time.sleep(POLL_INTERVAL)
                         else:
-                            raise RuntimeError(f"Unexpected instance status."
-                                               " Details: {instance}")
+                            raise RuntimeError(
+                                f"Unexpected instance status." " Details: {instance}"
+                            )
 
                     if instance.is_stopping():
-                        raise RuntimeError(f"Maximum number of polls: "
-                                           f"{MAX_POLLS_STOP} reached. "
-                                           f"Instance {node_id} is still in "
-                                           "STOPPING status.")
+                        raise RuntimeError(
+                            f"Maximum number of polls: "
+                            f"{MAX_POLLS_STOP} reached. "
+                            f"Instance {node_id} is still in "
+                            "STOPPING status."
+                        )
                 else:
                     result = resource.delete_instance(
                         node_id=node_id,

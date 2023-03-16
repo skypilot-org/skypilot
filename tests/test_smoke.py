@@ -1,5 +1,26 @@
 # Smoke tests for SkyPilot
 # Default options are set in pyproject.toml
+# Example usage:
+# Run all tests except for AWS and Lambda Cloud
+# > pytest tests/test_smoke.py
+#
+# Terminate failed clusetrs after test finishes
+# > pytest tests/test_smoke.py --terminate-on-failure
+#
+# Re-run last failed tests
+# > pytest --lf
+#
+# Run one of the smoke tests
+# > pytest tests/test_smoke.py::test_minimal
+#
+# Only run managed spot tests
+# > pytest tests/test_smoke.py --managed-spot
+#
+# Only run test for AWS + generic tests
+# > pytest tests/test_smoke.py --aws
+#
+# Change cloud for generic tests to aws
+# > pytest tests/test_smoke.py --generic-cloud aws
 
 import hashlib
 import inspect
@@ -39,7 +60,8 @@ LAMBDA_TYPE = '--cloud lambda --gpus A100'
 
 storage_setup_commands = [
     'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
-    'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/foo',
+    'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/tmp\ file2',
+    'touch ~/tmp-workdir/foo',
     'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
     'touch ~/.ssh/id_rsa.pub'
 ]
@@ -50,7 +72,7 @@ storage_setup_commands = [
 # the spot queue command will return staled table.
 _SPOT_QUEUE_WAIT = ('s=$(sky spot queue); '
                     'until [ `echo "$s" '
-                    '| grep "Please wait for the controller to be ready" '
+                    '| grep "jobs will not be shown until it becomes UP." '
                     '| wc -l` -eq 0 ]; '
                     'do echo "Waiting for spot queue to be ready..."; '
                     'sleep 5; s=$(sky spot queue); done; echo "$s"; '
@@ -133,7 +155,8 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
            f'\nLog: less {log_file.name}\n')
     test.echo(msg)
     log_file.write(msg)
-    if proc.returncode == 0 and test.teardown is not None:
+    if (proc.returncode == 0 or
+            pytest.terminate_on_failure) and test.teardown is not None:
         subprocess_utils.run(
             test.teardown,
             stdout=log_file,
@@ -1265,7 +1288,7 @@ def test_spot_failed_setup(generic_cloud: str):
         'spot-failed-setup',
         [
             f'sky spot launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
-            'sleep 200',
+            'sleep 300',
             # Make sure the job failed quickly.
             f'{_SPOT_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED_SETUP"',
         ],
@@ -1368,7 +1391,7 @@ def test_spot_recovery_multi_node_aws():
         'spot_recovery_multi_node_aws',
         [
             f'sky spot launch --cloud aws --region {region} -n {name} --num-nodes 2 "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
-            'sleep 400',
+            'sleep 450',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the worker manually.
@@ -1380,7 +1403,7 @@ def test_spot_recovery_multi_node_aws():
              '--output text)'),
             'sleep 50',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
-            'sleep 500',
+            'sleep 560',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],

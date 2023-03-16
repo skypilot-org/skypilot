@@ -31,7 +31,7 @@ class CloudImplementationFeatures(enum.Enum):
 class Region(collections.namedtuple('Region', ['name'])):
     """A region."""
     name: str
-    zones: List['Zone'] = []
+    zones: Optional[List['Zone']] = None
 
     def set_zones(self, zones: List['Zone']):
         self.zones = zones
@@ -101,11 +101,7 @@ class Cloud:
     #### Regions/Zones ####
 
     @classmethod
-    def regions(cls) -> List[Region]:
-        raise NotImplementedError
-
-    @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
+    def regions_with_offering(cls, instance_type: str,
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[Region]:
@@ -126,30 +122,59 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def region_zones_provision_loop(
+    def zones_provision_loop(
         cls,
         *,
-        instance_type: Optional[str] = None,
+        region: str,
+        num_nodes: int,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[Tuple[Region, List[Zone]]]:
-        """Loops over (region, zones) to retry for provisioning.
+    ) -> Iterator[Optional[List[Zone]]]:
+        """Loops over zones to retry for provisioning in a given region.
 
         Certain clouds' provisioners may handle batched requests, retrying for
         itself a list of zones under a region.  Others may need a specific zone
-        per provision request (in that case, yields (region, a one-element list
-        for each zone)).
+        per provision request (in that case, yields a one-element list for each
+        zone).
         Optionally, caller can filter the yielded region/zones by specifying the
         instance_type, accelerators, and use_spot.
 
         Args:
+            region: The region to provision.
+            num_nodes: The number of nodes to provision.
             instance_type: The instance type to provision.
             accelerators: The accelerators to provision.
             use_spot: Whether to use spot instances.
 
+        Yields:
+            A list of zones that offer the requested resources in the given
+            region, in the order of price.
+            (1) If there is no zone that offers the specified resources, nothing
+                is yielded. For example, Azure does not support zone, and
+                calling this method with non-existing instance_type in the given
+                region, will yield nothing, i.e. raise StopIteration.
+                ```
+                for zone in Azure.zones_provision_loop(region=region,
+                                           instance_type='non-existing'):
+                    # Will not reach here.
+                ```
+            (2) If the cloud's provisioner does not support `Zone`s, `None` will
+                be yielded.
+                ```
+                for zone in Azure.zones_provision_loop(region=region,
+                                           instance_type='existing-instance'):
+                    assert zone is None
+                ```
+            This means if something is yielded, either it's None (zones are not
+            supported and the region offers the resources) or it's a non-empty
+            list (zones are supported and they offer the resources).
+
         Typical usage:
 
-            for region, zones in cloud.region_zones_provision_loop(
+            for zones in cloud.region_zones_provision_loop(
+                region,
+                num_nodes,
                 instance_type,
                 accelerators,
                 use_spot
@@ -192,7 +217,7 @@ class Cloud:
     def make_deploy_resources_variables(
         self,
         resources: 'resources.Resources',
-        region: Optional['Region'],
+        region: 'Region',
         zones: Optional[List['Zone']],
     ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
@@ -209,9 +234,9 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_vcpus_from_instance_type(cls,
-                                     instance_type: str) -> Optional[float]:
-        """Returns the number of virtual CPUs that the instance type offers."""
+    def get_vcpus_mem_from_instance_type(
+            cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+        """Returns the #vCPUs and memory that the instance type offers."""
         raise NotImplementedError
 
     @classmethod
@@ -223,22 +248,24 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None) -> Optional[str]:
-        """Returns the default instance type with the given number of vCPUs.
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None) -> Optional[str]:
+        """Returns the default instance type with the given #vCPUs and memory.
 
         For example, if cpus='4', this method returns the default instance type
         with 4 vCPUs.  If cpus='4+', this method returns the default instance
         type with 4 or more vCPUs.
 
-        When cpus is None, this method will never return None.
+        If 'memory=4', this method returns the default instance type with 4GB
+        memory.  If 'memory=4+', this method returns the default instance
+        type with 4GB or more memory.
+
+        When cpus is None or memory is None, this method will never return None.
         This method may return None if the cloud's default instance family
         does not have a VM with the given number of vCPUs (e.g., when cpus='7').
         """
-        raise NotImplementedError
-
-    @classmethod
-    def _get_default_region(cls) -> Region:
         raise NotImplementedError
 
     @classmethod
@@ -259,7 +286,8 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud.
 
         Returns a boolean of whether the user can access this cloud, and a
@@ -267,7 +295,8 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def get_current_user_identity(self) -> Optional[str]:
+    @classmethod
+    def get_current_user_identity(cls) -> Optional[str]:
         """(Advanced) Returns currently active user identity of this cloud.
 
         The user "identity" is associated with each SkyPilot cluster they
@@ -401,13 +430,14 @@ class Cloud:
                     'ensure it is fully matched by regex (e.g., '
                     'only contains lower letters, numbers and dash): '
                     f'{valid_regex}')
-        if max_cluster_name_len_limit is not None and len(
-                cluster_name) > max_cluster_name_len_limit:
+        if (max_cluster_name_len_limit is not None and
+                len(cluster_name) > max_cluster_name_len_limit):
+            cloud_name = '' if cls is Cloud else f' on {cls._REPR}'
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InvalidClusterNameError(
                     f'Cluster name {cluster_name!r} has {len(cluster_name)} '
                     'chars; maximum length is '
-                    f'{max_cluster_name_len_limit} chars.')
+                    f'{max_cluster_name_len_limit} chars{cloud_name}.')
 
     def __repr__(self):
         return self._REPR
