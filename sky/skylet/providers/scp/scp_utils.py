@@ -246,7 +246,6 @@ class SCPClient:
             enc_params = list(map(lambda item: (item[0], parse.quote(item[1][0])), parse.parse_qs(url_info.query).items()))
             url = f'{url}?{parse.urlencode(enc_params)}'
 
-
         print(url)
 
         message = method + url + self.timestamp + self.access_key + self.project_id + self.client_type
@@ -266,7 +265,7 @@ class SCPClient:
 
     def list_nic_details(self, virtual_server_id) -> List[dict]:
         """List existing instances."""
-        url = f'{API_ENDPOINT}/v2/virtual-servers/{virtual_server_id}/nics'
+        url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{virtual_server_id}/nics'
         return self._get(url)
 
     def get_external_ip(self, virtual_server_id, ip):

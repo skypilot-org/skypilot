@@ -329,9 +329,13 @@ class SCPNodeProvider(NodeProvider):
 
     def terminate_node(self, node_id: str) -> None:
         """Terminates the specified node."""
-        raise Exception("!!!!!!!!!!", self.metadata[node_id])
-        self.scp_client.remove_instances(node_id)
-        self.metadata[node_id] = None
+        try:
+            tags = self.metadata[node_id]['tags']
+            self._del_firwall_inbound(tags['firewallId'], tags['firewallRuleId'])
+            self._del_vm(tags['virtualServerId'])
+            self._del_security_group(tags['securityGroupId'])
+        except: raise SCPError("Errors during terminating a node")
+        finally: self.metadata[node_id] = None
 
     def _get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         self._get_filtered_nodes({})  # Side effect: updates cache
@@ -346,9 +350,6 @@ class SCPNodeProvider(NodeProvider):
     def bootstrap_config(cluster_config):
 
         node_config = cluster_config['available_node_types']['ray_head_default']['node_config']
-
         provider_config = cluster_config['provider']
         node_config['region'] = provider_config['region']
-        node_config['security_group_name'] = provider_config['security_group']['GroupName']
-
         return cluster_config
