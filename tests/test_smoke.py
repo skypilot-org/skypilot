@@ -1824,7 +1824,7 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, 
-            marks=pytest.mark.skipif("not R2_AVAILABLE", 
+            marks=pytest.mark.skipif("not" R2_AVAILABLE, 
             reason="R2 is not configured"))])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
                                               store_type):
