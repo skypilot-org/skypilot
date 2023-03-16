@@ -77,11 +77,12 @@ _SPOT_QUEUE_WAIT = ('s=$(sky spot queue); '
                     'do echo "Waiting for spot queue to be ready..."; '
                     'sleep 5; s=$(sky spot queue); done; echo "$s"; '
                     'echo; echo; echo "$s"')
-_SPOT_CANCEL_WAIT = ('s=$(sky spot cancel -y -n {job_name}); until [ `echo "$s" '
-                    '| grep "Please wait for the controller to be ready." '
-                    '| wc -l` -eq 0 ]; do echo "Waiting for the spot controller '
-                    'to be ready"; sleep 5; s=$(sky spot cancel -y -n {job_name}); '
-                    'done; echo "$s"; echo; echo; echo "$s"')
+_SPOT_CANCEL_WAIT = (
+    's=$(sky spot cancel -y -n {job_name}); until [ `echo "$s" '
+    '| grep "Please wait for the controller to be ready." '
+    '| wc -l` -eq 0 ]; do echo "Waiting for the spot controller '
+    'to be ready"; sleep 5; s=$(sky spot cancel -y -n {job_name}); '
+    'done; echo "$s"; echo; echo; echo "$s"')
 # TODO(zhwu): make the spot controller on GCP.
 
 
