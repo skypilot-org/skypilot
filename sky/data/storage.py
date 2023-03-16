@@ -1714,7 +1714,7 @@ class R2Store(AbstractStore):
                           f'--endpoint {endpoint_url} '
                           f'--profile={cloudflare.R2_PROFILE_NAME}')
         try:
-            with backend_utils.safe_console_status(
+            with log_utils.safe_rich_status(
                     f'[bold cyan]Deleting R2 bucket {bucket_name}[/]'):
                 subprocess.check_output(remove_command.split(' '))
         except subprocess.CalledProcessError as e:
