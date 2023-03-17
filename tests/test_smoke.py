@@ -69,7 +69,7 @@ storage_setup_commands = [
 # Wait until the spot controller is not in INIT state.
 # This is a workaround for the issue that when multiple spot tests
 # are running in parallel, the spot controller may be in INIT and
-# the spot queue command will return staled table.
+# the spot queue/cancel command will return staled table.
 _SPOT_QUEUE_WAIT = ('s=$(sky spot queue); '
                     'until [ `echo "$s" '
                     '| grep "jobs will not be shown until it becomes UP." '
@@ -77,6 +77,12 @@ _SPOT_QUEUE_WAIT = ('s=$(sky spot queue); '
                     'do echo "Waiting for spot queue to be ready..."; '
                     'sleep 5; s=$(sky spot queue); done; echo "$s"; '
                     'echo; echo; echo "$s"')
+_SPOT_CANCEL_WAIT = (
+    's=$(sky spot cancel -y -n {job_name}); until [ `echo "$s" '
+    '| grep "Please wait for the controller to be ready." '
+    '| wc -l` -eq 0 ]; do echo "Waiting for the spot controller '
+    'to be ready"; sleep 5; s=$(sky spot cancel -y -n {job_name}); '
+    'done; echo "$s"; echo; echo; echo "$s"')
 # TODO(zhwu): make the spot controller on GCP.
 
 
@@ -1266,12 +1272,17 @@ def test_spot(generic_cloud: str):
             'sleep 5',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
-            f'sky spot cancel -y -n {name}-1',
+            _SPOT_CANCEL_WAIT.format(job_name=f'{name}-1'),
+            'sleep 5',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep CANCELLED',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
-        f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2',
+        # TODO(zhwu): Change to _SPOT_CANCEL_WAIT.format(job_name=f'{name}-1 -n {name}-2') when
+        # canceling multiple job names is supported.
+        (_SPOT_CANCEL_WAIT.format(job_name=f'{name}-1') + '; ' +
+         _SPOT_CANCEL_WAIT.format(job_name=f'{name}-2')),
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -1291,7 +1302,7 @@ def test_spot_failed_setup(generic_cloud: str):
             # Make sure the job failed quickly.
             f'{_SPOT_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED_SETUP"',
         ],
-        f'sky spot cancel -y -n {name}',
+        _SPOT_CANCEL_WAIT.format(job_name=name),
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -1324,7 +1335,7 @@ def test_spot_recovery_aws():
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
         ],
-        f'sky spot cancel -y -n {name}',
+        _SPOT_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
     )
     run_one_test(test)
@@ -1356,7 +1367,7 @@ def test_spot_recovery_gcp():
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
         ],
-        f'sky spot cancel -y -n {name}',
+        _SPOT_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
     )
     run_one_test(test)
@@ -1374,7 +1385,7 @@ def test_spot_recovery_default_resources(generic_cloud: str):
             'sleep 360',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|RECOVERING"',
         ],
-        f'sky spot cancel -y -n {name}',
+        _SPOT_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
     )
     run_one_test(test)
@@ -1406,7 +1417,7 @@ def test_spot_recovery_multi_node_aws():
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
-        f'sky spot cancel -y -n {name}',
+        _SPOT_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
     )
     run_one_test(test)
@@ -1440,7 +1451,7 @@ def test_spot_recovery_multi_node_gcp():
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
-        f'sky spot cancel -y -n {name}',
+        _SPOT_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
     )
     run_one_test(test)
@@ -1458,7 +1469,9 @@ def test_spot_cancellation_aws():
             f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
             'sleep 60',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING"',
-            f'sky spot cancel -y -n {name}',
+            _SPOT_CANCEL_WAIT.format(job_name=name),
+            'sleep 5',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLED"',
             (f's=$(aws ec2 describe-instances --region {region} '
@@ -1469,7 +1482,9 @@ def test_spot_cancellation_aws():
             # Test cancelling the spot cluster during spot job being setup.
             f'sky spot launch --cloud aws --region {region} -n {name}-2 tests/test_yamls/test_long_setup.yaml  -y -d',
             'sleep 300',
-            f'sky spot cancel -y -n {name}-2',
+            _SPOT_CANCEL_WAIT.format(job_name=f'{name}-2'),
+            'sleep 5',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLED"',
             (f's=$(aws ec2 describe-instances --region {region} '
@@ -1489,7 +1504,9 @@ def test_spot_cancellation_aws():
              '--output text)'),
             'sleep 100',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RECOVERING"',
-            f'sky spot cancel -y -n {name}-3',
+            _SPOT_CANCEL_WAIT.format(job_name=f'{name}-3'),
+            'sleep 5',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLED"',
             # The cluster should be terminated (shutting-down) after cancellation. We don't use the `=` operator here because
@@ -1524,13 +1541,17 @@ def test_spot_cancellation_gcp():
             f'sky spot launch --cloud gcp --zone {zone} -n {name} "sleep 1000"  -y -d',
             'sleep 60',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING"',
-            f'sky spot cancel -y -n {name}',
+            _SPOT_CANCEL_WAIT.format(job_name=name),
+            'sleep 5',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLED"',
             # Test cancelling the spot cluster during spot job being setup.
             f'sky spot launch --cloud gcp --zone {zone} -n {name}-2 tests/test_yamls/test_long_setup.yaml  -y -d',
             'sleep 300',
-            f'sky spot cancel -y -n {name}-2',
+            _SPOT_CANCEL_WAIT.format(job_name=f'{name}-2'),
+            'sleep 5',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLED"',
             # Test cancellation during spot job is recovering.
@@ -1541,7 +1562,9 @@ def test_spot_cancellation_gcp():
             terminate_cmd,
             'sleep 100',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RECOVERING"',
-            f'sky spot cancel -y -n {name}-3',
+            _SPOT_CANCEL_WAIT.format(job_name=f'{name}-3'),
+            'sleep 5',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLED"',
             # The cluster should be terminated (STOPPING) after cancellation. We don't use the `=` operator here because
@@ -1576,7 +1599,7 @@ def test_spot_storage(generic_cloud: str):
                 f'{_SPOT_QUEUE_WAIT}| grep {name} | grep SUCCEEDED',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
             ],
-            f'sky spot cancel -y -n {name}',
+            _SPOT_CANCEL_WAIT.format(job_name=name),
             # Increase timeout since sky spot queue -r can be blocked by other spot tests.
             timeout=20 * 60,
         )
@@ -1598,7 +1621,7 @@ def test_spot_tpu():
             'sleep 600',  # TPU takes a while to launch
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
-        f'sky spot cancel -y -n {name}',
+        _SPOT_CANCEL_WAIT.format(job_name=name),
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -1618,7 +1641,7 @@ def test_spot_inline_env(generic_cloud: str):
             'sleep 20',
             f'{_SPOT_QUEUE_WAIT} | grep {name} | grep SUCCEEDED',
         ],
-        f'sky spot cancel -y -n {name}',
+        _SPOT_CANCEL_WAIT.format(job_name=name),
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )

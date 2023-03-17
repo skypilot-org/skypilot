@@ -3355,6 +3355,8 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
         after a maximum number of retry attempts.
     - FAILED_CONTROLLER: The job failed due to an unexpected error in the spot
         controller.
+    - CANCELLING: The job was requested to be cancelled by the user, and the
+        cancellation is in progress.
     - CANCELLED: The job was cancelled by the user.
 
     If the job failed, either due to user code or spot unavailability, the error
