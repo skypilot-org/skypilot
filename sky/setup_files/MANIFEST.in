@@ -8,5 +8,5 @@ include sky/skylet/providers/lambda_cloud/*
 include sky/skylet/ray_patches/*.patch
 include sky/templates/*
 include sky/setup_files/*
-include sky/skylet/LICENCE
+include sky/skylet/LICENSE
 exclude sky/clouds/service_catalog/data_fetchers/analyze.py
