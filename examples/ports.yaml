@@ -1,0 +1,18 @@
+# A minimal example.
+#
+# Runs a task that simply lists the default conda environments.
+#
+# Usage:
+#   sky launch -c min minimal.yaml
+#   sky down min
+
+name: minimal
+
+resources:
+  ports: "tcp:9090-9098"
+
+setup: |
+  echo "running setup"
+
+run: |
+  python test.py
