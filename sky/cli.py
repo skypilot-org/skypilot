@@ -823,6 +823,35 @@ def _create_and_ssh_into_node(
             f'Name {cluster_name!r} taken by a local cluster and cannot '
             f'be used for a {node_type}.')
 
+    backend = backend if backend is not None else backends.CloudVmRayBackend()
+    if not isinstance(backend, backends.CloudVmRayBackend):
+        raise click.UsageError('Interactive nodes are only supported for '
+                               f'{backends.CloudVmRayBackend.__name__} '
+                               f'backend. Got {type(backend).__name__}.')
+
+    maybe_status, handle = backend_utils.refresh_cluster_status_handle(
+        cluster_name)
+    if maybe_status is not None:
+        if user_requested_resources:
+            if not resources.less_demanding_than(handle.launched_resources):
+                name_arg = ''
+                if cluster_name != _default_interactive_node_name(node_type):
+                    name_arg = f' -c {cluster_name}'
+                raise click.UsageError(
+                    f'Relaunching interactive node {cluster_name!r} with '
+                    'mismatched resources.\n    '
+                    f'Requested resources: {resources}\n    '
+                    f'Launched resources: {handle.launched_resources}\n'
+                    'To login to existing cluster, use '
+                    f'{colorama.Style.BRIGHT}sky {node_type}{name_arg}'
+                    f'{colorama.Style.RESET_ALL}. To launch a new cluster, '
+                    f'use {colorama.Style.BRIGHT}sky {node_type} -c NEW_NAME '
+                    f'{colorama.Style.RESET_ALL}')
+        else:
+            # Use existing interactive node if it exists and no user
+            # resources were specified.
+            resources = handle.launched_resources
+
     # TODO: Add conda environment replication
     # should be setup =
     # 'conda env export | grep -v "^prefix: " > environment.yml'
@@ -833,22 +862,6 @@ def _create_and_ssh_into_node(
         setup=None,
     )
     task.set_resources(resources)
-
-    backend = backend if backend is not None else backends.CloudVmRayBackend()
-    if not isinstance(backend, backends.CloudVmRayBackend):
-        raise click.UsageError('Interactive nodes are only supported for '
-                               f'{backends.CloudVmRayBackend.__name__} '
-                               f'backend. Got {type(backend).__name__}.')
-    maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster_name)
-    if maybe_status is not None and user_requested_resources:
-        name_arg = ''
-        if cluster_name != _default_interactive_node_name(node_type):
-            name_arg = f' -c {cluster_name}'
-        raise click.UsageError(
-            'Resources cannot be specified for an existing interactive node '
-            f'{cluster_name!r}. To login to the cluster, use: '
-            f'{colorama.Style.BRIGHT}'
-            f'sky {node_type}{name_arg}{colorama.Style.RESET_ALL}')
 
     _launch_with_confirm(
         task,
