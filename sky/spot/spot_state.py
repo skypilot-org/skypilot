@@ -162,7 +162,7 @@ _SPOT_STATUS_TO_COLOR = {
     SpotStatus.PENDING: colorama.Fore.BLUE,
     SpotStatus.SUBMITTED: colorama.Fore.BLUE,
     SpotStatus.STARTING: colorama.Fore.BLUE,
-    SpotStatus.RUNNING: colorama.Fore.BLACK,
+    SpotStatus.RUNNING: colorama.Fore.GREEN,
     SpotStatus.RECOVERING: colorama.Fore.CYAN,
     SpotStatus.SUCCEEDED: colorama.Fore.GREEN,
     SpotStatus.FAILED: colorama.Fore.RED,
