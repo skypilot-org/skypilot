@@ -107,13 +107,6 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
     pathlib.Path(sky.__file__).resolve().parent / 'backends' /
     'monkey_patches' / 'monkey_patch_ray_up.py')
 
-SKYLET_VERSION = 1  # maybe move it to sky/skylet/constants.py
-SKYLET_VERSION_FILE = '~/.sky/skylet_version'  # maybe move it to sky/skylet/constants.py
-# Restart skylet when the version does not match to keep the skylet up-to-date.
-_MAYBE_SKYLET_RESTART_CMD = (
-    f'[[ $(cat {SKYLET_VERSION_FILE}) = "{SKYLET_VERSION}" ]] || (pkill -f "python3 -m sky.skylet.skylet"; echo {SKYLET_VERSION} >  {SKYLET_VERSION_FILE}; nohup python3 -m '
-    'sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);')
-
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
@@ -1653,12 +1646,10 @@ class RetryingVmProvisioner(object):
             return
         backend = CloudVmRayBackend()
 
-        print(_MAYBE_SKYLET_RESTART_CMD)
-
         # For backward compatability and robustness of skylet, it is restarted
         returncode = backend.run_on_head(
             handle,
-            f'{_MAYBE_SKYLET_RESTART_CMD}ray status',
+            f'ray status',
             # At this state, an erroneous cluster may not have cached
             # handle.head_ip (global_user_state.add_or_update_cluster(...,
             # ready=True)).
@@ -2614,13 +2605,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       stream_logs=False,
                                                       require_outputs=True)
 
-        if True or 'has no attribute' in stdout:
+        if 'has no attribute' in stdout:
             # Happens when someone calls `sky exec` but remote has not been updated
             # necessicating calling `sky launch`
-            logger.info(
-                f'{colorama.Fore.RED}SkyPilot must be updated on remote,'
-                f'use `sky launch` instead{colorama.Style.RESET_ALL}')
-            return
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'{colorama.Fore.RED}SkyPilot must be updated on remote,'
+                    f' use `sky launch` instead{colorama.Style.RESET_ALL}')
 
         subprocess_utils.handle_returncode(returncode,
                                            job_submit_cmd,

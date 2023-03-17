@@ -217,17 +217,17 @@ _JOB_STATUS_TO_COLOR = {
 }
 
 _RAY_TO_JOB_STATUS_MAP = {
-    # These are intentionally set to one status before, because:
+    # These are intentionally set this way, because:
     # 1. when the ray status indicates the job is PENDING the generated
-    # python program should not be started yet, i.e. the job should be INIT.
+    # python program has left the job queue and is now PENDING
     # 2. when the ray status indicates the job is RUNNING the job can be in
     # setup or resources may not be allocated yet, i.e. the job should be
-    # SETTING_UP.
-    # For case 2, update_job_status() would compare this mapped SETTING_UP to
+    # PENDING.
+    # For case 2, update_job_status() would compare this mapped PENDING to
     # the status in our jobs DB and take the max. This is because the job's
     # generated ray program is the only place that can determine a job has
     # reserved resources and actually started running: it will set the
-    # status in the DB to RUNNING.
+    # status in the DB to SETTING_UP or RUNNING.
     # If there is no setup specified in the task, as soon as it is started
     # (ray's status becomes RUNNING), i.e. it will be very rare that the job
     # will be set to SETTING_UP by the update_job_status, as our generated
