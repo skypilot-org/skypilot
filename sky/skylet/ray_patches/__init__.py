@@ -63,6 +63,9 @@ def patch() -> None:
     from ray._private import log_monitor
     _run_patch(log_monitor.__file__, _to_absolute('log_monitor.py.patch'))
 
+    from ray._private import utils
+    _run_patch(utils.__file__, _to_absolute('utils.py.patch'))
+
     from ray._private import worker
     _run_patch(worker.__file__, _to_absolute('worker.py.patch'))
 
