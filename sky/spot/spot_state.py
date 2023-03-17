@@ -106,7 +106,8 @@ class SpotStatus(enum.Enum):
     # CANCELLING: The job is requested to be cancelled by the user, and the
     # controller is cleaning up the spot cluster.
     CANCELLING = 'CANCELLING'
-    # CANCELLED: The job is cancelled by the user.
+    # CANCELLED: The job is cancelled by the user. When the spot job is in
+    # CANCELLED status, the spot cluster has been cleaned up.
     CANCELLED = 'CANCELLED'
     # FAILED: The job is finished with failure from the user's program.
     FAILED = 'FAILED'
