@@ -51,6 +51,9 @@ envs:
 {% if is_dev %}
   SKYPILOT_DEV: 1
 {% endif %}
+{% if is_debug %}
+  SKYPILOT_DEBUG: 1
+{% endif %}
 {% if disable_logging %}
   SKYPILOT_DISABLE_USAGE_COLLECTION: 1
 {% endif %}

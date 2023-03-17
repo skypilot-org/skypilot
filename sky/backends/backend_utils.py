@@ -820,6 +820,9 @@ def write_cluster_config(
         if region_name not in ssh_proxy_command_config:
             # Skip this region. The upper layer will handle the failover to
             # other regions.
+            # TODO(zhwu): The optimizer should only yield the regions that
+            # is in ssh_proxy_command_config already, so this should not be
+            # reached.
             raise exceptions.ResourcesUnavailableError(
                 f'No ssh_proxy_command provided for region {region_name}. Skipped.'
             )

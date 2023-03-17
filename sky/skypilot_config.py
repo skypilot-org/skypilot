@@ -13,7 +13,7 @@ To read a nested-key config:
 
 To pop a nested-key config:
 
-  >> config_dict = skypilot_config.pop_nested(('auth', 'some_key'))
+  >> config_dict = skypilot_config.set_nested(('auth', 'some_key'), value)
 
 This operation returns a deep-copy dict, and is safe in that any key not found
 will not raise an error.
@@ -43,7 +43,7 @@ then:
 """
 import copy
 import os
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 import yaml
 
@@ -93,8 +93,8 @@ def get_nested(keys: Sequence[str], default_value: Any) -> Any:
     return curr
 
 
-def pop_nested(keys: Sequence[str]) -> Dict[str, Any]:
-    """Returns a deep-copied config with the nested key popped.
+def set_nested(keys: Sequence[str], value: Optional[Any]) -> Dict[str, Any]:
+    """Returns a deep-copied config with the nested key set to value.
 
     Like get_nested(), if any key is not found, this will not raise an error.
     """
@@ -105,15 +105,18 @@ def pop_nested(keys: Sequence[str]) -> Dict[str, Any]:
     to_return = curr
     prev = None
     for i, key in enumerate(keys):
-        if key in curr:
-            prev = curr
-            curr = curr[key]
-            if i == len(keys) - 1:
-                prev.pop(key)
-                logger.debug(f'Popped {keys}. Returning conf: {to_return}')
-        else:
-            # If any key not found, simply return.
-            return to_return
+        if key not in curr:
+            curr[key] = {}
+        prev = curr
+        curr = curr[key]
+        if i == len(keys) - 1:
+            prev_value = prev[key]
+            if value is None:
+                prev.pop(key, None)
+            else:
+                prev[key] = value
+            logger.debug(f'Set the value of {keys} to {value} (previous: '
+                         f'{prev_value}). Returning conf: {to_return}')
     return to_return
 
 
