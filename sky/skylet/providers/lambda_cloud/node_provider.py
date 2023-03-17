@@ -20,9 +20,12 @@ from sky import authentication as auth
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import common_utils
 
 _TAG_PATH_PREFIX = '~/.sky/generated/lambda_cloud/metadata'
+_REMOTE_SSH_KEY_NAME = '~/.lambda_cloud/ssh_key_name'
 _REMOTE_RAY_SSH_KEY = '~/ray_bootstrap_key.pem'
+_REMOTE_RAY_YAML = '~/ray_bootstrap_config.yaml'
 _GET_INTERNAL_IP_CMD = 'ip -4 -br addr show | grep -Eo "10\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"'
 
 logger = logging.getLogger(__name__)
@@ -54,9 +57,33 @@ class LambdaNodeProvider(NodeProvider):
         self.cached_nodes = {}
         self.metadata = lambda_utils.Metadata(_TAG_PATH_PREFIX, cluster_name)
         self.ssh_key_path = os.path.expanduser(auth.PRIVATE_SSH_KEY_PATH)
-        remote_ssh_key = os.path.expanduser(_REMOTE_RAY_SSH_KEY)
-        if os.path.exists(remote_ssh_key):
-            self.ssh_key_path = remote_ssh_key
+        self.ssh_key_name = f'sky-key-{common_utils.get_user_hash()}'
+
+        # Special handling if on head node
+        ray_yaml_path = os.path.expanduser(_REMOTE_RAY_YAML)
+        if (os.path.exists(ray_yaml_path) and
+                common_utils.read_yaml(ray_yaml_path)['cluster_name']
+                == cluster_name):
+            # On head node
+            self.ssh_key_path = os.path.expanduser(_REMOTE_RAY_SSH_KEY)
+            ssh_key_name_path = os.path.expanduser(_REMOTE_SSH_KEY_NAME)
+            if os.path.exists(ssh_key_name_path):
+                with open(ssh_key_name_path, 'r') as f:
+                    self.ssh_key_name = f.read()
+            else:
+                # At this point, `~/.ssh/sky-key.pub` contains the public
+                # key used to launch this cluster. Use it to determine
+                # ssh key name and store the name in _REMOTE_SSH_KEY_NAME
+                public_key_path = os.path.expanduser(auth.PUBLIC_SSH_KEY_PATH)
+                with open(public_key_path, 'r') as f:
+                    public_key = f.read()
+                for key_info in self.lambda_client.list_ssh_keys():
+                    if key_info.get('public_key', '') == public_key:
+                        self.ssh_key_name = key_info.get('name', '')
+                        with open(ssh_key_name_path, 'w') as f:
+                            f.write(self.ssh_key_name)
+                        return
+                raise lambda_utils.LambdaCloudError('SSH key not found')
 
     def _guess_and_add_missing_tags(self, vms: Dict[str, Any]) -> None:
         """Adds missing vms to local tag file and guesses their tags."""
@@ -206,7 +233,8 @@ class LambdaNodeProvider(NodeProvider):
                 instance_type=instance_type,
                 region=region,
                 quantity=1,
-                name=name)[0]
+                name=name,
+                ssh_key_name=self.ssh_key_name)[0]
             self.metadata.set(vm_id, {'tags': config_tags})
             booting_list.append(vm_id)
             time.sleep(10)  # Avoid api rate limits

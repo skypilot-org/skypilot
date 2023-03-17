@@ -1,6 +1,6 @@
 """Lambda Cloud helper functions."""
-import os
 import json
+import os
 import requests
 from typing import Any, Dict, List, Optional
 
@@ -97,17 +97,15 @@ class LambdaCloudClient:
                 line.split(' = ')[0]: line.split(' = ')[1] for line in lines
             }
         self.api_key = self._credentials['api_key']
-        self.ssh_key_name = self._credentials.get('ssh_key_name', None)
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
 
     def create_instances(self,
                          instance_type: str = 'gpu_1x_a100_sxm4',
                          region: str = 'us-east-1',
                          quantity: int = 1,
-                         name: str = '') -> Dict[str, Any]:
+                         name: str = '',
+                         ssh_key_name: str = '') -> Dict[str, Any]:
         """Launch new instances."""
-        assert self.ssh_key_name is not None
-
         # Optimization:
         # Most API requests are rate limited at ~1 request every second but
         # launch requests are rate limited at ~1 request every 10 seconds.
@@ -131,7 +129,7 @@ class LambdaCloudClient:
         data = json.dumps({
             'region_name': region,
             'instance_type_name': instance_type,
-            'ssh_key_names': [self.ssh_key_name],
+            'ssh_key_names': [ssh_key_name],
             'quantity': quantity,
             'name': name
         })
@@ -162,17 +160,29 @@ class LambdaCloudClient:
         raise_lambda_error(response)
         return response.json().get('data', [])
 
-    def set_ssh_key(self, name: str, pub_key: str) -> None:
-        """Set ssh key."""
+    def list_ssh_keys(self) -> List[Dict[str, str]]:
+        """List ssh keys."""
+        response = requests.get(f'{API_ENDPOINT}/ssh-keys',
+                                headers=self.headers)
+        raise_lambda_error(response)
+        return response.json().get('data', [])
+
+    def register_ssh_key(self, name: str, pub_key: str) -> None:
+        """Register ssh key with Lambda."""
+        # Check if key already exists
+        registered_ssh_keys = self.list_ssh_keys()
+        for key_info in registered_ssh_keys:
+            if key_info.get('name', '') == name:
+                if key_info.get('public_key', '') == pub_key:
+                    return
+                LambdaCloudError('SSH key {name} already exists.')
+
+        # Key doesn't exist. Register key with Lambda Cloud
         data = json.dumps({'name': name, 'public_key': pub_key})
         response = requests.post(f'{API_ENDPOINT}/ssh-keys',
                                  data=data,
                                  headers=self.headers)
         raise_lambda_error(response)
-        self.ssh_key_name = name
-        with open(self.credentials, 'w') as f:
-            f.write(f'api_key = {self.api_key}\n')
-            f.write(f'ssh_key_name = {self.ssh_key_name}\n')
 
     def list_catalog(self) -> Dict[str, Any]:
         """List offered instances and their availability."""
