@@ -629,9 +629,9 @@ def spot_launch(
             # controller VPC (or name) == the spot job's VPC (or name). It may
             # not be a sufficient check (as it's always possible that peering
             # is not set up), but it may catch some obvious errors.
-            # TODO(zhwu): hacky. We should only set the proxy command of the cloud
-            # where the controller is launched (currently, only aws user uses
-            # proxy_command).
+            # TODO(zhwu): hacky. We should only set the proxy command of the
+            # cloud where the controller is launched (currently, only aws user
+            # uses proxy_command).
             proxy_command_key = ('aws', 'ssh_proxy_command')
             ssh_proxy_command = skypilot_config.get_nested(
                 proxy_command_key, None)
