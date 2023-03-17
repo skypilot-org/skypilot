@@ -93,7 +93,7 @@ def get_nested(keys: Sequence[str], default_value: Any) -> Any:
     return curr
 
 
-def set_nested(keys: Sequence[str], value: Optional[Any]) -> Dict[str, Any]:
+def set_nested(keys: Sequence[str], value: Any) -> Dict[str, Any]:
     """Returns a deep-copied config with the nested key set to value.
 
     Like get_nested(), if any key is not found, this will not raise an error.
