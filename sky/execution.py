@@ -606,11 +606,11 @@ def spot_launch(
             # 'skypilot_config' module. Don't simply read the on-disk file as
             # it may have changed since this process started.
             #
-            # Pop any proxy command, because the controller would've been
-            # launched behind the proxy, and in general any nodes we launch may
-            # not have or need the proxy setup. (If the controller needs to
-            # launch spot clusters in another region/VPC, the user should
-            # properly set up VPC peering, which will allow the
+            # Set any proxy command to None, because the controller would've
+            # been launched behind the proxy, and in general any nodes we
+            # launch may not have or need the proxy setup. (If the controller
+            # needs to launch spot clusters in another region/VPC, the user
+            # should properly set up VPC peering, which will allow the
             # cross-region/VPC communication. The proxy command is orthogonal
             # to this scenario.)
             #

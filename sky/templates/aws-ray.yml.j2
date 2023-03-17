@@ -33,7 +33,7 @@ auth:
   ssh_user: ubuntu
   ssh_private_key: {{ssh_private_key}}
 {% if ssh_proxy_command is not none %}
-  ssh_proxy_command: "{{ssh_proxy_command}}"
+  ssh_proxy_command: {{ssh_proxy_command}}
 {% endif %}
 
 available_node_types:

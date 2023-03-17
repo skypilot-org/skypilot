@@ -11,7 +11,7 @@ To read a nested-key config:
 
   >> skypilot_config.get_nested(('auth', 'some_auth_config'), default_value)
 
-To pop a nested-key config:
+To set a value in the nested-key config:
 
   >> config_dict = skypilot_config.set_nested(('auth', 'some_key'), value)
 
