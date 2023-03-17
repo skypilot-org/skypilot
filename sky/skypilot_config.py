@@ -129,7 +129,7 @@ def _syntax_check_for_ssh_proxy_command(cloud: str) -> None:
 
     if isinstance(ssh_proxy_command_config, dict):
         for region, cmd in ssh_proxy_command_config.items():
-            if not isinstance(cmd, str):
+            if cmd and not isinstance(cmd, str):
                 raise ValueError(
                     f'Invalid ssh_proxy_command config for region {region!r} '
                     f'(expected a str): {cmd!r}')

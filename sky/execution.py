@@ -642,7 +642,7 @@ def spot_launch(
                 # Instead of removing the key, we set the value to empty string
                 # so that the controller will only try the regions specified by
                 # the keys.
-                ssh_proxy_command = {k: '' for k in ssh_proxy_command}
+                ssh_proxy_command = {k: None for k in ssh_proxy_command}
                 config_dict = skypilot_config.set_nested(
                     proxy_command_key, ssh_proxy_command)
 
