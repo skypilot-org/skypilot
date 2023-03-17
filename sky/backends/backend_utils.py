@@ -1692,11 +1692,13 @@ def _query_status_lambda(
         'terminated': None,
     }
     # TODO(ewzeng): filter by hash_filter_string to be safe
+    status_list = []
     vms = lambda_utils.LambdaCloudClient().list_instances()
+    possible_names = [f'{cluster}-head', f'{cluster}-worker']
     for node in vms:
-        if node['name'] == cluster:
-            return [status_map[node['status']]]
-    return []
+        if node.get('name') in possible_names:
+            status_list.append(status_map[node['status']])
+    return status_list
 
 
 _QUERY_STATUS_FUNCS = {

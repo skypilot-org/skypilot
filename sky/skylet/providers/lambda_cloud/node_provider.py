@@ -9,19 +9,21 @@ from ray.autoscaler.tags import (
     TAG_RAY_CLUSTER_NAME,
     TAG_RAY_USER_NODE_TYPE,
     TAG_RAY_NODE_NAME,
-    TAG_RAY_LAUNCH_CONFIG,
     TAG_RAY_NODE_STATUS,
     STATUS_UP_TO_DATE,
     TAG_RAY_NODE_KIND,
     NODE_KIND_WORKER,
     NODE_KIND_HEAD,
 )
-from ray.autoscaler._private.util import hash_launch_conf
 from sky.skylet.providers.lambda_cloud import lambda_utils
-from sky.utils import common_utils
+from sky import authentication as auth
+from sky.utils import command_runner
+from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
-TAG_PATH_PREFIX = '~/.sky/generated/lambda_cloud/metadata'
-REMOTE_RAY_YAML = '~/ray_bootstrap_config.yaml'
+_TAG_PATH_PREFIX = '~/.sky/generated/lambda_cloud/metadata'
+_REMOTE_RAY_SSH_KEY = '~/ray_bootstrap_key.pem'
+_GET_INTERNAL_IP_CMD = 'ip -4 -br addr show | grep -Eo "10\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"'
 
 logger = logging.getLogger(__name__)
 
@@ -50,80 +52,100 @@ class LambdaNodeProvider(NodeProvider):
         self.lock = RLock()
         self.lambda_client = lambda_utils.LambdaCloudClient()
         self.cached_nodes = {}
-        self.metadata = lambda_utils.Metadata(TAG_PATH_PREFIX, cluster_name)
-        vms = self._list_instances_in_cluster()
+        self.metadata = lambda_utils.Metadata(_TAG_PATH_PREFIX, cluster_name)
+        self.ssh_key_path = os.path.expanduser(auth.PRIVATE_SSH_KEY_PATH)
+        remote_ssh_key = os.path.expanduser(_REMOTE_RAY_SSH_KEY)
+        if os.path.exists(remote_ssh_key):
+            self.ssh_key_path = remote_ssh_key
 
-        # The tag file for autodowned clusters is not autoremoved. Hence, if
-        # a previous cluster was autodowned and has the same name as the
-        # current cluster, then self.metadata might load the old tag file.
-        # We prevent this by removing any old vms in the tag file.
-        self.metadata.refresh([node['id'] for node in vms])
-
-        # If tag file does not exist on head, create it and add basic tags.
-        # This is a hack to make sure that ray on head can access some
-        # important tags.
-        # TODO(ewzeng): change when Lambda Cloud adds tag support.
-        ray_yaml_path = os.path.expanduser(REMOTE_RAY_YAML)
-        if os.path.exists(ray_yaml_path) and not os.path.exists(
-                self.metadata.path):
-            config = common_utils.read_yaml(ray_yaml_path)
-            # Ensure correct cluster so sky launch on head node works correctly
-            if config['cluster_name'] != cluster_name:
-                return
-            # Compute launch hash
-            head_node_config = config.get('head_node', {})
-            head_node_type = config.get('head_node_type')
-            if head_node_type:
-                head_config = config['available_node_types'][head_node_type]
-                head_node_config.update(head_config["node_config"])
-            launch_hash = hash_launch_conf(head_node_config, config['auth'])
-            # Populate tags
-            for node in vms:
-                self.metadata[node['id']] = {
-                    'tags': {
-                        TAG_RAY_CLUSTER_NAME: cluster_name,
-                        TAG_RAY_NODE_STATUS: STATUS_UP_TO_DATE,
-                        TAG_RAY_NODE_KIND: NODE_KIND_HEAD,
-                        TAG_RAY_USER_NODE_TYPE: 'ray_head_default',
-                        TAG_RAY_NODE_NAME: f'ray-{cluster_name}-head',
-                        TAG_RAY_LAUNCH_CONFIG: launch_hash,
-                    }
-                }
+    def _guess_and_add_missing_tags(self, vms: Dict[str, Any]) -> None:
+        """Adds missing vms to local tag file and guesses their tags."""
+        for node in vms:
+            if self.metadata.get(node['id']) is not None:
+                pass
+            elif node['name'] == f'{self.cluster_name}-head':
+                self.metadata.set(
+                    node['id'], {
+                        'tags': {
+                            TAG_RAY_CLUSTER_NAME: self.cluster_name,
+                            TAG_RAY_NODE_STATUS: STATUS_UP_TO_DATE,
+                            TAG_RAY_NODE_KIND: NODE_KIND_HEAD,
+                            TAG_RAY_USER_NODE_TYPE: 'ray_head_default',
+                            TAG_RAY_NODE_NAME: f'ray-{self.cluster_name}-head',
+                        }
+                    })
+            elif node['name'] == f'{self.cluster_name}-worker':
+                self.metadata.set(
+                    node['id'], {
+                        'tags': {
+                            TAG_RAY_CLUSTER_NAME: self.cluster_name,
+                            TAG_RAY_NODE_STATUS: STATUS_UP_TO_DATE,
+                            TAG_RAY_NODE_KIND: NODE_KIND_WORKER,
+                            TAG_RAY_USER_NODE_TYPE: 'ray_worker_default',
+                            TAG_RAY_NODE_NAME: f'ray-{self.cluster_name}-worker',
+                        }
+                    })
 
     def _list_instances_in_cluster(self) -> Dict[str, Any]:
         """List running instances in cluster."""
         vms = self.lambda_client.list_instances()
-        return [node for node in vms if node.get('name') == self.cluster_name]
+        possible_names = [
+            f'{self.cluster_name}-head', f'{self.cluster_name}-worker'
+        ]
+        return [node for node in vms if node.get('name') in possible_names]
 
     @synchronized
     def _get_filtered_nodes(self, tag_filters: Dict[str,
                                                     str]) -> Dict[str, Any]:
 
-        def match_tags(vm):
-            vm_info = self.metadata[vm['id']]
+        def _extract_metadata(vm: Dict[str, Any]) -> Dict[str, Any]:
+            metadata = {'id': vm['id'], 'status': vm['status'], 'tags': {}}
+            instance_info = self.metadata.get(vm['id'])
+            if instance_info is not None:
+                metadata['tags'] = instance_info['tags']
+            with ux_utils.print_exception_no_traceback():
+                if 'ip' not in vm:
+                    raise lambda_utils.LambdaCloudError(
+                        'A node ip address was not found. Either '
+                        '(1) Lambda Cloud has internally errored, or '
+                        '(2) the cluster is still booting. '
+                        'You can manually terminate the cluster on the '
+                        'Lambda Cloud console or (in case 2) wait for '
+                        'booting to finish (~2 minutes).')
+            metadata['external_ip'] = vm['ip']
+            return metadata
+
+        def _match_tags(vm: Dict[str, Any]):
+            vm_info = self.metadata.get(vm['id'])
             tags = {} if vm_info is None else vm_info['tags']
             for k, v in tag_filters.items():
                 if tags.get(k) != v:
                     return False
             return True
 
+        def _get_internal_ip(node: Dict[str, Any]):
+            # TODO(ewzeng): cache internal ips in metadata file to reduce
+            # ssh overhead.
+            runner = command_runner.SSHCommandRunner(node['external_ip'],
+                                                     'ubuntu',
+                                                     self.ssh_key_path)
+            rc, stdout, stderr = runner.run(_GET_INTERNAL_IP_CMD,
+                                            require_outputs=True,
+                                            stream_logs=False)
+            subprocess_utils.handle_returncode(
+                rc,
+                _GET_INTERNAL_IP_CMD,
+                'Failed get obtain private IP from node',
+                stderr=stdout + stderr)
+            node['internal_ip'] = stdout.strip()
+
         vms = self._list_instances_in_cluster()
-        nodes = [self._extract_metadata(vm) for vm in filter(match_tags, vms)]
+        self.metadata.refresh([node['id'] for node in vms])
+        self._guess_and_add_missing_tags(vms)
+        nodes = [_extract_metadata(vm) for vm in filter(_match_tags, vms)]
+        subprocess_utils.run_in_parallel(_get_internal_ip, nodes)
         self.cached_nodes = {node['id']: node for node in nodes}
         return self.cached_nodes
-
-    def _extract_metadata(self, vm: Dict[str, Any]) -> Dict[str, Any]:
-        metadata = {'id': vm['id'], 'status': vm['status'], 'tags': {}}
-        instance_info = self.metadata[vm['id']]
-        if instance_info is not None:
-            metadata['tags'] = instance_info['tags']
-        ip = vm['ip']
-        metadata['external_ip'] = ip
-        # TODO(ewzeng): The internal ip is hard to get, so set it to the
-        # external ip as a hack. This should be changed in the future.
-        #   https://docs.lambdalabs.com/cloud/learn-private-ip-address/
-        metadata['internal_ip'] = ip
-        return metadata
 
     def non_terminated_nodes(self, tag_filters: Dict[str, str]) -> List[str]:
         """Return a list of node ids filtered by the specified tags dict.
@@ -164,31 +186,40 @@ class LambdaNodeProvider(NodeProvider):
     def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str],
                     count: int) -> None:
         """Creates a number of nodes within the namespace."""
-        assert count == 1, count  # Only support 1-node clusters for now
-
-        # get the tags
+        # Get tags
         config_tags = node_config.get('tags', {}).copy()
         config_tags.update(tags)
         config_tags[TAG_RAY_CLUSTER_NAME] = self.cluster_name
 
-        # create the node
-        ttype = node_config['InstanceType']
+        # Create nodes
+        instance_type = node_config['InstanceType']
         region = self.provider_config['region']
-        vm_list = self.lambda_client.create_instances(instance_type=ttype,
-                                                      region=region,
-                                                      quantity=1,
-                                                      name=self.cluster_name)
-        assert len(vm_list) == 1, len(vm_list)
-        vm_id = vm_list[0]
-        self.metadata[vm_id] = {'tags': config_tags}
+        if config_tags[TAG_RAY_NODE_KIND] == NODE_KIND_HEAD:
+            name = f'{self.cluster_name}-head'
+        else:
+            name = f'{self.cluster_name}-worker'
+        # Lambda launch api only supports launching one node at a time,
+        # so we do a loop. Remove loop when launch api allows quantity > 1
+        booting_list = []
+        for _ in range(count):
+            vm_id = self.lambda_client.create_instances(
+                instance_type=instance_type,
+                region=region,
+                quantity=1,
+                name=name)[0]
+            self.metadata.set(vm_id, {'tags': config_tags})
+            booting_list.append(vm_id)
+            time.sleep(10)  # Avoid api rate limits
 
-        # Wait for booting to finish
-        # TODO(ewzeng): For multi-node, launch all vms first and then wait.
+        # Wait for nodes to finish booting
         while True:
-            vms = self.lambda_client.list_instances()
-            for vm in vms:
-                if vm['id'] == vm_id and vm['status'] == 'active':
-                    return
+            vms = self._list_instances_in_cluster()
+            for vm_id in booting_list.copy():
+                for vm in vms:
+                    if vm['id'] == vm_id and vm['status'] == 'active':
+                        booting_list.remove(vm_id)
+            if len(booting_list) == 0:
+                return
             time.sleep(10)
 
     @synchronized
@@ -196,12 +227,12 @@ class LambdaNodeProvider(NodeProvider):
         """Sets the tag values (string dict) for the specified node."""
         node = self._get_node(node_id)
         node['tags'].update(tags)
-        self.metadata[node_id] = {'tags': node['tags']}
+        self.metadata.set(node_id, {'tags': node['tags']})
 
     def terminate_node(self, node_id: str) -> None:
         """Terminates the specified node."""
         self.lambda_client.remove_instances(node_id)
-        self.metadata[node_id] = None
+        self.metadata.set(node_id, None)
 
     def _get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         self._get_filtered_nodes({})  # Side effect: updates cache
