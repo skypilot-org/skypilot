@@ -260,8 +260,13 @@ class Optimizer:
             num_resources = len(node.get_resources())
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
+                    specified_resources_str = ''
+                    if node.get_resources():
+                        specified_resources = list(node.get_resources())[0]
+                        specified_resources_str = f' ({specified_resources})'
                     error_msg = (
-                        f'No launchable resource found for task {node}. '
+                        f'Optimizer: No launchable resource found for task {node}'
+                        f'{specified_resources_str}. '
                         'To fix: relax its resource requirements.\n'
                         'Hint: \'sky show-gpus --all\' '
                         'to list available accelerators.\n'
