@@ -56,7 +56,7 @@ _smoke_test_hash = hashlib.md5(
 # id.
 test_id = str(uuid.uuid4())[-2:]
 
-LAMBDA_TYPE = '--cloud lambda --gpus A100'
+LAMBDA_TYPE = '--cloud lambda --gpus A10'
 
 storage_setup_commands = [
     'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
@@ -69,7 +69,7 @@ storage_setup_commands = [
 # Wait until the spot controller is not in INIT state.
 # This is a workaround for the issue that when multiple spot tests
 # are running in parallel, the spot controller may be in INIT and
-# the spot queue command will return staled table.
+# the spot queue/cancel command will return staled table.
 _SPOT_QUEUE_WAIT = ('s=$(sky spot queue); '
                     'until [ `echo "$s" '
                     '| grep "jobs will not be shown until it becomes UP." '
@@ -77,6 +77,12 @@ _SPOT_QUEUE_WAIT = ('s=$(sky spot queue); '
                     'do echo "Waiting for spot queue to be ready..."; '
                     'sleep 5; s=$(sky spot queue); done; echo "$s"; '
                     'echo; echo; echo "$s"')
+_SPOT_CANCEL_WAIT = (
+    's=$(sky spot cancel -y -n {job_name}); until [ `echo "$s" '
+    '| grep "Please wait for the controller to be ready." '
+    '| wc -l` -eq 0 ]; do echo "Waiting for the spot controller '
+    'to be ready"; sleep 5; s=$(sky spot cancel -y -n {job_name}); '
+    'done; echo "$s"; echo; echo; echo "$s"')
 # TODO(zhwu): make the spot controller on GCP.
 
 
@@ -587,7 +593,6 @@ def test_gcp_stale_job_manual_restart():
 
 
 # ---------- Check Sky's environment variables; workdir. ----------
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_env_check(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -602,7 +607,6 @@ def test_env_check(generic_cloud: str):
 
 
 # ---------- file_mounts ----------
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_file_mounts(generic_cloud: str):
     name = _get_cluster_name()
     test_commands = [
@@ -612,24 +616,6 @@ def test_file_mounts(generic_cloud: str):
     ]
     test = Test(
         'using_file_mounts',
-        test_commands,
-        f'sky down -y {name}',
-        timeout=20 * 60,  # 20 mins
-    )
-    run_one_test(test)
-
-
-# TODO(ewzeng): merge this with 'test_file_mounts' when multi-node is supported.
-@pytest.mark.lambda_cloud
-def test_lambda_file_mounts():
-    name = _get_cluster_name()
-    test_commands = [
-        *storage_setup_commands,
-        f'sky launch -y -c {name} {LAMBDA_TYPE} --num-nodes 1 examples/using_file_mounts.yaml',
-        f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-    ]
-    test = Test(
-        'lambda_using_file_mounts',
         test_commands,
         f'sky down -y {name}',
         timeout=20 * 60,  # 20 mins
@@ -693,7 +679,6 @@ def test_gcp_storage_mounts():
 
 
 # ---------- CLI logs ----------
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_cli_logs(generic_cloud: str):
     name = _get_cluster_name()
     timestamp = time.time()
@@ -701,29 +686,6 @@ def test_cli_logs(generic_cloud: str):
         'cli_logs',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} --num-nodes 2 "echo {timestamp} 1"',
-            f'sky exec {name} "echo {timestamp} 2"',
-            f'sky exec {name} "echo {timestamp} 3"',
-            f'sky exec {name} "echo {timestamp} 4"',
-            f'sky logs {name} 2 --status',
-            f'sky logs {name} 3 4 --sync-down',
-            f'sky logs {name} * --sync-down',
-            f'sky logs {name} 1 | grep "{timestamp} 1"',
-            f'sky logs {name} | grep "{timestamp} 4"',
-        ],
-        f'sky down -y {name}',
-    )
-    run_one_test(test)
-
-
-# TODO(ewzeng): merge this with 'test_cli_logs' when multi-node is supported.
-@pytest.mark.lambda_cloud
-def test_lambda_logs():
-    name = _get_cluster_name()
-    timestamp = time.time()
-    test = Test(
-        'lambda_cli_logs',
-        [
-            f'sky launch -y -c {name} {LAMBDA_TYPE} "echo {timestamp} 1"',
             f'sky exec {name} "echo {timestamp} 2"',
             f'sky exec {name} "echo {timestamp} 3"',
             f'sky exec {name} "echo {timestamp} 4"',
@@ -773,9 +735,9 @@ def test_lambda_job_queue():
         'lambda_job_queue',
         [
             f'sky launch -y -c {name} {LAMBDA_TYPE} examples/job_queue/cluster.yaml',
-            f'sky exec {name} -n {name}-1 --gpus A100:0.5 -d examples/job_queue/job.yaml',
-            f'sky exec {name} -n {name}-2 --gpus A100:0.5 -d examples/job_queue/job.yaml',
-            f'sky exec {name} -n {name}-3 --gpus A100:0.5 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-1 --gpus A10:0.5 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-2 --gpus A10:0.5 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-3 --gpus A10:0.5 -d examples/job_queue/job.yaml',
             f'sky queue {name} | grep {name}-1 | grep RUNNING',
             f'sky queue {name} | grep {name}-2 | grep RUNNING',
             f'sky queue {name} | grep {name}-3 | grep PENDING',
@@ -789,7 +751,7 @@ def test_lambda_job_queue():
     run_one_test(test)
 
 
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 def test_job_queue_multinode(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -847,7 +809,7 @@ def test_large_job_queue(generic_cloud: str):
 
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
 def test_multi_echo(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -868,7 +830,7 @@ def test_multi_echo(generic_cloud: str):
 
 
 # ---------- Task: 1 node training. ----------
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 instances
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 def test_huggingface(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -961,7 +923,6 @@ def test_tpu_vm_pod():
 
 
 # ---------- Simple apps. ----------
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_multi_hostname(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -978,7 +939,7 @@ def test_multi_hostname(generic_cloud: str):
 
 
 # ---------- Task: n=2 nodes with setups. ----------
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 def test_distributed_tf(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1098,7 +1059,6 @@ def test_autostop(generic_cloud: str):
 
 
 # ---------- Testing Autodowning ----------
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_autodown(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1129,41 +1089,6 @@ def test_autodown(generic_cloud: str):
         ],
         f'sky down -y {name}',
         timeout=20 * 60,
-    )
-    run_one_test(test)
-
-
-@pytest.mark.lambda_cloud
-def test_lambda_autodown():
-    name = _get_cluster_name()
-    test = Test(
-        'lambda_autodown',
-        [
-            f'sky launch -y -d -c {name} {LAMBDA_TYPE} tests/test_yamls/minimal.yaml',
-            f'sky autostop -y {name} --down -i 1',
-            # Ensure autostop is set.
-            f'sky status | grep {name} | grep "1m (down)"',
-            # Ensure the cluster is not terminated early.
-            'sleep 45',
-            f'sky status --refresh | grep {name} | grep UP',
-            # Ensure the cluster is terminated.
-            'sleep 200',
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} {LAMBDA_TYPE} --down tests/test_yamls/minimal.yaml',
-            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
-            f'sky exec {name} {LAMBDA_TYPE} tests/test_yamls/minimal.yaml',
-            f'sky status | grep {name} | grep "1m (down)"',
-            'sleep 200',
-            # Ensure the cluster is terminated.
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} {LAMBDA_TYPE} --down tests/test_yamls/minimal.yaml',
-            f'sky autostop -y {name} --cancel',
-            'sleep 200',
-            # Ensure the cluster is still UP.
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && echo "$s" | grep {name} | grep UP',
-        ],
-        f'sky down -y {name}',
-        timeout=25 * 60,
     )
     run_one_test(test)
 
@@ -1211,7 +1136,7 @@ def test_cancel_azure():
     run_one_test(test)
 
 
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 def test_cancel_pytorch(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1266,12 +1191,17 @@ def test_spot(generic_cloud: str):
             'sleep 5',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
-            f'sky spot cancel -y -n {name}-1',
+            _SPOT_CANCEL_WAIT.format(job_name=f'{name}-1'),
+            'sleep 5',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep CANCELLED',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
-        f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2',
+        # TODO(zhwu): Change to _SPOT_CANCEL_WAIT.format(job_name=f'{name}-1 -n {name}-2') when
+        # canceling multiple job names is supported.
+        (_SPOT_CANCEL_WAIT.format(job_name=f'{name}-1') + '; ' +
+         _SPOT_CANCEL_WAIT.format(job_name=f'{name}-2')),
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -1291,7 +1221,7 @@ def test_spot_failed_setup(generic_cloud: str):
             # Make sure the job failed quickly.
             f'{_SPOT_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED_SETUP"',
         ],
-        f'sky spot cancel -y -n {name}',
+        _SPOT_CANCEL_WAIT.format(job_name=name),
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -1324,7 +1254,7 @@ def test_spot_recovery_aws():
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
         ],
-        f'sky spot cancel -y -n {name}',
+        _SPOT_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
     )
     run_one_test(test)
@@ -1356,7 +1286,7 @@ def test_spot_recovery_gcp():
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
         ],
-        f'sky spot cancel -y -n {name}',
+        _SPOT_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
     )
     run_one_test(test)
@@ -1374,7 +1304,7 @@ def test_spot_recovery_default_resources(generic_cloud: str):
             'sleep 360',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|RECOVERING"',
         ],
-        f'sky spot cancel -y -n {name}',
+        _SPOT_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
     )
     run_one_test(test)
@@ -1406,7 +1336,7 @@ def test_spot_recovery_multi_node_aws():
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
-        f'sky spot cancel -y -n {name}',
+        _SPOT_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
     )
     run_one_test(test)
@@ -1440,7 +1370,7 @@ def test_spot_recovery_multi_node_gcp():
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
-        f'sky spot cancel -y -n {name}',
+        _SPOT_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
     )
     run_one_test(test)
@@ -1458,7 +1388,9 @@ def test_spot_cancellation_aws():
             f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
             'sleep 60',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING"',
-            f'sky spot cancel -y -n {name}',
+            _SPOT_CANCEL_WAIT.format(job_name=name),
+            'sleep 5',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLED"',
             (f's=$(aws ec2 describe-instances --region {region} '
@@ -1469,7 +1401,9 @@ def test_spot_cancellation_aws():
             # Test cancelling the spot cluster during spot job being setup.
             f'sky spot launch --cloud aws --region {region} -n {name}-2 tests/test_yamls/test_long_setup.yaml  -y -d',
             'sleep 300',
-            f'sky spot cancel -y -n {name}-2',
+            _SPOT_CANCEL_WAIT.format(job_name=f'{name}-2'),
+            'sleep 5',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLED"',
             (f's=$(aws ec2 describe-instances --region {region} '
@@ -1489,7 +1423,9 @@ def test_spot_cancellation_aws():
              '--output text)'),
             'sleep 100',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RECOVERING"',
-            f'sky spot cancel -y -n {name}-3',
+            _SPOT_CANCEL_WAIT.format(job_name=f'{name}-3'),
+            'sleep 5',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLED"',
             # The cluster should be terminated (shutting-down) after cancellation. We don't use the `=` operator here because
@@ -1524,13 +1460,17 @@ def test_spot_cancellation_gcp():
             f'sky spot launch --cloud gcp --zone {zone} -n {name} "sleep 1000"  -y -d',
             'sleep 60',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING"',
-            f'sky spot cancel -y -n {name}',
+            _SPOT_CANCEL_WAIT.format(job_name=name),
+            'sleep 5',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLED"',
             # Test cancelling the spot cluster during spot job being setup.
             f'sky spot launch --cloud gcp --zone {zone} -n {name}-2 tests/test_yamls/test_long_setup.yaml  -y -d',
             'sleep 300',
-            f'sky spot cancel -y -n {name}-2',
+            _SPOT_CANCEL_WAIT.format(job_name=f'{name}-2'),
+            'sleep 5',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLED"',
             # Test cancellation during spot job is recovering.
@@ -1541,7 +1481,9 @@ def test_spot_cancellation_gcp():
             terminate_cmd,
             'sleep 100',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RECOVERING"',
-            f'sky spot cancel -y -n {name}-3',
+            _SPOT_CANCEL_WAIT.format(job_name=f'{name}-3'),
+            'sleep 5',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLED"',
             # The cluster should be terminated (STOPPING) after cancellation. We don't use the `=` operator here because
@@ -1576,7 +1518,7 @@ def test_spot_storage(generic_cloud: str):
                 f'{_SPOT_QUEUE_WAIT}| grep {name} | grep SUCCEEDED',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
             ],
-            f'sky spot cancel -y -n {name}',
+            _SPOT_CANCEL_WAIT.format(job_name=name),
             # Increase timeout since sky spot queue -r can be blocked by other spot tests.
             timeout=20 * 60,
         )
@@ -1598,7 +1540,7 @@ def test_spot_tpu():
             'sleep 600',  # TPU takes a while to launch
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
-        f'sky spot cancel -y -n {name}',
+        _SPOT_CANCEL_WAIT.format(job_name=name),
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -1618,7 +1560,7 @@ def test_spot_inline_env(generic_cloud: str):
             'sleep 20',
             f'{_SPOT_QUEUE_WAIT} | grep {name} | grep SUCCEEDED',
         ],
-        f'sky spot cancel -y -n {name}',
+        _SPOT_CANCEL_WAIT.format(job_name=name),
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
