@@ -817,6 +817,7 @@ def write_cluster_config(
     else:
         # ssh_proxy_command_config: Dict[str, str], region_name -> command
         # This type check is done by skypilot_config at config load time.
+        # Guaranteed by Resources.get_valid_regions_for_launchable().
         assert region_name in ssh_proxy_command_config, (
             'Optimizer should only yield regions that are in '
             'the ssh_proxy_command')
