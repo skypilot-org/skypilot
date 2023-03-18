@@ -817,11 +817,20 @@ def write_cluster_config(
     else:
         # ssh_proxy_command_config: Dict[str, str], region_name -> command
         # This type check is done by skypilot_config at config load time.
-        # Guaranteed by Resources.get_valid_regions_for_launchable().
-        assert region_name in ssh_proxy_command_config, (
-            'Optimizer should only yield regions that are in '
-            'the ssh_proxy_command')
-        ssh_proxy_command = ssh_proxy_command_config[region_name]
+
+        # There are two cases:
+        # 1. region_name may not appear in the config, when we are
+        # provisioning an existing clusters launched on a region and the
+        # region is now excluded from the config; we use None as
+        # ssh_proxy_command, which will be restored to the original value
+        # later by _replace_yaml_dicts().
+        # 2. New clusters will be launched on regions only appears in the
+        # ssh_proxy_command_config guaranteed by
+        # Resources.get_valid_regions_for_launchable();
+        assert (keep_launch_fields_in_existing_config or region_name
+                in ssh_proxy_command_config), (region_name,
+                                               ssh_proxy_command_config)
+        ssh_proxy_command = ssh_proxy_command_config.get(region_name, None)
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
