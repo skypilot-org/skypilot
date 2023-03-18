@@ -1421,7 +1421,7 @@ def test_spot_cancellation_aws():
              f'--filters Name=tag:ray-cluster-name,Values={name}-3-* '
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
-            'sleep 100',
+            'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RECOVERING"',
             _SPOT_CANCEL_WAIT.format(job_name=f'{name}-3'),
             'sleep 5',
