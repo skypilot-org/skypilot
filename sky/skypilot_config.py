@@ -111,10 +111,7 @@ def set_nested(keys: Sequence[str], value: Any) -> Dict[str, Any]:
         curr = curr[key]
         if i == len(keys) - 1:
             prev_value = prev[key]
-            if value is None:
-                prev.pop(key, None)
-            else:
-                prev[key] = value
+            prev[key] = value
             logger.debug(f'Set the value of {keys} to {value} (previous: '
                          f'{prev_value}). Returning conf: {to_return}')
     return to_return
