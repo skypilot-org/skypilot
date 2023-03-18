@@ -1337,7 +1337,7 @@ def test_spot_recovery_multi_node_aws(aws_config_region):
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
         _SPOT_CANCEL_WAIT.format(job_name=name),
-        timeout=25 * 60,
+        timeout=30 * 60,
     )
     run_one_test(test)
 
