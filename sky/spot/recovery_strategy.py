@@ -263,9 +263,12 @@ class StrategyExecutor:
                 # after failing over through all the candidates.
                 # Please refer to the docstring of `sky.launch` for more
                 # details of how the exception will be structured.
+                reasons = e.failover_history
+                if not reasons:
+                    reasons = [e]
                 if not any(
                         isinstance(err, exceptions.ResourcesUnavailableError)
-                        for err in e.failover_history):
+                        for err in reasons):
                     # _launch() (this function) should fail/exit directly, if
                     # none of the failover reasons were because of resource
                     # unavailability or no failover was attempted (the optimizer
@@ -274,8 +277,6 @@ class StrategyExecutor:
                     # Failing directly avoids the infinite loop of retrying
                     # the launch when, e.g., an invalid cluster name is used
                     # and --retry-until-up is specified.
-                    reasons = (e.failover_history
-                               if e.failover_history else [e])
                     reasons_str = '; '.join(
                         common_utils.format_exception(err) for err in reasons)
                     logger.error(
