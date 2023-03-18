@@ -2,6 +2,8 @@
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
+SKY_REMOTE_RAY_PORT = 6380
+SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.0.1'
 
 # TODO(mluo): Make explicit `sky launch -c <name> ''` optional.

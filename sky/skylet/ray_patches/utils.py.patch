@@ -1,7 +1,0 @@
-81c81,84
-<     return os.path.join(get_user_temp_dir(), "ray")
----
->     # From https://github.com/ray-project/ray/blob/releases/2.0.1/python/ray/autoscaler/_private/utils.py
->     # Sky patch change:
->     # - Make our Ray cluster invisible to avoid confilict with other Ray clusters
->     return os.path.join(get_user_temp_dir(), "ray_patch")

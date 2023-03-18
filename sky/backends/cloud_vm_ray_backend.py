@@ -222,7 +222,12 @@ class RayCodeGen:
 
             SKY_REMOTE_WORKDIR = {constants.SKY_REMOTE_WORKDIR!r}
 
-            ray.init(address={ray_address!r}, namespace='__sky__{job_id}__', log_to_driver=True)
+            ray.init(
+                address={ray_address!r},
+                namespace='__sky__{job_id}__',
+                log_to_driver=True,
+                _temp_dir={constants.SKY_REMOTE_RAY_TEMPDIR!r}
+            )
             run_fn = None
             futures = []
             """),
