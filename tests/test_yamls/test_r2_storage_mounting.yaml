@@ -26,17 +26,17 @@ file_mounts:
 run: |
   set -ex
 
-    # Check private bucket contents
-    ls -ltr /mount_private_copy/foo
-    ls -ltr /mount_private_copy/tmp\ file
-    ls -ltr /mount_private_copy_lof/tmp\ file
-    ls -ltr /mount_private_copy_lof/tmp\ file2
-    ls -ltr /mount_private_mount/foo
-    ls -ltr /mount_private_mount/tmp\ file
-    
-    # Symlinks are not copied to buckets
-    ! ls /mount_private_copy/circle-link
-    ! ls /mount_private_mount/circle-link
-    
-    # Write to private bucket in MOUNT mode should pass
-    echo "hello" > /mount_private_mount/hello.txt
+  # Check private bucket contents
+  ls -ltr /mount_private_copy/foo
+  ls -ltr /mount_private_copy/tmp\ file
+  ls -ltr /mount_private_copy_lof/tmp\ file
+  ls -ltr /mount_private_copy_lof/tmp\ file2
+  ls -ltr /mount_private_mount/foo
+  ls -ltr /mount_private_mount/tmp\ file
+  
+  # Symlinks are not copied to buckets
+  ! ls /mount_private_copy/circle-link
+  ! ls /mount_private_mount/circle-link
+  
+  # Write to private bucket in MOUNT mode should pass
+  echo "hello" > /mount_private_mount/hello.txt
