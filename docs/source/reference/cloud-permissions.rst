@@ -168,3 +168,28 @@ Service Account Creation
 3. Select the policy you created in step 4 in :ref:`User Creation <cloud-permissions-aws-user-creation>` (i.e. the previous step 6) and click on “Next: Tags”.
 4. [Optional] If you would like to let the user access S3 buckets on the VM they created, you can additionally attach the s3 access permission to the service account, such as the "AmazonS3FullAccess" policy.
 5. Click Next, and name your role with “skypilot-v1” and Click “Create role”
+
+
+.. _cloud-permissions-gcp:
+
+GCP
+---
+
+To use SkyPilot, your GCP account needs to be granted the following IAM roles:
+
+.. code-block:: yaml
+
+  roles/browser
+  roles/compute.admin
+  roles/iam.serviceAccountAdmin
+  roles/iam.serviceAccountUser
+  roles/serviceusage.serviceUsageConsumer
+  roles/storage.admin
+
+Optionally, to use TPUs, add the following role:
+
+.. code-block:: yaml
+
+  roles/tpu.admin
+
+You can grant those accesses via the `GCP IAM console <https://console.cloud.google.com/iam-admin/iam>`_.
