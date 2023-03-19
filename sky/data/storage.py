@@ -107,6 +107,7 @@ def get_store_prefix(storetype: StoreType) -> str:
         return 's3://'
     elif storetype == StoreType.GCS:
         return 'gs://'
+    # R2 storages use 's3://' as a prefix for various aws cli commands  
     elif storetype == StoreType.R2:
         return 's3://'
     elif storetype == StoreType.AZURE:

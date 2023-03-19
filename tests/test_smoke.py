@@ -696,6 +696,37 @@ def test_gcp_storage_mounts():
         run_one_test(test)
 
 
+@pytest.mark.cloudflare
+def test_cloudflare_storage_mounts(generic_cloud: str):
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_r2_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+        ]
+        if generic_cloud == "aws":
+            test_commands.append(f'aws s3 ls {storage_name}/hello.txt',)
+        elif generic_cloud == "gcp":
+            test_commands.append(f'gsutil ls gs://{storage_name}/hello.txt',)
+
+        test = Test(
+            'cloudflare_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
 # ---------- CLI logs ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_cli_logs(generic_cloud: str):
