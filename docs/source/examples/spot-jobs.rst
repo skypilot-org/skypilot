@@ -106,7 +106,7 @@ An end-to-end example
 Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a BERT model on a question-answering task with HuggingFace.
 
 .. code-block:: yaml
-  :emphasize-lines: 12-15,42-45
+  :emphasize-lines: 12-15,42-44
 
   # bert_qa.yaml
   name: bert_qa

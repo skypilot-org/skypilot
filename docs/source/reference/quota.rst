@@ -1,7 +1,7 @@
 .. _quota:
 
 Requesting Quota Increase
-=============================
+=========================
 
 
 Most cloud providers enforce a quota policy to limit the number of VM instances that can exist in a given region.
@@ -10,8 +10,10 @@ To check or increase your quota limits, please follow the below instructions.
 After submitting the request, it will usually take a few days for the support team to review.
 To increase chances of being approved, you may respond their inquiry emails on how the requested resources will be used your projects.
 
+.. _quota-aws:
+
 AWS
--------------------------------
+---
 
 1. Go to the `EC2 Quotas console <https://console.aws.amazon.com/servicequotas/home/services/ec2/quotas>`_.
 2. **Select a region** on the top right.
@@ -21,7 +23,7 @@ AWS
 6. Choose **Request**.
 
 Azure
--------------------------------
+-----
 
 1. First go to `Azure's quota page <https://portal.azure.com/#blade/Microsoft_Azure_Capacity/QuotaMenuBlade/myQuotas>`_.
 2. Select **Request Increase** near the top of the screen.
@@ -39,7 +41,7 @@ Azure
 6. Finally, ensure that everything looks correct on the Review + create page, then select **Create** to submit your request.
 
 GCP
--------------------------------
+---
 
 1. In the Google Cloud Console, go to the `Quota page <https://console.cloud.google.com/iam-admin/quotas/>`_.
 2. Click **Filter** and select ``Service: Compute Engine API``.

@@ -36,7 +36,7 @@ Depending on the level of detail required by you in the benchmark report, SkyPil
 2. With SkyCallback - You can get a more detailed benchmark report **by a few lines of code changes**. Please refer to :ref:`SkyCallback`.
 
 Table of Contents
--------------------
+-----------------
 .. toctree::
    cli
    config

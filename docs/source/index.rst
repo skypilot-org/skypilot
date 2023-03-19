@@ -98,3 +98,4 @@ Documentation
    reference/yaml-spec
    reference/cli
    reference/api
+   reference/cloud-permissions

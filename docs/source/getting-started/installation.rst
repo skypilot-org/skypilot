@@ -1,3 +1,5 @@
+.. _installation:
+
 Installation
 ============
 
@@ -63,6 +65,8 @@ To get the **AWS access key** required by :code:`aws configure`, please go to th
   $ aws configure
 
 Note: If you are using AWS IAM Identity Center (AWS SSO), you will need :code:`pip install awscli>=1.27.10`. See `here <https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html>`_ for instructions on how to configure AWS SSO.
+
+To create a new AWS user with minimal permissions for SkyPilot, see :ref:`AWS User Creation <cloud-permissions-aws>`.
 
 GCP
 ~~~~~~~~~
