@@ -2,7 +2,7 @@
 import os
 
 # Replaced with the current commit when building the wheels.
-__commit__ = '{{SKYPILOT_COMMIT_SHA}}'
+__commit__ = '14cb4b56bb56cbc6b1a59fa35ae59c881348690c'
 __version__ = '0.2.5'
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
