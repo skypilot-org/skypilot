@@ -145,7 +145,7 @@ To learn more about various SkyPilot commands, see [Quickstart](https://skypilot
 
 ## Why SkyPilot?
 
-Some caveat first. LLaMA models aren't specifically finetuned for being used as a chatbot and we only did some basic priming of the model (`INIT_PROMPT` in [`chat.py`](./chat.py)), so it is expected to experience not-so-great quality in your chats. See also Meta's [FAQ here](https://github.com/facebookresearch/llama/blob/main/FAQ.md#2-generations-are-bad).
+Some caveat first. LLaMA models aren't specifically finetuned for being used as a chatbot and we only did some basic priming of the model (`INIT_PROMPT` in [`chat.py`](https://github.com/skypilot-org/sky-llama/blob/main/chat.py#L39-L53)), so it is expected to experience not-so-great quality in your chats. See also Meta's [FAQ here](https://github.com/facebookresearch/llama/blob/main/FAQ.md#2-generations-are-bad).
 
 That said, we expect LLaMAs/other open LLMs to rapidly advance in the near future. As open LLMs become more powerful, bigger, and more compute-hungry, the demand of **flexibly finetuning and running them on a variety of cloud compute** will dramatically increase. 
 
