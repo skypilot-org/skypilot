@@ -680,6 +680,13 @@ def format_job_table(
 def dump_spot_cost(condensed: bool) -> str:
     cluster_reports = cost_utils.aggregate_all_records(condensed)
 
+    for cluster_report in cluster_reports:
+        cluster_report['job_id'] = get_job_id_from_spot_cluster_name(
+            cluster_report['name'])
+
+    cluster_reports.sort(
+        key=lambda report: (-int(report['job_id']), int(report['launched_at'])))
+
     seen_cluster_names = set()
 
     for cluster_report in cluster_reports:
@@ -692,8 +699,6 @@ def dump_spot_cost(condensed: bool) -> str:
 
         cluster_name = cluster_report['name']
         if cluster_name not in seen_cluster_names:
-            cluster_report['job_id'] = get_job_id_from_spot_cluster_name(
-                cluster_name)
             seen_cluster_names.add(cluster_name)
             cluster_report['name'] = get_job_name_from_spot_cluster_name(
                 cluster_name)
@@ -702,8 +707,8 @@ def dump_spot_cost(condensed: bool) -> str:
                 cluster_report['resources'] = '-'
                 cluster_report['num_nodes'] = '-'
                 cluster_report['zone'] = '-'
-
         else:
+            cluster_report['job_id'] = ''
             cluster_report['name'] = ''
             cluster_report['num_recoveries'] = ''
 
@@ -719,8 +724,8 @@ def load_spot_cost_report(payload: str) -> List[Dict[str, Any]]:
 def format_cost_table(reports: List[Dict[str, Any]]) -> str:
     """Show all spot costs."""
     columns = [
-        'JOB NAME',
         'JOB ID',
+        'JOB NAME',
         '# RECOVERIES',
         'RESOURCES',
         'NODES',
@@ -755,8 +760,8 @@ def format_cost_table(reports: List[Dict[str, Any]]) -> str:
             duration_str = f' {duration}'
 
         values = [
-            report['name'],
             report['job_id'],
+            report['name'],
             report['num_recoveries'],
             report['resources'],
             report['num_nodes'],
