@@ -86,7 +86,7 @@ WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 # We use fixed IP address to avoid DNS lookup blocking the check, for machine
 # with no internet connection.
 # Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
-_TEST_IP = 'https://8.8.8.8'
+_TEST_IP = 'https://1.1.1.1'
 
 # Allow each CPU thread take 2 tasks.
 # Note: This value cannot be too small, otherwise OOM issue may occur.
