@@ -1,5 +1,5 @@
 resources:
-  cloud: {{cloud}}
+  cloud: {{generic_cloud}}
 
 file_mounts:
   # Mounting private buckets in COPY mode with a source dir
