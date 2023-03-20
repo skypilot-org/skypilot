@@ -152,6 +152,7 @@ def fill_template(template_name: str, variables: Dict,
     with open(template_path) as fin:
         template = fin.read()
     output_path = os.path.abspath(os.path.expanduser(output_path))
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     # Write out yaml config.
     j2_template = jinja2.Template(template)
