@@ -3221,10 +3221,11 @@ def spot():
     default=True,
     is_flag=True,
     required=False,
-    help=('Whether to retry provisioning infinitely until the cluster is up, '
-          'if we fail to launch the cluster on any possible region/cloud due '
-          'to unavailability errors. This applies to launching the the spot '
-          'clusters (both initial and recovery attempts). Default: True.'))
+    help=('(Default: True; this flag is deprecated and will be removed in a '
+          'future release.) Whether to retry provisioning infinitely until the '
+          'cluster is up, if unavailability errors are encountered. This '
+          'applies to launching the spot clusters (both the initial and any '
+          'recovery attempts), not the spot controller.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3303,6 +3304,14 @@ def spot_launch(
     task_cloud = (resources.cloud
                   if resources.cloud is not None else clouds.Cloud)
     task_cloud.check_cluster_name_is_valid(name)
+
+    # Deprecation.
+    if not retry_until_up:
+        click.secho(
+            'Flag --retry-until-up is deprecated and will be removed in a '
+            'future release (defaults to True). Please file an issue if this '
+            'does not work for you.',
+            fg='yellow')
 
     sky.spot_launch(task,
                     name,
