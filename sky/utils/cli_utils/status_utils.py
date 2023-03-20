@@ -11,7 +11,7 @@ from sky.utils import common_utils
 from sky.utils import log_utils
 
 _COMMAND_TRUNC_LENGTH = 25
-_NUM_COST_REPORT_LINES = 5
+_NUM_COST_REPORT_LINES = 10
 
 # A record in global_user_state's 'clusters' table.
 _ClusterRecord = Dict[str, Any]
@@ -157,6 +157,9 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
     num_lines_to_display = _NUM_COST_REPORT_LINES
     if show_all:
         num_lines_to_display = len(cluster_records)
+
+    cluster_records.sort(
+        key=lambda report: -_get_status__value_for_cost_report(report))
 
     for record in cluster_records[:num_lines_to_display]:
         row = []
@@ -343,6 +346,14 @@ def _is_pending_autostop(cluster_record: _ClusterRecord) -> bool:
 
 
 # ---- 'sky cost-report' helper functions below ----
+
+
+def _get_status__value_for_cost_report(
+        cluster_cost_report_record: _ClusterCostReportRecord) -> int:
+    status = cluster_cost_report_record['status']
+    if status is None:
+        return -1
+    return 1
 
 
 def _get_status_for_cost_report(

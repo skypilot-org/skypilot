@@ -1694,8 +1694,9 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
       - clusters that were terminated/stopped on the cloud console.
     """
     cluster_records = core.cost_report()
-    total_cost = status_utils.get_estimated_total_cost_for_all_records(
-        cluster_records)
+
+    total_cost = sum(record['total_cost'] for record in cluster_records)
+
     nonreserved_cluster_records = []
     reserved_clusters = dict()
     for cluster_record in cluster_records:
@@ -1712,8 +1713,15 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
         status_utils.show_cost_report_table(
             [cluster_record], all, reserved_group_name=cluster_group_name)
 
-    click.echo(f'\n{colorama.Fore.WHITE}{colorama.Style.BRIGHT}'
-               f'{total_cost}')
+    click.echo(f'\n{colorama.Style.BRIGHT}'
+               f'Total Cost: ${total_cost:.3f}{colorama.Style.RESET_ALL}')
+
+    if not all:
+        click.secho(
+            'NOTE: Since --all is not set, '
+            'not all cost report records '
+            'may be displayed above.',
+            fg='yellow')
 
     click.secho(
         'NOTE: This feature is experimental. '
