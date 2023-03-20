@@ -17,6 +17,7 @@ import enum
 import getpass
 import tempfile
 import os
+import uuid
 from typing import Any, Dict, List, Optional, Union
 
 import colorama
@@ -543,8 +544,7 @@ def spot_launch(
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
     entrypoint = task
-    if name is None:
-        name = backend_utils.generate_cluster_name()
+    task_uuid = str(uuid.uuid4().hex[:4])
 
     dag = _convert_to_dag(entrypoint)
     assert len(dag.tasks) == 1, ('Only one task is allowed in a spot launch.',
@@ -570,6 +570,15 @@ def spot_launch(
 
     task = _maybe_translate_local_file_mounts_and_sync_up(task)
 
+    if name is None:
+        if task.name is not None:
+            name = task.name
+        else:
+            name = backend_utils.generate_cluster_name()
+    # Override the task name with the specified name or generated name, so that
+    # the controller process can retrieve the task name from the task config.
+    task.name = name
+
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
@@ -581,7 +590,9 @@ def spot_launch(
             'user_yaml_path': f.name,
             'user_config_path': None,
             'spot_controller': controller_name,
-            'cluster_name': name,
+            # Note: actual spot cluster name will be <task_name>-<spot job ID>
+            'task_name': name,
+            'uuid': task_uuid,
             'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
             'is_dev': env_options.Options.IS_DEVELOPER.get(),
             'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
@@ -630,10 +641,11 @@ def spot_launch(
                         skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
                 })
 
-        yaml_path = backend_utils.fill_template(
-            spot.SPOT_CONTROLLER_TEMPLATE,
-            vars_to_fill,
-            output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
+        yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
+                                 f'{name}-{task_uuid}.yaml')
+        backend_utils.fill_template(spot.SPOT_CONTROLLER_TEMPLATE,
+                                    vars_to_fill,
+                                    output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
         controller_task.spot_task = task
         assert len(controller_task.resources) == 1

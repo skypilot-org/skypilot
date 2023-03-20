@@ -142,10 +142,8 @@ def _get_yaml_path_from_cluster_name(cluster_name: str,
     return str(output_path)
 
 
-def fill_template(template_name: str,
-                  variables: Dict,
-                  output_path: Optional[str] = None,
-                  output_prefix: str = SKY_USER_FILE_PATH) -> str:
+def fill_template(template_name: str, variables: Dict,
+                  output_path: str) -> None:
     """Create a file from a Jinja template and return the filename."""
     assert template_name.endswith('.j2'), template_name
     template_path = os.path.join(sky.__root_dir__, 'templates', template_name)
@@ -153,19 +151,13 @@ def fill_template(template_name: str,
         raise FileNotFoundError(f'Template "{template_name}" does not exist.')
     with open(template_path) as fin:
         template = fin.read()
-    if output_path is None:
-        cluster_name = variables.get('cluster_name')
-        assert isinstance(cluster_name, str), cluster_name
-        output_path = _get_yaml_path_from_cluster_name(cluster_name,
-                                                       output_prefix)
-    output_path = os.path.abspath(output_path)
+    output_path = os.path.abspath(os.path.expanduser(output_path))
 
     # Write out yaml config.
     j2_template = jinja2.Template(template)
     content = j2_template.render(**variables)
     with open(output_path, 'w') as fout:
         fout.write(content)
-    return output_path
 
 
 def _optimize_file_mounts(yaml_path: str) -> None:
@@ -837,7 +829,7 @@ def write_cluster_config(
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
-    tmp_yaml_path = fill_template(
+    fill_template(
         cluster_config_template,
         dict(
             resources_vars,
@@ -946,7 +938,10 @@ def write_cluster_config(
         config = common_utils.read_yaml(os.path.expanduser(config_dict['ray']))
         vpc_name = gcp_config.get_usable_vpc(config)
 
-        scripts = tuple(
+        scripts = []
+        for template_name in ('gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2'):
+            script_path = os.path.join(user_file_dir, template_name).replace(
+                '.sh.j2', f'.{cluster_name}.sh')
             fill_template(
                 template_name,
                 dict(
@@ -958,10 +953,10 @@ def write_cluster_config(
                 # Use new names for TPU scripts so that different runs can use
                 # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
                 # with cluster yamls.
-                output_path=os.path.join(user_file_dir, template_name).replace(
-                    '.sh.j2', f'.{cluster_name}.sh'),
-            ) for template_name in
-            ['gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2'])
+                output_path=script_path,
+            )
+            scripts.append(script_path)
+
         config_dict['tpu-create-script'] = scripts[0]
         config_dict['tpu-delete-script'] = scripts[1]
         config_dict['tpu_name'] = tpu_name
@@ -999,6 +994,37 @@ def get_run_timestamp() -> str:
 def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
     return datetime.strptime(
         run_timestamp.partition('-')[2], '%Y-%m-%d-%H-%M-%S-%f').timestamp()
+
+
+def _count_healthy_nodes_from_ray(output: str,
+                                  is_local_cloud: bool = False
+                                 ) -> Tuple[int, int]:
+    """Count the number of healthy nodes from the output of `ray status`."""
+
+    def get_ready_nodes(pattern, output):
+        result = pattern.findall(output)
+        # On-prem/local case is handled differently.
+        # `ray status` produces different output for local case, and
+        # we poll for number of nodes launched instead of counting for
+        # head and number of worker nodes separately (it is impossible
+        # to distinguish between head and worker node for local case).
+        if is_local_cloud:
+            # In the local case, ready_workers mean the total number
+            # of nodes launched, including head.
+            return len(result)
+        if len(result) == 0:
+            return 0
+        assert len(result) == 1, result
+        return int(result[0])
+
+    if is_local_cloud:
+        ready_head = 0
+        ready_workers = get_ready_nodes(_LAUNCHED_LOCAL_WORKER_PATTERN, output)
+    else:
+        ready_head = get_ready_nodes(_LAUNCHED_HEAD_PATTERN, output)
+        ready_workers = get_ready_nodes(_LAUNCHED_WORKER_PATTERN, output)
+    assert ready_head <= 1, f'#head node should be <=1 (Got {ready_head}).'
+    return ready_head, ready_workers
 
 
 @timeline.event
@@ -1040,32 +1066,8 @@ def wait_until_ray_cluster_ready(
                 stderr)
             logger.debug(output)
 
-            # Workers that are ready
-            ready_workers = 0
-            # On-prem/local case is handled differently.
-            # `ray status` produces different output for local case, and
-            # we poll for number of nodes launched instead of counting for
-            # head and number of worker nodes separately (it is impossible
-            # to distinguish between head and worker node for local case).
-            if is_local_cloud:
-                result = _LAUNCHED_LOCAL_WORKER_PATTERN.findall(output)
-                # In the local case, ready_workers mean the total number
-                # of nodes launched, including head.
-                ready_workers = len(result)
-            else:
-                result = _LAUNCHED_WORKER_PATTERN.findall(output)
-                if len(result) == 0:
-                    ready_workers = 0
-                else:
-                    assert len(result) == 1, result
-                    ready_workers = int(result[0])
-
-            result = _LAUNCHED_HEAD_PATTERN.findall(output)
-            ready_head = 0
-            if result:
-                assert len(result) == 1, result
-                ready_head = int(result[0])
-                assert ready_head <= 1, ready_head
+            ready_head, ready_workers = _count_healthy_nodes_from_ray(
+                output, is_local_cloud=is_local_cloud)
 
             worker_status.update('[bold cyan]'
                                  f'{ready_workers} out of {num_nodes - 1} '
@@ -1450,16 +1452,16 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
                          'Hint: make sure it is not leaked.')
             continue
 
-        if not get_internal_ips:
-            ips = [
-                endpoint['accessConfig']['externalIp']
-                for endpoint in tpuvm_json['networkEndpoints']
-            ]
-        else:
-            ips = [
-                endpoint['ipAddress']
-                for endpoint in tpuvm_json['networkEndpoints']
-            ]
+        ips = []
+        for endpoint in tpuvm_json['networkEndpoints']:
+            # Note: if TPU VM is being preempted, its IP field may not exist.
+            # We use get() to avoid KeyError.
+            if get_internal_ips:
+                ip = endpoint.get('ipAddress', None)
+            else:
+                ip = endpoint['accessConfig'].get('externalIp', None)
+            if ip is not None:
+                ips.append(ip)
         all_ips.extend(ips)
 
     return all_ips
@@ -1690,11 +1692,13 @@ def _query_status_lambda(
         'terminated': None,
     }
     # TODO(ewzeng): filter by hash_filter_string to be safe
+    status_list = []
     vms = lambda_utils.LambdaCloudClient().list_instances()
+    possible_names = [f'{cluster}-head', f'{cluster}-worker']
     for node in vms:
-        if node['name'] == cluster:
-            return [status_map[node['status']]]
-    return []
+        if node.get('name') in possible_names:
+            status_list.append(status_map[node['status']])
+    return status_list
 
 
 _QUERY_STATUS_FUNCS = {
@@ -1767,6 +1771,8 @@ def _update_cluster_status_no_lock(
         return record
 
     cluster_name = handle.cluster_name
+    use_spot = handle.launched_resources.use_spot
+    ray_cluster_up = False
     try:
         # TODO(zhwu): This function cannot distinguish transient network error
         # in ray's get IPs vs. ray runtime failing.
@@ -1775,20 +1781,50 @@ def _update_cluster_status_no_lock(
         if external_ips is None or len(external_ips) == 0:
             raise exceptions.FetchIPError(
                 reason=exceptions.FetchIPError.Reason.HEAD)
-        if handle.launched_nodes == 1:
-            # Check the ray cluster status. We have to check it for single node
-            # case, since the get_node_ips() does not require ray cluster to be
-            # running.
-            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
-            runner = command_runner.SSHCommandRunner(external_ips[0],
-                                                     **ssh_credentials)
-            returncode = runner.run('ray status', stream_logs=False)
-            if returncode:
-                raise exceptions.FetchIPError(
-                    reason=exceptions.FetchIPError.Reason.HEAD)
-        # If we get node ips correctly, the cluster is UP. It is safe to
-        # set the status to UP, as the `handle.external_ips` function uses ray
-        # to fetch IPs and starting ray is the final step of sky launch.
+        # Check if ray cluster status is healthy.
+        ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
+        runner = command_runner.SSHCommandRunner(external_ips[0],
+                                                 **ssh_credentials)
+        rc, output, _ = runner.run('ray status',
+                                   stream_logs=False,
+                                   require_outputs=True,
+                                   separate_stderr=True)
+        if rc:
+            raise exceptions.FetchIPError(
+                reason=exceptions.FetchIPError.Reason.HEAD)
+
+        ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
+
+        if ready_head + ready_workers == handle.launched_nodes:
+            ray_cluster_up = True
+
+        # For non-spot clusters:
+        # If ray status shows all nodes are healthy, it is safe to set
+        # the status to UP as starting ray is the final step of sky launch.
+        # For spot clusters, the above can be unsafe because the Ray cluster
+        # may remain healthy for a while before the cloud completely
+        # preempts the VMs.
+        # Additionally, we query the VM state from the cloud provider.
+        if ray_cluster_up and not use_spot:
+            record['status'] = global_user_state.ClusterStatus.UP
+            global_user_state.add_or_update_cluster(cluster_name,
+                                                    handle,
+                                                    requested_resources=None,
+                                                    ready=True,
+                                                    is_launch=False)
+            return record
+    except exceptions.FetchIPError:
+        logger.debug('Refreshing status: Failed to get IPs from cluster '
+                     f'{cluster_name!r}, trying to fetch from provider.')
+    # For all code below, we query cluster status by cloud CLI for two cases:
+    # 1) ray fails to get IPs for the cluster.
+    # 2) the cluster is a spot cluster.
+    node_statuses = _get_cluster_status_via_cloud_cli(handle)
+
+    all_nodes_up = (all(status == global_user_state.ClusterStatus.UP
+                        for status in node_statuses) and
+                    len(node_statuses) == handle.launched_nodes)
+    if ray_cluster_up and all_nodes_up:
         record['status'] = global_user_state.ClusterStatus.UP
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
@@ -1796,11 +1832,6 @@ def _update_cluster_status_no_lock(
                                                 ready=True,
                                                 is_launch=False)
         return record
-    except exceptions.FetchIPError:
-        logger.debug('Refreshing status: Failed to get IPs from cluster '
-                     f'{cluster_name!r}, trying to fetch from provider.')
-    # For all code below, ray fails to get IPs for the cluster.
-    node_statuses = _get_cluster_status_via_cloud_cli(handle)
 
     if len(node_statuses) > handle.launched_nodes:
         # Unexpected: in the queried region more than 1 cluster with the same
