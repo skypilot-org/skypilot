@@ -655,14 +655,16 @@ def spot_launch(
             store_type = (None if cloud is None else
                           storage_lib.get_storetype_from_cloud(cloud).value)
             log_dir_mount = dict()
+            tmp_yaml_config = {
+                'name': spot.constants.SPOT_LOGS_BUCKET_NAME.format(
+                    username=getpass.getuser()),
+                'persistent': True,
+                'mode': 'MOUNT',
+            }
+            if store_type is not None:
+                tmp_yaml_config['store'] = store_type
             log_dir_mount[spot.constants.SPOT_CONTROLLER_LOGS_BUCKET_PATH] = (
-                storage_lib.Storage.from_yaml_config({
-                    'name': spot.constants.SPOT_LOGS_BUCKET_NAME.format(
-                        username=getpass.getuser()),
-                    'persistent': True,
-                    'mode': 'MOUNT',
-                    'store': store_type,
-                }))
+                storage_lib.Storage.from_yaml_config(tmp_yaml_config))
             controller_task.update_storage_mounts(log_dir_mount)
 
         controller_task.spot_task = task

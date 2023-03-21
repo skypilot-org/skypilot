@@ -37,7 +37,7 @@ setup: |
 
 run: |
   python -u -m sky.spot.controller \
-    {{remote_user_yaml_prefix}}/{{task_name}-{{uuid}}.yaml \
+    {{remote_user_yaml_prefix}}/{{task_name}}-{{uuid}}.yaml \
     --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %} \
     {% if sync_log %}--sync-log{% endif %}
 
