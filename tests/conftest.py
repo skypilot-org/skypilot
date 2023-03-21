@@ -18,7 +18,7 @@ from typing import List
 # --aws, --gcp, --azure, or --lambda.
 #
 # To only run tests for managed spot (without generic tests), use --managed-spot.
-all_clouds_in_smoke_tests = ['aws', 'gcp', 'azure', 'lambda']
+all_clouds_in_smoke_tests = ['aws', 'gcp', 'azure', 'lambda', 'cloudflare']
 default_clouds_to_run = ['gcp', 'azure']
 
 # Translate cloud name to pytest keyword. We need this because
@@ -28,7 +28,8 @@ cloud_to_pytest_keyword = {
     'aws': 'aws',
     'gcp': 'gcp',
     'azure': 'azure',
-    'lambda': 'lambda_cloud'
+    'lambda': 'lambda_cloud',
+    'cloudflare' : 'cloudflare'
 }
 
 
@@ -68,7 +69,6 @@ def pytest_configure(config):
         cloud_keyword = cloud_to_pytest_keyword[cloud]
         config.addinivalue_line(
             'markers', f'{cloud_keyword}: mark test as {cloud} specific')
-
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 
 
