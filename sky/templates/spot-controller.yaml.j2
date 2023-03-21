@@ -1,6 +1,6 @@
 # The template for the spot controller
 
-name: {{cluster_name}}
+name: {{task_name}}
 
 resources:
   disk_size: 50
@@ -11,9 +11,9 @@ resources:
 #  instance_type: t3.xlarge
 
 file_mounts:
-  {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml: {{user_yaml_path}}
+  {{remote_user_yaml_prefix}}/{{task_name}}-{{uuid}}.yaml: {{user_yaml_path}}
 {% if user_config_path is not none %}
-  {{remote_user_yaml_prefix}}/{{cluster_name}}.config_yaml: {{user_config_path}}
+  {{remote_user_yaml_prefix}}/{{task_name}}-{{uuid}}.config_yaml: {{user_config_path}}
 {% endif %}
 
 setup: |
@@ -37,7 +37,7 @@ setup: |
 
 run: |
   python -u -m sky.spot.controller \
-    {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml \
+    {{remote_user_yaml_prefix}}/{{task_name}-{{uuid}}.yaml \
     --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %} \
     {% if sync_log %}--sync-log{% endif %}
 
@@ -47,7 +47,7 @@ envs:
   SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK: 1
   SKYPILOT_USER: {{user}}
 {% if user_config_path is not none %}
-  {{env_var_skypilot_config}}: {{remote_user_yaml_prefix}}/{{cluster_name}}.config_yaml
+  {{env_var_skypilot_config}}: {{remote_user_yaml_prefix}}/{{task_name}}-{{uuid}}.config_yaml
 {% endif %}
 {% if is_dev %}
   SKYPILOT_DEV: 1

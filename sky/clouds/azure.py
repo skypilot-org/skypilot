@@ -1,9 +1,12 @@
 """Azure."""
+import functools
 import json
 import os
 import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
+
+import colorama
 
 from sky import clouds
 from sky import exceptions
@@ -49,8 +52,6 @@ class Azure(clouds.Cloud):
     # names, so the limit is 64 - 4 - 7 - 10 = 43.
     # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
-
-    _regions: List[clouds.Region] = []
 
     @classmethod
     def _cloud_unsupported_features(
@@ -110,9 +111,12 @@ class Azure(clouds.Cloud):
         return isinstance(other, Azure)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None) -> Optional[str]:
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
                                                          clouds='azure')
 
     def _get_image_config(self, gen_version, instance_type):
@@ -150,36 +154,14 @@ class Azure(clouds.Cloud):
         return image_config
 
     @classmethod
-    def regions(cls) -> List[clouds.Region]:
-        # NOTE on zones: Ray Autoscaler does not support specifying
-        # availability zones, and Azure CLI will try launching VMs in all
-        # zones. Hence for our purposes we do not keep track of zones.
-        if not cls._regions:
-            cls._regions = [
-                clouds.Region('centralus'),
-                clouds.Region('eastus'),
-                clouds.Region('eastus2'),
-                clouds.Region('northcentralus'),
-                clouds.Region('southcentralus'),
-                clouds.Region('westcentralus'),
-                clouds.Region('westus'),
-                clouds.Region('westus2'),
-            ]
-        return cls._regions
-
-    @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
+    def regions_with_offering(cls, instance_type: str,
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         del accelerators  # unused
         assert zone is None, 'Azure does not support zones'
-        if instance_type is None:
-            # Fall back to default regions
-            regions = cls.regions()
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'azure')
+        regions = service_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'azure')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -191,7 +173,7 @@ class Azure(clouds.Cloud):
         *,
         region: str,
         num_nodes: int,
-        instance_type: Optional[str] = None,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[None]:
@@ -217,25 +199,21 @@ class Azure(clouds.Cloud):
             instance_type, clouds='azure')
 
     @classmethod
-    def get_vcpus_from_instance_type(
+    def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[float]:
-        return service_catalog.get_vcpus_from_instance_type(instance_type,
-                                                            clouds='azure')
+    ) -> Tuple[Optional[float], Optional[float]]:
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='azure')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources.Resources',
-            region: Optional['clouds.Region'],
+            self, resources: 'resources.Resources', region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        if region is None:
-            assert zones is None, (
-                'Set either both or neither for: region, zones.')
-            region = self._get_default_region()
+        assert zones is None, ('Azure does not support zones', zones)
 
         region_name = region.name
 
@@ -283,6 +261,7 @@ class Azure(clouds.Cloud):
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
                     cpus=None,
+                    memory=None,
                 )
                 resource_list.append(r)
             return resource_list
@@ -292,7 +271,7 @@ class Azure(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             default_instance_type = Azure.get_default_instance_type(
-                cpus=resources.cpus)
+                cpus=resources.cpus, memory=resources.memory)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -305,6 +284,7 @@ class Azure(clouds.Cloud):
             acc,
             acc_count,
             cpus=resources.cpus,
+            memory=resources.memory,
             use_spot=resources.use_spot,
             region=resources.region,
             zone=resources.zone,
@@ -313,7 +293,8 @@ class Azure(clouds.Cloud):
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         help_str = (
             ' Run the following commands:'
@@ -341,7 +322,7 @@ class Azure(clouds.Cloud):
         # If Azure is properly logged in, this will return the account email
         # address + subscription ID.
         try:
-            self.get_current_user_identity()
+            cls.get_current_user_identity()
         except exceptions.CloudUserIdentityError:
             return False, 'Azure credential is not set.' + help_str
         return True, None
@@ -365,7 +346,9 @@ class Azure(clouds.Cloud):
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'azure')
 
-    def get_current_user_identity(self) -> Optional[str]:
+    @classmethod
+    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    def get_current_user_identity(cls) -> Optional[str]:
         """Returns the cloud user identity."""
         # This returns the user's email address + [subscription_id].
         retry_cnt = 0
@@ -373,6 +356,14 @@ class Azure(clouds.Cloud):
             retry_cnt += 1
             try:
                 import knack  # pylint: disable=import-outside-toplevel
+            except ModuleNotFoundError as e:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.CloudUserIdentityError(
+                        'Failed to import \'knack\'. To install the dependencies for Azure, '
+                        'Please install SkyPilot with: '
+                        f'{colorama.Style.BRIGHT}pip install skypilot[azure]'
+                        f'{colorama.Style.RESET_ALL}') from e
+            try:
                 account_email = azure.get_current_account_user()
                 break
             except (FileNotFoundError, knack.util.CLIError) as e:
@@ -394,7 +385,7 @@ class Azure(clouds.Cloud):
                         f'{common_utils.format_exception(e, use_bracket=True)}'
                     ) from e
         try:
-            project_id = self.get_project_id()
+            project_id = cls.get_project_id()
         except (ModuleNotFoundError, RuntimeError) as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(

@@ -25,18 +25,15 @@ class Lambda(clouds.Cloud):
 
     # Lamdba has a 64 char limit for cluster name.
     # Reference: https://cloud.lambdalabs.com/api/v1/docs#operation/launchInstance # pylint: disable=line-too-long
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 64
+    # However, we need to account for the suffixes '-head' and '-worker'
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 57
     # Currently, none of clouds.CloudImplementationFeatures are implemented
     # for Lambda Cloud.
     # STOP/AUTOSTOP: The Lambda cloud provider does not support stopping VMs.
-    # MULTI_NODE: Multi-node is not supported by the implementation yet.
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the Lambda Cloud implementation yet.',
     }
-
-    _regions: List[clouds.Region] = []
 
     @classmethod
     def _cloud_unsupported_features(
@@ -48,28 +45,7 @@ class Lambda(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions(cls) -> List[clouds.Region]:
-        if not cls._regions:
-            cls._regions = [
-                # Popular US regions
-                clouds.Region('us-east-1'),
-                clouds.Region('us-west-2'),
-                clouds.Region('us-west-1'),
-                clouds.Region('us-south-1'),
-
-                # Everyone else
-                clouds.Region('asia-northeast-1'),
-                clouds.Region('asia-northeast-2'),
-                clouds.Region('asia-south-1'),
-                clouds.Region('australia-southeast-1'),
-                clouds.Region('europe-central-1'),
-                clouds.Region('europe-south-1'),
-                clouds.Region('me-west-1'),
-            ]
-        return cls._regions
-
-    @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
+    def regions_with_offering(cls, instance_type: str,
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
@@ -77,12 +53,8 @@ class Lambda(clouds.Cloud):
         del accelerators, zone  # unused
         if use_spot:
             return []
-        if instance_type is None:
-            # Fall back to default regions
-            regions = cls.regions()
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'lambda')
+        regions = service_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'lambda')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -94,7 +66,7 @@ class Lambda(clouds.Cloud):
         *,
         region: str,
         num_nodes: int,
-        instance_type: Optional[str] = None,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[None]:
@@ -139,9 +111,12 @@ class Lambda(clouds.Cloud):
         return isinstance(other, Lambda)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None) -> Optional[str]:
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
                                                          clouds='lambda')
 
     @classmethod
@@ -153,24 +128,21 @@ class Lambda(clouds.Cloud):
             instance_type, clouds='lambda')
 
     @classmethod
-    def get_vcpus_from_instance_type(
+    def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[float]:
-        return service_catalog.get_vcpus_from_instance_type(instance_type,
-                                                            clouds='lambda')
+    ) -> Tuple[Optional[float], Optional[float]]:
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='lambda')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            region: Optional['clouds.Region'],
+            self, resources: 'resources_lib.Resources', region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del zones
-        if region is None:
-            region = self._get_default_region()
+        assert zones is None, 'Lambda does not support zones.'
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -205,6 +177,7 @@ class Lambda(clouds.Cloud):
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
                     cpus=None,
+                    memory=None,
                 )
                 resource_list.append(r)
             return resource_list
@@ -214,7 +187,7 @@ class Lambda(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             default_instance_type = Lambda.get_default_instance_type(
-                cpus=resources.cpus)
+                cpus=resources.cpus, memory=resources.memory)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -228,6 +201,7 @@ class Lambda(clouds.Cloud):
             acc_count,
             use_spot=resources.use_spot,
             cpus=resources.cpus,
+            memory=resources.memory,
             region=resources.region,
             zone=resources.zone,
             clouds='lambda')
@@ -235,7 +209,8 @@ class Lambda(clouds.Cloud):
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         try:
             lambda_utils.LambdaCloudClient().list_instances()
         except (AssertionError, KeyError, lambda_utils.LambdaCloudError):
@@ -253,7 +228,8 @@ class Lambda(clouds.Cloud):
             for filename in _CREDENTIAL_FILES
         }
 
-    def get_current_user_identity(self) -> Optional[str]:
+    @classmethod
+    def get_current_user_identity(cls) -> Optional[str]:
         # TODO(ewzeng): Implement get_current_user_identity for Lambda
         return None
 
@@ -272,3 +248,7 @@ class Lambda(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'lambda')
+
+    @classmethod
+    def regions(cls) -> List['clouds.Region']:
+        return service_catalog.regions(clouds='lambda')

@@ -101,11 +101,7 @@ class Cloud:
     #### Regions/Zones ####
 
     @classmethod
-    def regions(cls) -> List[Region]:
-        raise NotImplementedError
-
-    @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
+    def regions_with_offering(cls, instance_type: str,
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[Region]:
@@ -131,7 +127,7 @@ class Cloud:
         *,
         region: str,
         num_nodes: int,
-        instance_type: Optional[str] = None,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[Optional[List[Zone]]]:
@@ -221,7 +217,7 @@ class Cloud:
     def make_deploy_resources_variables(
         self,
         resources: 'resources.Resources',
-        region: Optional['Region'],
+        region: 'Region',
         zones: Optional[List['Zone']],
     ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
@@ -238,9 +234,9 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_vcpus_from_instance_type(cls,
-                                     instance_type: str) -> Optional[float]:
-        """Returns the number of virtual CPUs that the instance type offers."""
+    def get_vcpus_mem_from_instance_type(
+            cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+        """Returns the #vCPUs and memory that the instance type offers."""
         raise NotImplementedError
 
     @classmethod
@@ -252,22 +248,24 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None) -> Optional[str]:
-        """Returns the default instance type with the given number of vCPUs.
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None) -> Optional[str]:
+        """Returns the default instance type with the given #vCPUs and memory.
 
         For example, if cpus='4', this method returns the default instance type
         with 4 vCPUs.  If cpus='4+', this method returns the default instance
         type with 4 or more vCPUs.
 
-        When cpus is None, this method will never return None.
+        If 'memory=4', this method returns the default instance type with 4GB
+        memory.  If 'memory=4+', this method returns the default instance
+        type with 4GB or more memory.
+
+        When cpus is None or memory is None, this method will never return None.
         This method may return None if the cloud's default instance family
         does not have a VM with the given number of vCPUs (e.g., when cpus='7').
         """
-        raise NotImplementedError
-
-    @classmethod
-    def _get_default_region(cls) -> Region:
         raise NotImplementedError
 
     @classmethod
@@ -288,7 +286,8 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud.
 
         Returns a boolean of whether the user can access this cloud, and a
@@ -296,7 +295,8 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def get_current_user_identity(self) -> Optional[str]:
+    @classmethod
+    def get_current_user_identity(cls) -> Optional[str]:
         """(Advanced) Returns currently active user identity of this cloud.
 
         The user "identity" is associated with each SkyPilot cluster they

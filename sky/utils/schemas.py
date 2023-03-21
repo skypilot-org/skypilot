@@ -32,6 +32,13 @@ def get_resources_schema():
                     'type': 'number',
                 }],
             },
+            'memory': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'number',
+                }],
+            },
             'accelerators': {
                 'anyOf': [{
                     'type': 'string',

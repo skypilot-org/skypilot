@@ -1,5 +1,6 @@
 """The strategy to handle launching/recovery/termination of spot clusters."""
 import time
+import traceback
 import typing
 from typing import Optional, Tuple
 
@@ -7,6 +8,7 @@ import sky
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import backends
 from sky.backends import backend_utils
 from sky.skylet import job_lib
 from sky.spot import spot_utils
@@ -15,17 +17,38 @@ from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import backends
     from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
 
-SPOT_STRATEGIES = dict()
+SPOT_STRATEGIES = {}
 SPOT_DEFAULT_STRATEGY = None
 
 # Waiting time for job from INIT/PENDING to RUNNING
 # 10 * JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 10 * 5 = 50 seconds
 MAX_JOB_CHECKING_RETRY = 10
+
+
+def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
+    """Terminate the spot cluster."""
+    retry_cnt = 0
+    while True:
+        try:
+            usage_lib.messages.usage.set_internal()
+            sky.down(cluster_name)
+            return
+        except ValueError:
+            # The cluster is already down.
+            return
+        except Exception as e:  # pylint: disable=broad-except
+            retry_cnt += 1
+            if retry_cnt >= max_retry:
+                raise RuntimeError('Failed to terminate the spot cluster '
+                                   f'{cluster_name}.') from e
+            logger.error('Failed to terminate the spot cluster '
+                         f'{cluster_name}. Retrying.'
+                         f'Details: {common_utils.format_exception(e)}')
+            logger.error(f'  Traceback: {traceback.format_exc()}')
 
 
 class StrategyExecutor:
@@ -43,6 +66,8 @@ class StrategyExecutor:
             task: The task to execute.
             retry_until_up: Whether to retry until the cluster is up.
         """
+        assert isinstance(backend, backends.CloudVmRayBackend), (
+            'Only CloudVMRayBackend is supported.')
         self.dag = sky.Dag()
         self.dag.add(task)
         self.cluster_name = cluster_name
@@ -97,25 +122,6 @@ class StrategyExecutor:
         Returns: The timestamp job started.
         """
         raise NotImplementedError
-
-    def terminate_cluster(self, max_retry: int = 3) -> None:
-        """Terminate the spot cluster."""
-        retry_cnt = 0
-        while True:
-            try:
-                usage_lib.messages.usage.set_internal()
-                sky.down(self.cluster_name)
-                return
-            except ValueError:
-                # The cluster is already down.
-                return
-            except Exception as e:  # pylint: disable=broad-except
-                retry_cnt += 1
-                if retry_cnt >= max_retry:
-                    raise RuntimeError('Failed to terminate the spot cluster '
-                                       f'{self.cluster_name}.') from e
-                logger.error('Failed to terminate the spot cluster '
-                             f'{self.cluster_name}. Retrying.')
 
     def _try_cancel_all_jobs(self):
         handle = global_user_state.get_handle_from_cluster_name(
@@ -246,6 +252,12 @@ class StrategyExecutor:
                            detach_run=True,
                            _is_launched_by_spot_controller=True)
                 logger.info('Spot cluster launched.')
+            except exceptions.InvalidClusterNameError as e:
+                logger.error('Failure happened before provisioning. '
+                             f'{common_utils.format_exception(e)}')
+                if raise_on_failure:
+                    raise exceptions.ProvisionPrechecksError(reasons=[e])
+                return None
             except exceptions.ResourcesUnavailableError as e:
                 # This is raised when the launch fails due to prechecks or
                 # after failing over through all the candidates.
@@ -280,7 +292,6 @@ class StrategyExecutor:
                 # code.
                 logger.info('Failed to launch the spot cluster with error: '
                             f'{common_utils.format_exception(e)})')
-                import traceback  # pylint: disable=import-outside-toplevel
                 logger.info(f'  Traceback: {traceback.format_exc()}')
             else:  # No exception, the launch succeeds.
                 # At this point, a sky.launch() has succeeded. Cluster may be
@@ -296,7 +307,7 @@ class StrategyExecutor:
                     'launched cluster, due to unexpected submission errors or '
                     'the cluster being preempted during job submission.')
 
-            self.terminate_cluster()
+            terminate_cluster(self.cluster_name)
             if max_retry is not None and retry_cnt >= max_retry:
                 # Retry forever if max_retry is None.
                 if raise_on_failure:
@@ -375,7 +386,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             logger.debug('Terminating unhealthy spot cluster and '
                          'reset cloud region.')
             self._launched_cloud_region = None
-            self.terminate_cluster()
+            terminate_cluster(self.cluster_name)
 
             # Step 3
             logger.debug('Relaunch the cluster  without constraining to prior '

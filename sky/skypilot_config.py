@@ -43,11 +43,12 @@ then:
 """
 import copy
 import os
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Sequence
 
 import yaml
 
 from sky import sky_logging
+from sky import clouds
 from sky.utils import common_utils
 
 # The config path is discovered in this order:
@@ -73,6 +74,68 @@ logger = sky_logging.init_logger(__name__)
 _dict = None
 
 
+def get_nested(keys: Sequence[str], default_value: Any) -> Any:
+    """Gets a nested key.
+
+    If any key is not found, or any intermediate key does not point to a dict
+    value, returns 'default_value'.
+    """
+    global _dict
+    if _dict is None:
+        return default_value
+    curr = _dict
+    for key in keys:
+        if isinstance(curr, dict) and key in curr:
+            curr = curr[key]
+        else:
+            return default_value
+    logger.debug(f'User config: {".".join(keys)} -> {curr}')
+    return curr
+
+
+def pop_nested(keys: Sequence[str]) -> Dict[str, Any]:
+    """Returns a deep-copied config with the nested key popped.
+
+    Like get_nested(), if any key is not found, this will not raise an error.
+    """
+    _check_loaded_or_die()
+    global _dict
+    assert _dict is not None
+    curr = copy.deepcopy(_dict)
+    to_return = curr
+    prev = None
+    for i, key in enumerate(keys):
+        if key in curr:
+            prev = curr
+            curr = curr[key]
+            if i == len(keys) - 1:
+                prev.pop(key)
+                logger.debug(f'Popped {keys}. Returning conf: {to_return}')
+        else:
+            # If any key not found, simply return.
+            return to_return
+    return to_return
+
+
+def _syntax_check_for_ssh_proxy_command(cloud: str) -> None:
+    ssh_proxy_command_config = get_nested((cloud.lower(), 'ssh_proxy_command'),
+                                          None)
+    if ssh_proxy_command_config is None or isinstance(ssh_proxy_command_config,
+                                                      str):
+        return
+
+    if isinstance(ssh_proxy_command_config, dict):
+        for region, cmd in ssh_proxy_command_config.items():
+            if not isinstance(cmd, str):
+                raise ValueError(
+                    f'Invalid ssh_proxy_command config for region {region!r} '
+                    f'(expected a str): {cmd!r}')
+        return
+    raise ValueError(
+        'Invalid ssh_proxy_command config (expected a str or a dict with '
+        f'region names as keys): {ssh_proxy_command_config!r}')
+
+
 def _try_load_config() -> None:
     global _dict
     config_path_via_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
@@ -88,6 +151,10 @@ def _try_load_config() -> None:
             logger.debug(f'Config loaded: {_dict}')
         except yaml.YAMLError as e:
             logger.error(f'Error in loading config file ({config_path}):', e)
+
+        for cloud in clouds.CLOUD_REGISTRY:
+            _syntax_check_for_ssh_proxy_command(cloud)
+        logger.debug('Config syntax check passed.')
 
 
 # Load on import.
@@ -107,45 +174,3 @@ def loaded() -> bool:
     """Returns if the user configurations are loaded."""
     global _dict
     return _dict is not None
-
-
-def get_nested(keys: Tuple[str], default_value: Any) -> Any:
-    """Gets a nested key.
-
-    If any key is not found, or any intermediate key does not point to a dict
-    value, returns 'default_value'.
-    """
-    global _dict
-    if _dict is None:
-        return default_value
-    curr = _dict
-    for key in keys:
-        if isinstance(curr, dict) and key in curr:
-            curr = curr[key]
-        else:
-            return default_value
-    logger.debug(f'User config: {".".join(keys)} -> {curr}')
-    return curr
-
-
-def pop_nested(keys: Tuple[str]) -> Dict[str, Any]:
-    """Returns a deep-copied config with the nested key popped.
-
-    Like get_nested(), if any key is not found, this will not raise an error.
-    """
-    _check_loaded_or_die()
-    global _dict
-    curr = copy.deepcopy(_dict)
-    to_return = curr
-    prev = None
-    for i, key in enumerate(keys):
-        if key in curr:
-            prev = curr
-            curr = curr[key]
-            if i == len(keys) - 1:
-                prev.pop(key)
-                logger.debug(f'Popped {keys}. Returning conf: {to_return}')
-        else:
-            # If any key not found, simply return.
-            return to_return
-    return to_return
