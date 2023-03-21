@@ -689,8 +689,7 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
     template_str = pathlib.Path(
         'tests/test_yamls/test_r2_storage_mounting.yaml').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name,
-                              generic_cloud=generic_cloud)
+    content = template.render(storage_name=storage_name)
     endpoint_url = cloudflare.create_endpoint()
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
