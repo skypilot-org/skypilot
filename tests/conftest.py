@@ -29,7 +29,7 @@ cloud_to_pytest_keyword = {
     'gcp': 'gcp',
     'azure': 'azure',
     'lambda': 'lambda_cloud',
-    'cloudflare' : 'cloudflare'
+    'cloudflare': 'cloudflare'
 }
 
 
