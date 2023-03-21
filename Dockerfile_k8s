@@ -1,5 +1,5 @@
 # docker build -t skypilot:latest -f Dockerfile_k8s ./sky
-FROM continuumio/miniconda3:4.11.0
+FROM continuumio/miniconda3:22.11.1
 
 # Initialize conda for root user, install ssh and other local dependencies
 RUN apt update -y && \
@@ -29,7 +29,7 @@ RUN pip install wheel Click colorama cryptography jinja2 jsonschema && \
     pip install ray==2.3.0 rich tabulate filelock 'grpcio<=1.43.0' && \
     pip install packaging 'protobuf<4.0.0' pulp && \
     pip install awscli boto3 pycryptodome==3.12.0 && \
-    pip install docker
+    pip install docker kubernetes
 
 # Install SkyPilot. This is purposely separate from installing SkyPilot
 # dependencies to optimize rebuild time
