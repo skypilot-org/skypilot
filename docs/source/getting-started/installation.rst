@@ -101,20 +101,12 @@ Hint: run ``az account subscription list`` to get a list of subscription IDs und
 Lambda Cloud
 ~~~~~~~~~~~~~~~~~~
 
-Lambda Labs GPU Cloud, or Lambda Cloud, is a cloud provider offering low-cost GPUs. You can learn more about them `here <https://lambdalabs.com/>`__.
-
-To configure Lambda Cloud access, go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambda console to generate a key and then add it to :code:`~/.lambda_cloud/lambda_keys` by running:
+`Lambda Cloud <https://lambdalabs.com/>`__ is a cloud provider offering low-cost GPUs. To configure Lambda Cloud access, go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambda console to generate a key and then add it to :code:`~/.lambda_cloud/lambda_keys`:
 
 .. code-block:: console
 
-  $ # Create directory if required
   $ mkdir -p ~/.lambda_cloud
-  $ # Add the line "api_key = <your_api_key_here>" to lambda_keys file
   $ echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
-
-.. note::
-
-  Multi-node clusters and stopping instances are currently not supported on Lambda Cloud.
 
 .. _verify-cloud-access:
 
