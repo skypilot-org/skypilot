@@ -101,7 +101,7 @@ Hint: run ``az account subscription list`` to get a list of subscription IDs und
 Lambda Cloud
 ~~~~~~~~~~~~~~~~~~
 
-`Lambda Cloud <https://lambdalabs.com/>`__ is a cloud provider offering low-cost GPUs. To configure Lambda Cloud access, go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambda console to generate a key and then add it to :code:`~/.lambda_cloud/lambda_keys`:
+`Lambda Cloud <https://lambdalabs.com/>`_ is a cloud provider offering low-cost GPUs. To configure Lambda Cloud access, go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambda console to generate a key and then add it to :code:`~/.lambda_cloud/lambda_keys`:
 
 .. code-block:: console
 
