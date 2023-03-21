@@ -131,7 +131,7 @@ When you are done, you can stop or tear down the cluster:
     ```
     You can restart a stopped cluster and relaunch the chatbot (the `run` section in YAML) with
     ```bash
-    sky launch llama-7b.yaml -c llama --no-setup
+    sky launch llama-65b.yaml -c llama --no-setup
     ```
     Note the `--no-setup` flag: a stopped cluster preserves its disk contents so we can skip redoing the setup.
 - **To tear down the cluster** (non-restartable), run
