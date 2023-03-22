@@ -69,6 +69,7 @@ def pytest_configure(config):
         cloud_keyword = cloud_to_pytest_keyword[cloud]
         config.addinivalue_line(
             'markers', f'{cloud_keyword}: mark test as {cloud} specific')
+
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 
 
@@ -107,7 +108,6 @@ def pytest_collection_modifyitems(config, items):
         for cloud in all_clouds_in_smoke_tests:
             cloud_keyword = cloud_to_pytest_keyword[cloud]
             if (cloud_keyword in item.keywords and cloud not in cloud_to_run):
-                #if config.getoption('--cloudflare') and cloud_to_run[0] == 'gcp':
                 if config.getoption('--cloudflare') and cloud == 'cloudflare':
                     continue
                 item.add_marker(skip_marks[cloud])
