@@ -444,8 +444,14 @@ class AWS(clouds.Cloud):
         return 'sso' in proc.stdout.decode().split()
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[str]:
+    def get_current_user_identity(cls) -> Optional[List[str]]:
         """Returns the identity of the user on this cloud.
+
+        Returns:
+            A list of strings that uniquely identifies the user on this cloud.
+            For identity check, we will fallback through the list of strings
+            until we find a match, and print a warning if we fail for the
+            first string.
 
         Raises:
             exceptions.CloudUserIdentityError: if the user identity cannot be
@@ -462,7 +468,8 @@ class AWS(clouds.Cloud):
             # the user is deleted and recreated.
             # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # pylint: disable=line-too-long
             # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable # pylint: disable=line-too-long
-            user_id = sts.get_caller_identity()['UserId']
+            user_info = sts.get_caller_identity()
+            user_ids = [user_info['UserId'], user_info['AccountId']]
         except aws.botocore_exceptions().NoCredentialsError:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
@@ -507,7 +514,7 @@ class AWS(clouds.Cloud):
                     f'Failed to get AWS user.\n'
                     f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
-        return user_id
+        return user_ids
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         # TODO(skypilot): ~/.aws/credentials is required for users using multiple clouds.
