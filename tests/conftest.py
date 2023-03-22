@@ -76,7 +76,10 @@ def _get_cloud_to_run(config) -> List[str]:
     cloud_to_run = []
     for cloud in all_clouds_in_smoke_tests:
         if config.getoption(f'--{cloud}'):
-            cloud_to_run.append(cloud)
+            if cloud == 'cloudflare':
+                cloud_to_run.append(default_clouds_to_run[0])
+            else:
+                cloud_to_run.append(cloud)
     if not cloud_to_run:
         cloud_to_run = default_clouds_to_run
     return cloud_to_run
@@ -104,6 +107,9 @@ def pytest_collection_modifyitems(config, items):
         for cloud in all_clouds_in_smoke_tests:
             cloud_keyword = cloud_to_pytest_keyword[cloud]
             if (cloud_keyword in item.keywords and cloud not in cloud_to_run):
+                #if config.getoption('--cloudflare') and cloud_to_run[0] == 'gcp':
+                if config.getoption('--cloudflare') and cloud == 'cloudflare':
+                    continue
                 item.add_marker(skip_marks[cloud])
 
         if (not 'managed_spot'
