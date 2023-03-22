@@ -831,7 +831,8 @@ def write_cluster_config(
             #
             # Resources.get_valid_regions_for_launchable() respects the keys (regions)
             # in ssh_proxy_command in skypilot_config. So here we add an assert.
-            assert region_name in ssh_proxy_command_config, (region_name, ssh_proxy_command_config)
+            assert region_name in ssh_proxy_command_config, (
+                region_name, ssh_proxy_command_config)
             ssh_proxy_command = ssh_proxy_command_config[region_name]
 
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
