@@ -337,7 +337,7 @@ class Task:
     def envs(self) -> Dict[str, str]:
         return self._envs
 
-    def set_envs(
+    def update_envs(
             self, envs: Union[None, Tuple[Tuple[str, str]],
                               Dict[str, str]]) -> 'Task':
         """Sets the environment variables for use inside the setup/run commands.
@@ -353,8 +353,7 @@ class Task:
           ValueError: if various invalid inputs errors are detected.
         """
         if envs is None:
-            self._envs = {}
-            return self
+            envs = {}
         if isinstance(envs, (list, tuple)):
             keys = set(env[0] for env in envs)
             if len(keys) != len(envs):
@@ -374,7 +373,7 @@ class Task:
                 raise ValueError(
                     'envs must be List[Tuple[str, str]] or Dict[str, str]: '
                     f'{envs}')
-        self._envs = envs
+        self._envs.update(envs)
         return self
 
     @property

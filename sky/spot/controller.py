@@ -44,7 +44,7 @@ class SpotController:
         job_id_env_var = common_utils.get_global_job_id(
             self._backend.run_timestamp, 'spot', str(self._job_id))
         task_envs[constants.JOB_ID_ENV_VAR] = job_id_env_var
-        self._task.set_envs(task_envs)
+        self._task.update_envs(task_envs)
 
         spot_state.set_submitted(
             self._job_id,
