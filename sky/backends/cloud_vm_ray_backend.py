@@ -68,7 +68,7 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.AWS: 90,
     clouds.Azure: 90,
-    clouds.GCP: 90,
+    clouds.GCP: 120,
     clouds.Lambda: 120,
     clouds.Local: 90,
 }

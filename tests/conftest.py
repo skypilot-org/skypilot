@@ -180,6 +180,6 @@ def aws_config_region(monkeypatch) -> str:
     if skypilot_config.loaded():
         ssh_proxy_command = skypilot_config.get_nested(
             ('aws', 'ssh_proxy_command'), None)
-        if isinstance(ssh_proxy_command, dict):
+        if isinstance(ssh_proxy_command, dict) and ssh_proxy_command:
             region = list(ssh_proxy_command.keys())[0]
     return region

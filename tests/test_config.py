@@ -88,8 +88,8 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
 
     # Check config with only partial keys still works
     new_config3 = copy.copy(new_config2)
-    del new_config2['aws']['ssh_proxy_command']
-    del new_config2['aws']['use_internal_ips']
+    del new_config3['aws']['ssh_proxy_command']
+    del new_config3['aws']['use_internal_ips']
     new_config_path = tmp_path / 'new_config3.yaml'
     common_utils.dump_yaml(new_config_path, new_config3)
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', new_config_path)
