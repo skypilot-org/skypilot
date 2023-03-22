@@ -171,3 +171,15 @@ def enable_all_clouds(monkeypatch):
         prefix='tmp_backup_config_default', delete=False)
     monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
                         config_file_backup.name)
+
+
+@pytest.fixture
+def aws_config_region(monkeypatch) -> str:
+    from sky import skypilot_config
+    region = 'us-west-2'
+    if skypilot_config.loaded():
+        ssh_proxy_command = skypilot_config.get_nested(
+            ('aws', 'ssh_proxy_command'), None)
+        if isinstance(ssh_proxy_command, dict) and ssh_proxy_command:
+            region = list(ssh_proxy_command.keys())[0]
+    return region

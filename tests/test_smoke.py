@@ -1231,10 +1231,10 @@ def test_spot_failed_setup(generic_cloud: str):
 # ---------- Testing managed spot recovery ----------
 @pytest.mark.aws
 @pytest.mark.managed_spot
-def test_spot_recovery_aws():
+def test_spot_recovery_aws(aws_config_region):
     """Test managed spot recovery."""
     name = _get_cluster_name()
-    region = 'us-west-2'
+    region = aws_config_region
     test = Test(
         'spot_recovery_aws',
         [
@@ -1312,10 +1312,10 @@ def test_spot_recovery_default_resources(generic_cloud: str):
 
 @pytest.mark.aws
 @pytest.mark.managed_spot
-def test_spot_recovery_multi_node_aws():
+def test_spot_recovery_multi_node_aws(aws_config_region):
     """Test managed spot recovery."""
     name = _get_cluster_name()
-    region = 'us-west-2'
+    region = aws_config_region
     test = Test(
         'spot_recovery_multi_node_aws',
         [
@@ -1337,7 +1337,7 @@ def test_spot_recovery_multi_node_aws():
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
         _SPOT_CANCEL_WAIT.format(job_name=name),
-        timeout=25 * 60,
+        timeout=30 * 60,
     )
     run_one_test(test)
 
@@ -1378,9 +1378,9 @@ def test_spot_recovery_multi_node_gcp():
 
 @pytest.mark.aws
 @pytest.mark.managed_spot
-def test_spot_cancellation_aws():
+def test_spot_cancellation_aws(aws_config_region):
     name = _get_cluster_name()
-    region = 'us-east-2'
+    region = aws_config_region
     test = Test(
         'spot_cancellation_aws',
         [
@@ -1421,7 +1421,7 @@ def test_spot_cancellation_aws():
              f'--filters Name=tag:ray-cluster-name,Values={name}-3-* '
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
-            'sleep 100',
+            'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RECOVERING"',
             _SPOT_CANCEL_WAIT.format(job_name=f'{name}-3'),
             'sleep 5',

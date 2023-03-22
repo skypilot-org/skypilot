@@ -595,6 +595,7 @@ def spot_launch(
             'uuid': task_uuid,
             'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
             'is_dev': env_options.Options.IS_DEVELOPER.get(),
+            'is_debug': env_options.Options.SHOW_DEBUG_INFO.get(),
             'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
             'logging_user_hash': common_utils.get_user_hash(),
             'retry_until_up': retry_until_up,
@@ -605,11 +606,11 @@ def spot_launch(
             # 'skypilot_config' module. Don't simply read the on-disk file as
             # it may have changed since this process started.
             #
-            # Pop any proxy command, because the controller would've been
-            # launched behind the proxy, and in general any nodes we launch may
-            # not have or need the proxy setup. (If the controller needs to
-            # launch spot clusters in another region/VPC, the user should
-            # properly set up VPC peering, which will allow the
+            # Set any proxy command to None, because the controller would've
+            # been launched behind the proxy, and in general any nodes we
+            # launch may not have or need the proxy setup. (If the controller
+            # needs to launch spot clusters in another region/VPC, the user
+            # should properly set up VPC peering, which will allow the
             # cross-region/VPC communication. The proxy command is orthogonal
             # to this scenario.)
             #
@@ -628,11 +629,23 @@ def spot_launch(
             # controller VPC (or name) == the spot job's VPC (or name). It may
             # not be a sufficient check (as it's always possible that peering
             # is not set up), but it may catch some obvious errors.
-            # TODO(zhwu): hacky. We should pop the proxy command of the cloud
-            # where the controller is launched (currently, only aws user uses
-            # proxy_command).
-            config_dict = skypilot_config.pop_nested(
-                ('aws', 'ssh_proxy_command'))
+            # TODO(zhwu): hacky. We should only set the proxy command of the
+            # cloud where the controller is launched (currently, only aws user
+            # uses proxy_command).
+            proxy_command_key = ('aws', 'ssh_proxy_command')
+            ssh_proxy_command = skypilot_config.get_nested(
+                proxy_command_key, None)
+            if isinstance(ssh_proxy_command, str):
+                config_dict = skypilot_config.set_nested(
+                    proxy_command_key, None)
+            elif isinstance(ssh_proxy_command, dict):
+                # Instead of removing the key, we set the value to empty string
+                # so that the controller will only try the regions specified by
+                # the keys.
+                ssh_proxy_command = {k: None for k in ssh_proxy_command}
+                config_dict = skypilot_config.set_nested(
+                    proxy_command_key, ssh_proxy_command)
+
             with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
                 common_utils.dump_yaml(tmpfile.name, config_dict)
                 vars_to_fill.update({
