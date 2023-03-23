@@ -1744,7 +1744,12 @@ def check_owner_identity(cluster_name: str) -> None:
     if owner_identity is None:
         global_user_state.set_owner_identity_for_cluster(
             cluster_name, current_user_identity)
-    elif owner_identity != current_user_identity:
+    else:
+        if isinstance(owner_identity, str):
+            owner_identity = [owner_identity]
+        for owner, current in zip(owner_identity, current_user_identity):
+            if owner == current:
+                return  # The user identity matches.
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterOwnerIdentityMismatchError(
                 f'{cluster_name!r} ({cloud}) is owned by account '

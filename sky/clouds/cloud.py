@@ -296,7 +296,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[str]:
+    def get_current_user_identity(cls) -> Optional[List[str]]:
         """(Advanced) Returns currently active user identity of this cloud.
 
         The user "identity" is associated with each SkyPilot cluster they
@@ -318,6 +318,15 @@ class Cloud:
         ensure that different identities should imply different sets of
         resources are used when the user invoked each cloud's default
         CLI/API.
+
+        The returned identity is a list of strings. The list is in the
+        order of strictness, i.e., the first element is the most strict
+        identity, and the last element is the least strict identity.
+        This is useful for the IAM roles under the same root account
+        share the same set of permission. In that case, we assume
+        although the user can switch between different IAM roles, the
+        resources they can access are the same. Therefore, we can ignore
+        the difference between the IAM roles and only use the root account.
 
         Example identities (see cloud implementations):
             - AWS: unique aws:user_id

@@ -445,7 +445,7 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
-        """Returns the identity of the user on this cloud.
+        """Returns a list of identities of the user on this cloud.
 
         Returns:
             A list of strings that uniquely identifies the user on this cloud.
@@ -469,6 +469,11 @@ class AWS(clouds.Cloud):
             # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # pylint: disable=line-too-long
             # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable # pylint: disable=line-too-long
             user_info = sts.get_caller_identity()
+            # Allow fallback to AccountId if UserId does not match, since
+            # UserId mismatches and AccountId matches are common when
+            # the user is switching between IAM users under the same
+            # root account. (Normally, those IAM roles should have
+            # similar visibility to the same resources.)
             user_ids = [user_info['UserId'], user_info['AccountId']]
         except aws.botocore_exceptions().NoCredentialsError:
             with ux_utils.print_exception_no_traceback():
