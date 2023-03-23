@@ -648,10 +648,11 @@ class Resources:
                     'Cloud must be specified when image_id is provided.')
 
         if not self._cloud.is_same_cloud(
+                clouds.IBM()) or self._cloud.is_same_cloud(
                 clouds.AWS()) and not self._cloud.is_same_cloud(clouds.GCP()):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'image_id is only supported for AWS and GCP, please '
+                    'image_id is only supported for AWS, GCP and IBM, please '
                     'explicitly specify the cloud.')
 
         if self._region is not None:

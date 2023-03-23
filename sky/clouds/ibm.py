@@ -11,6 +11,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky.adaptors.ibm import CREDENTIAL_FILE
 
 from sky.clouds.cloud import Zone
+from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
@@ -257,8 +258,8 @@ class IBM(clouds.Cloud):
         worker_instance_type = get_cred_file_field('worker_instance_type',
                                                    r.instance_type)
         worker_instance_resources = _get_profile_resources(worker_instance_type)
-
-        image_id = r.image_id if r.image_id else self.get_default_image(
+        # r.image_id: {clouds.Region:image_id} - property of Resources class  
+        image_id = r.image_id[region.name] if r.image_id else self.get_default_image(
             region_name)
 
         return {
@@ -357,12 +358,11 @@ class IBM(clouds.Cloud):
             region for region in cls.regions() if region.name == region_name)
 
     @classmethod
-    def get_default_image(cls, region):
+    def get_default_image(cls, region) -> str:
         """
-        Returns default image.
-        if user ran the ibm script to creating a gpu image,
-        its id is loaded from local cache,
-        otherwise provides a clean image of ubuntu 22-04.
+        Returns default image id, currently stock ubuntu 22-04.
+        if user specified 'image_id' in ~/.ibm/credentials.yaml
+            matching this 'region', returns it instead.
         """
 
         def _get_image_objects():
@@ -393,6 +393,32 @@ class IBM(clouds.Cloud):
          img['name'].startswith('ibm-ubuntu-22-04') \
             and img['operating_system']['architecture'].startswith(
                 'amd')))['id']
+    
+    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+        assert region is not None, (image_id, region)
+        client = ibm.client(region=region)
+        try:
+            image_data = client.get_image(image_id).get_result()
+        except ibm.ibm_cloud_sdk_core.ApiException as e:
+            logger.error(e.message)
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Image {image_id!r} not found in '
+                                 f'IBM region "{region}"') from None
+        try:
+            # image_size['file']['size'] is non relevant, since
+            # the minimum size of a volume onto which this image
+            # may be provisioned is stored in minimum_provisioned_size
+            image_size = image_data['minimum_provisioned_size']
+        except KeyError:
+            logger.error('Image missing metadata:"minimum_provisioned_size". '
+                          'Image may be in status: Failed/Pending.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'IBM image {image_id!r} in '
+                                 f'region "{region}", is missing'
+                                 'metadata:"minimum_provisioned_size". '
+                                 'Image may be in status: Failed/Pending'
+                                 ) from None
+        return image_size
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:

@@ -5,9 +5,13 @@ This module loads the service catalog file and can be used to query
 instance types and pricing information for IBM.
 """
 
+from sky import sky_logging
 from sky.clouds import cloud
 from sky.clouds.service_catalog import common
+from sky.adaptors import ibm
 from typing import Dict, List, Optional, Tuple
+
+logger = sky_logging.init_logger(__name__)
 
 _DEFAULT_INSTANCE_FAMILY = 'bx2'
 _DEFAULT_NUM_VCPUS = '8'
@@ -92,3 +96,13 @@ def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
     instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}-'
     df = _df[_df['InstanceType'].str.startswith(instance_type_prefix)]
     return common.get_instance_type_for_cpus_impl(df, cpus)
+
+def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
+    """Returns whether the image tag is valid."""
+    vpc_client = ibm.client(region=region)
+    try:
+        vpc_client.get_image(tag)
+    except ibm.ibm_cloud_sdk_core.ApiException as e:
+        logger.error(e.message)
+        return False
+    return True
