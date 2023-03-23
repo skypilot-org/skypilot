@@ -1,0 +1,18 @@
+num_nodes: 1  # Number of VMs to launch
+
+# Working directory (optional) containing the project codebase.
+# Its contents are synced to ~/sky_workdir/ on the cluster.
+
+
+resources:
+  cloud: scp
+  accelerators: A100:1
+
+workdir: .
+
+setup:
+  echo "Running setup"
+
+run:
+  echo "Hello, Skypiolt"
+  conda env list

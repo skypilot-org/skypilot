@@ -135,6 +135,7 @@ class SCPClient:
     def create_instance(self, instance_config):
         """Launch new instances."""
         url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers'
+        print(instance_config)
         return self._post(url, instance_config)
 
     def _get(self, url, contents_key='contents'):
@@ -394,3 +395,8 @@ class SCPClient:
     def list_firwalls(self):
         url = f'{API_ENDPOINT}/firewall/v2/firewalls'
         return self._get(url)
+
+    def list_service_zone_names(self):
+        url = f'{API_ENDPOINT}/project/v3/projects/{self.project_id}/zones'
+        zone_contents = self._get(url)
+        return [content['serviceZoneName'] for content in zone_contents]

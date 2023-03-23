@@ -7,6 +7,7 @@ import typing
 from typing import Dict, List, Optional, Tuple
 
 from sky.clouds.service_catalog import common
+from sky.skylet.providers.scp.scp_utils import SCPClient
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -16,6 +17,14 @@ _df = common.read_catalog('scp/vms.csv')
 _image_df = common.read_catalog('scp/images.csv')
 # Number of vCPUS for gpu_1x_a100_sxm4
 _DEFAULT_NUM_VCPUS = 30
+
+
+def crop_available_region(df):
+    scp_client = SCPClient()
+    service_zones = scp_client.list_service_zone_names()
+    return df[df['Region'].isin(service_zones)]
+
+_df = crop_available_region(_df)
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -123,7 +132,7 @@ def list_accelerators(
         case_sensitive: bool = True
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in SCP offering GPUs."""
-    return common.list_accelerators_impl('SCP', _df, gpus_only, name_filter,
+    return common.list_accelerators_impl('scp', _df, gpus_only, name_filter,
                                          region_filter, case_sensitive)
 
 
