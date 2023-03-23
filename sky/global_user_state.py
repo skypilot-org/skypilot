@@ -508,7 +508,14 @@ def _load_owner(record_owner: Optional[str]) -> Optional[List[str]]:
     if record_owner is None:
         return None
     try:
-        return json.loads(record_owner)
+        result = json.loads(record_owner)
+        if result is not None and not isinstance(result, list):
+            # Backwards compatibility for old records, which were stored as
+            # a string instead of a list. It is possible that json.loads
+            # will parse the string with all numbers as an int, so we need
+            # to convert it back to a list of strings.
+            return [str(result)]
+        return result
     except json.JSONDecodeError:
         # Backwards compatibility for old records, which were stored as
         # a string instead of a list.
