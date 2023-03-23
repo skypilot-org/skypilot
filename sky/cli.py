@@ -1465,7 +1465,8 @@ def _get_spot_jobs(
         refresh: bool,
         skip_finished: bool,
         show_all: bool,
-        limit_num_jobs_to_show: bool = False) -> Tuple[Optional[int], str]:
+        limit_num_jobs_to_show: bool = False,
+        is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
     """Get the in-progress spot jobs.
 
     Args:
@@ -1476,6 +1477,8 @@ def _get_spot_jobs(
         limit_num_jobs_to_show: If True, limit the number of jobs to show to
             _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS, which is mainly used by
             `sky status`.
+        is_called_by_user: If this function is called by user directly, or an
+            internal call.
 
     Returns:
         A tuple of (num_in_progress_jobs, msg). If num_in_progress_jobs is None,
@@ -1485,6 +1488,8 @@ def _get_spot_jobs(
     """
     num_in_progress_jobs = None
     try:
+        if not is_called_by_user:
+            usage_lib.messages.usage.set_internal()
         with sky_logging.silent():
             # Make the call silent
             spot_jobs = core.spot_queue(refresh=refresh,
@@ -1606,7 +1611,8 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                 kwds=dict(refresh=False,
                           skip_finished=True,
                           show_all=False,
-                          limit_num_jobs_to_show=not all))
+                          limit_num_jobs_to_show=not all,
+                          is_called_by_user=False))
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                    f'{colorama.Style.RESET_ALL}')
         query_clusters: Optional[List[str]] = None
@@ -3506,7 +3512,8 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
     with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
         _, msg = _get_spot_jobs(refresh=refresh,
                                 skip_finished=skip_finished,
-                                show_all=all)
+                                show_all=all,
+                                is_called_by_user=True)
     if not skip_finished:
         in_progress_only_hint = ''
     else:
