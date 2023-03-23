@@ -459,10 +459,10 @@ class AWS(clouds.Cloud):
         """
         try:
             sts = aws.client('sts')
-            # The caller identity contains 3 fields: UserId, AccountId, Arn.
+            # The caller identity contains 3 fields: UserId, Account, Arn.
             # 'UserId' is unique across all AWS entity, which looks like
             # "AROADBQP57FF2AEXAMPLE:role-session-name"
-            # 'AccountId' can be shared by multiple users under the same
+            # 'Account' can be shared by multiple users under the same
             # organization
             # 'Arn' is the full path to the user, which can be reused when
             # the user is deleted and recreated.
@@ -478,7 +478,7 @@ class AWS(clouds.Cloud):
             # userid changed for a cluster).
             # 2. In the case where the multiple users belong to an organization,
             # those users will have different account id, so fallback works.
-            user_ids = [user_info['UserId'], user_info['AccountId']]
+            user_ids = [user_info['UserId'], user_info['Account']]
         except aws.botocore_exceptions().NoCredentialsError:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
