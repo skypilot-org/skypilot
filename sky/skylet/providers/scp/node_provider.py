@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 import copy
 
 from ray.autoscaler.node_provider import NodeProvider
+from ray.autoscaler._private.cli_logger import cli_logger
 from ray.autoscaler.tags import (
     TAG_RAY_CLUSTER_NAME,
     TAG_RAY_USER_NODE_TYPE,
@@ -59,6 +60,7 @@ class SCPNodeProvider(NodeProvider):
         self.scp_client = scp_utils.SCPClient()
 
         self.cached_nodes = {}
+        self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
         self.metadata = scp_utils.Metadata(TAG_PATH_PREFIX, cluster_name)
         vms = self._list_instances_in_cluster()
 
@@ -154,7 +156,7 @@ class SCPNodeProvider(NodeProvider):
             ["node-1", "node-2"]
         """
         nodes = self._get_filtered_nodes(tag_filters=tag_filters)
-        return [k for k, _ in nodes.items()]
+        return [k for k, v in nodes.items() if not v["status"].startswith("STOPPED")]
 
     def is_running(self, node_id: str) -> bool:
         """Return whether the specified node is running."""
@@ -276,40 +278,70 @@ class SCPNodeProvider(NodeProvider):
         config_tags.update(tags)
         config_tags[TAG_RAY_CLUSTER_NAME] = self.cluster_name
 
+        if self.cache_stopped_nodes:
+            VALIDITY_TAGS = [
+                TAG_RAY_CLUSTER_NAME,
+                TAG_RAY_NODE_KIND,
+                TAG_RAY_LAUNCH_CONFIG,
+                TAG_RAY_USER_NODE_TYPE,
+            ]
+            filters = {tag: config_tags[tag] for tag in VALIDITY_TAGS if tag in config_tags}
+            reuse_nodes = self._stopped_nodes(filters)[:count]
+            logger.info(
+                f"Reusing nodes {list(reuse_nodes)}. "
+                "To disable reuse, set `cache_stopped_nodes: False` "
+                "under `provider` in the cluster configuration.",
+            )
 
-        zone_config = ZoneConfig(self.scp_client, node_config['region'])
-        vpc_subnets = zone_config.get_vcp_subnets()
-        if (len(vpc_subnets) ==0) : raise SCPError("This region/zone does not have available VPCS.")
+            for vm_id in reuse_nodes:
+                self._start_vm(vm_id=vm_id)
+                self.set_node_tags(vm_id, config_tags)
 
-        instance_config = zone_config.bootstrap_instance_config(node_config)
-        instance_config['virtualServerName'] = self.cluster_name
+                while True:
+                    time.sleep(5)
+                    vm_info = self.scp_client.get_vm_info(vm_id)
+                    if vm_info["virtualServerState"] == "RUNNING": break
 
-        SUCCESS = False
-        for vpc, subnets in vpc_subnets.items():
-            sg_id = self._config_security_group(zone_config.zone_id,
-                                        zone_config.get_product_group("NETWORKING:Security Group"),
-                                        vpc, self.cluster_name+"_sg") #sg_name
-            instance_config['securityGroupIds'] =[sg_id]
-            for subnet in subnets:
-                instance_config['nic']['subnetId'] = subnet
-                vm_id, vm_internal_ip, firewall_id, firewall_rule_id = self._create_instance_sequence(vpc, instance_config)
-                if vm_id:
-                    SUCCESS = True
+            count -= len(reuse_nodes)
+
+        if count:
+            zone_config = ZoneConfig(self.scp_client, node_config['region'])
+            vpc_subnets = zone_config.get_vcp_subnets()
+            if (len(vpc_subnets) == 0): raise SCPError("This region/zone does not have available VPCS.")
+
+            instance_config = zone_config.bootstrap_instance_config(node_config)
+            instance_config['virtualServerName'] = self.cluster_name
+
+            SUCCESS = False
+            for vpc, subnets in vpc_subnets.items():
+                sg_id = self._config_security_group(zone_config.zone_id,
+                                                    zone_config.get_product_group("NETWORKING:Security Group"),
+                                                    vpc, self.cluster_name + "_sg")  # sg_name
+                instance_config['securityGroupIds'] = [sg_id]
+                for subnet in subnets:
+                    instance_config['nic']['subnetId'] = subnet
+                    vm_id, vm_internal_ip, firewall_id, firewall_rule_id = self._create_instance_sequence(vpc,
+                                                                                                          instance_config)
+                    if vm_id:
+                        SUCCESS = True
+                        break
+                if SUCCESS:
                     break
-            if SUCCESS: break
-            else: self._del_security_group(sg_id)
+                else:
+                    self._del_security_group(sg_id)
 
-        if not SUCCESS:
-            raise SCPError("Cannot create VM")
+            if not SUCCESS:
+                raise SCPError("Cannot create VM")
 
-        vm_external_ip = self.scp_client.get_external_ip(virtual_server_id=vm_id, ip=vm_internal_ip)
+            vm_external_ip = self.scp_client.get_external_ip(virtual_server_id=vm_id, ip=vm_internal_ip)
 
-        config_tags['virtualServerId'] = vm_id
-        config_tags['vmInternalIp'] =vm_internal_ip
-        config_tags['firewallId'] = firewall_id
-        config_tags['firewallRuleId'] = firewall_rule_id
-        config_tags['securityGroupId'] = sg_id
-        config_tags['vmExternalIp'] = vm_external_ip
+            config_tags['virtualServerId'] = vm_id
+            config_tags['vmInternalIp'] = vm_internal_ip
+            config_tags['firewallId'] = firewall_id
+            config_tags['firewallRuleId'] = firewall_rule_id
+            config_tags['securityGroupId'] = sg_id
+            config_tags['vmExternalIp'] = vm_external_ip
+
         self.metadata[vm_id] = {'tags': config_tags}
 
         # try:
@@ -318,10 +350,10 @@ class SCPNodeProvider(NodeProvider):
         #     self.scp_client.set_default_config(external_ip=vm_external_ip)
         # except: raise SCPError("SSH Init Error")
 
-
-
-
-
+    def _stopped_nodes(self, tag_filters):
+        """Return a list of stopped node ids filtered by the specified tags dict."""
+        nodes = self._get_filtered_nodes(tag_filters=tag_filters)
+        return [k for k, v in nodes.items() if v["status"].startswith("STOPPED")]
 
     @synchronized
     def set_node_tags(self, node_id: str, tags: Dict[str, str]) -> None:
@@ -332,13 +364,27 @@ class SCPNodeProvider(NodeProvider):
 
     def terminate_node(self, node_id: str) -> None:
         """Terminates the specified node."""
-        try:
-            tags = self.metadata[node_id]['tags']
-            self._del_firwall_inbound(tags['firewallId'], tags['firewallRuleId'])
-            self._del_vm(tags['virtualServerId'])
-            self._del_security_group(tags['securityGroupId'])
-        except: raise SCPError("Errors during terminating a node")
-        finally: self.metadata[node_id] = None
+        if self.cache_stopped_nodes:
+            try:
+                cli_logger.print(
+                    f"Stopping instance {node_id}"
+                    "(to fully terminate instead, "
+                    "set `cache_stopped_nodes: False` "
+                    "under `provider` in the cluster configuration)"
+                )
+                self._stop_vm(node_id)
+            except:
+                raise SCPError("Errors during stopping a node")
+        else:
+            try:
+                tags = self.metadata[node_id]['tags']
+                self._del_firwall_inbound(tags['firewallId'], tags['firewallRuleId'])
+                self._del_vm(tags['virtualServerId'])
+                self._del_security_group(tags['securityGroupId'])
+            except:
+                raise SCPError("Errors during terminating a node")
+            finally:
+                self.metadata[node_id] = None
 
     def _get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         self._get_filtered_nodes({})  # Side effect: updates cache
@@ -356,3 +402,9 @@ class SCPNodeProvider(NodeProvider):
         provider_config = cluster_config['provider']
         node_config['region'] = provider_config['region']
         return cluster_config
+
+    def _start_vm(self, vm_id):
+        self.scp_client.start_instance(vm_id)
+
+    def _stop_vm(self, vm_id):
+        self.scp_client.stop_instance(vm_id)

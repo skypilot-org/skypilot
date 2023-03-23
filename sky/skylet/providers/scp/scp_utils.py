@@ -381,3 +381,11 @@ class SCPClient:
         url = f'{API_ENDPOINT}/project/v3/projects/{self.project_id}/zones'
         zone_contents = self._get(url)
         return [content['serviceZoneName'] for content in zone_contents]
+
+    def start_instance(self, vm_id):
+        url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{vm_id}/start'
+        return self._post(url=url, request_body={})
+
+    def stop_instance(self, vm_id):
+        url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{vm_id}/stop'
+        return self._post(url=url, request_body={})
