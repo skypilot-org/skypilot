@@ -48,7 +48,7 @@ from ray.autoscaler.tags import (
     TAG_RAY_FILE_MOUNTS_CONTENTS,
 )
 from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
-from sky.skylet.providers.ibm.utils import get_logger
+from sky.skylet.providers.ibm.utils import get_logger, RAY_RECYCLABLE
 
 logger = get_logger("node_provider_")
 
@@ -58,7 +58,6 @@ PENDING_TIMEOUT = 3600  # period before a node that's yet to run is deleted.
 VOLUME_TIER_NAME_DEFAULT = "general-purpose"
 # identifies resources created by this package.
 # these resources are deleted alongside the node.
-RAY_RECYCLABLE = "ray-recyclable"
 VPC_TAGS = ".sky-vpc-tags"
 
 

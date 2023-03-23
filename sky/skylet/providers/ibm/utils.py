@@ -3,7 +3,7 @@
 import logging
 import os
 import time
-
+RAY_RECYCLABLE = "ray-recyclable"
 
 def get_logger(caller_name):
     """
