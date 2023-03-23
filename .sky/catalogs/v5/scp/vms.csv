@@ -1,0 +1,8 @@
+InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,Price,Region,GpuInfo,SpotPrice
+s1v1m2,,,1,2,0.01,DUMMY,,0.1
+s1v1m2,,,1,2,0.05,KOREA-WEST-1-SCP-B001,,0.1
+s1v1m2,,,1,2,0.05,KOREA-WEST-2-SCP-B001,,0.1
+s1v1m2,,,1,2,0.1,KOREA-EAST-1-SCP-B001,,0.1
+s1v1m2,,,1,2,0.1,KOREA-EAST-1-CCN-FIN-B001,,0.1
+g1v8v1,V100,1.0,8.0,64.0,0.1,KOREA-WEST-1-SCP-B001,"{'Gpus': [{'Name': 'V100', 'Manufacturer': 'NVIDIA', 'Count': 1.0, 'MemoryInfo': {'SizeInMiB': 32510}}], 'TotalGpuMemoryInMiB': 32510}",
+g1v16a1,A100,1.0,16.0,240.0,0.1,KOREA-WEST-1-SCP-B001,"{'Gpus': [{'Name': 'A100', 'Manufacturer': 'NVIDIA', 'Count': 1.0, 'MemoryInfo': {'SizeInMiB': 32510}}], 'TotalGpuMemoryInMiB': 32510}",

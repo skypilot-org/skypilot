@@ -7,6 +7,8 @@ from sky import clouds
 from sky.clouds import service_catalog
 from sky.skylet.providers.scp import scp_utils
 from sky import exceptions
+from sky.skylet.providers.scp.scp_utils import SCPClient
+
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
@@ -49,13 +51,11 @@ class SCP(clouds.Cloud):
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
+
         if not cls._regions:
-            cls._regions = [
-                # Popular US regions
-                clouds.Region('KOREA-WEST-2-SCP-B001'),
-                clouds.Region('KOREA-EAST-1-SCP-B001'),
-                clouds.Region('KOREA-EAST-1-CCN-FIN-B001'),
-            ]
+            scp_client = SCPClient()
+            service_zones = scp_client.list_service_zone_names()
+            cls._regions = [clouds.Region(zone_name) for zone_name in service_zones]
         return cls._regions
 
     @classmethod
@@ -63,6 +63,7 @@ class SCP(clouds.Cloud):
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
+
         del accelerators, zone  # unused
         if use_spot:
             return []
@@ -164,7 +165,6 @@ class SCP(clouds.Cloud):
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
 
 
-
         if acc_dict is not None:
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
@@ -175,6 +175,7 @@ class SCP(clouds.Cloud):
             'custom_resources': custom_resources,
             'region': region.name,
             'image_id': image_id,
+            'use_gpu': True if acc_dict is not None else False
         }
 
     @classmethod
@@ -184,6 +185,8 @@ class SCP(clouds.Cloud):
             region_name: str,
             instance_type: str,
     ) -> str:
+
+
         if image_id is None:
             return cls._get_default_ami(region_name, instance_type)
         if None in image_id:
@@ -209,13 +212,11 @@ class SCP(clouds.Cloud):
     def _get_default_ami(cls, region_name: str, instance_type: str) -> str:
         acc = cls.get_accelerators_from_instance_type(instance_type)
         image_id = service_catalog.get_image_id_from_tag(
-            'skypilot:gpu-ubuntu-2004', region_name, clouds='scp')
+            'skypilot:ubuntu-2004', region_name, clouds='scp')
         if acc is not None:
             assert len(acc) == 1, acc
-            acc_name = list(acc.keys())[0]
-            if acc_name == 'K80':
-                image_id = service_catalog.get_image_id_from_tag(
-                    'skypilot:k80-ubuntu-2004', region_name, clouds='scp')
+            image_id = service_catalog.get_image_id_from_tag(
+                'skypilot:gpu-ubuntu-1804', region_name, clouds='scp')
         if image_id is not None:
             return image_id
         # Raise ResourcesUnavailableError to make sure the failover in

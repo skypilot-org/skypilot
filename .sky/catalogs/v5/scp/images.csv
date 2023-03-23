@@ -1,0 +1,10 @@
+Tag,Region,OS,OSVersion,ImageId,CreationDate
+skypilot:ubuntu-2004,KOREA-WEST-1-SCP-B001,ubuntu,20.04,IMAGE-dW-daWg-sKnGu7v28o2bBh1,20211208
+skypilot:ubuntu-2004,KORE_WEST-1-SWN-FIN-B001,ubuntu,20.04,IMAGE-dW-daWg-sKnGu7v28o2bBh3,20211208
+skypilot:ubuntu-2004,KOREA-WEST-1-SCP-B002,ubuntu,20.04,IMAGE-dW-daWg-sKnGu7v28o2bBh2,20211208
+skypilot:ubuntu-2004,KOREA-EAST-1-CCN-FIN-B001,ubuntu,20.04,IMAGE-dW-daWg-sKnGu7v28o2bBh4,20211208
+skypilot:ubuntu-2004,KOREA-EAST-1-SCP-B001,ubuntu,20.04,IMAGE-dW-daWg-sKnGu7v28o2bBh5,20211208
+skypilot:ubuntu-2004,KOREA-WEST-1-SCP-BO9,ubuntu,20.04,IMAGE-dW-daWg-sKnGu7v28o2bBh6,20211208
+skypilot:ubuntu-2004,KOREA-WEST-2-SCP-B001,ubuntu,20.04,IMAGE-dW-daWg-sKnGu7v28o2bBh,20211208
+skypilot:gpu-ubuntu-1804,KORE_WEST-1-SWN-FIN-B001,ubuntu,18.04,IMAGE-FIN-B001-2e0a6d2872970048192,20211208
+skypilot:gpu-ubuntu-1804,KOREA-WEST-1-SCP-B001,ubuntu,18.04,IMAGE-oN7QXwX0q8cUGfp0qSDKEl1,20211208

@@ -39,11 +39,14 @@ class ZoneConfig:
 
     def bootstrap_instance_config(self, node_config):
 
+
+
         instance_config = {"imageId": node_config["imageId"]}
         instance_config['serviceZoneId'] = self.zone_id
         instance_config['serverTypeId'] = self.product_ids['SCALE:' + node_config['InstanceType']]
         instance_config['contractId'] = self.product_ids['CONTRACT_DISCOUNT:None']
-        instance_config['productGroupId'] = self.get_product_group('COMPUTE:Virtual Server')
+        product_group_name = 'COMPUTE:GPU Server' if node_config['use_gpu'] else 'COMPUTE:Virtual Server'
+        instance_config['productGroupId'] = self.get_product_group(product_group_name)
 
 
         miscellaneous ={
