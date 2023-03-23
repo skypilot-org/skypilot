@@ -469,11 +469,15 @@ class AWS(clouds.Cloud):
             # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # pylint: disable=line-too-long
             # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable # pylint: disable=line-too-long
             user_info = sts.get_caller_identity()
-            # Allow fallback to AccountId if UserId does not match, since
-            # UserId mismatches and AccountId matches are common when
-            # the user is switching between IAM users under the same
-            # root account. (Normally, those IAM roles should have
-            # similar visibility to the same resources.)
+            # Allow fallback to AccountId if UserId does not match, because:
+            # 1. In the case where multiple IAM users belong a single root account,
+            # those users normally share the visibility of the VMs, so we do not
+            # need to identity them with each other. (There can be some cases,
+            # when an IAM user is given a limited permission by the admin, we may
+            # ignore that case for now, or print out a warning if the underlying
+            # userid changed for a cluster).
+            # 2. In the case where the multiple users belong to an organization,
+            # those users will have different account id, so fallback works.
             user_ids = [user_info['UserId'], user_info['AccountId']]
         except aws.botocore_exceptions().NoCredentialsError:
             with ux_utils.print_exception_no_traceback():
