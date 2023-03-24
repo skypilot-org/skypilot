@@ -1768,9 +1768,15 @@ def check_owner_identity(cluster_name: str) -> None:
                         f'The cluster was owned by {owner_identity}, but '
                         f'a new identity {current_user_identity} is activated. We still '
                         'allow the operation as the two identities are likely to have '
-                        'the same access to the cluster, but please be aware that '
-                        'this is not guaranteed.')
+                        'the same access to the cluster. Please be aware that this can '
+                        'cause unexpected cluster leakage if the two identites have '
+                        'different access to the cluster.')
                 if i != 0 or len(owner_identity) != len(current_user_identity):
+                    # We update the owner of a cluster, when:
+                    # 1. The strictest identty (i.e. the first one) does not
+                    # match, but the latter ones match.
+                    # 2. The length of the two identities are different, which
+                    # will only happen when the cluster is launched before #1808.
                     # Update the user identity to avoid showing the warning above
                     # again.
                     global_user_state.set_owner_identity_for_cluster(
