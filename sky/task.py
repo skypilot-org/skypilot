@@ -340,7 +340,7 @@ class Task:
     def update_envs(
             self, envs: Union[None, Tuple[Tuple[str, str]],
                               Dict[str, str]]) -> 'Task':
-        """Sets the environment variables for use inside the setup/run commands.
+        """Updates the environment variables for use inside the setup/run commands.
 
         Args:
           envs: (optional) either a list of ``(env_name, value)`` or a dict
