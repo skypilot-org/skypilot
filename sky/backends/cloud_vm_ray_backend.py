@@ -2339,11 +2339,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             global_user_state.ClusterStatus.UP)
 
-        self.run_on_head(
-            handle,
-            _MAYBE_SKYLET_RESTART_CMD,
-            use_cached_head_ip=False,
-        )
+        with backend_utils.safe_console_status('Updating remote skylet'):
+            self.run_on_head(
+                handle,
+                _MAYBE_SKYLET_RESTART_CMD,
+                use_cached_head_ip=False,
+            )
 
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.

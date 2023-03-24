@@ -192,6 +192,8 @@ class JobScheduler:
         p.start()
 
     def _get_jobs(self) -> List[Tuple[int, str, int, int]]:
+        """Returns the metadata for jobs the pending jobs table
+        with job_id, run command, submit time, creation time"""
         raise NotImplementedError
 
 
@@ -695,6 +697,9 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
         job_id = make_ray_job_id(job['job_id'], job_owner)
         # Job is locked to ensure that pending queue does not start it while
         # it is being cancelled
+        # TODO(mraheja): remove pylint disabling when filelock
+        # version updated
+        # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(_get_lock_path(job['job_id'])):
             try:
                 # TODO(mraheja): remove pylint disabling when filelock
