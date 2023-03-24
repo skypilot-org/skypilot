@@ -449,7 +449,7 @@ class AWS(clouds.Cloud):
 
         These fields come from `aws sts get-caller-identity`. We permit the same
         actual user to:
-        
+
           - switch between different root accounts (after which both elements
             of the list will be different) and have their clusters owned by
             each account be protected; or

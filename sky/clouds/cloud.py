@@ -295,6 +295,7 @@ class Cloud:
         """
         raise NotImplementedError
 
+    # TODO(zhwu): Make the return type immutable.
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
         """(Advanced) Returns currently active user identity of this cloud.
