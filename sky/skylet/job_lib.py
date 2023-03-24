@@ -11,7 +11,7 @@ import shlex
 import subprocess
 import time
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 import filelock
@@ -156,7 +156,7 @@ class JobScheduler:
         set_status(job_id, JobStatus.PENDING)
         self.schedule_step()
 
-    def remove_job_no_lock(self, job_id: str) -> None:
+    def remove_job_no_lock(self, job_id: int) -> None:
         _CURSOR.execute(f'DELETE FROM pending_jobs WHERE job_id={job_id!r}')
         _CONN.commit()
 
@@ -191,14 +191,14 @@ class JobScheduler:
         p = multiprocessing.Process(target=self.schedule_step)
         p.start()
 
-    def _get_jobs(self) -> List[str]:
+    def _get_jobs(self) -> List[Tuple[int, str, int, int]]:
         raise NotImplementedError
 
 
 class FIFOScheduler(JobScheduler):
     """First in first out job scheduler"""
 
-    def _get_jobs(self) -> List[str]:
+    def _get_jobs(self) -> List[Tuple[int, str, int, int]]:
         return list(
             _CURSOR.execute('SELECT * FROM pending_jobs ORDER BY job_id'))
 
@@ -219,7 +219,8 @@ _JOB_STATUS_TO_COLOR = {
 _RAY_TO_JOB_STATUS_MAP = {
     # These are intentionally set this way, because:
     # 1. when the ray status indicates the job is PENDING the generated
-    # python program has left the job queue and is now PENDING
+    # python program has been `ray job submit` from the job queue
+    # and is now PENDING
     # 2. when the ray status indicates the job is RUNNING the job can be in
     # setup or resources may not be allocated yet, i.e. the job should be
     # PENDING.

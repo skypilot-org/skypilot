@@ -66,14 +66,6 @@ The command can then be run as:
   sky.spot_launch(task, ...)
 """.strip()
 
-SKYLET_VERSION = 1  # maybe move it to sky/skylet/constants.py
-SKYLET_VERSION_FILE = '~/.sky/skylet_version'  # maybe move it to sky/skylet/constants.py
-
-# Restart skylet when the version does not match to keep the skylet up-to-date.
-_MAYBE_SKYLET_RESTART_CMD = (
-    f'[[ $(cat {SKYLET_VERSION_FILE}) = "{SKYLET_VERSION}" ]] || (pkill -f "python3 -m sky.skylet.skylet"; echo {SKYLET_VERSION} >  {SKYLET_VERSION_FILE}; nohup python3 -m '
-    'sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);')
-
 
 def _convert_to_dag(entrypoint: Any) -> 'sky.Dag':
     """Convert the entrypoint to a sky.Dag.
@@ -293,11 +285,6 @@ def _execute(
             logger.info('Setup commands skipped.')
         elif Stage.SETUP in stages:
             backend.setup(handle, task, detach_setup=detach_setup)
-            backend.run_on_head(
-                handle,
-                _MAYBE_SKYLET_RESTART_CMD,
-                use_cached_head_ip=False,
-            )
 
         if Stage.PRE_EXEC in stages:
             if idle_minutes_to_autostop is not None:

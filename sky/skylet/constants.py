@@ -10,3 +10,6 @@ UNINITIALIZED_ONPREM_CLUSTER_MESSAGE = (
     'command to initialize it locally: sky launch -c {cluster} \'\'')
 
 JOB_ID_ENV_VAR = 'SKYPILOT_JOB_ID'
+
+SKYLET_VERSION = 1
+SKYLET_VERSION_FILE = '~/.sky/skylet_version'

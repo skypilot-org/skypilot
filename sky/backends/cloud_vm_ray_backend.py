@@ -107,6 +107,13 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
     pathlib.Path(sky.__file__).resolve().parent / 'backends' /
     'monkey_patches' / 'monkey_patch_ray_up.py')
 
+# Restart skylet when the version does not match to keep the skylet up-to-date.
+_MAYBE_SKYLET_RESTART_CMD = (
+    f'[[ $(cat {constants.SKYLET_VERSION_FILE}) = "{constants.SKYLET_VERSION}"'
+    ' ]] || (pkill -f "python3 -m sky.skylet.skylet";'
+    f' echo {constants.SKYLET_VERSION} > {constants.SKYLET_VERSION_FILE};'
+    'nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);')
+
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
@@ -1649,7 +1656,7 @@ class RetryingVmProvisioner(object):
         # For backward compatability and robustness of skylet, it is restarted
         returncode = backend.run_on_head(
             handle,
-            f'ray status',
+            'ray status',
             # At this state, an erroneous cluster may not have cached
             # handle.head_ip (global_user_state.add_or_update_cluster(...,
             # ready=True)).
@@ -2332,6 +2339,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             global_user_state.ClusterStatus.UP)
 
+        self.run_on_head(
+            handle,
+            _MAYBE_SKYLET_RESTART_CMD,
+            use_cached_head_ip=False,
+        )
+
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.
         if prev_cluster_status == global_user_state.ClusterStatus.INIT:
@@ -2606,7 +2619,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       require_outputs=True)
 
         if 'has no attribute' in stdout:
-            # Happens when someone calls `sky exec` but remote has not been updated
+            # Happens when someone calls `sky exec` but remote is outdated
             # necessicating calling `sky launch`
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
