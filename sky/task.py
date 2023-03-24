@@ -347,7 +347,7 @@ class Task:
             ``{env_name: value}``.
 
         Returns:
-          self: The current task, with envs set.
+          self: The current task, with envs updated.
 
         Raises:
           ValueError: if various invalid inputs errors are detected.
