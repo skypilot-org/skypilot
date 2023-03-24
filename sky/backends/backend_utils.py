@@ -1757,7 +1757,7 @@ def check_owner_identity(cluster_name: str) -> None:
                     logger.warning(
                         f'The cluster was owned by {owner_identity}, but '
                         f'a new identity {current_user_identity} is activated. We still '
-                        'allow the operation as the two identities is likely to have '
+                        'allow the operation as the two identities are likely to have '
                         'the same access to the cluster, but please be aware that '
                         'this is not guaranteed.')
                     # Update the user identity to avoid showing the warning above
