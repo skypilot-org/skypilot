@@ -1221,7 +1221,7 @@ def test_autostop(generic_cloud: str):
     )
     run_one_test(test)
 
-
+@pytest.mark.slow
 @pytest.mark.ibm
 def test_ibm_autostop():
     name = _get_cluster_name()
@@ -1311,7 +1311,7 @@ def test_autodown(generic_cloud: str):
     )
     run_one_test(test)
 
-
+@pytest.mark.slow
 @pytest.mark.ibm
 def test_ibm_autodown():
     name = _get_cluster_name()
