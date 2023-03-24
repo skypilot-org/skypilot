@@ -233,25 +233,6 @@ class SCPClient:
         url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers'
         return self._get(url)
 
-
-
-
-
-    def set_ssh_key(self, name: str, pub_key: str) -> None:
-        """Set ssh key."""
-        data = json.dumps({
-            'name': name,
-            'public_key': pub_key
-        })
-        response = requests.post(f'{API_ENDPOINT}/ssh-keys',
-                                 data=data,
-                                 headers=self.headers)
-        raise_scp_error(response)
-        self.ssh_key_name = name
-        with open(self.credentials, 'w') as f:
-            f.write(f'api_key = {self.api_key}\n')
-            f.write(f'ssh_key_name = {self.ssh_key_name}\n')
-
     def list_catalog(self) -> Dict[str, Any]:
         """List offered instances and their availability."""
         response = requests.get(f'{API_ENDPOINT}/instance-types',
