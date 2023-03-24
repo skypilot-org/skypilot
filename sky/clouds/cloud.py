@@ -319,19 +319,19 @@ class Cloud:
         resources are used when the user invoked each cloud's default
         CLI/API.
 
-        The returned identity is a list of strings. The list is in the
-        order of strictness, i.e., the first element is the most strict
-        identity, and the last element is the least strict identity.
-        This is useful for the IAM roles under the same root account
-        share the same set of permission. In that case, we assume
-        although the user can switch between different IAM roles, the
-        resources they can access are the same. Therefore, we can ignore
-        the difference between the IAM roles and only use the root account.
+        The returned identity is a list of strings. The list is in the order of
+        strictness, i.e., the first element is the most strict identity, and
+        the last element is the least strict identity.
+        When performing an identity check between the current active identity
+        and the owner identity associated with a cluster, we compare the two
+        lists in order: if a position does not match, we go to the next.
+        To see an example, see the docstring of the AWS.get_current_user_identity.
+
 
         Example identities (see cloud implementations):
-            - AWS: unique aws:user_id
-            - GCP: email address + project ID
-            - Azure: email address + subscription ID
+            - AWS: [UserId, AccountId]
+            - GCP: [email address + project ID]
+            - Azure: [email address + subscription ID]
 
         Returns:
             None if the cloud does not have a concept of user identity

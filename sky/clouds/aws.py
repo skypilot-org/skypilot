@@ -445,7 +445,24 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
-        """Returns a list of identities of the user on this cloud.
+        """Returns a [UserId, Account] list that uniquely identifies the user.
+
+        These fields come from `aws sts get-caller-identity`. We permit the same
+        actual user to:
+        
+          - switch between different root accounts (after which both elements
+            of the list will be different) and have their clusters owned by
+            each account be protected; or
+
+          - within the same root account, switch between different IAM
+            users, and treat [user_id=1234, account=A] and
+            [user_id=4567, account=A] to be the *same*. Namely, switching
+            between these IAM roles within the same root account will cause
+            the first element of the returned list to differ, and will allow
+            the same actual user to continue to interact with their clusters.
+            Note: this is not 100% safe, since the IAM users can have very
+            specific permissions, that disallow them to access the clusters
+            but it is a reasonable compromise as that could be rare.
 
         Returns:
             A list of strings that uniquely identifies the user on this cloud.
@@ -460,11 +477,11 @@ class AWS(clouds.Cloud):
         try:
             sts = aws.client('sts')
             # The caller identity contains 3 fields: UserId, Account, Arn.
-            # 'UserId' is unique across all AWS entity, which looks like
+            # 1. 'UserId' is unique across all AWS entity, which looks like
             # "AROADBQP57FF2AEXAMPLE:role-session-name"
-            # 'Account' can be shared by multiple users under the same
+            # 2. 'Account' can be shared by multiple users under the same
             # organization
-            # 'Arn' is the full path to the user, which can be reused when
+            # 3. 'Arn' is the full path to the user, which can be reused when
             # the user is deleted and recreated.
             # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # pylint: disable=line-too-long
             # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable # pylint: disable=line-too-long

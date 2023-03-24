@@ -1746,8 +1746,24 @@ def check_owner_identity(cluster_name: str) -> None:
             cluster_name, current_user_identity)
     else:
         assert isinstance(owner_identity, list)
-        for owner, current in zip(owner_identity, current_user_identity):
+        # It is OK if the owner identity is shorter, which will happen when
+        # the cluster is launched before #1808. In that case, we only check
+        # the same length (zip will stop at the shorter one).
+        for i, (owner,
+                current) in enumerate(zip(owner_identity,
+                                          current_user_identity)):
             if owner == current:
+                if i != 0:
+                    logger.warning(
+                        f'The cluster was owned by {owner_identity}, but '
+                        f'a new identity {current_user_identity} is activated. We still '
+                        'allow the operation as the two identities is likely to have '
+                        'the same access to the cluster, but please be aware that '
+                        'this is not guaranteed.')
+                    # Update the user identity to avoid showing the warning above
+                    # again.
+                    global_user_state.set_owner_identity_for_cluster(
+                        cluster_name, current_user_identity)
                 return  # The user identity matches.
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterOwnerIdentityMismatchError(
