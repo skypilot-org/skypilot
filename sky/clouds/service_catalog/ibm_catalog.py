@@ -15,6 +15,7 @@ logger = sky_logging.init_logger(__name__)
 
 _DEFAULT_INSTANCE_FAMILY = 'bx2'
 _DEFAULT_NUM_VCPUS = '8'
+_DEFAULT_MEMORY = 32
 
 _df = common.read_catalog('ibm/vms.csv')
 
@@ -47,6 +48,11 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
     return common.get_vcpus_from_instance_type_impl(_df, instance_type)
 
 
+def get_vcpus_mem_from_instance_type(
+        instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+    return common.get_vcpus_mem_from_instance_type_impl(_df,
+                                                        instance_type)
+
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, int]]:
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
@@ -56,6 +62,7 @@ def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
     cpus: Optional[str] = None,
+    memory: Optional[str] = None,
     use_spot: bool = False,
     region: Optional[str] = None,
     zone: Optional[str] = None,
@@ -68,6 +75,7 @@ def get_instance_type_for_accelerator(
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
                                                          cpus=cpus,
+                                                         memory=memory,
                                                          use_spot=use_spot,
                                                          region=region,
                                                          zone=zone)
@@ -90,12 +98,20 @@ def list_accelerators(
                                          region_filter, case_sensitive)
 
 
-def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
-    if cpus is None:
-        cpus = str(_DEFAULT_NUM_VCPUS)
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory: Optional[str] = None) -> Optional[str]:
+    if cpus is None and memory is None:
+        cpus = f'{_DEFAULT_NUM_VCPUS}+'
+
+    if memory is None:
+        memory_gb_or_ratio = f'{_DEFAULT_MEMORY}+'
+    else:
+        memory_gb_or_ratio = memory
     instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}-'
     df = _df[_df['InstanceType'].str.startswith(instance_type_prefix)]
-    return common.get_instance_type_for_cpus_impl(df, cpus)
+    return common.get_instance_type_for_cpus_mem_impl(df, cpus,
+                                                  memory_gb_or_ratio)
+
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
     """Returns whether the image tag is valid."""

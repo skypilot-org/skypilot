@@ -72,6 +72,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.Azure: 90,
     clouds.GCP: 120,
     clouds.Lambda: 150,
+    clouds.IBM: 160,
     clouds.Local: 90,
 }
 
@@ -3081,7 +3082,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     require_outputs=True)
 
         if (isinstance(cloud, clouds.IBM) and terminate and
-                prev_status == global_user_state.ClusterStatus.STOPPED):
+                prev_cluster_status == global_user_state.ClusterStatus.STOPPED):
             # pylint: disable= W0622 W0703
 
             config_provider = common_utils.read_yaml(

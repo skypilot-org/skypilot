@@ -278,11 +278,12 @@ class IBM(clouds.Cloud):
         }
 
     @classmethod
-    def get_vcpus_from_instance_type(cls,
-                                     instance_type: str) -> Optional[float]:
-        """Returns the number of virtual CPUs that the instance type offers."""
-        return service_catalog.get_vcpus_from_instance_type(instance_type,
-                                                            clouds='ibm')
+    def get_vcpus_mem_from_instance_type(
+    cls,
+    instance_type: str,
+) -> Tuple[Optional[float], Optional[float]]:
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='ibm')
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -295,8 +296,11 @@ class IBM(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None) -> Optional[str]:
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None
+                                  ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
                                                          clouds='ibm')
 
     def get_feasible_launchable_resources(self,
@@ -325,6 +329,7 @@ class IBM(clouds.Cloud):
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
                     cpus=None,
+                    memory=None
                 )
                 resource_list.append(r)
             return resource_list
@@ -333,7 +338,8 @@ class IBM(clouds.Cloud):
         accelerators = resources.accelerators
         if accelerators is None:
             # No requirements to filter, so just return a default VM type.
-            return (_make([IBM.get_default_instance_type()]),
+            return (_make([IBM.get_default_instance_type(
+                cpus=resources.cpus, memory=resources.memory)]),
                     fuzzy_candidate_list)
 
         assert len(accelerators) == 1, resources
@@ -343,6 +349,7 @@ class IBM(clouds.Cloud):
             acc,
             acc_count,
             cpus=resources.cpus,
+            memory=resources.memory,
             region=resources.region,
             zone=resources.zone,
             clouds='ibm')
