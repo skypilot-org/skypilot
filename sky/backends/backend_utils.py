@@ -1770,6 +1770,7 @@ def check_owner_identity(cluster_name: str) -> None:
                         'allow the operation as the two identities are likely to have '
                         'the same access to the cluster, but please be aware that '
                         'this is not guaranteed.')
+                if i != 0 or len(owner_identity) != len(current_user_identity):
                     # Update the user identity to avoid showing the warning above
                     # again.
                     global_user_state.set_owner_identity_for_cluster(
