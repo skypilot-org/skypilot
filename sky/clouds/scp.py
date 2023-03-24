@@ -33,7 +33,6 @@ class SCP(clouds.Cloud):
     # STOP/AUTOSTOP: The SCP cloud provider does not support stopping VMs.
     # MULTI_NODE: Multi-node is not supported by the implementation yet.
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.STOP: 'SCP cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'SCP cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the SCP Cloud implementation yet.',
     }
