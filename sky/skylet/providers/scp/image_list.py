@@ -112,10 +112,11 @@ class SCPClientSmall:
         return response.json().get(contents_key, [])
 
 
-    def list_image(self, serviceZoneId):
+    def list_image(self, serviceZoneId, size="999"):
         url = f'{API_ENDPOINT}/image/v2/standard-images'
         parameter = []
         parameter.append("serviceZoneId=" + serviceZoneId)
+        parameter.append("size="+size)
         if len(parameter) > 0: url = url + "?" + "&".join(parameter)
         return self._get(url)
 
@@ -142,7 +143,7 @@ if __name__ == '__main__':
         images = api.list_image(zone_id)
         for image in images:
             del image['icon']
-        # images = [img for img in images if img["osType"] == "UBUNTU"]
+        images = [img for img in images if img["osType"] == "UBUNTU"]
 
         for img in images:
             # print(f'gpu-ubuntu-2004,{zone["serviceZoneName"]},ubuntu,20.04,{img["imageId"]},20211208', img['osType'], img['imageName'])

@@ -344,11 +344,11 @@ class SCPNodeProvider(NodeProvider):
 
         self.metadata[vm_id] = {'tags': config_tags}
 
-        # try:
-        #
-        #     self.scp_client.set_ssh_key(external_ip=vm_external_ip)
-        #     self.scp_client.set_default_config(external_ip=vm_external_ip)
-        # except: raise SCPError("SSH Init Error")
+        try:
+
+            self.scp_client.set_ssh_key(external_ip=vm_external_ip)
+            self.scp_client.set_default_config(external_ip=vm_external_ip)
+        except: raise SCPError("SSH Init Error")
 
     def _stopped_nodes(self, tag_filters):
         """Return a list of stopped node ids filtered by the specified tags dict."""

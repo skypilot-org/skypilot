@@ -6,7 +6,7 @@ num_nodes: 1  # Number of VMs to launch
 
 resources:
   cloud: scp
-  accelerators: A100:1
+  accelerators: V100:1
 
 workdir: .
 
