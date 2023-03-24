@@ -44,14 +44,10 @@ def get_hourly_cost(instance_type: str,
                                        zone)
 
 
-def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
-    return common.get_vcpus_from_instance_type_impl(_df, instance_type)
-
-
 def get_vcpus_mem_from_instance_type(
         instance_type: str) -> Tuple[Optional[float], Optional[float]]:
-    return common.get_vcpus_mem_from_instance_type_impl(_df,
-                                                        instance_type)
+    return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
+
 
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, int]]:
@@ -110,7 +106,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
     instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}-'
     df = _df[_df['InstanceType'].str.startswith(instance_type_prefix)]
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
-                                                  memory_gb_or_ratio)
+                                                      memory_gb_or_ratio)
 
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
@@ -118,7 +114,7 @@ def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
     vpc_client = ibm.client(region=region)
     try:
         vpc_client.get_image(tag)
-    except ibm.ibm_cloud_sdk_core.ApiException as e:
+    except ibm.ibm_cloud_sdk_core.ApiException as e:  # type: ignore[union-attr]
         logger.error(e.message)
         return False
     return True

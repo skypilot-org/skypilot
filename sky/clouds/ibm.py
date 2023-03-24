@@ -258,9 +258,9 @@ class IBM(clouds.Cloud):
         worker_instance_type = get_cred_file_field('worker_instance_type',
                                                    r.instance_type)
         worker_instance_resources = _get_profile_resources(worker_instance_type)
-        # r.image_id: {clouds.Region:image_id} - property of Resources class  
-        image_id = r.image_id[region.name] if r.image_id else self.get_default_image(
-            region_name)
+        # r.image_id: {clouds.Region:image_id} - property of Resources class
+        image_id = r.image_id[
+            region.name] if r.image_id else self.get_default_image(region_name)
 
         return {
             'instance_type': r.instance_type,
@@ -279,9 +279,9 @@ class IBM(clouds.Cloud):
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
-    cls,
-    instance_type: str,
-) -> Tuple[Optional[float], Optional[float]]:
+        cls,
+        instance_type: str,
+    ) -> Tuple[Optional[float], Optional[float]]:
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
                                                                 clouds='ibm')
 
@@ -295,10 +295,10 @@ class IBM(clouds.Cloud):
             instance_type, clouds='ibm')
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None
-                                  ) -> Optional[str]:
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
                                                          clouds='ibm')
@@ -329,8 +329,7 @@ class IBM(clouds.Cloud):
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
                     cpus=None,
-                    memory=None
-                )
+                    memory=None)
                 resource_list.append(r)
             return resource_list
 
@@ -338,9 +337,10 @@ class IBM(clouds.Cloud):
         accelerators = resources.accelerators
         if accelerators is None:
             # No requirements to filter, so just return a default VM type.
-            return (_make([IBM.get_default_instance_type(
-                cpus=resources.cpus, memory=resources.memory)]),
-                    fuzzy_candidate_list)
+            return (_make([
+                IBM.get_default_instance_type(cpus=resources.cpus,
+                                              memory=resources.memory)
+            ]), fuzzy_candidate_list)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -400,31 +400,33 @@ class IBM(clouds.Cloud):
          img['name'].startswith('ibm-ubuntu-22-04') \
             and img['operating_system']['architecture'].startswith(
                 'amd')))['id']
-    
+
     def get_image_size(self, image_id: str, region: Optional[str]) -> float:
         assert region is not None, (image_id, region)
         client = ibm.client(region=region)
         try:
             image_data = client.get_image(image_id).get_result()
-        except ibm.ibm_cloud_sdk_core.ApiException as e:
+        # pylint: disable=line-too-long
+        except ibm.ibm_cloud_sdk_core.ApiException as e:  # type: ignore[union-attr]
             logger.error(e.message)
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Image {image_id!r} not found in '
                                  f'IBM region "{region}"') from None
         try:
-            # image_size['file']['size'] is non relevant, since
+            # image_size['file']['size'] is not relevant, since
             # the minimum size of a volume onto which this image
             # may be provisioned is stored in minimum_provisioned_size
+            # pylint: disable=unsubscriptable-object
             image_size = image_data['minimum_provisioned_size']
         except KeyError:
             logger.error('Image missing metadata:"minimum_provisioned_size". '
-                          'Image may be in status: Failed/Pending.')
+                         'Image may be in status: Failed/Pending.')
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'IBM image {image_id!r} in '
-                                 f'region "{region}", is missing'
-                                 'metadata:"minimum_provisioned_size". '
-                                 'Image may be in status: Failed/Pending'
-                                 ) from None
+                raise ValueError(
+                    f'IBM image {image_id!r} in '
+                    f'region "{region}", is missing'
+                    'metadata:"minimum_provisioned_size". '
+                    'Image may be in status: Failed/Pending') from None
         return image_size
 
     @classmethod

@@ -295,7 +295,7 @@ class IBMVPCProvider:
             )
 
         def _del_instance(vm_data):
-            # first delete ips created by node_provider 
+            # first delete ips created by node_provider
             nic_id = vm_data["network_interfaces"][0]["id"]
             res = vpc_client.list_instance_network_interface_floating_ips(
                 vm_data["id"], nic_id
@@ -490,7 +490,7 @@ class ClusterCleaner:
         self.vpc_region = vpc_region
 
     function_code = textwrap.dedent(
-    """
+        """
     import subprocess
     import time
     from concurrent.futures import ThreadPoolExecutor

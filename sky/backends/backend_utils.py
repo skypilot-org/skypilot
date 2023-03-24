@@ -1746,6 +1746,7 @@ def _query_status_ibm(
 
     return [status_map[instance['status']] for instance in instances]
 
+
 def _query_status_lambda(
         cluster: str,
         ray_config: Dict[str, Any],  # pylint: disable=unused-argument
@@ -1773,7 +1774,6 @@ _QUERY_STATUS_FUNCS = {
     'GCP': _query_status_gcp,
     'Azure': _query_status_azure,
     'Lambda': _query_status_lambda,
-    'IBM':_query_status_ibm,
     'IBM': _query_status_ibm,
 }
 
