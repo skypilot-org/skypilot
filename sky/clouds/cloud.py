@@ -325,8 +325,8 @@ class Cloud:
         the last element is the least strict identity.
         When performing an identity check between the current active identity
         and the owner identity associated with a cluster, we compare the two
-        lists in order: if a position does not match, we go to the next.
-        To see an example, see the docstring of the AWS.get_current_user_identity.
+        lists in order: if a position does not match, we go to the next. To
+        see an example, see the docstring of the AWS.get_current_user_identity.
 
 
         Example identities (see cloud implementations):
