@@ -3,13 +3,14 @@ This script takes about 1 minute to finish.
 """
 import argparse
 import datetime
+import itertools
+from multiprocessing import pool as mp_pool
 import os
 import subprocess
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import pandas as pd
-import ray
 
 from sky.adaptors import aws
 
@@ -48,6 +49,7 @@ ALL_REGIONS = [
 ]
 US_REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
 
+# The following columns will be included in the final catalog.
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
     'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone'
@@ -72,7 +74,6 @@ def get_enabled_regions() -> Set[str]:
     return regions_enabled
 
 
-@ray.remote
 def _get_instance_types(region: str) -> pd.DataFrame:
     client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_instance_types')
@@ -84,7 +85,19 @@ def _get_instance_types(region: str) -> pd.DataFrame:
     return pd.DataFrame(items)
 
 
-@ray.remote
+def _get_instance_type_offerings(region: str) -> pd.DataFrame:
+    client = aws.client('ec2', region_name=region)
+    paginator = client.get_paginator('describe_instance_type_offerings')
+    items = []
+    for i, resp in enumerate(
+            paginator.paginate(LocationType='availability-zone')):
+        print(f'{region} getting instance type offerings page {i}')
+        items += resp['InstanceTypeOfferings']
+
+    return pd.DataFrame(items).rename(
+        columns={'Location': 'AvailabilityZoneName'})
+
+
 def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
     client = aws.client('ec2', region_name=region)
     zones = []
@@ -106,7 +119,6 @@ def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
     return pd.DataFrame(zones)
 
 
-@ray.remote
 def _get_pricing_table(region: str) -> pd.DataFrame:
     print(f'{region} downloading pricing table')
     url = PRICING_TABLE_URL_FMT.format(region=region)
@@ -125,7 +137,6 @@ def _get_pricing_table(region: str) -> pd.DataFrame:
               ]]
 
 
-@ray.remote
 def _get_spot_pricing_table(region: str) -> pd.DataFrame:
     """Get spot pricing table for a region.
 
@@ -155,20 +166,26 @@ def _get_spot_pricing_table(region: str) -> pd.DataFrame:
     return df
 
 
-@ray.remote
 def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
     try:
         # Fetch the zone info first to make sure the account has access to the
         # region.
-        zone_df = ray.get(_get_availability_zones.remote(region))
+        zone_df = _get_availability_zones(region)
         if zone_df is None:
             raise RuntimeError(f'No access to region {region}')
 
-        df, pricing_df, spot_pricing_df = ray.get([
-            _get_instance_types.remote(region),
-            _get_pricing_table.remote(region),
-            _get_spot_pricing_table.remote(region),
-        ])
+        # Use ThreadPool instead of Pool because this function can be called
+        # within a multiprocessing.Pool, and Pool cannot be nested.
+        with mp_pool.ThreadPool() as pool:
+            futures = [
+                pool.apply_async(_get_instance_types, (region,)),
+                pool.apply_async(_get_instance_type_offerings, (region,)),
+                pool.apply_async(_get_pricing_table, (region,)),
+                pool.apply_async(_get_spot_pricing_table, (region,))
+            ]
+            df, offering_df, pricing_df, spot_pricing_df = [
+                future.get() for future in futures
+            ]
         print(f'{region} Processing dataframes')
 
         def get_acc_info(row) -> Tuple[Optional[str], float]:
@@ -213,9 +230,12 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         # so we need to merge the two dataframes.
         df = df.merge(pricing_df, on=['InstanceType'], how='outer')
         df['Region'] = region
-        # Cartesian product of instance types and availability zones, so that
-        # we can join the spot pricing table per instance type and zone.
-        df = df.merge(pd.DataFrame(zone_df), how='cross')
+        # An instance type may not be available in all zones. We need to
+        # merge the zone info to the instance type info.
+        df = df.merge(offering_df, on=['InstanceType'], how='inner')
+        # Add the mapping from zone name to zone id, as the zone id is
+        # the real identifier for a zone across different users.
+        df = df.merge(zone_df, on=['AvailabilityZoneName'], how='inner')
 
         # Add spot price column, by joining the spot pricing table.
         df = df.merge(spot_pricing_df,
@@ -237,7 +257,8 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
 
 
 def get_all_regions_instance_types_df(regions: Set[str]) -> pd.DataFrame:
-    df_or_regions = ray.get([_get_instance_types_df.remote(r) for r in regions])
+    with mp_pool.Pool() as pool:
+        df_or_regions = pool.map(_get_instance_types_df, regions)
     new_dfs = []
     for df_or_region in df_or_regions:
         if isinstance(df_or_region, str):
@@ -295,7 +316,6 @@ def _fetch_image_id(region: str, ubuntu_version: str, creation_date: str,
     return image_id
 
 
-@ray.remote
 def _get_image_row(
         region: str, gpu: str, ubuntu_version: str, date: str,
         pytorch_version) -> Tuple[str, str, str, str, Optional[str], str]:
@@ -309,20 +329,16 @@ def _get_image_row(
 
 
 def get_all_regions_images_df(regions: Set[str]) -> pd.DataFrame:
-    workers = []
-    for (gpu, ubuntu_version, date,
-         pytorch_version) in _GPU_UBUNTU_DATE_PYTORCH:
-        for region in regions:
-            workers.append(
-                _get_image_row.remote(region, gpu, ubuntu_version, date,
-                                      pytorch_version))
-
-    results = ray.get(workers)
-    results = pd.DataFrame(
+    image_metas = [
+        (r, *i) for r, i in itertools.product(regions, _GPU_UBUNTU_DATE_PYTORCH)
+    ]
+    with mp_pool.Pool() as pool:
+        results = pool.starmap(_get_image_row, image_metas)
+    result_df = pd.DataFrame(
         results,
         columns=['Tag', 'Region', 'OS', 'OSVersion', 'ImageId', 'CreationDate'])
-    results.sort_values(['Tag', 'Region'], inplace=True)
-    return results
+    result_df.sort_values(['Tag', 'Region'], inplace=True)
+    return result_df
 
 
 def fetch_availability_zone_mappings() -> pd.DataFrame:
@@ -334,8 +350,10 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
         use1-az2          us-east-1a
     """
     regions = list(get_enabled_regions())
-    az_mappings = [_get_availability_zones.remote(r) for r in regions]
-    az_mappings = ray.get(az_mappings)
+    # Use ThreadPool instead of Pool because this function can be called within
+    # a Pool, and Pool cannot be nested.
+    with mp_pool.ThreadPool() as pool:
+        az_mappings = pool.map(_get_availability_zones, regions)
     missing_regions = {
         regions[i] for i, m in enumerate(az_mappings) if m is None
     }
@@ -388,7 +406,6 @@ if __name__ == '__main__':
                 f'{name}: Fetched regions {fetched_regions} does not match '
                 f'requested regions {user_regions}.')
 
-    ray.init()
     instance_df = get_all_regions_instance_types_df(user_regions)
     _check_regions_integrity(instance_df, 'instance types')
 

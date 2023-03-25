@@ -17,7 +17,8 @@ import enum
 import getpass
 import tempfile
 import os
-from typing import Any, List, Optional, Union
+import uuid
+from typing import Any, Dict, List, Optional, Union
 
 import colorama
 
@@ -43,8 +44,6 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
-
-OptimizeTarget = optimizer.OptimizeTarget
 
 # Message thrown when APIs sky.{exec,launch,spot_launch}() received a string
 # instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
@@ -113,7 +112,7 @@ def _execute(
     handle: Any = None,
     backend: Optional[backends.Backend] = None,
     retry_until_up: bool = False,
-    optimize_target: OptimizeTarget = OptimizeTarget.COST,
+    optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST,
     stages: Optional[List[Stage]] = None,
     cluster_name: Optional[str] = None,
     detach_setup: bool = False,
@@ -177,15 +176,9 @@ def _execute(
         existing_handle = global_user_state.get_handle_from_cluster_name(
             cluster_name)
         cluster_exists = existing_handle is not None
-    if cluster_exists:
-        assert len(task.resources) == 1
-        task_resources = list(task.resources)[0]
-        if task_resources.cpus is not None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cannot specify CPU when using an existing cluster. '
-                    'CPU is only used for selecting the instance type when '
-                    'creating a new cluster.')
+        # TODO(woosuk): If the cluster exists, print a warning that
+        # `cpus` and `memory` are not used as a job scheduling constraint,
+        # unlike `gpus`.
 
     stages = stages if stages is not None else list(Stage)
 
@@ -219,6 +212,12 @@ def _execute(
             if not down:
                 requested_features.add(
                     clouds.CloudImplementationFeatures.AUTOSTOP)
+                # TODO(ewzeng): allow autostop for spot when stopping is
+                # supported.
+                if task.use_spot:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'Autostop is not supported for spot instances.')
 
     elif idle_minutes_to_autostop is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
@@ -290,6 +289,7 @@ def _execute(
 
         if Stage.PRE_EXEC in stages:
             if idle_minutes_to_autostop is not None:
+                assert isinstance(backend, backends.CloudVmRayBackend)
                 backend.set_autostop(handle,
                                      idle_minutes_to_autostop,
                                      down=down)
@@ -318,7 +318,7 @@ def _execute(
             # Disable the usage collection for this status command.
             env = dict(os.environ,
                        **{env_options.Options.DISABLE_LOGGING.value: '1'})
-            subprocess_utils.run('sky status', env=env)
+            subprocess_utils.run('sky status --no-show-spot-jobs', env=env)
         print()
         print('\x1b[?25h', end='')  # Show cursor.
 
@@ -334,7 +334,7 @@ def launch(
     down: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
-    optimize_target: OptimizeTarget = OptimizeTarget.COST,
+    optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST,
     detach_setup: bool = False,
     detach_run: bool = False,
     no_setup: bool = False,
@@ -400,6 +400,11 @@ def launch(
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the cluster is
             owned by another user.
+        exceptions.InvalidClusterNameError: if the cluster name is invalid.
+        exceptions.ResourcesMismatchError: if the requested resources
+            do not match the existing cluster.
+        exceptions.NotSupportedError: if required features are not supported
+            by the backend/cloud/cluster.
         exceptions.ResourcesUnavailableError: if the requested resources
             cannot be satisfied. The failover_history of the exception
             will be set as:
@@ -409,7 +414,7 @@ def launch(
                 2. Non-empty: iff at least 1 exception from either
                 our pre-checks (e.g., cluster name invalid) or a region/zone
                 throwing resource unavailability.
-        exceptions.NotSupportedError: if the cluster name is reserved.
+        exceptions.CommandError: any ssh command error.
     Other exceptions may be raised depending on the backend.
     """
     entrypoint = task
@@ -539,8 +544,7 @@ def spot_launch(
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
     entrypoint = task
-    if name is None:
-        name = backend_utils.generate_cluster_name()
+    task_uuid = str(uuid.uuid4().hex[:4])
 
     dag = _convert_to_dag(entrypoint)
     assert len(dag.tasks) == 1, ('Only one task is allowed in a spot launch.',
@@ -549,7 +553,7 @@ def spot_launch(
     assert len(task.resources) == 1, task
     resources = list(task.resources)[0]
 
-    change_default_value = dict()
+    change_default_value: Dict[str, Any] = {}
     if not resources.use_spot_specified:
         change_default_value['use_spot'] = True
     if resources.spot_recovery is None:
@@ -566,6 +570,15 @@ def spot_launch(
 
     task = _maybe_translate_local_file_mounts_and_sync_up(task)
 
+    if name is None:
+        if task.name is not None:
+            name = task.name
+        else:
+            name = backend_utils.generate_cluster_name()
+    # Override the task name with the specified name or generated name, so that
+    # the controller process can retrieve the task name from the task config.
+    task.name = name
+
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
@@ -577,9 +590,12 @@ def spot_launch(
             'user_yaml_path': f.name,
             'user_config_path': None,
             'spot_controller': controller_name,
-            'cluster_name': name,
+            # Note: actual spot cluster name will be <task_name>-<spot job ID>
+            'task_name': name,
+            'uuid': task_uuid,
             'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
             'is_dev': env_options.Options.IS_DEVELOPER.get(),
+            'is_debug': env_options.Options.SHOW_DEBUG_INFO.get(),
             'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
             'logging_user_hash': common_utils.get_user_hash(),
             'retry_until_up': retry_until_up,
@@ -590,11 +606,11 @@ def spot_launch(
             # 'skypilot_config' module. Don't simply read the on-disk file as
             # it may have changed since this process started.
             #
-            # Pop any proxy command, because the controller would've been
-            # launched behind the proxy, and in general any nodes we launch may
-            # not have or need the proxy setup. (If the controller needs to
-            # launch spot clusters in another region/VPC, the user should
-            # properly set up VPC peering, which will allow the
+            # Set any proxy command to None, because the controller would've
+            # been launched behind the proxy, and in general any nodes we
+            # launch may not have or need the proxy setup. (If the controller
+            # needs to launch spot clusters in another region/VPC, the user
+            # should properly set up VPC peering, which will allow the
             # cross-region/VPC communication. The proxy command is orthogonal
             # to this scenario.)
             #
@@ -613,11 +629,23 @@ def spot_launch(
             # controller VPC (or name) == the spot job's VPC (or name). It may
             # not be a sufficient check (as it's always possible that peering
             # is not set up), but it may catch some obvious errors.
-            # TODO(zhwu): hacky. We should pop the proxy command of the cloud
-            # where the controller is launched (currently, only aws user uses
-            # proxy_command).
-            config_dict = skypilot_config.pop_nested(
-                ('aws', 'ssh_proxy_command'))
+            # TODO(zhwu): hacky. We should only set the proxy command of the
+            # cloud where the controller is launched (currently, only aws user
+            # uses proxy_command).
+            proxy_command_key = ('aws', 'ssh_proxy_command')
+            ssh_proxy_command = skypilot_config.get_nested(
+                proxy_command_key, None)
+            if isinstance(ssh_proxy_command, str):
+                config_dict = skypilot_config.set_nested(
+                    proxy_command_key, None)
+            elif isinstance(ssh_proxy_command, dict):
+                # Instead of removing the key, we set the value to empty string
+                # so that the controller will only try the regions specified by
+                # the keys.
+                ssh_proxy_command = {k: None for k in ssh_proxy_command}
+                config_dict = skypilot_config.set_nested(
+                    proxy_command_key, ssh_proxy_command)
+
             with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
                 common_utils.dump_yaml(tmpfile.name, config_dict)
                 vars_to_fill.update({
@@ -626,13 +654,15 @@ def spot_launch(
                         skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
                 })
 
-        yaml_path = backend_utils.fill_template(
-            spot.SPOT_CONTROLLER_TEMPLATE,
-            vars_to_fill,
-            output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
+        yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
+                                 f'{name}-{task_uuid}.yaml')
+        backend_utils.fill_template(spot.SPOT_CONTROLLER_TEMPLATE,
+                                    vars_to_fill,
+                                    output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
         controller_task.spot_task = task
         assert len(controller_task.resources) == 1
+
         print(f'{colorama.Fore.YELLOW}'
               f'Launching managed spot job {name} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
@@ -678,7 +708,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(
             f'source paths to SkyPilot Storage...{colorama.Style.RESET_ALL}')
 
     # Step 1: Translate the workdir to SkyPilot storage.
-    new_storage_mounts = dict()
+    new_storage_mounts = {}
     if task.workdir is not None:
         bucket_name = spot.constants.SPOT_WORKDIR_BUCKET_NAME.format(
             username=getpass.getuser(), id=run_id)
@@ -707,7 +737,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     # TODO(zhwu): Optimize this by:
     # 1. Use the same bucket for all the mounts.
     # 2. When the src is the same, use the same bucket.
-    copy_mounts_with_file_in_src = dict()
+    copy_mounts_with_file_in_src = {}
     for i, (dst, src) in enumerate(copy_mounts.items()):
         task.file_mounts.pop(dst)
         if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
@@ -736,7 +766,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     file_bucket_name = spot.constants.SPOT_FM_FILE_ONLY_BUCKET_NAME.format(
         username=getpass.getuser(), id=run_id)
     if copy_mounts_with_file_in_src:
-        src_to_file_id = dict()
+        src_to_file_id = {}
         for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):
             src_to_file_id[src] = i
             os.link(os.path.abspath(os.path.expanduser(src)),
@@ -776,7 +806,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(
 
     # Step 5: Add the file download into the file mounts, such as
     #  /original-dst: s3://spot-fm-file-only-bucket-name/file-0
-    new_file_mounts = dict()
+    new_file_mounts = {}
     for dst, src in copy_mounts_with_file_in_src.items():
         storage = task.storage_mounts[spot.constants.SPOT_FM_REMOTE_TMP_DIR]
         store_type = list(storage.stores.keys())[0]

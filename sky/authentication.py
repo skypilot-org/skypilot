@@ -142,7 +142,6 @@ def _wait_for_compute_global_operation(project_name: str, operation_name: str,
 # avoid duplicated codes.
 # Retry for the GCP as sometimes there will be connection reset by peer error.
 @common_utils.retry
-@gcp.import_package
 def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     private_key_path, public_key_path = get_or_generate_keys()
     config = copy.deepcopy(config)
@@ -156,7 +155,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         project = compute.projects().get(project=project_id).execute()
-    except gcp.googleapiclient.errors.HttpError as e:
+    except gcp.http_error_exception() as e:
         # Can happen for a new project where Compute Engine API is disabled.
         #
         # Example message:
@@ -191,7 +190,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                      'Please check your network connection.')
         raise
 
-    project_oslogin = next(
+    project_oslogin: str = next(  # type: ignore
         (item for item in project['commonInstanceMetadata'].get('items', [])
          if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
 
@@ -245,7 +244,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                 'utf-8'):
             subprocess_utils.handle_returncode(proc.returncode, enable_ssh_cmd,
                                                'Failed to enable ssh port.',
-                                               proc.stderr)
+                                               proc.stderr.decode('utf-8'))
         return config
 
     # OS Login is not enabled for the project. Add the ssh key directly to the
@@ -253,7 +252,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # TODO(zhwu): Use cloud init to add ssh public key, to avoid the permission
     # issue. A blocker is that the cloud init is not installed in the debian
     # image by default.
-    project_keys = next(
+    project_keys: str = next(  # type: ignore
         (item for item in project['commonInstanceMetadata'].get('items', [])
          if item['key'] == 'ssh-keys'), {}).get('value', '')
     ssh_keys = project_keys.split('\n') if project_keys else []
@@ -287,8 +286,8 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         if len(ssh_key_index) == 0:
             metadata.append({'key': 'ssh-keys', 'value': new_ssh_key})
         else:
-            ssh_key_index = ssh_key_index[0]
-            metadata[ssh_key_index]['value'] += '\n' + new_ssh_key
+            first_ssh_key_index = ssh_key_index[0]
+            metadata[first_ssh_key_index]['value'] += '\n' + new_ssh_key
 
         project['commonInstanceMetadata']['items'] = metadata
 

@@ -24,7 +24,7 @@ import colorama
 from sky import clouds
 from sky import sky_logging
 from sky.adaptors import aws, gcp
-from sky.backends import backend_utils
+from sky.utils import log_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -93,7 +93,7 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     logger.debug(json.dumps(operation, indent=4))
     logger.info('Waiting for the transfer to finish')
     start = time.time()
-    with backend_utils.safe_console_status('Transferring'):
+    with log_utils.safe_rich_status('Transferring'):
         for _ in range(MAX_POLLS):
             result = (storagetransfer.transferOperations().get(
                 name=operation['name']).execute())

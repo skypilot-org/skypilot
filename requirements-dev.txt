@@ -1,6 +1,8 @@
 # formatting
 yapf==0.32.0
 pylint==2.8.2
+# formatting the node_providers code from upstream ray-project/ray project
+black==22.10.0
 # https://github.com/edaniszewski/pylint-quotes
 pylint-quotes==0.2.3
 toml==0.10.2
@@ -9,6 +11,7 @@ toml==0.10.2
 mypy==0.991
 types-PyYAML
 types-requests
+types-setuptools
 
 # testing
 pytest

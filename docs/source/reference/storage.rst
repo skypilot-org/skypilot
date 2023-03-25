@@ -162,7 +162,7 @@ and storage mounting:
       # same bucket.
       #
       # Note: The basenames of each path in the source list are copied recursively
-      # to the root of the bucket. Thus, If the source list contains a directory,
+      # to the root of the bucket. Thus, if the source list contains a directory,
       # the entire directory is copied to the root of the bucket. For instance,
       # in this example, the contents of ~/datasets are copied to
       # s3://sky-multisource-storage/datasets/. ~/mydir/myfile.txt will appear
