@@ -842,7 +842,7 @@ def write_cluster_config(
     disk_configure = {
         'disk_type': to_provision.get_cloud_disk_type_str(),
     }
-    # AWS need to specify iops and throughput manually.
+    # AWS need to specify iops manually.
     if isinstance(cloud, clouds.AWS):
         disk_configure['disk_iops'] = to_provision.get_disk_iops()
 

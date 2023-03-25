@@ -52,6 +52,7 @@ available_node_types:
             # billingProfile:
             #     maxPrice: -1
             {%- endif %}
+            osDiskType: {{disk_type}}
         # TODO: attach disk
 {% if num_nodes > 1 %}
     ray.worker.default:
