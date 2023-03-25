@@ -99,12 +99,13 @@ class Resources:
                     k.strip(): v.strip() for k, v in image_id.items()
                 }
 
-        assert disk_type in ['high', 'medium', 'low', None], f'Unsupported disk type: {disk_type}'
+        assert disk_type in ['high', 'medium', 'low',
+                             None], f'Unsupported disk type: {disk_type}'
         # default to basic disk type
         self._disk_type = disk_type if disk_type is not None else 'low'
         if isinstance(self.cloud, clouds.Azure):
             # Only S-series supported premium ssd
-            # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre
+            # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # pylint: disable=line-too-long
             series = self.instance_type.split('_')[1].lower()
             if self._disk_type == 'high' and not 's' in series:
                 self._disk_type = 'medium'
@@ -289,46 +290,30 @@ class Resources:
     @property
     def disk_type(self) -> str:
         return self._disk_type
-    
+
     def get_cloud_disk_type_str(self) -> str:
         if isinstance(self.cloud, clouds.GCP):
-            return (
-                "pd-ssd"
-                if self.disk_type == "high"
-                else "pd-balanced"
-                if self.disk_type == "medium"
-                else "pd-standard"
-            )
+            return ('pd-ssd' if self.disk_type == 'high' else 'pd-balanced'
+                    if self.disk_type == 'medium' else 'pd-standard')
         if isinstance(self.cloud, clouds.AWS):
-            return (
-                "io2"
-                if self.disk_type == "high"
-                else "gp3"
-                if self.disk_type == "medium"
-                else "gp3"
-            )
+            return ('io2' if self.disk_type == 'high' else
+                    'gp3' if self.disk_type == 'medium' else 'gp3')
         if isinstance(self.cloud, clouds.Azure):
             return (
                 # TODO(tian): maybe use UltraSSD_LRS?
-                "Premium_LRS"
-                if self.disk_type == "high"
-                else "StandardSSD_LRS"
-                if self.disk_type == "medium"
-                else "Standard_LRS"
-            )
-        raise NotImplementedError(f'Disk type of cloud {self.cloud} is not implemented yet.')
-    
+                'Premium_LRS' if self.disk_type == 'high' else 'StandardSSD_LRS'
+                if self.disk_type == 'medium' else 'Standard_LRS')
+        raise NotImplementedError(
+            f'Disk type of cloud {self.cloud} is not implemented yet.')
+
     def get_disk_iops(self) -> int:
         if isinstance(self.cloud, clouds.AWS):
-            # TODO(tian): benchmark on each cloud to make sure performance is similar
-            return (
-                27000
-                if self.disk_type == "high"
-                else 9000
-                if self.disk_type == "medium"
-                else 3000
-            )
-        raise NotImplementedError(f'Disk type of cloud {self.cloud} is not implemented yet.')
+            # TODO(tian): benchmark on each cloud to make sure performance
+            # is similar
+            return (27000 if self.disk_type == 'high' else
+                    9000 if self.disk_type == 'medium' else 3000)
+        raise NotImplementedError(
+            f'Disk type of cloud {self.cloud} is not implemented yet.')
 
     def _set_cpus(
         self,
@@ -1011,7 +996,7 @@ class Resources:
         image_id = state.get('_image_id', None)
         if isinstance(image_id, str):
             state['_image_id'] = {state.get('_region', None): image_id}
-        
+
         disk_type = state.get('_disk_type', None)
         if isinstance(disk_type, str):
             state['_disk_type'] = disk_type
