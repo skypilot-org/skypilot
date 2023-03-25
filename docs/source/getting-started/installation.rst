@@ -112,29 +112,30 @@ Cloudflare R2
 ~~~~~~~~~~~~~~~~~~
 
 Cloudflare offers `R2 <https://www.cloudflare.com/products/r2>`_, an S3-compatible object storage without any egress charges.
-SkyPilot can download/upload data to R2 buckets and mount them as local filesystem on clusters launched by SkyPilot.
-
-To set up R2 support, follow these `instructions <https://developers.cloudflare.com/r2/data-access/s3-api/tokens/>`_ to generate your  generate the your R2 Access Key ID and Secret Access Key. Then run:
+SkyPilot can download/upload data to R2 buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up R2 support, run:
 
 .. code-block:: console
+
   $ # Install boto
   $ pip install boto3
   $ # Configure your R2 credentials
   $ aws configure --profile r2
 
-In the prompt, enter your R2 Access Key ID and Secret Access Key. Select 'auto' for the default region and 'json' for the default output format.
+In the prompt, enter your R2 Access Key ID and Secret Access Key (see `instructions to generate R2 credentials <https://developers.cloudflare.com/r2/data-access/s3-api/tokens/>`_). Select :code:`auto` for the default region and :code:`json` for the default output format.
 
 .. code-block:: text
+
   AWS Access Key ID [None]: <access_key_id>
   AWS Secret Access Key [None]: <access_key_secret>
   Default region name [None]: auto
   Default output format [None]: json
 
-Next get your `Account ID <https://developers.cloudflare.com/fundamentals/get-started/basic-tasks/find-account-and-zone-ids/>`_ from your R2 dashboard and store it in :code:`~/.cloudflare/accountid` by running the following commands:
+Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-started/basic-tasks/find-account-and-zone-ids/>`_ from your R2 dashboard and store it in :code:`~/.cloudflare/accountid` with:
 
 .. code-block:: console
-  mkdir -p ~/.cloudflare
-  echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid
+
+  $ mkdir -p ~/.cloudflare
+  $ echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid
 
 .. note::
 
