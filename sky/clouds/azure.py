@@ -348,7 +348,7 @@ class Azure(clouds.Cloud):
 
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
-    def get_current_user_identity(cls) -> Optional[str]:
+    def get_current_user_identity(cls) -> Optional[List[str]]:
         """Returns the cloud user identity."""
         # This returns the user's email address + [subscription_id].
         retry_cnt = 0
@@ -390,7 +390,7 @@ class Azure(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'Failed to get Azure project ID.') from e
-        return f'{account_email} [subscription_id={project_id}]'
+        return [f'{account_email} [subscription_id={project_id}]']
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:

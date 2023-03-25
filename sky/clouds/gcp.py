@@ -31,6 +31,14 @@ GCP_CONFIG_PATH = '~/.config/gcloud/configurations/config_default'
 # autoscaler can overwrite that directory on the remote nodes.
 GCP_CONFIG_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
 
+# A list of permissions required to run SkyPilot on GCP.
+# This is not a complete list but still useful to check first
+# and hint users if not sufficient during sky check.
+GCP_PREMISSION_CHECK_LIST = [
+    'compute.projects.get',
+    'iam.serviceAccounts.actAs',
+]
+
 # Minimum set of files under ~/.config/gcloud that grant GCP access.
 _CREDENTIAL_FILES = [
     'credentials.db',
@@ -479,7 +487,7 @@ class GCP(clouds.Cloud):
             project_id = cls.get_project_id()
 
             # Check if the user is activated.
-            cls.get_current_user_identity()
+            identity = cls.get_current_user_identity()
         except (auth.exceptions.DefaultCredentialsError,
                 subprocess.CalledProcessError,
                 exceptions.CloudUserIdentityError, FileNotFoundError,
@@ -547,6 +555,28 @@ class GCP(clouds.Cloud):
                   'effect. If any SkyPilot commands/calls failed, retry after '
                   'some time.')
 
+        # pylint: disable=import-outside-toplevel,unused-import
+        import googleapiclient.discovery
+        import google.auth
+
+        # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
+        credentials, project = google.auth.default()
+        service = googleapiclient.discovery.build('cloudresourcemanager',
+                                                  'v1',
+                                                  credentials=credentials)
+        permissions = {'permissions': GCP_PREMISSION_CHECK_LIST}
+        request = service.projects().testIamPermissions(resource=project,
+                                                        body=permissions)
+        ret_permissions = request.execute().get('permissions', [])
+        if len(ret_permissions) < len(GCP_PREMISSION_CHECK_LIST):
+            diffs = set(GCP_PREMISSION_CHECK_LIST).difference(
+                set(ret_permissions))
+            identity_str = identity[0] if identity else None
+            return False, (
+                'The following permissions are not enabled for the current '
+                f'GCP identity ({identity_str}):\n    '
+                f'{diffs}\n    '
+                'For more details, visit: https://skypilot.readthedocs.io/en/latest/reference/faq.html#what-are-the-required-iam-permissons-on-gcp-for-skypilot')  # pylint: disable=line-too-long
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
@@ -577,7 +607,7 @@ class GCP(clouds.Cloud):
 
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
-    def get_current_user_identity(cls) -> Optional[str]:
+    def get_current_user_identity(cls) -> Optional[List[str]]:
         """Returns the email address + project id of the active user."""
         try:
             account = _run_output('gcloud auth list --filter=status:ACTIVE '
@@ -598,7 +628,7 @@ class GCP(clouds.Cloud):
                     '--format="value(account)"` and ensure it correctly '
                     'returns the current user.')
         try:
-            return f'{account} [project_id={cls.get_project_id()}]'
+            project_id = cls.get_project_id()
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
@@ -607,6 +637,7 @@ class GCP(clouds.Cloud):
                     '  Reason: '
                     f'{common_utils.format_exception(e, use_bracket=True)}'
                 ) from e
+        return [f'{account} [project_id={project_id}]']
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')

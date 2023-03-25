@@ -468,11 +468,12 @@ def _set_cluster_usage_intervals(cluster_hash: str,
 
 
 def set_owner_identity_for_cluster(cluster_name: str,
-                                   owner_identity: Optional[str]) -> None:
+                                   owner_identity: Optional[List[str]]) -> None:
     if owner_identity is None:
         return
+    owner_identity_str = json.dumps(owner_identity)
     _DB.cursor.execute('UPDATE clusters SET owner=(?) WHERE name=(?)',
-                       (owner_identity, cluster_name))
+                       (owner_identity_str, cluster_name))
 
     count = _DB.cursor.rowcount
     _DB.conn.commit()
@@ -503,6 +504,25 @@ def get_launched_resources_from_cluster_hash(
         return num_nodes, launched_resources
 
 
+def _load_owner(record_owner: Optional[str]) -> Optional[List[str]]:
+    if record_owner is None:
+        return None
+    try:
+        result = json.loads(record_owner)
+        if result is not None and not isinstance(result, list):
+            # Backwards compatibility for old records, which were stored as
+            # a string instead of a list. It is possible that json.loads
+            # will parse the string with all numbers as an int, so we need
+            # to convert it back to a list of strings.
+            return [str(result)]
+        return result
+    except json.JSONDecodeError:
+        # Backwards compatibility for old records, which were stored as
+        # a string instead of a list. This will happen when the previous
+        # UserId is a string instead of an int.
+        return [record_owner]
+
+
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
@@ -522,7 +542,7 @@ def get_cluster_from_name(
             'status': ClusterStatus[status],
             'autostop': autostop,
             'to_down': bool(to_down),
-            'owner': owner,
+            'owner': _load_owner(owner),
             'metadata': json.loads(metadata),
             'cluster_hash': cluster_hash,
         }
@@ -546,7 +566,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'status': ClusterStatus[status],
             'autostop': autostop,
             'to_down': bool(to_down),
-            'owner': owner,
+            'owner': _load_owner(owner),
             'metadata': json.loads(metadata),
             'cluster_hash': cluster_hash,
         }

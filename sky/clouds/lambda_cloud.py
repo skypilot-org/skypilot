@@ -25,15 +25,14 @@ class Lambda(clouds.Cloud):
 
     # Lamdba has a 64 char limit for cluster name.
     # Reference: https://cloud.lambdalabs.com/api/v1/docs#operation/launchInstance # pylint: disable=line-too-long
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 64
+    # However, we need to account for the suffixes '-head' and '-worker'
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 57
     # Currently, none of clouds.CloudImplementationFeatures are implemented
     # for Lambda Cloud.
     # STOP/AUTOSTOP: The Lambda cloud provider does not support stopping VMs.
-    # MULTI_NODE: Multi-node is not supported by the implementation yet.
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the Lambda Cloud implementation yet.',
     }
 
     @classmethod
@@ -230,7 +229,7 @@ class Lambda(clouds.Cloud):
         }
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[str]:
+    def get_current_user_identity(cls) -> Optional[List[str]]:
         # TODO(ewzeng): Implement get_current_user_identity for Lambda
         return None
 
