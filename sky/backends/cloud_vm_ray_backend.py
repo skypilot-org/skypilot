@@ -2422,6 +2422,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 up=True,
                 log_path=log_path,
                 stream_logs=False,
+                line_processor = log_utils.RsyncLineBarProcessor(transient=True,
+                                                                 redirect_stdout=False,
+                                                                 redirect_stderr=False)
             )
 
         num_nodes = handle.launched_nodes

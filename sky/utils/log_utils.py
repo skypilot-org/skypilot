@@ -1,9 +1,11 @@
 """Logging utils."""
 import enum
 import threading
+import re
 from typing import List, Optional
 
 import rich.console as rich_console
+from rich.progress import Progress
 
 import colorama
 import pendulum
@@ -92,6 +94,91 @@ class RayUpLineProcessor(LineProcessor):
             self.status_display.update(
                 '[bold cyan]Launching - Preparing SkyPilot runtime')
             self.state = self.ProvisionStatus.RUNTIME_SETUP
+
+    def __exit__(self, except_type, except_value, traceback):
+        del except_type, except_value, traceback  # unused
+        self.status_display.stop()
+
+class ProgressSample():
+    """Sample of progress for a given time."""
+
+    timestamp: float
+    """Timestamp of sample."""
+    completed: float
+    """Number of steps completed."""
+    
+class RsyncLineBarProcessor(Progress):
+    """A processor for `rsync` log lines."""
+    # original Progress class defined inttps://g
+    # https://github.com/Textualize/rich/blob/master/rich/progress.py
+    class RsyncStatus(enum.Enum):
+        STARTLOG = 0
+        RUNTIME_SETUP = 1
+
+    def __init__(
+        self,        
+        transient: bool = False,
+        redirect_stdout: bool = True,
+        redirect_stderr: bool = True
+    ):
+        self.progress_bar_track_ids = []
+        self.prev_percentage = 0
+        super().__init__(transient=transient, redirect_stdout=redirect_stdout, redirect_stderr=redirect_stderr)
+
+    def __enter__(self):
+        self.state = None
+        self.status_display = safe_rich_status('[bold cyan]Syncing')
+        self.status_display.start()
+
+
+    def update(
+        self,
+        task_id: int,
+        line: str
+    ) -> None:
+        """Update information associated with a task.
+
+        Args:
+            task_id (TaskID): Task id (returned by add_task).
+            total (float, optional): Updates task.total if not None.
+            completed (float, optional): Updates task.completed if not None.
+            advance (float, optional): Add a value to task.completed if not None.
+            description (str, optional): Change task description if not None.
+            visible (bool, optional): Set visible flag if not None.
+            refresh (bool): Force a refresh of progress information. Default is False.
+            **fields (Any): Additional data fields required for rendering.
+        """
+        with self._lock:
+            task = self._tasks[task_id]
+            completed_start = task.completed
+            pattern = r'(\d+)%'
+            result = re.search(pattern, line)
+            if result:
+                percentage = int(result.group(1))
+
+                advance = self.prev_percentage - percentage 
+                self.prev_percentage = percentage
+                task.completed += advance
+                update_completed = task.completed - completed_start
+
+                current_time = self.get_time()
+                old_sample_time = current_time - self.speed_estimate_period
+                _progress = task._progress
+
+                popleft = _progress.popleft
+                while _progress and _progress[0].timestamp < old_sample_time:
+                    popleft()
+                if update_completed > 0:
+                    _progress.append(ProgressSample(current_time, update_completed))
+                if (
+                    task.total is not None
+                    and task.completed >= task.total
+                    and task.finished_time is None
+                ):
+                    task.finished_time = task.elapsed
+            else:
+                return
+
 
     def __exit__(self, except_type, except_value, traceback):
         del except_type, except_value, traceback  # unused
