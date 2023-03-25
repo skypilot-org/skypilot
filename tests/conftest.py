@@ -69,7 +69,7 @@ def pytest_configure(config):
         cloud_keyword = cloud_to_pytest_keyword[cloud]
         config.addinivalue_line(
             'markers', f'{cloud_keyword}: mark test as {cloud} specific')
-            
+
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 
 
