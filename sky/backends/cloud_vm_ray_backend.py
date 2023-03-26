@@ -2345,7 +2345,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             global_user_state.ClusterStatus.UP)
 
-        with backend_utils.safe_console_status('Updating remote skylet'):
+        with log_utils.safe_rich_status('Updating remote skylet'):
             self.run_on_head(
                 handle,
                 _MAYBE_SKYLET_RESTART_CMD,
