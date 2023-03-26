@@ -1143,7 +1143,7 @@ class RetryingVmProvisioner(object):
         dryrun: bool,
         stream_logs: bool,
         cluster_name: str,
-        cloud_user_identity: Optional[str],
+        cloud_user_identity: Optional[List[str]],
         prev_cluster_status: Optional[global_user_state.ClusterStatus],
     ):
         """The provision retry loop."""

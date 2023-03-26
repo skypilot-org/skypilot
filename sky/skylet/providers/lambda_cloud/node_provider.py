@@ -58,7 +58,7 @@ class LambdaNodeProvider(NodeProvider):
         if os.path.exists(remote_ssh_key):
             self.ssh_key_path = remote_ssh_key
 
-    def _guess_and_add_missing_tags(self, vms: Dict[str, Any]) -> None:
+    def _guess_and_add_missing_tags(self, vms: List[Dict[str, Any]]) -> None:
         """Adds missing vms to local tag file and guesses their tags."""
         for node in vms:
             if self.metadata.get(node['id']) is not None:

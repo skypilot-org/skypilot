@@ -1712,7 +1712,9 @@ def _query_status_lambda(
     possible_names = [f'{cluster}-head', f'{cluster}-worker']
     for node in vms:
         if node.get('name') in possible_names:
-            status_list.append(status_map[node['status']])
+            node_status = status_map[node['status']]
+            if node_status is not None:
+                status_list.append(node_status)
     return status_list
 
 
