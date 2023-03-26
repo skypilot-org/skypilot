@@ -186,6 +186,14 @@ def _interactive_node_cli_command(cli_func):
         help=('Number of vCPUs each instance must have '
               '(e.g., ``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
               'This is used to automatically select the instance type.'))
+    memory = click.option(
+        '--memory',
+        default=None,
+        type=str,
+        required=False,
+        help=('Amount of memory each instance must have in GB (e.g., '
+              '``--memory=16`` (exactly 16GB), ``--memory=16+`` (at least '
+              '16GB))'))
     gpus = click.option('--gpus',
                         default=None,
                         type=str,
@@ -281,6 +289,7 @@ def _interactive_node_cli_command(cli_func):
         zone_option,
         instance_type_option,
         cpus,
+        memory,
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
         spot_option,
@@ -575,6 +584,7 @@ def _parse_override_params(cloud: Optional[str] = None,
                            zone: Optional[str] = None,
                            gpus: Optional[str] = None,
                            cpus: Optional[str] = None,
+                           memory: Optional[str] = None,
                            instance_type: Optional[str] = None,
                            use_spot: Optional[bool] = None,
                            image_id: Optional[str] = None,
@@ -606,6 +616,11 @@ def _parse_override_params(cloud: Optional[str] = None,
             override_params['cpus'] = None
         else:
             override_params['cpus'] = cpus
+    if memory is not None:
+        if memory.lower() == 'none':
+            override_params['memory'] = None
+        else:
+            override_params['memory'] = memory
     if instance_type is not None:
         if instance_type.lower() == 'none':
             override_params['instance_type'] = None
@@ -808,6 +823,35 @@ def _create_and_ssh_into_node(
             f'Name {cluster_name!r} taken by a local cluster and cannot '
             f'be used for a {node_type}.')
 
+    backend = backend if backend is not None else backends.CloudVmRayBackend()
+    if not isinstance(backend, backends.CloudVmRayBackend):
+        raise click.UsageError('Interactive nodes are only supported for '
+                               f'{backends.CloudVmRayBackend.__name__} '
+                               f'backend. Got {type(backend).__name__}.')
+
+    maybe_status, handle = backend_utils.refresh_cluster_status_handle(
+        cluster_name)
+    if maybe_status is not None:
+        if user_requested_resources:
+            if not resources.less_demanding_than(handle.launched_resources):
+                name_arg = ''
+                if cluster_name != _default_interactive_node_name(node_type):
+                    name_arg = f' -c {cluster_name}'
+                raise click.UsageError(
+                    f'Relaunching interactive node {cluster_name!r} with '
+                    'mismatched resources.\n    '
+                    f'Requested resources: {resources}\n    '
+                    f'Launched resources: {handle.launched_resources}\n'
+                    'To login to existing cluster, use '
+                    f'{colorama.Style.BRIGHT}sky {node_type}{name_arg}'
+                    f'{colorama.Style.RESET_ALL}. To launch a new cluster, '
+                    f'use {colorama.Style.BRIGHT}sky {node_type} -c NEW_NAME '
+                    f'{colorama.Style.RESET_ALL}')
+        else:
+            # Use existing interactive node if it exists and no user
+            # resources were specified.
+            resources = handle.launched_resources
+
     # TODO: Add conda environment replication
     # should be setup =
     # 'conda env export | grep -v "^prefix: " > environment.yml'
@@ -818,22 +862,6 @@ def _create_and_ssh_into_node(
         setup=None,
     )
     task.set_resources(resources)
-
-    backend = backend if backend is not None else backends.CloudVmRayBackend()
-    if not isinstance(backend, backends.CloudVmRayBackend):
-        raise click.UsageError('Interactive nodes are only supported for '
-                               f'{backends.CloudVmRayBackend.__name__} '
-                               f'backend. Got {type(backend).__name__}.')
-    maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster_name)
-    if maybe_status is not None and user_requested_resources:
-        name_arg = ''
-        if cluster_name != _default_interactive_node_name(node_type):
-            name_arg = f' -c {cluster_name}'
-        raise click.UsageError(
-            'Resources cannot be specified for an existing interactive node '
-            f'{cluster_name!r}. To login to the cluster, use: '
-            f'{colorama.Style.BRIGHT}'
-            f'sky {node_type}{name_arg}{colorama.Style.RESET_ALL}')
 
     _launch_with_confirm(
         task,
@@ -936,6 +964,7 @@ def _make_task_from_entrypoint_with_overrides(
     zone: Optional[str] = None,
     gpus: Optional[str] = None,
     cpus: Optional[str] = None,
+    memory: Optional[str] = None,
     instance_type: Optional[str] = None,
     num_nodes: Optional[int] = None,
     use_spot: Optional[bool] = None,
@@ -979,6 +1008,7 @@ def _make_task_from_entrypoint_with_overrides(
                                              zone=zone,
                                              gpus=gpus,
                                              cpus=cpus,
+                                             memory=memory,
                                              instance_type=instance_type,
                                              use_spot=use_spot,
                                              image_id=image_id,
@@ -1000,7 +1030,7 @@ def _make_task_from_entrypoint_with_overrides(
         task.num_nodes = num_nodes
     if name is not None:
         task.name = name
-    task.set_envs(env)
+    task.update_envs(env)
     # TODO(wei-lin): move this validation into Python API.
     if new_resources.accelerators is not None:
         acc, _ = list(new_resources.accelerators.items())[0]
@@ -1127,6 +1157,13 @@ def cli():
               help=('Number of vCPUs each instance must have (e.g., '
                     '``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
                     'This is used to automatically select the instance type.'))
+@click.option(
+    '--memory',
+    default=None,
+    type=str,
+    required=False,
+    help=('Amount of memory each instance must have in GB (e.g., '
+          '``--memory=16`` (exactly 16GB), ``--memory=16+`` (at least 16GB))'))
 @click.option('--disk-size',
               default=None,
               type=int,
@@ -1192,6 +1229,7 @@ def launch(
     zone: Optional[str],
     gpus: Optional[str],
     cpus: Optional[str],
+    memory: Optional[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -1237,6 +1275,7 @@ def launch(
         zone=zone,
         gpus=gpus,
         cpus=cpus,
+        memory=memory,
         instance_type=instance_type,
         num_nodes=num_nodes,
         use_spot=use_spot,
@@ -1383,6 +1422,7 @@ def exec(
         zone=zone,
         gpus=gpus,
         cpus=None,
+        memory=None,
         instance_type=instance_type,
         use_spot=use_spot,
         image_id=image_id,
@@ -1394,9 +1434,21 @@ def exec(
     sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
-def _get_in_progress_spot_jobs(
-        show_all_in_progress: bool = False) -> Tuple[Optional[int], str]:
+def _get_spot_jobs(
+        refresh: bool,
+        skip_finished: bool,
+        show_all: bool,
+        limit_num_jobs_to_show: bool = False) -> Tuple[Optional[int], str]:
     """Get the in-progress spot jobs.
+
+    Args:
+        refresh: Query the latest statuses, restarting the spot controller if
+            stopped.
+        skip_finished: Show only in-progress jobs.
+        show_all: Show all information of each spot job (e.g., region, price).
+        limit_num_jobs_to_show: If True, limit the number of jobs to show to
+            _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS, which is mainly used by
+            `sky status`.
 
     Returns:
         A tuple of (num_in_progress_jobs, msg). If num_in_progress_jobs is None,
@@ -1406,9 +1458,10 @@ def _get_in_progress_spot_jobs(
     """
     num_in_progress_jobs = None
     try:
-        with ux_utils.suppress_output():
-            # Make the call slient
-            spot_jobs = core.spot_queue(refresh=False, skip_finished=True)
+        with sky_logging.silent():
+            # Make the call silent
+            spot_jobs = core.spot_queue(refresh=refresh,
+                                        skip_finished=skip_finished)
         num_in_progress_jobs = len(spot_jobs)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
@@ -1420,14 +1473,20 @@ def _get_in_progress_spot_jobs(
                 None, global_user_state.ClusterStatus.STOPPED
             ]
             msg = 'No in progress jobs.'
+            if controller_status is None:
+                msg += (f' (See: {colorama.Style.BRIGHT}sky spot -h'
+                        f'{colorama.Style.RESET_ALL})')
     except RuntimeError:
         msg = ('Failed to query spot jobs due to connection '
                'issues. Try again later.')
+    except Exception as e:  # pylint: disable=broad-except
+        msg = ('Failed to query spot jobs: '
+               f'{common_utils.format_exception(e, use_bracket=True)}')
     else:
-        max_jobs_to_show = (None if show_all_in_progress else
-                            _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS)
+        max_jobs_to_show = (_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS
+                            if limit_num_jobs_to_show else None)
         msg = spot_lib.format_job_table(spot_jobs,
-                                        show_all=False,
+                                        show_all=show_all,
                                         max_jobs=max_jobs_to_show)
     return num_in_progress_jobs, msg
 
@@ -1515,9 +1574,14 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
         show_spot_jobs = show_spot_jobs and not clusters
         if show_spot_jobs:
             # Run the spot job query in parallel to speed up the status query.
-            spot_jobs_future = pool.apply_async(_get_in_progress_spot_jobs,
-                                                (all,))
-
+            spot_jobs_future = pool.apply_async(
+                _get_spot_jobs,
+                kwds=dict(refresh=False,
+                          skip_finished=True,
+                          show_all=False,
+                          limit_num_jobs_to_show=not all))
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+                   f'{colorama.Style.RESET_ALL}')
         query_clusters: Optional[List[str]] = None
         if clusters:
             query_clusters = _get_glob_clusters(clusters)
@@ -1543,9 +1607,16 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
         if show_spot_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed spot jobs{colorama.Style.RESET_ALL}')
-            with backend_utils.safe_console_status(
-                    '[cyan]Checking spot jobs[/]'):
-                num_in_progress_jobs, msg = spot_jobs_future.get()
+            with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
+                try:
+                    num_in_progress_jobs, msg = spot_jobs_future.get()
+                except KeyboardInterrupt:
+                    pool.terminate()
+                    # Set to -1, so that the controller is not considered
+                    # down, and the hint for showing sky spot queue
+                    # will still be shown.
+                    num_in_progress_jobs = -1
+                    msg = 'KeyboardInterrupt'
 
                 try:
                     pool.close()
@@ -1575,7 +1646,7 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                             'shown)')
                     job_info += '. '
                 hints.append(
-                    f'* {job_info}To see all jobs: {colorama.Style.BRIGHT}'
+                    f'* {job_info}To see all spot jobs: {colorama.Style.BRIGHT}'
                     f'sky spot queue{colorama.Style.RESET_ALL}')
 
         if num_pending_autostop > 0:
@@ -1631,6 +1702,11 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     for cluster_group_name, cluster_record in reserved_clusters.items():
         status_utils.show_cost_report_table(
             [cluster_record], all, reserved_group_name=cluster_group_name)
+    click.secho(
+        'NOTE: This feature is experimental. '
+        'Costs for clusters with auto{stop,down} '
+        'scheduled may not be accurate.',
+        fg='yellow')
 
 
 @cli.command()
@@ -2327,7 +2403,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
            'jobs (output of `sky spot queue`) will be lost.')
     click.echo(msg)
     if cluster_status == global_user_state.ClusterStatus.UP:
-        with backend_utils.safe_console_status(
+        with log_utils.safe_rich_status(
                 '[bold cyan]Checking for in-progress spot jobs[/]'):
             try:
                 spot_jobs = core.spot_queue(refresh=False)
@@ -2561,10 +2637,11 @@ def _down_or_stop_clusters(
 def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], region: Optional[str], zone: Optional[str],
             instance_type: Optional[str], cpus: Optional[str],
-            gpus: Optional[str], use_spot: Optional[bool],
-            screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
-            down: bool, retry_until_up: bool):
+            memory: Optional[str], gpus: Optional[str],
+            use_spot: Optional[bool], screen: Optional[bool],
+            tmux: Optional[bool], disk_size: Optional[int],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
 
     Examples:
@@ -2603,8 +2680,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
     user_requested_resources = not (cloud is None and region is None and
                                     zone is None and instance_type is None and
-                                    cpus is None and gpus is None and
-                                    use_spot is None)
+                                    cpus is None and memory is None and
+                                    gpus is None and use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
     if gpus is None and instance_type is None:
@@ -2618,6 +2695,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               zone=zone,
                               instance_type=instance_type,
                               cpus=cpus,
+                              memory=memory,
                               accelerators=gpus,
                               use_spot=use_spot,
                               disk_size=disk_size)
@@ -2642,10 +2720,10 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], region: Optional[str], zone: Optional[str],
             instance_type: Optional[str], cpus: Optional[str],
-            use_spot: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool], disk_size: Optional[int],
-            idle_minutes_to_autostop: Optional[int], down: bool,
-            retry_until_up: bool):
+            memory: Optional[str], use_spot: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
 
     Examples:
@@ -2683,7 +2761,8 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
     user_requested_resources = not (cloud is None and region is None and
                                     zone is None and instance_type is None and
-                                    cpus is None and use_spot is None)
+                                    cpus is None and memory is None and
+                                    use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
     if instance_type is None:
@@ -2695,6 +2774,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               zone=zone,
                               instance_type=instance_type,
                               cpus=cpus,
+                              memory=memory,
                               use_spot=use_spot,
                               disk_size=disk_size)
 
@@ -2718,11 +2798,11 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             region: Optional[str], zone: Optional[str],
             instance_type: Optional[str], cpus: Optional[str],
-            tpus: Optional[str], use_spot: Optional[bool],
-            tpu_vm: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool], disk_size: Optional[int],
-            idle_minutes_to_autostop: Optional[int], down: bool,
-            retry_until_up: bool):
+            memory: Optional[str], tpus: Optional[str],
+            use_spot: Optional[bool], tpu_vm: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
 
     Examples:
@@ -2760,7 +2840,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
     user_requested_resources = not (region is None and zone is None and
                                     instance_type is None and cpus is None and
-                                    tpus is None and use_spot is None)
+                                    memory is None and tpus is None and
+                                    use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
     accelerator_args = default_resources.accelerator_args
     if tpu_vm:
@@ -2777,6 +2858,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               zone=zone,
                               instance_type=instance_type,
                               cpus=cpus,
+                              memory=memory,
                               accelerators=tpus,
                               accelerator_args=accelerator_args,
                               use_spot=use_spot,
@@ -3128,6 +3210,13 @@ def spot():
               help=('Number of vCPUs each instance must have (e.g., '
                     '``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
                     'This is used to automatically select the instance type.'))
+@click.option(
+    '--memory',
+    default=None,
+    type=str,
+    required=False,
+    help=('Amount of memory each instance must have in GB (e.g., '
+          '``--memory=16`` (exactly 16GB), ``--memory=16+`` (at least 16GB))'))
 @click.option('--spot-recovery',
               default=None,
               type=str,
@@ -3171,6 +3260,7 @@ def spot_launch(
     zone: Optional[str],
     gpus: Optional[str],
     cpus: Optional[str],
+    memory: Optional[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -3208,6 +3298,7 @@ def spot_launch(
         zone=zone,
         gpus=gpus,
         cpus=cpus,
+        memory=memory,
         instance_type=instance_type,
         num_nodes=num_nodes,
         use_spot=use_spot,
@@ -3277,6 +3368,8 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
         after a maximum number of retry attempts.
     - FAILED_CONTROLLER: The job failed due to an unexpected error in the spot
         controller.
+    - CANCELLING: The job was requested to be cancelled by the user, and the
+        cancellation is in progress.
     - CANCELLED: The job was cancelled by the user.
 
     If the job failed, either due to user code or spot unavailability, the error
@@ -3289,48 +3382,17 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
       watch -n60 sky spot queue
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
-    no_jobs_found_str = '  No jobs found.'
-    try:
-        job_table = core.spot_queue(refresh=refresh,
-                                    skip_finished=skip_finished)
-    except exceptions.ClusterNotUpError:
-        # TODO(mehul): handle skip_finished for the cached case. E.g., change
-        # {load,dump}_job_table_cache() to use structured data, and let
-        # format_job_table() to take skip_finished.
-        cache = spot_lib.load_job_table_cache()
-        if cache is not None:
-            readable_time = log_utils.readable_time_duration(cache[0])
-            if not cache[1].strip():
-                table_str = no_jobs_found_str
-                cached_hint = ''
-            else:
-                table_str = cache[1]
-                # Show a helpful hint at the end, if cached table is non-empty.
-                cached_hint = (
-                    '\n\nNOTE: cached job table is being shown '
-                    f'[last updated: {readable_time}].\nUse '
-                    f'{colorama.Style.BRIGHT}--refresh / -r'
-                    f'{colorama.Style.RESET_ALL} to restart the spot '
-                    'controller and see the latest job table.')
-            table_message = (
-                f'\n{colorama.Fore.YELLOW}Cached job status table '
-                f'[last updated: {readable_time}]:{colorama.Style.RESET_ALL}\n'
-                f'{table_str}{cached_hint}')
-        else:
-            table_message = 'No cached job status table found.'
-        click.echo(table_message)
-        return
-    job_table = spot_lib.format_job_table(job_table, all)
-
-    spot_lib.dump_job_table_cache(job_table)
-
+    with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
+        _, msg = _get_spot_jobs(refresh=refresh,
+                                skip_finished=skip_finished,
+                                show_all=all)
     if not skip_finished:
         in_progress_only_hint = ''
     else:
         in_progress_only_hint = ' (showing in-progress jobs only)'
-    if not job_table:
-        job_table = no_jobs_found_str
-    click.echo(f'Managed spot jobs{in_progress_only_hint}:\n{job_table}')
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'Managed spot jobs{colorama.Style.RESET_ALL}'
+               f'{in_progress_only_hint}\n{msg}')
 
 
 _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
@@ -3377,7 +3439,8 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     _, handle = spot_lib.is_spot_controller_up(
         'All managed spot jobs should have finished.')
     if handle is None:
-        return
+        # Hint messages already printed by the call above.
+        sys.exit(1)
 
     job_id_str = ','.join(map(str, job_ids))
     if sum([len(job_ids) > 0, name is not None, all]) != 1:
@@ -3598,6 +3661,7 @@ def benchmark_launch(
     # The user can specify the benchmark candidates in either of the two ways:
     # 1. By specifying resources.candidates in the YAML.
     # 2. By specifying gpu types as a command line argument (--gpus).
+    override_gpu = None
     if gpus is not None:
         gpu_list = gpus.split(',')
         gpu_list = [gpu.strip() for gpu in gpu_list]

@@ -106,14 +106,15 @@ install_requires = [
 
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the following
 # packages dependencies are changed.
+aws_dependencies = [
+    # awscli>=1.27.10 is required for SSO support.
+    'awscli',
+    'boto3',
+    # 'Crypto' module used in authentication.py for AWS.
+    'pycryptodome==3.12.0',
+]
 extras_require: Dict[str, List[str]] = {
-    'aws': [
-        # awscli>=1.27.10 is required for SSO support.
-        'awscli',
-        'boto3',
-        # 'Crypto' module used in authentication.py for AWS.
-        'pycryptodome==3.12.0',
-    ],
+    'aws': aws_dependencies,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
     # azure-identity is needed in node_provider.
@@ -121,6 +122,7 @@ extras_require: Dict[str, List[str]] = {
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],
     'lambda': [],
+    'cloudflare': aws_dependencies
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

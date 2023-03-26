@@ -25,16 +25,28 @@ _TPU_REGIONS = [
     'asia-east1',
 ]
 
-# Default instance family for CPU-only VMs.
-# This is the latest general-purpose instance family as of Jan 2023.
-# CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
-# Memory: 4 GiB RAM per 1 vCPU.
-_DEFAULT_INSTANCE_FAMILY = 'n2-standard'
+# We will select from the following three CPU instance families:
+_DEFAULT_INSTANCE_FAMILY = [
+    # This is the latest general-purpose instance family as of Mar 2023.
+    # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
+    # Memory: 4 GiB RAM per 1 vCPU;
+    'n2-standard',
+    # This is the latest memory-optimized instance family as of Mar 2023.
+    # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
+    # Memory: 8 GiB RAM per 1 vCPU;
+    'n2-highmem',
+    # This is the latest compute-optimized instance family as of Mar 2023.
+    # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
+    # Memory: 1 GiB RAM per 1 vCPU;
+    'n2-highcpu',
+]
 _DEFAULT_NUM_VCPUS = 8
+_DEFAULT_MEMORY_CPU_RATIO = 4
 
 # This can be switched between n1 and n2.
 # n2 is not allowed for launching GPUs.
 _DEFAULT_HOST_VM_FAMILY = 'n1'
+_DEFAULT_GPU_MEMORY_CPU_RATIO = 4
 
 # TODO(zongheng): fix A100 info directly in catalog.
 # https://cloud.google.com/blog/products/compute/a2-vms-with-nvidia-a100-gpus-are-ga
@@ -164,26 +176,36 @@ def get_hourly_cost(
                                        zone)
 
 
-def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
-    # The number of vCPUs provided with a TPU VM is not officially documented.
+def get_vcpus_mem_from_instance_type(
+        instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+    # The number of vCPUs and memory size provided with a TPU VM is not
+    # officially documented.
     if instance_type == 'TPU-VM':
-        return None
-    return common.get_vcpus_from_instance_type_impl(_df, instance_type)
+        return None, None
+    return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
-    if cpus is None:
-        cpus = str(_DEFAULT_NUM_VCPUS)
-    instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}-'
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory: Optional[str] = None) -> Optional[str]:
+    if cpus is None and memory is None:
+        cpus = f'{_DEFAULT_NUM_VCPUS}+'
+    if memory is None:
+        memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
+    else:
+        memory_gb_or_ratio = memory
+    instance_type_prefix = tuple(
+        f'{family}-' for family in _DEFAULT_INSTANCE_FAMILY)
     df = _df[_df['InstanceType'].notna()]
     df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
-    return common.get_instance_type_for_cpus_impl(df, cpus)
+    return common.get_instance_type_for_cpus_mem_impl(df, cpus,
+                                                      memory_gb_or_ratio)
 
 
 def get_instance_type_for_accelerator(
         acc_name: str,
         acc_count: int,
         cpus: Optional[str] = None,
+        memory: Optional[str] = None,
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
@@ -195,7 +217,7 @@ def get_instance_type_for_accelerator(
     """
     (instance_list,
      fuzzy_candidate_list) = common.get_instance_type_for_accelerator_impl(
-         _df, acc_name, acc_count, cpus, use_spot, region, zone)
+         _df, acc_name, acc_count, cpus, memory, use_spot, region, zone)
     if instance_list is None:
         return None, fuzzy_candidate_list
 
@@ -203,53 +225,34 @@ def get_instance_type_for_accelerator(
         # If A100 is used, host VM type must be A2.
         # https://cloud.google.com/compute/docs/gpus#a100-gpus
 
-        # FIXME(woosuk): This uses the knowledge that the A2 machines provide
-        # 12 vCPUs per GPU, except for a2-megagpu-16g which has 16 GPUs.
-        if cpus is not None:
-            num_a2_cpus = min(12 * acc_count, 96)
-            if cpus.endswith('+'):
-                if num_a2_cpus < float(cpus[:-1]):
-                    return None, []
-            else:
-                if num_a2_cpus != float(cpus):
-                    return None, []
-        return [_A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]], []
+        df = _df[_df['InstanceType'].notna()]
+        instance_type = _A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]
+        df = df[df['InstanceType'] == instance_type]
+
+        # Check the cpus and memory specified by the user.
+        instance_type = common.get_instance_type_for_cpus_mem_impl(
+            df, cpus, memory)
+        if instance_type is None:
+            return None, []
+        return [instance_type], []
 
     if acc_name not in _NUM_ACC_TO_NUM_CPU:
         acc_name = 'DEFAULT'
 
     assert _DEFAULT_HOST_VM_FAMILY == 'n1'
-    num_cpus = None
-    if cpus is None:
-        num_cpus = _NUM_ACC_TO_NUM_CPU[acc_name].get(acc_count, None)
-    else:
-        # FIXME(woosuk): This uses the knowledge that the N1-highmem machines
-        # have 2, 4, 8, 16, 32, 64, or 96 vCPUs.
-        for num_n1_cpus in [2, 4, 8, 16, 32, 64, 96]:
-            if cpus.endswith('+'):
-                if num_n1_cpus >= float(cpus[:-1]):
-                    num_cpus = num_n1_cpus
-                    break
-            else:
-                if num_n1_cpus == float(cpus):
-                    num_cpus = num_n1_cpus
-                    break
-    if num_cpus is None:
-        return None, []
 
-    mem_type = 'highmem'
-    # patches for the number of cores per GPU, as some of the combinations
-    # are not supported by GCP.
-    if _DEFAULT_HOST_VM_FAMILY == 'n1':
-        if num_cpus < 96:
-            num_cpus = _closest_power_of_two(num_cpus)
-        else:
-            num_cpus = 96
-    else:
-        if num_cpus > 80:
-            mem_type = 'standard'
+    if cpus is None and memory is None:
+        cpus = f'{_NUM_ACC_TO_NUM_CPU[acc_name].get(acc_count, None)}+'
+    if memory is None:
+        memory = f'{_DEFAULT_GPU_MEMORY_CPU_RATIO}x'
+    df = _df[_df['InstanceType'].notna()]
+    df = df[df['InstanceType'].str.startswith(f'{_DEFAULT_HOST_VM_FAMILY}-')]
+
+    instance_type = common.get_instance_type_for_cpus_mem_impl(df, cpus, memory)
     # The fuzzy candidate should have already been fetched in the caller.
-    return [f'{_DEFAULT_HOST_VM_FAMILY}-{mem_type}-{num_cpus}'], []
+    if instance_type is None:
+        return None, []
+    return [instance_type], []
 
 
 def validate_region_zone(

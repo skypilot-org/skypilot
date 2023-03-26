@@ -17,6 +17,7 @@ import enum
 import getpass
 import tempfile
 import os
+import uuid
 from typing import Any, Dict, List, Optional, Union
 
 import colorama
@@ -176,7 +177,8 @@ def _execute(
             cluster_name)
         cluster_exists = existing_handle is not None
         # TODO(woosuk): If the cluster exists, print a warning that
-        # `cpus` is not used as a job scheduling constraint, unlike `gpus`.
+        # `cpus` and `memory` are not used as a job scheduling constraint,
+        # unlike `gpus`.
 
     stages = stages if stages is not None else list(Stage)
 
@@ -543,8 +545,7 @@ def spot_launch(
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
     entrypoint = task
-    if name is None:
-        name = backend_utils.generate_cluster_name()
+    task_uuid = str(uuid.uuid4().hex[:4])
 
     dag = _convert_to_dag(entrypoint)
     assert len(dag.tasks) == 1, ('Only one task is allowed in a spot launch.',
@@ -570,6 +571,15 @@ def spot_launch(
 
     task = _maybe_translate_local_file_mounts_and_sync_up(task)
 
+    if name is None:
+        if task.name is not None:
+            name = task.name
+        else:
+            name = backend_utils.generate_cluster_name()
+    # Override the task name with the specified name or generated name, so that
+    # the controller process can retrieve the task name from the task config.
+    task.name = name
+
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
@@ -581,9 +591,12 @@ def spot_launch(
             'user_yaml_path': f.name,
             'user_config_path': None,
             'spot_controller': controller_name,
-            'cluster_name': name,
+            # Note: actual spot cluster name will be <task_name>-<spot job ID>
+            'task_name': name,
+            'uuid': task_uuid,
             'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
             'is_dev': env_options.Options.IS_DEVELOPER.get(),
+            'is_debug': env_options.Options.SHOW_DEBUG_INFO.get(),
             'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
             'logging_user_hash': common_utils.get_user_hash(),
             'retry_until_up': retry_until_up,
@@ -594,11 +607,11 @@ def spot_launch(
             # 'skypilot_config' module. Don't simply read the on-disk file as
             # it may have changed since this process started.
             #
-            # Pop any proxy command, because the controller would've been
-            # launched behind the proxy, and in general any nodes we launch may
-            # not have or need the proxy setup. (If the controller needs to
-            # launch spot clusters in another region/VPC, the user should
-            # properly set up VPC peering, which will allow the
+            # Set any proxy command to None, because the controller would've
+            # been launched behind the proxy, and in general any nodes we
+            # launch may not have or need the proxy setup. (If the controller
+            # needs to launch spot clusters in another region/VPC, the user
+            # should properly set up VPC peering, which will allow the
             # cross-region/VPC communication. The proxy command is orthogonal
             # to this scenario.)
             #
@@ -617,11 +630,23 @@ def spot_launch(
             # controller VPC (or name) == the spot job's VPC (or name). It may
             # not be a sufficient check (as it's always possible that peering
             # is not set up), but it may catch some obvious errors.
-            # TODO(zhwu): hacky. We should pop the proxy command of the cloud
-            # where the controller is launched (currently, only aws user uses
-            # proxy_command).
-            config_dict = skypilot_config.pop_nested(
-                ('aws', 'ssh_proxy_command'))
+            # TODO(zhwu): hacky. We should only set the proxy command of the
+            # cloud where the controller is launched (currently, only aws user
+            # uses proxy_command).
+            proxy_command_key = ('aws', 'ssh_proxy_command')
+            ssh_proxy_command = skypilot_config.get_nested(
+                proxy_command_key, None)
+            if isinstance(ssh_proxy_command, str):
+                config_dict = skypilot_config.set_nested(
+                    proxy_command_key, None)
+            elif isinstance(ssh_proxy_command, dict):
+                # Instead of removing the key, we set the value to empty string
+                # so that the controller will only try the regions specified by
+                # the keys.
+                ssh_proxy_command = {k: None for k in ssh_proxy_command}
+                config_dict = skypilot_config.set_nested(
+                    proxy_command_key, ssh_proxy_command)
+
             with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
                 common_utils.dump_yaml(tmpfile.name, config_dict)
                 vars_to_fill.update({
@@ -630,10 +655,11 @@ def spot_launch(
                         skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
                 })
 
-        yaml_path = backend_utils.fill_template(
-            spot.SPOT_CONTROLLER_TEMPLATE,
-            vars_to_fill,
-            output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
+        yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
+                                 f'{name}-{task_uuid}.yaml')
+        backend_utils.fill_template(spot.SPOT_CONTROLLER_TEMPLATE,
+                                    vars_to_fill,
+                                    output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
         controller_task.spot_task = task
         assert len(controller_task.resources) == 1
@@ -807,6 +833,8 @@ def _maybe_translate_local_file_mounts_and_sync_up(
                 storage_obj.source = f's3://{storage_obj.name}'
             elif store_type == storage_lib.StoreType.GCS:
                 storage_obj.source = f'gs://{storage_obj.name}'
+            elif store_type == storage_lib.StoreType.R2:
+                storage_obj.source = f'r2://{storage_obj.name}'
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
