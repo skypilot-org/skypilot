@@ -259,8 +259,17 @@ class Optimizer:
             num_resources = len(node.get_resources())
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
+                    specified_resources_str = ''
+                    if node.get_resources():
+                        specified_resources = list(node.get_resources())[0]
+                        specified_resources_str = f' ({specified_resources})'
+                        if specified_resources.region:
+                            specified_resources_str = (
+                                f' ({specified_resources} '
+                                f'in {specified_resources.region})')
                     error_msg = (
-                        f'No launchable resource found for task {node}. '
+                        'Optimizer: No launchable resource found for task '
+                        f'{node}{specified_resources_str}. '
                         'To fix: relax its resource requirements.\n'
                         'Hint: \'sky show-gpus --all\' '
                         'to list available accelerators.\n'
@@ -661,13 +670,20 @@ class Optimizer:
                 accelerators = f'{accelerators}:{count}'
             spot = '[Spot]' if resources.use_spot else ''
             cloud = resources.cloud
-            vcpus = cloud.get_vcpus_from_instance_type(resources.instance_type)
-            if vcpus is None:
-                vcpus = '-'
-            elif vcpus.is_integer():
-                vcpus = str(int(vcpus))
-            else:
-                vcpus = f'{vcpus:.1f}'
+            vcpus, mem = cloud.get_vcpus_mem_from_instance_type(
+                resources.instance_type)
+
+            def format_number(x):
+                if x is None:
+                    return '-'
+                elif x.is_integer():
+                    return str(int(x))
+                else:
+                    return f'{x:.1f}'
+
+            vcpus = format_number(vcpus)
+            mem = format_number(mem)
+
             if resources.zone is None:
                 region_or_zone = resources.region
             else:
@@ -676,13 +692,15 @@ class Optimizer:
                 str(cloud),
                 resources.instance_type + spot,
                 vcpus,
+                mem,
                 str(accelerators),
                 str(region_or_zone),
             ]
 
         # Print the list of resouces that the optimizer considered.
         resource_fields = [
-            'CLOUD', 'INSTANCE', 'vCPUs', 'ACCELERATORS', 'REGION/ZONE'
+            'CLOUD', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'ACCELERATORS',
+            'REGION/ZONE'
         ]
         # Do not print Source or Sink.
         best_plan_rows = [[t, t.num_nodes] + _get_resources_element_list(r)
@@ -981,10 +999,15 @@ def _fill_in_launchable_resources(
                                 f'{colorama.Fore.CYAN}'
                                 f'{sorted(all_fuzzy_candidates)}'
                                 f'{colorama.Style.RESET_ALL}')
-                elif resources.cpus is not None:
-                    logger.info('Try specifying a different CPU count, '
-                                'or add "+" to the end of the CPU count '
-                                'to allow for larger instances.')
+                else:
+                    if resources.cpus is not None:
+                        logger.info('Try specifying a different CPU count, '
+                                    'or add "+" to the end of the CPU count '
+                                    'to allow for larger instances.')
+                    if resources.memory is not None:
+                        logger.info('Try specifying a different memory size, '
+                                    'or add "+" to the end of the memory size '
+                                    'to allow for larger instances.')
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)

@@ -234,9 +234,9 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_vcpus_from_instance_type(cls,
-                                     instance_type: str) -> Optional[float]:
-        """Returns the number of virtual CPUs that the instance type offers."""
+    def get_vcpus_mem_from_instance_type(
+            cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+        """Returns the #vCPUs and memory that the instance type offers."""
         raise NotImplementedError
 
     @classmethod
@@ -248,15 +248,21 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None) -> Optional[str]:
-        """Returns the default instance type with the given number of vCPUs.
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None) -> Optional[str]:
+        """Returns the default instance type with the given #vCPUs and memory.
 
         For example, if cpus='4', this method returns the default instance type
         with 4 vCPUs.  If cpus='4+', this method returns the default instance
         type with 4 or more vCPUs.
 
-        When cpus is None, this method will never return None.
+        If 'memory=4', this method returns the default instance type with 4GB
+        memory.  If 'memory=4+', this method returns the default instance
+        type with 4GB or more memory.
+
+        When cpus is None or memory is None, this method will never return None.
         This method may return None if the cloud's default instance family
         does not have a VM with the given number of vCPUs (e.g., when cpus='7').
         """
@@ -289,8 +295,9 @@ class Cloud:
         """
         raise NotImplementedError
 
+    # TODO(zhwu): Make the return type immutable.
     @classmethod
-    def get_current_user_identity(cls) -> Optional[str]:
+    def get_current_user_identity(cls) -> Optional[List[str]]:
         """(Advanced) Returns currently active user identity of this cloud.
 
         The user "identity" is associated with each SkyPilot cluster they
@@ -313,10 +320,19 @@ class Cloud:
         resources are used when the user invoked each cloud's default
         CLI/API.
 
+        The returned identity is a list of strings. The list is in the order of
+        strictness, i.e., the first element is the most strict identity, and
+        the last element is the least strict identity.
+        When performing an identity check between the current active identity
+        and the owner identity associated with a cluster, we compare the two
+        lists in order: if a position does not match, we go to the next. To
+        see an example, see the docstring of the AWS.get_current_user_identity.
+
+
         Example identities (see cloud implementations):
-            - AWS: unique aws:user_id
-            - GCP: email address + project ID
-            - Azure: email address + subscription ID
+            - AWS: [UserId, AccountId]
+            - GCP: [email address + project ID]
+            - Azure: [email address + subscription ID]
 
         Returns:
             None if the cloud does not have a concept of user identity

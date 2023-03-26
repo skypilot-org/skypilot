@@ -266,9 +266,12 @@ class AWS(clouds.Cloud):
         return isinstance(other, AWS)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None) -> Optional[str]:
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
                                                          clouds='aws')
 
     # TODO: factor the following three methods, as they are the same logic
@@ -282,12 +285,12 @@ class AWS(clouds.Cloud):
             instance_type, clouds='aws')
 
     @classmethod
-    def get_vcpus_from_instance_type(
+    def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[float]:
-        return service_catalog.get_vcpus_from_instance_type(instance_type,
-                                                            clouds='aws')
+    ) -> Tuple[Optional[float], Optional[float]]:
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='aws')
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources', region: 'clouds.Region',
@@ -334,6 +337,7 @@ class AWS(clouds.Cloud):
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
                     cpus=None,
+                    memory=None,
                 )
                 resource_list.append(r)
             return resource_list
@@ -343,7 +347,7 @@ class AWS(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             default_instance_type = AWS.get_default_instance_type(
-                cpus=resources.cpus)
+                cpus=resources.cpus, memory=resources.memory)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -357,6 +361,7 @@ class AWS(clouds.Cloud):
             acc_count,
             use_spot=resources.use_spot,
             cpus=resources.cpus,
+            memory=resources.memory,
             region=resources.region,
             zone=resources.zone,
             clouds='aws')
@@ -439,8 +444,31 @@ class AWS(clouds.Cloud):
         return 'sso' in proc.stdout.decode().split()
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[str]:
-        """Returns the identity of the user on this cloud.
+    def get_current_user_identity(cls) -> Optional[List[str]]:
+        """Returns a [UserId, Account] list that uniquely identifies the user.
+
+        These fields come from `aws sts get-caller-identity`. We permit the same
+        actual user to:
+
+          - switch between different root accounts (after which both elements
+            of the list will be different) and have their clusters owned by
+            each account be protected; or
+
+          - within the same root account, switch between different IAM
+            users, and treat [user_id=1234, account=A] and
+            [user_id=4567, account=A] to be the *same*. Namely, switching
+            between these IAM roles within the same root account will cause
+            the first element of the returned list to differ, and will allow
+            the same actual user to continue to interact with their clusters.
+            Note: this is not 100% safe, since the IAM users can have very
+            specific permissions, that disallow them to access the clusters
+            but it is a reasonable compromise as that could be rare.
+
+        Returns:
+            A list of strings that uniquely identifies the user on this cloud.
+            For identity check, we will fallback through the list of strings
+            until we find a match, and print a warning if we fail for the
+            first string.
 
         Raises:
             exceptions.CloudUserIdentityError: if the user identity cannot be
@@ -448,16 +476,26 @@ class AWS(clouds.Cloud):
         """
         try:
             sts = aws.client('sts')
-            # The caller identity contains 3 fields: UserId, AccountId, Arn.
-            # 'UserId' is unique across all AWS entity, which looks like
+            # The caller identity contains 3 fields: UserId, Account, Arn.
+            # 1. 'UserId' is unique across all AWS entity, which looks like
             # "AROADBQP57FF2AEXAMPLE:role-session-name"
-            # 'AccountId' can be shared by multiple users under the same
+            # 2. 'Account' can be shared by multiple users under the same
             # organization
-            # 'Arn' is the full path to the user, which can be reused when
+            # 3. 'Arn' is the full path to the user, which can be reused when
             # the user is deleted and recreated.
             # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # pylint: disable=line-too-long
             # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable # pylint: disable=line-too-long
-            user_id = sts.get_caller_identity()['UserId']
+            user_info = sts.get_caller_identity()
+            # Allow fallback to AccountId if UserId does not match, because:
+            # 1. In the case where multiple IAM users belong a single root account,
+            # those users normally share the visibility of the VMs, so we do not
+            # need to identity them with each other. (There can be some cases,
+            # when an IAM user is given a limited permission by the admin, we may
+            # ignore that case for now, or print out a warning if the underlying
+            # userid changed for a cluster).
+            # 2. In the case where the multiple users belong to an organization,
+            # those users will have different account id, so fallback works.
+            user_ids = [user_info['UserId'], user_info['Account']]
         except aws.botocore_exceptions().NoCredentialsError:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
@@ -502,7 +540,7 @@ class AWS(clouds.Cloud):
                     f'Failed to get AWS user.\n'
                     f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
-        return user_id
+        return user_ids
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         # TODO(skypilot): ~/.aws/credentials is required for users using multiple clouds.

@@ -1,0 +1,30 @@
+resources:
+  accelerators: A100:2
+  disk_size: 1024
+
+setup: |
+  set -ex
+  conda create -n llama python=3.9 -y
+  conda activate llama
+
+  git clone https://github.com/skypilot-org/sky-llama.git || true
+  cd sky-llama
+
+  # Download the model weights
+  bash download.sh $LLAMA_URL 13B
+
+  # Install ttyd for web serving
+  wget https://github.com/tsl0922/ttyd/releases/download/1.7.2/ttyd.x86_64
+  sudo mv ttyd.x86_64 /usr/local/bin/ttyd
+  sudo chmod +x /usr/local/bin/ttyd
+
+  # Install dependencies
+  pip install torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+  pip install -r requirements.txt
+  pip install -e .
+
+run: |
+  conda activate llama
+
+  cd sky-llama
+  ttyd /bin/bash -c "torchrun --nproc_per_node 2 chat.py --ckpt_dir ~/sky_workdir/ckpt/13B --tokenizer_path ~/sky_workdir/ckpt/tokenizer.model"
