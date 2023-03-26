@@ -98,8 +98,6 @@ def show_status_table(cluster_records: List[_ClusterRecord],
         num_pending_autostop += _is_pending_autostop(record)
 
     if cluster_records:
-        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
-                   f'{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
     else:
         click.echo('No existing clusters.')

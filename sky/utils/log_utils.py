@@ -1,15 +1,59 @@
 """Logging utils."""
 import enum
+import threading
 from typing import List, Optional
+
+import rich.console as rich_console
 
 import colorama
 import pendulum
 import prettytable
-import rich.status
 
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
+
+console = rich_console.Console()
+_status = None
+
+
+class _NoOpConsoleStatus:
+    """An empty class for multi-threaded console.status."""
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    def update(self, text):
+        pass
+
+    def stop(self):
+        pass
+
+    def start(self):
+        pass
+
+
+def safe_rich_status(msg: str):
+    """A wrapper for multi-threaded console.status."""
+    if (threading.current_thread() is threading.main_thread() and
+            not sky_logging.is_silent()):
+        global _status
+        if _status is None:
+            _status = console.status(msg)
+        _status.update(msg)
+        return _status
+    return _NoOpConsoleStatus()
+
+
+def force_update_rich_status(msg: str):
+    """Update the status message even if sky_logging.is_silent() is true."""
+    if threading.current_thread() is threading.main_thread():
+        global _status
+        if _status is not None:
+            _status.update(msg)
 
 
 class LineProcessor(object):
@@ -35,7 +79,7 @@ class RayUpLineProcessor(LineProcessor):
 
     def __enter__(self):
         self.state = self.ProvisionStatus.LAUNCH
-        self.status_display = rich.status.Status('[bold cyan]Launching')
+        self.status_display = safe_rich_status('[bold cyan]Launching')
         self.status_display.start()
 
     def process_line(self, log_line):

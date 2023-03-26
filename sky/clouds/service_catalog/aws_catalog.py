@@ -25,11 +25,23 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# This is the latest general-purpose instance family as of Jan 2023.
-# CPU: Intel Ice Lake 8375C.
-# Memory: 4 GiB RAM per 1 vCPU.
-_DEFAULT_INSTANCE_FAMILY = 'm6i'
+# We will select from the following three instance families:
+_DEFAULT_INSTANCE_FAMILY = [
+    # This is the latest general-purpose instance family as of Mar 2023.
+    # CPU: Intel Ice Lake 8375C.
+    # Memory: 4 GiB RAM per 1 vCPU;
+    'm6i',
+    # This is the latest memory-optimized instance family as of Mar 2023.
+    # CPU: Intel Ice Lake 8375C
+    # Memory: 8 GiB RAM per 1 vCPU;
+    'r6i',
+    # This is the latest compute-optimized instance family as of Mar 2023.
+    # CPU: Intel Ice Lake 8375C
+    # Memory: 2 GiB RAM per 1 vCPU;
+    'c6i',
+]
 _DEFAULT_NUM_VCPUS = 8
+_DEFAULT_MEMORY_CPU_RATIO = 4
 
 # Keep it synced with the frequency in
 # skypilot-catalog/.github/workflows/update-aws-catalog.yml
@@ -75,8 +87,9 @@ def _fetch_and_apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
         with the zone name (e.g. us-east-1a).
     """
     try:
-        user_identity = aws.AWS.get_current_user_identity()
-        assert user_identity is not None, 'user_identity is None'
+        user_identity_list = aws.AWS.get_current_user_identity()
+        assert user_identity_list, user_identity_list
+        user_identity = user_identity_list[0]
         aws_user_hash = hashlib.md5(user_identity.encode()).hexdigest()[:8]
     except exceptions.CloudUserIdentityError:
         glob_name = common.get_catalog_path('aws/az_mappings-*.csv')
@@ -161,17 +174,27 @@ def get_hourly_cost(instance_type: str,
                                        region, zone)
 
 
-def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
-    return common.get_vcpus_from_instance_type_impl(_get_df(), instance_type)
+def get_vcpus_mem_from_instance_type(
+        instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+    return common.get_vcpus_mem_from_instance_type_impl(_get_df(),
+                                                        instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
-    if cpus is None:
-        cpus = str(_DEFAULT_NUM_VCPUS)
-    instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}.'
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory: Optional[str] = None) -> Optional[str]:
+    if cpus is None and memory is None:
+        cpus = f'{_DEFAULT_NUM_VCPUS}+'
+
+    if memory is None:
+        memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
+    else:
+        memory_gb_or_ratio = memory
+    instance_type_prefix = tuple(
+        f'{family}.' for family in _DEFAULT_INSTANCE_FAMILY)
     df = _get_df()
     df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
-    return common.get_instance_type_for_cpus_impl(df, cpus)
+    return common.get_instance_type_for_cpus_mem_impl(df, cpus,
+                                                      memory_gb_or_ratio)
 
 
 def get_accelerators_from_instance_type(
@@ -184,6 +207,7 @@ def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
     cpus: Optional[str] = None,
+    memory: Optional[str] = None,
     use_spot: bool = False,
     region: Optional[str] = None,
     zone: Optional[str] = None,
@@ -196,6 +220,7 @@ def get_instance_type_for_accelerator(
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
                                                          cpus=cpus,
+                                                         memory=memory,
                                                          use_spot=use_spot,
                                                          region=region,
                                                          zone=zone)
