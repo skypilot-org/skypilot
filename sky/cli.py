@@ -989,9 +989,6 @@ def _make_task_from_entrypoint_with_overrides(
             click.secho('Task from command: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
 
-    if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
-        cloud = 'local'
-
     if is_yaml:
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
         task = sky.Task.from_yaml(entrypoint)
@@ -1002,6 +999,9 @@ def _make_task_from_entrypoint_with_overrides(
     # Override.
     if workdir is not None:
         task.workdir = workdir
+
+    if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
+        cloud = 'local'
 
     override_params = _parse_override_params(cloud=cloud,
                                              region=region,

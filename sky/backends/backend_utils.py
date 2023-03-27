@@ -2459,7 +2459,9 @@ def validate_schema(obj, schema, err_msg_prefix=''):
                     else:
                         err_msg += f'\nFound unsupported field {field!r}.'
         else:
-            err_msg = err_msg_prefix + e.message
+            # Example e.json_path value: '$.resources'
+            err_msg = (err_msg_prefix + e.message +
+                       f'. Check problematic field(s): {e.json_path}')
 
     if err_msg:
         with ux_utils.print_exception_no_traceback():
