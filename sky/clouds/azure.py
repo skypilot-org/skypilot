@@ -414,3 +414,13 @@ class Azure(clouds.Cloud):
                     'cli command: "az account set -s <subscription_id>".'
                 ) from e
         return azure_subscription_id
+
+    @classmethod
+    def get_disk_type(cls, disk_type: str) -> str:
+        # TODO(tian): maybe use UltraSSD_LRS?
+        type2name = {
+            'high': 'Premium_LRS',
+            'medium': 'StandardSSD_LRS',
+            'low': 'Standard_LRS',
+        }
+        return type2name[disk_type]

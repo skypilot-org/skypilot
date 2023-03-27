@@ -839,13 +839,6 @@ def write_cluster_config(
 
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
-    disk_configure = {
-        'disk_type': to_provision.get_cloud_disk_type_str(),
-    }
-    # AWS need to specify iops manually.
-    if isinstance(cloud, clouds.AWS):
-        disk_configure['disk_iops'] = to_provision.get_disk_iops()
-
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -857,6 +850,7 @@ def write_cluster_config(
                 'cluster_name': cluster_name,
                 'num_nodes': num_nodes,
                 'disk_size': to_provision.disk_size,
+                'disk_type': to_provision.get_cloud_disk_type(),
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the
                 # SKYPILOT_USER env var (see spot-controller.yaml.j2).
@@ -905,8 +899,6 @@ def write_cluster_config(
                 'worker_ips': None if ip_list is None else ip_list[1:],
                 # Authentication (optional).
                 **auth_config,
-                # Disk configuration.
-                **disk_configure,
             }),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name

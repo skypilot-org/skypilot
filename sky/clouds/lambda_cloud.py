@@ -4,6 +4,7 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import exceptions
 from sky.clouds import service_catalog
 from sky.skylet.providers.lambda_cloud import lambda_utils
 
@@ -252,3 +253,9 @@ class Lambda(clouds.Cloud):
     @classmethod
     def regions(cls) -> List['clouds.Region']:
         return service_catalog.regions(clouds='lambda')
+
+    @classmethod
+    def check_disk_type_enabled(cls, instance_type: str,
+                                disk_type: str) -> None:
+        raise exceptions.NotSupportedError(
+            'Lambda does not support disk types.')

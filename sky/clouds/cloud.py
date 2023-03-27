@@ -449,5 +449,31 @@ class Cloud:
                     'chars; maximum length is '
                     f'{max_cluster_name_len_limit} chars{cloud_name}.')
 
+    @classmethod
+    def check_disk_type_enabled(cls, instance_type: str,
+                                disk_type: str) -> None:
+        """Errors out if the disk type is not supported by the cloud provider.
+
+        Raises:
+            exceptions.NotSupportedError: If the disk type is not supported.
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def get_disk_type(cls, disk_type: str) -> str:
+        """Returns the disk type name for each cloud."""
+        raise NotImplementedError
+
+    @classmethod
+    def get_disk_iops(
+            cls,
+            disk_type: str  # pylint: disable=unused-argument
+    ) -> int:
+        """Returns the disk iops correspond to disk type for each cloud.
+
+        Only AWS will return a non-zero value for cunfiguration.
+        """
+        return 0
+
     def __repr__(self):
         return self._REPR

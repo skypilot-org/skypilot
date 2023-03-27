@@ -331,6 +331,7 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
+            'disk_iops': r.cloud.get_disk_iops()
         }
 
     def get_feasible_launchable_resources(self,
@@ -614,3 +615,34 @@ class AWS(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'aws')
+
+    @classmethod
+    def check_disk_type_enabled(cls, instance_type: str,
+                                disk_type: str) -> None:
+        # Only S-series supported premium ssd
+        # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # pylint: disable=line-too-long
+        series = instance_type.split('_')[1].lower()
+        if disk_type == 'high' and not 's' in series:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Azure premium SSD is only supported for S-series '
+                    'instances. Please use disk_type=medium or low.')
+
+    @classmethod
+    def get_disk_type(cls, disk_type: str) -> str:
+        # medium & low will be configured to different IOPS
+        type2name = {
+            'high': 'io2',
+            'medium': 'gp3',
+            'low': 'gp3',
+        }
+        return type2name[disk_type]
+
+    @classmethod
+    def get_disk_iops(cls, disk_type: str) -> int:
+        type2iops = {
+            'high': 27000,
+            'medium': 9000,
+            'low': 3000,
+        }
+        return type2iops[disk_type]

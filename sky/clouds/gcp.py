@@ -689,3 +689,12 @@ class GCP(clouds.Cloud):
             zone: Optional[str] = None) -> None:
         service_catalog.check_accelerator_attachable_to_host(
             instance_type, accelerators, zone, 'gcp')
+
+    @classmethod
+    def get_disk_type(cls, disk_type: str) -> str:
+        type2name = {
+            'high': 'pd-ssd',
+            'medium': 'pd-balanced',
+            'low': 'pd-standard',
+        }
+        return type2name[disk_type]

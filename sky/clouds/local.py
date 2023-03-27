@@ -4,6 +4,7 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import exceptions
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -193,3 +194,9 @@ class Local(clouds.Cloud):
             raise ValueError(f'Region {region!r} does not match the Local'
                              ' cloud region {Local.LOCAL_REGION.name!r}.')
         return region, zone
+
+    @classmethod
+    def check_disk_type_enabled(cls, instance_type: str,
+                                disk_type: str) -> None:
+        raise exceptions.NotSupportedError(
+            'Local cloud does not support disk types.')
