@@ -416,6 +416,19 @@ class Azure(clouds.Cloud):
         return azure_subscription_id
 
     @classmethod
+    def check_disk_type_enabled(cls, instance_type: str,
+                                disk_type: str) -> None:
+        # Only S-series supported premium ssd
+        # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # pylint: disable=line-too-long
+        series = instance_type.split('_')[1].lower()
+        if disk_type == 'high' and not 's' in series:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Azure premium SSDs are only supported for S-series '
+                    'instances. To use disk_type=high, please make sure '
+                    'instance_type is specified to an S-series instance.')
+
+    @classmethod
     def get_disk_type(cls, disk_type: str) -> str:
         # TODO(tian): maybe use UltraSSD_LRS?
         type2name = {

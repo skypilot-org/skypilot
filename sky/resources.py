@@ -99,8 +99,7 @@ class Resources:
                     k.strip(): v.strip() for k, v in image_id.items()
                 }
 
-        # default to basic disk type
-        self._disk_type = disk_type if disk_type is not None else 'low'
+        self._disk_type = disk_type
 
         self._set_cpus(cpus)
         self._set_memory(memory)
@@ -167,6 +166,11 @@ class Resources:
             else:
                 image_id = f', image_id={self.image_id!r}'
 
+        disk_type = ''
+        if self.disk_type is not None:
+            cloud_disk_type = self.cloud.get_disk_type(self.disk_type)
+            disk_type = f', disk_type={cloud_disk_type}'
+
         disk_size = ''
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
@@ -186,7 +190,7 @@ class Resources:
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
-            f'{disk_size}{region}{zone}')
+            f'{disk_type}{disk_size}{region}{zone}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):
@@ -285,7 +289,9 @@ class Resources:
         return self._disk_type
 
     def get_cloud_disk_type(self) -> str:
-        return self.cloud.get_disk_type(self.disk_type)
+        # default to low if not specified
+        disk_type = 'low' if self.disk_type is None else self.disk_type
+        return self.cloud.get_disk_type(disk_type)
 
     def _set_cpus(
         self,
@@ -698,12 +704,20 @@ class Resources:
                         'image.')
 
     def _try_validate_disk_type(self) -> None:
+        if self.disk_type is None:
+            return
+        if self.cloud is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cloud must be specified when disk_type is provided.')
         if self.disk_type not in ['high', 'medium', 'low']:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Invalid disk_type {self.disk_type}. '
                     'Please use one of "high", "medium", or "low".')
-        self.cloud.check_disk_type_enabled(self.instance_type, self.disk_type)
+        if self.instance_type is not None:
+            self.cloud.check_disk_type_enabled(self.instance_type,
+                                               self.disk_type)
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""

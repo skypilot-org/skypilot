@@ -691,6 +691,14 @@ class GCP(clouds.Cloud):
             instance_type, accelerators, zone, 'gcp')
 
     @classmethod
+    def check_disk_type_enabled(
+        cls,
+        instance_type: str,  # pylint: disable=unused-argument
+        disk_type: str  # pylint: disable=unused-argument
+    ) -> None:
+        return
+
+    @classmethod
     def get_disk_type(cls, disk_type: str) -> str:
         type2name = {
             'high': 'pd-ssd',

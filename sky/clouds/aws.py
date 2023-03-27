@@ -617,16 +617,12 @@ class AWS(clouds.Cloud):
             accelerator, acc_count, region, zone, 'aws')
 
     @classmethod
-    def check_disk_type_enabled(cls, instance_type: str,
-                                disk_type: str) -> None:
-        # Only S-series supported premium ssd
-        # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # pylint: disable=line-too-long
-        series = instance_type.split('_')[1].lower()
-        if disk_type == 'high' and not 's' in series:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Azure premium SSD is only supported for S-series '
-                    'instances. Please use disk_type=medium or low.')
+    def check_disk_type_enabled(
+        cls,
+        instance_type: str,  # pylint: disable=unused-argument
+        disk_type: str  # pylint: disable=unused-argument
+    ) -> None:
+        return
 
     @classmethod
     def get_disk_type(cls, disk_type: str) -> str:
