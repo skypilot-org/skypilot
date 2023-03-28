@@ -419,7 +419,7 @@ class AWS(clouds.Cloud):
             'if you want to use multiple clouds. To set up static credentials, '
             'try: aws configure')
         if identity_type == AWSIdentityType.SSO:
-            hints = 'AWS SSO is set. '
+            hints = 'AWS SSO is set.'
             if static_credential_exists:
                 hints += (
                     ' To ensure multiple clouds work correctly, please use SkyPilot '
@@ -433,7 +433,7 @@ class AWS(clouds.Cloud):
             # file. This will happen when the user is on the VM (or spot-controller)
             # created by SSO account, i.e. the VM will be assigned with the IAM
             # role: skypilot-v1.
-            hints = f'AWS IAM role is set. {single_cloud_hint}'
+            hints = f'AWS IAM role is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
