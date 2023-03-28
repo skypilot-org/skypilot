@@ -2262,7 +2262,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 return None
             cluster_config_file = config_dict['ray']
 
-            handle = self.ResourceHandle(
+            handle = CloudVmRayResourceHandle(
                 cluster_name=cluster_name,
                 cluster_yaml=cluster_config_file,
                 launched_nodes=config_dict['launched_nodes'],
