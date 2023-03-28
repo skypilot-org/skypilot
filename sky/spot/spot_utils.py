@@ -64,7 +64,7 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_SETUP or CANCELLED.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    assert isinstance(handle, backends.CloudVmRayBackend.ResourceHandle), handle
+    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     status = None
     try:
         logger.info('=== Checking the job status... ===')

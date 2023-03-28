@@ -307,8 +307,13 @@ def stop(cluster_name: str, purge: bool = False) -> None:
     backend = backend_utils.get_backend_from_handle(handle)
 
     if isinstance(backend, backends.CloudVmRayBackend):
-        assert isinstance(handle,
-                          backends.CloudVmRayBackend.ResourceHandle), handle
+        assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+        if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
+            # Reference:
+            # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_a_with_gcloud  # pylint: disable=line-too-long
+            raise exceptions.NotSupportedError(
+                f'Stopping cluster {cluster_name!r} with TPU VM Pod '
+                'is not supported.')
         # Check cloud supports stopping instances
         cloud = handle.launched_resources.cloud
         cloud.check_features_are_supported(

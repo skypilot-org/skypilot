@@ -681,9 +681,9 @@ def _check_resources_match(backend: backends.Backend,
         return
 
     if node_type is not None:
-        assert isinstance(
-            handle,
-            backends.CloudVmRayBackend.ResourceHandle), (node_type, handle)
+        assert isinstance(handle,
+                          backends.CloudVmRayResourceHandle), (node_type,
+                                                               handle)
         inferred_node_type = _infer_interactive_node_type(
             handle.launched_resources)
         if node_type != inferred_node_type:
@@ -879,7 +879,7 @@ def _create_and_ssh_into_node(
         node_type=node_type,
     )
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    assert isinstance(handle, backends.CloudVmRayBackend.ResourceHandle), handle
+    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
     # connection, and for allowing adding 'cd workdir' in the future.
