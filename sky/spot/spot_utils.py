@@ -5,7 +5,7 @@ import json
 import pathlib
 import shlex
 import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 import filelock
@@ -494,7 +494,7 @@ class SpotCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs_by_id(cls, job_ids: Optional[Sequence[int]]) -> str:
+    def cancel_jobs_by_id(cls, job_ids: Optional[List[int]]) -> str:
         code = [
             f'msg = spot_utils.cancel_jobs_by_id({job_ids})',
             'print(msg, end="", flush=True)',

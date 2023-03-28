@@ -37,7 +37,7 @@ import subprocess
 import sys
 import textwrap
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import click
 import colorama
@@ -104,7 +104,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 5
 
 
-def _get_glob_clusters(clusters: Sequence[str]) -> List[str]:
+def _get_glob_clusters(clusters: List[str]) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
     for cluster in clusters:
@@ -120,7 +120,7 @@ def _get_glob_clusters(clusters: Sequence[str]) -> List[str]:
     return list(set(glob_clusters))
 
 
-def _get_glob_storages(storages: Sequence[str]) -> List[str]:
+def _get_glob_storages(storages: List[str]) -> List[str]:
     """Returns a list of storages that match the glob pattern."""
     glob_storages = []
     for storage_object in storages:
@@ -134,7 +134,7 @@ def _get_glob_storages(storages: Sequence[str]) -> List[str]:
     return list(set(glob_storages))
 
 
-def _warn_if_local_cluster(cluster: str, local_clusters: Sequence[str],
+def _warn_if_local_cluster(cluster: str, local_clusters: List[str],
                            message: str) -> bool:
     """Raises warning if the cluster name is a local cluster."""
     if cluster in local_clusters:
@@ -568,7 +568,7 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
     ctx.exit()
 
 
-def _add_click_options(options: Sequence[click.Option]):
+def _add_click_options(options: List[click.Option]):
     """A decorator for adding a list of click option decorators."""
 
     def _add_options(func):
@@ -958,7 +958,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
 
 
 def _make_task_from_entrypoint_with_overrides(
-    entrypoint: Sequence[str],
+    entrypoint: List[str],
     *,
     name: Optional[str] = None,
     cluster: Optional[str] = None,
@@ -974,7 +974,7 @@ def _make_task_from_entrypoint_with_overrides(
     use_spot: Optional[bool] = None,
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
-    env: Optional[Sequence[Tuple[str, str]]] = None,
+    env: Optional[List[Tuple[str, str]]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
 ) -> sky.Task:
@@ -1221,7 +1221,7 @@ def cli():
               help='Skip setup phase when (re-)launching cluster.')
 @usage_lib.entrypoint
 def launch(
-    entrypoint: Sequence[str],
+    entrypoint: List[str],
     cluster: Optional[str],
     dryrun: bool,
     detach_setup: bool,
@@ -1239,7 +1239,7 @@ def launch(
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
-    env: Sequence[Tuple[str, str]],
+    env: List[Tuple[str, str]],
     disk_size: Optional[int],
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
@@ -1333,7 +1333,7 @@ def launch(
 # pylint: disable=redefined-builtin
 def exec(
     cluster: str,
-    entrypoint: Sequence[str],
+    entrypoint: List[str],
     detach_run: bool,
     name: Optional[str],
     cloud: Optional[str],
@@ -1345,7 +1345,7 @@ def exec(
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
-    env: Sequence[Tuple[str, str]],
+    env: List[Tuple[str, str]],
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or a command on a cluster (skip setup).
@@ -1733,7 +1733,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
                 nargs=-1,
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
-def queue(clusters: Sequence[str], skip_finished: bool, all_users: bool):
+def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
@@ -1884,7 +1884,7 @@ def logs(
               help='Skip confirmation prompt.')
 @click.argument('jobs', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
-def cancel(cluster: str, all: bool, jobs: Sequence[int], yes: bool):  # pylint: disable=redefined-builtin
+def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s)."""
     bold = colorama.Style.BRIGHT
@@ -1951,7 +1951,7 @@ def cancel(cluster: str, all: bool, jobs: Sequence[int], yes: bool):  # pylint: 
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 def stop(
-    clusters: Tuple[str],
+    clusters: List[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
 ):
@@ -2029,7 +2029,7 @@ def stop(
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 def autostop(
-    clusters: Tuple[str],
+    clusters: List[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     idle_minutes: Optional[int],
     cancel: bool,  # pylint: disable=redefined-outer-name
@@ -2152,7 +2152,7 @@ def autostop(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def start(
-        clusters: Sequence[str],
+        clusters: List[str],
         all: bool,
         yes: bool,
         idle_minutes_to_autostop: Optional[int],
@@ -2341,7 +2341,7 @@ def start(
               'Useful for cleaning up manually deleted cluster(s).')
 @usage_lib.entrypoint
 def down(
-    clusters: Tuple[str],
+    clusters: List[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
     purge: bool,
@@ -2444,7 +2444,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
 
 
 def _down_or_stop_clusters(
-        names: Sequence[str],
+        names: List[str],
         apply_to_all: Optional[bool],
         down: bool,  # pylint: disable=redefined-outer-name
         no_confirm: bool,
@@ -3089,7 +3089,7 @@ def storage_ls():
               required=False,
               help='Delete all storage objects.')
 @usage_lib.entrypoint
-def storage_delete(names: Sequence[str], all: bool):  # pylint: disable=redefined-builtin
+def storage_delete(names: List[str], all: bool):  # pylint: disable=redefined-builtin
     """Delete storage objects.
 
     Examples:
@@ -3257,7 +3257,7 @@ def spot():
 @timeline.event
 @usage_lib.entrypoint
 def spot_launch(
-    entrypoint: Sequence[str],
+    entrypoint: List[str],
     name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
@@ -3271,7 +3271,7 @@ def spot_launch(
     use_spot: Optional[bool],
     image_id: Optional[str],
     spot_recovery: Optional[str],
-    env: Sequence[Tuple[str, str]],
+    env: List[Tuple[str, str]],
     disk_size: Optional[int],
     detach_run: bool,
     retry_until_up: bool,
@@ -3604,7 +3604,7 @@ def benchmark_launch(
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
-    env: Sequence[Tuple[str, str]],
+    env: List[Tuple[str, str]],
     disk_size: Optional[int],
     idle_minutes_to_autostop: Optional[int],
     yes: bool,
@@ -3976,7 +3976,7 @@ def benchmark_show(benchmark: str) -> None:
 @usage_lib.entrypoint
 def benchmark_down(
     benchmark: str,
-    clusters_to_exclude: Sequence[str],
+    clusters_to_exclude: List[str],
     yes: bool,
 ) -> None:
     """Tear down all clusters belonging to a benchmark."""

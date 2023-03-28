@@ -8,7 +8,7 @@ import pathlib
 import shlex
 import time
 import typing
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional
 
 import colorama
 import filelock
@@ -670,8 +670,7 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs(cls, job_owner: str,
-                    job_ids: Optional[Sequence[int]]) -> str:
+    def cancel_jobs(cls, job_owner: str, job_ids: Optional[List[int]]) -> str:
         code = [f'job_lib.cancel_jobs({job_owner!r},{job_ids!r})']
         return cls._build(code)
 
@@ -697,7 +696,7 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_job_status(cls, job_ids: Optional[Sequence[int]] = None) -> str:
+    def get_job_status(cls, job_ids: Optional[List[int]] = None) -> str:
         # Prints "Job <id> <status>" for UX; caller should parse the last token.
         code = [
             f'job_ids = {job_ids} if {job_ids} is not None '
@@ -723,8 +722,8 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_run_timestamp_with_globbing(
-            cls, job_ids: Optional[Sequence[str]]) -> str:
+    def get_run_timestamp_with_globbing(cls,
+                                        job_ids: Optional[List[str]]) -> str:
         code = [
             f'job_ids = {job_ids} if {job_ids} is not None '
             'else [job_lib.get_latest_job_id()]',

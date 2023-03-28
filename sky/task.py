@@ -3,7 +3,7 @@ import inspect
 import os
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import yaml
 
@@ -352,7 +352,7 @@ class Task:
         return self._envs
 
     def update_envs(
-            self, envs: Union[None, Sequence[Tuple[str, str]],
+            self, envs: Union[None, List[Tuple[str, str]],
                               Dict[str, str]]) -> 'Task':
         """Updates environment variables for use inside the setup/run commands.
 

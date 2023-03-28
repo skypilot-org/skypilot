@@ -2,7 +2,7 @@
 import collections
 import enum
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import colorama
 import numpy as np
@@ -44,7 +44,7 @@ class OptimizeTarget(enum.Enum):
 
 
 # For logging purposes.
-def _create_table(field_names: Sequence[str]) -> prettytable.PrettyTable:
+def _create_table(field_names: List[str]) -> prettytable.PrettyTable:
     table_kwargs = {
         'hrules': prettytable.FRAME,
         'vrules': prettytable.NONE,
@@ -214,7 +214,7 @@ class Optimizer:
 
     @staticmethod
     def _estimate_nodes_cost_or_time(
-        topo_order: Sequence[task_lib.Task],
+        topo_order: List[task_lib.Task],
         minimize_cost: bool = True,
         blocked_resources: Optional[Iterable[resources_lib.Resources]] = None,
     ) -> Tuple[_TaskToCostMap, _TaskToPerCloudCandidates]:
@@ -316,7 +316,7 @@ class Optimizer:
 
     @staticmethod
     def _optimize_by_dp(
-        topo_order: Sequence[task_lib.Task],
+        topo_order: List[task_lib.Task],
         node_to_cost_map: _TaskToCostMap,
         minimize_cost: bool = True,
     ) -> Tuple[Dict[task_lib.Task, resources_lib.Resources], float]:
@@ -378,7 +378,7 @@ class Optimizer:
     @staticmethod
     def _optimize_by_ilp(
         graph: 'nx.DiGraph',
-        topo_order: Sequence[task_lib.Task],
+        topo_order: List[task_lib.Task],
         node_to_cost_map: _TaskToCostMap,
         minimize_cost: bool = True,
     ) -> Tuple[Dict[task_lib.Task, resources_lib.Resources], float]:

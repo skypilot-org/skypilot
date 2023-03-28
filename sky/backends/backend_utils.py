@@ -700,7 +700,7 @@ class SSHConfigHelper(object):
 
 def _replace_yaml_dicts(
         new_yaml: str, old_yaml: str, restore_key_names: Set[str],
-        restore_key_names_exceptions: Sequence[Sequence[str]]) -> str:
+        restore_key_names_exceptions: Sequence[Tuple[str, ...]]) -> str:
     """Replaces 'new' with 'old' for all keys in restore_key_names.
 
     The replacement will be applied recursively and only for the blocks
@@ -2209,7 +2209,7 @@ def get_clusters(
     include_reserved: bool,
     refresh: bool,
     cloud_filter: CloudFilter = CloudFilter.CLOUDS_AND_DOCKER,
-    cluster_names: Optional[Union[str, Sequence[str]]] = None,
+    cluster_names: Optional[Union[str, List[str]]] = None,
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached or optionally refreshed cluster records.
 

@@ -43,7 +43,7 @@ then:
 """
 import copy
 import os
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, Iterable
 
 import yaml
 
@@ -74,7 +74,7 @@ logger = sky_logging.init_logger(__name__)
 _dict = None
 
 
-def get_nested(keys: Sequence[str], default_value: Any) -> Any:
+def get_nested(keys: Iterable[str], default_value: Any) -> Any:
     """Gets a nested key.
 
     If any key is not found, or any intermediate key does not point to a dict
@@ -93,7 +93,7 @@ def get_nested(keys: Sequence[str], default_value: Any) -> Any:
     return curr
 
 
-def set_nested(keys: Sequence[str], value: Any) -> Dict[str, Any]:
+def set_nested(keys: Iterable[str], value: Any) -> Dict[str, Any]:
     """Returns a deep-copied config with the nested key set to value.
 
     Like get_nested(), if any key is not found, this will not raise an error.

@@ -16,7 +16,7 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import Dict, Iterable, List, Optional, Tuple, Union, Sequence, Set
+from typing import Dict, Iterable, List, Optional, Tuple, Union, Set
 
 import colorama
 import filelock
@@ -967,7 +967,8 @@ class RetryingVmProvisioner(object):
                 handle = global_user_state.get_handle_from_cluster_name(
                     cluster_name)
                 assert isinstance(handle, CloudVmRayResourceHandle), (
-                    f'handle should not be None {cluster_name!r}')
+                    'handle should be CloudVmRayResourceHandle (found: '
+                    f'{type(handle)}) {cluster_name!r}')
                 config = common_utils.read_yaml(handle.cluster_yaml)
                 # This is for the case when the zone field is not set in the
                 # launched resources in a previous launch (e.g., ctrl-c during
@@ -2797,7 +2798,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def get_job_status(
         self,
         handle: CloudVmRayResourceHandle,
-        job_ids: Optional[Sequence[int]] = None,
+        job_ids: Optional[List[int]] = None,
         stream_logs: bool = True
     ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
         code = job_lib.JobLibCodeGen.get_job_status(job_ids)
@@ -2812,7 +2813,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         return statuses
 
     def cancel_jobs(self, handle: CloudVmRayResourceHandle,
-                    jobs: Optional[Sequence[int]]):
+                    jobs: Optional[List[int]]):
         job_owner = onprem_utils.get_job_owner(handle.cluster_yaml)
         code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs)
 
@@ -2828,7 +2829,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def sync_down_logs(
             self,
             handle: CloudVmRayResourceHandle,
-            job_ids: Optional[Sequence[str]],
+            job_ids: Optional[List[str]],
             local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
         """Sync down logs for the given job_ids.
 

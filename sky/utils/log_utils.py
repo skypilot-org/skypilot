@@ -1,7 +1,7 @@
 """Logging utils."""
 import enum
 import threading
-from typing import Optional, Sequence
+from typing import Optional, List
 
 import rich.console as rich_console
 
@@ -98,8 +98,7 @@ class RayUpLineProcessor(LineProcessor):
         self.status_display.stop()
 
 
-def create_table(field_names: Sequence[str],
-                 **kwargs) -> prettytable.PrettyTable:
+def create_table(field_names: List[str], **kwargs) -> prettytable.PrettyTable:
     """Creates table with default style."""
     border = kwargs.pop('border', False)
     align = kwargs.pop('align', 'l')

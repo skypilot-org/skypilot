@@ -1,7 +1,7 @@
 """SDK functions for cluster/job management."""
 import getpass
 import sys
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Union
 
 import colorama
 
@@ -33,7 +33,7 @@ logger = sky_logging.init_logger(__name__)
 
 
 @usage_lib.entrypoint
-def status(cluster_names: Optional[Union[str, Sequence[str]]] = None,
+def status(cluster_names: Optional[Union[str, List[str]]] = None,
            refresh: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get cluster statuses.
@@ -520,7 +520,7 @@ def queue(cluster_name: str,
 # pylint: disable=redefined-builtin
 def cancel(cluster_name: str,
            all: bool = False,
-           job_ids: Optional[Sequence[int]] = None) -> None:
+           job_ids: Optional[List[int]] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel jobs on a cluster.
 
@@ -609,7 +609,7 @@ def tail_logs(cluster_name: str,
 @usage_lib.entrypoint
 def download_logs(
         cluster_name: str,
-        job_ids: Optional[Sequence[str]],
+        job_ids: Optional[List[str]],
         local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Download the logs of jobs.
@@ -649,11 +649,10 @@ def download_logs(
 
 
 @usage_lib.entrypoint
-def job_status(
-    cluster_name: str,
-    job_ids: Optional[Sequence[int]],
-    stream_logs: bool = False
-) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
+def job_status(cluster_name: str,
+               job_ids: Optional[List[int]],
+               stream_logs: bool = False
+              ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get the status of jobs.
 
@@ -801,7 +800,7 @@ def spot_queue(refresh: bool,
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def spot_cancel(name: Optional[str] = None,
-                job_ids: Optional[Sequence[int]] = None,
+                job_ids: Optional[List[int]] = None,
                 all: bool = False) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel managed spot jobs.

@@ -4,7 +4,7 @@ import os
 import subprocess
 import time
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
 
 import colorama
@@ -477,7 +477,7 @@ class Storage(object):
           is_local_path: bool; Whether the source is a local path. False if URI.
         """
 
-        def _check_basename_conflicts(source_list: Sequence[str]) -> None:
+        def _check_basename_conflicts(source_list: List[str]) -> None:
             """Checks if two paths in source_list have the same basename."""
             basenames = [os.path.basename(s) for s in source_list]
             conflicts = {x for x in basenames if basenames.count(x) > 1}
@@ -916,7 +916,7 @@ class S3Store(AbstractStore):
         return aws.resource('s3').Bucket(self.name)
 
     def batch_aws_rsync(self,
-                        source_path_list: Sequence[Path],
+                        source_path_list: List[Path],
                         create_dirs: bool = False) -> None:
         """Invokes aws s3 sync to batch upload a list of local paths to S3
 
@@ -1208,7 +1208,7 @@ class GcsStore(AbstractStore):
         return self.client.get_bucket(self.name)
 
     def batch_gsutil_cp(self,
-                        source_path_list: Sequence[Path],
+                        source_path_list: List[Path],
                         create_dirs: bool = False) -> None:
         """Invokes gsutil cp -n to batch upload a list of local paths
 
