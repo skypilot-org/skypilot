@@ -211,17 +211,6 @@ class SCPClient:
         }
         return self._post(url, request_body)
 
-    def remove_instances(self, *instance_ids: str) -> Dict[str, Any]:
-        """Terminate instances."""
-        data = json.dumps({
-            'instance_ids': [
-                instance_ids[0] # TODO(ewzeng) don't hardcode
-            ]
-        })
-        url = f'{API_ENDPOINT}/virtual-server/instance-operations/terminate'
-
-        return self._post(url, data).get('data', []).get('terminated_instances', [])
-
     def terminate_instance(self, vm_id):
         url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{vm_id}'
         return self._delete(url)
@@ -343,47 +332,3 @@ class SCPClient:
     def stop_instance(self, vm_id):
         url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{vm_id}/stop'
         return self._post(url=url, request_body={})
-
-    # def set_ssh_key(self, external_ip: str) -> None:
-    #
-    #     try:
-    #         with open(self.ssh_public_key_path, 'r') as f:
-    #             key = f.read()
-    #     # Load configuration file values
-    #     except FileNotFoundError:
-    #         print('Public SSH key does not exist.')
-    #
-    #     command_list = ['mkdir -p ~/.ssh/',
-    #                     'echo "%s" > ~/.ssh/authorized_keys' % key,
-    #                     'chmod 644 ~/.ssh/authorized_keys',
-    #                     'chmod 700 ~/.ssh/']
-    #     self.exec_ssh_command(command_list=command_list, external_ip=external_ip)
-    #
-    # def set_default_config(self, external_ip) -> None:
-    #     command_list = [
-    #         'echo "nameserver 8.8.8.8" > /etc/resolv.conf',
-    #         'pip3 install --upgrade --ignore-installed pip setuptools',
-    #         'pip3 install -U "ray[default]"',
-    #         'echo export LANG=ko_KR.utf8 >> ~/.bashrc',
-    #         'echo export LC_ALL=ko_KR.utf8 >> ~/.bashrc',
-    #         'source ~/.bashrc',
-    #         'yum -y install rsync'
-    #     ]
-    #     self.exec_ssh_command(command_list=command_list, external_ip=external_ip)
-    # def exec_ssh_command(self, command_list: List[str], external_ip: str):
-    #
-    #     if len(command_list) <= 0 or external_ip is None:
-    #         return
-    #
-    #     client = paramiko.SSHClient()
-    #     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    #     client.connect(external_ip, username=self.user_name, password=self.password)
-    #     for command in command_list:
-    #         stdin, stdout, stderr = client.exec_command(command)
-    #         exit_status = stdout.channel.recv_exit_status()
-    #         if exit_status == 0:
-    #             print("Process finished")
-    #         else:
-    #             print("Error", exit_status)
-    #
-    #     client.close()
