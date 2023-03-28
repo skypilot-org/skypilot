@@ -710,7 +710,7 @@ def _launch_with_confirm(
     retry_until_up: bool = False,
     no_setup: bool = False,
     node_type: Optional[str] = None,
-):
+) -> str:
     """Launch a cluster with a Task."""
     with sky.Dag() as dag:
         dag.add(task)
@@ -778,6 +778,8 @@ def _launch_with_confirm(
             retry_until_up=retry_until_up,
             no_setup=no_setup,
         )
+
+    return cluster
 
 
 # TODO: skip installing ray to speed up provisioning.
@@ -1241,7 +1243,7 @@ def launch(
     retry_until_up: bool,
     yes: bool,
     no_setup: bool,
-):
+) -> str:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
@@ -1293,17 +1295,18 @@ def launch(
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'{backend_name} backend is not supported.')
 
-    _launch_with_confirm(task,
-                         backend,
-                         cluster,
-                         dryrun=dryrun,
-                         detach_setup=detach_setup,
-                         detach_run=detach_run,
-                         no_confirm=yes,
-                         idle_minutes_to_autostop=idle_minutes_to_autostop,
-                         down=down,
-                         retry_until_up=retry_until_up,
-                         no_setup=no_setup)
+    return _launch_with_confirm(
+        task,
+        backend,
+        cluster,
+        dryrun=dryrun,
+        detach_setup=detach_setup,
+        detach_run=detach_run,
+        no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
+        no_setup=no_setup)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
