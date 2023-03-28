@@ -331,7 +331,7 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
-            'disk_iops': r.cloud.get_disk_iops()
+            'disk_iops': r.cloud.get_disk_iops(r.disk_type)
         }
 
     def get_feasible_launchable_resources(self,

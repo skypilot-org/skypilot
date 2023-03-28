@@ -169,7 +169,7 @@ class Resources:
         disk_type = ''
         if self.disk_type is not None:
             cloud_disk_type = self.cloud.get_disk_type(self.disk_type)
-            disk_type = f', disk_type={cloud_disk_type}'
+            disk_type = f', disk_type={self.disk_type}:{cloud_disk_type}'
 
         disk_size = ''
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
