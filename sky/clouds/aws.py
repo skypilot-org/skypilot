@@ -1,4 +1,5 @@
 """Amazon Web Services."""
+import enum
 import functools
 import json
 import os
@@ -38,6 +39,13 @@ _CREDENTIAL_FILES = [
 ]
 
 DEFAULT_AMI_GB = 45
+
+
+class AWSIdentityType(enum.Enum):
+    """AWS identity type."""
+    SSO = 'sso'
+    STATIC = 'static'
+    IAM_ROLE = 'iam-role'
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -405,7 +413,12 @@ class AWS(clouds.Cloud):
         static_credential_exists = os.path.isfile(
             os.path.expanduser('~/.aws/credentials'))
         hints = None
-        if cls._is_current_identity_sso():
+        identity_type = cls._current_identity_type()
+        single_cloud_hint = (
+            ' It will work if you use AWS only, but will cause problems '
+            'if you want to use multiple clouds. To set up static credentials, '
+            'try: aws configure')
+        if identity_type == AWSIdentityType.SSO:
             hints = 'AWS SSO is set. '
             if static_credential_exists:
                 hints += (
@@ -413,11 +426,14 @@ class AWS(clouds.Cloud):
                     'with static credentials (e.g., ~/.aws/credentials) by unsetting '
                     'the AWS_PROFILE environment variable.')
             else:
-                hints += (
-                    ' It will work if you use AWS only, but will cause problems '
-                    'if you want to use multiple clouds. To set up static credentials, '
-                    'try: aws configure')
-
+                hints += single_cloud_hint
+        elif identity_type == AWSIdentityType.IAM_ROLE:
+            # When using an IAM role, the credentials may not store in the
+            # ~/.aws/credentials file. So we don't check the existence of the
+            # file. This will happen when the user is on the VM (or spot-controller)
+            # created by SSO account, i.e. the VM will be assigned with the IAM
+            # role: skypilot-v1.
+            hints = f'AWS IAM role is set. {single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
@@ -433,15 +449,20 @@ class AWS(clouds.Cloud):
         return True, hints
 
     @classmethod
-    def _is_current_identity_sso(cls) -> bool:
+    def _current_identity_type(cls) -> Optional[AWSIdentityType]:
         proc = subprocess.run('aws configure list',
                               shell=True,
                               check=False,
                               stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
-            return False
-        return 'sso' in proc.stdout.decode().split()
+            return None
+        if AWSIdentityType.SSO.value in proc.stdout.decode():
+            return AWSIdentityType.SSO
+        elif AWSIdentityType.IAM_ROLE.value in proc.stdout.decode():
+            return AWSIdentityType.IAM_ROLE
+        else:
+            return AWSIdentityType.STATIC
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
@@ -495,7 +516,9 @@ class AWS(clouds.Cloud):
             # userid changed for a cluster).
             # 2. In the case where the multiple users belong to an organization,
             # those users will have different account id, so fallback works.
-            user_ids = [user_info['UserId'], user_info['Account']]
+            user_ids = [
+                user_info['UserId'], user_info['Account'], user_info['Arn']
+            ]
         except aws.botocore_exceptions().NoCredentialsError:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
@@ -544,8 +567,8 @@ class AWS(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         # TODO(skypilot): ~/.aws/credentials is required for users using multiple clouds.
-        # If this file does not exist, users can launch on AWS via AWS SSO and assign
-        # IAM role to the cluster.
+        # If this file does not exist, users can launch on AWS via AWS SSO or assumed IAM
+        # role (only when the user is on an AWS cluster) and assign IAM role to the cluster.
         # However, if users launch clusters in a non-AWS cloud, those clusters do not
         # understand AWS IAM role so will not be able to access private AWS EC2 resources
         # and S3 buckets.
@@ -559,7 +582,7 @@ class AWS(clouds.Cloud):
         # to define a mechanism to find out the cloud provider of the cluster to be
         # launched in this function and make sure the cluster will not be used for
         # launching clusters in other clouds, e.g. spot controller.
-        if self._is_current_identity_sso():
+        if self._current_identity_type() != AWSIdentityType.STATIC:
             return {}
         return {
             f'~/.aws/{filename}': f'~/.aws/{filename}'
