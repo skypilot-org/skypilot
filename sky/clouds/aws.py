@@ -42,10 +42,16 @@ DEFAULT_AMI_GB = 45
 
 
 class AWSIdentityType(enum.Enum):
-    """AWS identity type."""
+    """AWS identity type.
+
+    The account type is determined by the current user identity,
+    based on `aws configure list`. We will check the existence of
+    the value in the output of `aws configure list` to determine
+    the account type.
+    """
     SSO = 'sso'
-    STATIC = 'static'
     IAM_ROLE = 'iam-role'
+    STATIC = 'static'
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -428,10 +434,10 @@ class AWS(clouds.Cloud):
             else:
                 hints += single_cloud_hint
         elif identity_type == AWSIdentityType.IAM_ROLE:
-            # When using an IAM role, the credentials may not store in the
-            # ~/.aws/credentials file. So we don't check the existence of the
-            # file. This will happen when the user is on the VM (or spot-controller)
-            # created by SSO account, i.e. the VM will be assigned with the IAM
+            # When using an IAM role, the credentials may not exist in the
+            # ~/.aws/credentials file. So we don't check for the existence of the
+            # file. This will happen when the user is on a VM (or spot-controller)
+            # created by an SSO account, i.e. the VM will be assigned the IAM
             # role: skypilot-v1.
             hints = f'AWS IAM role is set.{single_cloud_hint}'
         else:
@@ -457,6 +463,16 @@ class AWS(clouds.Cloud):
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
             return None
+        # We determine the identity type by looking at the output of
+        # `aws configure list`. The output looks like:
+        #   Name                   Value         Type    Location
+        #   ----                   -----         ----    --------
+        #   profile                <not set>     None    None
+        #   access_key     *       <not set>     sso     None
+        #   secret_key     *       <not set>     sso     None
+        #   region                 <not set>     None    None
+        # We try to determine the identity type by looking for the
+        # string "sso"/"iam-role" in the output, i.e. the "Type" column.
         if AWSIdentityType.SSO.value in proc.stdout.decode():
             return AWSIdentityType.SSO
         elif AWSIdentityType.IAM_ROLE.value in proc.stdout.decode():
@@ -516,9 +532,7 @@ class AWS(clouds.Cloud):
             # userid changed for a cluster).
             # 2. In the case where the multiple users belong to an organization,
             # those users will have different account id, so fallback works.
-            user_ids = [
-                user_info['UserId'], user_info['Account'], user_info['Arn']
-            ]
+            user_ids = [user_info['UserId'], user_info['Account']]
         except aws.botocore_exceptions().NoCredentialsError:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(

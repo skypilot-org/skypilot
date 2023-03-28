@@ -2470,7 +2470,7 @@ def check_public_cloud_enabled():
     """Checks if any of the public clouds is enabled.
 
     Exceptions:
-        exceptions.AllCloudDisabledError: if no public cloud is enabled.
+        exceptions.NoCloudAccessError: if no public cloud is enabled.
     """
 
     def _no_public_cloud():
@@ -2485,7 +2485,7 @@ def check_public_cloud_enabled():
     sky_check.check(quiet=True)
     if _no_public_cloud():
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.AllCloudDisabledError(
+            raise exceptions.NoCloudAccessError(
                 'Cloud access is not set up. Run: '
                 f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
 

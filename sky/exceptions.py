@@ -204,6 +204,6 @@ class ClusterOwnerIdentityMismatchError(Exception):
     pass
 
 
-class AllCloudDisabledError(Exception):
+class NoCloudAccessError(Exception):
     """Raised when all clouds are disabled."""
     pass

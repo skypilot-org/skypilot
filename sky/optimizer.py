@@ -105,7 +105,7 @@ class Optimizer:
         Raises:
             exceptions.ResourcesUnavailableError: if no resources are available
                 for a task.
-            exceptions.AllCloudDisabledError: if no public clouds are enabled.
+            exceptions.NoCloudAccessError: if no public clouds are enabled.
         """
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
