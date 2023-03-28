@@ -724,7 +724,7 @@ def _launch_with_confirm(
         # Show the optimize log before the prompt if the cluster does not exist.
         try:
             backend_utils.check_public_cloud_enabled()
-        except RuntimeError as e:
+        except exceptions.NoCloudAccessError as e:
             # Catch the exception where the public cloud is not enabled, and
             # only print the error message without the error type.
             click.secho(e, fg='yellow')
@@ -993,9 +993,6 @@ def _make_task_from_entrypoint_with_overrides(
             click.secho('Task from command: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
 
-    if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
-        cloud = 'local'
-
     if is_yaml:
         assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
@@ -1007,6 +1004,9 @@ def _make_task_from_entrypoint_with_overrides(
     # Override.
     if workdir is not None:
         task.workdir = workdir
+
+    if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
+        cloud = 'local'
 
     override_params = _parse_override_params(cloud=cloud,
                                              region=region,

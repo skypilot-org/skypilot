@@ -415,6 +415,7 @@ def launch(
                 our pre-checks (e.g., cluster name invalid) or a region/zone
                 throwing resource unavailability.
         exceptions.CommandError: any ssh command error.
+        exceptions.NoCloudAccessError: if all clouds are disabled.
     Other exceptions may be raised depending on the backend.
     """
     entrypoint = task

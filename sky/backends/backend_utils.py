@@ -2474,7 +2474,9 @@ def validate_schema(obj, schema, err_msg_prefix=''):
                     else:
                         err_msg += f'\nFound unsupported field {field!r}.'
         else:
-            err_msg = err_msg_prefix + e.message
+            # Example e.json_path value: '$.resources'
+            err_msg = (err_msg_prefix + e.message +
+                       f'. Check problematic field(s): {e.json_path}')
 
     if err_msg:
         with ux_utils.print_exception_no_traceback():
@@ -2482,7 +2484,11 @@ def validate_schema(obj, schema, err_msg_prefix=''):
 
 
 def check_public_cloud_enabled():
-    """Checks if any of the public clouds is enabled."""
+    """Checks if any of the public clouds is enabled.
+
+    Exceptions:
+        exceptions.NoCloudAccessError: if no public cloud is enabled.
+    """
 
     def _no_public_cloud():
         enabled_clouds = global_user_state.get_enabled_clouds()
@@ -2496,7 +2502,7 @@ def check_public_cloud_enabled():
     sky_check.check(quiet=True)
     if _no_public_cloud():
         with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
+            raise exceptions.NoCloudAccessError(
                 'Cloud access is not set up. Run: '
                 f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
 

@@ -204,3 +204,8 @@ class CloudUserIdentityError(Exception):
 class ClusterOwnerIdentityMismatchError(Exception):
     """The cluster's owner identity does not match the current user identity."""
     pass
+
+
+class NoCloudAccessError(Exception):
+    """Raised when all clouds are disabled."""
+    pass
