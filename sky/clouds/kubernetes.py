@@ -26,6 +26,8 @@ class Kubernetes(clouds.Cloud):
         clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the Kubernetes implementation yet.',
     }
 
+    IMAGE = 'us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest'
+
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:

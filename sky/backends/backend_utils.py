@@ -811,6 +811,10 @@ def write_cluster_config(
     assert cluster_name is not None
     credentials = sky_check.get_cloud_credential_file_mounts()
 
+    k8s_image = None
+    if isinstance(cloud, clouds.Kubernetes):
+        k8s_image = cloud.IMAGE
+
     ip_list = None
     auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
     if isinstance(cloud, clouds.Local):
@@ -877,6 +881,9 @@ def write_cluster_config(
 
                 # GCP only:
                 'gcp_project_id': gcp_project_id,
+
+                # Kubernetes only:
+                'skypilot_k8s_image': k8s_image,
 
                 # Ray version.
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,

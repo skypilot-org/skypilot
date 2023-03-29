@@ -137,8 +137,8 @@ available_node_types:
             medium: Memory
         containers:
         - name: ray-node
-          imagePullPolicy: Never
-          image: skypilot:latest
+          imagePullPolicy: Always
+          image: {{skypilot_k8s_image}}
           command: ["/bin/bash", "-c", "--"]
           args: ["trap : TERM INT; sleep infinity & wait;"]
           lifecycle:
@@ -200,8 +200,8 @@ available_node_types:
             medium: Memory
         containers:
         - name: ray-node
-          imagePullPolicy: Never
-          image: skypilot:latest
+          imagePullPolicy: Always
+          image: {{skypilot_k8s_image}}
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
           command: ["/bin/bash", "-c", "--"]

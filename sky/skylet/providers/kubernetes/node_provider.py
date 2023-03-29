@@ -4,6 +4,7 @@ import logging
 import subprocess
 import time
 from typing import Dict
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from kubernetes.client.rest import ApiException
@@ -98,9 +99,23 @@ class KubernetesNodeProvider(NodeProvider):
             "server"].split("//")[1].split(":")[0]
         return api_server_ip
 
+    @staticmethod
+    def get_external_ip_for_nodeport() -> str:
+        # Return the IP address of the first node with an external IP
+        nodes = core_api().list_node().items
+        for node in nodes:
+            if node.status.addresses:
+                for address in node.status.addresses:
+                    if address.type == "ExternalIP":
+                        return address.address
+        # If no external IP is found, use the API server IP
+        api_host = core_api().api_client.configuration.host
+        parsed_url = urlparse(api_host)
+        return parsed_url.hostname
+
     def external_ip(self, node_id):
         # Extract the IP address of the API server from kubectl
-        return self.get_apiserver_ip()
+        return self.get_external_ip_for_nodeport()
 
     def external_port(self, node_id):
         # Extract the NodePort of the head node's SSH service

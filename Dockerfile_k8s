@@ -1,4 +1,6 @@
-# docker build -t skypilot:latest -f Dockerfile_k8s ./sky
+# docker build --platform=linux/amd64 -t skypilot:latest -f Dockerfile_k8s ./sky
+# docker build --platform=linux/amd64 -t us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest -f Dockerfile_k8s ./sky
+# docker push us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest
 FROM continuumio/miniconda3:22.11.1
 
 # Initialize conda for root user, install ssh and other local dependencies
