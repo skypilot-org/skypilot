@@ -336,4 +336,7 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    private_key_path, public_key_path = get_or_generate_keys()
+    config['auth']['ssh_private_key'] = private_key_path
+    config['auth']['ssh_public_key'] = public_key_path
     return config

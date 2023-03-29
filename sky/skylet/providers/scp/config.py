@@ -47,7 +47,7 @@ class ZoneConfig:
         instance_config['contractId'] = self.product_ids['CONTRACT_DISCOUNT:None']
         product_group_name = 'COMPUTE:GPU Server' if node_config['use_gpu'] else 'COMPUTE:Virtual Server'
         instance_config['productGroupId'] = self.get_product_group(product_group_name)
-
+        instance_config['initialScript'] = self._get_vm_init_script(node_config['auth']['ssh_public_key'])
 
         miscellaneous ={
             'deletionProtectionEnabled': False,
@@ -94,3 +94,39 @@ class ZoneConfig:
             if len(subnet_list) > 0: vpc_subnets[vpc] = subnet_list
 
         return vpc_subnets
+
+    def _get_vm_init_script(self, ssh_public_key_path):
+
+        init_script_content = self._get_ssh_key_gen_cmd(ssh_public_key_path) + "; " + self._get_default_config_cmd()
+        return {
+            "encodingType" : "plain",
+            "initialScriptShell": "bash",
+            "initialScriptType": "text",
+            "initialScriptContent": init_script_content
+        }
+
+    def _get_ssh_key_gen_cmd(self, ssh_public_key_path):
+        cmd_st = "mkdir -p ~/.ssh/; touch ~/.ssh/authorized_keys;"
+        cmd_ed = "chmod 644 ~/.ssh/authorized_keys; chmod 700 ~/.ssh/"
+        try:
+            with open(ssh_public_key_path, 'r') as f:
+                key = f.read()
+        # Load configuration file values
+        except FileNotFoundError:
+            print('Public SSH key does not exist.')
+
+        cmd = "echo '{}' &>>~/.ssh/authorized_keys;".format(key)
+
+        return cmd_st + cmd + cmd_ed
+    def _get_default_config_cmd(self):
+        cmd_list = ["echo 'nameserver 8.8.8.8' &>>/etc/resolv.conf",
+                    "echo export LANG=ko_KR.utf8 &>>~/.bashrc",
+                    "echo export LC_ALL=ko_KR.utf8 &>>~/.bashrc",
+                    "source ~/.bashrc",
+                    "yum -y install rsync"]
+
+        res = ""
+        for cmd in cmd_list:
+            res += cmd + "; "
+
+        return res
