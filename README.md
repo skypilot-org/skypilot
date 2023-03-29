@@ -115,7 +115,7 @@ Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/
 
 More information:
 - [Project blog](https://blog.skypilot.co/)
-- [Introductory blog post](https://medium.com/@zongheng_yang/skypilot-ml-and-data-science-on-any-cloud-with-massive-cost-savings-244189cc7c0f)
+- [Introductory blog post](https://blog.skypilot.co/introducing-skypilot/)
 
 ## Issues, feature requests, and questions
 We are excited to hear your feedback! 
