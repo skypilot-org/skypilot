@@ -36,6 +36,7 @@ def process_subprocess_stream(
     replace_crlf: bool = False,
     line_processor: Optional[log_utils.LineProcessor] = None,
     streaming_prefix: Optional[str] = None,
+    source: Optional[str] = None
 ) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     if line_processor is None:
@@ -103,7 +104,23 @@ def process_subprocess_stream(
                     if log_path != '/dev/null':
                         fout.write(line)
                         fout.flush()
-                    line_processor.process_line(line)
+                    if isinstance(line_processor, log_utils.RsyncProgressBarProcessor):
+                        if "./\n" == line:
+                            line_processor.state = line_processor.RsyncStatus.STARTLOG
+                        elif line_processor.state == line_processor.RsyncStatus.STARTLOG:
+                            # line[:-1] ignores the \n at the end of the string
+                            temp_path = os.path.join(source, line[:-1])
+                            if os.path.isfile(temp_path):
+                                file_path = temp_path
+                                task_id = line_processor.add_task(
+                                f'[bold cyan]{file_path}[/]', total=100)
+                            else:
+                                task_id = line_processor.get_current_task_id()
+                                if task_id:
+                                    line_processor.update(task_id, line, refresh=True)
+                                    line_processor.remove_task_if_complete(task_id)
+                    else:
+                        line_processor.process_line(line)
     return stdout, stderr
 
 
@@ -123,6 +140,7 @@ def run_with_log(
     streaming_prefix: Optional[str] = None,
     ray_job_id: Optional[str] = None,
     use_sudo: bool = False,
+    source: Optional[str] = None,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
@@ -233,6 +251,7 @@ def run_with_log(
                 # Replace CRLF when the output is logged to driver by ray.
                 replace_crlf=with_ray,
                 streaming_prefix=streaming_prefix,
+                source=source
             )
         proc.wait()
         if require_outputs:
