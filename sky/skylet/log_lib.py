@@ -26,18 +26,17 @@ _SKY_LOG_TAILING_GAP_SECONDS = 0.2
 logger = sky_logging.init_logger(__name__)
 
 
-def process_subprocess_stream(
-    proc,
-    log_path: str,
-    stream_logs: bool,
-    start_streaming_at: str = '',
-    end_streaming_at: Optional[str] = None,
-    skip_lines: Optional[List[str]] = None,
-    replace_crlf: bool = False,
-    line_processor: Optional[log_utils.LineProcessor] = None,
-    streaming_prefix: Optional[str] = None,
-    source: Optional[str] = None
-) -> Tuple[str, str]:
+def process_subprocess_stream(proc,
+                              log_path: str,
+                              stream_logs: bool,
+                              start_streaming_at: str = '',
+                              end_streaming_at: Optional[str] = None,
+                              skip_lines: Optional[List[str]] = None,
+                              replace_crlf: bool = False,
+                              line_processor: Optional[
+                                  log_utils.LineProcessor] = None,
+                              streaming_prefix: Optional[str] = None,
+                              source: Optional[str] = None) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     if line_processor is None:
         line_processor = log_utils.LineProcessor()
@@ -104,7 +103,8 @@ def process_subprocess_stream(
                     if log_path != '/dev/null':
                         fout.write(line)
                         fout.flush()
-                    if isinstance(line_processor, log_utils.RsyncProgressBarProcessor):
+                    if isinstance(line_processor,
+                                  log_utils.RsyncProgressBarProcessor):
                         if "./\n" == line:
                             line_processor.state = line_processor.RsyncStatus.STARTLOG
                         elif line_processor.state == line_processor.RsyncStatus.STARTLOG:
@@ -113,12 +113,15 @@ def process_subprocess_stream(
                             if os.path.isfile(temp_path):
                                 file_path = temp_path
                                 task_id = line_processor.add_task(
-                                f'[bold cyan]{file_path}[/]', total=100)
+                                    f'[bold cyan]{file_path}[/]', total=100)
                             else:
                                 task_id = line_processor.get_current_task_id()
                                 if task_id:
-                                    line_processor.update(task_id, line, refresh=True)
-                                    line_processor.remove_task_if_complete(task_id)
+                                    line_processor.update(task_id,
+                                                          line,
+                                                          refresh=True)
+                                    line_processor.remove_task_if_complete(
+                                        task_id)
                     else:
                         line_processor.process_line(line)
     return stdout, stderr
@@ -251,8 +254,7 @@ def run_with_log(
                 # Replace CRLF when the output is logged to driver by ray.
                 replace_crlf=with_ray,
                 streaming_prefix=streaming_prefix,
-                source=source
-            )
+                source=source)
         proc.wait()
         if require_outputs:
             return proc.returncode, stdout, stderr

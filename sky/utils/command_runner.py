@@ -285,16 +285,15 @@ class SSHCommandRunner:
                                     **kwargs)
 
     def rsync(
-        self,
-        source: str,
-        target: str,
-        *,
-        up: bool,
-        # Advanced options.
-        log_path: str = os.devnull,
-        stream_logs: bool = True,
-        line_processor: Optional[log_utils.LineProcessor] = None
-    ) -> None:
+            self,
+            source: str,
+            target: str,
+            *,
+            up: bool,
+            # Advanced options.
+            log_path: str = os.devnull,
+            stream_logs: bool = True,
+            line_processor: Optional[log_utils.LineProcessor] = None) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
         Args:
@@ -353,13 +352,14 @@ class SSHCommandRunner:
             ])
         command = ' '.join(rsync_command)
         source_full_path = os.path.expanduser(source)
-        returncode, _, stderr = log_lib.run_with_log(command,
-                                                     log_path=log_path,
-                                                     stream_logs=stream_logs,
-                                                     shell=True,
-                                                     require_outputs=True,
-                                                     line_processor=line_processor,
-                                                     source=source_full_path)
+        returncode, _, stderr = log_lib.run_with_log(
+            command,
+            log_path=log_path,
+            stream_logs=stream_logs,
+            shell=True,
+            require_outputs=True,
+            line_processor=line_processor,
+            source=source_full_path)
 
         direction = 'up' if up else 'down'
         subprocess_utils.handle_returncode(

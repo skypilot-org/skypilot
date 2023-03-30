@@ -2416,16 +2416,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             ip_list, **ssh_credentials)
 
         def _sync_workdir_node(runner: command_runner.SSHCommandRunner) -> None:
-            runner.rsync(
-                source=workdir,
-                target=SKY_REMOTE_WORKDIR,
-                up=True,
-                log_path=log_path,
-                stream_logs=False,
-                line_processor = log_utils.RsyncProgressBarProcessor(transient=True,
-                                                                 redirect_stdout=False,
-                                                                 redirect_stderr=False)
-            )
+            runner.rsync(source=workdir,
+                         target=SKY_REMOTE_WORKDIR,
+                         up=True,
+                         log_path=log_path,
+                         stream_logs=False,
+                         line_processor=log_utils.RsyncProgressBarProcessor(
+                             transient=True,
+                             redirect_stdout=False,
+                             redirect_stderr=False))
 
         num_nodes = handle.launched_nodes
         plural = 's' if num_nodes > 1 else ''
@@ -3441,8 +3440,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     run_rsync=True,
                     action_message='Syncing',
                     log_path=log_path,
-                    stream_logs=False
-                )
+                    stream_logs=False)
                 continue
 
             storage = cloud_stores.get_storage_from_path(src)

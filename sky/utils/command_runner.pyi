@@ -9,6 +9,7 @@ import typing
 from sky import sky_logging as sky_logging
 from sky.skylet import log_lib as log_lib
 from sky.utils import subprocess_utils as subprocess_utils
+from sky.utils import log_utils
 from typing import List, Optional, Tuple, Union
 from typing_extensions import Literal
 
@@ -100,5 +101,6 @@ class SSHCommandRunner:
               *,
               up: bool,
               log_path: str = ...,
-              stream_logs: bool = ...) -> None:
+              stream_logs: bool = ...,
+              line_processor: Optional[log_utils.LineProcessor] = ...) -> None:
         ...

@@ -2,7 +2,7 @@
 import enum
 import threading
 import re
-from typing import List, Optional, NamedTuple, Any, NewType
+from typing import List, Optional, NamedTuple, Any, NewType, Dict
 
 import rich.console as rich_console
 from rich.progress import Progress, Task
@@ -100,6 +100,7 @@ class RayUpLineProcessor(LineProcessor):
         del except_type, except_value, traceback  # unused
         self.status_display.stop()
 
+
 class ProgressSample(NamedTuple):
     """Sample of progress for a given time."""
 
@@ -107,34 +108,34 @@ class ProgressSample(NamedTuple):
     """Timestamp of sample."""
     completed: float
     """Number of steps completed."""
-    
+
+
 class RsyncProgressBarProcessor(LineProcessor, Progress):
     """A progress bar processor for `rsync` log lines."""
+
     # original Progress class defined in
     # https://github.com/Textualize/rich/blob/master/rich/progress.py
     class RsyncStatus(enum.Enum):
         STARTLOG = 0
         RUNTIME_SETUP = 1
 
-    def __init__(
-        self,        
-        transient: bool = True,
-        redirect_stdout: bool = True,
-        redirect_stderr: bool = True
-    ):
+    def __init__(self,
+                 transient: bool = True,
+                 redirect_stdout: bool = True,
+                 redirect_stderr: bool = True):
         self.current_task_id = None
         self._tasks: Dict[TaskID, Task] = {}
-        super().__init__(transient=transient, redirect_stdout=redirect_stdout, redirect_stderr=redirect_stderr)
+        super().__init__(transient=transient,
+                         redirect_stdout=redirect_stdout,
+                         redirect_stderr=redirect_stderr)
 
     def __enter__(self):
         self.state = None
         self._task_index = 1
         self.start()
         return self
-     
-    def get_current_task_id(
-        self
-    ) -> TaskID:
+
+    def get_current_task_id(self):
         """returns the task_id currently being processed"""
         if self.current_task_id:
             return self.current_task_id
@@ -183,8 +184,7 @@ class RsyncProgressBarProcessor(LineProcessor, Progress):
             self._task_index = TaskID(int(self._task_index) + 1)
         self.refresh()
         return new_task_index
-        
-        
+
     def update(
         self,
         task_id: TaskID,
@@ -198,7 +198,7 @@ class RsyncProgressBarProcessor(LineProcessor, Progress):
             line (str): string read from output of the rsync command
             refresh (bool): Force a refresh of progress information. Default is False.
         """
-        
+
         with self._lock:
             if task_id in self._tasks:
                 task = self._tasks[task_id]
@@ -216,18 +216,17 @@ class RsyncProgressBarProcessor(LineProcessor, Progress):
                     while _progress and _progress[0].timestamp < old_sample_time:
                         popleft()
                     if update_completed > 0:
-                        _progress.append(ProgressSample(current_time, update_completed))
-                    if (
-                        task.total is not None
-                        and task.completed >= task.total
-                        and task.finished_time is None
-                    ):
+                        _progress.append(
+                            ProgressSample(current_time, update_completed))
+                    if (task.total is not None and
+                            task.completed >= task.total and
+                            task.finished_time is None):
                         task.finished_time = task.elapsed
-         
+
         if refresh:
             self.refresh()
 
-    def remove_task_if_complete(self, task_id: int) -> None:
+    def remove_task_if_complete(self, task_id: TaskID) -> None:
         """Delete a task if it exists.
 
         Args:
@@ -236,7 +235,7 @@ class RsyncProgressBarProcessor(LineProcessor, Progress):
         with self._lock:
             if task_id in self._tasks and self._tasks[task_id].completed == 100:
                 del self._tasks[task_id]
-            
+
     def __exit__(self, except_type, except_value, traceback):
         del except_type, except_value, traceback  # unused
         self.stop()

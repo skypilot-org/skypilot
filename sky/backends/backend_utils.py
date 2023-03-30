@@ -1193,16 +1193,15 @@ def parallel_data_transfer_to_nodes(
             assert source is not None
             # TODO(zhwu): Optimize for large amount of files.
             # zip / transfer / unzip
-            runner.rsync(
-                source=source,
-                target=target,
-                up=True,
-                log_path=log_path,
-                stream_logs=stream_logs,
-                line_processor = log_utils.RsyncProgressBarProcessor(transient=True,
-                                                                redirect_stdout=False,
-                                                                redirect_stderr=False)
-            )
+            runner.rsync(source=source,
+                         target=target,
+                         up=True,
+                         log_path=log_path,
+                         stream_logs=stream_logs,
+                         line_processor=log_utils.RsyncProgressBarProcessor(
+                             transient=True,
+                             redirect_stdout=False,
+                             redirect_stderr=False))
 
     num_nodes = len(runners)
     plural = 's' if num_nodes > 1 else ''
