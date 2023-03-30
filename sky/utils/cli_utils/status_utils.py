@@ -109,8 +109,8 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
                            reserved_group_name: Optional[str] = None):
     """Compute cluster table values and display for cost report.
 
-    For each cluster, we show: cluster name, resources, launched time, duration
-    that cluster was up, and total estimated cost.
+    For each cluster, this shows: cluster name, resources, launched time,
+    duration that cluster was up, and total estimated cost.
 
     The estimated cost column indicates the price for the cluster based on the
     type of resources being used and the duration of use up until now. This

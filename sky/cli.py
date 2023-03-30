@@ -1673,8 +1673,8 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show estimated costs for launched clusters.
 
-    For each cluster, we show: cluster name, resources, launched time, duration
-    that cluster was up, and total estimated cost.
+    For each cluster, this shows: cluster name, resources, launched time,
+    duration that cluster was up, and total estimated cost.
 
     The estimated cost column indicates the price for the cluster based on the
     type of resources being used and the duration of use up until now. This
@@ -2887,14 +2887,14 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 @cli.command()
 @usage_lib.entrypoint
 def check():
-    """Check what clouds are available to use.
+    """Check which clouds are available to use.
 
-    This checks access credentials for all clouds supported by SkyPilot. If we
-    detect a cloud to be unavailable, the reason and correction steps will be
-    shown.
+    This checks access credentials for all clouds supported by SkyPilot. If a
+    cloud is detected to be inaccessible, the reason and correction steps will
+    be shown.
 
-    The enabled clouds will be cached and they form the "search space" to be
-    considered for each task.
+    The enabled clouds are cached and form the "search space" to be considered
+    for each task.
     """
     sky_check.check()
 
@@ -2932,8 +2932,8 @@ def show_gpus(
     table shows 8x V100s are supported, then the string ``V100:8`` will be
     accepted by the above.
 
-    To show the detailed information of a GPU/TPU type (which clouds offer it,
-    the quantity in each VM type, etc.), use ``sky show-gpus <gpu>``.
+    To show the detailed information of a GPU/TPU type (its price, which clouds
+    offer it, the quantity in each VM type, etc.), use ``sky show-gpus <gpu>``.
 
     To show all accelerators, including less common ones and their detailed
     information, use ``sky show-gpus --all``.
