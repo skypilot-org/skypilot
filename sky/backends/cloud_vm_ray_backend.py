@@ -2422,7 +2422,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 up=True,
                 log_path=log_path,
                 stream_logs=False,
-                line_processor = log_utils.RsyncLineBarProcessor(transient=True,
+                line_processor = log_utils.RsyncProgressBarProcessor(transient=True,
                                                                  redirect_stdout=False,
                                                                  redirect_stderr=False)
             )
@@ -2437,8 +2437,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
-        with log_utils.safe_rich_status('[bold cyan]Syncing[/]'):
-            subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
+        #with log_utils.safe_rich_status('[bold cyan]Syncing[/]'):
+        subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
 
     def _sync_file_mounts(
         self,
@@ -3441,7 +3441,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     run_rsync=True,
                     action_message='Syncing',
                     log_path=log_path,
-                    stream_logs=False,
+                    stream_logs=False
                 )
                 continue
 

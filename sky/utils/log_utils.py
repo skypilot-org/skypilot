@@ -2,10 +2,10 @@
 import enum
 import threading
 import re
-from typing import List, Optional
+from typing import List, Optional, NamedTuple, Any, NewType
 
 import rich.console as rich_console
-from rich.progress import Progress
+from rich.progress import Progress, Task
 
 import colorama
 import pendulum
@@ -17,6 +17,7 @@ logger = sky_logging.init_logger(__name__)
 
 console = rich_console.Console()
 _status = None
+TaskID = NewType("TaskID", int)
 
 
 class _NoOpConsoleStatus:
@@ -99,7 +100,7 @@ class RayUpLineProcessor(LineProcessor):
         del except_type, except_value, traceback  # unused
         self.status_display.stop()
 
-class ProgressSample():
+class ProgressSample(NamedTuple):
     """Sample of progress for a given time."""
 
     timestamp: float
@@ -107,9 +108,9 @@ class ProgressSample():
     completed: float
     """Number of steps completed."""
     
-class RsyncLineBarProcessor(Progress):
-    """A processor for `rsync` log lines."""
-    # original Progress class defined inttps://g
+class RsyncProgressBarProcessor(LineProcessor, Progress):
+    """A progress bar processor for `rsync` log lines."""
+    # original Progress class defined in
     # https://github.com/Textualize/rich/blob/master/rich/progress.py
     class RsyncStatus(enum.Enum):
         STARTLOG = 0
@@ -117,72 +118,128 @@ class RsyncLineBarProcessor(Progress):
 
     def __init__(
         self,        
-        transient: bool = False,
+        transient: bool = True,
         redirect_stdout: bool = True,
         redirect_stderr: bool = True
     ):
-        self.progress_bar_track_ids = []
-        self.prev_percentage = 0
+        self.current_task_id = None
+        self._tasks: Dict[TaskID, Task] = {}
         super().__init__(transient=transient, redirect_stdout=redirect_stdout, redirect_stderr=redirect_stderr)
 
     def __enter__(self):
         self.state = None
-        self.status_display = safe_rich_status('[bold cyan]Syncing')
-        self.status_display.start()
+        self._task_index = 1
+        self.start()
+        return self
+     
+    def get_current_task_id(
+        self
+    ) -> TaskID:
+        """returns the task_id currently being processed"""
+        if self.current_task_id:
+            return self.current_task_id
+        return None
 
+    def add_task(
+        self,
+        description: str,
+        start: bool = True,
+        total: Optional[float] = 100.0,
+        completed: int = 0,
+        visible: bool = True,
+        **fields: Any,
+    ) -> TaskID:
+        """Add a new 'task' to the Progress display.
 
+        Args:
+            description (str): A description of the task.
+            start (bool, optional): Start the task immediately (to calculate elapsed time). If set to False,
+                you will need to call `start` manually. Defaults to True.
+            total (float, optional): Number of total steps in the progress if known.
+                Set to None to render a pulsing animation. Defaults to 100.
+            completed (int, optional): Number of steps completed so far. Defaults to 0.
+            visible (bool, optional): Enable display of the task. Defaults to True.
+            **fields (str): Additional data fields required for rendering.
+
+        Returns:
+            TaskID: An ID you can use when calling `update`.
+        """
+        with self._lock:
+            task = Task(
+                self._task_index,
+                description,
+                total,
+                completed,
+                visible=visible,
+                fields=fields,
+                _get_time=self.get_time,
+                _lock=self._lock,
+            )
+            self._tasks[self._task_index] = task
+            if start:
+                self.start_task(self._task_index)
+            new_task_index = self._task_index
+            self.current_task_id = new_task_index
+            self._task_index = TaskID(int(self._task_index) + 1)
+        self.refresh()
+        return new_task_index
+        
+        
     def update(
         self,
-        task_id: int,
-        line: str
+        task_id: TaskID,
+        line: str,
+        refresh: bool = False,
     ) -> None:
-        """Update information associated with a task.
+        """Process the string read from stdout of rsync command and update information associated with a task.
 
         Args:
             task_id (TaskID): Task id (returned by add_task).
-            total (float, optional): Updates task.total if not None.
-            completed (float, optional): Updates task.completed if not None.
-            advance (float, optional): Add a value to task.completed if not None.
-            description (str, optional): Change task description if not None.
-            visible (bool, optional): Set visible flag if not None.
+            line (str): string read from output of the rsync command
             refresh (bool): Force a refresh of progress information. Default is False.
-            **fields (Any): Additional data fields required for rendering.
+        """
+        
+        with self._lock:
+            if task_id in self._tasks:
+                task = self._tasks[task_id]
+                completed_start = task.completed
+                pattern = r'(\d+)%'
+                result = re.search(pattern, line)
+                if result:
+                    percentage = int(result.group(1))
+                    task.completed = percentage
+                    update_completed = task.completed - completed_start
+                    current_time = self.get_time()
+                    old_sample_time = current_time - self.speed_estimate_period
+                    _progress = task._progress
+                    popleft = _progress.popleft
+                    while _progress and _progress[0].timestamp < old_sample_time:
+                        popleft()
+                    if update_completed > 0:
+                        _progress.append(ProgressSample(current_time, update_completed))
+                    if (
+                        task.total is not None
+                        and task.completed >= task.total
+                        and task.finished_time is None
+                    ):
+                        task.finished_time = task.elapsed
+         
+        if refresh:
+            self.refresh()
+
+    def remove_task_if_complete(self, task_id: int) -> None:
+        """Delete a task if it exists.
+
+        Args:
+            task_id (TaskID): A task ID.
         """
         with self._lock:
-            task = self._tasks[task_id]
-            completed_start = task.completed
-            pattern = r'(\d+)%'
-            result = re.search(pattern, line)
-            if result:
-                percentage = int(result.group(1))
-
-                advance = self.prev_percentage - percentage 
-                self.prev_percentage = percentage
-                task.completed += advance
-                update_completed = task.completed - completed_start
-
-                current_time = self.get_time()
-                old_sample_time = current_time - self.speed_estimate_period
-                _progress = task._progress
-
-                popleft = _progress.popleft
-                while _progress and _progress[0].timestamp < old_sample_time:
-                    popleft()
-                if update_completed > 0:
-                    _progress.append(ProgressSample(current_time, update_completed))
-                if (
-                    task.total is not None
-                    and task.completed >= task.total
-                    and task.finished_time is None
-                ):
-                    task.finished_time = task.elapsed
-            else:
-                return
-
-
+            if task_id in self._tasks and self._tasks[task_id].completed == 100:
+                del self._tasks[task_id]
+            
     def __exit__(self, except_type, except_value, traceback):
         del except_type, except_value, traceback  # unused
-        self.status_display.stop()
+        self.stop()
 
 
 def create_table(field_names: List[str], **kwargs) -> prettytable.PrettyTable:

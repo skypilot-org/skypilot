@@ -1199,6 +1199,9 @@ def parallel_data_transfer_to_nodes(
                 up=True,
                 log_path=log_path,
                 stream_logs=stream_logs,
+                line_processor = log_utils.RsyncProgressBarProcessor(transient=True,
+                                                                redirect_stdout=False,
+                                                                redirect_stderr=False)
             )
 
     num_nodes = len(runners)
@@ -1207,8 +1210,8 @@ def parallel_data_transfer_to_nodes(
                f': {style.BRIGHT}{origin_source}{style.RESET_ALL} -> '
                f'{style.BRIGHT}{target}{style.RESET_ALL}')
     logger.info(message)
-    with log_utils.safe_rich_status(f'[bold cyan]{action_message}[/]'):
-        subprocess_utils.run_in_parallel(_sync_node, runners)
+    #with log_utils.safe_rich_status(f'[bold cyan]{action_message}[/]'):
+    subprocess_utils.run_in_parallel(_sync_node, runners)
 
 
 def check_local_gpus() -> bool:

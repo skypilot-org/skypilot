@@ -24,7 +24,7 @@ _SKY_LOG_WAITING_MAX_RETRY = 5
 _SKY_LOG_TAILING_GAP_SECONDS = 0.2
 
 logger = sky_logging.init_logger(__name__)
-progress_bar_track_ids = []
+
 
 def process_subprocess_stream(
     proc,
@@ -104,22 +104,21 @@ def process_subprocess_stream(
                     if log_path != '/dev/null':
                         fout.write(line)
                         fout.flush()
-                    if isinstance(line_processor, log_utils.RsyncLineBarProcessor):
+                    if isinstance(line_processor, log_utils.RsyncProgressBarProcessor):
                         if "./\n" == line:
                             line_processor.state = line_processor.RsyncStatus.STARTLOG
                         elif line_processor.state == line_processor.RsyncStatus.STARTLOG:
-                            if len(line) > 0:
-                                temp_path = os.path.join(source, line[:-1])
-                                if os.path.isfile(temp_path):
-                                    file_path = temp_path
-                                    task_id = line_processor.add_task(
-                                    f'[bold cyan]{file_path}[/]', total=100)
-                                    line_processor.progress_bar_track_ids.append(task_id)
-                                else:
-                                    line_processor.stop()
-                                    if not line_processor.progress_bar_track_ids:
-                                        line_processor.update(line_processor.progress_bar_track_ids[-1], line)
-                                    line_processor.start()
+                            # line[:-1] ignores the \n at the end of the string
+                            temp_path = os.path.join(source, line[:-1])
+                            if os.path.isfile(temp_path):
+                                file_path = temp_path
+                                task_id = line_processor.add_task(
+                                f'[bold cyan]{file_path}[/]', total=100)
+                            else:
+                                task_id = line_processor.get_current_task_id()
+                                if task_id:
+                                    line_processor.update(task_id, line, refresh=True)
+                                    line_processor.remove_task_if_complete(task_id)
                     else:
                         line_processor.process_line(line)
     return stdout, stderr
