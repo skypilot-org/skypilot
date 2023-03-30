@@ -97,7 +97,7 @@ class ZoneConfig:
 
     def _get_vm_init_script(self, ssh_public_key_path):
 
-        init_script_content = self._get_ssh_key_gen_cmd(ssh_public_key_path) + "; " + self._get_default_config_cmd()
+        init_script_content = self._get_default_config_cmd() + self._get_ssh_key_gen_cmd(ssh_public_key_path)
         return {
             "encodingType" : "plain",
             "initialScriptShell": "bash",
@@ -122,6 +122,7 @@ class ZoneConfig:
         cmd_list = ["echo 'nameserver 8.8.8.8' &>>/etc/resolv.conf",
                     "echo export LANG=ko_KR.utf8 &>>~/.bashrc",
                     "echo export LC_ALL=ko_KR.utf8 &>>~/.bashrc",
+                    "sed -i '/alias cp=/d' ~/.bashrc",
                     "source ~/.bashrc",
                     "yum -y install rsync"]
 
