@@ -105,9 +105,9 @@ def process_subprocess_stream(proc,
                         fout.flush()
                     if isinstance(line_processor,
                                   log_utils.RsyncProgressBarProcessor):
-                        if "./\n" == line:
-                            line_processor.state = line_processor.RsyncStatus.STARTLOG
-                        elif line_processor.state == line_processor.RsyncStatus.STARTLOG:
+                        if './\n' == line:
+                            line_processor.state = line_processor.Status.LOG
+                        elif line_processor.state == line_processor.Status.LOG:
                             # line[:-1] ignores the \n at the end of the string
                             temp_path = os.path.join(source, line[:-1])
                             if os.path.isfile(temp_path):

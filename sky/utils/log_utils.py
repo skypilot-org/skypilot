@@ -17,7 +17,7 @@ logger = sky_logging.init_logger(__name__)
 
 console = rich_console.Console()
 _status = None
-TaskID = NewType("TaskID", int)
+TaskID = NewType('TaskID', int)
 
 
 class _NoOpConsoleStatus:
@@ -115,8 +115,8 @@ class RsyncProgressBarProcessor(LineProcessor, Progress):
 
     # original Progress class defined in
     # https://github.com/Textualize/rich/blob/master/rich/progress.py
-    class RsyncStatus(enum.Enum):
-        STARTLOG = 0
+    class Status(enum.Enum):
+        LOG = 0
         RUNTIME_SETUP = 1
 
     def __init__(self,
@@ -153,14 +153,14 @@ class RsyncProgressBarProcessor(LineProcessor, Progress):
         """Add a new 'task' to the Progress display.
 
         Args:
-            description (str): A description of the task.
-            start (bool, optional): Start the task immediately (to calculate elapsed time). If set to False,
+            description: A description of the task.
+            start: Start the task immediately. If set to False,
                 you will need to call `start` manually. Defaults to True.
-            total (float, optional): Number of total steps in the progress if known.
+            total: Number of total steps in the progress if known.
                 Set to None to render a pulsing animation. Defaults to 100.
-            completed (int, optional): Number of steps completed so far. Defaults to 0.
-            visible (bool, optional): Enable display of the task. Defaults to True.
-            **fields (str): Additional data fields required for rendering.
+            completed: Number of steps completed so far. Defaults to 0.
+            visible: Enable display of the task. Defaults to True.
+            **fields: Additional data fields required for rendering.
 
         Returns:
             TaskID: An ID you can use when calling `update`.
@@ -191,12 +191,13 @@ class RsyncProgressBarProcessor(LineProcessor, Progress):
         line: str,
         refresh: bool = False,
     ) -> None:
-        """Process the string read from stdout of rsync command and update information associated with a task.
+        """Process the string read from stdout of rsync 
+           command and update information associated with a task.
 
         Args:
-            task_id (TaskID): Task id (returned by add_task).
-            line (str): string read from output of the rsync command
-            refresh (bool): Force a refresh of progress information. Default is False.
+            task_id: Task id (returned by add_task).
+            line: string read from output of the rsync command
+            refresh: Force a refresh of progress information.
         """
 
         with self._lock:
@@ -211,12 +212,13 @@ class RsyncProgressBarProcessor(LineProcessor, Progress):
                     update_completed = task.completed - completed_start
                     current_time = self.get_time()
                     old_sample_time = current_time - self.speed_estimate_period
-                    _progress = task._progress
-                    popleft = _progress.popleft
-                    while _progress and _progress[0].timestamp < old_sample_time:
+                    progress = task._progress
+                    popleft = progress.popleft
+                    while (progress and
+                           progress[0].timestamp < old_sample_time):
                         popleft()
                     if update_completed > 0:
-                        _progress.append(
+                        progress.append(
                             ProgressSample(current_time, update_completed))
                     if (task.total is not None and
                             task.completed >= task.total and
