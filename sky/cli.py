@@ -3033,8 +3033,8 @@ def show_gpus(
                         cpu_str = str(int(cpu_count))
                     else:
                         cpu_str = f'{cpu_count:.1f}'
-                device_memory_str = f'{item.device_memory:.0f}GB' if not pd.isna(
-                    item.device_memory) else '-'
+                device_memory_str = (f'{item.device_memory:.0f}GB' if
+                                     not pd.isna(item.device_memory) else '-')
                 host_memory_str = f'{item.memory:.0f}GB' if not pd.isna(
                     item.memory) else '-'
                 price_str = f'$ {item.price:.3f}' if not pd.isna(
