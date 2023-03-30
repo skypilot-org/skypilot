@@ -3013,6 +3013,7 @@ def show_gpus(
                 'CLOUD',
                 'INSTANCE_TYPE',
                 'vCPUs',
+                'DEVICE_MEMORY',
                 'HOST_MEMORY',
                 'HOURLY_PRICE',
                 'HOURLY_SPOT_PRICE',
@@ -3032,7 +3033,9 @@ def show_gpus(
                         cpu_str = str(int(cpu_count))
                     else:
                         cpu_str = f'{cpu_count:.1f}'
-                mem_str = f'{item.memory:.0f}GB' if not pd.isna(
+                device_memory_str = f'{item.device_memory:.0f}GB' if not pd.isna(
+                    item.device_memory) else '-'
+                host_memory_str = f'{item.memory:.0f}GB' if not pd.isna(
                     item.memory) else '-'
                 price_str = f'$ {item.price:.3f}' if not pd.isna(
                     item.price) else '-'
@@ -3045,7 +3048,8 @@ def show_gpus(
                     item.cloud,
                     instance_type_str,
                     cpu_str,
-                    mem_str,
+                    device_memory_str,
+                    host_memory_str,
                     price_str,
                     spot_price_str,
                 ]
