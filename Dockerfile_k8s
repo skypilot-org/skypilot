@@ -1,6 +1,17 @@
-# docker build --platform=linux/amd64 -t skypilot:latest -f Dockerfile_k8s ./sky
+# On M1 Macs, use the following command to build the image:
+# docker build --platform=linux/arm64 -t skypilot:latest -f Dockerfile_k8s ./sky
+# For amd64, use the following command:
 # docker build --platform=linux/amd64 -t us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest -f Dockerfile_k8s ./sky
 # docker push us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest
+# Multiplatform build
+# docker buildx build --platform=linux/arm64,linux/amd64 -t skypilot:latest -f Dockerfile_k8s ./sky
+
+# build both images
+# docker buildx build --platform=linux/arm64,linux/amd64 -t us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest -f Dockerfile_k8s ./sky
+# load M1 mac
+# docker buildx build --load --platform linux/arm64 -t us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest -f Dockerfile_k8s ./sky && docker tag us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest skypilot:latest
+# push both platforms as one image manifest list
+# docker buildx build --push --platform linux/amd64,linux/arm64 -t us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest -f Dockerfile_k8s ./sky
 FROM continuumio/miniconda3:22.11.1
 
 # Initialize conda for root user, install ssh and other local dependencies
@@ -28,10 +39,13 @@ USER sky
 # Install SkyPilot pip dependencies
 RUN pip install wheel Click colorama cryptography jinja2 jsonschema && \
     pip install networkx oauth2client pandas pendulum PrettyTable && \
-    pip install ray==2.3.0 rich tabulate filelock 'grpcio<=1.43.0' && \
+    pip install ray==2.3.0 rich tabulate filelock && \
     pip install packaging 'protobuf<4.0.0' pulp && \
     pip install awscli boto3 pycryptodome==3.12.0 && \
     pip install docker kubernetes
+
+# Add /home/sky/.local/bin/ to PATH
+RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 
 # Install SkyPilot. This is purposely separate from installing SkyPilot
 # dependencies to optimize rebuild time
