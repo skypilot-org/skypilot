@@ -1,6 +1,6 @@
 # Vicuna: An LLM Chatbot Impressing GPT-4 with 90% ChatGPT Quality
 
-<img src="https://vicuna.lmsys.org/favicon.jpeg" width="30%" alt="Vicuna LLM"/>
+<img src="https://vicuna.lmsys.org/favicon.jpeg" width="25%" alt="Vicuna LLM"/>
 
 Vicuna is an LLM chatbot with impressive quality. It is trained using SkyPilot on [cloud spot instances](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html), with a cost of ~$300.
 
