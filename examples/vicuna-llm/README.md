@@ -21,7 +21,7 @@ cd FastChat
 ```
 
 ## Training Vicuna with SkyPilot
-Currently, training requires GPUs with 80GB memory.  See `sky show-gpus --all` to see supported GPUs.
+Currently, training requires GPUs with 80GB memory.  See `sky show-gpus --all` for supported GPUs.
 
 **To train on 8 A100 GPUs (80GB memory) using spot instances**:
 ```bash
