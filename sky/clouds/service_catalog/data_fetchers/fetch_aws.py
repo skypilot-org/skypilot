@@ -60,6 +60,9 @@ USEFUL_COLUMNS = [
 # only available in this region, but it serves pricing information for all
 # regions.
 PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv'  # pylint: disable=line-too-long
+# Hardcode the regions that offer p4de.24xlarge as our credential does not have
+# the permission to query the offerings of the instance.
+# Ref: https://aws.amazon.com/ec2/instance-types/p4/
 P4DE_REGIONS = ['us-east-1', 'us-west-2']
 
 regions_enabled: Optional[Set[str]] = None
@@ -185,7 +188,7 @@ def _patch_p4de(region: str, df: pd.DataFrame,
             'GpuInfo':
                 ('{\'Gpus\': [{\'Name\': \'A100-80GB\', \'Manufacturer\': '
                  '\'NVIDIA\', \'Count\': 8, \'MemoryInfo\': {\'SizeInMiB\': '
-                 '40960}}], \'TotalGpuMemoryInMiB\': 327680}'),
+                 '81920}}], \'TotalGpuMemoryInMiB\': 655360}'),
             'AvailabilityZone': zone,
             'Region': region,
             'Price': pricing_df[pricing_df['InstanceType'] == 'p4de.24xlarge']
