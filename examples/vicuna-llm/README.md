@@ -35,7 +35,7 @@ Currently, such instances (`--gpus A100-80GB:8 --use-spot`) are only available o
 
 **To use on-demand `A100-80GB:8` instances**, which are currently available on both Azure and GCP:
 ```bash
-sky launch -c vicuna -s scripts/train-vicuna.yaml --env WANDB_API_KEY --no-use-spot      
+sky launch -c vicuna -s scripts/train-vicuna.yaml --env WANDB_API_KEY --no-use-spot
 ```
 
 
