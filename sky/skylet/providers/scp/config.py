@@ -57,7 +57,7 @@ class ZoneConfig:
                 'osUserPassword': 'example123$'
             },
             'blockStorage':{
-                'blockStorageName': 'sky-storage',
+                'blockStorageName': 'skystorage',
                 'diskSize': 100,
                 'encryptEnabled': False,
                 'productId': 'PRODUCT-sRlJ34iBr9hOxN9J5PrQxo'
