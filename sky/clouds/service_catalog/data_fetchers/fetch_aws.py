@@ -183,9 +183,9 @@ def _patch_p4de(region: str, df: pd.DataFrame,
             'vCPUs': 96,
             'MemoryGiB': 1152,
             'GpuInfo': (
-                '{\'Gpus\': [{\'Name\': \'A100-80GB\', \'Manufacturer\': \'NVIDIA\', '
-                '\'Count\': 8, \'MemoryInfo\': {\'SizeInMiB\': 40960}}], '
-                '\'TotalGpuMemoryInMiB\': 327680}'),
+                '{\'Gpus\': [{\'Name\': \'A100-80GB\', \'Manufacturer\': '
+                '\'NVIDIA\', \'Count\': 8, \'MemoryInfo\': {\'SizeInMiB\': '
+                '40960}}], \'TotalGpuMemoryInMiB\': 327680}'),
             'AvailabilityZone': zone,
             'Region': region,
             'Price': pricing_df[pricing_df['InstanceType'] == 'p4de.24xlarge']
