@@ -25,6 +25,13 @@
     Run jobs on any cloud, easily and cost effectively
 </h3>
 
+----
+:fire: :dromedary_camel: *News (March, 2023)* :dromedary_camel: :fire: 
+
+- **[Vicuna LLM chatbot](https://vicuna.lmsys.org/) trained** [**using SkyPilot**](./examples/vicuna-llm/) **for $300 on spot instances!** 
+- *Serve* your own LLaMA LLM chatbot (not finetuned) on any cloud: [**example**](./examples/llama-llm-chatbots/), [**repo**](https://github.com/skypilot-org/sky-llama)
+----
+
 SkyPilot is a framework for easily and cost effectively running ML workloads[^1] on any cloud. 
 
 SkyPilot abstracts away the cloud infra burden:
