@@ -30,6 +30,10 @@ sky spot launch -n vicuna scripts/train-vicuna.yaml --env WANDB_API_KEY
 
 # Train a 7B model instead of the default 13B
 sky spot launch -n vicuna-7b scripts/train-vicuna.yaml --env WANDB_API_KEY --env MODEL_SIZE=7
+
+# Use *unmanaged* spot instances (i.e., preemptions won't get auto-recovered).
+# Unmanaged spot saves the cost of a small controller VM.  We recommend using managed spot as above.
+sky launch -n vicunab scripts/train-vicuna.yaml --env WANDB_API_KEY
 ```
 Currently, such instances (`--gpus A100-80GB:8 --use-spot`) are only available on GCP.
 
