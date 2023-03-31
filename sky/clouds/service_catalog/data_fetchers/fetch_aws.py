@@ -300,7 +300,7 @@ def get_all_regions_instance_types_df(regions: Set[str]) -> pd.DataFrame:
             new_dfs.append(df_or_region)
 
     df = pd.concat(new_dfs)
-    df.sort_values(['InstanceType', 'Region'], inplace=True)
+    df.sort_values(['InstanceType', 'Region', 'AvailabilityZone'], inplace=True)
     return df
 
 
