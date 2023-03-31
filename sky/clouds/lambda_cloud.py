@@ -231,7 +231,7 @@ class Lambda(clouds.Cloud):
         return (_make(instance_list), fuzzy_candidate_list)
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
-        return True, None
+
         try:
             lambda_utils.LambdaCloudClient().list_instances()
         except (AssertionError, KeyError, lambda_utils.LambdaCloudError):
