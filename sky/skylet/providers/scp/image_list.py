@@ -141,10 +141,13 @@ if __name__ == '__main__':
         print(f'\n\n\n{zone["serviceZoneName"]}',zone['serviceZoneId'] )
         zone_id = zone['serviceZoneId']
         images = api.list_image(zone_id)
+        print(len(images))
         for image in images:
             del image['icon']
         images = [img for img in images if img["osType"] == "UBUNTU"]
 
+
         for img in images:
             # print(f'gpu-ubuntu-2004,{zone["serviceZoneName"]},ubuntu,20.04,{img["imageId"]},20211208', img['osType'], img['imageName'])
             print( img['osType'],img["imageId"], img['imageName'] )
+
