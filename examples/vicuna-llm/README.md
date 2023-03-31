@@ -35,7 +35,7 @@ sky spot launch -n vicuna-7b scripts/train-vicuna.yaml --env WANDB_API_KEY --env
 # Unmanaged spot saves the cost of a small controller VM.  We recommend using managed spot as above.
 sky launch -n vicunab scripts/train-vicuna.yaml --env WANDB_API_KEY
 ```
-Currently, such A100-80GB:8 spot instances are only available on GCP.
+Currently, such `A100-80GB:8` spot instances are only available on GCP.
 
 **To use on-demand `A100-80GB:8` instances**, which are currently available on Lambda Cloud, Azure, and GCP:
 ```bash
