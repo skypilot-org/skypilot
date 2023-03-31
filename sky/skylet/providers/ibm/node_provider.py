@@ -27,9 +27,7 @@ from pprint import pprint
 from pathlib import Path
 from uuid import uuid4
 
-from ibm_cloud_sdk_core import ApiException
-from ibm_cloud_sdk_core.authenticators import IAMAuthenticator
-from ibm_vpc import VpcV1
+from sky.adaptors import ibm
 from typing import Any, Dict, List, Optional
 
 from ray.autoscaler._private.cli_logger import cli_logger
@@ -59,16 +57,6 @@ VOLUME_TIER_NAME_DEFAULT = "general-purpose"
 # identifies resources created by this package.
 # these resources are deleted alongside the node.
 VPC_TAGS = ".sky-vpc-tags"
-
-
-def _get_vpc_client(endpoint, authenticator):
-    """
-    Creates an IBM VPC python-sdk instance
-    """
-    ibm_vpc_client = VpcV1(version="2022-06-30", authenticator=authenticator)
-    ibm_vpc_client.set_service_url(endpoint + "/v1")
-
-    return ibm_vpc_client
 
 
 def log_in_out(func):
@@ -105,6 +93,8 @@ class IBMVPCNodeProvider(NodeProvider):
     cluster head node, while worker nodes are provisioned with private ips only.
     """
 
+    # IBM-TODO alter tagging mechanism to support cloud tags instead of
+    #  maintaining VM tags locally (file).
     def _load_tags(self):
         """
         if local tags cache (file) exists (cluster is restarting),
@@ -125,7 +115,7 @@ class IBMVPCNodeProvider(NodeProvider):
                 try:
                     self.ibm_vpc_client.get_instance(instance_id)
                     self.nodes_tags[instance_id] = instance_tags
-                except ApiException as e:
+                except ibm.ibm_cloud_sdk_core.ApiException as e:
                     cli_logger.warning(instance_id)
                     if e.message == "Instance not found":
                         logger.error(
@@ -196,11 +186,8 @@ class IBMVPCNodeProvider(NodeProvider):
         self.resource_group_id = provider_config["resource_group_id"]
         self.iam_endpoint = provider_config.get("iam_endpoint")
         self.region = provider_config["region"]
-        self.endpoint = f"https://{self.region}.iaas.cloud.ibm.com"
         self.zone = self.provider_config["availability_zone"]
-        self.ibm_vpc_client = _get_vpc_client(
-            self.endpoint, IAMAuthenticator(self.iam_api_key, url=self.iam_endpoint)
-        )
+        self.ibm_vpc_client = ibm.client(region=self.region)
 
         # vpc_tags may contain the following fields:
         # vpc_id, subnet_id, security_group_id
@@ -313,7 +300,7 @@ class IBMVPCNodeProvider(NodeProvider):
                     try:
                         # not using cache. see function docs for details.
                         nodes.append(self.ibm_vpc_client.get_instance(node_id).result)
-                    except ApiException as e:
+                    except ibm.ibm_cloud_sdk_core.ApiException as e:
                         cli_logger.warning(node_id)
                         if "Instance not found" in e.message:
                             logger.error(f"failed to find vsi {node_id}, skipping")
@@ -559,7 +546,7 @@ class IBMVPCNodeProvider(NodeProvider):
         try:
             with self.lock:
                 resp = self.ibm_vpc_client.create_instance(instance_prototype)
-        except ApiException as e:
+        except ibm.ibm_cloud_sdk_core.ApiException as e:
             if e.code == 400 and "already exists" in e.message:
                 return self._get_instance_data(name)
             elif e.code == 400 and "over quota" in e.message:
@@ -635,23 +622,25 @@ class IBMVPCNodeProvider(NodeProvider):
 
     def _stopped_nodes(self, tags):
         """
-        returns stopped nodes of type specified in tags.
-        TAG_RAY_NODE_KIND is a mandatory field.
+        returns either stopped head or stopped worker nodes,
+            belonging to this cluster
+
+        requires: TAG_RAY_NODE_KIND key in tags.
         Args:
             tags(dict): set of conditions nodes will be filtered by.
+        Returns:
+            list of stopped nodes, where each item contains node data.
         """
+
         # pylint: disable=C0206 W0622
         # the following subset 'filter' is a common denominator for all
         # nodes belonging to the cluster.
-        # can't filter using tags in its entirety, since worker nodes might
-        # be created by ray with the most basic tags.
-        # the entire set of tags of these stopped nodes will be updated on the
-        # calling function: create_node().
         filter = {
             TAG_RAY_CLUSTER_NAME: self.cluster_name,
             TAG_RAY_NODE_KIND: tags[TAG_RAY_NODE_KIND],
         }
         nodes = []
+        # filter stopped nodes
         with self.lock:
             for node_id in self.nodes_tags:
                 try:
@@ -666,7 +655,7 @@ class IBMVPCNodeProvider(NodeProvider):
                         f"node: {node_id} from cache: 'nodes_tags' not found in VPC"
                     )
                     if (
-                        isinstance(e, ApiException)
+                        isinstance(e, ibm.ibm_cloud_sdk_core.ApiException)
                         and "Instance not found" in e.message
                     ):
                         continue
@@ -874,7 +863,7 @@ class IBMVPCNodeProvider(NodeProvider):
                     self.ibm_vpc_client.delete_floating_ip(ip["id"])
 
         # catch exceptions from instance/ip deletion
-        except ApiException as e:
+        except ibm.ibm_cloud_sdk_core.ApiException as e:
             # allow 'resource not found' exceptions to pass through
             # suggesting the resource was already removed
             if e.code == 404:
@@ -920,7 +909,7 @@ class IBMVPCNodeProvider(NodeProvider):
                 cli_logger.print(f"Terminating instance {node_id}")
                 self._delete_node(node_id)
 
-        except ApiException as e:
+        except ibm.ibm_cloud_sdk_core.ApiException as e:
             if e.code == 404:
                 pass
             else:
@@ -951,7 +940,7 @@ class IBMVPCNodeProvider(NodeProvider):
         while tries:
             try:
                 self.ibm_vpc_client.get_instance(instance_id).get_result()
-            except ApiException:
+            except ibm.ibm_cloud_sdk_core.ApiException:
                 logger.debug(f"Deleted VM instance with id: {instance_id}")
                 return True
 

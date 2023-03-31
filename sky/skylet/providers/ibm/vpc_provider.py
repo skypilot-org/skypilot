@@ -13,7 +13,6 @@ import json
 import textwrap
 from sky.adaptors import ibm
 from sky.skylet.providers.ibm.utils import get_logger, RAY_RECYCLABLE
-from ibm_cloud_sdk_core import ApiException
 
 # pylint: disable=line-too-long
 logger = get_logger("vpc_provider_")
@@ -117,6 +116,16 @@ class IBMVPCProvider:
         return vpc_tags
 
     def create_vpc(self):
+        """creates a vpc, tags it and return key values pertaining it.
+
+        uuid is added to vpc name to avoid naming collision.
+        vpc is tagged using the exact cluster name, as appears on
+            the cluster's config file.
+
+        Returns:
+            dict: containing the keys: vpc_id, subnet_id
+                    and security_group_id
+        """
         vpc_data = self.vpc_client.create_vpc(
             address_prefix_management="auto",
             classic_access=False,
@@ -126,6 +135,7 @@ class IBMVPCProvider:
         subnet_data = self.create_subnet(vpc_data["id"], self.zone)
         self.create_public_gateway(vpc_data["id"], self.zone, subnet_data)
         sg_id = self.create_sg_rules(vpc_data)
+
         # tag vpc with the cluster's name
         resource_model = {"resource_id": vpc_data["crn"]}
         self.tagging_client.attach_tag(
@@ -223,7 +233,7 @@ class IBMVPCProvider:
         try:
             vpc_data = tmp_vpc_client.get_vpc(vpc_id).result
             return vpc_data
-        except ApiException as e:
+        except ibm.ibm_cloud_sdk_core.ApiException as e:
             if e.code == 404:
                 logger.debug("VPC doesn't exist.")
                 return None
@@ -328,7 +338,7 @@ class IBMVPCProvider:
             while tries:
                 try:
                     vpc_client.get_subnet(subnet_id).get_result()
-                except ApiException:
+                except ibm.ibm_cloud_sdk_core.ApiException:
                     logger.debug(f"Deleted subnet id: {subnet_id}")
                     return True
                 tries -= 1
