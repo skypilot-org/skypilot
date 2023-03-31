@@ -37,7 +37,7 @@ sky launch -n vicunab scripts/train-vicuna.yaml --env WANDB_API_KEY
 ```
 Currently, such instances (`--gpus A100-80GB:8 --use-spot`) are only available on GCP.
 
-**To use on-demand `A100-80GB:8` instances**, which are currently available on both Azure and GCP:
+**To use on-demand `A100-80GB:8` instances**, which are currently available on Lambda Cloud, Azure, and GCP:
 ```bash
 sky launch -c vicuna -s scripts/train-vicuna.yaml --env WANDB_API_KEY --no-use-spot
 ```
