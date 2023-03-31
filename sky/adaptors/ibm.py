@@ -31,8 +31,9 @@ def import_package(func):
                 ibm_cloud_sdk_core = _ibm_cloud_sdk_core
                 ibm_platform_services = _ibm_platform_services
             except ImportError:
-                raise ImportError('Fail to import dependencies for IBM.'
-                                  'Try pip install "skypilot[ibm]"') from None
+                raise ImportError(
+                    'Failed to import dependencies for IBM. '
+                    'Try running: pip install "skypilot[ibm]".\n') from None
         return func(*args, **kwargs)
 
     return wrapper
