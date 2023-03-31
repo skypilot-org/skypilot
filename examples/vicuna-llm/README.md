@@ -2,7 +2,7 @@
 
 <img src="https://vicuna.lmsys.org/favicon.jpeg" width=256 alt="Vicuna LLM"/>
 
-Vicuna is an LLM chatbot with impressive quality. It is trained using SkyPilot on cloud spot instances, with a cost of ~$300.
+Vicuna is an LLM chatbot with impressive quality. It is trained using SkyPilot on [cloud spot instances](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html), with a cost of ~$300.
 
 * [Blog post](https://vicuna.lmsys.org/)
 * [Demo](https://chat.lmsys.org/)
@@ -35,7 +35,7 @@ Currently, such instances (`--gpus A100-80GB:8 --use-spot`) are only available o
 
 **To use on-demand `A100-80GB:8` instances**, which are available on both Azure and GCP:
 ```bash
-sky launch -c vicuna -s scripts/train-vicuna.yaml --env WANDB_API_KEY --use-spot none
+sky launch -c vicuna -s scripts/train-vicuna.yaml --env WANDB_API_KEY --no-use-spot      
 ```
 
 
