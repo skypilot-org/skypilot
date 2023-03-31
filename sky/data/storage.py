@@ -1114,6 +1114,7 @@ class GcsStore(AbstractStore):
     """
 
     ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
+    GCSFUSE_VERSION = '0.42.3'
 
     def __init__(self,
                  name: str,
@@ -1353,7 +1354,8 @@ class GcsStore(AbstractStore):
           mount_path: str; Path to mount the bucket to.
         """
         install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
-                       '/releases/download/v0.41.10/gcsfuse_0.41.10_amd64.deb '
+                       f'/releases/download/v{self.GCSFUSE_VERSION}/'
+                       f'gcsfuse_{self.GCSFUSE_VERSION}_amd64.deb '
                        '-O /tmp/gcsfuse.deb && '
                        'sudo dpkg --install /tmp/gcsfuse.deb')
         mount_cmd = ('gcsfuse -o allow_other '
