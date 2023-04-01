@@ -9,14 +9,18 @@ This feature **saves significant cost** (e.g., up to 70\% for GPU VMs) by making
 SkyPilot automatically finds available spot resources across regions and clouds to maximize availability.
 Here is an example of a BERT training job failing over different regions across AWS and GCP.
 
+.. image:: https://i.imgur.com/Vteg3fK.gif
+  :width: 600
+  :alt: GIF for BERT training on Spot V100
+
 .. image:: ../images/spot-training.png
   :width: 600
-  :alt: BERT training on Spot V100
+  :alt: Static plot, BERT training on Spot V100
 
-Below are the requirements for using managed spot jobs:
+To use managed spot jobs, there are two requirements:
 
 #. **Task YAML**: Managed Spot requires a YAML to describe the job, tested with :code:`sky launch`.
-#. **Checkpointing and recovery** (optional): For job recovery with less progress resuming, application code can checkpoint periodically to a :ref:`SkyPilot Storage <sky-storage>`-mounted cloud bucket. The program can reload the latest checkpoint when restarted.
+#. **Checkpointing** (optional): For job recovery due to preemptions, the user application code can checkpoint its progress periodically to a :ref:`SkyPilot Storage <sky-storage>`-mounted cloud bucket. The program can reload the latest checkpoint when restarted.
 
 
 Task YAML
@@ -183,26 +187,46 @@ Useful CLIs
 
 Here are some commands for managed spot jobs. Check :code:`sky spot --help` for more details.
 
+See all spot jobs:
+
 .. code-block:: console
 
-    # Check the status of the spot jobs
     $ sky spot queue
+
+.. code-block:: console
+
     Fetching managed spot job statuses...
     Managed spot jobs:
     ID NAME     RESOURCES     SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
     2  roberta  1x [A100:8]   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
     1  bert-qa  1x [V100:1]   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
 
-    # Stream the logs of a running spot job
-    $ sky spot logs -n bert-qa
+Stream the logs of a running spot job:
 
-    # Cancel a spot job by name
-    $ sky spot cancel -n bert-qa
+.. code-block:: console
+
+    $ sky spot logs -n bert-qa  # by name
+    $ sky spot logs 2           # by job ID
+
+Cancel a spot job:
+
+.. code-block:: console
+
+    $ sky spot cancel -n bert-qa  # by name
+    $ sky spot cancel 2           # by job ID
 
 .. note::
   If any failure happens for a spot job, you can check :code:`sky spot queue -a` for the brief reason
   of the failure. For more details, it would be helpful to check :code:`sky spot logs --controller <job_id>`.
 
+
+Real-world examples
+-------------------------
+
+* `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <https://github.com/skypilot-org/skypilot/tree/master/examples/vicuna-llm>`_, `YAML <https://github.com/lm-sys/FastChat/blob/main/scripts/train-alpaca.yaml>`_
+* BERT (shown above): `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_
+* PyTorch DDP, ResNet: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/resnet.yaml>`_
+* PyTorch Lightning DDP, CIFAR-10: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/lightning_cifar10.yaml>`_
 
 Spot controller (Advanced)
 -------------------------------
