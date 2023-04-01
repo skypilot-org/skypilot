@@ -475,5 +475,16 @@ class Cloud:
         """
         return 0
 
+    @classmethod
+    def get_disk_throughput(
+            cls,
+            disk_type: str  # pylint: disable=unused-argument
+    ) -> int:
+        """Returns the disk throughput correspond to disk type for each cloud.
+
+        Only AWS will return a non-zero value for cunfiguration.
+        """
+        return 0
+
     def __repr__(self):
         return self._REPR

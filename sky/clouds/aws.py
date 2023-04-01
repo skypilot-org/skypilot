@@ -331,7 +331,8 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
-            'disk_iops': r.cloud.get_disk_iops(r.disk_type)
+            'disk_iops': r.cloud.get_disk_iops(r.disk_type),
+            'disk_throughput': r.cloud.get_disk_throughput(r.disk_type),
         }
 
     def get_feasible_launchable_resources(self,
@@ -626,19 +627,18 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def get_disk_type(cls, disk_type: str) -> str:
-        # medium & low will be configured to different IOPS
-        type2name = {
-            'high': 'io2',
-            'medium': 'gp3',
-            'low': 'gp3',
-        }
-        return type2name[disk_type]
+        # aws disk will be configured to different IOPS and throughput
+        return 'gp3'
 
     @classmethod
     def get_disk_iops(cls, disk_type: str) -> int:
         type2iops = {
-            'high': 27000,
-            'medium': 9000,
-            'low': 3000,
+            'high': 15000,
+            'medium': 4500,
+            'low': 3500,
         }
         return type2iops[disk_type]
+
+    @classmethod
+    def get_disk_throughput(cls, disk_type: str) -> int:
+        return cls.get_disk_iops(disk_type) // 16
