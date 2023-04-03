@@ -81,8 +81,10 @@ def raise_scp_error(response: requests.Response) -> None:
     status_code = response.status_code
     if status_code == 200 or status_code == 202 :
         return
+    print(response.json())
     try:
         resp_json = response.json()
+
         message = resp_json['message']
     except (KeyError, json.decoder.JSONDecodeError):
         raise SCPClientError(f'Unexpected error. Status code: {status_code}')
@@ -133,8 +135,7 @@ class SCPClient:
 
     def create_instance(self, instance_config):
         """Launch new instances."""
-        url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers'
-        print(instance_config)
+        url = f'{API_ENDPOINT}/virtual-server/v3/virtual-servers'
         return self._post(url, instance_config)
 
     def _get(self, url, contents_key='contents'):
@@ -151,7 +152,7 @@ class SCPClient:
         method = 'POST'
         self.set_timestamp()
         self.set_signature(url=url, method=method)
-
+        print(request_body)
         response = requests.post(url, json=request_body, headers=self.headers)
 
         raise_scp_error(response)
@@ -166,16 +167,11 @@ class SCPClient:
         raise_scp_error(response)
         return response.json()
 
-    def create_security_group(self, zone_id, product_group, vpc, sg_name):
-        url = f'{API_ENDPOINT}/security-group/v2/security-groups'
+    def create_security_group(self, zone_id, vpc, sg_name):
+        url = f'{API_ENDPOINT}/security-group/v3/security-groups'
         request_body = {
-            "productGroupId": product_group,
             "securityGroupName": sg_name,
             "serviceZoneId": zone_id,
-            "tags": [{
-                "tagKey": "tagKey",
-                "tagValue": "tagValue"
-            }],
             "vpcId": vpc,
             "securityGroupDescription": "skypilot sg"
         }

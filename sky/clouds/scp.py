@@ -174,7 +174,6 @@ class SCP(clouds.Cloud):
             'custom_resources': custom_resources,
             'region': region.name,
             'image_id': image_id,
-            'use_gpu': True if acc_dict is not None else False
         }
 
     @classmethod

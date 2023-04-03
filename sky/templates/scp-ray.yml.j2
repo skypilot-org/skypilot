@@ -20,7 +20,6 @@ available_node_types:
     node_config:
       InstanceType: {{instance_type}}
       imageId: {{image_id}}
-      use_gpu: {{use_gpu}}
 {% if num_nodes > 1 %}
   ray_worker_default:
     min_workers: {{num_nodes - 1}}
@@ -29,7 +28,6 @@ available_node_types:
     node_config:
       InstanceType: {{instance_type}}
       imageId: {{image_id}}
-      use_gpu: {{use_gpu}}
 
 {%- endif %}
 

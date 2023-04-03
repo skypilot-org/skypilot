@@ -3,6 +3,7 @@ import copy
 
 class ZoneConfig:
     def __init__(self, scp_client, zone_name):
+        self.zone_name = zone_name
         self.scp_client = scp_client
         self.zone_id = self._get_region_id(zone_name)
         self.product_ids = self._set_product_list()
@@ -39,14 +40,10 @@ class ZoneConfig:
 
     def bootstrap_instance_config(self, node_config):
 
-
-
         instance_config = {"imageId": node_config["imageId"]}
         instance_config['serviceZoneId'] = self.zone_id
-        instance_config['serverTypeId'] = self.product_ids['SCALE:' + node_config['InstanceType']]
-        instance_config['contractId'] = self.product_ids['CONTRACT_DISCOUNT:None']
-        product_group_name = 'COMPUTE:GPU Server' if node_config['use_gpu'] else 'COMPUTE:Virtual Server'
-        instance_config['productGroupId'] = self.get_product_group(product_group_name)
+        instance_config['serverType'] = node_config['InstanceType']
+        instance_config['contractId'] = "None"
         instance_config['initialScript'] = self._get_vm_init_script(node_config['auth']['ssh_public_key'])
 
         miscellaneous ={
