@@ -450,7 +450,6 @@ def list_accelerators_impl(
         #  ValueError: malformed node or string: <_ast.Name object at ..>
         df['DeviceMemoryGiB'] = None
 
-    # import ipdb; ipdb.set_trace()
     df = df[[
         'InstanceType',
         'AcceleratorName',

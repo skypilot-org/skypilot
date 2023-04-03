@@ -2938,8 +2938,16 @@ def show_gpus(
     To show all accelerators, including less common ones and their detailed
     information, use ``sky show-gpus --all``.
 
-    NOTE: If region is not specified, the price displayed for each instance type
-    is the lowest across all regions for both on-demand and spot instances.
+    Definitions of certain fields:
+
+    * ``DEVICE_MEM``: Memory of a single device; does not depend on the device
+      count of the instance (VM).
+
+    * ``HOST_MEM``: Memory of the host instance (VM).
+
+    If ``--region`` is not specified, the price displayed for each instance
+    type is the lowest across all regions for both on-demand and spot
+    instances. There may be multiple regions with the same lowest price.
     """
     # validation for the --region flag
     if region is not None and cloud is None:
@@ -3012,9 +3020,9 @@ def show_gpus(
                 'QTY',
                 'CLOUD',
                 'INSTANCE_TYPE',
+                'DEVICE_MEM',
                 'vCPUs',
-                'DEVICE_MEMORY',
-                'HOST_MEMORY',
+                'HOST_MEM',
                 'HOURLY_PRICE',
                 'HOURLY_SPOT_PRICE',
             ]
@@ -3047,8 +3055,8 @@ def show_gpus(
                     item.accelerator_count,
                     item.cloud,
                     instance_type_str,
-                    cpu_str,
                     device_memory_str,
+                    cpu_str,
                     host_memory_str,
                     price_str,
                     spot_price_str,
