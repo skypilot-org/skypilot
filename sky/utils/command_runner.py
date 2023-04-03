@@ -158,11 +158,15 @@ class SSHCommandRunner:
         ssh_private_key: str,
         ssh_control_name: Optional[str] = None,
         ssh_proxy_command: Optional[str] = None,
+        port_list: Optional[List[int]] = None,
     ) -> List['SSHCommandRunner']:
         """Helper function for creating runners with the same ssh credentials"""
+        if not port_list:
+            port_list = [22] * len(ip_list)
         return [
             SSHCommandRunner(ip, ssh_user, ssh_private_key, ssh_control_name,
-                             ssh_proxy_command) for ip in ip_list
+                             ssh_proxy_command, port) for ip, port in zip(
+                                 ip_list, port_list)
         ]
 
     def _ssh_base_command(self, *, ssh_mode: SshMode,

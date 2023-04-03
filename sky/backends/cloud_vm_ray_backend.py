@@ -2441,6 +2441,7 @@ ssh_port_list,
         fore = colorama.Fore
         style = colorama.Style
         ip_list = handle.external_ips()
+        port_list = handle.external_ssh_ports()
         assert ip_list is not None, 'external_ips is not cached in handle'
         full_workdir = os.path.abspath(os.path.expanduser(workdir))
 
@@ -2470,7 +2471,7 @@ ssh_port_list,
 
         # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, **ssh_credentials)
+            ip_list, port_list=port_list, **ssh_credentials)
 
         def _sync_workdir_node(runner: command_runner.SSHCommandRunner) -> None:
             runner.rsync(
@@ -2522,6 +2523,7 @@ ssh_port_list,
             setup_file = os.path.basename(setup_sh_path)
             # Sync the setup script up and run it.
             ip_list = handle.external_ips()
+            port_list = handle.external_ssh_ports()
             assert ip_list is not None, 'external_ips is not cached in handle'
             ssh_credentials = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml)
@@ -2530,7 +2532,7 @@ ssh_port_list,
             # forwarding.
             ssh_credentials.pop('ssh_control_name')
             runners = command_runner.SSHCommandRunner.make_runner_list(
-                ip_list, **ssh_credentials)
+                ip_list, port_list=port_list, **ssh_credentials)
 
             # Need this `-i` option to make sure `source ~/.bashrc` work
             setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
@@ -3435,11 +3437,12 @@ ssh_port_list,
         logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
         start = time.time()
         ip_list = handle.external_ips()
+        port_list = handle.external_ssh_ports()
         assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, **ssh_credentials)
+            ip_list, port_list=port_list, **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
 
         # Check the files and warn
