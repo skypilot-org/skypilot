@@ -178,8 +178,9 @@ def _patch_p4de(region: str, df: pd.DataFrame,
     # Columns:
     # InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,
     # Price,SpotPrice,Region,AvailabilityZone
+    records = []
     for zone in df[df['Region'] == region]['AvailabilityZone'].unique():
-        df = df.append(pd.Series({
+        records.append({
             'InstanceType': 'p4de.24xlarge',
             'AcceleratorName': 'A100-80GB',
             'AcceleratorCount': 8,
@@ -194,8 +195,8 @@ def _patch_p4de(region: str, df: pd.DataFrame,
             'Price': pricing_df[pricing_df['InstanceType'] == 'p4de.24xlarge']
                      ['Price'].values[0],
             'SpotPrice': np.nan,
-        }),
-                       ignore_index=True)
+        })
+    df = pd.concat([df, pd.DataFrame.from_records(records)])
     return df
 
 
