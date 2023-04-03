@@ -130,16 +130,7 @@ class LambdaNodeProvider(NodeProvider):
             instance_info = self.metadata.get(vm['id'])
             if instance_info is not None:
                 metadata['tags'] = instance_info['tags']
-            with ux_utils.print_exception_no_traceback():
-                if 'ip' not in vm:
-                    raise lambda_utils.LambdaCloudError(
-                        'A node ip address was not found. Either '
-                        '(1) Lambda Cloud has internally errored, or '
-                        '(2) the cluster is still booting. '
-                        'You can manually terminate the cluster on the '
-                        'Lambda Cloud console or (in case 2) wait for '
-                        'booting to finish (~2 minutes).')
-            metadata['external_ip'] = vm['ip']
+            metadata['external_ip'] = vm.get('ip')
             return metadata
 
         def _match_tags(vm: Dict[str, Any]):
@@ -153,6 +144,9 @@ class LambdaNodeProvider(NodeProvider):
         def _get_internal_ip(node: Dict[str, Any]):
             # TODO(ewzeng): cache internal ips in metadata file to reduce
             # ssh overhead.
+            if node['external_ip'] is None:
+                node['internal_ip'] = None
+                return
             runner = command_runner.SSHCommandRunner(node['external_ip'],
                                                      'ubuntu',
                                                      self.ssh_key_path)
@@ -204,11 +198,31 @@ class LambdaNodeProvider(NodeProvider):
 
     def external_ip(self, node_id: str) -> str:
         """Returns the external ip of the given node."""
-        return self._get_cached_node(node_id=node_id)['external_ip']
+        ip = self._get_cached_node(node_id=node_id)['external_ip']
+        with ux_utils.print_exception_no_traceback():
+            if ip is None:
+                raise lambda_utils.LambdaCloudError(
+                    'A node ip address was not found. Either '
+                    '(1) Lambda Cloud has internally errored, or '
+                    '(2) the cluster is still booting. '
+                    'You can manually terminate the cluster on the '
+                    'Lambda Cloud console or (in case 2) wait for '
+                    'booting to finish (~2 minutes).')
+        return ip
 
     def internal_ip(self, node_id: str) -> str:
         """Returns the internal ip (Ray ip) of the given node."""
-        return self._get_cached_node(node_id=node_id)['internal_ip']
+        ip = self._get_cached_node(node_id=node_id)['internal_ip']
+        with ux_utils.print_exception_no_traceback():
+            if ip is None:
+                raise lambda_utils.LambdaCloudError(
+                    'A node ip address was not found. Either '
+                    '(1) Lambda Cloud has internally errored, or '
+                    '(2) the cluster is still booting. '
+                    'You can manually terminate the cluster on the '
+                    'Lambda Cloud console or (in case 2) wait for '
+                    'booting to finish (~2 minutes).')
+        return ip
 
     def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str],
                     count: int) -> None:

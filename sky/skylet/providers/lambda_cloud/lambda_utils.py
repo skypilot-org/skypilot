@@ -78,8 +78,8 @@ def raise_lambda_error(response: requests.Response) -> None:
         raise LambdaCloudError('Your API requests are being rate limited.')
     try:
         resp_json = response.json()
-        code = resp_json['error']['code']
-        message = resp_json['error']['message']
+        code = resp_json.get('error', {}).get('code')
+        message = resp_json.get('error', {}).get('message')
     except (KeyError, json.decoder.JSONDecodeError):
         raise LambdaCloudError(f'Unexpected error. Status code: {status_code}')
     raise LambdaCloudError(f'{code}: {message}')
