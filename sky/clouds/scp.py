@@ -281,7 +281,7 @@ class SCP(clouds.Cloud):
         # return True, None
         try:
             scp_utils.SCPClient().list_instances()
-        except (AssertionError, KeyError, scp_utils.SCPError):
+        except (AssertionError, KeyError, scp_utils.SCPClientError):
             return False, ('Failed to access SCP with credentials. '
                            'To configure credentials, go to:\n    '
                            '  https://cloud.samsungsds.com/openapiguide\n    '
