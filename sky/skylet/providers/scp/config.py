@@ -48,7 +48,7 @@ class ZoneConfig:
 
         miscellaneous ={
             'deletionProtectionEnabled': False,
-            'dnsEnabled': False,
+            'dnsEnabled': True,
             'osAdmin':{
                 'osUserId': 'root',
                 'osUserPassword': 'example123$'
@@ -116,12 +116,8 @@ class ZoneConfig:
 
         return cmd_st + cmd + cmd_ed
     def _get_default_config_cmd(self):
-        cmd_list = ["echo 'nameserver 8.8.8.8' &>>/etc/resolv.conf",
-                    "echo export LANG=ko_KR.utf8 &>>~/.bashrc",
-                    "echo export LC_ALL=ko_KR.utf8 &>>~/.bashrc",
-                    "sed -i '/alias cp=/d' ~/.bashrc",
-                    "source ~/.bashrc",
-                    "yum -y install rsync"]
+        cmd_list = ["apt-get update",
+                    "apt-get -y install python3-pip"]
 
         res = ""
         for cmd in cmd_list:

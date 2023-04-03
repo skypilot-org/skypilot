@@ -231,7 +231,7 @@ class SCPClient:
             enc_params = list(map(lambda item: (item[0], parse.quote(item[1][0])), parse.parse_qs(url_info.query).items()))
             url = f'{url}?{parse.urlencode(enc_params)}'
 
-        print(url)
+        # print(url)
 
         message = method + url + self.timestamp + self.access_key + self.project_id + self.client_type
         message = bytes(message, 'utf-8')
