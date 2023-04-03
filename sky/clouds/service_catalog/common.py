@@ -1,4 +1,5 @@
 """Common utilities for service catalog."""
+import ast
 import hashlib
 import os
 import time
@@ -31,6 +32,7 @@ class InstanceTypeInfo(NamedTuple):
     - accelerator_name: Canonical name of the accelerator. E.g. `V100`.
     - accelerator_count: Number of accelerators offered by this instance type.
     - cpu_count: Number of vCPUs offered by this instance type.
+    - device_memory: Device memory in GiB.
     - memory: Instance memory in GiB.
     - price: Regular instance price per hour (cheapest across all regions).
     - spot_price: Spot instance price per hour (cheapest across all regions).
@@ -41,6 +43,7 @@ class InstanceTypeInfo(NamedTuple):
     accelerator_name: str
     accelerator_count: int
     cpu_count: Optional[float]
+    device_memory: Optional[float]
     memory: Optional[float]
     price: float
     spot_price: float
@@ -178,8 +181,8 @@ def validate_region_zone_impl(
 
     def _get_all_supported_regions_str() -> str:
         all_regions: List[str] = sorted(df['Region'].unique().tolist())
-        return \
-        f'\nList of supported {cloud_name} regions: {", ".join(all_regions)!r}'
+        return (f'\nList of supported {cloud_name} regions: '
+                f'{", ".join(all_regions)!r}')
 
     validated_region, validated_zone = region, zone
 
@@ -435,12 +438,25 @@ def list_accelerators_impl(
     """
     if gpus_only:
         df = df[~df['GpuInfo'].isna()]
+    df = df.copy()  # avoid column assignment warning
+
+    try:
+        gpu_info_df = df['GpuInfo'].apply(ast.literal_eval)
+        df['DeviceMemoryGiB'] = gpu_info_df.apply(
+            lambda row: row['Gpus'][0]['MemoryInfo']['SizeInMiB']) / 1024.0
+    except ValueError:
+        # TODO(zongheng,woosuk): GCP/Azure catalogs do not have well-formed
+        # GpuInfo fields. So the above will throw:
+        #  ValueError: malformed node or string: <_ast.Name object at ..>
+        df['DeviceMemoryGiB'] = None
+
     df = df[[
         'InstanceType',
         'AcceleratorName',
         'AcceleratorCount',
         'vCPUs',
-        'MemoryGiB',
+        'DeviceMemoryGiB',  # device memory
+        'MemoryGiB',  # host memory
         'Price',
         'SpotPrice',
         'Region',
@@ -470,6 +486,7 @@ def list_accelerators_impl(
                 row['AcceleratorName'],
                 row['AcceleratorCount'],
                 row['vCPUs'],
+                row['DeviceMemoryGiB'],
                 row['MemoryGiB'],
                 row['Price'],
                 row['SpotPrice'],
