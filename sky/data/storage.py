@@ -862,56 +862,66 @@ class S3Store(AbstractStore):
                     f'Source specified as {self.source}, a R2 bucket. ',
                     'R2 Bucket should exist.')
         # Validate name
-        self._validate_name(self.name)
+        self.name = self.validate_name(self.name)
 
     @classmethod
-    def _validate_name(cls, name):
+    def validate_name(cls, name) -> str:
         """Validates the name of the S3 store.
 
         Source for rules: https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html # pylint: disable=line-too-long
         """
+
         def _raise_no_traceback_name_error(err_str):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageNameError(err_str)
 
         if name is not None and isinstance(name, str):
-            if not (3 <= len(name) <= 63):
+            if not 3 <= len(name) <= 63:
                 _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} must be between 3 (min) and 63 (max) characters long.')
+                    f'Invalid store name: name {name} must be between 3 (min) '
+                    'and 63 (max) characters long.')
 
             # Check for valid characters and start/end with a letter or number
             pattern = r'^[a-z0-9][-a-z0-9.]*[a-z0-9]$'
             if not re.match(pattern, name):
                 _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} can consist only of lowercase letters, numbers, dots (.), and hyphens (-). It must begin and end with a letter or number.')
+                    f'Invalid store name: name {name} can consist only of '
+                    'lowercase letters, numbers, dots (.), and hyphens (-). '
+                    'It must begin and end with a letter or number.')
 
             # Check for two adjacent periods
             if '..' in name:
                 _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} must not contain two adjacent periods.')
+                    f'Invalid store name: name {name} must not contain '
+                    'two adjacent periods.')
 
             # Check for IP address format
             ip_pattern = r'^(?:\d{1,3}\.){3}\d{1,3}$'
             if re.match(ip_pattern, name):
                 _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} must not be formatted as an IP address (for example, 192.168.5.4).')
+                    f'Invalid store name: name {name} must not be formatted as '
+                    'an IP address (for example, 192.168.5.4).')
 
             # Check for 'xn--' prefix
             if name.startswith('xn--'):
                 _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} must not start with the prefix "xn--".')
+                    f'Invalid store name: name {name} must not start with the '
+                    'prefix "xn--".')
 
             # Check for '-s3alias' suffix
             if name.endswith('-s3alias'):
                 _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} must not end with the suffix "-s3alias".')
+                    f'Invalid store name: name {name} must not end with the '
+                    'suffix "-s3alias".')
 
             # Check for '--ol-s3' suffix
             if name.endswith('--ol-s3'):
                 _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} must not end with the suffix "--ol-s3".')
+                    f'Invalid store name: name {name} must not end with the '
+                    'suffix "--ol-s3".')
         else:
-            raise _raise_no_traceback_name_error('Store name must be specified.')
+            _raise_no_traceback_name_error('Store name must be specified.')
+        return name
 
     def initialize(self):
         """Initializes the S3 store object on the cloud.
@@ -1203,47 +1213,58 @@ class GcsStore(AbstractStore):
                         f'Source specified as {self.source}, a R2 bucket. ',
                         'R2 Bucket should exist.')
         # Validate name
-        self._validate_name(self.name)
+        self.name = self.validate_name(self.name)
 
     @classmethod
-    def _validate_name(cls, name) -> None:
+    def validate_name(cls, name) -> str:
         """Validates the name of the GCS store.
 
         Source for rules: https://cloud.google.com/storage/docs/buckets#naming
         """
+
         def _raise_no_traceback_name_error(err_str):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageNameError(err_str)
 
         if name is not None and isinstance(name, str):
             # Check for overall length
-            if not (3 <= len(name) <= 222):
-                raise _raise_no_traceback_name_error(f'Invalid store name: name {name} must contain 3-222 characters.')
+            if not 3 <= len(name) <= 222:
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must contain 3-222 '
+                    'characters.')
 
             # Check for valid characters and start/end with a number or letter
             pattern = r'^[a-z0-9][-a-z0-9._]*[a-z0-9]$'
             if not re.match(pattern, name):
-                raise _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} can only contain lowercase letters, numeric characters, dashes (-), underscores (_), and dots (.). Spaces are not allowed. Names must start and end with a number or letter.')
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} can only contain '
+                    'lowercase letters, numeric characters, dashes (-), '
+                    'underscores (_), and dots (.). Spaces are not allowed. '
+                    'Names must start and end with a number or letter.')
 
-            # Check for "goog" prefix and "google" in the name
-            if name.startswith("goog") or "google" in name:
-                raise _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} cannot begin with the "goog" prefix and contain "google".')
+            # Check for 'goog' prefix and 'google' in the name
+            if name.startswith('goog') or 'google' in name:
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} cannot begin with the '
+                    '"goog" prefix and contain "google".')
 
             # Check for dot-separated components length
-            components = name.split(".")
+            components = name.split('.')
             if any(len(component) > 63 for component in components):
-                raise _raise_no_traceback_name_error(
-                    f'Invalid store name: Dot-separated components in name {name} can be no longer than 63 characters.')
+                _raise_no_traceback_name_error(
+                    'Invalid store name: Dot-separated components in name '
+                    f'{name} can be no longer than 63 characters.')
 
             # Check for IP address format
             ip_pattern = r'^(?:\d{1,3}\.){3}\d{1,3}$'
             if re.match(ip_pattern, name):
-                raise _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} cannot be represented as an IP address in dotted-decimal notation (for example, 192.168.5.4).')
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} cannot be represented as '
+                    'an IP address in dotted-decimal notation '
+                    '(for example, 192.168.5.4).')
         else:
             _raise_no_traceback_name_error('Store name must be specified.')
+        return name
 
     def initialize(self):
         """Initializes the GCS store object on the cloud.
@@ -1558,7 +1579,7 @@ class R2Store(AbstractStore):
                 assert self.name == data_utils.split_r2_path(self.source)[0], (
                     'R2 Bucket is specified as path, the name should be '
                     'the same as R2 bucket.')
-        S3Store._validate_name(self.name)
+        self.name = S3Store.validate_name(self.name)
 
     def initialize(self):
         """Initializes the R2 store object on the cloud.
