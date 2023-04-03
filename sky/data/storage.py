@@ -564,6 +564,27 @@ class Storage(object):
         """
         Validates the storage spec and updates local fields if necessary.
         """
+
+        def validate_name(name):
+            """ Checks for validating the storage name.
+
+            Checks if the name starts the s3, gcs or r2 prefix and raise error
+            if it does. Store specific validation checks (e.g., S3 specific
+            rules) happen in the corresponding store class.
+            """
+            prefix = name.split('://')[0]
+            prefix = prefix.lower()
+            if prefix in ['s3', 'gs', 'r2']:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageNameError(
+                        'Prefix detected: `name` cannot start with '
+                        f'{prefix}://. If you are trying to use an existing '
+                        'bucket created outside of SkyPilot, please specify it '
+                        'using the `source` field (e.g. '
+                        '`source: s3://mybucket/`). If you are trying to '
+                        'create a new bucket, please use the `store` field to '
+                        'specify the store type (e.g. `store: s3`).')
+
         if self.source is None:
             # If the mode is COPY, the source must be specified
             if self.mode == StorageMode.COPY:
@@ -590,6 +611,7 @@ class Storage(object):
                             'Storage source or storage name must be specified.')
                 else:
                     # Create bucket and mount
+                    validate_name(self.name)
                     return
         elif self.source is not None:
             source, is_local_source = Storage._validate_source(
@@ -608,6 +630,7 @@ class Storage(object):
             else:
                 if is_local_source:
                     # If name is specified and source is local, upload to bucket
+                    validate_name(self.name)
                     return
                 else:
                     # Both name and source should not be specified if the source
