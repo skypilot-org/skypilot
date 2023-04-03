@@ -2319,6 +2319,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._update_after_cluster_provisioned(handle, task,
                                                    prev_cluster_status, ip_list,
                                                    lock_path)
+            print("HEREHREREHERHE", handle.launched_resources.ports)
+            resources = handle.launched_resources
+            if resources.ports and resources.cloud == clouds.GCP:
+                print("ADDING PORTS")
+
+            #if not resources.ports and resources.cloud:
             return handle
 
     def _update_after_cluster_provisioned(

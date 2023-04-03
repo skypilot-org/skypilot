@@ -688,3 +688,21 @@ class GCP(clouds.Cloud):
             zone: Optional[str] = None) -> None:
         service_catalog.check_accelerator_attachable_to_host(
             instance_type, accelerators, zone, 'gcp')
+
+    @staticmethod
+    def add_ports(cluster_name: str, port: int) -> None:
+        from sky.backends import backend_utils
+        handle = backend_utils.check_cluster_available(
+            cluster_name,
+            operation='adding ports'
+        )
+        backend = backend_utils.get_backend_From_handle(handle)
+        ray_config = common_utils.read_yaml(handle.cluster_yaml)
+
+        returncode, full_name, _ = backend.run_on_head(handle,
+        "hostname", require_outputs=True, separate_stderr=True)
+
+        external_ip = handle.head_ip
+
+        full_name = full_name.strip()
+        region = ray_config['provider']['availability_zone'].strip()
