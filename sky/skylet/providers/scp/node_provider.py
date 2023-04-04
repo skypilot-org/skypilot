@@ -188,7 +188,9 @@ class SCPNodeProvider(NodeProvider):
             if len(sg) !=0 and sg[0] == "ACTIVE" : break
             time.sleep(5)
 
-        self.scp_client.add_security_group_rule(sg_id)
+        self.scp_client.add_security_group_in_rule(sg_id)
+        self.scp_client.add_security_group_out_rule(sg_id)  # out all
+
         return sg_id
 
     def _del_security_group(self, sg_id):
@@ -209,25 +211,38 @@ class SCPNodeProvider(NodeProvider):
             vms = [vm["virtualServerId"] for vm in vm_contents if vm["virtualServerId"] == vm_id]
             if len(vms) == 0: break
 
-    def _del_firwall_inbound(self, firewall_id, rule_id):
-        self.scp_client.del_firwall_rule(firewall_id, rule_id)
+    def _del_firwall_rules(self, firewall_id, rule_ids):
+        if isinstance(rule_ids, list): rule_ids = [rule_ids]
+        self.scp_client.del_firwall_rules(firewall_id, rule_ids)
 
 
 
-    def _add_firewall_inbound(self, vpc_id, internal_ip):
+    def _add_firewall_inbound(self, firewall_id, internal_ip):
 
-        firewall_contents = self.scp_client.list_firwalls()
-        firewall_id = [firewall['firewallId'] for firewall in firewall_contents
-                       if firewall['vpcId']==vpc_id and firewall['firewallState']=='ACTIVE'][0]
         rule_info = self.scp_client.add_firewall_inbound_rule(firewall_id, internal_ip)
         rule_id = rule_info['resourceId']
         while True:
             time.sleep(5)
             rule_info = self.scp_client.get_firewal_rule_info(firewall_id, rule_id)
             if rule_info['ruleState'] == "ACTIVE" : break
-        return firewall_id, rule_id
+        return rule_id
+
+    def _add_firewall_outbound(self, firewall_id, internal_ip):
+
+        rule_info = self.scp_client.add_firewall_outbound_rule(firewall_id, internal_ip)
+        rule_id = rule_info['resourceId']
+        while True:
+            time.sleep(5)
+            rule_info = self.scp_client.get_firewal_rule_info(firewall_id, rule_id)
+            if rule_info['ruleState'] == "ACTIVE": break
+        return  rule_id
 
 
+    def _get_firewall_id(self, vpc_id):
+        firewall_contents = self.scp_client.list_firwalls()
+        firewall_id = [firewall['firewallId'] for firewall in firewall_contents
+                       if firewall['vpcId'] == vpc_id and firewall['firewallState'] == 'ACTIVE'][0]
+        return firewall_id
 
     def _create_instance_sequence(self, vpc, instance_config):
         undo_func_stack = []
@@ -241,10 +256,16 @@ class SCPNodeProvider(NodeProvider):
 
             vm_internal_ip = vm_info['ip']
             undo_func_stack.append(lambda: self._del_vm(vm_id))
-            firewall_id, rule_id = self._add_firewall_inbound(vpc, vm_internal_ip)
-            undo_func_stack.append(lambda: self._del_firwall_inbound(firewall_id, rule_id))
+            firewall_id = self._get_firewall_id(vpc)
 
-            return vm_id, vm_internal_ip, firewall_id, rule_id
+
+            in_rule_id = self._add_firewall_inbound(firewall_id, vm_internal_ip)
+            undo_func_stack.append(lambda: self._del_firwall_rules(firewall_id, in_rule_id))
+            out_rule_id = self._add_firewall_outbound(firewall_id, vm_internal_ip)
+            undo_func_stack.append(lambda: self._del_firwall_rules(firewall_id, in_rule_id))
+
+            firewall_rules = [in_rule_id, out_rule_id]
+            return vm_id, vm_internal_ip, firewall_id, firewall_rules
 
         except Exception as e:
             print(e)
@@ -320,7 +341,7 @@ class SCPNodeProvider(NodeProvider):
                 instance_config['securityGroupIds'] = [sg_id]
                 for subnet in subnets:
                     instance_config['nic']['subnetId'] = subnet
-                    vm_id, vm_internal_ip, firewall_id, firewall_rule_id = self._create_instance_sequence(vpc,
+                    vm_id, vm_internal_ip, firewall_id, firwall_rules = self._create_instance_sequence(vpc,
                                                                                                           instance_config)
                     if vm_id:
                         SUCCESS = True
@@ -338,7 +359,7 @@ class SCPNodeProvider(NodeProvider):
             config_tags['virtualServerId'] = vm_id
             config_tags['vmInternalIp'] = vm_internal_ip
             config_tags['firewallId'] = firewall_id
-            config_tags['firewallRuleId'] = firewall_rule_id
+            config_tags['firewallRuleIds'] = firwall_rules
             config_tags['securityGroupId'] = sg_id
             config_tags['vmExternalIp'] = vm_external_ip
 
@@ -378,7 +399,7 @@ class SCPNodeProvider(NodeProvider):
         else:
             try:
                 tags = self.metadata[node_id]['tags']
-                self._del_firwall_inbound(tags['firewallId'], tags['firewallRuleId'])
+                self._del_firwall_rules(tags['firewallId'], tags['firewallRuleIds'])
                 self._del_vm(tags['virtualServerId'])
                 self._del_security_group(tags['securityGroupId'])
             except:
