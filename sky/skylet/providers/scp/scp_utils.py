@@ -177,7 +177,7 @@ class SCPClient:
         }
         return self._post(url, request_body)
 
-    def add_security_group_rule(self, sg_id):
+    def add_security_group_in_rule(self, sg_id):
         url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}/rules'
         request_body = {
               "ruleDirection" : "IN",
@@ -189,6 +189,28 @@ class SCPClient:
               "ruleDescription" : "skypilot ssh rue"
             }
         return self._post(url, request_body)
+
+
+    def add_security_group_out_rule(self, sg_id):
+        url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}/rules'
+        request_body = {
+              "ruleDirection" : "OUT",
+              "services" : [ {
+                "serviceType" : "TCP",
+                "serviceValue" : "21"
+              },{
+                "serviceType" : "TCP",
+                "serviceValue" : "80"
+              },{
+                "serviceType" : "TCP",
+                "serviceValue" : "443"
+              }],
+              "destinationIpAddresses" : [ "0.0.0.0/0"],
+              "ruleDescription" : "skypilot out rue"
+            }
+        return self._post(url, request_body)
+
+
 
     def add_firewall_inbound_rule(self, firewall_id, internal_ip):
         url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules'
@@ -206,6 +228,34 @@ class SCPClient:
           "ruleDescription" : "description"
         }
         return self._post(url, request_body)
+
+
+
+    def add_firewall_outbound_rule(self, firewall_id, internal_ip):
+        url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules'
+        request_body = {
+          "sourceIpAddresses" : [internal_ip],
+          "destinationIpAddresses" : ["0.0.0.0/0"],
+          "services" : [ {
+                "serviceType" : "TCP",
+                "serviceValue" : "21"
+              },{
+                "serviceType" : "TCP",
+                "serviceValue" : "80"
+              },{
+                "serviceType" : "TCP",
+                "serviceValue" : "443"
+              }],
+          "ruleDirection" : "OUT",
+          "ruleAction" : "ALLOW",
+          "isRuleEnabled" : True,
+          "ruleLocationType" : "FIRST",
+          "ruleDescription" : "description"
+        }
+        return self._post(url, request_body)
+
+
+
 
     def terminate_instance(self, vm_id):
         url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{vm_id}'
@@ -284,11 +334,11 @@ class SCPClient:
         url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}'
         return self._delete(url)
 
-    def del_firwall_rule(self, firewall_id, rule_id):
+    def del_firwall_rules(self, firewall_id, rule_id_list):
         url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules'
         request_body={
               "ruleDeletionType" : "PARTIAL",
-              "ruleIds" : [ rule_id ]
+              "ruleIds" : rule_id_list
             }
         return self._delete(url, request_body=request_body)
 
