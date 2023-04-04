@@ -339,4 +339,8 @@ def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     private_key_path, public_key_path = get_or_generate_keys()
     config['auth']['ssh_private_key'] = private_key_path
     config['auth']['ssh_public_key'] = public_key_path
+
+    file_mounts = config['file_mounts']
+    file_mounts[public_key_path] = public_key_path
+    config['file_mounts'] = file_mounts
     return config
