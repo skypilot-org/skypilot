@@ -5,7 +5,7 @@ import json
 import os
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Any
 
 from sky import clouds
 from sky import exceptions
@@ -308,7 +308,7 @@ class AWS(clouds.Cloud):
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources', region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Any]:
         assert zones is not None, (region, zones)
 
         region_name = region.name
@@ -331,8 +331,9 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
-            'disk_iops': r.cloud.get_disk_iops(r.disk_type),
-            'disk_throughput': r.cloud.get_disk_throughput(r.disk_type),
+            'disk_iops': AWS.get_disk_iops(r.disk_type),
+            'disk_throughput': AWS.get_disk_throughput(r.disk_type),
+            'custom_disk_perf': AWS.enable_custom_disk_perf(r.disk_type),
         }
 
     def get_feasible_launchable_resources(self,
@@ -628,17 +629,28 @@ class AWS(clouds.Cloud):
     @classmethod
     def get_disk_type(cls, disk_type: str) -> str:
         # aws disk will be configured to different IOPS and throughput
-        return 'gp3'
+        return 'standard' if disk_type == 'low' else 'gp3'
 
     @classmethod
     def get_disk_iops(cls, disk_type: str) -> int:
         type2iops = {
-            'high': 15000,
-            'medium': 4500,
-            'low': 3500,
+            'high': 7000,
+            'medium': 3500,
+            'low': 0, # only gp3 is required to set iops
         }
         return type2iops[disk_type]
 
     @classmethod
     def get_disk_throughput(cls, disk_type: str) -> int:
         return cls.get_disk_iops(disk_type) // 16
+
+    @classmethod
+    def enable_custom_disk_perf(cls, disk_type: str) -> bool:
+        return cls.get_disk_type(disk_type) == 'gp3'
+
+    @classmethod
+    def get_disk_desc(cls, disk_type: str) -> str:
+        cloud_disk_type = cls.get_disk_type(disk_type)
+        cloud_disk_iops = cls.get_disk_iops(disk_type)
+        return f'{disk_type}:{cloud_disk_type}[{cloud_disk_iops}]' if cls.get_disk_type(
+            disk_type) == 'gp3' else f'{disk_type}:{cloud_disk_type}'

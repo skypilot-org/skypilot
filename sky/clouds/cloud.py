@@ -465,26 +465,14 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_disk_iops(
-            cls,
-            disk_type: str  # pylint: disable=unused-argument
-    ) -> int:
-        """Returns the disk iops correspond to disk type for each cloud.
+    def get_disk_desc(cls, disk_type: str) -> str:
+        """Returns a string to describe the disk type for each cloud.
 
-        Only AWS will return a non-zero value for cunfiguration.
+        Default format: {disk_type}:{cloud_disk_type}
+
+        AWS format: {disk_type}:{cloud_disk_type}[{iops}]
         """
-        return 0
-
-    @classmethod
-    def get_disk_throughput(
-            cls,
-            disk_type: str  # pylint: disable=unused-argument
-    ) -> int:
-        """Returns the disk throughput correspond to disk type for each cloud.
-
-        Only AWS will return a non-zero value for cunfiguration.
-        """
-        return 0
+        return f'{disk_type}:{cls.get_disk_type(disk_type)}'
 
     def __repr__(self):
         return self._REPR
