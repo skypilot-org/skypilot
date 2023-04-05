@@ -207,26 +207,6 @@ def test_minimal(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.ibm
-def test_ibm_minimal():
-    name = _get_cluster_name()
-    test = Test(
-        'ibm_minimal',
-        [
-            f'sky launch -y -c {name} --cloud ibm examples/minimal.yaml',
-            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky launch -y -c {name} --cloud ibm examples/minimal.yaml',
-            f'sky logs {name} 2 --status',
-            f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
-            # Ensure the raylet process has the correct file descriptor limit.
-            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
-            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
-        ],
-        f'sky down -y {name}',
-    )
-    run_one_test(test)
-
-
 # ---------- Test region ----------
 @pytest.mark.aws
 def test_aws_region():
@@ -680,23 +660,6 @@ def test_file_mounts(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.ibm
-def test_ibm_file_mounts():
-    name = _get_cluster_name()
-    test_commands = [
-        *storage_setup_commands,
-        f'sky launch -y -c {name} --cloud ibm examples/using_file_mounts_ibm.yaml',
-        f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-    ]
-    test = Test(
-        'using_file_mounts',
-        test_commands,
-        f'sky down -y {name}',
-        timeout=50 * 60,  # 50 mins
-    )
-    run_one_test(test)
-
-
 # ---------- storage ----------
 @pytest.mark.aws
 def test_aws_storage_mounts():
@@ -805,6 +768,7 @@ def test_cli_logs(generic_cloud: str):
 
 # ---------- Job Queue. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
+@pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus. run test_ibm_job_queue instead
 def test_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -878,6 +842,7 @@ def test_ibm_job_queue():
 
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
+@pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue_multinode instead
 def test_job_queue_multinode(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -935,7 +900,7 @@ def test_large_job_queue(generic_cloud: str):
 
 
 @pytest.mark.ibm
-def test_ibm_n_node_job_queue():
+def test_ibm_job_queue_multinode():
     name = _get_cluster_name()
     task_file = 'examples/job_queue/job_multinode_ibm.yaml'
     test = Test(
@@ -1221,61 +1186,6 @@ def test_autostop(generic_cloud: str):
     )
     run_one_test(test)
 
-@pytest.mark.slow
-@pytest.mark.ibm
-def test_ibm_autostop():
-    name = _get_cluster_name()
-    test = Test(
-        'autostop',
-        [
-            f'sky launch -y -d -c {name} --cloud ibm --num-nodes 2 examples/minimal.yaml',
-            f'sky autostop -y {name} -i 1',
-
-            # Ensure autostop is set.
-            f'sky status | grep {name} | grep "1m"',
-
-            # Ensure the cluster is not stopped early.
-            'sleep 45',
-            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
-
-            # Ensure the cluster is STOPPED.
-            'sleep 100',
-            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
-
-            # Ensure the cluster is UP and the autostop setting is reset ('-').
-            f'sky start -y {name}',
-            f'sky status | grep {name} | grep -E "UP\s+-"',
-
-            # Ensure the job succeeded.
-            f'sky exec {name} --cloud ibm examples/minimal.yaml',
-            f'sky logs {name} 2 --status',
-
-            # Test restarting the idleness timer via cancel + reset:
-            f'sky autostop -y {name} -i 1',  # Idleness starts counting.
-            'sleep 45',  # Almost reached the threshold.
-            f'sky autostop -y {name} --cancel',
-            f'sky autostop -y {name} -i 1',  # Should restart the timer.
-            'sleep 45',
-            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
-            'sleep 100',
-            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
-
-            # Test restarting the idleness timer via exec:
-            f'sky start -y {name}',
-            f'sky status | grep {name} | grep -E "UP\s+-"',
-            f'sky autostop -y {name} -i 1',  # Idleness starts counting.
-            'sleep 45',  # Almost reached the threshold.
-            f'sky exec {name} --cloud ibm echo hi',  # Should restart the timer.
-            'sleep 45',
-            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
-            'sleep 90',
-            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
-        ],
-        f'sky down -y {name}',
-        timeout=60 * 60,
-    )
-    run_one_test(test)
-
 
 # ---------- Testing Autodowning ----------
 def test_autodown(generic_cloud: str):
@@ -1308,42 +1218,6 @@ def test_autodown(generic_cloud: str):
         ],
         f'sky down -y {name}',
         timeout=20 * 60,
-    )
-    run_one_test(test)
-
-@pytest.mark.slow
-@pytest.mark.ibm
-def test_ibm_autodown():
-    name = _get_cluster_name()
-    task_file = 'examples/minimal.yaml'
-    test = Test(
-        'autodown',
-        [
-            f'sky launch -y -d -c {name} --cloud ibm --num-nodes 2 --cloud ibm {task_file}',
-            f'sky autostop -y {name} --down -i 1',
-            # Ensure autostop is set.
-            f'sky status | grep {name} | grep "1m (down)"',
-            # Ensure the cluster is not terminated early.
-            'sleep 45',
-            f'sky status --refresh | grep {name} | grep UP',
-            # Ensure the cluster is terminated.
-            'sleep 200',
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} --cloud ibm --num-nodes 2 --down {task_file}',
-            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
-            f'sky exec {name} --cloud ibm {task_file}',
-            f'sky status | grep {name} | grep "1m (down)"',
-            'sleep 240',
-            # Ensure the cluster is terminated.
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} --cloud ibm --num-nodes 2 --down {task_file}',
-            f'sky autostop -y {name} --cancel',
-            'sleep 240',
-            # Ensure the cluster is still UP.
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && echo "$s" | grep {name} | grep UP',
-        ],
-        f'sky down -y {name}',
-        timeout=50 * 60,
     )
     run_one_test(test)
 
