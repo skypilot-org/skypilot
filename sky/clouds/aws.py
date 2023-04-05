@@ -636,7 +636,7 @@ class AWS(clouds.Cloud):
         type2iops = {
             'high': 7000,
             'medium': 3500,
-            'low': 0, # only gp3 is required to set iops
+            'low': 0,  # only gp3 is required to set iops
         }
         return type2iops[disk_type]
 

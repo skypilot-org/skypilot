@@ -420,9 +420,8 @@ class Azure(clouds.Cloud):
                                 disk_type: str) -> None:
         if disk_type == 'high':
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Azure disk_type=high is not supported now. '
-                    'Please use disk_type={low, medium} instead.')
+                raise ValueError('Azure disk_type=high is not supported now. '
+                                 'Please use disk_type={low, medium} instead.')
         # Only S-series supported premium ssd
         # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # pylint: disable=line-too-long
         series = instance_type.split('_')[1].lower()
