@@ -104,9 +104,11 @@ def show_status_table(cluster_records: List[_ClusterRecord],
         click.echo('No existing clusters.')
     return num_pending_autostop
 
-def get_total_cost_of_displayed_records(cluster_records: List[_ClusterCostReportRecord]):
+
+def get_total_cost_of_displayed_records(
+        cluster_records: List[_ClusterCostReportRecord]):
     """Compute total cost of records to be displayed in cost report.
-    """    
+    """
     num_lines_to_display = _NUM_COST_REPORT_LINES
     displayed_records = cluster_records[:num_lines_to_display]
 

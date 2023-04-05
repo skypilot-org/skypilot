@@ -1706,13 +1706,15 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
         else:
             nonreserved_cluster_records.append(cluster_record)
 
-    total_cost = status_utils.get_total_cost_of_displayed_records(nonreserved_cluster_records)
+    total_cost = status_utils.get_total_cost_of_displayed_records(
+        nonreserved_cluster_records)
 
     status_utils.show_cost_report_table(nonreserved_cluster_records, all)
     for cluster_group_name, cluster_record in reserved_clusters.items():
         status_utils.show_cost_report_table(
             [cluster_record], all, reserved_group_name=cluster_group_name)
-        total_cost += status_utils.get_total_cost_of_displayed_records([cluster_record])
+        total_cost += status_utils.get_total_cost_of_displayed_records(
+            [cluster_record])
 
     click.echo(f'\n{colorama.Style.BRIGHT}'
                f'Total Cost: ${total_cost:.2f}{colorama.Style.RESET_ALL}')
