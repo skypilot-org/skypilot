@@ -104,6 +104,15 @@ def show_status_table(cluster_records: List[_ClusterRecord],
         click.echo('No existing clusters.')
     return num_pending_autostop
 
+def get_total_cost_of_displayed_records(cluster_records: List[_ClusterCostReportRecord]):
+    """Compute total cost of records to be displayed in cost report.
+    """    
+    num_lines_to_display = _NUM_COST_REPORT_LINES
+    displayed_records = cluster_records[:num_lines_to_display]
+
+    total_cost = sum(record['total_cost'] for record in displayed_records)
+    return total_cost
+
 
 def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
                            show_all: bool,
@@ -159,7 +168,7 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
         num_lines_to_display = len(cluster_records)
 
     cluster_records.sort(
-        key=lambda report: -_get_status__value_for_cost_report(report))
+        key=lambda report: -_get_status_value_for_cost_report(report))
 
     for record in cluster_records[:num_lines_to_display]:
         row = []
@@ -348,7 +357,7 @@ def _is_pending_autostop(cluster_record: _ClusterRecord) -> bool:
 # ---- 'sky cost-report' helper functions below ----
 
 
-def _get_status__value_for_cost_report(
+def _get_status_value_for_cost_report(
         cluster_cost_report_record: _ClusterCostReportRecord) -> int:
     status = cluster_cost_report_record['status']
     if status is None:
@@ -394,16 +403,3 @@ def _get_estimated_cost_for_cost_report(
         return '-'
 
     return f'${cost:.3f}'
-
-
-def get_estimated_total_cost_for_all_records(
-        cluster_cost_report_records: List[_ClusterCostReportRecord]) -> str:
-    cost = 0
-
-    for cluster_cost_report_record in cluster_cost_report_records:
-        cost += cluster_cost_report_record['total_cost']
-
-    if not cost:
-        return '-'
-
-    return f'TOTAL COST: ${cost:.3f}'

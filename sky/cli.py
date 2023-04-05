@@ -1695,8 +1695,6 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     """
     cluster_records = core.cost_report()
 
-    total_cost = sum(record['total_cost'] for record in cluster_records)
-
     nonreserved_cluster_records = []
     reserved_clusters = dict()
     for cluster_record in cluster_records:
@@ -1708,23 +1706,26 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
         else:
             nonreserved_cluster_records.append(cluster_record)
 
+    total_cost = status_utils.get_total_cost_of_displayed_records(nonreserved_cluster_records)
+
     status_utils.show_cost_report_table(nonreserved_cluster_records, all)
     for cluster_group_name, cluster_record in reserved_clusters.items():
         status_utils.show_cost_report_table(
             [cluster_record], all, reserved_group_name=cluster_group_name)
+        total_cost += status_utils.get_total_cost_of_displayed_records([cluster_record])
 
     click.echo(f'\n{colorama.Style.BRIGHT}'
-               f'Total Cost: ${total_cost:.3f}{colorama.Style.RESET_ALL}')
+               f'Total Cost: ${total_cost:.2f}{colorama.Style.RESET_ALL}')
 
     if not all:
         click.secho(
-            'NOTE: Since --all is not set, '
-            'not all cost report records '
-            'may be displayed above.',
+            'Showing the N most recent clusters. '
+            'To see all clusters in history, '
+            'pass the --all flag.',
             fg='yellow')
 
     click.secho(
-        'NOTE: This feature is experimental. '
+        'This feature is experimental. '
         'Costs for clusters with auto{stop,down} '
         'scheduled may not be accurate.',
         fg='yellow')
