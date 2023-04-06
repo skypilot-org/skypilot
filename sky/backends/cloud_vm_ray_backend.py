@@ -2960,7 +2960,7 @@ class CloudVmRayBackend(backends.Backend):
                     require_outputs=True)
         elif (terminate and
               (prev_status == global_user_state.ClusterStatus.STOPPED or
-               use_tpu_vm)):
+               use_tpu_vm) and not isinstance(cloud, clouds.SCP) ) :
             # For TPU VMs, gcloud CLI is used for VM termination.
             if isinstance(cloud, clouds.AWS):
                 # TODO(zhwu): Room for optimization. We can move these cloud

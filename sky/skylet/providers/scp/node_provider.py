@@ -156,7 +156,13 @@ class SCPNodeProvider(NodeProvider):
             ["node-1", "node-2"]
         """
         nodes = self._get_filtered_nodes(tag_filters=tag_filters)
-        return [k for k, v in nodes.items() if not v["status"].startswith("STOPPED")]
+
+        if self.cache_stopped_nodes:
+            print("cache_stopped_nodes value is True")
+            return [k for k, v in nodes.items() if not v["status"].startswith("STOPPED")]
+        else:
+            print("cache_stopped_nodes value is False")
+            return [k for k, v in nodes.items()]
 
     def is_running(self, node_id: str) -> bool:
         """Return whether the specified node is running."""
