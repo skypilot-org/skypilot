@@ -305,6 +305,7 @@ class SSHCommandRunner:
             log_path: Redirect stdout/stderr to the log_path.
             stream_logs: Stream logs to the stdout/stderr.
             max_retry: The maximum number of retries for the rsync command.
+              This value should be non-negative.
 
         Raises:
             exceptions.CommandError: rsync command failed.
