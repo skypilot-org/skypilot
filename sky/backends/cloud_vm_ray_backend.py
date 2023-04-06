@@ -50,6 +50,7 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
+from sky.skylet.providers.scp.node_provider import SCPNodeProvider
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -2958,9 +2959,19 @@ class CloudVmRayBackend(backends.Backend):
                     shell=True,
                     stream_logs=False,
                     require_outputs=True)
+        if terminate and isinstance(cloud, clouds.SCP):
+            config['provider']['cache_stopped_nodes'] = not terminate
+            provider = SCPNodeProvider(config['provider'],handle.cluster_name)
+
+            with open(provider.metadata.path, 'r') as f:
+                metadata = json.load(f)
+                node_id = next((key for key in list(metadata.keys()) if key.startswith('INSTANCE')), None)
+                provider.terminate_node(node_id)
+                returncode = 0
+
         elif (terminate and
               (prev_status == global_user_state.ClusterStatus.STOPPED or
-               use_tpu_vm) and not isinstance(cloud, clouds.SCP) ) :
+               use_tpu_vm)) :
             # For TPU VMs, gcloud CLI is used for VM termination.
             if isinstance(cloud, clouds.AWS):
                 # TODO(zhwu): Room for optimization. We can move these cloud
