@@ -443,6 +443,11 @@ class SCPNodeProvider(NodeProvider):
         provider_config = cluster_config['provider']
         node_config['region'] = provider_config['region']
         node_config['auth'] = cluster_config['auth']
+
+        #Add file mount: metadata path
+        metadata_path = f'{TAG_PATH_PREFIX}-{cluster_config["cluster_name"]}'
+        cluster_config['file_mounts'][metadata_path] = metadata_path
+
         return cluster_config
 
     def _start_vm(self, vm_id):
