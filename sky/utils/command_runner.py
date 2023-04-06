@@ -367,11 +367,10 @@ class SSHCommandRunner:
             retry_cnt -= 1
 
         direction = 'up' if up else 'down'
-        error_msg = (f"Failed to rsync {direction}: {source} -> {target}."
-                     "Ensure that the network is stable, then retry.")
-        subprocess_utils.handle_returncode(
-            returncode,
-            command,
-            error_msg,
-            stderr=stderr,
-            stream_logs=stream_logs)
+        error_msg = (f'Failed to rsync {direction}: {source} -> {target}.'
+                     'Ensure that the network is stable, then retry.')
+        subprocess_utils.handle_returncode(returncode,
+                                           command,
+                                           error_msg,
+                                           stderr=stderr,
+                                           stream_logs=stream_logs)
