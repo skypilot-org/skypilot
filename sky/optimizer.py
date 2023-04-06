@@ -270,9 +270,11 @@ class Optimizer:
                                 f' ({specified_resources} '
                                 f'in {specified_resources.region})')
                     error_msg = (
-                        'Optimizer: No launchable resource found for task '
-                        f'{node}{specified_resources_str}. '
-                        'To fix: relax its resource requirements.\n'
+                        'No launchable resource found for task '
+                        f'{node}{specified_resources_str}. This means the '
+                        'catalog does not contain any instance types to satisfy'
+                        ' the request. '
+                        'To fix: relax/change its resource requirements.\n'
                         'Hint: \'sky show-gpus --all\' '
                         'to list available accelerators.\n'
                         '      \'sky check\' to check the enabled clouds.')
