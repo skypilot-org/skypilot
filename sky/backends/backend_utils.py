@@ -1186,7 +1186,8 @@ def parallel_data_transfer_to_nodes(
             subprocess_utils.handle_returncode(
                 rc,
                 cmd, ('Failed to run command before rsync '
-                      f'{origin_source} -> {target}.'),
+                      f'{origin_source} -> {target}.'
+                      'Ensure that the network is stable, then retry.'),
                 stderr=stdout + stderr)
 
         if run_rsync:

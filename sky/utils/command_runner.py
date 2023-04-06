@@ -292,6 +292,7 @@ class SSHCommandRunner:
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,
+        retry_cnt: int = 1,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -356,11 +357,21 @@ class SSHCommandRunner:
                                                      stream_logs=stream_logs,
                                                      shell=True,
                                                      require_outputs=True)
+        while returncode != 0 and retry_cnt > 0:
+            returncode, _, stderr = log_lib.run_with_log(
+                command,
+                log_path=log_path,
+                stream_logs=stream_logs,
+                shell=True,
+                require_outputs=True)
+            retry_cnt -= 1
 
         direction = 'up' if up else 'down'
+        error_msg = (f"Failed to rsync {direction}: {source} -> {target}."
+                     "Ensure that the network is stable, then retry.")
         subprocess_utils.handle_returncode(
             returncode,
             command,
-            f'Failed to rsync {direction}: {source} -> {target}',
+            error_msg,
             stderr=stderr,
             stream_logs=stream_logs)
