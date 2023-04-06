@@ -11,7 +11,7 @@ from sky.utils import common_utils
 from sky.utils import log_utils
 
 _COMMAND_TRUNC_LENGTH = 25
-_NUM_COST_REPORT_LINES = 10
+NUM_COST_REPORT_LINES = 5
 
 # A record in global_user_state's 'clusters' table.
 _ClusterRecord = Dict[str, Any]
@@ -107,10 +107,11 @@ def show_status_table(cluster_records: List[_ClusterRecord],
 
 def get_total_cost_of_displayed_records(
         cluster_records: List[_ClusterCostReportRecord]):
-    """Compute total cost of records to be displayed in cost report.
-    """
-    num_lines_to_display = _NUM_COST_REPORT_LINES
-    displayed_records = cluster_records[:num_lines_to_display]
+    """Compute total cost of records to be displayed in cost report."""
+    cluster_records.sort(
+        key=lambda report: -_get_status_value_for_cost_report(report))
+
+    displayed_records = cluster_records[:NUM_COST_REPORT_LINES]
 
     total_cost = sum(record['total_cost'] for record in displayed_records)
     return total_cost
@@ -165,10 +166,11 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
             columns.append(status_column.name)
     cluster_table = log_utils.create_table(columns)
 
-    num_lines_to_display = _NUM_COST_REPORT_LINES
+    num_lines_to_display = NUM_COST_REPORT_LINES
     if show_all:
         num_lines_to_display = len(cluster_records)
 
+    # prioritize showing non-terminated clusters in table
     cluster_records.sort(
         key=lambda report: -_get_status_value_for_cost_report(report))
 
