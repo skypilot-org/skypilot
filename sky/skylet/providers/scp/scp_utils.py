@@ -242,6 +242,9 @@ class SCPClient:
                 "serviceValue" : "21"
               },{
                 "serviceType" : "TCP",
+                "serviceValue" : "22"
+              },{
+                "serviceType" : "TCP",
                 "serviceValue" : "80"
               },{
                 "serviceType" : "TCP",
