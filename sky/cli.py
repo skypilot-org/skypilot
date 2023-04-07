@@ -2955,6 +2955,8 @@ def show_gpus(
     if region is not None and cloud is None:
         raise click.UsageError(
             'The --region flag is only valid when the --cloud flag is set.')
+    # This will validate 'cloud' and raise if not found.
+    clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
     if show_all and gpu_name is not None:
