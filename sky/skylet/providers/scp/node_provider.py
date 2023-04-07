@@ -156,7 +156,13 @@ class SCPNodeProvider(NodeProvider):
             ["node-1", "node-2"]
         """
         nodes = self._get_filtered_nodes(tag_filters=tag_filters)
-        return [k for k, v in nodes.items() if not v["status"].startswith("STOPPED")]
+
+        if self.cache_stopped_nodes:
+            print("cache_stopped_nodes value is True")
+            return [k for k, v in nodes.items() if not v["status"].startswith("STOPPED")]
+        else:
+            print("cache_stopped_nodes value is False")
+            return [k for k, v in nodes.items()]
 
     def is_running(self, node_id: str) -> bool:
         """Return whether the specified node is running."""
@@ -437,6 +443,11 @@ class SCPNodeProvider(NodeProvider):
         provider_config = cluster_config['provider']
         node_config['region'] = provider_config['region']
         node_config['auth'] = cluster_config['auth']
+
+        #Add file mount: metadata path
+        metadata_path = f'{TAG_PATH_PREFIX}-{cluster_config["cluster_name"]}'
+        cluster_config['file_mounts'][metadata_path] = metadata_path
+
         return cluster_config
 
     def _start_vm(self, vm_id):
