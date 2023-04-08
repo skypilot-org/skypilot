@@ -659,13 +659,13 @@ class RetryingVmProvisioner(object):
                         launchable_resources.copy(zone=zone.name))
                 elif code == 'RESOURCE_NOT_FOUND':
                     # https://github.com/skypilot-org/skypilot/issues/1797
-                    # The VM may be alive on console. In the inner provision
-                    # loop we have used retries to recover but failed. The
-                    # provision loop will terminate the potentially live VMs
-                    # and move onto the next zone. Since the VM may have been
-                    # provisioned in this zone, it doesn't seem right to block
-                    # the current zone.
-                    pass
+                    # In the inner provision loop we have used retries to
+                    # recover but failed. This indicates this zone is most
+                    # likely out of capacity. The provision loop will terminate
+                    # any potentially live VMs before moving onto the next
+                    # zone.
+                    self._blocked_resources.add(
+                        launchable_resources.copy(zone=zone.name))
                 else:
                     assert False, error
         elif len(httperror_str) >= 1:
