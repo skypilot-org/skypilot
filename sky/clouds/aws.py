@@ -324,6 +324,8 @@ class AWS(clouds.Cloud):
 
         image_id = self._get_image_id(r.image_id, region_name, r.instance_type)
 
+        disk_type = r.disk_type if r.disk_type is not None else 'low'
+
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
@@ -331,9 +333,9 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
-            'disk_iops': AWS.get_disk_iops(r.disk_type),
-            'disk_throughput': AWS.get_disk_throughput(r.disk_type),
-            'custom_disk_perf': AWS.enable_custom_disk_perf(r.disk_type),
+            'disk_iops': AWS.get_disk_iops(disk_type),
+            'disk_throughput': AWS.get_disk_throughput(disk_type),
+            'custom_disk_perf': AWS.enable_custom_disk_perf(disk_type),
         }
 
     def get_feasible_launchable_resources(self,
