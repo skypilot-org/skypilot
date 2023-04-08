@@ -221,6 +221,12 @@ def _interactive_node_cli_command(cli_func):
                              type=int,
                              required=False,
                              help=('OS disk size in GBs.'))
+    disk_type = click.option('--disk-type',
+                             default=None,
+                             type=str,
+                             required=False,
+                             help=('OS disk type. Could be one of "low", '
+                                   '"medium", "high".'))
     no_confirm = click.option('--yes',
                               '-y',
                               is_flag=True,
@@ -299,6 +305,7 @@ def _interactive_node_cli_command(cli_func):
         screen_option,
         tmux_option,
         disk_size,
+        disk_type,
     ]
     decorator = functools.reduce(lambda res, f: f(res),
                                  reversed(click_decorators), cli_func)
@@ -2684,8 +2691,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             memory: Optional[str], gpus: Optional[str],
             use_spot: Optional[bool], screen: Optional[bool],
             tmux: Optional[bool], disk_size: Optional[int],
-            idle_minutes_to_autostop: Optional[int], down: bool,
-            retry_until_up: bool):
+            disk_type: Optional[str], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
 
     Examples:
@@ -2742,7 +2749,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               memory=memory,
                               accelerators=gpus,
                               use_spot=use_spot,
-                              disk_size=disk_size)
+                              disk_size=disk_size,
+                              disk_type=disk_type)
 
     _create_and_ssh_into_node(
         'gpunode',
@@ -2766,8 +2774,9 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             instance_type: Optional[str], cpus: Optional[str],
             memory: Optional[str], use_spot: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
-            down: bool, retry_until_up: bool):
+            disk_size: Optional[int], disk_type: Optional[str],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
 
     Examples:
@@ -2820,7 +2829,8 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               cpus=cpus,
                               memory=memory,
                               use_spot=use_spot,
-                              disk_size=disk_size)
+                              disk_size=disk_size,
+                              disk_type=disk_type)
 
     _create_and_ssh_into_node(
         'cpunode',
@@ -2845,8 +2855,9 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             memory: Optional[str], tpus: Optional[str],
             use_spot: Optional[bool], tpu_vm: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
-            down: bool, retry_until_up: bool):
+            disk_size: Optional[int], disk_type: Optional[str],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
 
     Examples:
@@ -2906,7 +2917,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               accelerators=tpus,
                               accelerator_args=accelerator_args,
                               use_spot=use_spot,
-                              disk_size=disk_size)
+                              disk_size=disk_size,
+                              disk_type=disk_type)
 
     _create_and_ssh_into_node(
         'tpunode',
