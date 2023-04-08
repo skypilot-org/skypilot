@@ -324,8 +324,6 @@ class AWS(clouds.Cloud):
 
         image_id = self._get_image_id(r.image_id, region_name, r.instance_type)
 
-        disk_type = r.disk_type if r.disk_type is not None else 'low'
-
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
@@ -333,9 +331,7 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
-            'disk_iops': AWS.get_disk_iops(disk_type),
-            'disk_throughput': AWS.get_disk_throughput(disk_type),
-            'custom_disk_perf': AWS.enable_custom_disk_perf(disk_type),
+            **AWS._get_disk_specs(r.disk_type or 'low')
         }
 
     def get_feasible_launchable_resources(self,
@@ -629,30 +625,19 @@ class AWS(clouds.Cloud):
         return
 
     @classmethod
-    def get_disk_type(cls, disk_type: str) -> str:
-        # aws disk will be configured to different IOPS and throughput
+    def _get_disk_type(cls, disk_type: str) -> str:
         return 'standard' if disk_type == 'low' else 'gp3'
 
     @classmethod
-    def get_disk_iops(cls, disk_type: str) -> int:
+    def _get_disk_specs(cls, disk_type: str) -> Dict[str, Any]:
         type2iops = {
             'high': 7000,
             'medium': 3500,
             'low': 0,  # only gp3 is required to set iops
         }
-        return type2iops[disk_type]
-
-    @classmethod
-    def get_disk_throughput(cls, disk_type: str) -> int:
-        return cls.get_disk_iops(disk_type) // 16
-
-    @classmethod
-    def enable_custom_disk_perf(cls, disk_type: str) -> bool:
-        return cls.get_disk_type(disk_type) == 'gp3'
-
-    @classmethod
-    def get_disk_desc(cls, disk_type: str) -> str:
-        cloud_disk_type = cls.get_disk_type(disk_type)
-        cloud_disk_iops = cls.get_disk_iops(disk_type)
-        return f'{disk_type}:{cloud_disk_type}[{cloud_disk_iops}]' if cls.get_disk_type(
-            disk_type) == 'gp3' else f'{disk_type}:{cloud_disk_type}'
+        return {
+            'disk_type': cls._get_disk_type(disk_type),
+            'disk_iops': type2iops[disk_type],
+            'disk_throughput': type2iops[disk_type] // 16,
+            'custom_disk_perf': disk_type != 'low',
+        }

@@ -237,7 +237,8 @@ class Azure(clouds.Cloud):
             'region': region_name,
             # Azure does not support specific zones.
             'zones': None,
-            **image_config
+            **image_config,
+            'disk_type': Azure._get_disk_type(r.disk_type or 'low')
         }
 
     def get_feasible_launchable_resources(self, resources):
@@ -425,7 +426,7 @@ class Azure(clouds.Cloud):
         # Only S-series supported premium ssd
         # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # pylint: disable=line-too-long
         series = instance_type.split('_')[1].lower()
-        if cls.get_disk_type(disk_type) == 'Premium_LRS' and not 's' in series:
+        if cls._get_disk_type(disk_type) == 'Premium_LRS' and not 's' in series:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Azure premium SSDs are only supported for S-series '
@@ -433,7 +434,7 @@ class Azure(clouds.Cloud):
                     'instance_type is specified to an S-series instance.')
 
     @classmethod
-    def get_disk_type(cls, disk_type: str) -> str:
+    def _get_disk_type(cls, disk_type: str) -> str:
         # TODO(tian): Maybe use PremiumV2_LRS/UltraSSD_LRS? Notice these two
         # cannot be used as OS disks so we might need data disk support
         type2name = {

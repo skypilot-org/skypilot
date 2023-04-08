@@ -168,8 +168,7 @@ class Resources:
 
         disk_type = ''
         if self.disk_type is not None:
-            disk_desc = self.cloud.get_disk_desc(self.disk_type)
-            disk_type = f', disk_type={disk_desc}'
+            disk_type = f', disk_type={self.disk_type}'
 
         disk_size = ''
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
@@ -287,11 +286,6 @@ class Resources:
     @property
     def disk_type(self) -> str:
         return self._disk_type
-
-    def get_cloud_disk_type(self) -> str:
-        # default to low if not specified
-        disk_type = 'low' if self.disk_type is None else self.disk_type
-        return self.cloud.get_disk_type(disk_type)
 
     def _set_cpus(
         self,
@@ -795,6 +789,14 @@ class Resources:
 
         if self.use_spot_specified and self.use_spot != other.use_spot:
             return False
+
+        if self.disk_type is not None:
+            if other.disk_type is None:
+                return False
+            if self.disk_type != other.disk_type:
+                types = ['low', 'medium', 'high']
+                return types.index(self.disk_type) < types.index(
+                    other.disk_type)
 
         # self <= other
         return True

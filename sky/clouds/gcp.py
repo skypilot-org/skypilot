@@ -353,6 +353,8 @@ class GCP(clouds.Cloud):
         assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
 
+        resources_vars['disk_type'] = GCP._get_disk_type(r.disk_type or 'low')
+
         return resources_vars
 
     def get_feasible_launchable_resources(self, resources):
@@ -699,7 +701,7 @@ class GCP(clouds.Cloud):
         return
 
     @classmethod
-    def get_disk_type(cls, disk_type: str) -> str:
+    def _get_disk_type(cls, disk_type: str) -> str:
         type2name = {
             'high': 'pd-ssd',
             'medium': 'pd-balanced',

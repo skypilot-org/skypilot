@@ -200,3 +200,8 @@ class Local(clouds.Cloud):
                                 disk_type: str) -> None:
         raise exceptions.NotSupportedError(
             'Local cloud does not support disk types.')
+
+    @classmethod
+    def _get_disk_type(cls, disk_type: str) -> str:
+        raise exceptions.NotSupportedError(
+            'Local cloud does not support disk types.')

@@ -460,19 +460,9 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_disk_type(cls, disk_type: str) -> str:
+    def _get_disk_type(cls, disk_type: str) -> str:
         """Returns the disk type name for each cloud."""
         raise NotImplementedError
-
-    @classmethod
-    def get_disk_desc(cls, disk_type: str) -> str:
-        """Returns a string to describe the disk type for each cloud.
-
-        Default format: {disk_type}:{cloud_disk_type}
-
-        AWS format: {disk_type}:{cloud_disk_type}[{iops}]
-        """
-        return f'{disk_type}:{cls.get_disk_type(disk_type)}'
 
     def __repr__(self):
         return self._REPR
