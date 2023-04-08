@@ -27,7 +27,7 @@ US_REGIONS = [
 ]
 
 # Exclude the following regions as they do not have ProductName in the
-# pricing table.
+# pricing table. Reference: #1768
 EXCLUDED_REGIONS = {
     'eastus2euap',
     'centraluseuap',
