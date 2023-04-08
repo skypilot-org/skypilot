@@ -657,6 +657,15 @@ class RetryingVmProvisioner(object):
                     # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # pylint: disable=line-too-long
                     self._blocked_resources.add(
                         launchable_resources.copy(zone=zone.name))
+                elif code == 'RESOURCE_NOT_FOUND':
+                    # https://github.com/skypilot-org/skypilot/issues/1797
+                    # In the inner provision loop we have used retries to
+                    # recover but failed. This indicates this zone is most
+                    # likely out of capacity. The provision loop will terminate
+                    # any potentially live VMs before moving onto the next
+                    # zone.
+                    self._blocked_resources.add(
+                        launchable_resources.copy(zone=zone.name))
                 else:
                     assert False, error
         elif len(httperror_str) >= 1:
@@ -1522,6 +1531,18 @@ class RetryingVmProvisioner(object):
                         'limit \'List requests per minute\'' in stderr):
                     logger.info(
                         'Retrying due to list request rate limit exceeded.')
+                    return True
+
+                # https://github.com/skypilot-org/skypilot/issues/1797
+                # "The resource 'projects/xxx/zones/us-central1-b/instances/ray-yyy-head-<hash>-compute' was not found" # pylint: disable=line-too-long
+                pattern = (r'\'code\': \'RESOURCE_NOT_FOUND\'.*The resource'
+                           r'.*instances\/.*-compute\' was not found')
+                result = re.search(pattern, stderr)
+                if result is not None:
+                    # Retry. Unlikely will succeed if it's due to no capacity.
+                    logger.info(
+                        'Retrying due to the possibly flaky RESOURCE_NOT_FOUND '
+                        'error.')
                     return True
 
             if ('Processing file mounts' in stdout and
