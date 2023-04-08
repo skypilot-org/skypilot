@@ -191,7 +191,7 @@ class RsyncProgressBarProcessor(LineProcessor, Progress):
         line: str,
         refresh: bool = False,
     ) -> None:
-        """Process the string read from stdout of rsync 
+        """Process the string read from stdout of rsync
            command and update information associated with a task.
 
         Args:
