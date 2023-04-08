@@ -700,16 +700,12 @@ class Resources:
     def _try_validate_disk_type(self) -> None:
         if self.disk_type is None:
             return
-        if self.cloud is None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cloud must be specified when disk_type is provided.')
         if self.disk_type not in ['high', 'medium', 'low']:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Invalid disk_type {self.disk_type}. '
                     'Please use one of "high", "medium", or "low".')
-        if self.instance_type is not None:
+        if self.cloud is not None:
             self.cloud.check_disk_type_enabled(self.instance_type,
                                                self.disk_type)
 
