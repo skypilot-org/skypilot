@@ -12,7 +12,7 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 from typing_extensions import Literal
 import uuid
 
@@ -700,7 +700,7 @@ class SSHConfigHelper(object):
 
 def _replace_yaml_dicts(
         new_yaml: str, old_yaml: str, restore_key_names: Set[str],
-        restore_key_names_exceptions: Sequence[Sequence[str]]) -> str:
+        restore_key_names_exceptions: Sequence[Tuple[str, ...]]) -> str:
     """Replaces 'new' with 'old' for all keys in restore_key_names.
 
     The replacement will be applied recursively and only for the blocks
@@ -1515,7 +1515,7 @@ def check_network_connection():
 
 def _process_cli_query(
     cloud: str, cluster: str, query_cmd: str, deliminiator: str,
-    status_map: Dict[str, global_user_state.ClusterStatus]
+    status_map: Mapping[str, Optional[global_user_state.ClusterStatus]]
 ) -> List[global_user_state.ClusterStatus]:
     """Run the cloud CLI query and returns cluster status.
 
@@ -1557,11 +1557,13 @@ def _process_cli_query(
     cluster_status = stdout.strip()
     if cluster_status == '':
         return []
-    return [
-        status_map[s]
-        for s in cluster_status.split(deliminiator)
-        if status_map[s] is not None
-    ]
+
+    statuses = []
+    for s in cluster_status.split(deliminiator):
+        node_status = status_map[s]
+        if node_status is not None:
+            statuses.append(node_status)
+    return statuses
 
 
 def _query_status_aws(
@@ -1646,6 +1648,8 @@ def _query_status_gcp(
         logger.debug(f'Terminating preempted TPU VM cluster {cluster}')
         backend = backends.CloudVmRayBackend()
         handle = global_user_state.get_handle_from_cluster_name(cluster)
+        assert isinstance(handle,
+                          backends.CloudVmRayResourceHandle), (cluster, handle)
         # Do not use refresh cluster status during teardown, as that will
         # cause inifinite recursion by calling cluster status refresh
         # again.
@@ -1709,7 +1713,9 @@ def _query_status_lambda(
     possible_names = [f'{cluster}-head', f'{cluster}-worker']
     for node in vms:
         if node.get('name') in possible_names:
-            status_list.append(status_map[node['status']])
+            node_status = status_map[node['status']]
+            if node_status is not None:
+                status_list.append(node_status)
     return status_list
 
 
@@ -2148,7 +2154,10 @@ def check_cluster_available(
             f'not fatal, but {operation} might hang if the cluster is not up.\n'
             f'Detailed reason: {e}')
         record = global_user_state.get_cluster_from_name(cluster_name)
-        cluster_status, handle = record['status'], record['handle']
+        if record is None:
+            cluster_status, handle = None, None
+        else:
+            cluster_status, handle = record['status'], record['handle']
 
     if handle is None:
         with ux_utils.print_exception_no_traceback():
@@ -2201,7 +2210,7 @@ def get_clusters(
     include_reserved: bool,
     refresh: bool,
     cloud_filter: CloudFilter = CloudFilter.CLOUDS_AND_DOCKER,
-    cluster_names: Optional[Union[str, Sequence[str]]] = None,
+    cluster_names: Optional[Union[str, List[str]]] = None,
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached or optionally refreshed cluster records.
 
@@ -2351,6 +2360,12 @@ def get_backend_from_handle(
 def get_backend_from_handle(
     handle: 'local_docker_backend.LocalDockerResourceHandle'
 ) -> 'local_docker_backend.LocalDockerBackend':
+    ...
+
+
+@typing.overload
+def get_backend_from_handle(
+        handle: backends.ResourceHandle) -> backends.Backend:
     ...
 
 

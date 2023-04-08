@@ -4,7 +4,7 @@ import os
 import subprocess
 import time
 import typing
-from typing import Any, Dict, Optional, Tuple, Type, Union, List
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
 
 import colorama
@@ -382,7 +382,7 @@ class Storage(object):
             there. This is set to false when the Storage object is created not
             for direct use, e.g. for sky storage delete.
         """
-        self.name = name
+        self.name: str
         self.source = source
         self.persistent = persistent
         self.mode = mode
@@ -395,8 +395,7 @@ class Storage(object):
         self.force_delete = False
 
         # Validate and correct inputs if necessary
-        self._validate_storage_spec()
-        assert self.name is not None
+        self._validate_storage_spec(name)
 
         # Sky optimizer either adds a storage object instance or selects
         # from existing ones
@@ -559,7 +558,7 @@ class Storage(object):
                         f'r2://. Got: {source}')
         return source, is_local_source
 
-    def _validate_storage_spec(self) -> None:
+    def _validate_storage_spec(self, name: Optional[str]) -> None:
         """
         Validates the storage spec and updates local fields if necessary.
         """
@@ -570,11 +569,8 @@ class Storage(object):
                 # (e.g. used as scratch previously). Such storage objects can be
                 # mounted in copy mode even though they have no source in the
                 # yaml spec (the name is the source).
-                handle = global_user_state.get_handle_from_storage_name(
-                    self.name)
-                if handle is not None:
-                    return
-                else:
+                handle = global_user_state.get_handle_from_storage_name(name)
+                if handle is None:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageSourceError(
                             'New storage object: source must be specified when '
@@ -583,17 +579,17 @@ class Storage(object):
                 # If source is not specified in COPY mode, the intent is to
                 # create a bucket and use it as scratch disk. Name must be
                 # specified to create bucket.
-                if not self.name:
+                if not name:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageSpecError(
                             'Storage source or storage name must be specified.')
-                else:
-                    # Create bucket and mount
-                    return
+            assert name is not None, handle
+            self.name = name
+            return
         elif self.source is not None:
             source, is_local_source = Storage._validate_source(
                 self.source, self.mode, self.sync_on_reconstruction)
-            if not self.name:
+            if not name:
                 if is_local_source:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageNameError(
@@ -602,11 +598,15 @@ class Storage(object):
                 else:
                     assert isinstance(source, str)
                     # Set name to source bucket name and continue
-                    self.name = urllib.parse.urlsplit(source).netloc
+                    name = urllib.parse.urlsplit(source).netloc
+                    assert name is not None, source
+                    self.name = name
                     return
             else:
                 if is_local_source:
                     # If name is specified and source is local, upload to bucket
+                    assert name is not None, source
+                    self.name = name
                     return
                 else:
                     # Both name and source should not be specified if the source
@@ -647,7 +647,6 @@ class Storage(object):
                 raise exceptions.StorageSpecError(
                     f'{store_type} not supported as a Store.')
 
-        assert self.name is not None, self.name
         # Initialize store object and get/create bucket
         try:
             store = store_cls(name=self.name, source=self.source)

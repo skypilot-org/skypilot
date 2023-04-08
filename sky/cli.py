@@ -37,7 +37,7 @@ import subprocess
 import sys
 import textwrap
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import click
 import colorama
@@ -104,7 +104,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 5
 
 
-def _get_glob_clusters(clusters: Sequence[str]) -> List[str]:
+def _get_glob_clusters(clusters: List[str]) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
     for cluster in clusters:
@@ -120,7 +120,7 @@ def _get_glob_clusters(clusters: Sequence[str]) -> List[str]:
     return list(set(glob_clusters))
 
 
-def _get_glob_storages(storages: Sequence[str]) -> List[str]:
+def _get_glob_storages(storages: List[str]) -> List[str]:
     """Returns a list of storages that match the glob pattern."""
     glob_storages = []
     for storage_object in storages:
@@ -681,6 +681,9 @@ def _check_resources_match(backend: backends.Backend,
         return
 
     if node_type is not None:
+        assert isinstance(handle,
+                          backends.CloudVmRayResourceHandle), (node_type,
+                                                               handle)
         inferred_node_type = _infer_interactive_node_type(
             handle.launched_resources)
         if node_type != inferred_node_type:
@@ -876,6 +879,7 @@ def _create_and_ssh_into_node(
         node_type=node_type,
     )
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
     # connection, and for allowing adding 'cd workdir' in the future.
@@ -990,6 +994,7 @@ def _make_task_from_entrypoint_with_overrides(
             click.secho(entrypoint, bold=True)
 
     if is_yaml:
+        assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
         task = sky.Task.from_yaml(entrypoint)
     else:
@@ -1731,7 +1736,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
                 nargs=-1,
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
-def queue(clusters: Sequence[str], skip_finished: bool, all_users: bool):
+def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
@@ -1952,7 +1957,7 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 def stop(
-    clusters: Tuple[str],
+    clusters: List[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
 ):
@@ -2030,7 +2035,7 @@ def stop(
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 def autostop(
-    clusters: Tuple[str],
+    clusters: List[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     idle_minutes: Optional[int],
     cancel: bool,  # pylint: disable=redefined-outer-name
@@ -2153,7 +2158,7 @@ def autostop(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def start(
-        clusters: Sequence[str],
+        clusters: List[str],
         all: bool,
         yes: bool,
         idle_minutes_to_autostop: Optional[int],
@@ -2342,7 +2347,7 @@ def start(
               'Useful for cleaning up manually deleted cluster(s).')
 @usage_lib.entrypoint
 def down(
-    clusters: Tuple[str],
+    clusters: List[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
     purge: bool,
@@ -2445,7 +2450,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
 
 
 def _down_or_stop_clusters(
-        names: Sequence[str],
+        names: List[str],
         apply_to_all: Optional[bool],
         down: bool,  # pylint: disable=redefined-outer-name
         no_confirm: bool,
@@ -3105,7 +3110,7 @@ def storage_ls():
               required=False,
               help='Delete all storage objects.')
 @usage_lib.entrypoint
-def storage_delete(names: Sequence[str], all: bool):  # pylint: disable=redefined-builtin
+def storage_delete(names: List[str], all: bool):  # pylint: disable=redefined-builtin
     """Delete storage objects.
 
     Examples:
@@ -4114,6 +4119,7 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
             bucket_name = benchmark_state.get_benchmark_from_name(
                 benchmark)['bucket']
             handle = global_user_state.get_handle_from_storage_name(bucket_name)
+            assert handle is not None, bucket_name
             bucket_type = list(handle.sky_stores.keys())[0]
             benchmark_utils.remove_benchmark_logs(benchmark, bucket_name,
                                                   bucket_type)
