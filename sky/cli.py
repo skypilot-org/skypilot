@@ -2402,7 +2402,9 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.RED}Tearing down the spot controller while '
-                'it is in INIT state is not supported, as we cannot '
+                'it is in INIT state is not supported (this means a spot '
+                'launch is in progress or the previous launch failed), as we '
+                'cannot '
                 'guarantee that all the spot jobs are finished. Please wait '
                 'until the spot controller is UP or fix it with '
                 f'{colorama.Style.BRIGHT}sky start '
@@ -2958,6 +2960,8 @@ def show_gpus(
     if region is not None and cloud is None:
         raise click.UsageError(
             'The --region flag is only valid when the --cloud flag is set.')
+    # This will validate 'cloud' and raise if not found.
+    clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
     if show_all and gpu_name is not None:

@@ -54,7 +54,7 @@ class _CloudRegistry(dict):
             return None
         if name.lower() not in self:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Cloud {name} is not a valid cloud among '
+                raise ValueError(f'Cloud {name!r} is not a valid cloud among '
                                  f'{list(self.keys())}')
         return self.get(name.lower())
 

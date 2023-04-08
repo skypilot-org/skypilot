@@ -2159,11 +2159,13 @@ def check_cluster_available(
         else:
             cluster_status, handle = record['status'], record['handle']
 
+    bright = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
     if handle is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} does not '
-                f'exist.{colorama.Style.RESET_ALL}')
+                f'exist.{reset}')
     backend = get_backend_from_handle(handle)
     if check_cloud_vm_ray_backend and not isinstance(
             backend, backends.CloudVmRayBackend):
@@ -2172,7 +2174,7 @@ def check_cluster_available(
                 f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for '
                 f'cluster {cluster_name!r}. It is only supported by backend: '
                 f'{backends.CloudVmRayBackend.NAME}.'
-                f'{colorama.Style.RESET_ALL}')
+                f'{reset}')
     if cluster_status != global_user_state.ClusterStatus.UP:
         if onprem_utils.check_if_local_cloud(cluster_name):
             raise exceptions.ClusterNotUpError(
@@ -2180,12 +2182,19 @@ def check_cluster_available(
                     cluster_name),
                 cluster_status=cluster_status)
         with ux_utils.print_exception_no_traceback():
+            hint_for_init = ''
+            if cluster_status == global_user_state.ClusterStatus.INIT:
+                hint_for_init = (
+                    f'{reset} Wait for a launch to finish, or use this command '
+                    f'to try to transition the cluster to UP: {bright}sky '
+                    f'start {cluster_name}{reset}')
             raise exceptions.ClusterNotUpError(
                 f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for '
                 f'cluster {cluster_name!r} (status: {cluster_status.value}). '
                 'It is only allowed for '
                 f'{global_user_state.ClusterStatus.UP.value} clusters.'
-                f'{colorama.Style.RESET_ALL}',
+                f'{hint_for_init}'
+                f'{reset}',
                 cluster_status=cluster_status)
 
     if handle.head_ip is None:
