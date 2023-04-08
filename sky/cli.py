@@ -588,7 +588,8 @@ def _parse_override_params(cloud: Optional[str] = None,
                            instance_type: Optional[str] = None,
                            use_spot: Optional[bool] = None,
                            image_id: Optional[str] = None,
-                           disk_size: Optional[int] = None) -> Dict[str, Any]:
+                           disk_size: Optional[int] = None,
+                           disk_type: Optional[str] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -635,6 +636,8 @@ def _parse_override_params(cloud: Optional[str] = None,
             override_params['image_id'] = image_id
     if disk_size is not None:
         override_params['disk_size'] = disk_size
+    if disk_type is not None:
+        override_params['disk_type'] = disk_type
     return override_params
 
 
@@ -974,6 +977,7 @@ def _make_task_from_entrypoint_with_overrides(
     use_spot: Optional[bool] = None,
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
+    disk_type: Optional[str] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
@@ -1017,7 +1021,8 @@ def _make_task_from_entrypoint_with_overrides(
                                              instance_type=instance_type,
                                              use_spot=use_spot,
                                              image_id=image_id,
-                                             disk_size=disk_size)
+                                             disk_size=disk_size,
+                                             disk_type=disk_type)
     # Spot launch specific.
     if spot_recovery is not None:
         if spot_recovery.lower() == 'none':
@@ -1174,6 +1179,11 @@ def cli():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
+@click.option('--disk-type',
+              default=None,
+              type=str,
+              required=False,
+              help=('OS disk type. Could be one of "low", "medium", "high".'))
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -1241,6 +1251,7 @@ def launch(
     image_id: Optional[str],
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
+    disk_type: Optional[str],
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
@@ -1287,6 +1298,7 @@ def launch(
         image_id=image_id,
         env=env,
         disk_size=disk_size,
+        disk_type=disk_type,
     )
 
     backend: backends.Backend
@@ -3277,6 +3289,11 @@ def spot():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
+@click.option('--disk-type',
+              default=None,
+              type=str,
+              required=False,
+              help=('OS disk type. Could be one of "low", "medium", "high".'))
 @click.option(
     '--detach-run',
     '-d',
@@ -3320,6 +3337,7 @@ def spot_launch(
     spot_recovery: Optional[str],
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
+    disk_type: Optional[str],
     detach_run: bool,
     retry_until_up: bool,
     yes: bool,
@@ -3357,6 +3375,7 @@ def spot_launch(
         image_id=image_id,
         env=env,
         disk_size=disk_size,
+        disk_type=disk_type,
         spot_recovery=spot_recovery,
     )
 
@@ -3653,6 +3672,11 @@ def bench():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
+@click.option('--disk-type',
+              default=None,
+              type=str,
+              required=False,
+              help=('OS disk type. Could be one of "low", "medium", "high".'))
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -3684,6 +3708,7 @@ def benchmark_launch(
     image_id: Optional[str],
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
+    disk_type: Optional[str],
     idle_minutes_to_autostop: Optional[int],
     yes: bool,
 ) -> None:
@@ -3740,6 +3765,9 @@ def benchmark_launch(
         if disk_size is not None:
             if any('disk_size' in candidate for candidate in candidates):
                 raise click.BadParameter(f'disk_size {message}')
+        if disk_type is not None:
+            if any('disk_type' in candidate for candidate in candidates):
+                raise click.BadParameter(f'disk_type {message}')
 
     # The user can specify the benchmark candidates in either of the two ways:
     # 1. By specifying resources.candidates in the YAML.
@@ -3782,7 +3810,8 @@ def benchmark_launch(
                                              gpus=override_gpu,
                                              use_spot=use_spot,
                                              image_id=image_id,
-                                             disk_size=disk_size)
+                                             disk_size=disk_size,
+                                             disk_type=disk_type)
     resources_config.update(override_params)
     if 'cloud' in resources_config:
         cloud = resources_config.pop('cloud')
