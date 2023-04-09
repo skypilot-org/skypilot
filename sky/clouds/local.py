@@ -201,9 +201,9 @@ class Local(clouds.Cloud):
     def check_disk_tier_enabled(cls, instance_type: str,
                                 disk_tier: str) -> None:
         raise exceptions.NotSupportedError(
-            'Local cloud does not support disk types.')
+            'Local cloud does not support disk tiers.')
 
     @classmethod
     def _get_disk_type(cls, disk_tier: str) -> str:
         raise exceptions.NotSupportedError(
-            'Local cloud does not support disk types.')
+            'Local cloud does not support disk tiers.')

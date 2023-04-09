@@ -160,7 +160,7 @@ class Lambda(clouds.Cloud):
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
-        if resources.use_spot or resources.disk_tier is not None:
+        if resources.use_spot or resourceier is not None:
             return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
@@ -258,9 +258,9 @@ class Lambda(clouds.Cloud):
     def check_disk_tier_enabled(cls, instance_type: str,
                                 disk_tier: str) -> None:
         raise exceptions.NotSupportedError(
-            'Lambda does not support disk types.')
+            'Lambda does not support disk tiers.')
 
     @classmethod
     def _get_disk_type(cls, disk_tier: str) -> str:
         raise exceptions.NotSupportedError(
-            'Lambda does not support disk types.')
+            'Lambda does not support disk tiers.')
