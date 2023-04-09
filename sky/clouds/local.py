@@ -143,7 +143,7 @@ class Local(clouds.Cloud):
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
-        if resources.disk_type is not None:
+        if resources.disk_tier is not None:
             return ([], [])
         # The entire local cluster's resources is considered launchable, as the
         # check for task resources is deferred later.
@@ -198,12 +198,12 @@ class Local(clouds.Cloud):
         return region, zone
 
     @classmethod
-    def check_disk_type_enabled(cls, instance_type: str,
-                                disk_type: str) -> None:
+    def check_disk_tier_enabled(cls, instance_type: str,
+                                disk_tier: str) -> None:
         raise exceptions.NotSupportedError(
             'Local cloud does not support disk types.')
 
     @classmethod
-    def _get_disk_type(cls, disk_type: str) -> str:
+    def _get_disk_type(cls, disk_tier: str) -> str:
         raise exceptions.NotSupportedError(
             'Local cloud does not support disk types.')

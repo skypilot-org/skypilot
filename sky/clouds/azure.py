@@ -238,7 +238,7 @@ class Azure(clouds.Cloud):
             # Azure does not support specific zones.
             'zones': None,
             **image_config,
-            'disk_type': Azure._get_disk_type(r.disk_type or 'low')
+            'disk_tier': Azure._get_disk_type(r.disk_tier or 'low')
         }
 
     def get_feasible_launchable_resources(self, resources):
@@ -246,7 +246,7 @@ class Azure(clouds.Cloud):
             # TODO(zhwu): our azure subscription offer ID does not support spot.
             # Need to support it.
             return ([], [])
-        if resources.disk_type == 'high':
+        if resources.disk_tier == 'high':
             # Azure does not support high disk type.
             return ([], [])
         if resources.instance_type is not None:
@@ -420,31 +420,31 @@ class Azure(clouds.Cloud):
         return azure_subscription_id
 
     @classmethod
-    def check_disk_type_enabled(cls, instance_type: Optional[str],
-                                disk_type: str) -> None:
-        if disk_type == 'high':
+    def check_disk_tier_enabled(cls, instance_type: Optional[str],
+                                disk_tier: str) -> None:
+        if disk_tier == 'high':
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('Azure disk_type=high is not supported now. '
-                                 'Please use disk_type={low, medium} instead.')
+                raise ValueError('Azure disk_tier=high is not supported now. '
+                                 'Please use disk_tier={low, medium} instead.')
         if instance_type is None:
             return
         # Only S-series supported premium ssd
         # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # pylint: disable=line-too-long
         series = instance_type.split('_')[1].lower()
-        if cls._get_disk_type(disk_type) == 'Premium_LRS' and not 's' in series:
+        if cls._get_disk_type(disk_tier) == 'Premium_LRS' and not 's' in series:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Azure premium SSDs are only supported for S-series '
-                    'instances. To use disk_type=medium, please make sure '
+                    'instances. To use disk_tier=medium, please make sure '
                     'instance_type is specified to an S-series instance.')
 
     @classmethod
-    def _get_disk_type(cls, disk_type: str) -> str:
+    def _get_disk_type(cls, disk_tier: str) -> str:
         # TODO(tian): Maybe use PremiumV2_LRS/UltraSSD_LRS? Notice these two
         # cannot be used as OS disks so we might need data disk support
-        type2name = {
+        tier2name = {
             'high': 'Disabled',
             'medium': 'Premium_LRS',
             'low': 'Standard_LRS',
         }
-        return type2name[disk_type]
+        return tier2name[disk_tier]

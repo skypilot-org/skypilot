@@ -47,7 +47,7 @@ available_node_types:
         - DeviceName: /dev/sda1
           Ebs:
             VolumeSize: {{disk_size}}
-            VolumeType: {{disk_type}}
+            VolumeType: {{disk_tier}}
             {% if custom_disk_perf %}
             Iops: {{disk_iops}}
             Throughput: {{disk_throughput}}
@@ -76,7 +76,7 @@ available_node_types:
         - DeviceName: /dev/sda1
           Ebs:
             VolumeSize: {{disk_size}}
-            VolumeType: {{disk_type}}
+            VolumeType: {{disk_tier}}
             {% if custom_disk_perf %}
             Iops: {{disk_iops}}
             Throughput: {{disk_throughput}}

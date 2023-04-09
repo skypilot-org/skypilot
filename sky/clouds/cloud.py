@@ -450,8 +450,8 @@ class Cloud:
                     f'{max_cluster_name_len_limit} chars{cloud_name}.')
 
     @classmethod
-    def check_disk_type_enabled(cls, instance_type: str,
-                                disk_type: str) -> None:
+    def check_disk_tier_enabled(cls, instance_type: str,
+                                disk_tier: str) -> None:
         """Errors out if the disk type is not supported by the cloud provider.
 
         Raises:
@@ -460,7 +460,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def _get_disk_type(cls, disk_type: str) -> str:
+    def _get_disk_type(cls, disk_tier: str) -> str:
         """Returns the disk type name for each cloud."""
         raise NotImplementedError
 

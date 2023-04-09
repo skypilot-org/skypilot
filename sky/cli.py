@@ -221,11 +221,11 @@ def _interactive_node_cli_command(cli_func):
                              type=int,
                              required=False,
                              help=('OS disk size in GBs.'))
-    disk_type = click.option('--disk-type',
+    disk_tier = click.option('--disk-tier',
                              default=None,
                              type=str,
                              required=False,
-                             help=('OS disk type. Could be one of "low", '
+                             help=('OS disk tier. Could be one of "low", '
                                    '"medium", "high".'))
     no_confirm = click.option('--yes',
                               '-y',
@@ -305,7 +305,7 @@ def _interactive_node_cli_command(cli_func):
         screen_option,
         tmux_option,
         disk_size,
-        disk_type,
+        disk_tier,
     ]
     decorator = functools.reduce(lambda res, f: f(res),
                                  reversed(click_decorators), cli_func)
@@ -596,7 +596,7 @@ def _parse_override_params(cloud: Optional[str] = None,
                            use_spot: Optional[bool] = None,
                            image_id: Optional[str] = None,
                            disk_size: Optional[int] = None,
-                           disk_type: Optional[str] = None) -> Dict[str, Any]:
+                           disk_tier: Optional[str] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -643,8 +643,8 @@ def _parse_override_params(cloud: Optional[str] = None,
             override_params['image_id'] = image_id
     if disk_size is not None:
         override_params['disk_size'] = disk_size
-    if disk_type is not None:
-        override_params['disk_type'] = disk_type
+    if disk_tier is not None:
+        override_params['disk_tier'] = disk_tier
     return override_params
 
 
@@ -984,7 +984,7 @@ def _make_task_from_entrypoint_with_overrides(
     use_spot: Optional[bool] = None,
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
-    disk_type: Optional[str] = None,
+    disk_tier: Optional[str] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
@@ -1029,7 +1029,7 @@ def _make_task_from_entrypoint_with_overrides(
                                              use_spot=use_spot,
                                              image_id=image_id,
                                              disk_size=disk_size,
-                                             disk_type=disk_type)
+                                             disk_tier=disk_tier)
     # Spot launch specific.
     if spot_recovery is not None:
         if spot_recovery.lower() == 'none':
@@ -1186,7 +1186,7 @@ def cli():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
-@click.option('--disk-type',
+@click.option('--disk-tier',
               default=None,
               type=str,
               required=False,
@@ -1258,7 +1258,7 @@ def launch(
     image_id: Optional[str],
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
-    disk_type: Optional[str],
+    disk_tier: Optional[str],
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
@@ -1305,7 +1305,7 @@ def launch(
         image_id=image_id,
         env=env,
         disk_size=disk_size,
-        disk_type=disk_type,
+        disk_tier=disk_tier,
     )
 
     backend: backends.Backend
@@ -2691,7 +2691,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             memory: Optional[str], gpus: Optional[str],
             use_spot: Optional[bool], screen: Optional[bool],
             tmux: Optional[bool], disk_size: Optional[int],
-            disk_type: Optional[str], idle_minutes_to_autostop: Optional[int],
+            disk_tier: Optional[str], idle_minutes_to_autostop: Optional[int],
             down: bool, retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
 
@@ -2750,7 +2750,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               accelerators=gpus,
                               use_spot=use_spot,
                               disk_size=disk_size,
-                              disk_type=disk_type)
+                              disk_tier=disk_tier)
 
     _create_and_ssh_into_node(
         'gpunode',
@@ -2774,7 +2774,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             instance_type: Optional[str], cpus: Optional[str],
             memory: Optional[str], use_spot: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], disk_type: Optional[str],
+            disk_size: Optional[int], disk_tier: Optional[str],
             idle_minutes_to_autostop: Optional[int], down: bool,
             retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
@@ -2830,7 +2830,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               memory=memory,
                               use_spot=use_spot,
                               disk_size=disk_size,
-                              disk_type=disk_type)
+                              disk_tier=disk_tier)
 
     _create_and_ssh_into_node(
         'cpunode',
@@ -2855,7 +2855,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             memory: Optional[str], tpus: Optional[str],
             use_spot: Optional[bool], tpu_vm: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], disk_type: Optional[str],
+            disk_size: Optional[int], disk_tier: Optional[str],
             idle_minutes_to_autostop: Optional[int], down: bool,
             retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
@@ -2918,7 +2918,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               accelerator_args=accelerator_args,
                               use_spot=use_spot,
                               disk_size=disk_size,
-                              disk_type=disk_type)
+                              disk_tier=disk_tier)
 
     _create_and_ssh_into_node(
         'tpunode',
@@ -3301,7 +3301,7 @@ def spot():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
-@click.option('--disk-type',
+@click.option('--disk-tier',
               default=None,
               type=str,
               required=False,
@@ -3349,7 +3349,7 @@ def spot_launch(
     spot_recovery: Optional[str],
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
-    disk_type: Optional[str],
+    disk_tier: Optional[str],
     detach_run: bool,
     retry_until_up: bool,
     yes: bool,
@@ -3387,7 +3387,7 @@ def spot_launch(
         image_id=image_id,
         env=env,
         disk_size=disk_size,
-        disk_type=disk_type,
+        disk_tier=disk_tier,
         spot_recovery=spot_recovery,
     )
 
@@ -3684,7 +3684,7 @@ def bench():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
-@click.option('--disk-type',
+@click.option('--disk-tier',
               default=None,
               type=str,
               required=False,
@@ -3720,7 +3720,7 @@ def benchmark_launch(
     image_id: Optional[str],
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
-    disk_type: Optional[str],
+    disk_tier: Optional[str],
     idle_minutes_to_autostop: Optional[int],
     yes: bool,
 ) -> None:
@@ -3777,9 +3777,9 @@ def benchmark_launch(
         if disk_size is not None:
             if any('disk_size' in candidate for candidate in candidates):
                 raise click.BadParameter(f'disk_size {message}')
-        if disk_type is not None:
-            if any('disk_type' in candidate for candidate in candidates):
-                raise click.BadParameter(f'disk_type {message}')
+        if disk_tier is not None:
+            if any('disk_tier' in candidate for candidate in candidates):
+                raise click.BadParameter(f'disk_tier {message}')
 
     # The user can specify the benchmark candidates in either of the two ways:
     # 1. By specifying resources.candidates in the YAML.
@@ -3823,7 +3823,7 @@ def benchmark_launch(
                                              use_spot=use_spot,
                                              image_id=image_id,
                                              disk_size=disk_size,
-                                             disk_type=disk_type)
+                                             disk_tier=disk_tier)
     resources_config.update(override_params)
     if 'cloud' in resources_config:
         cloud = resources_config.pop('cloud')

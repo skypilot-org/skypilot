@@ -353,7 +353,7 @@ class GCP(clouds.Cloud):
         assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
 
-        resources_vars['disk_type'] = GCP._get_disk_type(r.disk_type or 'low')
+        resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier or 'low')
 
         return resources_vars
 
@@ -693,18 +693,18 @@ class GCP(clouds.Cloud):
             instance_type, accelerators, zone, 'gcp')
 
     @classmethod
-    def check_disk_type_enabled(
+    def check_disk_tier_enabled(
         cls,
         instance_type: str,  # pylint: disable=unused-argument
-        disk_type: str  # pylint: disable=unused-argument
+        disk_tier: str  # pylint: disable=unused-argument
     ) -> None:
         return
 
     @classmethod
-    def _get_disk_type(cls, disk_type: str) -> str:
-        type2name = {
+    def _get_disk_type(cls, disk_tier: str) -> str:
+        tier2name = {
             'high': 'pd-ssd',
             'medium': 'pd-balanced',
             'low': 'pd-standard',
         }
-        return type2name[disk_type]
+        return tier2name[disk_tier]

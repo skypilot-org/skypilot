@@ -89,7 +89,7 @@
                 "description": "OS disk size in GBs."
             }
         },
-        "osDiskType": {
+        "osDiskTier": {
             "type": "string",
             "allowedValues": [
                 "Premium_LRS",
@@ -211,7 +211,7 @@
                     "osDisk": {
                         "createOption": "fromImage",
                         "managedDisk": {
-                            "storageAccountType": "[parameters('osDiskType')]"
+                            "storageAccountType": "[parameters('osDiskTier')]"
                         },
                         "diskSizeGB": "[parameters('osDiskSizeGB')]"
                     },
