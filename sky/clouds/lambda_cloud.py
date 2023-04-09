@@ -160,7 +160,7 @@ class Lambda(clouds.Cloud):
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
-        if resources.use_spot:
+        if resources.use_spot or resources.disk_type is not None:
             return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources

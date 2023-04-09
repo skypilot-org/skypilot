@@ -143,6 +143,8 @@ class Local(clouds.Cloud):
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
+        if resources.disk_type is not None:
+            return ([], [])
         # The entire local cluster's resources is considered launchable, as the
         # check for task resources is deferred later.
         # The check for task resources meeting cluster resources is run in

@@ -246,6 +246,9 @@ class Azure(clouds.Cloud):
             # TODO(zhwu): our azure subscription offer ID does not support spot.
             # Need to support it.
             return ([], [])
+        if resources.disk_type == 'high':
+            # Azure does not support high disk type.
+            return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
