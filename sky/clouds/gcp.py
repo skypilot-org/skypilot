@@ -353,7 +353,7 @@ class GCP(clouds.Cloud):
         assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
 
-        resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier or 'low')
+        resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier or 'medium')
 
         return resources_vars
 

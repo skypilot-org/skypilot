@@ -238,7 +238,7 @@ class Azure(clouds.Cloud):
             # Azure does not support specific zones.
             'zones': None,
             **image_config,
-            'disk_tier': Azure._get_disk_type(r.disk_tier or 'low')
+            'disk_tier': Azure._get_disk_type(r.disk_tier or 'medium')
         }
 
     def get_feasible_launchable_resources(self, resources):
