@@ -42,10 +42,10 @@ Here is an example of a :code:`file_mount` that uses SkyPilot Storage:
 
     file_mounts:
       /mybucket:
-        name: my-sky-bucket # Make sure this name is unique or you own this bucket
-        source: ~/dataset # Defines the contents of the bucket
-        store: s3 # Could be either of [s3, gcs, r2]
-        persistent: True  # Set to False to delete the bucket after the task is done
+        name: my-sky-bucket # Make sure it is unique or you own this bucket name
+        source: ~/dataset # Contents of the store. Can be local or an object store path.
+        store: s3 # Could be either of [s3, gcs, r2]. Defaults to None.
+        persistent: True  # Set to False to delete the bucket after the task is done. Defaults to True.
         mode: MOUNT  # MOUNT or COPY. Defaults to MOUNT if not specified
 
 
@@ -279,7 +279,8 @@ Storage YAML reference
 
       sky.Storage.store: str; either of 's3', 'gcs' or 'r2'
         If you wish to force sky.Storage to be backed by a specific cloud object
-        store, you can specify it here.
+        store, you can specify it here. If not specified, SkyPilot chooses the
+        appropriate object store based on the source path and task's cloud provider.
 
       sky.Storage.persistent: bool
         Whether the remote backing stores in the cloud should be deleted after
