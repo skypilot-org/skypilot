@@ -265,8 +265,6 @@ def get_vcpus_from_instance_type_impl(
                                         f'of the instance type {instance_type}.'
                                         f'\n{df}')
     vcpus = df['vCPUs'].iloc[0]
-
-
     if pd.isna(vcpus):
         return None
     return float(vcpus)

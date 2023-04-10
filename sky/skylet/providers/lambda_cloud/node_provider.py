@@ -92,7 +92,6 @@ class LambdaNodeProvider(NodeProvider):
 
     def _list_instances_in_cluster(self) -> Dict[str, Any]:
         """List running instances in cluster."""
-        return []
         vms = self.lambda_client.list_instances()
         return [node for node in vms if node['name'] == self.cluster_name]
 
@@ -166,11 +165,11 @@ class LambdaNodeProvider(NodeProvider):
                     count: int) -> None:
         """Creates a number of nodes within the namespace."""
         assert count == 1, count  # Only support 1-node clusters for now
+
         # get the tags
         config_tags = node_config.get('tags', {}).copy()
         config_tags.update(tags)
         config_tags[TAG_RAY_CLUSTER_NAME] = self.cluster_name
-
 
         # create the node
         ttype = node_config['InstanceType']
@@ -212,4 +211,3 @@ class LambdaNodeProvider(NodeProvider):
         if node_id in self.cached_nodes:
             return self.cached_nodes[node_id]
         return self._get_node(node_id=node_id)
-
