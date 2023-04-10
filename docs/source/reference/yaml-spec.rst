@@ -74,10 +74,10 @@ Available fields:
       disk_size: 256
 
       # Disk tier to use for OS (optional).
-      # Could be one of 'low', 'medium', 'high'. Rough performance estimate:
-      #   low: 500 IOPS
-      #   medium: 3000 IOPS
-      #   high: 6000 IOPS
+      # Could be one of 'low', 'medium', or 'high' (default: 'medium'). Rough performance estimate:
+      #   low: 500 IOPS; read 20MB/s; write 40 MB/s
+      #   medium: 3000 IOPS; read 220 MB/s; write 200 MB/s
+      #   high: 6000 IOPS; 340 MB/s; write 250 MB/s
       disk_tier: 'medium'
 
       # Additional accelerator metadata (optional); only used for TPU node
