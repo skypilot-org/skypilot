@@ -16,8 +16,8 @@ specified in the source becomes available at the destination mount path.
 A storage object can used in either :code:`MOUNT` mode or :code:`COPY` mode.
 
 * In :code:`MOUNT` mode, the backing store is directly "mounted" to the remote VM.
-  I.e., files are fetched when accessed by the task and files written to the
-  mount path are also written to the remote store.
+  I.e., files are streamed when accessed by the task and all writes are replicated
+  to remote bucket (and any other VMs mounting the same bucket).
 
 * In :code:`COPY` mode, the files are pre-fetched and cached on the local disk.
   Writes are not replicated on the remote store.
@@ -36,7 +36,21 @@ the files to a cloud store (e.g. S3, GCS, R2) and have them persist there by
 specifying the :code:`name`, :code:`source` and :code:`persistent` fields. By
 enabling persistence, file_mount sync can be made significantly faster.
 
-Your usage of SkyPilot Storage can fall under four broad use cases:
+Here is an example of a :code:`file_mount` that uses SkyPilot Storage:
+
+.. code-block:: yaml
+
+    file_mounts:
+      /mybucket:
+        name: my-sky-bucket # Make sure this name is unique or you own this bucket
+        source: ~/dataset # Defines the contents of the bucket
+        store: s3 # Could be either of [s3, gcs, r2]
+        persistent: True  # Set to False to delete the bucket after the task is done
+        mode: MOUNT  # MOUNT or COPY. Defaults to MOUNT if not specified
+
+
+Common Use Cases
+^^^^^^^^^^^^^^^^
 
 1.  **You want to upload your local data to remote VM -** specify the name and
     source fields. Name sets the bucket name that will be used, and source
@@ -54,21 +68,6 @@ Your usage of SkyPilot Storage can fall under four broad use cases:
     nodes -** specify a name (to create a bucket if it doesn't exist) and set
     the mode to MOUNT. This will create an empty scratch space that workers
     can write to. Any writes will show up on all worker's mount points.
-
-When specifying a storage object, you can specify either of two modes:
-
-- :code:`mode: MOUNT` (default)
-    This mode directly mounts the bucket at the specified path on the VM.
-    In effect, files are streamed from the backing source bucket as and when
-    they are accessed by applications. This mode also allows applications to
-    write to the mount path. All writes are replicated to remote bucket (and
-    any other VMs mounting the same bucket).
-
-
-- :code:`mode: COPY`
-    This mode pre-fetches your files from remote storage and caches them on the
-    local disk. Note that in this mode, any writes to the mount path are not
-    replicated to the source bucket.
 
 Here are a few examples covering a range of use cases for sky file_mounts
 and storage mounting:
@@ -111,7 +110,7 @@ and storage mounting:
       /datasets-storage:
         name: sky-dataset-romil # Make sure this name is unique or you own this bucket
         source: ~/datasets
-        store: s3 # Could be either of [s3, gcs]; default: None
+        store: s3 # Could be either of [s3, gcs, r2]; default: None
         persistent: True  # Defaults to True, can be set to false.
         mode: COPY  # Defaults to MOUNT if not specified
 
