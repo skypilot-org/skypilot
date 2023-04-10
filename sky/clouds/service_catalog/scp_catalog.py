@@ -16,7 +16,7 @@ if typing.TYPE_CHECKING:
 _df = common.read_catalog('scp/vms.csv')
 _image_df = common.read_catalog('scp/images.csv')
 # Number of vCPUS for gpu_1x_a100_sxm4
-_DEFAULT_NUM_VCPUS = 30
+_DEFAULT_NUM_VCPUS = 1
 
 
 def crop_available_region(df):
@@ -73,9 +73,8 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
 def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
     if cpus is None:
         cpus = str(_DEFAULT_NUM_VCPUS)
-    # Set to gpu_1x_a100_sxm4 to be the default instance type if match vCPU
-    # requirement.
-    df = _df[_df['InstanceType'].eq('gpu_1x_a100_sxm4')]
+
+    df = _df[_df['InstanceType'].eq('s1v1m2')]
     instance = common.get_instance_type_for_cpus_impl(df, cpus)
     if not instance:
         instance = common.get_instance_type_for_cpus_impl(_df, cpus)

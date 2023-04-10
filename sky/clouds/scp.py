@@ -125,9 +125,9 @@ class SCP(clouds.Cloud):
     @classmethod
     def get_default_instance_type(cls,
                                   cpus: Optional[str] = None) -> Optional[str]:
-        return 's1v1m2'
-        # return service_catalog.get_default_instance_type(cpus=cpus,
-        #                                                  clouds='scp')
+
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         clouds='scp')
 
     @classmethod
     def get_accelerators_from_instance_type(
