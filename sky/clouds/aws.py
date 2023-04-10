@@ -1,4 +1,5 @@
 """Amazon Web Services."""
+import enum
 import functools
 import json
 import os
@@ -38,6 +39,19 @@ _CREDENTIAL_FILES = [
 ]
 
 DEFAULT_AMI_GB = 45
+
+
+class AWSIdentityType(enum.Enum):
+    """AWS identity type.
+
+    The account type is determined by the current user identity,
+    based on `aws configure list`. We will check the existence of
+    the value in the output of `aws configure list` to determine
+    the account type.
+    """
+    SSO = 'sso'
+    IAM_ROLE = 'iam-role'
+    STATIC = 'static'
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -405,19 +419,27 @@ class AWS(clouds.Cloud):
         static_credential_exists = os.path.isfile(
             os.path.expanduser('~/.aws/credentials'))
         hints = None
-        if cls._is_current_identity_sso():
-            hints = 'AWS SSO is set. '
+        identity_type = cls._current_identity_type()
+        single_cloud_hint = (
+            ' It will work if you use AWS only, but will cause problems '
+            'if you want to use multiple clouds. To set up static credentials, '
+            'try: aws configure')
+        if identity_type == AWSIdentityType.SSO:
+            hints = 'AWS SSO is set.'
             if static_credential_exists:
                 hints += (
                     ' To ensure multiple clouds work correctly, please use SkyPilot '
                     'with static credentials (e.g., ~/.aws/credentials) by unsetting '
                     'the AWS_PROFILE environment variable.')
             else:
-                hints += (
-                    ' It will work if you use AWS only, but will cause problems '
-                    'if you want to use multiple clouds. To set up static credentials, '
-                    'try: aws configure')
-
+                hints += single_cloud_hint
+        elif identity_type == AWSIdentityType.IAM_ROLE:
+            # When using an IAM role, the credentials may not exist in the
+            # ~/.aws/credentials file. So we don't check for the existence of the
+            # file. This will happen when the user is on a VM (or spot-controller)
+            # created by an SSO account, i.e. the VM will be assigned the IAM
+            # role: skypilot-v1.
+            hints = f'AWS IAM role is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
@@ -433,19 +455,57 @@ class AWS(clouds.Cloud):
         return True, hints
 
     @classmethod
-    def _is_current_identity_sso(cls) -> bool:
+    def _current_identity_type(cls) -> Optional[AWSIdentityType]:
         proc = subprocess.run('aws configure list',
                               shell=True,
                               check=False,
                               stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
-            return False
-        return 'sso' in proc.stdout.decode().split()
+            return None
+        # We determine the identity type by looking at the output of
+        # `aws configure list`. The output looks like:
+        #   Name                   Value         Type    Location
+        #   ----                   -----         ----    --------
+        #   profile                <not set>     None    None
+        #   access_key     *       <not set>     sso     None
+        #   secret_key     *       <not set>     sso     None
+        #   region                 <not set>     None    None
+        # We try to determine the identity type by looking for the
+        # string "sso"/"iam-role" in the output, i.e. the "Type" column.
+        if AWSIdentityType.SSO.value in proc.stdout.decode():
+            return AWSIdentityType.SSO
+        elif AWSIdentityType.IAM_ROLE.value in proc.stdout.decode():
+            return AWSIdentityType.IAM_ROLE
+        else:
+            return AWSIdentityType.STATIC
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[str]:
-        """Returns the identity of the user on this cloud.
+    def get_current_user_identity(cls) -> Optional[List[str]]:
+        """Returns a [UserId, Account] list that uniquely identifies the user.
+
+        These fields come from `aws sts get-caller-identity`. We permit the same
+        actual user to:
+
+          - switch between different root accounts (after which both elements
+            of the list will be different) and have their clusters owned by
+            each account be protected; or
+
+          - within the same root account, switch between different IAM
+            users, and treat [user_id=1234, account=A] and
+            [user_id=4567, account=A] to be the *same*. Namely, switching
+            between these IAM roles within the same root account will cause
+            the first element of the returned list to differ, and will allow
+            the same actual user to continue to interact with their clusters.
+            Note: this is not 100% safe, since the IAM users can have very
+            specific permissions, that disallow them to access the clusters
+            but it is a reasonable compromise as that could be rare.
+
+        Returns:
+            A list of strings that uniquely identifies the user on this cloud.
+            For identity check, we will fallback through the list of strings
+            until we find a match, and print a warning if we fail for the
+            first string.
 
         Raises:
             exceptions.CloudUserIdentityError: if the user identity cannot be
@@ -453,16 +513,26 @@ class AWS(clouds.Cloud):
         """
         try:
             sts = aws.client('sts')
-            # The caller identity contains 3 fields: UserId, AccountId, Arn.
-            # 'UserId' is unique across all AWS entity, which looks like
+            # The caller identity contains 3 fields: UserId, Account, Arn.
+            # 1. 'UserId' is unique across all AWS entity, which looks like
             # "AROADBQP57FF2AEXAMPLE:role-session-name"
-            # 'AccountId' can be shared by multiple users under the same
+            # 2. 'Account' can be shared by multiple users under the same
             # organization
-            # 'Arn' is the full path to the user, which can be reused when
+            # 3. 'Arn' is the full path to the user, which can be reused when
             # the user is deleted and recreated.
             # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # pylint: disable=line-too-long
             # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable # pylint: disable=line-too-long
-            user_id = sts.get_caller_identity()['UserId']
+            user_info = sts.get_caller_identity()
+            # Allow fallback to AccountId if UserId does not match, because:
+            # 1. In the case where multiple IAM users belong a single root account,
+            # those users normally share the visibility of the VMs, so we do not
+            # need to identity them with each other. (There can be some cases,
+            # when an IAM user is given a limited permission by the admin, we may
+            # ignore that case for now, or print out a warning if the underlying
+            # userid changed for a cluster).
+            # 2. In the case where the multiple users belong to an organization,
+            # those users will have different account id, so fallback works.
+            user_ids = [user_info['UserId'], user_info['Account']]
         except aws.botocore_exceptions().NoCredentialsError:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
@@ -507,12 +577,12 @@ class AWS(clouds.Cloud):
                     f'Failed to get AWS user.\n'
                     f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
-        return user_id
+        return user_ids
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         # TODO(skypilot): ~/.aws/credentials is required for users using multiple clouds.
-        # If this file does not exist, users can launch on AWS via AWS SSO and assign
-        # IAM role to the cluster.
+        # If this file does not exist, users can launch on AWS via AWS SSO or assumed IAM
+        # role (only when the user is on an AWS cluster) and assign IAM role to the cluster.
         # However, if users launch clusters in a non-AWS cloud, those clusters do not
         # understand AWS IAM role so will not be able to access private AWS EC2 resources
         # and S3 buckets.
@@ -526,7 +596,7 @@ class AWS(clouds.Cloud):
         # to define a mechanism to find out the cloud provider of the cluster to be
         # launched in this function and make sure the cluster will not be used for
         # launching clusters in other clouds, e.g. spot controller.
-        if self._is_current_identity_sso():
+        if self._current_identity_type() != AWSIdentityType.STATIC:
             return {}
         return {
             f'~/.aws/{filename}': f'~/.aws/{filename}'

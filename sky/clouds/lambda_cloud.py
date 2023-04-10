@@ -229,7 +229,7 @@ class Lambda(clouds.Cloud):
         }
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[str]:
+    def get_current_user_identity(cls) -> Optional[List[str]]:
         # TODO(ewzeng): Implement get_current_user_identity for Lambda
         return None
 

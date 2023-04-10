@@ -87,8 +87,9 @@ def _fetch_and_apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
         with the zone name (e.g. us-east-1a).
     """
     try:
-        user_identity = aws.AWS.get_current_user_identity()
-        assert user_identity is not None, 'user_identity is None'
+        user_identity_list = aws.AWS.get_current_user_identity()
+        assert user_identity_list, user_identity_list
+        user_identity = user_identity_list[0]
         aws_user_hash = hashlib.md5(user_identity.encode()).hexdigest()[:8]
     except exceptions.CloudUserIdentityError:
         glob_name = common.get_catalog_path('aws/az_mappings-*.csv')

@@ -1,7 +1,7 @@
 """Logging utils."""
 import enum
 import threading
-from typing import List, Optional
+from typing import Optional, List
 
 import rich.console as rich_console
 

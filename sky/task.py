@@ -139,14 +139,17 @@ class Task:
         """
         self.name = name
         self.run = run
-        self.storage_mounts = {}
-        self.storage_plans = {}
+        self.storage_mounts: Dict[str, storage_lib.Storage] = {}
+        self.storage_plans: Dict[storage_lib.Storage,
+                                 storage_lib.StoreType] = {}
         self.setup = setup
         self._envs = envs or {}
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
-        self.num_nodes = num_nodes
+        # Ignore type error due to a mypy bug.
+        # https://github.com/python/mypy/issues/3004
+        self.num_nodes = num_nodes  # type: ignore
 
         self.inputs = None
         self.outputs = None
@@ -154,12 +157,13 @@ class Task:
         self.estimated_outputs_size_gigabytes = None
         # Default to CPUNode
         self.resources = {sky.Resources()}
-        self.time_estimator_func = None
-        self.file_mounts = None
+        self.time_estimator_func: Optional[Callable[['sky.Resources'],
+                                                    int]] = None
+        self.file_mounts: Optional[Dict[str, str]] = None
 
         # Only set when 'self' is a spot controller task: 'self.spot_task' is
         # the underlying managed spot task (Task object).
-        self.spot_task = None
+        self.spot_task: Optional['Task'] = None
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
@@ -289,7 +293,7 @@ class Task:
                                          f'{dst_path}:{src}')
             task.set_file_mounts(copy_mounts)
 
-        task_storage_mounts = {}  # type: Dict[str, Storage]
+        task_storage_mounts: Dict[str, storage_lib.Storage] = {}
         all_storages = fm_storages
         for storage in all_storages:
             mount_path = storage[0]
@@ -333,28 +337,37 @@ class Task:
     def num_nodes(self) -> int:
         return self._num_nodes
 
+    @num_nodes.setter
+    def num_nodes(self, num_nodes: Optional[int]) -> None:
+        if num_nodes is None:
+            num_nodes = 1
+        if not isinstance(num_nodes, int) or num_nodes <= 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'num_nodes should be a positive int. Got: {num_nodes}')
+        self._num_nodes = num_nodes
+
     @property
     def envs(self) -> Dict[str, str]:
         return self._envs
 
-    def set_envs(
-            self, envs: Union[None, Tuple[Tuple[str, str]],
+    def update_envs(
+            self, envs: Union[None, List[Tuple[str, str]],
                               Dict[str, str]]) -> 'Task':
-        """Sets the environment variables for use inside the setup/run commands.
+        """Updates environment variables for use inside the setup/run commands.
 
         Args:
           envs: (optional) either a list of ``(env_name, value)`` or a dict
             ``{env_name: value}``.
 
         Returns:
-          self: The current task, with envs set.
+          self: The current task, with envs updated.
 
         Raises:
           ValueError: if various invalid inputs errors are detected.
         """
         if envs is None:
-            self._envs = {}
-            return self
+            envs = {}
         if isinstance(envs, (list, tuple)):
             keys = set(env[0] for env in envs)
             if len(keys) != len(envs):
@@ -374,7 +387,7 @@ class Task:
                 raise ValueError(
                     'envs must be List[Tuple[str, str]] or Dict[str, str]: '
                     f'{envs}')
-        self._envs = envs
+        self._envs.update(envs)
         return self
 
     @property
@@ -384,16 +397,6 @@ class Task:
     @property
     def use_spot(self) -> bool:
         return any(r.use_spot for r in self.resources)
-
-    @num_nodes.setter
-    def num_nodes(self, num_nodes: Optional[int]) -> None:
-        if num_nodes is None:
-            num_nodes = 1
-        if not isinstance(num_nodes, int) or num_nodes <= 0:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'num_nodes should be a positive int. Got: {num_nodes}')
-        self._num_nodes = num_nodes
 
     def set_inputs(self, inputs, estimated_size_gigabytes) -> 'Task':
         # E.g., 's3://bucket', 'gs://bucket', or None.
@@ -574,6 +577,7 @@ class Task:
         """
         if self.file_mounts is None:
             self.file_mounts = {}
+        assert self.file_mounts is not None
         self.file_mounts.update(file_mounts)
         # For validation logic:
         return self.set_file_mounts(self.file_mounts)
@@ -612,7 +616,7 @@ class Task:
           ValueError: if input paths are invalid.
         """
         if storage_mounts is None:
-            self.storage_mounts = None
+            self.storage_mounts = {}
             return self
         for target, _ in storage_mounts.items():
             # TODO(zhwu): /home/username/sky_workdir as the target path need
@@ -717,28 +721,38 @@ class Task:
                 store_type = storage_plans[storage]
                 if store_type is storage_lib.StoreType.S3:
                     # TODO: allow for Storage mounting of different clouds
-                    if storage.source is not None and not isinstance(
-                            storage.source,
-                            list) and storage.source.startswith('s3://'):
+                    if isinstance(storage.source,
+                                  str) and storage.source.startswith('s3://'):
                         blob_path = storage.source
                     else:
+                        assert storage.name is not None, storage
                         blob_path = 's3://' + storage.name
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
                 elif store_type is storage_lib.StoreType.GCS:
-                    if storage.source is not None and not isinstance(
-                            storage.source,
-                            list) and storage.source.startswith('gs://'):
+                    if isinstance(storage.source,
+                                  str) and storage.source.startswith('gs://'):
                         blob_path = storage.source
                     else:
+                        assert storage.name is not None, storage
                         blob_path = 'gs://' + storage.name
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
+                elif store_type is storage_lib.StoreType.R2:
+                    if storage.source is not None and not isinstance(
+                            storage.source,
+                            list) and storage.source.startswith('r2://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 'r2://' + storage.name
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
                 elif store_type is storage_lib.StoreType.AZURE:
                     # TODO when Azure Blob is done: sync ~/.azure
-                    assert False, 'TODO: Azure Blob not mountable yet'
+                    raise NotImplementedError('Azure Blob not mountable yet')
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Storage Type {store_type} '

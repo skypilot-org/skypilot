@@ -103,8 +103,14 @@ class LambdaCloudClient:
                          instance_type: str = 'gpu_1x_a100_sxm4',
                          region: str = 'us-east-1',
                          quantity: int = 1,
+<<<<<<< HEAD
                          name: str = '',
                          ssh_key_name: str = '') -> Dict[str, Any]:
+||||||| 67bd3cc4
+                         name: str = '') -> Dict[str, Any]:
+=======
+                         name: str = '') -> List[str]:
+>>>>>>> origin
         """Launch new instances."""
         # Optimization:
         # Most API requests are rate limited at ~1 request every second but
@@ -153,7 +159,7 @@ class LambdaCloudClient:
         raise_lambda_error(response)
         return response.json().get('data', []).get('terminated_instances', [])
 
-    def list_instances(self) -> Dict[str, Any]:
+    def list_instances(self) -> List[Dict[str, Any]]:
         """List existing instances."""
         response = requests.get(f'{API_ENDPOINT}/instances',
                                 headers=self.headers)

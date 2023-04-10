@@ -32,6 +32,7 @@ import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 import urllib.parse
 import uuid
+import os
 
 import colorama
 import jinja2
@@ -40,6 +41,7 @@ import pytest
 import sky
 from sky import global_user_state
 from sky.data import storage as storage_lib
+from sky.adaptors import cloudflare
 from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -671,6 +673,35 @@ def test_gcp_storage_mounts():
         ]
         test = Test(
             'gcp_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
+@pytest.mark.cloudflare
+def test_cloudflare_storage_mounts(generic_cloud: str):
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_r2_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    endpoint_url = cloudflare.create_endpoint()
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
+        ]
+
+        test = Test(
+            'cloudflare_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete {storage_name}',
             timeout=20 * 60,  # 20 mins
@@ -1726,6 +1757,20 @@ class TestStorageWithCredentials:
         subprocess.check_call(['gsutil', 'rm', '-r', f'gs://{tmp_bucket_name}'])
 
     @pytest.fixture
+    def tmp_awscli_bucket_r2(self, tmp_bucket_name):
+        # Creates a temporary bucket using awscli
+        endpoint_url = cloudflare.create_endpoint()
+        subprocess.check_call([
+            'aws', 's3', 'mb', f's3://{tmp_bucket_name}', '--endpoint',
+            endpoint_url, '--profile=r2'
+        ])
+        yield tmp_bucket_name
+        subprocess.check_call([
+            'aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force',
+            '--endpoint', endpoint_url, '--profile=r2'
+        ])
+
+    @pytest.fixture
     def tmp_public_storage_obj(self, request):
         # Initializes a storage object with a public bucket
         storage_obj = storage_lib.Storage(source=request.param)
@@ -1733,8 +1778,10 @@ class TestStorageWithCredentials:
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
 
-    @pytest.mark.parametrize(
-        'store_type', [storage_lib.StoreType.S3, storage_lib.StoreType.GCS])
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
                                               store_type):
         # Creates a new bucket with a local source, uploads files to it
@@ -1753,8 +1800,10 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
 
-    @pytest.mark.parametrize(
-        'store_type', [storage_lib.StoreType.S3, storage_lib.StoreType.GCS])
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
     def test_bucket_bulk_deletion(self, store_type):
         # Create a temp folder with over 256 files and folders, upload
         # files and folders to a new bucket, then delete bucket.
@@ -1791,8 +1840,10 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
 
-    @pytest.mark.parametrize('nonexist_bucket_url',
-                             ['s3://{random_name}', 'gs://{random_name}'])
+    @pytest.mark.parametrize('nonexist_bucket_url', [
+        's3://{random_name}', 'gs://{random_name}',
+        pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare)
+    ])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
         # Attempts to create fetch a stroage with a non-existent source.
         # Generate a random bucket name and verify it doesn't exist:
@@ -1811,6 +1862,14 @@ class TestStorageWithCredentials:
                     nonexist_bucket_url.format(random_name=nonexist_bucket_name)
                 ]
                 expected_output = 'BucketNotFoundException'
+            elif nonexist_bucket_url.startswith('r2'):
+                endpoint_url = cloudflare.create_endpoint()
+                command = [
+                    'aws', 's3api', 'head-bucket', '--bucket',
+                    nonexist_bucket_name, '--endpoint', endpoint_url,
+                    '--profile=r2'
+                ]
+                expected_output = '404'
             else:
                 raise ValueError('Unsupported bucket type '
                                  f'{nonexist_bucket_url}')
@@ -1863,10 +1922,23 @@ class TestStorageWithCredentials:
             else:
                 url = f'gs://{bucket_name}'
             return ['gsutil', 'ls', url]
+        if store_type == storage_lib.StoreType.R2:
+            endpoint_url = cloudflare.create_endpoint()
+            if suffix:
+                url = f's3://{bucket_name}/{suffix}'
+            else:
+                url = f's3://{bucket_name}'
+            return [
+                'aws', 's3', 'ls', url, '--endpoint', endpoint_url,
+                '--profile=r2'
+            ]
 
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
-                              ('tmp_gsutil_bucket', storage_lib.StoreType.GCS)])
+                              ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
+                              pytest.param('tmp_awscli_bucket_r2',
+                                           storage_lib.StoreType.R2,
+                                           marks=pytest.mark.cloudflare)])
     def test_upload_to_existing_bucket(self, ext_bucket_fixture, request,
                                        tmp_source, store_type):
         # Tries uploading existing files to newly created bucket (outside of
@@ -1905,8 +1977,10 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls']).decode('utf-8')
         assert storage_name in out, f'Storage {storage_name} not found in sky storage ls.'
 
-    @pytest.mark.parametrize(
-        'store_type', [storage_lib.StoreType.S3, storage_lib.StoreType.GCS])
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.

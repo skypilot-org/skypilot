@@ -13,6 +13,7 @@ Currently implemented:
 
 TODO:
 - All combinations of Azure Transfer
+- All combinations of R2 Transfer
 - GCS -> S3
 """
 import json
@@ -116,6 +117,21 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
         f'Transfer finished in {(time.time() - start) / 60:.2f} minutes.')
 
 
+def s3_to_r2(s3_bucket_name: str, r2_bucket_name: str) -> None:
+    """Creates a one-time transfer from Amazon S3 to Google Cloud Storage.
+
+    Can be viewed from: https://console.cloud.google.com/transfer/cloud
+    it will block until the transfer is complete.
+
+    Args:
+      s3_bucket_name: str; Name of the Amazon S3 Bucket
+      r2_bucket_name: str; Name of the Cloudflare R2 Bucket
+    """
+    raise NotImplementedError('Moving data directly from clouds to R2 is '
+                              'currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
 def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
     """Creates a one-time transfer from Google Cloud Storage to Amazon S3.
 
@@ -127,6 +143,48 @@ def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
                     f's3://{s3_bucket_name}')
 
     subprocess.call(sync_command, shell=True)
+
+
+def gcs_to_r2(gs_bucket_name: str, r2_bucket_name: str) -> None:
+    """Creates a one-time transfer from Google Cloud Storage to Amazon S3.
+
+     Args:
+      gs_bucket_name: str; Name of the Google Cloud Storage Bucket
+      r2_bucket_name: str; Name of the Cloudflare R2 Bucket
+    """
+    raise NotImplementedError('Moving data directly from clouds to R2 is '
+                              'currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
+def r2_to_gcs(r2_bucket_name: str, gs_bucket_name: str) -> None:
+    """Creates a one-time transfer from Cloudflare R2 to Google Cloud Storage.
+
+    Can be viewed from: https://console.cloud.google.com/transfer/cloud
+    it will block until the transfer is complete.
+
+    Args:
+      r2_bucket_name: str; Name of the Cloudflare R2 Bucket
+      gs_bucket_name: str; Name of the Google Cloud Storage Bucket
+    """
+    raise NotImplementedError('Moving data directly from R2 to clouds is '
+                              'currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
+def r2_to_s3(r2_bucket_name: str, s3_bucket_name: str) -> None:
+    """Creates a one-time transfer from Amazon S3 to Google Cloud Storage.
+
+    Can be viewed from: https://console.cloud.google.com/transfer/cloud
+    it will block until the transfer is complete.
+
+    Args:
+      r2_bucket_name: str; Name of the Cloudflare R2 Bucket\
+      s3_bucket_name: str; Name of the Amazon S3 Bucket
+    """
+    raise NotImplementedError('Moving data directly from R2 to clouds is '
+                              'currently not supported. Please specify '
+                              'a local source for the storage object.')
 
 
 def _add_bucket_iam_member(bucket_name: str, role: str, member: str) -> None:

@@ -4,6 +4,7 @@ import multiprocessing
 import pathlib
 import time
 import traceback
+from typing import Tuple
 
 import filelock
 
@@ -24,14 +25,19 @@ from sky.utils import subprocess_utils
 logger = sky_logging.init_logger(__name__)
 
 
+def _get_task_and_name(task_yaml: str) -> Tuple['sky.Task', str]:
+    task = sky.Task.from_yaml(task_yaml)
+    assert task.name is not None, task
+    return task, task.name
+
+
 class SpotController:
     """Each spot controller manages the life cycle of one spot cluster (job)."""
 
     def __init__(self, job_id: int, task_yaml: str,
                  retry_until_up: bool) -> None:
         self._job_id = job_id
-        self._task = sky.Task.from_yaml(task_yaml)
-        self._task_name = self._task.name
+        self._task, self._task_name = _get_task_and_name(task_yaml)
 
         self._retry_until_up = retry_until_up
         # TODO(zhwu): this assumes the specific backend.
@@ -44,7 +50,7 @@ class SpotController:
         job_id_env_var = common_utils.get_global_job_id(
             self._backend.run_timestamp, 'spot', str(self._job_id))
         task_envs[constants.JOB_ID_ENV_VAR] = job_id_env_var
-        self._task.set_envs(task_envs)
+        self._task.update_envs(task_envs)
 
         spot_state.set_submitted(
             self._job_id,
@@ -266,8 +272,7 @@ def _handle_signal(job_id):
 def _cleanup(job_id: int, task_yaml: str):
     # NOTE: The code to get cluster name is same as what we did in the spot
     # controller, we should keep it in sync with SpotController.__init__()
-    task = sky.Task.from_yaml(task_yaml)
-    task_name = task.name
+    task, task_name = _get_task_and_name(task_yaml)
     cluster_name = spot_utils.generate_spot_cluster_name(task_name, job_id)
     recovery_strategy.terminate_cluster(cluster_name)
     # Clean up Storages with persistent=False.

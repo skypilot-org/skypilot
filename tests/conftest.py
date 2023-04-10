@@ -18,7 +18,7 @@ from typing import List
 # --aws, --gcp, --azure, or --lambda.
 #
 # To only run tests for managed spot (without generic tests), use --managed-spot.
-all_clouds_in_smoke_tests = ['aws', 'gcp', 'azure', 'lambda']
+all_clouds_in_smoke_tests = ['aws', 'gcp', 'azure', 'lambda', 'cloudflare']
 default_clouds_to_run = ['gcp', 'azure']
 
 # Translate cloud name to pytest keyword. We need this because
@@ -28,7 +28,8 @@ cloud_to_pytest_keyword = {
     'aws': 'aws',
     'gcp': 'gcp',
     'azure': 'azure',
-    'lambda': 'lambda_cloud'
+    'lambda': 'lambda_cloud',
+    'cloudflare': 'cloudflare'
 }
 
 
@@ -76,7 +77,10 @@ def _get_cloud_to_run(config) -> List[str]:
     cloud_to_run = []
     for cloud in all_clouds_in_smoke_tests:
         if config.getoption(f'--{cloud}'):
-            cloud_to_run.append(cloud)
+            if cloud == 'cloudflare':
+                cloud_to_run.append(default_clouds_to_run[0])
+            else:
+                cloud_to_run.append(cloud)
     if not cloud_to_run:
         cloud_to_run = default_clouds_to_run
     return cloud_to_run
@@ -104,6 +108,10 @@ def pytest_collection_modifyitems(config, items):
         for cloud in all_clouds_in_smoke_tests:
             cloud_keyword = cloud_to_pytest_keyword[cloud]
             if (cloud_keyword in item.keywords and cloud not in cloud_to_run):
+                # Need to check both conditions as 'gcp' is added to cloud_to_run
+                # when tested for cloudflare
+                if config.getoption('--cloudflare') and cloud == 'cloudflare':
+                    continue
                 item.add_marker(skip_marks[cloud])
 
         if (not 'managed_spot'

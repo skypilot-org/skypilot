@@ -415,6 +415,7 @@ def launch(
                 our pre-checks (e.g., cluster name invalid) or a region/zone
                 throwing resource unavailability.
         exceptions.CommandError: any ssh command error.
+        exceptions.NoCloudAccessError: if all clouds are disabled.
     Other exceptions may be raised depending on the backend.
     """
     entrypoint = task
@@ -739,6 +740,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     # 2. When the src is the same, use the same bucket.
     copy_mounts_with_file_in_src = {}
     for i, (dst, src) in enumerate(copy_mounts.items()):
+        assert task.file_mounts is not None
         task.file_mounts.pop(dst)
         if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
             copy_mounts_with_file_in_src[dst] = src
@@ -832,11 +834,12 @@ def _maybe_translate_local_file_mounts_and_sync_up(
                 storage_obj.source = f's3://{storage_obj.name}'
             elif store_type == storage_lib.StoreType.GCS:
                 storage_obj.source = f'gs://{storage_obj.name}'
+            elif store_type == storage_lib.StoreType.R2:
+                storage_obj.source = f'r2://{storage_obj.name}'
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
                         f'Unsupported store type: {store_type}')
-            storage_obj.name = None
             storage_obj.force_delete = True
 
     return task
