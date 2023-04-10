@@ -459,10 +459,5 @@ class Cloud:
         """
         raise NotImplementedError
 
-    @classmethod
-    def _get_disk_type(cls, disk_tier: str) -> str:
-        """Returns the disk type name for each cloud."""
-        raise NotImplementedError
-
     def __repr__(self):
         return self._REPR
