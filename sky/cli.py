@@ -1186,11 +1186,14 @@ def cli():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
-@click.option('--disk-tier',
-              default=None,
-              type=str,
-              required=False,
-              help=('OS disk type. Could be one of "low", "medium", "high". Default: medium'))
+@click.option(
+    '--disk-tier',
+    default=None,
+    type=str,
+    required=False,
+    help=(
+        'OS disk type. Could be one of "low", "medium", "high". Default: medium'
+    ))
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -3301,11 +3304,14 @@ def spot():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
-@click.option('--disk-tier',
-              default=None,
-              type=str,
-              required=False,
-              help=('OS disk type. Could be one of "low", "medium", "high". Default: medium'))
+@click.option(
+    '--disk-tier',
+    default=None,
+    type=str,
+    required=False,
+    help=(
+        'OS disk type. Could be one of "low", "medium", "high". Default: medium'
+    ))
 @click.option(
     '--detach-run',
     '-d',
@@ -3684,11 +3690,14 @@ def bench():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
-@click.option('--disk-tier',
-              default=None,
-              type=str,
-              required=False,
-              help=('OS disk type. Could be one of "low", "medium", "high". Default: medium'))
+@click.option(
+    '--disk-tier',
+    default=None,
+    type=str,
+    required=False,
+    help=(
+        'OS disk type. Could be one of "low", "medium", "high". Default: medium'
+    ))
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
