@@ -3688,7 +3688,7 @@ def bench():
               default=None,
               type=str,
               required=False,
-              help=('OS disk type. Could be one of "low", "medium", "high".'))
+              help=('OS disk type. Could be one of "low", "medium", "high". Default: medium'))
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
