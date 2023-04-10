@@ -2,7 +2,7 @@
 import json
 import os
 import requests
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 CREDENTIALS_PATH = '~/.lambda_cloud/lambda_keys'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
@@ -167,17 +167,37 @@ class LambdaCloudClient:
         raise_lambda_error(response)
         return response.json().get('data', [])
 
+    def get_unique_ssh_key_name(self, prefix: str,
+                                pub_key: str) -> Tuple[str, bool]:
+        """Returns a ssh key name with the given prefix.
+
+        If no names have given prefix, return prefix. If pub_key exists and
+        has name with given prefix, return that name. Otherwise create a
+        UNIQUE name with given prefix.
+
+        The second return value is True iff the returned name already exists.
+        """
+        candidate_keys = [
+            k for k in self.list_ssh_keys()
+            if k.get('name', '').startswith(prefix)
+        ]
+
+        # Prefix not found
+        if not candidate_keys:
+            return prefix, False
+
+        suffix_digits = [0]
+        for key_info in candidate_keys:
+            name = key_info.get('name', '')
+            if key_info.get('public_key', '') == pub_key:
+                return name, True
+            if (len(name) > len(prefix) + 1 and name[len(prefix)] == '-' and
+                    name[len(prefix) + 1:].isdigit()):
+                suffix_digits.append(int(name[len(prefix) + 1:]))
+        return f'{prefix}-{max(suffix_digits) + 1}', False
+
     def register_ssh_key(self, name: str, pub_key: str) -> None:
         """Register ssh key with Lambda."""
-        # Check if key already exists
-        registered_ssh_keys = self.list_ssh_keys()
-        for key_info in registered_ssh_keys:
-            if key_info.get('name', '') == name:
-                if key_info.get('public_key', '') == pub_key:
-                    return
-                LambdaCloudError('SSH key {name} already exists.')
-
-        # Key doesn't exist. Register key with Lambda Cloud
         data = json.dumps({'name': name, 'public_key': pub_key})
         response = requests.post(f'{API_ENDPOINT}/ssh-keys',
                                  data=data,

@@ -320,8 +320,10 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     with open(public_key_path, 'r') as f:
         public_key = f.read()
-    name = f'sky-key-{common_utils.get_user_hash()}'
-    lambda_client.register_ssh_key(name, public_key)
+    prefix = f'sky-key-{common_utils.get_user_hash()}'
+    name, exists = lambda_client.get_unique_ssh_key_name(prefix, public_key)
+    if not exists:
+        lambda_client.register_ssh_key(name, public_key)
 
     # Need to use ~ relative path because Ray uses the same
     # path for finding the public key path on both local and head node.

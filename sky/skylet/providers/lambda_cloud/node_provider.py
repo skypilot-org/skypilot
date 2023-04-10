@@ -57,9 +57,17 @@ class LambdaNodeProvider(NodeProvider):
         self.cached_nodes = {}
         self.metadata = lambda_utils.Metadata(_TAG_PATH_PREFIX, cluster_name)
         self.ssh_key_path = os.path.expanduser(auth.PRIVATE_SSH_KEY_PATH)
-        self.ssh_key_name = f'sky-key-{common_utils.get_user_hash()}'
 
-        # Special handling if on head node
+        def _get_ssh_key_name(prefix: str) -> str:
+            public_key_path = os.path.expanduser(auth.PUBLIC_SSH_KEY_PATH)
+            with open(public_key_path, 'r') as f:
+                public_key = f.read()
+            name, exists = self.lambda_client.get_unique_ssh_key_name(
+                prefix, public_key)
+            if not exists:
+                raise lambda_utils.LambdaCloudError('SSH key not found')
+            return name
+
         ray_yaml_path = os.path.expanduser(_REMOTE_RAY_YAML)
         if (os.path.exists(ray_yaml_path) and
                 common_utils.read_yaml(ray_yaml_path)['cluster_name']
@@ -73,17 +81,17 @@ class LambdaNodeProvider(NodeProvider):
             else:
                 # At this point, `~/.ssh/sky-key.pub` contains the public
                 # key used to launch this cluster. Use it to determine
-                # ssh key name and store the name in _REMOTE_SSH_KEY_NAME
-                public_key_path = os.path.expanduser(auth.PUBLIC_SSH_KEY_PATH)
-                with open(public_key_path, 'r') as f:
-                    public_key = f.read()
-                for key_info in self.lambda_client.list_ssh_keys():
-                    if key_info.get('public_key', '') == public_key:
-                        self.ssh_key_name = key_info.get('name', '')
-                        with open(ssh_key_name_path, 'w') as f:
-                            f.write(self.ssh_key_name)
-                        return
-                raise lambda_utils.LambdaCloudError('SSH key not found')
+                # ssh key name and store the name in _REMOTE_SSH_KEY_NAME.
+                # Note: this case only runs during cluster launch, so it is
+                # not possible for ~/.ssh/sky-key.pub to already be regenerated
+                # by the user.
+                self.ssh_key_name = _get_ssh_key_name('')
+                with open(ssh_key_name_path, 'w') as f:
+                    f.write(self.ssh_key_name)
+        else:
+            # On local
+            self.ssh_key_name = _get_ssh_key_name(
+                f'sky-key-{common_utils.get_user_hash()}')
 
     def _guess_and_add_missing_tags(self, vms: Dict[str, Any]) -> None:
         """Adds missing vms to local tag file and guesses their tags."""
