@@ -5,7 +5,7 @@ import json
 import pathlib
 import shlex
 import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 import filelock
@@ -64,6 +64,7 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_SETUP or CANCELLED.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     status = None
     try:
         logger.info('=== Checking the job status... ===')
@@ -282,6 +283,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 spot_status = spot_state.get_status(job_id)
                 continue
             assert spot_status is not None
+            assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             status_display.stop()
             returncode = backend.tail_logs(handle,
                                            job_id=None,
@@ -382,6 +384,7 @@ def dump_spot_job_queue() -> str:
                                                   job['job_id'])
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
+            assert isinstance(handle, backends.CloudVmRayResourceHandle)
             job['cluster_resources'] = (
                 f'{handle.launched_nodes}x {handle.launched_resources}')
             job['region'] = handle.launched_resources.region
@@ -491,7 +494,7 @@ class SpotCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs_by_id(cls, job_ids: Optional[Sequence[int]]) -> str:
+    def cancel_jobs_by_id(cls, job_ids: Optional[List[int]]) -> str:
         code = [
             f'msg = spot_utils.cancel_jobs_by_id({job_ids})',
             'print(msg, end="", flush=True)',
