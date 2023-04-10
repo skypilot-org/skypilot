@@ -211,8 +211,8 @@ and storage mounting:
 Creating a shared file system
 -----------------------------
 
-SkyPilot Storage can also be used to create a shared file-system that multiple tasks
-on different nodes can read and write to. This allows developers to pass files
+SkyPilot Storage can also be used to create a shared file-system backed by a remote object store (e.g., S3)
+that multiple tasks on different nodes can read and write to. This allows developers to pass files
 between workers and even use files as a medium for inter-process communication (IPC).
 
 To create a shared filesystem, simply create a Storage object without a source
