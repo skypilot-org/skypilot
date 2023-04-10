@@ -103,14 +103,8 @@ class LambdaCloudClient:
                          instance_type: str = 'gpu_1x_a100_sxm4',
                          region: str = 'us-east-1',
                          quantity: int = 1,
-<<<<<<< HEAD
                          name: str = '',
-                         ssh_key_name: str = '') -> Dict[str, Any]:
-||||||| 67bd3cc4
-                         name: str = '') -> Dict[str, Any]:
-=======
-                         name: str = '') -> List[str]:
->>>>>>> origin
+                         ssh_key_name: str = '') -> List[str]:
         """Launch new instances."""
         # Optimization:
         # Most API requests are rate limited at ~1 request every second but
