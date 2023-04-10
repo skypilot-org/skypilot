@@ -1278,6 +1278,11 @@ class GcsStore(AbstractStore):
                     'Invalid store name: Dot-separated components in name '
                     f'{name} can be no longer than 63 characters.')
 
+            if '..' in name or '.-' in name or '-.' in name:
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must not contain two '
+                    'adjacent periods or a dot next to a hyphen.')
+
             # Check for IP address format
             ip_pattern = r'^(?:\d{1,3}\.){3}\d{1,3}$'
             if re.match(ip_pattern, name):
