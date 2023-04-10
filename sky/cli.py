@@ -226,7 +226,7 @@ def _interactive_node_cli_command(cli_func):
                              type=str,
                              required=False,
                              help=('OS disk tier. Could be one of "low", '
-                                   '"medium", "high".'))
+                                   '"medium", "high". Default: medium'))
     no_confirm = click.option('--yes',
                               '-y',
                               is_flag=True,
