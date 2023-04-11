@@ -37,7 +37,7 @@ SKY_DOCKER_WORKDIR = 'sky_workdir'
 
 def create_dockerfile(
     base_image: str,
-    setup_command: str,
+    setup_command: Optional[str],
     copy_path: str,
     build_dir: str,
     run_command: Optional[str] = None,
@@ -158,6 +158,9 @@ def build_dockerimage(task: task_mod.Task,
     temp_dir = tempfile.mkdtemp(prefix='sky_local_')
 
     # Create dockerfile
+    if callable(task.run):
+        raise ValueError(
+            'Cannot build docker image for a task.run with function.')
     _, img_metadata = create_dockerfile(base_image=task.docker_image,
                                         setup_command=task.setup,
                                         copy_path=f'{SKY_DOCKER_WORKDIR}/',
@@ -186,6 +189,7 @@ def build_dockerimage(task: task_mod.Task,
 def build_dockerimage_from_task(
         task: task_mod.Task) -> Tuple[str, Dict[str, str]]:
     """ Builds a docker image from a Task"""
+    assert task.name is not None, task
     tag, img_metadata = build_dockerimage(task, tag=task.name)
     return tag, img_metadata
 

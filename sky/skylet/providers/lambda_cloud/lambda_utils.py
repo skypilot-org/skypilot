@@ -104,7 +104,7 @@ class LambdaCloudClient:
                          instance_type: str = 'gpu_1x_a100_sxm4',
                          region: str = 'us-east-1',
                          quantity: int = 1,
-                         name: str = '') -> Dict[str, Any]:
+                         name: str = '') -> List[str]:
         """Launch new instances."""
         assert self.ssh_key_name is not None
 
@@ -155,7 +155,7 @@ class LambdaCloudClient:
         raise_lambda_error(response)
         return response.json().get('data', []).get('terminated_instances', [])
 
-    def list_instances(self) -> Dict[str, Any]:
+    def list_instances(self) -> List[Dict[str, Any]]:
         """List existing instances."""
         response = requests.get(f'{API_ENDPOINT}/instances',
                                 headers=self.headers)
