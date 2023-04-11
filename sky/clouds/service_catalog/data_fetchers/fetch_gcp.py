@@ -388,6 +388,7 @@ def _get_tpus() -> pd.DataFrame:
     tpu_df = pd.concat(all_tpu_dfs, ignore_index=True)
     return tpu_df
 
+
 # TODO: the TPUs fetched fails to contain us-east1
 def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
     df = _get_tpus()
