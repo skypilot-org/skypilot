@@ -1364,10 +1364,11 @@ class GcsStore(AbstractStore):
                      f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
                      f'--rename-dir-limit {self._RENAME_DIR_LIMIT} '
                      f'{self.bucket.name} {mount_path}')
+        version_check_cmd = f'gcsfuse --version | grep -q {self.GCSFUSE_VERSION}'
         return mounting_utils.get_mounting_command(mount_path,
                                                    install_cmd,
                                                    mount_cmd,
-                                                   version=self.GCSFUSE_VERSION)
+                                                   version_check_cmd)
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket

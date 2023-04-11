@@ -8,7 +8,7 @@ def get_mounting_command(
     mount_path: str,
     install_cmd: str,
     mount_cmd: str,
-    version: Optional[str] = None,
+    version_check_cmd: Optional[str] = None,
 ) -> str:
     """
     Generates the mounting command for a given bucket. Generated script first
@@ -27,8 +27,8 @@ def get_mounting_command(
     """
     mount_binary = mount_cmd.split()[0]
     installed_check = f'[ -x "$(command -v {mount_binary})" ]'
-    if version is not None:
-        installed_check += f' && {mount_binary} --version | grep -q {version}'
+    if version_check_cmd is not None:
+        installed_check += f' && {version_check_cmd}'
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash
         set -e
