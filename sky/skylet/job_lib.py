@@ -188,6 +188,7 @@ class JobScheduler:
                 return
 
     def async_schedule_step(self) -> None:
+        #TODO(mraheja): Integrate into mid-job scheduling
         p = multiprocessing.Process(target=self.schedule_step)
         p.start()
 
@@ -715,7 +716,9 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
             if job['status'] in [
                     JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING
             ]:
-                set_status(job['job_id'], JobStatus.CANCELLED)
+                _set_status_no_lock(job['job_id'], JobStatus.CANCELLED)
+    
+    scheduler.schedule_step()
 
 
 def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:

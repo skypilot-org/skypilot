@@ -330,7 +330,6 @@ class RayCodeGen:
                 print('INFO: All task resources reserved.',
                       file=sys.stderr,
                       flush=True)
-                job_lib.scheduler.async_schedule_step()
                 """)
         ]
 
@@ -378,6 +377,7 @@ class RayCodeGen:
         self._code += [
             textwrap.dedent(f"""\
                 job_lib.set_job_started({self.job_id!r})
+                job_lib.scheduler.schedule_step()
                 """),
         ]
 
