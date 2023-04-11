@@ -19,8 +19,8 @@ def import_package(func):
                 googleapiclient = _googleapiclient
                 google = _google
             except ImportError:
-                raise ImportError('Fail to import dependencies for GCP.'
-                                  'Try pip install "skypilot[gcp]"') from None
+                raise ImportError('Failed to import dependencies for GCP. '
+                                  'Try: pip install "skypilot[gcp]"') from None
         return func(*args, **kwargs)
 
     return wrapper

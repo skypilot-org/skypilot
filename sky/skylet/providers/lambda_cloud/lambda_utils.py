@@ -2,7 +2,7 @@
 import os
 import json
 import requests
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 CREDENTIALS_PATH = '~/.lambda_cloud/lambda_keys'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
@@ -24,13 +24,14 @@ class Metadata:
         # In case parent directory does not exist
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
 
-    def __getitem__(self, instance_id: str) -> Dict[str, Any]:
-        assert os.path.exists(self.path), 'Metadata file not found'
+    def get(self, instance_id: str) -> Optional[Dict[str, Any]]:
+        if not os.path.exists(self.path):
+            return None
         with open(self.path, 'r') as f:
             metadata = json.load(f)
         return metadata.get(instance_id)
 
-    def __setitem__(self, instance_id: str, value: Dict[str, Any]) -> None:
+    def set(self, instance_id: str, value: Optional[Dict[str, Any]]) -> None:
         # Read from metadata file
         if os.path.exists(self.path):
             with open(self.path, 'r') as f:
@@ -103,7 +104,7 @@ class LambdaCloudClient:
                          instance_type: str = 'gpu_1x_a100_sxm4',
                          region: str = 'us-east-1',
                          quantity: int = 1,
-                         name: str = '') -> Dict[str, Any]:
+                         name: str = '') -> List[str]:
         """Launch new instances."""
         assert self.ssh_key_name is not None
 
@@ -154,7 +155,7 @@ class LambdaCloudClient:
         raise_lambda_error(response)
         return response.json().get('data', []).get('terminated_instances', [])
 
-    def list_instances(self) -> Dict[str, Any]:
+    def list_instances(self) -> List[Dict[str, Any]]:
         """List existing instances."""
         response = requests.get(f'{API_ENDPOINT}/instances',
                                 headers=self.headers)

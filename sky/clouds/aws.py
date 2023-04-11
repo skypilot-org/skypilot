@@ -1,7 +1,6 @@
 """Amazon Web Services."""
-
-# pylint: disable=import-outside-toplevel
-
+import enum
+import functools
 import json
 import os
 import subprocess
@@ -40,6 +39,19 @@ _CREDENTIAL_FILES = [
 ]
 
 DEFAULT_AMI_GB = 45
+
+
+class AWSIdentityType(enum.Enum):
+    """AWS identity type.
+
+    The account type is determined by the current user identity,
+    based on `aws configure list`. We will check the existence of
+    the value in the output of `aws configure list` to determine
+    the account type.
+    """
+    SSO = 'sso'
+    IAM_ROLE = 'iam-role'
+    STATIC = 'static'
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -92,74 +104,51 @@ class AWS(clouds.Cloud):
     #### Regions/Zones ####
 
     @classmethod
-    def regions(cls):
-        if not cls._regions:
-            # https://aws.amazon.com/premiumsupport/knowledge-center/vpc-find-availability-zone-options/
-            cls._regions = [
-                clouds.Region('us-west-1').set_zones([
-                    clouds.Zone('us-west-1a'),
-                    clouds.Zone('us-west-1b'),
-                ]),
-                clouds.Region('us-west-2').set_zones([
-                    clouds.Zone('us-west-2a'),
-                    clouds.Zone('us-west-2b'),
-                    clouds.Zone('us-west-2c'),
-                    clouds.Zone('us-west-2d'),
-                ]),
-                clouds.Region('us-east-2').set_zones([
-                    clouds.Zone('us-east-2a'),
-                    clouds.Zone('us-east-2b'),
-                    clouds.Zone('us-east-2c'),
-                ]),
-                clouds.Region('us-east-1').set_zones([
-                    clouds.Zone('us-east-1a'),
-                    clouds.Zone('us-east-1b'),
-                    clouds.Zone('us-east-1c'),
-                    clouds.Zone('us-east-1d'),
-                    clouds.Zone('us-east-1e'),
-                    clouds.Zone('us-east-1f'),
-                ]),
-            ]
-        return cls._regions
-
-    @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
+    def regions_with_offering(cls, instance_type: str,
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         del accelerators  # unused
-        if instance_type is None:
-            # Fall back to default regions
-            regions = cls.regions()
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'aws')
+        regions = service_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'aws')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
         if zone is not None:
             for r in regions:
+                assert r.zones is not None, r
                 r.set_zones([z for z in r.zones if z.name == zone])
             regions = [r for r in regions if r.zones]
         return regions
 
     @classmethod
-    def region_zones_provision_loop(
+    def zones_provision_loop(
         cls,
         *,
-        instance_type: Optional[str] = None,
+        region: str,
+        num_nodes: int,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+    ) -> Iterator[List[clouds.Zone]]:
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
-                                            region=None,
+                                            region=region,
                                             zone=None)
-        for region in regions:
-            yield region, region.zones
+        for r in regions:
+            assert r.zones is not None, r
+            if num_nodes > 1:
+                # When num_nodes > 1, we shouldn't pass a list of zones to the
+                # AWS NodeProvider to try, because it may then place the nodes of
+                # the same cluster in different zones. This is an artifact of the
+                # current AWS NodeProvider implementation.
+                for z in r.zones:
+                    yield [z]
+            else:
+                yield r.zones
 
     @classmethod
     def _get_default_ami(cls, region_name: str, instance_type: str) -> str:
@@ -291,9 +280,12 @@ class AWS(clouds.Cloud):
         return isinstance(other, AWS)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None) -> Optional[str]:
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
                                                          clouds='aws')
 
     # TODO: factor the following three methods, as they are the same logic
@@ -307,25 +299,17 @@ class AWS(clouds.Cloud):
             instance_type, clouds='aws')
 
     @classmethod
-    def get_vcpus_from_instance_type(
+    def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[float]:
-        return service_catalog.get_vcpus_from_instance_type(instance_type,
-                                                            clouds='aws')
+    ) -> Tuple[Optional[float], Optional[float]]:
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='aws')
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            region: Optional['clouds.Region'],
+            self, resources: 'resources_lib.Resources', region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        if region is None:
-            assert zones is None, (
-                'Set either both or neither for: region, zones.')
-            region = self._get_default_region()
-            zones = region.zones
-        else:
-            assert zones is not None, (
-                'Set either both or neither for: region, zones.')
+        assert zones is not None, (region, zones)
 
         region_name = region.name
         zone_names = [zone.name for zone in zones]
@@ -367,6 +351,7 @@ class AWS(clouds.Cloud):
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
                     cpus=None,
+                    memory=None,
                 )
                 resource_list.append(r)
             return resource_list
@@ -376,7 +361,7 @@ class AWS(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             default_instance_type = AWS.get_default_instance_type(
-                cpus=resources.cpus)
+                cpus=resources.cpus, memory=resources.memory)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -390,6 +375,7 @@ class AWS(clouds.Cloud):
             acc_count,
             use_spot=resources.use_spot,
             cpus=resources.cpus,
+            memory=resources.memory,
             region=resources.region,
             zone=resources.zone,
             clouds='aws')
@@ -397,10 +383,12 @@ class AWS(clouds.Cloud):
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
-            # pylint: disable=top-level-import-outside-toplevel,unused-import
+            # pylint: disable=import-outside-toplevel,unused-import
             import boto3
             import botocore
         except ImportError:
@@ -417,81 +405,147 @@ class AWS(clouds.Cloud):
             return False, (
                 'AWS CLI is not installed properly. '
                 'Run the following commands:'
-                f'\n{self._INDENT_PREFIX}  $ pip install skypilot[aws]'
-                f'{self._INDENT_PREFIX}Credentials may also need to be set. '
-                f'{self._STATIC_CREDENTIAL_HELP_STR}')
+                f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[aws]'
+                f'{cls._INDENT_PREFIX}Credentials may also need to be set. '
+                f'{cls._STATIC_CREDENTIAL_HELP_STR}')
 
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
         try:
-            self.get_current_user_identity()
+            cls.get_current_user_identity()
         except exceptions.CloudUserIdentityError as e:
             return False, str(e)
 
         static_credential_exists = os.path.isfile(
             os.path.expanduser('~/.aws/credentials'))
         hints = None
-        if self._is_current_identity_sso():
-            hints = 'AWS SSO is set. '
+        identity_type = cls._current_identity_type()
+        single_cloud_hint = (
+            ' It will work if you use AWS only, but will cause problems '
+            'if you want to use multiple clouds. To set up static credentials, '
+            'try: aws configure')
+        if identity_type == AWSIdentityType.SSO:
+            hints = 'AWS SSO is set.'
             if static_credential_exists:
                 hints += (
                     ' To ensure multiple clouds work correctly, please use SkyPilot '
                     'with static credentials (e.g., ~/.aws/credentials) by unsetting '
                     'the AWS_PROFILE environment variable.')
             else:
-                hints += (
-                    ' It will work if you use AWS only, but will cause problems '
-                    'if you want to use multiple clouds. To set up static credentials, '
-                    'try: aws configure')
-
+                hints += single_cloud_hint
+        elif identity_type == AWSIdentityType.IAM_ROLE:
+            # When using an IAM role, the credentials may not exist in the
+            # ~/.aws/credentials file. So we don't check for the existence of the
+            # file. This will happen when the user is on a VM (or spot-controller)
+            # created by an SSO account, i.e. the VM will be assigned the IAM
+            # role: skypilot-v1.
+            hints = f'AWS IAM role is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
             # `get_current_user_identity` does not guarantee this file exists.
             if not static_credential_exists:
                 return (False, '~/.aws/credentials does not exist. ' +
-                        self._STATIC_CREDENTIAL_HELP_STR)
+                        cls._STATIC_CREDENTIAL_HELP_STR)
 
-        # Fetch the AWS availability zones mapping from ID to name.
+        # Fetch the AWS catalogs
         from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
+        # Trigger the fetch of the availability zones mapping.
+        aws_catalog.get_default_instance_type()
         return True, hints
 
-    def _is_current_identity_sso(self) -> bool:
+    @classmethod
+    def _current_identity_type(cls) -> Optional[AWSIdentityType]:
         proc = subprocess.run('aws configure list',
                               shell=True,
                               check=False,
                               stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
-            return False
-        return 'sso' in proc.stdout.decode().split()
+            return None
+        # We determine the identity type by looking at the output of
+        # `aws configure list`. The output looks like:
+        #   Name                   Value         Type    Location
+        #   ----                   -----         ----    --------
+        #   profile                <not set>     None    None
+        #   access_key     *       <not set>     sso     None
+        #   secret_key     *       <not set>     sso     None
+        #   region                 <not set>     None    None
+        # We try to determine the identity type by looking for the
+        # string "sso"/"iam-role" in the output, i.e. the "Type" column.
+        if AWSIdentityType.SSO.value in proc.stdout.decode():
+            return AWSIdentityType.SSO
+        elif AWSIdentityType.IAM_ROLE.value in proc.stdout.decode():
+            return AWSIdentityType.IAM_ROLE
+        else:
+            return AWSIdentityType.STATIC
 
-    def get_current_user_identity(self) -> Optional[str]:
-        """Returns the identity of the user on this cloud."""
+    @classmethod
+    def get_current_user_identity(cls) -> Optional[List[str]]:
+        """Returns a [UserId, Account] list that uniquely identifies the user.
+
+        These fields come from `aws sts get-caller-identity`. We permit the same
+        actual user to:
+
+          - switch between different root accounts (after which both elements
+            of the list will be different) and have their clusters owned by
+            each account be protected; or
+
+          - within the same root account, switch between different IAM
+            users, and treat [user_id=1234, account=A] and
+            [user_id=4567, account=A] to be the *same*. Namely, switching
+            between these IAM roles within the same root account will cause
+            the first element of the returned list to differ, and will allow
+            the same actual user to continue to interact with their clusters.
+            Note: this is not 100% safe, since the IAM users can have very
+            specific permissions, that disallow them to access the clusters
+            but it is a reasonable compromise as that could be rare.
+
+        Returns:
+            A list of strings that uniquely identifies the user on this cloud.
+            For identity check, we will fallback through the list of strings
+            until we find a match, and print a warning if we fail for the
+            first string.
+
+        Raises:
+            exceptions.CloudUserIdentityError: if the user identity cannot be
+                retrieved.
+        """
         try:
             sts = aws.client('sts')
-            # The caller identity contains 3 fields: UserId, AccountId, Arn.
-            # 'UserId' is unique across all AWS entity, which looks like
+            # The caller identity contains 3 fields: UserId, Account, Arn.
+            # 1. 'UserId' is unique across all AWS entity, which looks like
             # "AROADBQP57FF2AEXAMPLE:role-session-name"
-            # 'AccountId' can be shared by multiple users under the same
+            # 2. 'Account' can be shared by multiple users under the same
             # organization
-            # 'Arn' is the full path to the user, which can be reused when
+            # 3. 'Arn' is the full path to the user, which can be reused when
             # the user is deleted and recreated.
             # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # pylint: disable=line-too-long
             # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable # pylint: disable=line-too-long
-            user_id = sts.get_caller_identity()['UserId']
+            user_info = sts.get_caller_identity()
+            # Allow fallback to AccountId if UserId does not match, because:
+            # 1. In the case where multiple IAM users belong a single root account,
+            # those users normally share the visibility of the VMs, so we do not
+            # need to identity them with each other. (There can be some cases,
+            # when an IAM user is given a limited permission by the admin, we may
+            # ignore that case for now, or print out a warning if the underlying
+            # userid changed for a cluster).
+            # 2. In the case where the multiple users belong to an organization,
+            # those users will have different account id, so fallback works.
+            user_ids = [user_info['UserId'], user_info['Account']]
         except aws.botocore_exceptions().NoCredentialsError:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
-                    f'AWS credentials are not set. {self._STATIC_CREDENTIAL_HELP_STR}'
+                    f'AWS credentials are not set. {cls._STATIC_CREDENTIAL_HELP_STR}'
                 ) from None
         except aws.botocore_exceptions().ClientError:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'Failed to access AWS services with credentials. '
                     'Make sure that the access and secret keys are correct.'
-                    f' {self._STATIC_CREDENTIAL_HELP_STR}') from None
+                    f' {cls._STATIC_CREDENTIAL_HELP_STR}') from None
         except aws.botocore_exceptions().InvalidConfigError as e:
+            # pylint: disable=import-outside-toplevel
             import awscli
             from packaging import version
             awscli_version = version.parse(awscli.__version__)
@@ -500,9 +554,9 @@ class AWS(clouds.Cloud):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.CloudUserIdentityError(
                         'awscli is too old to use SSO. Run the following command to upgrade:'
-                        f'\n{self._INDENT_PREFIX}  $ pip install awscli>=1.27.10'
-                        f'\n{self._INDENT_PREFIX}You may need to log into SSO again after '
-                        f'upgrading. {self._sso_credentials_help_str()}'
+                        f'\n{cls._INDENT_PREFIX}  $ pip install awscli>=1.27.10'
+                        f'\n{cls._INDENT_PREFIX}You may need to log into SSO again after '
+                        f'upgrading. {cls._sso_credentials_help_str()}'
                     ) from None
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
@@ -516,20 +570,19 @@ class AWS(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'AWS access token is expired.'
-                    f' {self._sso_credentials_help_str(expired=True)}'
-                ) from None
+                    f' {cls._sso_credentials_help_str(expired=True)}') from None
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     f'Failed to get AWS user.\n'
                     f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
-        return user_id
+        return user_ids
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         # TODO(skypilot): ~/.aws/credentials is required for users using multiple clouds.
-        # If this file does not exist, users can launch on AWS via AWS SSO and assign
-        # IAM role to the cluster.
+        # If this file does not exist, users can launch on AWS via AWS SSO or assumed IAM
+        # role (only when the user is on an AWS cluster) and assign IAM role to the cluster.
         # However, if users launch clusters in a non-AWS cloud, those clusters do not
         # understand AWS IAM role so will not be able to access private AWS EC2 resources
         # and S3 buckets.
@@ -543,7 +596,7 @@ class AWS(clouds.Cloud):
         # to define a mechanism to find out the cloud provider of the cluster to be
         # launched in this function and make sure the cluster will not be used for
         # launching clusters in other clouds, e.g. spot controller.
-        if self._is_current_identity_sso():
+        if self._current_identity_type() != AWSIdentityType.STATIC:
             return {}
         return {
             f'~/.aws/{filename}': f'~/.aws/{filename}'

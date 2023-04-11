@@ -28,7 +28,7 @@ class AutostopConfig:
 
     def __init__(self,
                  autostop_idle_minutes: int,
-                 boot_time: int,
+                 boot_time: float,
                  backend: Optional[str],
                  down: bool = False):
         assert autostop_idle_minutes < 0 or backend is not None, (

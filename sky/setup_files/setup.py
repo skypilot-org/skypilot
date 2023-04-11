@@ -18,6 +18,7 @@ import os
 import platform
 import re
 import warnings
+from typing import Dict, List
 
 import setuptools
 
@@ -85,9 +86,10 @@ install_requires = [
     'PrettyTable>=2.0.0',
     # Lower local ray version is not fully supported, due to the
     # autoscaler issues (also tracked in #537).
-    'ray[default]>=1.9.0,<=2.2.0',
+    'ray[default]>=1.9.0,<=2.3.0',
     'rich',
     'tabulate',
+    'typing-extensions',
     'filelock',  # TODO(mraheja): Enforce >=3.6.0 when python version is >= 3.7
     # This is used by ray. The latest 1.44.0 will generate an error
     # `Fork support is only compatible with the epoll1 and poll
@@ -104,14 +106,15 @@ install_requires = [
 
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the following
 # packages dependencies are changed.
-extras_require = {
-    'aws': [
-        # awscli>=1.27.10 is required for SSO support.
-        'awscli',
-        'boto3',
-        # 'Crypto' module used in authentication.py for AWS.
-        'pycryptodome==3.12.0',
-    ],
+aws_dependencies = [
+    # awscli>=1.27.10 is required for SSO support.
+    'awscli',
+    'boto3',
+    # 'Crypto' module used in authentication.py for AWS.
+    'pycryptodome==3.12.0',
+]
+extras_require: Dict[str, List[str]] = {
+    'aws': aws_dependencies,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
     # azure-identity is needed in node_provider.
@@ -119,6 +122,7 @@ extras_require = {
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],
     'lambda': [],
+    'cloudflare': aws_dependencies
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

@@ -12,7 +12,7 @@ import re
 import socket
 import sys
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Union
 import uuid
 import yaml
 
@@ -194,7 +194,7 @@ def dump_yaml_str(config):
                      default_flow_style=False)
 
 
-def make_decorator(cls, name_or_fn, **ctx_kwargs):
+def make_decorator(cls, name_or_fn: Union[str, Callable], **ctx_kwargs):
     """Make the cls a decorator.
 
     class cls:
@@ -318,7 +318,8 @@ def class_fullname(cls):
     return f'{cls.__module__}.{cls.__name__}'
 
 
-def format_exception(e: Exception, use_bracket: bool = False) -> str:
+def format_exception(e: Union[Exception, SystemExit],
+                     use_bracket: bool = False) -> str:
     """Format an exception to a string.
 
     Args:
@@ -330,7 +331,7 @@ def format_exception(e: Exception, use_bracket: bool = False) -> str:
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
     if use_bracket:
-        return f'{bright}[{class_fullname(e.__class__)}]:{reset} {e}'
+        return f'{bright}[{class_fullname(e.__class__)}]{reset} {e}'
     return f'{bright}{class_fullname(e.__class__)}:{reset} {e}'
 
 
