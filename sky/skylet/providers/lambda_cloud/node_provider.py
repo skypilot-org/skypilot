@@ -69,10 +69,11 @@ class LambdaNodeProvider(NodeProvider):
             return name
 
         ray_yaml_path = os.path.expanduser(_REMOTE_RAY_YAML)
-        if (os.path.exists(ray_yaml_path) and
-                common_utils.read_yaml(ray_yaml_path)['cluster_name']
-                == cluster_name):
-            # On head node
+        self.on_head = (os.path.exists(ray_yaml_path) and
+                        common_utils.read_yaml(ray_yaml_path)['cluster_name']
+                        == cluster_name)
+
+        if self.on_head:
             self.ssh_key_path = os.path.expanduser(_REMOTE_RAY_SSH_KEY)
             ssh_key_name_path = os.path.expanduser(_REMOTE_SSH_KEY_NAME)
             if os.path.exists(ssh_key_name_path):
@@ -252,10 +253,21 @@ class LambdaNodeProvider(NodeProvider):
         # Create nodes
         instance_type = node_config['InstanceType']
         region = self.provider_config['region']
+
         if config_tags[TAG_RAY_NODE_KIND] == NODE_KIND_HEAD:
             name = f'{self.cluster_name}-head'
+            # Occasionally, the head node will continue running for a short
+            # period after termination. This can lead to the following bug:
+            #   1. Head node autodowns but continues running.
+            #   2. The next autodown event is triggered, which executes ray up.
+            #   3. Head node stops running.
+            # In this case, a new head node is created after the cluster has
+            # terminated. We avoid this with the following check:
+            if self.on_head:
+                raise lambda_utils.LambdaCloudError('Head already exists.')
         else:
             name = f'{self.cluster_name}-worker'
+
         # Lambda launch api only supports launching one node at a time,
         # so we do a loop. Remove loop when launch api allows quantity > 1
         booting_list = []
