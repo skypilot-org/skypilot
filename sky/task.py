@@ -288,6 +288,10 @@ class Task:
                         raise ValueError(f'Unable to parse file_mount '
                                          f'{dst_path}:{src}')
             task.set_file_mounts(copy_mounts)
+        
+        #Ports
+        ports = config.pop('ports', None)
+        task.set_ports(ports)
 
         task_storage_mounts = {}  # type: Dict[str, Storage]
         all_storages = fm_storages
@@ -542,6 +546,9 @@ class Task:
 
         self.file_mounts = file_mounts
         return self
+
+    def set_ports(self, ports) -> 'Task':
+        self.ports = ports
 
     def update_file_mounts(self, file_mounts: Dict[str, str]) -> 'Task':
         """Updates the file mounts for this task.

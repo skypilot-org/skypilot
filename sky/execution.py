@@ -269,6 +269,11 @@ def _execute(
                                            stream_logs=stream_logs,
                                            cluster_name=cluster_name,
                                            retry_until_up=retry_until_up)
+            if task.ports is not None:
+                if isinstance(handle.launched_resources.cloud, clouds.GCP):
+                    backend_utils.add_ports(cluster_name, task.ports)
+                else:
+                    logger.warning('Ports only supported for GCP')
 
         if dryrun:
             logger.info('Dry run finished.')

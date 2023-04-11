@@ -186,6 +186,9 @@ def get_task_schema():
                     'type': 'number'
                 }
             },
+            'ports': {
+                'type': 'string',
+            },
         }
     }
 

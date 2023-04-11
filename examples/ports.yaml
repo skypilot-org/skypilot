@@ -1,0 +1,10 @@
+resources:
+  cloud: gcp
+
+setup: |
+  echo "running setup"
+
+run: |
+  conda env list
+
+ports: tcp:9091

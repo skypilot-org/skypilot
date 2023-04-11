@@ -2511,3 +2511,28 @@ def run_command_and_handle_ssh_failure(runner: command_runner.SSHCommandRunner,
                                        failure_message,
                                        stderr=stderr)
     return stdout
+
+def add_ports(cluster_name, port):
+    import subprocess as sp
+    handle = check_cluster_available(
+        cluster_name,
+        operation='getting the job queue',
+    )
+    backend = get_backend_from_handle(handle)
+    ray_config = common_utils.read_yaml(handle.cluster_yaml)
+
+    returncode, full_name, _ = backend.run_on_head(handle,
+                                                           "hostname",
+                                                           require_outputs=True,
+                                                           separate_stderr=True)
+
+    external_ip = handle.head_ip
+
+    full_name = full_name.strip()
+    region = ray_config['provider']['availability_zone'].strip()               
+
+    sp.run(f"gcloud compute instances add-tags {full_name} --tags={full_name} --zone={region}", shell=True)
+    sp.run(f"gcloud compute firewall-rules delete {full_name}-manual-ports --quiet", shell=True)
+    sp.run(f"gcloud compute firewall-rules create {full_name}-manual-ports --allow {port} --source-tags={full_name} --source-ranges=0.0.0.0/0 --description=\"custom sky rule\" --network=skypilot-vpc", shell=True)
+
+    print(f'You can now access open ports {port!r} on: {external_ip}')
