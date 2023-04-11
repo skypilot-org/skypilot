@@ -106,12 +106,14 @@ def show_status_table(cluster_records: List[_ClusterRecord],
 
 
 def get_total_cost_of_displayed_records(
-        cluster_records: List[_ClusterCostReportRecord]):
+        cluster_records: List[_ClusterCostReportRecord], display_all: bool):
     """Compute total cost of records to be displayed in cost report."""
     cluster_records.sort(
         key=lambda report: -_get_status_value_for_cost_report(report))
 
     displayed_records = cluster_records[:NUM_COST_REPORT_LINES]
+    if display_all:
+        displayed_records = cluster_records
 
     total_cost = sum(record['total_cost'] for record in displayed_records)
     return total_cost
