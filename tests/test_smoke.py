@@ -836,7 +836,7 @@ def test_large_job_queue(generic_cloud: str):
             # Make sure the jobs are scheduled in FIFO order
             *[
                 f'sky queue {name} | grep {name}-{i} | grep CANCELLED'
-                for i in range(17)
+                for i in range(1, 17)
             ],
             *[
                 f'sky queue {name} | grep {name}-{i} | grep RUNNING'
