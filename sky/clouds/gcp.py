@@ -270,9 +270,11 @@ class GCP(clouds.Cloud):
     def get_default_instance_type(
             cls,
             cpus: Optional[str] = None,
-            memory: Optional[str] = None) -> Optional[str]:
+            memory: Optional[str] = None,
+            disk_tier: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
+                                                         disk_tier=disk_tier,
                                                          clouds='gcp')
 
     def make_deploy_resources_variables(
@@ -365,7 +367,9 @@ class GCP(clouds.Cloud):
         if resources.accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             host_vm_type = GCP.get_default_instance_type(
-                cpus=resources.cpus, memory=resources.memory)
+                cpus=resources.cpus,
+                memory=resources.memory,
+                disk_tier=resources.disk_tier)
             if host_vm_type is None:
                 return ([], [])
             else:

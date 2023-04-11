@@ -7,6 +7,7 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 from sky import clouds as cloud_lib
+from sky.clouds import Azure
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
@@ -29,6 +30,7 @@ _DEFAULT_INSTANCE_FAMILY = [
 ]
 _DEFAULT_NUM_VCPUS = 8
 _DEFAULT_MEMORY_CPU_RATIO = 4
+_DEFAULT_S_SERIES_MEMORY_CPU_RATIO = 2
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -97,15 +99,27 @@ def _get_instance_family(instance_type: str) -> str:
 
 
 def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None) -> Optional[str]:
+                              memory: Optional[str] = None,
+                              disk_tier: Optional[str] = None) -> Optional[str]:
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
     if memory is None:
-        memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
+        # medium disk tier (PremiumSSD) is only supported by s series, which
+        # have 2x memory/cpu ratio.
+        ratio = (_DEFAULT_S_SERIES_MEMORY_CPU_RATIO
+                 if disk_tier == 'medium' else _DEFAULT_MEMORY_CPU_RATIO)
+        memory_gb_or_ratio = f'{ratio}x'
     else:
         memory_gb_or_ratio = memory
     df = _df[_df['InstanceType'].apply(_get_instance_family).isin(
         _DEFAULT_INSTANCE_FAMILY)]
+
+    def _filter_disk_type(instance_type: str) -> bool:
+        if disk_tier is None:
+            return True
+        return Azure.check_disk_tier(instance_type, disk_tier)[0]
+
+    df = df.loc[df['InstanceType'].apply(_filter_disk_type)]
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
                                                       memory_gb_or_ratio)
 

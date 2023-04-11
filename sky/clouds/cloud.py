@@ -252,8 +252,10 @@ class Cloud:
     def get_default_instance_type(
             cls,
             cpus: Optional[str] = None,
-            memory: Optional[str] = None) -> Optional[str]:
-        """Returns the default instance type with the given #vCPUs and memory.
+            memory: Optional[str] = None,
+            disk_tier: Optional[str] = None) -> Optional[str]:
+        """Returns the default instance type with the given #vCPUs, memory and
+        disk tier.
 
         For example, if cpus='4', this method returns the default instance type
         with 4 vCPUs.  If cpus='4+', this method returns the default instance
@@ -263,9 +265,14 @@ class Cloud:
         memory.  If 'memory=4+', this method returns the default instance
         type with 4GB or more memory.
 
-        When cpus is None or memory is None, this method will never return None.
-        This method may return None if the cloud's default instance family
-        does not have a VM with the given number of vCPUs (e.g., when cpus='7').
+        If disk_rier='medium', this method returns the default instance type
+        that support medium disk tier.
+
+        When cpus is None, memory is None or disk tier is None, this method will
+        never return None. This method may return None if the cloud's default
+        instance family does not have a VM with the given number of vCPUs
+        (e.g., when cpus='7') or does not have a VM with the give disk tier
+        (e.g. Azure, disk_tier='high').
         """
         raise NotImplementedError
 
