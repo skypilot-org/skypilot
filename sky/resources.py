@@ -44,7 +44,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 8
+    _VERSION = 9
 
     def __init__(
         self,
@@ -60,6 +60,7 @@ class Resources:
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
+        ports: Optional[str] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
@@ -96,6 +97,9 @@ class Resources:
                 self._image_id = {
                     k.strip(): v.strip() for k, v in image_id.items()
                 }
+
+        print("PORTS:", ports)
+        self._ports = ports
 
         self._set_cpus(cpus)
         self._set_memory(memory)
@@ -161,6 +165,11 @@ class Resources:
             else:
                 image_id = f', image_id={self.image_id!r}'
 
+        ports = ''
+        if self.ports is not None:
+            print("REPRING")
+            ports = f', ports={self.ports!r}'
+
         disk_size = ''
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
@@ -173,7 +182,7 @@ class Resources:
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
-            f'{disk_size}')
+            f'{ports}{disk_size}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):
@@ -266,6 +275,10 @@ class Resources:
     @property
     def image_id(self) -> Optional[Dict[str, str]]:
         return self._image_id
+
+    @property
+    def ports(self) -> Optional[str]:
+        return self._ports
 
     def _set_cpus(
         self,
@@ -808,6 +821,7 @@ class Resources:
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
+            ports=override.pop('ports', self.ports)
         )
         assert len(override) == 0
         return resources
@@ -860,6 +874,8 @@ class Resources:
             logger.warning('image_id in resources is experimental. It only '
                            'supports AWS/GCP.')
             resources_fields['image_id'] = config.pop('image_id')
+        if config.get('ports') is not None:
+            resources_fields['ports'] = config.pop('ports')
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -886,6 +902,7 @@ class Resources:
         add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
+        add_if_not_none('ports', self.ports)
         return config
 
     def __setstate__(self, state):
@@ -895,6 +912,7 @@ class Resources:
         # TODO (zhwu): Design our persistent state format with `__getstate__`,
         # so that to get rid of the version tracking.
         version = state.pop('_version', None)
+
         # Handle old version(s) here.
         if version is None:
             version = -1
@@ -940,6 +958,9 @@ class Resources:
 
         if version < 8:
             self._memory = None
+        
+        if version < 9:
+            self._ports = None
 
         image_id = state.get('_image_id', None)
         if isinstance(image_id, str):

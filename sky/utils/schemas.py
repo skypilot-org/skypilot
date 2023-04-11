@@ -86,6 +86,9 @@ def get_resources_schema():
                     'type': 'object',
                     'required': [],
                 }]
+            },
+            'ports': {
+                'type': 'string',
             }
         }
     }
