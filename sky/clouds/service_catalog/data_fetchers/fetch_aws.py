@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from sky.adaptors import aws
+from sky.utils import ux_utils
 
 # Enable most of the regions. Each user's account may have a subset of these
 # enabled; this is ok because we take the intersection of the list here with
@@ -73,7 +74,14 @@ def get_enabled_regions() -> Set[str]:
     global regions_enabled
     if regions_enabled is None:
         aws_client = aws.client('ec2', region_name='us-east-1')
-        user_cloud_regions = aws_client.describe_regions()['Regions']
+        try:
+            user_cloud_regions = aws_client.describe_regions()['Regions']
+        except aws.botocore_exceptions().ClientError:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Failed to retrieve AWS regions. '
+                    'Please ensure that the `ec2:DescribeRegions` action '
+                    'is enabled for your AWS account.') from None
         regions_enabled = {r['RegionName'] for r in user_cloud_regions}
         regions_enabled = regions_enabled.intersection(set(ALL_REGIONS))
     return regions_enabled
