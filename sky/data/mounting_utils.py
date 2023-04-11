@@ -26,9 +26,9 @@ def get_mounting_command(
         str: Mounting command with the mounting script as a heredoc.
     """
     mount_binary = mount_cmd.split()[0]
-    not_installed_check = f'! [ -x "$(command -v {mount_binary})" ]'
+    installed_check = f'[ -x "$(command -v {mount_binary})" ]'
     if version is not None:
-        not_installed_check += f' || {mount_binary} --version | grep -q {version}'
+        installed_check += f' && {mount_binary} --version | grep -q {version}'
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash
         set -e
@@ -44,11 +44,11 @@ def get_mounting_command(
         fi
 
         # Install MOUNT_BINARY if not already installed
-        if {not_installed_check}; then
+        if {installed_check}; then
+          echo "$MOUNT_BINARY already installed. Proceeding..."
+        else
           echo "Installing $MOUNT_BINARY..."
           {install_cmd}
-        else
-          echo "$MOUNT_BINARY already installed. Proceeding..."
         fi
 
         # Check if mount path exists
