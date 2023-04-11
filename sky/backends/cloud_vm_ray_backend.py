@@ -2987,11 +2987,16 @@ class CloudVmRayBackend(backends.Backend):
             config['provider']['cache_stopped_nodes'] = not terminate
             provider = SCPNodeProvider(config['provider'],handle.cluster_name)
 
-            with open(provider.metadata.path, 'r') as f:
-                metadata = json.load(f)
-                node_id = next((key for key in list(metadata.keys()) if key.startswith('INSTANCE')), None)
-                provider.terminate_node(node_id)
-                returncode = 0
+            try:
+                with open(provider.metadata.path, 'r') as f:
+                    metadata = json.load(f)
+                    node_id = next((key for key in list(metadata.keys()) if key.startswith('INSTANCE')), None)
+                    provider.terminate_node(node_id)
+                    returncode = 0
+            except Exception as e:
+                returncode = 1
+                stdout = f'{e}'
+                stderr = f'{e}'
 
         elif (terminate and
               (prev_status == global_user_state.ClusterStatus.STOPPED or
