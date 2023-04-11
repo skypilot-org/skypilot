@@ -265,7 +265,7 @@ class Optimizer:
                         f'{node}.\nThis means the '
                         'catalog does not contain any instance types that '
                         'satisfy this request.\n'
-                        'To fix: relax/change its resource requirements.\n'
+                        'To fix: relax or change the resource requirements.\n'
                         'Hint: \'sky show-gpus --all\' '
                         'to list available accelerators.\n'
                         '      \'sky check\' to check the enabled clouds.')
