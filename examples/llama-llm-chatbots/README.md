@@ -170,7 +170,7 @@ SkyPilot's `sky launch` command makes this entirely automatic. It performs *auto
 
 ## Recap
 
-Congratulations! You have used SkyPilot ot launch a LLaMA-based chatbot on the cloud with just one command. The system automatically handles setting up instances and it offers cloud portability, higher GPU availability, and cost reduction.
+Congratulations! You have used SkyPilot to launch a LLaMA-based chatbot on the cloud with just one command. The system automatically handles setting up instances and it offers cloud portability, higher GPU availability, and cost reduction.
 
 LLaMA chatbots are just one example app. To leverage these benefits for your own ML projects on the cloud, we recommend the [Quickstart guide](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html).
 

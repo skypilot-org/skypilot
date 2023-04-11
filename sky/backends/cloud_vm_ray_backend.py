@@ -657,6 +657,15 @@ class RetryingVmProvisioner(object):
                     # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # pylint: disable=line-too-long
                     self._blocked_resources.add(
                         launchable_resources.copy(zone=zone.name))
+                elif code == 'RESOURCE_NOT_FOUND':
+                    # https://github.com/skypilot-org/skypilot/issues/1797
+                    # In the inner provision loop we have used retries to
+                    # recover but failed. This indicates this zone is most
+                    # likely out of capacity. The provision loop will terminate
+                    # any potentially live VMs before moving onto the next
+                    # zone.
+                    self._blocked_resources.add(
+                        launchable_resources.copy(zone=zone.name))
                 else:
                     assert False, error
         elif len(httperror_str) >= 1:
@@ -966,8 +975,9 @@ class RetryingVmProvisioner(object):
                 # cluster is launched.
                 handle = global_user_state.get_handle_from_cluster_name(
                     cluster_name)
-                assert handle is not None, (
-                    f'handle should not be None {cluster_name!r}')
+                assert isinstance(handle, CloudVmRayResourceHandle), (
+                    'handle should be CloudVmRayResourceHandle (found: '
+                    f'{type(handle)}) {cluster_name!r}')
                 config = common_utils.read_yaml(handle.cluster_yaml)
                 # This is for the case when the zone field is not set in the
                 # launched resources in a previous launch (e.g., ctrl-c during
@@ -1143,7 +1153,7 @@ class RetryingVmProvisioner(object):
         dryrun: bool,
         stream_logs: bool,
         cluster_name: str,
-        cloud_user_identity: Optional[str],
+        cloud_user_identity: Optional[List[str]],
         prev_cluster_status: Optional[global_user_state.ClusterStatus],
     ):
         """The provision retry loop."""
@@ -1521,6 +1531,18 @@ class RetryingVmProvisioner(object):
                         'limit \'List requests per minute\'' in stderr):
                     logger.info(
                         'Retrying due to list request rate limit exceeded.')
+                    return True
+
+                # https://github.com/skypilot-org/skypilot/issues/1797
+                # "The resource 'projects/xxx/zones/us-central1-b/instances/ray-yyy-head-<hash>-compute' was not found" # pylint: disable=line-too-long
+                pattern = (r'\'code\': \'RESOURCE_NOT_FOUND\'.*The resource'
+                           r'.*instances\/.*-compute\' was not found')
+                result = re.search(pattern, stderr)
+                if result is not None:
+                    # Retry. Unlikely will succeed if it's due to no capacity.
+                    logger.info(
+                        'Retrying due to the possibly flaky RESOURCE_NOT_FOUND '
+                        'error.')
                     return True
 
             if ('Processing file mounts' in stdout and
@@ -2261,7 +2283,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 return None
             cluster_config_file = config_dict['ray']
 
-            handle = self.ResourceHandle(
+            handle = CloudVmRayResourceHandle(
                 cluster_name=cluster_name,
                 cluster_yaml=cluster_config_file,
                 launched_nodes=config_dict['launched_nodes'],
@@ -2323,7 +2345,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _update_after_cluster_provisioned(
             self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
-            prev_cluster_status: global_user_state.ClusterStatus,
+            prev_cluster_status: Optional[global_user_state.ClusterStatus],
             ip_list: List[str], lock_path: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
@@ -2681,8 +2703,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'--no-wait -- {switch_user_cmd}')
         return job_submit_cmd
 
-    def _add_job(self, handle: CloudVmRayResourceHandle, job_name: str,
-                 resources_str: str) -> int:
+    def _add_job(self, handle: CloudVmRayResourceHandle,
+                 job_name: Optional[str], resources_str: str) -> int:
         username = getpass.getuser()
         code = job_lib.JobLibCodeGen.add_job(job_name, username,
                                              self.run_timestamp, resources_str)
