@@ -1702,7 +1702,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
         if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
             cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
                 cluster_name]
-            # to display most recent entry for each reserved cluster 
+            # to display most recent entry for each reserved cluster
             if cluster_group_name not in reserved_clusters:
                 reserved_clusters[cluster_group_name] = cluster_record
         else:
