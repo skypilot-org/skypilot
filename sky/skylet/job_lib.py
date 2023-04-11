@@ -717,7 +717,7 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
                     JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING
             ]:
                 _set_status_no_lock(job['job_id'], JobStatus.CANCELLED)
-    
+
     scheduler.schedule_step()
 
 
