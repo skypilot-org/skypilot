@@ -1,12 +1,14 @@
 """Helper functions for object store mounting in Sky Storage"""
 import random
 import textwrap
+from typing import Optional
 
 
 def get_mounting_command(
     mount_path: str,
     install_cmd: str,
     mount_cmd: str,
+    version: Optional[str] = None,
 ) -> str:
     """
     Generates the mounting command for a given bucket. Generated script first
@@ -24,6 +26,9 @@ def get_mounting_command(
         str: Mounting command with the mounting script as a heredoc.
     """
     mount_binary = mount_cmd.split()[0]
+    not_installed_check = f'! [ -x "$(command -v {mount_binary})" ]'
+    if version is not None:
+        not_installed_check += f' || {mount_binary} --version | grep -q {version}'
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash
         set -e
@@ -39,7 +44,7 @@ def get_mounting_command(
         fi
 
         # Install MOUNT_BINARY if not already installed
-        if ! [ -x "$(command -v $MOUNT_BINARY)" ]; then
+        if {not_installed_check}; then
           echo "Installing $MOUNT_BINARY..."
           {install_cmd}
         else
