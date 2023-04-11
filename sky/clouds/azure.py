@@ -238,7 +238,7 @@ class Azure(clouds.Cloud):
             # Azure does not support specific zones.
             'zones': None,
             **image_config,
-            'disk_tier': Azure._get_disk_type(r.disk_tier or 'medium')
+            'disk_tier': Azure._get_disk_type(r.disk_tier)
         }
 
     def get_feasible_launchable_resources(self, resources):
@@ -439,7 +439,8 @@ class Azure(clouds.Cloud):
                     'instance_type is specified to an S-series instance.')
 
     @classmethod
-    def _get_disk_type(cls, disk_tier: str) -> str:
+    def _get_disk_type(cls, opt_disk_tier: Optional[str]) -> str:
+        disk_tier = opt_disk_tier or cls._DEFAULT_DISK_TIER
         # TODO(tian): Maybe use PremiumV2_LRS/UltraSSD_LRS? Notice these two
         # cannot be used as OS disks so we might need data disk support
         tier2name = {

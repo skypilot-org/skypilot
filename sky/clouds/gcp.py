@@ -353,8 +353,7 @@ class GCP(clouds.Cloud):
         assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
 
-        resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier or
-                                                         'medium')
+        resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier)
 
         return resources_vars
 
@@ -702,7 +701,8 @@ class GCP(clouds.Cloud):
         return
 
     @classmethod
-    def _get_disk_type(cls, disk_tier: str) -> str:
+    def _get_disk_type(cls, opt_disk_tier: Optional[str]) -> str:
+        disk_tier = opt_disk_tier or cls._DEFAULT_DISK_TIER
         tier2name = {
             'high': 'pd-ssd',
             'medium': 'pd-balanced',

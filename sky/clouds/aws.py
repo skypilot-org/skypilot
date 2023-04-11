@@ -331,7 +331,7 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
-            **AWS._get_disk_specs(r.disk_tier or 'medium')
+            **AWS._get_disk_specs(r.disk_tier)
         }
 
     def get_feasible_launchable_resources(self,
@@ -629,7 +629,8 @@ class AWS(clouds.Cloud):
         return 'standard' if disk_tier == 'low' else 'gp3'
 
     @classmethod
-    def _get_disk_specs(cls, disk_tier: str) -> Dict[str, Any]:
+    def _get_disk_specs(cls, opt_disk_tier: Optional[str]) -> Dict[str, Any]:
+        disk_tier = opt_disk_tier or cls._DEFAULT_DISK_TIER
         tier2iops = {
             'high': 7000,
             'medium': 3500,

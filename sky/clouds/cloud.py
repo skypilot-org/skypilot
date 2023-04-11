@@ -72,6 +72,7 @@ class Cloud:
     """A cloud provider."""
 
     _REPR = '<Cloud>'
+    _DEFAULT_DISK_TIER = 'medium'
 
     @classmethod
     def _cloud_unsupported_features(
