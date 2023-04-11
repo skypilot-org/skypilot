@@ -3,7 +3,6 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for Azure.
 """
-import re
 from typing import Dict, List, Optional, Tuple
 
 from sky import clouds as cloud_lib
@@ -18,7 +17,7 @@ _DEFAULT_INSTANCE_FAMILY = [
     # The latest general-purpose instance family as of Mar. 2023.
     # CPU: Intel Ice Lake 8370C.
     # Memory: 4 GiB RAM per 1 vCPU;
-    'D_v5',
+    'Ds_v5',
     # The latest memory-optimized instance family as of Mar. 2023.
     # CPU: Intel Ice Lake 8370C.
     # Memory: 8 GiB RAM per 1 vCPU.
@@ -30,7 +29,6 @@ _DEFAULT_INSTANCE_FAMILY = [
 ]
 _DEFAULT_NUM_VCPUS = 8
 _DEFAULT_MEMORY_CPU_RATIO = 4
-_DEFAULT_S_SERIES_MEMORY_CPU_RATIO = 2
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -75,44 +73,17 @@ def get_vcpus_mem_from_instance_type(
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def _get_instance_family(instance_type: str) -> str:
-    if instance_type.startswith('Basic_A'):
-        return 'basic_a'
-
-    assert instance_type.startswith('Standard_')
-    # Remove the 'Standard_' prefix.
-    instance_type = instance_type[len('Standard_'):]
-    # Remove the '_Promo' suffix if exists.
-    if '_Promo' in instance_type:
-        instance_type = instance_type[:-len('_Promo')]
-
-    # TODO(woosuk): Use better regex.
-    if '-' in instance_type:
-        x = re.match(r'([A-Za-z]+)([0-9]+)(-)([0-9]+)(.*)', instance_type)
-        assert x is not None, x
-        instance_family = x.group(1) + '_' + x.group(5)
-    else:
-        x = re.match(r'([A-Za-z]+)([0-9]+)(.*)', instance_type)
-        assert x is not None, x
-        instance_family = x.group(1) + x.group(3)
-    return instance_family
-
-
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
                               disk_tier: Optional[str] = None) -> Optional[str]:
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
     if memory is None:
-        # medium disk tier (PremiumSSD) is only supported by s series, which
-        # have 2x memory/cpu ratio.
-        ratio = (_DEFAULT_S_SERIES_MEMORY_CPU_RATIO
-                 if disk_tier == 'medium' else _DEFAULT_MEMORY_CPU_RATIO)
-        memory_gb_or_ratio = f'{ratio}x'
+        memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
     else:
         memory_gb_or_ratio = memory
-    df = _df[_df['InstanceType'].apply(_get_instance_family).isin(
-        _DEFAULT_INSTANCE_FAMILY)]
+    df = _df[_df['InstanceType'].apply(
+        Azure.get_instance_family).isin(_DEFAULT_INSTANCE_FAMILY)]
 
     def _filter_disk_type(instance_type: str) -> bool:
         if disk_tier is None:

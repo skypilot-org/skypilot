@@ -2,6 +2,7 @@
 import functools
 import json
 import os
+import re
 import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -422,9 +423,31 @@ class Azure(clouds.Cloud):
         return azure_subscription_id
 
     @classmethod
+    def get_instance_family(cls, instance_type: str) -> str:
+        if instance_type.startswith('Basic_A'):
+            return 'basic_a'
+
+        assert instance_type.startswith('Standard_')
+        # Remove the 'Standard_' prefix.
+        instance_type = instance_type[len('Standard_'):]
+        # Remove the '_Promo' suffix if exists.
+        if '_Promo' in instance_type:
+            instance_type = instance_type[:-len('_Promo')]
+
+        # TODO(woosuk): Use better regex.
+        if '-' in instance_type:
+            x = re.match(r'([A-Za-z]+)([0-9]+)(-)([0-9]+)(.*)', instance_type)
+            assert x is not None, x
+            instance_family = x.group(1) + '_' + x.group(5)
+        else:
+            x = re.match(r'([A-Za-z]+)([0-9]+)(.*)', instance_type)
+            assert x is not None, x
+            instance_family = x.group(1) + x.group(3)
+        return instance_family
+
+    @classmethod
     def _is_s_series(cls, instance_type: str) -> bool:
-        series = instance_type.split('_')[1].lower()
-        return 's' in series
+        return 's' in cls.get_instance_family(instance_type).lower()
 
     @classmethod
     def check_disk_tier(cls, instance_type: str,
