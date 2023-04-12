@@ -19,7 +19,7 @@ Find the Vicuna serving [SkyPilot YAMLs](examples/llm-vicuna/serve.yaml)
 
 ## Serve the official Vicuna model by yourself with SkyPilot
 
-1. Start the serving:
+1. Start the serving the Vicuna-7B model on a single A100 GPU:
 ```bash
 sky launch -c vicuna-serve -s serve.yaml
 ```
@@ -50,7 +50,7 @@ To finetune on your own data, replace the file with your own, or change the line
 
 1. Replace the bucket name in [finetune.yaml](examples/llm-vicuna/finetune.yaml) with some unique name, so the SkyPilot can create a bucket for you to store the model weights. See `# Change to your own bucket` in the YAML file.
 
-2. **Finetune the 7B model on 8 A100 GPUs (80GB memory) using spot instances**:
+2. **Finetune the Vicuna-7B model on 8 A100 GPUs (80GB memory) using spot instances**:
 ```bash
 # Launch it on managed spot to save 3x cost
 sky spot launch -n vicuna scripts/train-vicuna.yaml --env WANDB_API_KEY
