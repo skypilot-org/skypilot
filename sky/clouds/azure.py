@@ -451,7 +451,9 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def check_disk_tier(cls, instance_type: str,
-                        disk_tier: str) -> Tuple[bool, str]:
+                        disk_tier: Optional[str]) -> Tuple[bool, str]:
+        if disk_tier is None:
+            return True, ''
         if disk_tier == 'high':
             return False, ('Azure disk_tier=high is not supported now. '
                            'Please use disk_tier={low, medium} instead.')
@@ -467,10 +469,8 @@ class Azure(clouds.Cloud):
         return True, ''
 
     @classmethod
-    def check_disk_tier_enabled(cls, instance_type: Optional[str],
+    def check_disk_tier_enabled(cls, instance_type: str,
                                 disk_tier: str) -> None:
-        if instance_type is None:
-            return
         ok, msg = cls.check_disk_tier(instance_type, disk_tier)
         if not ok:
             with ux_utils.print_exception_no_traceback():

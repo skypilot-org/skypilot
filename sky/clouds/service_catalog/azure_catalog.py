@@ -86,8 +86,6 @@ def get_default_instance_type(cpus: Optional[str] = None,
         Azure.get_instance_family).isin(_DEFAULT_INSTANCE_FAMILY)]
 
     def _filter_disk_type(instance_type: str) -> bool:
-        if disk_tier is None:
-            return True
         return Azure.check_disk_tier(instance_type, disk_tier)[0]
 
     df = df.loc[df['InstanceType'].apply(_filter_disk_type)]

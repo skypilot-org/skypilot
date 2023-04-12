@@ -460,10 +460,10 @@ class Cloud:
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
                                 disk_tier: str) -> None:
-        """Errors out if the disk type is not supported by the cloud provider.
+        """Errors out if the disk tier is not supported by the cloud provider.
 
         Raises:
-            exceptions.NotSupportedError: If the disk type is not supported.
+            exceptions.NotSupportedError: If the disk tier is not supported.
         """
         raise NotImplementedError
 
