@@ -25,10 +25,10 @@ run: |
   
   echo 'Starting controller...'
   python3 -m fastchat.serve.controller > ~/controller.log 2>&1 &
-  sleep 5
+  sleep 10
   echo 'Starting model worker...'
   python3 -m fastchat.serve.model_worker --model-path ~/vicuna-${MODEL_SIZE}b > ~/model_worker.log 2>&1 &
-  sleep 5
+  sleep 10
   echo 'Starting gradio server...'
   python3 -m fastchat.serve.gradio_web_server --share | tee ~/gradio.log
 
