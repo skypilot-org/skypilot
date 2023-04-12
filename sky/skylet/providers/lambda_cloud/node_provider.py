@@ -20,9 +20,12 @@ from sky import authentication as auth
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import common_utils
 
 _TAG_PATH_PREFIX = '~/.sky/generated/lambda_cloud/metadata'
+_REMOTE_SSH_KEY_NAME = '~/.lambda_cloud/ssh_key_name'
 _REMOTE_RAY_SSH_KEY = '~/ray_bootstrap_key.pem'
+_REMOTE_RAY_YAML = '~/ray_bootstrap_config.yaml'
 _GET_INTERNAL_IP_CMD = 'ip -4 -br addr show | grep -Eo "10\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"'
 
 logger = logging.getLogger(__name__)
@@ -54,9 +57,42 @@ class LambdaNodeProvider(NodeProvider):
         self.cached_nodes: Dict[str, Dict[str, Any]] = {}
         self.metadata = lambda_utils.Metadata(_TAG_PATH_PREFIX, cluster_name)
         self.ssh_key_path = os.path.expanduser(auth.PRIVATE_SSH_KEY_PATH)
-        remote_ssh_key = os.path.expanduser(_REMOTE_RAY_SSH_KEY)
-        if os.path.exists(remote_ssh_key):
-            self.ssh_key_path = remote_ssh_key
+
+        def _get_ssh_key_name(prefix: str) -> str:
+            public_key_path = os.path.expanduser(auth.PUBLIC_SSH_KEY_PATH)
+            with open(public_key_path, 'r') as f:
+                public_key = f.read()
+            name, exists = self.lambda_client.get_unique_ssh_key_name(
+                prefix, public_key)
+            if not exists:
+                raise lambda_utils.LambdaCloudError('SSH key not found')
+            return name
+
+        ray_yaml_path = os.path.expanduser(_REMOTE_RAY_YAML)
+        self.on_head = (os.path.exists(ray_yaml_path) and
+                        common_utils.read_yaml(ray_yaml_path)['cluster_name']
+                        == cluster_name)
+
+        if self.on_head:
+            self.ssh_key_path = os.path.expanduser(_REMOTE_RAY_SSH_KEY)
+            ssh_key_name_path = os.path.expanduser(_REMOTE_SSH_KEY_NAME)
+            if os.path.exists(ssh_key_name_path):
+                with open(ssh_key_name_path, 'r') as f:
+                    self.ssh_key_name = f.read()
+            else:
+                # At this point, `~/.ssh/sky-key.pub` contains the public
+                # key used to launch this cluster. Use it to determine
+                # ssh key name and store the name in _REMOTE_SSH_KEY_NAME.
+                # Note: this case only runs during cluster launch, so it is
+                # not possible for ~/.ssh/sky-key.pub to already be regenerated
+                # by the user.
+                self.ssh_key_name = _get_ssh_key_name('')
+                with open(ssh_key_name_path, 'w') as f:
+                    f.write(self.ssh_key_name)
+        else:
+            # On local
+            self.ssh_key_name = _get_ssh_key_name(
+                f'sky-key-{common_utils.get_user_hash()}')
 
     def _guess_and_add_missing_tags(self, vms: List[Dict[str, Any]]) -> None:
         """Adds missing vms to local tag file and guesses their tags."""
@@ -103,16 +139,7 @@ class LambdaNodeProvider(NodeProvider):
             instance_info = self.metadata.get(vm['id'])
             if instance_info is not None:
                 metadata['tags'] = instance_info['tags']
-            with ux_utils.print_exception_no_traceback():
-                if 'ip' not in vm:
-                    raise lambda_utils.LambdaCloudError(
-                        'A node ip address was not found. Either '
-                        '(1) Lambda Cloud has internally errored, or '
-                        '(2) the cluster is still booting. '
-                        'You can manually terminate the cluster on the '
-                        'Lambda Cloud console or (in case 2) wait for '
-                        'booting to finish (~2 minutes).')
-            metadata['external_ip'] = vm['ip']
+            metadata['external_ip'] = vm.get('ip')
             return metadata
 
         def _match_tags(vm: Dict[str, Any]):
@@ -126,6 +153,9 @@ class LambdaNodeProvider(NodeProvider):
         def _get_internal_ip(node: Dict[str, Any]):
             # TODO(ewzeng): cache internal ips in metadata file to reduce
             # ssh overhead.
+            if node['external_ip'] is None:
+                node['internal_ip'] = None
+                return
             runner = command_runner.SSHCommandRunner(node['external_ip'],
                                                      'ubuntu',
                                                      self.ssh_key_path)
@@ -183,14 +213,34 @@ class LambdaNodeProvider(NodeProvider):
         node = self._get_cached_node(node_id=node_id)
         if node is None:
             return None
-        return node.get('external_ip')
+        ip = node.get('external_ip')
+        with ux_utils.print_exception_no_traceback():
+            if ip is None:
+                raise lambda_utils.LambdaCloudError(
+                    'A node ip address was not found. Either '
+                    '(1) Lambda Cloud has internally errored, or '
+                    '(2) the cluster is still booting. '
+                    'You can manually terminate the cluster on the '
+                    'Lambda Cloud console or (in case 2) wait for '
+                    'booting to finish (~2 minutes).')
+        return ip
 
     def internal_ip(self, node_id: str) -> Optional[str]:
         """Returns the internal ip (Ray ip) of the given node."""
         node = self._get_cached_node(node_id=node_id)
         if node is None:
             return None
-        return node.get('internal_ip')
+        ip = node.get('internal_ip')
+        with ux_utils.print_exception_no_traceback():
+            if ip is None:
+                raise lambda_utils.LambdaCloudError(
+                    'A node ip address was not found. Either '
+                    '(1) Lambda Cloud has internally errored, or '
+                    '(2) the cluster is still booting. '
+                    'You can manually terminate the cluster on the '
+                    'Lambda Cloud console or (in case 2) wait for '
+                    'booting to finish (~2 minutes).')
+        return ip
 
     def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str],
                     count: int) -> None:
@@ -203,10 +253,21 @@ class LambdaNodeProvider(NodeProvider):
         # Create nodes
         instance_type = node_config['InstanceType']
         region = self.provider_config['region']
+
         if config_tags[TAG_RAY_NODE_KIND] == NODE_KIND_HEAD:
             name = f'{self.cluster_name}-head'
+            # Occasionally, the head node will continue running for a short
+            # period after termination. This can lead to the following bug:
+            #   1. Head node autodowns but continues running.
+            #   2. The next autodown event is triggered, which executes ray up.
+            #   3. Head node stops running.
+            # In this case, a new head node is created after the cluster has
+            # terminated. We avoid this with the following check:
+            if self.on_head:
+                raise lambda_utils.LambdaCloudError('Head already exists.')
         else:
             name = f'{self.cluster_name}-worker'
+
         # Lambda launch api only supports launching one node at a time,
         # so we do a loop. Remove loop when launch api allows quantity > 1
         booting_list = []
@@ -215,7 +276,8 @@ class LambdaNodeProvider(NodeProvider):
                 instance_type=instance_type,
                 region=region,
                 quantity=1,
-                name=name)[0]
+                name=name,
+                ssh_key_name=self.ssh_key_name)[0]
             self.metadata.set(vm_id, {'tags': config_tags})
             booting_list.append(vm_id)
             time.sleep(10)  # Avoid api rate limits

@@ -1,8 +1,8 @@
 """Lambda Cloud helper functions."""
-import os
 import json
+import os
 import requests
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 CREDENTIALS_PATH = '~/.lambda_cloud/lambda_keys'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
@@ -78,8 +78,8 @@ def raise_lambda_error(response: requests.Response) -> None:
         raise LambdaCloudError('Your API requests are being rate limited.')
     try:
         resp_json = response.json()
-        code = resp_json['error']['code']
-        message = resp_json['error']['message']
+        code = resp_json.get('error', {}).get('code')
+        message = resp_json.get('error', {}).get('message')
     except (KeyError, json.decoder.JSONDecodeError):
         raise LambdaCloudError(f'Unexpected error. Status code: {status_code}')
     raise LambdaCloudError(f'{code}: {message}')
@@ -97,17 +97,15 @@ class LambdaCloudClient:
                 line.split(' = ')[0]: line.split(' = ')[1] for line in lines
             }
         self.api_key = self._credentials['api_key']
-        self.ssh_key_name = self._credentials.get('ssh_key_name', None)
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
 
     def create_instances(self,
                          instance_type: str = 'gpu_1x_a100_sxm4',
                          region: str = 'us-east-1',
                          quantity: int = 1,
-                         name: str = '') -> List[str]:
+                         name: str = '',
+                         ssh_key_name: str = '') -> List[str]:
         """Launch new instances."""
-        assert self.ssh_key_name is not None
-
         # Optimization:
         # Most API requests are rate limited at ~1 request every second but
         # launch requests are rate limited at ~1 request every 10 seconds.
@@ -131,7 +129,7 @@ class LambdaCloudClient:
         data = json.dumps({
             'region_name': region,
             'instance_type_name': instance_type,
-            'ssh_key_names': [self.ssh_key_name],
+            'ssh_key_names': [ssh_key_name],
             'quantity': quantity,
             'name': name
         })
@@ -162,17 +160,49 @@ class LambdaCloudClient:
         raise_lambda_error(response)
         return response.json().get('data', [])
 
-    def set_ssh_key(self, name: str, pub_key: str) -> None:
-        """Set ssh key."""
+    def list_ssh_keys(self) -> List[Dict[str, str]]:
+        """List ssh keys."""
+        response = requests.get(f'{API_ENDPOINT}/ssh-keys',
+                                headers=self.headers)
+        raise_lambda_error(response)
+        return response.json().get('data', [])
+
+    def get_unique_ssh_key_name(self, prefix: str,
+                                pub_key: str) -> Tuple[str, bool]:
+        """Returns a ssh key name with the given prefix.
+
+        If no names have given prefix, return prefix. If pub_key exists and
+        has name with given prefix, return that name. Otherwise create a
+        UNIQUE name with given prefix.
+
+        The second return value is True iff the returned name already exists.
+        """
+        candidate_keys = [
+            k for k in self.list_ssh_keys()
+            if k.get('name', '').startswith(prefix)
+        ]
+
+        # Prefix not found
+        if not candidate_keys:
+            return prefix, False
+
+        suffix_digits = [0]
+        for key_info in candidate_keys:
+            name = key_info.get('name', '')
+            if key_info.get('public_key', '') == pub_key:
+                return name, True
+            if (len(name) > len(prefix) + 1 and name[len(prefix)] == '-' and
+                    name[len(prefix) + 1:].isdigit()):
+                suffix_digits.append(int(name[len(prefix) + 1:]))
+        return f'{prefix}-{max(suffix_digits) + 1}', False
+
+    def register_ssh_key(self, name: str, pub_key: str) -> None:
+        """Register ssh key with Lambda."""
         data = json.dumps({'name': name, 'public_key': pub_key})
         response = requests.post(f'{API_ENDPOINT}/ssh-keys',
                                  data=data,
                                  headers=self.headers)
         raise_lambda_error(response)
-        self.ssh_key_name = name
-        with open(self.credentials, 'w') as f:
-            f.write(f'api_key = {self.api_key}\n')
-            f.write(f'ssh_key_name = {self.ssh_key_name}\n')
 
     def list_catalog(self) -> Dict[str, Any]:
         """List offered instances and their availability."""
