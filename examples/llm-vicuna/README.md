@@ -15,6 +15,18 @@ pip install git+https://github.com/skypilot-org/skypilot.git
 sky check
 ```
 Find the Vicuna finetuning [SkyPilot YAMLs](examples/llm-vicuna/finetune.yaml)
+Find the Vicuna serving [SkyPilot YAMLs](examples/llm-vicuna/serve.yaml)
+
+## Serve the official Vicuna model by yourself with SkyPilot
+
+1. **Serve the official Vicuna model**:
+```bash
+sky launch -c vicuna-serve serve.yaml
+```
+2. Serve the 13B model instead of the default 7B:
+```bash
+sky launch -c vicuna-serve serve.yaml --env MODEL_SIZE=13
+```
 
 
 ## Finetuning Vicuna with SkyPilot
@@ -47,6 +59,7 @@ Currently, such `A100-80GB:8` spot instances are only available on AWS and GCP.
 ```bash
 sky launch -c vicuna -s scripts/train-vicuna.yaml --env WANDB_API_KEY --no-use-spot
 ```
+
 
 
 ## Q&A
