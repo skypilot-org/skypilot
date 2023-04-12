@@ -19,11 +19,23 @@ Find the Vicuna serving [SkyPilot YAMLs](examples/llm-vicuna/serve.yaml)
 
 ## Serve the official Vicuna model by yourself with SkyPilot
 
-1. **Serve the official Vicuna model**:
+1. Start the serving:
 ```bash
 sky launch -c vicuna-serve -s serve.yaml
 ```
-2. Serve the 13B model instead of the default 7B:
+2. Check the output of the command. There will be a sharable gradio link (like the following). Open it in your browser to chat with Vicuna.
+```
+(task, pid=20933) 2023-04-12 22:08:49 | INFO | gradio_web_server | Namespace(host='0.0.0.0', port=None, controller_url='http://localhost:21001', concurrency_count=10, model_list_mode='once', share=True, moderate=False)
+(task, pid=20933) 2023-04-12 22:08:49 | INFO | stdout | Running on local URL:  http://0.0.0.0:7860
+(task, pid=20933) 2023-04-12 22:08:51 | INFO | stdout | Running on public URL: https://<random-hash>.gradio.live
+```
+
+3. [Optinoal] Try other GPUs:
+```bash
+sky launch -c vicuna-serve-v100 -s serve.yaml --gpus V100
+```
+
+4. [Optional] Serve the 13B model instead of the default 7B:
 ```bash
 sky launch -c vicuna-serve -s serve.yaml --env MODEL_SIZE=13
 ```
