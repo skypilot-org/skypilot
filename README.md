@@ -28,7 +28,8 @@
 ----
 :fire: :dromedary_camel: *News (March, 2023)* :dromedary_camel: :fire: 
 
-- **[Vicuna LLM chatbot](https://vicuna.lmsys.org/) trained** [**using SkyPilot**](./examples/vicuna-llm/) **for $300 on spot instances!** 
+- **You can now train and serve the Vicuna model with a single** [**SkyPilot command**](./examples/llm-vicuna/)!
+- **[Vicuna LLM chatbot](https://vicuna.lmsys.org/) trained** [**using SkyPilot**](./examples/llm-vicuna/) **for $300 on spot instances!** 
 - *Serve* your own LLaMA LLM chatbot (not finetuned) on any cloud: [**example**](./examples/llama-llm-chatbots/), [**repo**](https://github.com/skypilot-org/sky-llama)
 ----
 
