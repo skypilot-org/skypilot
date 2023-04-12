@@ -83,10 +83,12 @@ _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._]default'.format(IP_ADDR_REGEX))
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
-# We use fixed IP address to avoid DNS lookup blocking the check, for machine
-# with no internet connection.
+# We check network connection by going through _TEST_IP_LIST. We may need to
+# check multiple IPs because some IPs may be blocked on certain networks.
+# Fixed IP addresses are used to avoid DNS lookup blocking the check, for
+# machine with no internet connection.
 # Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
-_TEST_IP = 'https://1.1.1.1'
+_TEST_IP_LIST = ['https://1.1.1.1', 'https://8.8.8.8']
 
 # Allow each CPU thread take 2 tasks.
 # Note: This value cannot be too small, otherwise OOM issue may occur.
@@ -1506,11 +1508,14 @@ def check_network_connection():
     http = requests.Session()
     http.mount('https://', adapter)
     http.mount('http://', adapter)
-    try:
-        http.head(_TEST_IP, timeout=3)
-    except (requests.Timeout, requests.exceptions.ConnectionError) as e:
-        raise exceptions.NetworkError(
-            'Could not refresh the cluster. Network seems down.') from e
+    for i, ip in enumerate(_TEST_IP_LIST):
+        try:
+            http.head(ip, timeout=3)
+            return
+        except (requests.Timeout, requests.exceptions.ConnectionError) as e:
+            if i == len(_TEST_IP_LIST) - 1:
+                raise exceptions.NetworkError('Could not refresh the cluster. '
+                                              'Network seems down.') from e
 
 
 def _process_cli_query(
