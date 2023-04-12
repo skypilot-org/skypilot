@@ -24,7 +24,7 @@ run: |
     --delta lmsys/vicuna-${MODEL_SIZE}b-delta-v1.1
   
   python3 -m fastchat.serve.controller > ~/controller.log 2>&1 &
-  python3 -m fastchat.serve.model_worker --model ~/vicuna-${MODEL_SIZE}b > ~/model_worker.log 2>&1 &
+  python3 -m fastchat.serve.model_worker --model-path ~/vicuna-${MODEL_SIZE}b > ~/model_worker.log 2>&1 &
   python3 -m fastchat.serve.gradio_web_server --share
 
 envs:
