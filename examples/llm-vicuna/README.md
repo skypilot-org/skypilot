@@ -21,11 +21,11 @@ Find the Vicuna serving [SkyPilot YAMLs](examples/llm-vicuna/serve.yaml)
 
 1. **Serve the official Vicuna model**:
 ```bash
-sky launch -c vicuna-serve serve.yaml
+sky launch -c vicuna-serve -s serve.yaml
 ```
 2. Serve the 13B model instead of the default 7B:
 ```bash
-sky launch -c vicuna-serve serve.yaml --env MODEL_SIZE=13
+sky launch -c vicuna-serve -s serve.yaml --env MODEL_SIZE=13
 ```
 
 
