@@ -1703,6 +1703,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
             cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
                 cluster_name]
             # to display most recent entry for each reserved cluster
+            # TODO(sgurram): fix assumption of sorted order of clusters
             if cluster_group_name not in reserved_clusters:
                 reserved_clusters[cluster_group_name] = cluster_record
         else:
@@ -1722,7 +1723,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 
     if not all:
         click.secho(
-            f'Showing the {status_utils.NUM_COST_REPORT_LINES} '
+            f'Showing up to {status_utils.NUM_COST_REPORT_LINES} '
             'most recent clusters. '
             'To see all clusters in history, '
             'pass the --all flag.',
