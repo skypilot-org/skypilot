@@ -190,7 +190,7 @@ class SCPNodeProvider(NodeProvider):
 
     def _config_security_group(self, zone_id,vpc, cluster_name):
         sg_name = cluster_name.replace("-", "") + "sg"
-        if sg_name>20: sg_name = sg_name[:9]+'0'+sg_name[-10:]
+        if len(sg_name)>20: sg_name = sg_name[:9]+'0'+sg_name[-10:] # should be less than 21
 
         undo_func_stack = []
         try :
