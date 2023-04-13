@@ -45,6 +45,7 @@ from sky.adaptors import cloudflare
 from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
+from sky.clouds import AWS, GCP, Azure
 
 # For uniquefying users on shared-account cloud providers. Used as part of the
 # cluster names.
@@ -1650,6 +1651,40 @@ def test_azure_start_stop_two_nodes():
         timeout=30 * 60,  # 30 mins  (it takes around ~23 mins)
     )
     run_one_test(test)
+
+
+# ---------- Testing env for disk tier ----------
+def test_aws_disk_tier():
+
+    def _get_aws_query_command(region, instance_id, field, expected):
+        return (f'aws ec2 describe-volumes --region {region} '
+                f'--filters Name=attachment.instance-id,Values={instance_id} '
+                f'--query Volumes[*].{field} | grep {expected} ; ')
+
+    for disk_tier in ['low', 'medium', 'high']:
+        specs = AWS.get_disk_specs(disk_tier)
+        name = _get_cluster_name() + '-' + disk_tier
+        region = 'us-west-2'
+        test = Test(
+            'azure-disk-tier',
+            [
+                f'sky launch -y -c {name} --cloud aws --region {region} '
+                f'--disk-tier {disk_tier} echo "hello sky"',
+                f'id=`aws ec2 describe-instances --region {region} --filters '
+                f'Name=tag:ray-cluster-name,Values={name} --query '
+                f'Reservations[].Instances[].InstanceId --output text`; ' +
+                _get_aws_query_command(region, '$id', 'VolumeType',
+                                       specs['disk_tier']) +
+                ('' if disk_tier == 'low' else
+                 (_get_aws_query_command(region, '$id', 'Iops',
+                                         specs['disk_iops']) +
+                  _get_aws_query_command(region, '$id', 'Throughput',
+                                         specs['disk_throughput']))),
+            ],
+            f'sky down -y {name}',
+            timeout=10 * 60,  # 10 mins  (it takes around ~6 mins)
+        )
+        run_one_test(test)
 
 
 # ------- Testing the core API --------
