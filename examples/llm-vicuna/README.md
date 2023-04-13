@@ -46,7 +46,7 @@ Currently, training requires GPUs with 80GB memory.  See `sky show-gpus --all` f
 
 We can start the finetuning of Vicuna model on the dummy data [dummy.json](dummy.json) **with a single command**. It will automatically find the available cheapest VM on any cloud.
 
-**To finetune on your own data**, replace the file with your own, or change the line `/data/mydata.json: ./dummy.json` to the path of your own data in the SkyPilot YAML .
+**To finetune on your own data**, replace the file with your own, or change the line `/data/mydata.json: ./dummy.json` to the path of your own data in the SkyPilot YAML.
 
 Steps for finetuning on your cloud(s):
 
