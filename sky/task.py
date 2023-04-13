@@ -282,6 +282,17 @@ class Task:
             for dst_path, src in file_mounts.items():
                 # Check if it is str path
                 if isinstance(src, str):
+                    if data_utils.is_cloud_store_url(src):
+                        store_type = data_utils.get_cloud_store_type(src)
+                        cloud_type = storage_lib.STORE_TYPE_TO_CLOUD_TYPE[store_type]
+                        enabled_clouds = global_user_state.get_enabled_clouds()
+                        if not cloud_type in enabled_clouds:
+                            with ux_utils.print_exception_no_traceback():
+                                raise exceptions.CloudDisabledError(
+                                    f'{store_type} type is specified: {src}. But '
+                                    f'{cloud_type} access is disabled. To fix: enable '
+                                    f'{cloud_type}.'
+                                )
                     copy_mounts[dst_path] = src
                 # If the src is not a str path, it is likely a dict. Try to
                 # parse storage object.
@@ -299,6 +310,17 @@ class Task:
             mount_path = storage[0]
             assert mount_path, \
                 'Storage mount path cannot be empty.'
+            store_type = storage[1]['store']
+            if store_type:
+                cloud_type = storage_lib.STORE_TYPE_TO_CLOUD_TYPE[store_type]
+                enabled_clouds = global_user_state.get_enabled_clouds()
+                if not cloud_type in enabled_clouds:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.CloudDisabledError(
+                            f'Storage \'store:{store_type}\' specified, but '
+                            f'{cloud_type} access is disabled. To fix: enable '
+                            f'{cloud_type}.'
+                        )
             try:
                 storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
             except exceptions.StorageSourceError as e:
