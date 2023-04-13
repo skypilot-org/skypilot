@@ -1666,7 +1666,7 @@ def test_aws_disk_tier():
         name = _get_cluster_name() + '-' + disk_tier
         region = 'us-west-2'
         test = Test(
-            'azure-disk-tier',
+            'aws-disk-tier',
             [
                 f'sky launch -y -c {name} --cloud aws --region {region} '
                 f'--disk-tier {disk_tier} echo "hello sky"',
@@ -1683,6 +1683,27 @@ def test_aws_disk_tier():
             ],
             f'sky down -y {name}',
             timeout=10 * 60,  # 10 mins  (it takes around ~6 mins)
+        )
+        run_one_test(test)
+
+
+def test_gcp_disk_tier():
+    for disk_tier in ['low', 'medium', 'high']:
+        type = GCP.get_disk_type(disk_tier)
+        name = _get_cluster_name() + '-' + disk_tier
+        region = 'us-west2'
+        test = Test(
+            'gcp-disk-tier',
+            [
+                f'sky launch -y -c {name} --cloud gcp --region {region} '
+                f'--disk-tier {disk_tier} echo "hello sky"',
+                f'name=`gcloud compute instances list --filter='
+                f'"labels.ray-cluster-name:{name}" --format="value(name)"`; '
+                f'gcloud compute disks list --filter="name=$name" '
+                f'--format="value(type)" | grep {type} '
+            ],
+            f'sky down -y {name}',
+            timeout=6 * 60,  # 6 mins  (it takes around ~3 mins)
         )
         run_one_test(test)
 
