@@ -2984,7 +2984,7 @@ def show_gpus(
                 clouds=cloud,
                 region_filter=region,
             )
-            # NVIDIA GPUs
+            # "Common" GPUs
             for gpu in service_catalog.get_common_gpus():
                 if gpu in result:
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
