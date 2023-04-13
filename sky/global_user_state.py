@@ -664,7 +664,7 @@ def get_enabled_clouds() -> List[clouds.Cloud]:
     return enabled_clouds
 
 
-def get_enabled_clouds_str() -> List[clouds.Cloud]:
+def get_enabled_clouds_str() -> List[str]:
     # Currently, 'clouds' only support cloud types with
     # computing instances. The following is to temporarily
     # support R2 for get_enabled_clouds
@@ -679,8 +679,7 @@ def get_enabled_clouds_str() -> List[clouds.Cloud]:
         cloud = clouds.CLOUD_REGISTRY.from_str(c)
         if cloud is not None:
             enabled_clouds.append(str(cloud))
-    if os.path.exists(
-        os.path.expanduser(cloudflare.ACCOUNT_ID_PATH)):
+    if os.path.exists(os.path.expanduser(cloudflare.ACCOUNT_ID_PATH)):
         enabled_clouds.append('Cloudflare')
     return enabled_clouds
 
