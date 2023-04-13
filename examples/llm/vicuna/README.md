@@ -84,10 +84,10 @@ sky launch -c vicuna -s train.yaml --no-use-spot
 Q: I see some bucket permission errors `sky.exceptions.StorageBucketGetError` when running the above:
 ```
 ...
-sky.exceptions.StorageBucketGetError: Failed to connect to an existing bucket 'model-weights'.
+sky.exceptions.StorageBucketGetError: Failed to connect to an existing bucket 'YOUR_OWN_BUCKET_NAME'.
 Please check if:
   1. the bucket name is taken and/or
-  2. the bucket permissions are not setup correctly. To debug, consider using gsutil ls gs://model-weights.
+  2. the bucket permissions are not setup correctly. To debug, consider using gsutil ls gs://YOUR_OWN_BUCKET_NAME.
 ```
 
-A: The YAML files hard-coded names for existing buckets which are not public. Replace those bucket names (see `# Change to your own bucket`) with some unique names, and rerun the commands. New private buckets will be automatically created under your cloud account.
+A: You need to replace the bucket name with your own globally unique name, and rerun the commands. New private buckets will be automatically created under your cloud account.
