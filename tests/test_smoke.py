@@ -1708,6 +1708,26 @@ def test_gcp_disk_tier():
         run_one_test(test)
 
 
+def test_azure_disk_tier():
+    for disk_tier in ['low', 'medium']:
+        type = Azure.get_disk_type(disk_tier)
+        name = _get_cluster_name() + '-' + disk_tier
+        region = 'westus2'
+        test = Test(
+            'azure-disk-tier',
+            [
+                f'sky launch -y -c {name} --cloud azure --region {region} '
+                f'--disk-tier {disk_tier} echo "hello sky"',
+                f'az resource list --tag ray-cluster-name={name} --query '
+                f'"[?type==\'Microsoft.Compute/disks\'].sku.name" '
+                f'--output tsv | grep {type}'
+            ],
+            f'sky down -y {name}',
+            timeout=20 * 60,  # 20 mins  (it takes around ~12 mins)
+        )
+        run_one_test(test)
+
+
 # ------- Testing the core API --------
 # Most of the core APIs have been tested in the CLI tests.
 # These tests are for testing the return value of the APIs not fully used in CLI.
