@@ -55,7 +55,7 @@ class ZoneConfig:
             },
             'blockStorage':{
                 'blockStorageName': 'skystorage',
-                'diskSize': 100,
+                'diskSize': node_config['diskSize'],
                 'encryptEnabled': False,
                 'productId': 'PRODUCT-sRlJ34iBr9hOxN9J5PrQxo'
             },

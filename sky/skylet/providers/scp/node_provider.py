@@ -41,6 +41,10 @@ def synchronized(f):
     return wrapper
 
 
+def _validation_check(cluster_config, node_config):
+    assert node_config['diskSize'] >= 100 and node_config['diskSize'] <= 300, \
+        f'Disk size must be greater than or equal to 100 and smaller than or equal to 300.' \
+        f'Input: {node_config["diskSize"]}'
 
 
 class SCPError(Exception):
@@ -447,6 +451,8 @@ class SCPNodeProvider(NodeProvider):
         #Add file mount: metadata path
         metadata_path = f'{TAG_PATH_PREFIX}-{cluster_config["cluster_name"]}'
         cluster_config['file_mounts'][metadata_path] = metadata_path
+
+        _validation_check(cluster_config, node_config)
 
         return cluster_config
 

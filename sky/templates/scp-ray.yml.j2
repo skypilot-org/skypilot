@@ -21,6 +21,7 @@ available_node_types:
     node_config:
       InstanceType: {{instance_type}}
       imageId: {{image_id}}
+      diskSize: {{disk_size}}
 {% if num_nodes > 1 %}
   ray_worker_default:
     min_workers: {{num_nodes - 1}}
@@ -29,6 +30,7 @@ available_node_types:
     node_config:
       InstanceType: {{instance_type}}
       imageId: {{image_id}}
+      diskSize: {{disk_size}}
 
 {%- endif %}
 
