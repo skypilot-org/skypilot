@@ -162,7 +162,9 @@ class SCPClient:
         method = 'DELETE'
         self.set_timestamp()
         self.set_signature(url=url, method=method)
-        if request_body: response = requests.delete(url, json=request_body, headers=self.headers)
+        if request_body:
+            print(request_body)
+            response = requests.delete(url, json=request_body, headers=self.headers)
 
         else: response = requests.delete(url,  headers=self.headers)
         raise_scp_error(response)
