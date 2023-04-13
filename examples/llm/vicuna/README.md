@@ -22,7 +22,7 @@ See the Vicuna SkyPilot YAMLs: for [training](train.yaml) and for [serving](serv
 ```bash
 sky launch -c vicuna-serve -s serve.yaml
 ```
-2. Check the output of the command. There will be a sharable gradio link (like the last line in of the following). Open it in your browser to chat with Vicuna.
+2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to chat with Vicuna.
 ```
 (task, pid=20933) 2023-04-12 22:08:49 | INFO | gradio_web_server | Namespace(host='0.0.0.0', port=None, controller_url='http://localhost:21001', concurrency_count=10, model_list_mode='once', share=True, moderate=False)
 (task, pid=20933) 2023-04-12 22:08:49 | INFO | stdout | Running on local URL:  http://0.0.0.0:7860
