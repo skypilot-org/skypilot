@@ -47,7 +47,7 @@ We can start the training of Vicuna model on the dummy data [dummy.json](dummy.j
 
 **To train on your own data**, replace the file with your own, or change the line `/data/mydata.json: ./dummy.json` to the path of your own data in the [train.yaml](train.yaml).
 
-[^1]: The dummy data was original from the official Vicuna repository, [FastChat](https://github.com/lm-sys/FastChat).
+[^1]: The dummy data was originally from the official Vicuna repository, [FastChat](https://github.com/lm-sys/FastChat).
 
 Steps for training on your cloud(s):
 
