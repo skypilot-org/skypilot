@@ -14,7 +14,7 @@ Install the latest SkyPilot and check your setup of the cloud credentials:
 pip install git+https://github.com/skypilot-org/skypilot.git
 sky check
 ```
-Find the Vicuna [training SkyPilot YAMLs](train.yaml) and [serving SkyPilot YAMLs](serve.yaml).
+See the Vicuna SkyPilot YAMLs: for [training](train.yaml) and for [serving](serve.yaml).
 
 ## Serve the official Vicuna model by yourself with SkyPilot
 
