@@ -291,9 +291,9 @@ class Task:
                         if not cloud_type in enabled_clouds:
                             with ux_utils.print_exception_no_traceback():
                                 raise exceptions.CloudDisabledError(
-                                    f'{store_type} type is specified: {src}. But '
-                                    f'{cloud_type} access is disabled. To fix: enable '
-                                    f'{cloud_type}.')
+                                    f'\'{store_type}\' type is specified: \'{src}\'. But '
+                                    f'\'{cloud_type}\' access is disabled. Enable '
+                                    f'\'{cloud_type}\' to fix.')
                     copy_mounts[dst_path] = src
                 # If the src is not a str path, it is likely a dict. Try to
                 # parse storage object.
@@ -319,8 +319,8 @@ class Task:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.CloudDisabledError(
                             f'Storage \'store:{store_type}\' specified, but '
-                            f'{cloud_type} access is disabled. To fix: enable '
-                            f'{cloud_type}.')
+                            f'\'{cloud_type}\' access is disabled. Enable '
+                            f'\'{cloud_type}\' to fix.')
             try:
                 storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
             except exceptions.StorageSourceError as e:
