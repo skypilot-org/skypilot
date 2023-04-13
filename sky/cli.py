@@ -2972,7 +2972,7 @@ def show_gpus(
 
     def _output():
         gpu_table = log_utils.create_table(
-            ['NVIDIA_GPU', 'AVAILABLE_QUANTITIES'])
+            ['COMMON_GPU', 'AVAILABLE_QUANTITIES'])
         tpu_table = log_utils.create_table(
             ['GOOGLE_TPU', 'AVAILABLE_QUANTITIES'])
         other_table = log_utils.create_table(
@@ -2984,7 +2984,7 @@ def show_gpus(
                 clouds=cloud,
                 region_filter=region,
             )
-            # NVIDIA GPUs
+            # "Common" GPUs
             for gpu in service_catalog.get_common_gpus():
                 if gpu in result:
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
@@ -3006,6 +3006,8 @@ def show_gpus(
                 yield from other_table.get_string()
                 yield '\n\n'
             else:
+                yield ('\n\nHint: use -a/--all to see all accelerators '
+                       '(including non-common ones) and pricing.')
                 return
 
         # Show detailed accelerator information
@@ -3266,13 +3268,14 @@ def spot():
 @click.option(
     '--retry-until-up',
     '-r',
-    default=False,
+    default=True,
     is_flag=True,
     required=False,
-    help=('Whether to retry provisioning infinitely until the cluster is up, '
-          'if we fail to launch the cluster on any possible region/cloud due '
-          'to unavailability errors. This applies to launching the the spot '
-          'clusters (both initial and recovery attempts).'))
+    help=('(Default: True; this flag is deprecated and will be removed in a '
+          'future release.) Whether to retry provisioning infinitely until the '
+          'cluster is up, if unavailability errors are encountered. This '
+          'applies to launching the spot clusters (both the initial and any '
+          'recovery attempts), not the spot controller.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3351,6 +3354,14 @@ def spot_launch(
     task_cloud = (resources.cloud
                   if resources.cloud is not None else clouds.Cloud)
     task_cloud.check_cluster_name_is_valid(name)
+
+    # Deprecation.
+    if not retry_until_up:
+        click.secho(
+            'Flag --retry-until-up is deprecated and will be removed in a '
+            'future release (defaults to True). Please file an issue if this '
+            'does not work for you.',
+            fg='yellow')
 
     sky.spot_launch(task,
                     name,
