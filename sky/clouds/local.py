@@ -199,7 +199,7 @@ class Local(clouds.Cloud):
         return region, zone
 
     @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
+    def check_disk_tier_enabled(cls, instance_type: Optional[str],
                                 disk_tier: str) -> None:
         raise exceptions.NotSupportedError(
             'Local cloud does not support disk tiers.')

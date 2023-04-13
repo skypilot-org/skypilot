@@ -458,7 +458,7 @@ class Cloud:
                     f'{max_cluster_name_len_limit} chars{cloud_name}.')
 
     @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
+    def check_disk_tier_enabled(cls, instance_type: Optional[str],
                                 disk_tier: str) -> None:
         """Errors out if the disk tier is not supported by the cloud provider.
 

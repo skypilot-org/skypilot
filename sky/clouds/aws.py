@@ -623,7 +623,7 @@ class AWS(clouds.Cloud):
     @classmethod
     def check_disk_tier_enabled(
         cls,
-        instance_type: str,  # pylint: disable=unused-argument
+        instance_type: Optional[str],  # pylint: disable=unused-argument
         disk_tier: str  # pylint: disable=unused-argument
     ) -> None:
         return

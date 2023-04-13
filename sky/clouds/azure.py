@@ -446,11 +446,13 @@ class Azure(clouds.Cloud):
         return instance_family
 
     @classmethod
-    def _is_s_series(cls, instance_type: str) -> bool:
+    def _is_s_series(cls, instance_type: Optional[str]) -> bool:
+        if instance_type is None:
+            return True
         return 's' in cls.get_instance_family(instance_type).lower()
 
     @classmethod
-    def check_disk_tier(cls, instance_type: str,
+    def check_disk_tier(cls, instance_type: Optional[str],
                         disk_tier: Optional[str]) -> Tuple[bool, str]:
         if disk_tier is None:
             return True, ''
@@ -469,7 +471,7 @@ class Azure(clouds.Cloud):
         return True, ''
 
     @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
+    def check_disk_tier_enabled(cls, instance_type: Optional[str],
                                 disk_tier: str) -> None:
         ok, msg = cls.check_disk_tier(instance_type, disk_tier)
         if not ok:
