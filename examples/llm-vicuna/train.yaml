@@ -7,7 +7,8 @@ num_nodes: 1
 
 file_mounts:
   /artifacts:
-    name: YOUR_OWN_BUCKET_NAME # Change to your own bucket name
+    # name: YOUR_OWN_BUCKET_NAME # Change to your own bucket name
+    name: skypilot-vicuna
     mode: MOUNT
   /data/mydata.json: ./dummy.json
 
