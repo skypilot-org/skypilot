@@ -43,7 +43,7 @@ sky launch -c vicuna-serve -s serve.yaml --env MODEL_SIZE=13
 ## Training Vicuna with SkyPilot
 Currently, training requires GPUs with 80GB memory.  See `sky show-gpus --all` for supported GPUs.
 
-We can start the training of Vicuna model on the dummy data[^1] [dummy.json](dummy.json) **with a single command**. It will automatically find the available cheapest VM on any cloud.
+We can start the training of Vicuna model on the dummy data [dummy.json](dummy.json)[^1] **with a single command**. It will automatically find the available cheapest VM on any cloud.
 
 **To train on your own data**, replace the file with your own, or change the line `/data/mydata.json: ./dummy.json` to the path of your own data in the SkyPilot YAML.
 
