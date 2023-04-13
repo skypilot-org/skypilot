@@ -1265,10 +1265,12 @@ class GcsStore(AbstractStore):
                     'Names must start and end with a number or letter.')
 
             # Check for 'goog' prefix and 'google' in the name
-            if name.startswith('goog') or 'google' in name:
+            if name.startswith('goog') or any(
+                    s in name
+                    for s in ['google', 'g00gle', 'go0gle', 'g0ogle']):
                 _raise_no_traceback_name_error(
                     f'Invalid store name: name {name} cannot begin with the '
-                    '"goog" prefix and contain "google".')
+                    '"goog" prefix or contain "google" in various forms.')
 
             # Check for dot-separated components length
             components = name.split('.')

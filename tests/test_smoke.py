@@ -1671,6 +1671,7 @@ class TestStorageWithCredentials:
         # more than 63 characters
         'Abcdef',  # contains an uppercase letter
         'abc def',  # contains a space
+        'abc..def',  # two adjacent periods
         '192.168.5.4',  # formatted as an IP address
         'xn--bucket',  # starts with 'xn--' prefix
         'bucket-s3alias',  # ends with '-s3alias' suffix
@@ -1688,11 +1689,14 @@ class TestStorageWithCredentials:
         'Abcdef',  # contains an uppercase letter
         'abc def',  # contains a space
         'abc..def',  # two adjacent periods
-        'abc_.def.ghi.jklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz1',
+        'abc_.def.ghi.jklmnopqrstuvwxyzabcdefghijklmnopqfghijklmnopqrstuvw' * 5,
         # more than 222 characters (with dots)
         '192.168.5.4',  # formatted as an IP address
         'googbucket',  # starts with 'goog' prefix
         'googlebucket',  # contains 'google'
+        'g00glebucket',  # variant of 'google'
+        'go0glebucket',  # variant of 'google'
+        'g0oglebucket',  # variant of 'google'
         '.abc',  # starts with a dot
         'abc.',  # ends with a dot
         '_abc',  # starts with an underscore
