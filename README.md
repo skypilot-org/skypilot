@@ -26,11 +26,10 @@
 </h3>
 
 ----
-:fire: :dromedary_camel: *News (March, 2023)* :dromedary_camel: :fire: 
-
-- **You can now train and serve the Vicuna model with a single** [**SkyPilot command**](./examples/llm-vicuna/)!
-- **[Vicuna LLM chatbot](https://vicuna.lmsys.org/) trained** [**using SkyPilot**](./examples/llm-vicuna/) **for $300 on spot instances!** 
-- *Serve* your own LLaMA LLM chatbot (not finetuned) on any cloud: [**example**](./examples/llama-llm-chatbots/), [**repo**](https://github.com/skypilot-org/sky-llama)
+:fire: :dromedary_camel: *News* :dromedary_camel: :fire: 
+- [April, 2023] **You can now finetune and serve the Vicuna model with a single** [**SkyPilot command**](./examples/llm-vicuna/)!
+- [March, 2023]**[Vicuna LLM chatbot](https://vicuna.lmsys.org/) trained** [**using SkyPilot**](./examples/llm-vicuna/) **for $300 on spot instances!** 
+- [March, 2023]*Serve* your own LLaMA LLM chatbot (not finetuned) on any cloud: [**example**](./examples/llama-llm-chatbots/), [**repo**](https://github.com/skypilot-org/sky-llama)
 ----
 
 SkyPilot is a framework for easily and cost effectively running ML workloads[^1] on any cloud. 
