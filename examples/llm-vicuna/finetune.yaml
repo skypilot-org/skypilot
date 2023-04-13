@@ -64,6 +64,11 @@ run: |
 
   bash scripts/sync_local_checkpoint.sh ${LOCAL_CKPT_PATH} ${CKPT_PATH} > sync.log 2>&1 &
   
+  # Turn off wandb if no api key is provided
+  if [ $WANDB_API_KEY == "" ]; then
+    WANDB_MODE="offline"
+  fi
+  
   torchrun \
     --nnodes=$NUM_NODES \
     --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
@@ -107,3 +112,4 @@ envs:
   SEQ_LEN: 2048
   GC_SCALE: 4
   USE_FLASH_ATTN: 0
+  WANDB_API_KEY: ""

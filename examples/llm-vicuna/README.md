@@ -30,7 +30,7 @@ sky launch -c vicuna-serve -s serve.yaml
 (task, pid=20933) 2023-04-12 22:08:51 | INFO | stdout | Running on public URL: https://<random-hash>.gradio.live
 ```
 
-3. [Optinoal] Try other GPUs:
+3. [Optional] Try other GPUs:
 ```bash
 sky launch -c vicuna-serve-v100 -s serve.yaml --gpus V100
 ```
@@ -44,32 +44,33 @@ sky launch -c vicuna-serve -s serve.yaml --env MODEL_SIZE=13
 ## Finetuning Vicuna with SkyPilot
 Currently, training requires GPUs with 80GB memory.  See `sky show-gpus --all` for supported GPUs.
 
-We can start the finetuning of Vicuna model on the dummy data [dummy.json](examples/llm-vicuna/dummy-data) **with a single command**. It will automatically find the available cheapest VM on any cloud.
+We can start the finetuning of Vicuna model on the dummy data [dummy.json](dummy.json) **with a single command**. It will automatically find the available cheapest VM on any cloud.
 
-To finetune on your own data, replace the file with your own, or change the line `/data/mydata.json: ./dummy.json` to the path of your own data.
+**To finetune on your own data**, replace the file with your own, or change the line `/data/mydata.json: ./dummy.json` to the path of your own data in the SkyPilot YAML .
 
-1. Replace the bucket name in [finetune.yaml](examples/llm-vicuna/finetune.yaml) with some unique name, so the SkyPilot can create a bucket for you to store the model weights. See `# Change to your own bucket` in the YAML file.
+1. Replace the bucket name in [finetune.yaml](finetune.yaml) with some unique name, so the SkyPilot can create a bucket for you to store the model weights. See `# Change to your own bucket` in the YAML file.
 
 2. **Finetune the Vicuna-7B model on 8 A100 GPUs (80GB memory) using spot instances**:
 ```bash
 # Launch it on managed spot to save 3x cost
-sky spot launch -n vicuna scripts/train-vicuna.yaml --env WANDB_API_KEY
+sky spot launch -n vicuna finetune.yaml
 ```
+Note: if you would like to see the training curve on W&B, you can add `--env WANDB_API_KEY` to the above command, which will propagate your local W&B API key in the environment variable to the job.
 
 [Optional] Finetune a larger model 13B model
 ```
 # Train a 13B model instead of the default 7B
-sky spot launch -n vicuna-7b scripts/train-vicuna.yaml --env WANDB_API_KEY --env MODEL_SIZE=13
+sky spot launch -n vicuna-7b finetune.yaml --env MODEL_SIZE=13
 
 # Use *unmanaged* spot instances (i.e., preemptions won't get auto-recovered).
 # Unmanaged spot saves the cost of a small controller VM.  We recommend using managed spot as above.
-sky launch -n vicuna scripts/train-vicuna.yaml --env WANDB_API_KEY
+sky launch -c vicuna finetune.yaml
 ```
 Currently, such `A100-80GB:8` spot instances are only available on AWS and GCP.
 
 [Optional] **To use on-demand `A100-80GB:8` instances**, which are currently available on Lambda Cloud, Azure, and GCP:
 ```bash
-sky launch -c vicuna -s scripts/train-vicuna.yaml --env WANDB_API_KEY --no-use-spot
+sky launch -c vicuna -s finetune.yaml --no-use-spot
 ```
 
 
