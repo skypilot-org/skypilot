@@ -66,7 +66,7 @@ Note: if you would like to see the training curve on W&B, you can add `--env WAN
 sky spot launch -n vicuna-7b train.yaml --env MODEL_SIZE=13
 
 # Use *unmanaged* spot instances (i.e., preemptions won't get auto-recovered).
-# Unmanaged spot saves the cost of a small controller VM.  We recommend using managed spot as above.
+# Unmanaged spot provides a better interactive development experience but is vulnerable to spot preemptions.  We recommend using managed spot as above.
 sky launch -c vicuna train.yaml
 ```
 Currently, such `A100-80GB:8` spot instances are only available on AWS and GCP.
