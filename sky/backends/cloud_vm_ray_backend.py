@@ -69,7 +69,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.AWS: 90,
     clouds.Azure: 90,
     clouds.GCP: 120,
-    clouds.Lambda: 120,
+    clouds.Lambda: 150,
     clouds.Local: 90,
 }
 
