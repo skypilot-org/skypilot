@@ -121,14 +121,25 @@ def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
     zones = []
     try:
         response = client.describe_availability_zones()
-    except aws.botocore_exceptions().ClientError:
-        # The user's AWS account may not have access to this region.
-        # The error looks like:
-        # botocore.exceptions.ClientError: An error occurred
-        # (AuthFailure) when calling the DescribeAvailabilityZones
-        # operation: AWS was not able to validate the provided
-        # access credentials
-        return None
+    except aws.botocore_exceptions().ClientError as e:
+        if e.response['Error']['Code'] == 'AuthFailure':
+            # The user's AWS account may not have access to this region.
+            # The error looks like:
+            # botocore.exceptions.ClientError: An error occurred
+            # (AuthFailure) when calling the DescribeAvailabilityZones
+            # operation: AWS was not able to validate the provided
+            # access credentials
+            return None
+        elif e.response['Error']['Code'] == 'UnauthorizedOperation':
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Failed to retrieve availability zone. '
+                    'Please ensure that the `ec2:DescribeAvailabilityZones` '
+                    'action is enabled for your AWS account in IAM. '
+                    'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html'  # pylint: disable=line-too-long
+                ) from None
+        else:
+            raise
     for resp in response['AvailabilityZones']:
         zones.append({
             'AvailabilityZoneName': resp['ZoneName'],
