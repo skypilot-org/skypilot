@@ -285,7 +285,7 @@ class Task:
                     if data_utils.is_cloud_store_url(src):
                         store_type = data_utils.get_cloud_store_type(src)
                         cloud_type = storage_lib.STORE_TYPE_TO_CLOUD_TYPE[store_type]
-                        enabled_clouds = global_user_state.get_enabled_clouds()
+                        enabled_clouds = global_user_state.get_enabled_clouds_str()
                         if not cloud_type in enabled_clouds:
                             with ux_utils.print_exception_no_traceback():
                                 raise exceptions.CloudDisabledError(
@@ -313,7 +313,7 @@ class Task:
             store_type = storage[1]['store']
             if store_type:
                 cloud_type = storage_lib.STORE_TYPE_TO_CLOUD_TYPE[store_type]
-                enabled_clouds = global_user_state.get_enabled_clouds()
+                enabled_clouds = global_user_state.get_enabled_clouds_str()
                 if not cloud_type in enabled_clouds:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.CloudDisabledError(
