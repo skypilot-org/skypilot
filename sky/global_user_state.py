@@ -22,6 +22,7 @@ import colorama
 from sky import clouds
 from sky.utils import db_utils
 from sky.utils import common_utils
+from sky.adaptors import cloudflare
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -658,6 +659,12 @@ def get_enabled_clouds() -> List[clouds.Cloud]:
         cloud = clouds.CLOUD_REGISTRY.from_str(c)
         if cloud is not None:
             enabled_clouds.append(cloud)
+    # Currently, 'clouds' only support cloud types with
+    # computing instances. Hence, the following is a
+    # temporary solution to support R2 
+    if os.path.exists(
+        os.path.expanduser(cloudflare.ACCOUNT_ID_PATH)):
+        enabled_clouds.append('Cloudflare')
     return enabled_clouds
 
 
