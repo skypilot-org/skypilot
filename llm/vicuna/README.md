@@ -14,7 +14,7 @@ Install the latest SkyPilot and check your setup of the cloud credentials:
 pip install git+https://github.com/skypilot-org/skypilot.git
 sky check
 ```
-Find the Vicuna [training SkyPilot YAMLs](train.yaml) and [serving SkyPilot YAMLs](serve.yaml).
+See the Vicuna SkyPilot YAMLs: for [training](train.yaml) and for [serving](serve.yaml).
 
 ## Serve the official Vicuna model by yourself with SkyPilot
 
@@ -22,7 +22,7 @@ Find the Vicuna [training SkyPilot YAMLs](train.yaml) and [serving SkyPilot YAML
 ```bash
 sky launch -c vicuna-serve -s serve.yaml
 ```
-2. Check the output of the command. There will be a sharable gradio link (like the last line in of the following). Open it in your browser to chat with Vicuna.
+2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to chat with Vicuna.
 ```
 (task, pid=20933) 2023-04-12 22:08:49 | INFO | gradio_web_server | Namespace(host='0.0.0.0', port=None, controller_url='http://localhost:21001', concurrency_count=10, model_list_mode='once', share=True, moderate=False)
 (task, pid=20933) 2023-04-12 22:08:49 | INFO | stdout | Running on local URL:  http://0.0.0.0:7860
@@ -47,7 +47,7 @@ We can start the training of Vicuna model on the dummy data [dummy.json](dummy.j
 
 **To train on your own data**, replace the file with your own, or change the line `/data/mydata.json: ./dummy.json` to the path of your own data in the [train.yaml](train.yaml).
 
-[^1]: The dummy data was original from the official Vicuna repository, [FastChat](https://github.com/lm-sys/FastChat).
+[^1]: The dummy data was originally from the official Vicuna repository, [FastChat](https://github.com/lm-sys/FastChat).
 
 Steps for training on your cloud(s):
 
