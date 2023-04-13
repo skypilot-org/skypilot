@@ -76,12 +76,17 @@ def get_enabled_regions() -> Set[str]:
         aws_client = aws.client('ec2', region_name='us-east-1')
         try:
             user_cloud_regions = aws_client.describe_regions()['Regions']
-        except aws.botocore_exceptions().ClientError:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    'Failed to retrieve AWS regions. '
-                    'Please ensure that the `ec2:DescribeRegions` action '
-                    'is enabled for your AWS account.') from None
+        except aws.botocore_exceptions().ClientError as e:
+            if e.response['Error']['Code'] == 'UnauthorizedOperation':
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'Failed to retrieve AWS regions. '
+                        'Please ensure that the `ec2:DescribeRegions` action '
+                        'is enabled for your AWS account in IAM. '
+                        'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeRegions.html'  # pylint: disable=line-too-long
+                    ) from None
+            else:
+                raise
         regions_enabled = {r['RegionName'] for r in user_cloud_regions}
         regions_enabled = regions_enabled.intersection(set(ALL_REGIONS))
     return regions_enabled
