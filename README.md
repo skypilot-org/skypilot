@@ -27,7 +27,7 @@
 
 ----
 :fire: :dromedary_camel: *News* :dromedary_camel: :fire: 
-- [April, 2023] **You can now finetune and serve the Vicuna model with a single** [**SkyPilot command**](./examples/llm/vicuna/)!
+- [April, 2023] **[**SkyPilot YAMLs released**](./examples/llm/vicuna/) for finetuning and serving the Vicuna model with a single command** !
 - [March, 2023] **[Vicuna LLM chatbot](https://vicuna.lmsys.org/) trained** [**using SkyPilot**](./examples/llm/vicuna/) **for $300 on spot instances!** 
 - [March, 2023] *Serve* your own LLaMA LLM chatbot (not finetuned) on any cloud: [**example**](./examples/llama-llm-chatbots/), [**repo**](https://github.com/skypilot-org/sky-llama)
 ----
