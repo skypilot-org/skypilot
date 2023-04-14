@@ -1,6 +1,7 @@
 """Storage and Store Classes for Sky Data."""
 import enum
 import os
+import re
 import subprocess
 import time
 import typing
@@ -562,6 +563,27 @@ class Storage(object):
         """
         Validates the storage spec and updates local fields if necessary.
         """
+
+        def validate_name(name):
+            """ Checks for validating the storage name.
+
+            Checks if the name starts the s3, gcs or r2 prefix and raise error
+            if it does. Store specific validation checks (e.g., S3 specific
+            rules) happen in the corresponding store class.
+            """
+            prefix = name.split('://')[0]
+            prefix = prefix.lower()
+            if prefix in ['s3', 'gs', 'r2']:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageNameError(
+                        'Prefix detected: `name` cannot start with '
+                        f'{prefix}://. If you are trying to use an existing '
+                        'bucket created outside of SkyPilot, please specify it '
+                        'using the `source` field (e.g. '
+                        '`source: s3://mybucket/`). If you are trying to '
+                        'create a new bucket, please use the `store` field to '
+                        'specify the store type (e.g. `store: s3`).')
+
         if self.source is None:
             # If the mode is COPY, the source must be specified
             if self.mode == StorageMode.COPY:
@@ -584,6 +606,7 @@ class Storage(object):
                         raise exceptions.StorageSpecError(
                             'Storage source or storage name must be specified.')
             assert name is not None, handle
+            validate_name(name)
             self.name = name
             return
         elif self.source is not None:
@@ -606,6 +629,7 @@ class Storage(object):
                 if is_local_source:
                     # If name is specified and source is local, upload to bucket
                     assert name is not None, source
+                    validate_name(name)
                     self.name = name
                     return
                 else:
@@ -828,7 +852,7 @@ class S3Store(AbstractStore):
     for S3 buckets.
     """
 
-    ACCESS_DENIED_MESSAGE = 'Access Denied'
+    _ACCESS_DENIED_MESSAGE = 'Access Denied'
 
     def __init__(self,
                  name: str,
@@ -859,6 +883,67 @@ class S3Store(AbstractStore):
                 assert data_utils.verify_r2_bucket(self.name), (
                     f'Source specified as {self.source}, a R2 bucket. ',
                     'R2 Bucket should exist.')
+        # Validate name
+        self.name = self.validate_name(self.name)
+
+    @classmethod
+    def validate_name(cls, name) -> str:
+        """Validates the name of the S3 store.
+
+        Source for rules: https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html # pylint: disable=line-too-long
+        """
+
+        def _raise_no_traceback_name_error(err_str):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageNameError(err_str)
+
+        if name is not None and isinstance(name, str):
+            if not 3 <= len(name) <= 63:
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must be between 3 (min) '
+                    'and 63 (max) characters long.')
+
+            # Check for valid characters and start/end with a letter or number
+            pattern = r'^[a-z0-9][-a-z0-9.]*[a-z0-9]$'
+            if not re.match(pattern, name):
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} can consist only of '
+                    'lowercase letters, numbers, dots (.), and hyphens (-). '
+                    'It must begin and end with a letter or number.')
+
+            # Check for two adjacent periods
+            if '..' in name:
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must not contain '
+                    'two adjacent periods.')
+
+            # Check for IP address format
+            ip_pattern = r'^(?:\d{1,3}\.){3}\d{1,3}$'
+            if re.match(ip_pattern, name):
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must not be formatted as '
+                    'an IP address (for example, 192.168.5.4).')
+
+            # Check for 'xn--' prefix
+            if name.startswith('xn--'):
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must not start with the '
+                    'prefix "xn--".')
+
+            # Check for '-s3alias' suffix
+            if name.endswith('-s3alias'):
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must not end with the '
+                    'suffix "-s3alias".')
+
+            # Check for '--ol-s3' suffix
+            if name.endswith('--ol-s3'):
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must not end with the '
+                    'suffix "--ol-s3".')
+        else:
+            _raise_no_traceback_name_error('Store name must be specified.')
+        return name
 
     def initialize(self):
         """Initializes the S3 store object on the cloud.
@@ -966,7 +1051,7 @@ class S3Store(AbstractStore):
                 get_file_sync_command,
                 get_dir_sync_command,
                 self.name,
-                self.ACCESS_DENIED_MESSAGE,
+                self._ACCESS_DENIED_MESSAGE,
                 create_dirs=create_dirs,
                 max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
 
@@ -1112,7 +1197,7 @@ class GcsStore(AbstractStore):
     for GCS buckets.
     """
 
-    ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
+    _ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
     GCSFUSE_VERSION = '0.42.3'
 
     def __init__(self,
@@ -1150,6 +1235,66 @@ class GcsStore(AbstractStore):
                     assert data_utils.verify_r2_bucket(self.name), (
                         f'Source specified as {self.source}, a R2 bucket. ',
                         'R2 Bucket should exist.')
+        # Validate name
+        self.name = self.validate_name(self.name)
+
+    @classmethod
+    def validate_name(cls, name) -> str:
+        """Validates the name of the GCS store.
+
+        Source for rules: https://cloud.google.com/storage/docs/buckets#naming
+        """
+
+        def _raise_no_traceback_name_error(err_str):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageNameError(err_str)
+
+        if name is not None and isinstance(name, str):
+            # Check for overall length
+            if not 3 <= len(name) <= 222:
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must contain 3-222 '
+                    'characters.')
+
+            # Check for valid characters and start/end with a number or letter
+            pattern = r'^[a-z0-9][-a-z0-9._]*[a-z0-9]$'
+            if not re.match(pattern, name):
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} can only contain '
+                    'lowercase letters, numeric characters, dashes (-), '
+                    'underscores (_), and dots (.). Spaces are not allowed. '
+                    'Names must start and end with a number or letter.')
+
+            # Check for 'goog' prefix and 'google' in the name
+            if name.startswith('goog') or any(
+                    s in name
+                    for s in ['google', 'g00gle', 'go0gle', 'g0ogle']):
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} cannot begin with the '
+                    '"goog" prefix or contain "google" in various forms.')
+
+            # Check for dot-separated components length
+            components = name.split('.')
+            if any(len(component) > 63 for component in components):
+                _raise_no_traceback_name_error(
+                    'Invalid store name: Dot-separated components in name '
+                    f'{name} can be no longer than 63 characters.')
+
+            if '..' in name or '.-' in name or '-.' in name:
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must not contain two '
+                    'adjacent periods or a dot next to a hyphen.')
+
+            # Check for IP address format
+            ip_pattern = r'^(?:\d{1,3}\.){3}\d{1,3}$'
+            if re.match(ip_pattern, name):
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} cannot be represented as '
+                    'an IP address in dotted-decimal notation '
+                    '(for example, 192.168.5.4).')
+        else:
+            _raise_no_traceback_name_error('Store name must be specified.')
+        return name
 
     def initialize(self):
         """Initializes the GCS store object on the cloud.
@@ -1243,7 +1388,7 @@ class GcsStore(AbstractStore):
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
             data_utils.run_upload_cli(sync_command,
-                                      self.ACCESS_DENIED_MESSAGE,
+                                      self._ACCESS_DENIED_MESSAGE,
                                       bucket_name=self.name)
 
     def batch_gsutil_rsync(self,
@@ -1293,7 +1438,7 @@ class GcsStore(AbstractStore):
                 get_file_sync_command,
                 get_dir_sync_command,
                 self.name,
-                self.ACCESS_DENIED_MESSAGE,
+                self._ACCESS_DENIED_MESSAGE,
                 create_dirs=create_dirs,
                 max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
 
@@ -1436,7 +1581,7 @@ class R2Store(AbstractStore):
     for R2 buckets.
     """
 
-    ACCESS_DENIED_MESSAGE = 'Access Denied'
+    _ACCESS_DENIED_MESSAGE = 'Access Denied'
 
     def __init__(self,
                  name: str,
@@ -1467,6 +1612,7 @@ class R2Store(AbstractStore):
                 assert self.name == data_utils.split_r2_path(self.source)[0], (
                     'R2 Bucket is specified as path, the name should be '
                     'the same as R2 bucket.')
+        self.name = S3Store.validate_name(self.name)
 
     def initialize(self):
         """Initializes the R2 store object on the cloud.
@@ -1580,7 +1726,7 @@ class R2Store(AbstractStore):
                 get_file_sync_command,
                 get_dir_sync_command,
                 self.name,
-                self.ACCESS_DENIED_MESSAGE,
+                self._ACCESS_DENIED_MESSAGE,
                 create_dirs=create_dirs,
                 max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
 
