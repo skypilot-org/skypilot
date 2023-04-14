@@ -46,9 +46,12 @@ STORE_ENABLED_CLOUDS = [clouds.AWS(), clouds.GCP()]
 _MAX_CONCURRENT_UPLOADS = 32
 
 _BUCKET_FAIL_TO_CONNECT_MESSAGE = (
-    'Failed to connect to an existing bucket {name!r}.\n'
-    'Please check if:\n  1. the bucket name is taken and/or '
-    '\n  2. the bucket permissions are not setup correctly.')
+    'Failed to access existing bucket {name!r}. '
+    'This is likely because it is a private bucket you do not have access to.\n'
+    'To fix: \n'
+    '  1. If you are trying to create a new bucket: use a different name.\n'
+    '  2. If you are trying to connect to an existing bucket: make sure '
+    'your cloud credentials have access to it.')
 
 
 class StoreType(enum.Enum):
@@ -1093,7 +1096,7 @@ class S3Store(AbstractStore):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
                         _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
-                        f' To debug, consider using {command}.') from e
+                        f' To debug, consider running `{command}`.') from e
 
         if isinstance(self.source, str) and self.source.startswith('s3://'):
             with ux_utils.print_exception_no_traceback():
@@ -1487,7 +1490,7 @@ class GcsStore(AbstractStore):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
                         _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
-                        f' To debug, consider using {command}.') from e
+                        f' To debug, consider running `{command}`.') from e
 
     def mount_command(self, mount_path: str) -> str:
         """Returns the command to mount the bucket to the mount_path.
@@ -1770,7 +1773,7 @@ class R2Store(AbstractStore):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
                         _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
-                        f' To debug, consider using {command}.') from e
+                        f' To debug, consider running `{command}`.') from e
 
         if isinstance(self.source, str) and self.source.startswith('r2://'):
             with ux_utils.print_exception_no_traceback():
