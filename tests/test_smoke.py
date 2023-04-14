@@ -1689,6 +1689,8 @@ class TestStorageWithCredentials:
         'Abcdef',  # contains an uppercase letter
         'abc def',  # contains a space
         'abc..def',  # two adjacent periods
+        'abc_.def.ghi.jklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz1'
+        # More than 63 characters between dots
         'abc_.def.ghi.jklmnopqrstuvwxyzabcdefghijklmnopqfghijklmnopqrstuvw' * 5,
         # more than 222 characters (with dots)
         '192.168.5.4',  # formatted as an IP address
