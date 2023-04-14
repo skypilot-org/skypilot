@@ -45,12 +45,12 @@ STORE_ENABLED_CLOUDS = [clouds.AWS(), clouds.GCP()]
 _MAX_CONCURRENT_UPLOADS = 32
 
 _BUCKET_FAIL_TO_CONNECT_MESSAGE = (
-    'Failed to connect to an existing bucket {name!r}. '
+    'Failed to access existing bucket {name!r}. '
     'This is likely because it is a private bucket you do not have access to.\n'
     'To fix: \n'
-    '  1. If you are trying to create a new bucket - use a different name.\n'
-    '  2. If you are trying to connect to an existing bucket - make sure '
-    'you have access to it.')
+    '  1. If you are trying to create a new bucket: use a different name.\n'
+    '  2. If you are trying to connect to an existing bucket: make sure '
+    'your cloud credentials have access to it.')
 
 
 class StoreType(enum.Enum):
