@@ -83,3 +83,20 @@ class TestStorageSpecValidation:
             storage_lib.Storage()
 
         assert 'Storage source or storage name must be specified' in str(e)
+
+    def test_uri_in_name(self):
+        """Tests when name is a URI.
+
+        Other tests for invalid names require store-specific test cases, and
+        are in test_smoke.py::TestStorageWithCredentials"""
+        invalid_names = [
+            's3://mybucket',
+            'gs://mybucket',
+            'r2://mybucket',
+        ]
+
+        for n in invalid_names:
+            with pytest.raises(exceptions.StorageNameError) as e:
+                storage_lib.Storage(name=n)
+
+            assert 'Prefix detected' in str(e)
