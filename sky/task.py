@@ -298,7 +298,7 @@ class Task:
         all_storages = fm_storages
         enabled_clouds = global_user_state.get_enabled_clouds()
         enabled_clouds = [str(cloud) for cloud in enabled_clouds]
-        if cloudflare.r2_is_enabled:
+        if cloudflare.r2_is_enabled():
             enabled_clouds.append('r2')
         for storage in all_storages:
             mount_path = storage[0]
