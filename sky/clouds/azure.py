@@ -241,7 +241,7 @@ class Azure(clouds.Cloud):
             # Azure does not support specific zones.
             'zones': None,
             **image_config,
-            'disk_tier': Azure.get_disk_type(r.disk_tier)
+            'disk_tier': Azure._get_disk_type(r.disk_tier)
         }
 
     def get_feasible_launchable_resources(self, resources):
@@ -461,7 +461,7 @@ class Azure(clouds.Cloud):
                            'Please use disk_tier={low, medium} instead.')
         # Only S-series supported premium ssd
         # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # pylint: disable=line-too-long
-        if cls.get_disk_type(
+        if cls._get_disk_type(
                 disk_tier
         ) == 'Premium_LRS' and not Azure._is_s_series(instance_type):
             return False, (
@@ -471,7 +471,7 @@ class Azure(clouds.Cloud):
         return True, ''
 
     @classmethod
-    def check_disk_tier_enabled(cls, instance_type: Optional[str],
+    def check_disk_tier_enabled(cls, instance_type: str,
                                 disk_tier: str) -> None:
         ok, msg = cls.check_disk_tier(instance_type, disk_tier)
         if not ok:
@@ -479,8 +479,8 @@ class Azure(clouds.Cloud):
                 raise ValueError(msg)
 
     @classmethod
-    def get_disk_type(cls, opt_disk_tier: Optional[str]) -> str:
-        disk_tier = opt_disk_tier or cls._DEFAULT_DISK_TIER
+    def _get_disk_type(cls, disk_tier: Optional[str]) -> str:
+        tier = disk_tier or cls._DEFAULT_DISK_TIER
         # TODO(tian): Maybe use PremiumV2_LRS/UltraSSD_LRS? Notice these two
         # cannot be used as OS disks so we might need data disk support
         tier2name = {
@@ -488,4 +488,4 @@ class Azure(clouds.Cloud):
             'medium': 'Premium_LRS',
             'low': 'Standard_LRS',
         }
-        return tier2name[disk_tier]
+        return tier2name[tier]

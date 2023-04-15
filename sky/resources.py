@@ -705,6 +705,8 @@ class Resources:
                 raise ValueError(
                     f'Invalid disk_tier {self.disk_tier}. '
                     'Please use one of "high", "medium", or "low".')
+        if self.instance_type is None:
+            return
         if self.cloud is not None:
             self.cloud.check_disk_tier_enabled(self.instance_type,
                                                self.disk_tier)

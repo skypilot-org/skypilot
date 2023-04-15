@@ -333,7 +333,7 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
-            **AWS.get_disk_specs(r.disk_tier)
+            **AWS._get_disk_specs(r.disk_tier)
         }
 
     def get_feasible_launchable_resources(self,
@@ -621,28 +621,25 @@ class AWS(clouds.Cloud):
             accelerator, acc_count, region, zone, 'aws')
 
     @classmethod
-    def check_disk_tier_enabled(
-        cls,
-        instance_type: Optional[str],  # pylint: disable=unused-argument
-        disk_tier: str  # pylint: disable=unused-argument
-    ) -> None:
-        return
+    def check_disk_tier_enabled(cls, instance_type: str,
+                                disk_tier: str) -> None:
+        del instance_type, disk_tier  # unused
 
     @classmethod
     def _get_disk_type(cls, disk_tier: str) -> str:
         return 'standard' if disk_tier == 'low' else 'gp3'
 
     @classmethod
-    def get_disk_specs(cls, opt_disk_tier: Optional[str]) -> Dict[str, Any]:
-        disk_tier = opt_disk_tier or cls._DEFAULT_DISK_TIER
+    def _get_disk_specs(cls, disk_tier: Optional[str]) -> Dict[str, Any]:
+        tier = disk_tier or cls._DEFAULT_DISK_TIER
         tier2iops = {
             'high': 7000,
             'medium': 3500,
             'low': 0,  # only gp3 is required to set iops
         }
         return {
-            'disk_tier': cls._get_disk_type(disk_tier),
-            'disk_iops': tier2iops[disk_tier],
-            'disk_throughput': tier2iops[disk_tier] // 16,
-            'custom_disk_perf': disk_tier != 'low',
+            'disk_tier': cls._get_disk_type(tier),
+            'disk_iops': tier2iops[tier],
+            'disk_throughput': tier2iops[tier] // 16,
+            'custom_disk_perf': tier != 'low',
         }

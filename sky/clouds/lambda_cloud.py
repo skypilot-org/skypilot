@@ -259,7 +259,7 @@ class Lambda(clouds.Cloud):
         return service_catalog.regions(clouds='lambda')
 
     @classmethod
-    def check_disk_tier_enabled(cls, instance_type: Optional[str],
+    def check_disk_tier_enabled(cls, instance_type: str,
                                 disk_tier: str) -> None:
         raise exceptions.NotSupportedError(
             'Lambda does not support disk tiers.')
