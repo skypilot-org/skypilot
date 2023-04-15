@@ -132,7 +132,7 @@ def r2_is_enabled() -> bool:
 def get_credential_file_mounts(file_mounts: Dict[str, str]) -> Dict[str, str]:
     """Checks if aws credential file is set and update if not
        Updates file containing account ID information
-    
+
     Args:
         file_mounts: stores path to credential files of clouds
     """
