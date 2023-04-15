@@ -119,3 +119,11 @@ def create_endpoint():
     endpoint = 'https://' + accountid + '.r2.cloudflarestorage.com'
 
     return endpoint
+
+def r2_is_enabled():
+    """Checks if Cloudflare R2 is enabled"""
+    
+    accountid_path = os.path.expanduser(ACCOUNT_ID_PATH)
+    if os.path.exists(accountid_path):
+        return True
+    return False
