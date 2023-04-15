@@ -664,26 +664,6 @@ def get_enabled_clouds() -> List[clouds.Cloud]:
     return enabled_clouds
 
 
-def get_enabled_clouds_str() -> List[str]:
-    # Currently, 'clouds' only support cloud types with
-    # computing instances. The following is to temporarily
-    # support R2 for get_enabled_clouds
-    rows = _DB.cursor.execute('SELECT value FROM config WHERE key = ?',
-                              (_ENABLED_CLOUDS_KEY,))
-    ret = []
-    for (value,) in rows:
-        ret = json.loads(value)
-        break
-    enabled_clouds: List[str] = []
-    for c in ret:
-        cloud = clouds.CLOUD_REGISTRY.from_str(c)
-        if cloud is not None:
-            enabled_clouds.append(str(cloud))
-    if os.path.exists(os.path.expanduser(cloudflare.ACCOUNT_ID_PATH)):
-        enabled_clouds.append('Cloudflare')
-    return enabled_clouds
-
-
 def set_enabled_clouds(enabled_clouds: List[str]) -> None:
     _DB.cursor.execute('INSERT OR REPLACE INTO config VALUES (?, ?)',
                        (_ENABLED_CLOUDS_KEY, json.dumps(enabled_clouds)))

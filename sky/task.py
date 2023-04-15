@@ -17,6 +17,7 @@ from sky.data import data_utils
 from sky.skylet import constants
 from sky.utils import schemas
 from sky.utils import ux_utils
+from sky.adaptors import cloudflare
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -295,6 +296,10 @@ class Task:
 
         task_storage_mounts: Dict[str, storage_lib.Storage] = {}
         all_storages = fm_storages
+        enabled_clouds = global_user_state.get_enabled_clouds()
+        enabled_clouds = [str(cloud) for cloud in enabled_clouds]
+        if cloudflare.r2_is_enabled:
+            enabled_clouds.append('r2')
         for storage in all_storages:
             mount_path = storage[0]
             assert mount_path, \
@@ -302,8 +307,7 @@ class Task:
             store_type = storage[1]['store']
             if store_type:
                 cloud_type = storage_lib.STORE_TYPE_TO_CLOUD_TYPE[store_type]
-                enabled_clouds = global_user_state.get_enabled_clouds_str()
-                if not cloud_type in enabled_clouds:
+                if cloud_type not in enabled_clouds:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.CloudDisabledError(
                             f'Storage \'store:{store_type}\' specified, but '
