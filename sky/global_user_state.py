@@ -459,6 +459,8 @@ def _get_cluster_duration(cluster_hash: str) -> int:
 
     for i, (start_time, end_time) in enumerate(usage_intervals):
         # duration from latest start time to time of query
+        if start_time is None:
+            continue
         if end_time is None:
             assert i == len(usage_intervals) - 1, i
             end_time = int(time.time())
