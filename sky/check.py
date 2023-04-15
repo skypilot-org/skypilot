@@ -7,6 +7,7 @@ from sky import clouds
 from sky import global_user_state
 from sky.adaptors import cloudflare
 
+
 def check(quiet: bool = False) -> None:
     echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
     echo('Checking credentials to enable clouds for SkyPilot.')
@@ -66,7 +67,7 @@ def get_cloud_credential_file_mounts() -> Dict[str, str]:
     # by 'clouds'
     if cloudflare.r2_is_enabled():
         if not '~/.aws/credentials' in file_mounts:
-            file_mounts.update({'~/.aws/credentials':'~/.aws/credentials'})
+            file_mounts.update({'~/.aws/credentials': '~/.aws/credentials'})
             accountIDPath = cloudflare.ACCOUNT_ID_PATH
-        file_mounts.update({accountIDPath:accountIDPath})
+        file_mounts.update({accountIDPath: accountIDPath})
     return file_mounts
