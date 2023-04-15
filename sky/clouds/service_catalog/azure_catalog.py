@@ -3,6 +3,7 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for Azure.
 """
+import re
 from typing import Dict, List, Optional, Tuple
 
 from sky import clouds as cloud_lib
@@ -73,6 +74,29 @@ def get_vcpus_mem_from_instance_type(
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
+def _get_instance_family(instance_type: str) -> str:
+    if instance_type.startswith('Basic_A'):
+        return 'basic_a'
+
+    assert instance_type.startswith('Standard_')
+    # Remove the 'Standard_' prefix.
+    instance_type = instance_type[len('Standard_'):]
+    # Remove the '_Promo' suffix if exists.
+    if '_Promo' in instance_type:
+        instance_type = instance_type[:-len('_Promo')]
+
+    # TODO(woosuk): Use better regex.
+    if '-' in instance_type:
+        x = re.match(r'([A-Za-z]+)([0-9]+)(-)([0-9]+)(.*)', instance_type)
+        assert x is not None, x
+        instance_family = x.group(1) + '_' + x.group(5)
+    else:
+        x = re.match(r'([A-Za-z]+)([0-9]+)(.*)', instance_type)
+        assert x is not None, x
+        instance_family = x.group(1) + x.group(3)
+    return instance_family
+
+
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
                               disk_tier: Optional[str] = None) -> Optional[str]:
@@ -82,8 +106,8 @@ def get_default_instance_type(cpus: Optional[str] = None,
         memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
     else:
         memory_gb_or_ratio = memory
-    df = _df[_df['InstanceType'].apply(
-        Azure.get_instance_family).isin(_DEFAULT_INSTANCE_FAMILY)]
+    df = _df[_df['InstanceType'].apply(_get_instance_family).isin(
+        _DEFAULT_INSTANCE_FAMILY)]
 
     def _filter_disk_type(instance_type: str) -> bool:
         return Azure.check_disk_tier(instance_type, disk_tier)[0]

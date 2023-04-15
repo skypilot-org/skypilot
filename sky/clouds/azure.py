@@ -423,36 +423,15 @@ class Azure(clouds.Cloud):
         return azure_subscription_id
 
     @classmethod
-    def get_instance_family(cls, instance_type: str) -> str:
-        if instance_type.startswith('Basic_A'):
-            return 'basic_a'
-
-        assert instance_type.startswith('Standard_')
-        # Remove the 'Standard_' prefix.
-        instance_type = instance_type[len('Standard_'):]
-        # Remove the '_Promo' suffix if exists.
-        if '_Promo' in instance_type:
-            instance_type = instance_type[:-len('_Promo')]
-
-        # TODO(woosuk): Use better regex.
-        if '-' in instance_type:
-            x = re.match(r'([A-Za-z]+)([0-9]+)(-)([0-9]+)(.*)', instance_type)
-            assert x is not None, x
-            instance_family = x.group(1) + '_' + x.group(5)
-        else:
-            x = re.match(r'([A-Za-z]+)([0-9]+)(.*)', instance_type)
-            assert x is not None, x
-            instance_family = x.group(1) + x.group(3)
-        return instance_family
-
-    @classmethod
     def _is_s_series(cls, instance_type: Optional[str]) -> bool:
+        # For azure naming convention, see https://learn.microsoft.com/en-us/azure/virtual-machines/vm-naming-conventions  # pylint: disable=line-too-long
         if instance_type is None:
             return True
-        instance_family = cls.get_instance_family(instance_type).lower()
-        if instance_family == 'basic_a':
-            return False
-        return 's' in instance_family
+        x = re.match(
+            r'(Standard|Basic)_([A-Z]+)([0-9]+)(-[0-9]+)?'
+            r'([a-z]*)(_[A-Z]+[0-9]+)?(_v[0-9])?(_Promo)?', instance_type)
+        assert x is not None, f'Unknown instance type: {instance_type}'
+        return 's' in x.group(5)
 
     @classmethod
     def check_disk_tier(cls, instance_type: Optional[str],
