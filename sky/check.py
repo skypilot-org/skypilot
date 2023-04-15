@@ -67,6 +67,7 @@ def get_cloud_credential_file_mounts() -> Dict[str, str]:
     # as enabled by skypilot. This will be removed when
     # cloudflare/r2 is added as a 'cloud'.
     if cloudflare.r2_is_enabled():
-        r2_credential_mounts = cloudflare.get_credential_file_mounts(file_mounts)
+        r2_credential_mounts = cloudflare.get_credential_file_mounts(
+            file_mounts)
         file_mounts.update(r2_credential_mounts)
     return file_mounts
