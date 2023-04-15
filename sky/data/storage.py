@@ -42,8 +42,6 @@ SourceType = Union[Path, List[Path]]
 # R2 to be an option as preferred store type
 STORE_ENABLED_CLOUDS = [clouds.AWS(), clouds.GCP()]
 
-STORE_TYPE_TO_CLOUD_TYPE = {'s3': 'AWS', 'gcs': 'GCP', 'r2': 'Cloudflare'}
-
 # Maximum number of concurrent rsync upload processes
 _MAX_CONCURRENT_UPLOADS = 32
 

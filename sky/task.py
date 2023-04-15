@@ -299,16 +299,6 @@ class Task:
             mount_path = storage[0]
             assert mount_path, \
                 'Storage mount path cannot be empty.'
-            store_type = storage[1]['store']
-            if store_type:
-                cloud_type = storage_lib.STORE_TYPE_TO_CLOUD_TYPE[store_type]
-                enabled_clouds = global_user_state.get_enabled_clouds_str()
-                if not cloud_type in enabled_clouds:
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.CloudDisabledError(
-                            f'Storage \'store:{store_type}\' specified, but '
-                            f'\'{cloud_type}\' access is disabled. Enable '
-                            f'\'{cloud_type}\' to fix.')
             try:
                 storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
             except exceptions.StorageSourceError as e:
