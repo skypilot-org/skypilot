@@ -170,10 +170,17 @@ class Resources:
         else:
             instance_type = ''
 
+        region = ''
+        if self.region is not None:
+            region = f', region={self.region!r}'
+        zone = ''
+        if self.zone is not None:
+            zone = f', zone={self.zone!r}'
+
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
-            f'{disk_size}')
+            f'{disk_size}{region}{zone}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):

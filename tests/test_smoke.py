@@ -1665,6 +1665,46 @@ def test_core_api():
 class TestStorageWithCredentials:
     """Storage tests which require credentials and network connection"""
 
+    AWS_INVALID_NAMES = [
+        'ab',  # less than 3 characters
+        'abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz1',
+        # more than 63 characters
+        'Abcdef',  # contains an uppercase letter
+        'abc def',  # contains a space
+        'abc..def',  # two adjacent periods
+        '192.168.5.4',  # formatted as an IP address
+        'xn--bucket',  # starts with 'xn--' prefix
+        'bucket-s3alias',  # ends with '-s3alias' suffix
+        'bucket--ol-s3',  # ends with '--ol-s3' suffix
+        '.abc',  # starts with a dot
+        'abc.',  # ends with a dot
+        '-abc',  # starts with a hyphen
+        'abc-',  # ends with a hyphen
+    ]
+
+    GCS_INVALID_NAMES = [
+        'ab',  # less than 3 characters
+        'abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz1',
+        # more than 63 characters (without dots)
+        'Abcdef',  # contains an uppercase letter
+        'abc def',  # contains a space
+        'abc..def',  # two adjacent periods
+        'abc_.def.ghi.jklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz1'
+        # More than 63 characters between dots
+        'abc_.def.ghi.jklmnopqrstuvwxyzabcdefghijklmnopqfghijklmnopqrstuvw' * 5,
+        # more than 222 characters (with dots)
+        '192.168.5.4',  # formatted as an IP address
+        'googbucket',  # starts with 'goog' prefix
+        'googlebucket',  # contains 'google'
+        'g00glebucket',  # variant of 'google'
+        'go0glebucket',  # variant of 'google'
+        'g0oglebucket',  # variant of 'google'
+        '.abc',  # starts with a dot
+        'abc.',  # ends with a dot
+        '_abc',  # starts with an underscore
+        'abc_',  # ends with an underscore
+    ]
+
     @pytest.fixture
     def tmp_source(self, tmp_path):
         # Creates a temporary directory with a file in it
@@ -2000,6 +2040,20 @@ class TestStorageWithCredentials:
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
+
+    @pytest.mark.parametrize('invalid_name_list, store_type',
+                             [(AWS_INVALID_NAMES, storage_lib.StoreType.S3),
+                              (GCS_INVALID_NAMES, storage_lib.StoreType.GCS),
+                              pytest.param(AWS_INVALID_NAMES,
+                                           storage_lib.StoreType.R2,
+                                           marks=pytest.mark.cloudflare)])
+    def test_invalid_names(self, invalid_name_list, store_type):
+        # Uses a list in the source field to specify a file and a directory to
+        # be uploaded to the storage object.
+        for name in invalid_name_list:
+            with pytest.raises(sky.exceptions.StorageNameError):
+                storage_obj = storage_lib.Storage(name=name)
+                storage_obj.add_store(store_type)
 
 
 # ---------- Testing YAML Specs ----------
