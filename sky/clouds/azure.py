@@ -449,7 +449,10 @@ class Azure(clouds.Cloud):
     def _is_s_series(cls, instance_type: Optional[str]) -> bool:
         if instance_type is None:
             return True
-        return 's' in cls.get_instance_family(instance_type).lower()
+        instance_family = cls.get_instance_family(instance_type).lower()
+        if instance_family == 'basic_a':
+            return False
+        return 's' in instance_family
 
     @classmethod
     def check_disk_tier(cls, instance_type: Optional[str],
