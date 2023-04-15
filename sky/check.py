@@ -63,11 +63,11 @@ def get_cloud_credential_file_mounts() -> Dict[str, str]:
         cloud_file_mounts = cloud.get_credential_file_mounts()
         file_mounts.update(cloud_file_mounts)
     # Currently, get_enabled_clouds() does not support r2
-    # as only clouds with computing instances are supported
-    # by 'clouds'
+    # as only clouds with computing instances are marked
+    # as enabled by skypilot. This will be removed when
+    # cloudflare/r2 is added as a 'cloud'.
     if cloudflare.r2_is_enabled():
-        if not '~/.aws/credentials' in file_mounts:
-            file_mounts.update({'~/.aws/credentials': '~/.aws/credentials'})
-            accountIDPath = cloudflare.ACCOUNT_ID_PATH
-        file_mounts.update({accountIDPath: accountIDPath})
+        r2_credential_mounts = cloudflare.get_credential_file_mounts(
+            file_mounts)
+        file_mounts.update(r2_credential_mounts)
     return file_mounts

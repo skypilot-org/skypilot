@@ -5,6 +5,7 @@
 import functools
 import threading
 import os
+from typing import Dict
 
 boto3 = None
 botocore = None
@@ -121,10 +122,24 @@ def create_endpoint():
     return endpoint
 
 
-def r2_is_enabled():
+def r2_is_enabled() -> bool:
     """Checks if Cloudflare R2 is enabled"""
 
     accountid_path = os.path.expanduser(ACCOUNT_ID_PATH)
-    if os.path.exists(accountid_path):
-        return True
-    return False
+    return os.path.exists(accountid_path)
+
+
+def get_credential_file_mounts(file_mounts: Dict[str, str]) -> Dict[str, str]:
+    """Checks if aws credential file is set and update if not
+       Updates file containing account ID information
+    
+    Args:
+        file_mounts: stores path to credential files of clouds
+    """
+
+    r2_credential_mounts = {}
+    if '~/.aws/credentials' not in file_mounts:
+        r2_credential_mounts.update(
+            {'~/.aws/credentials': '~/.aws/credentials'})
+    r2_credential_mounts.update({ACCOUNT_ID_PATH: ACCOUNT_ID_PATH})
+    return r2_credential_mounts
