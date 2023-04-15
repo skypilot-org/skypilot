@@ -111,14 +111,6 @@ def is_cloud_store_url(url):
     return result.netloc
 
 
-def get_cloud_store_type(url):
-    result = urllib.parse.urlsplit(url)
-    store_type = result.scheme
-    if store_type == 'gs':
-        store_type = 'gcs'
-    return store_type
-
-
 def _group_files_by_dir(
         source_list: List[str]) -> Tuple[Dict[str, List[str]], List[str]]:
     """Groups a list of paths based on their directory
