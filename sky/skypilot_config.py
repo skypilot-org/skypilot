@@ -74,6 +74,22 @@ logger = sky_logging.init_logger(__name__)
 _dict = None
 
 
+def get_nested_from_dict(config: Dict[str, Any], keys: Iterable[str],
+                         default_value: Any) -> Any:
+    """Gets a nested key from 'config'.
+
+    If any key is not found, or any intermediate key does not point to a
+    dict value, returns 'default_value'.
+    """
+    curr = config
+    for key in keys:
+        if isinstance(curr, dict) and key in curr:
+            curr = curr[key]
+        else:
+            return default_value
+    return curr
+
+
 def get_nested(keys: Iterable[str], default_value: Any) -> Any:
     """Gets a nested key.
 
@@ -81,16 +97,7 @@ def get_nested(keys: Iterable[str], default_value: Any) -> Any:
     value, returns 'default_value'.
     """
     global _dict
-    if _dict is None:
-        return default_value
-    curr = _dict
-    for key in keys:
-        if isinstance(curr, dict) and key in curr:
-            curr = curr[key]
-        else:
-            return default_value
-    logger.debug(f'User config: {".".join(keys)} -> {curr}')
-    return curr
+    return get_nested_from_dict(_dict, keys, default_value)
 
 
 def set_nested(keys: Iterable[str], value: Any) -> Dict[str, Any]:

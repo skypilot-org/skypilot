@@ -12,7 +12,8 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import (Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple,
+                    Union)
 from typing_extensions import Literal
 import uuid
 
@@ -120,12 +121,13 @@ _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
     'cluster_name', 'provider', 'auth', 'node_config'
 }
-# For these keys, don't use the old yaml's version and instead use the new yaml's.
-#  - zone: The zone field of the old yaml may be '1a,1b,1c' (AWS) while the actual
-#    zone of the launched cluster is '1a'. If we restore, then on capacity errors
-#    it's possible to failover to 1b, which leaves a leaked instance in 1a. Here,
-#    we use the new yaml's zone field, which is guaranteed to be the existing zone
-#    '1a'.
+# For these keys, don't use the old yaml's version and instead use the new
+# yaml's.
+#  - zone: The zone field of the old yaml may be '1a,1b,1c' (AWS) while the
+#    actual zone of the launched cluster is '1a'. If we restore, then on
+#    capacity errors it's possible to failover to 1b, which leaves a leaked
+#    instance in 1a. Here, we use the new yaml's zone field, which is
+#    guaranteed to be the existing zone '1a'.
 _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('provider', 'availability_zone'),
 ]
@@ -753,6 +755,35 @@ def _replace_yaml_dicts(
     return common_utils.dump_yaml_str(new_config)
 
 
+def _print_vpc_and_ssh_settings(yaml_content_in_use: str) -> None:
+    config_in_use = yaml.safe_load(yaml_content_in_use)
+    vpc_name_in_use = skypilot_config.get_nested_from_dict(config_in_use,
+                                                           keys=('provider',
+                                                                 'vpc_name'),
+                                                           default_value=None)
+    use_internal_ips_in_use = skypilot_config.get_nested_from_dict(
+        config_in_use,
+        keys=('provider', 'use_internal_ips'),
+        default_value=False)
+    ssh_proxy_command_in_use = skypilot_config.get_nested_from_dict(
+        config_in_use, keys=('auth', 'ssh_proxy_command'), default_value=None)
+    if (vpc_name_in_use is not None or use_internal_ips_in_use or
+            ssh_proxy_command_in_use is not None):
+        # Print hints for non-default cases.
+        yellow = colorama.Fore.YELLOW
+        bright = colorama.Style.BRIGHT
+        reset = colorama.Style.RESET_ALL
+        logger.info(f'{yellow}Custom VPC/SSH settings found and will '
+                    f'be used for this launch:{reset}')
+        logger.info(f'  {bright}vpc_name{reset}: {vpc_name_in_use}')
+        logger.info(
+            f'  {bright}use_internal_ips{reset}: {use_internal_ips_in_use}')
+        logger.info(
+            f'  {bright}ssh_proxy_command{reset}: {ssh_proxy_command_in_use}')
+        logger.info(f'{yellow}Please check the settings are correct, otherwise '
+                    f'the launch may get stuck and eventually time out.{reset}')
+
+
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
@@ -831,8 +862,9 @@ def write_cluster_config(
         else:
             # (2) We're launching a new cluster.
             #
-            # Resources.get_valid_regions_for_launchable() respects the keys (regions)
-            # in ssh_proxy_command in skypilot_config. So here we add an assert.
+            # Resources.get_valid_regions_for_launchable() respects the keys
+            # (regions) in ssh_proxy_command in skypilot_config. So here we add
+            # an assert.
             assert region_name in ssh_proxy_command_config, (
                 region_name, ssh_proxy_command_config)
             ssh_proxy_command = ssh_proxy_command_config[region_name]
@@ -908,18 +940,22 @@ def write_cluster_config(
         return config_dict
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
 
+    with open(tmp_yaml_path, 'r') as f:
+        new_yaml_content = f.read()
+
     # Restore the old yaml content for backward compatibility.
     if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
         with open(yaml_path, 'r') as f:
             old_yaml_content = f.read()
-        with open(tmp_yaml_path, 'r') as f:
-            new_yaml_content = f.read()
         restored_yaml_content = _replace_yaml_dicts(
             new_yaml_content, old_yaml_content,
             _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
             _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
         with open(tmp_yaml_path, 'w') as f:
             f.write(restored_yaml_content)
+        _print_vpc_and_ssh_settings(restored_yaml_content)
+    else:
+        _print_vpc_and_ssh_settings(new_yaml_content)
 
     # Optimization: copy the contents of source files in file_mounts to a
     # special dir, and upload that as the only file_mount instead. Delay
@@ -1598,8 +1634,8 @@ def _query_status_gcp(
     cluster: str,
     ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
-    # Note: we use ":" for filtering labels for gcloud, as the latest gcloud (v393.0)
-    # fails to filter labels with "=".
+    # Note: we use ":" for filtering labels for gcloud, as the latest gcloud
+    # (v393.0) fails to filter labels with "=".
     # Reference: https://cloud.google.com/sdk/gcloud/reference/topic/filters
 
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
