@@ -260,16 +260,17 @@ class Optimizer:
             num_resources = len(node.get_resources())
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
-                    # Region str.
-                    region_str = ''
+                    location_hint = ''
                     if node.get_resources():
                         specified_resources = list(node.get_resources())[0]
-                        if specified_resources.region:
-                            region_str = f' Region: {specified_resources.region}.'
+                        if specified_resources.zone is not None:
+                            location_hint = f' Zone: {specified_resources.zone}.'
+                        elif specified_resources.region:
+                            location_hint = f' Region: {specified_resources.region}.'
 
                     error_msg = (
                         'No launchable resource found for task '
-                        f'{node}.{region_str}\nThis means the '
+                        f'{node}.{location_hint}\nThis means the '
                         'catalog does not contain any instance types that '
                         'satisfy this request.\n'
                         'To fix: relax or change the resource requirements.\n'
