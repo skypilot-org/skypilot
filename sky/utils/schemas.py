@@ -63,6 +63,9 @@ def get_resources_schema():
             'disk_size': {
                 'type': 'integer',
             },
+            'disk_tier': {
+                'type': 'string',
+            },
             'accelerator_args': {
                 'type': 'object',
                 'required': [],

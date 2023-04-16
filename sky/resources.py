@@ -1,5 +1,6 @@
 """Resources: compute requirements of Tasks."""
 from typing import Dict, List, Optional, Union
+from typing_extensions import Literal
 
 from sky import clouds
 from sky import global_user_state
@@ -44,7 +45,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 8
+    _VERSION = 9
 
     def __init__(
         self,
@@ -60,6 +61,7 @@ class Resources:
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
+        disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
@@ -97,6 +99,8 @@ class Resources:
                     k.strip(): v.strip() for k, v in image_id.items()
                 }
 
+        self._disk_tier = disk_tier
+
         self._set_cpus(cpus)
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
@@ -107,6 +111,7 @@ class Resources:
         self._try_validate_accelerators()
         self._try_validate_spot()
         self._try_validate_image_id()
+        self._try_validate_disk_tier()
 
     def __repr__(self) -> str:
         """Returns a string representation for display.
@@ -161,6 +166,10 @@ class Resources:
             else:
                 image_id = f', image_id={self.image_id!r}'
 
+        disk_tier = ''
+        if self.disk_tier is not None:
+            disk_tier = f', disk_tier={self.disk_tier}'
+
         disk_size = ''
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
@@ -180,7 +189,7 @@ class Resources:
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
-            f'{disk_size}{region}{zone}')
+            f'{disk_tier}{disk_size}{region}{zone}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):
@@ -273,6 +282,10 @@ class Resources:
     @property
     def image_id(self) -> Optional[Dict[str, str]]:
         return self._image_id
+
+    @property
+    def disk_tier(self) -> str:
+        return self._disk_tier
 
     def _set_cpus(
         self,
@@ -684,6 +697,20 @@ class Resources:
                         ' GB. Please specify a larger disk_size to use this '
                         'image.')
 
+    def _try_validate_disk_tier(self) -> None:
+        if self.disk_tier is None:
+            return
+        if self.disk_tier not in ['high', 'medium', 'low']:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Invalid disk_tier {self.disk_tier}. '
+                    'Please use one of "high", "medium", or "low".')
+        if self.instance_type is None:
+            return
+        if self.cloud is not None:
+            self.cloud.check_disk_tier_enabled(self.instance_type,
+                                               self.disk_tier)
+
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
@@ -761,6 +788,14 @@ class Resources:
         if self.use_spot_specified and self.use_spot != other.use_spot:
             return False
 
+        if self.disk_tier is not None:
+            if other.disk_tier is None:
+                return False
+            if self.disk_tier != other.disk_tier:
+                types = ['low', 'medium', 'high']
+                return types.index(self.disk_tier) < types.index(
+                    other.disk_tier)
+
         # self <= other
         return True
 
@@ -815,6 +850,7 @@ class Resources:
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
+            disk_tier=override.pop('disk_tier', self.disk_tier),
         )
         assert len(override) == 0
         return resources
@@ -867,6 +903,8 @@ class Resources:
             logger.warning('image_id in resources is experimental. It only '
                            'supports AWS/GCP.')
             resources_fields['image_id'] = config.pop('image_id')
+        if config.get('disk_tier') is not None:
+            resources_fields['disk_tier'] = config.pop('disk_tier')
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -893,6 +931,7 @@ class Resources:
         add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
+        add_if_not_none('disk_tier', self.disk_tier)
         return config
 
     def __setstate__(self, state):
@@ -951,5 +990,8 @@ class Resources:
         image_id = state.get('_image_id', None)
         if isinstance(image_id, str):
             state['_image_id'] = {state.get('_region', None): image_id}
+
+        if version < 9:
+            self._disk_tier = None
 
         self.__dict__.update(state)

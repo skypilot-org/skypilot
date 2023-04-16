@@ -73,6 +73,13 @@ Available fields:
       # have a large working directory or tasks that write out large outputs.
       disk_size: 256
 
+      # Disk tier to use for OS (optional).
+      # Could be one of 'low', 'medium', or 'high' (default: 'medium'). Rough performance estimate:
+      #   low: 500 IOPS; read 20MB/s; write 40 MB/s
+      #   medium: 3000 IOPS; read 220 MB/s; write 200 MB/s
+      #   high: 6000 IOPS; 340 MB/s; write 250 MB/s
+      disk_tier: 'medium'
+
       # Additional accelerator metadata (optional); only used for TPU node
       # and TPU VM.
       # Example usage:
