@@ -97,7 +97,7 @@
                 "Standard_LRS"
             ],
             "metadata": {
-                "description": "OS disk type."
+                "description": "OS disk tier."
             }
         }
     },

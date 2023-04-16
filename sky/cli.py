@@ -1192,7 +1192,7 @@ def cli():
     type=str,
     required=False,
     help=(
-        'OS disk type. Could be one of "low", "medium", "high". Default: medium'
+        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
     ))
 @click.option(
     '--idle-minutes-to-autostop',
@@ -3310,7 +3310,7 @@ def spot():
     type=str,
     required=False,
     help=(
-        'OS disk type. Could be one of "low", "medium", "high". Default: medium'
+        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
     ))
 @click.option(
     '--detach-run',
@@ -3696,7 +3696,7 @@ def bench():
     type=str,
     required=False,
     help=(
-        'OS disk type. Could be one of "low", "medium", "high". Default: medium'
+        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
     ))
 @click.option(
     '--idle-minutes-to-autostop',
