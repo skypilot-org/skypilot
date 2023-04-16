@@ -179,17 +179,13 @@ class Resources:
         else:
             instance_type = ''
 
-        region = ''
-        if self.region is not None:
-            region = f', region={self.region!r}'
-        zone = ''
-        if self.zone is not None:
-            zone = f', zone={self.zone!r}'
-
+        # Do not show region/zone here as `sky status -a` would show them as
+        # separate columns. Also, Resources repr will be printed during
+        # failover, and the region may be dynamically determined.
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
-            f'{disk_tier}{disk_size}{region}{zone}')
+            f'{disk_tier}{disk_size}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):
