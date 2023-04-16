@@ -17,6 +17,9 @@ Install SkyPilot using pip:
   $ # pip install "skypilot[lambda]"
   $ # pip install "skypilot[all]"
 
+.. note::
+
+    There is no native build for python version <3.8 on Apple Silicon. Apple Silicon-based devices should create the conda environment with python version >=3.8.
 
 SkyPilot currently supports five cloud providers: AWS, GCP, Azure, Lambda Cloud and Cloudflare (R2).
 If you only have access to certain clouds, use any combination of
