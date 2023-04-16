@@ -264,9 +264,11 @@ class Optimizer:
                     if node.get_resources():
                         specified_resources = list(node.get_resources())[0]
                         if specified_resources.zone is not None:
-                            location_hint = f' Zone: {specified_resources.zone}.'
+                            location_hint = (
+                                f' Zone: {specified_resources.zone}.')
                         elif specified_resources.region:
-                            location_hint = f' Region: {specified_resources.region}.'
+                            location_hint = (
+                                f' Region: {specified_resources.region}.')
 
                     error_msg = (
                         'No launchable resource found for task '
