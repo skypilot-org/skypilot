@@ -125,6 +125,8 @@ class RsyncProgressBarProcessor(LineProcessor, Progress):
                  redirect_stderr: bool = True):
         self.current_task_id = None
         self._tasks: Dict[TaskID, Task] = {}
+        self.state = None
+        self._task_index = 1
         super().__init__(transient=transient,
                          redirect_stdout=redirect_stdout,
                          redirect_stderr=redirect_stderr)
@@ -132,11 +134,9 @@ class RsyncProgressBarProcessor(LineProcessor, Progress):
     def __enter__(self):
         if (threading.current_thread() is threading.main_thread() and
                 not sky_logging.is_silent()):
-            self.state = None
-            self._task_index = 1
             self.start()
             return self
-        return _NoOpConsoleStatus()
+        
 
     def get_current_task_id(self):
         """returns the task_id currently being processed"""
@@ -243,7 +243,9 @@ class RsyncProgressBarProcessor(LineProcessor, Progress):
 
     def __exit__(self, except_type, except_value, traceback):
         del except_type, except_value, traceback  # unused
-        self.stop()
+        if (threading.current_thread() is threading.main_thread() and
+                not sky_logging.is_silent()):
+            self.stop()
 
 
 def create_table(field_names: List[str], **kwargs) -> prettytable.PrettyTable:
