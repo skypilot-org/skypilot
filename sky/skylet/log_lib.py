@@ -62,7 +62,8 @@ def process_subprocess_stream(proc,
 
     start_streaming_flag = False
     end_streaming_flag = False
-    with line_processor:
+    #with line_processor:
+    with log_utils.safe_rich_progress_bar():
         with open(log_path, 'a') as fout:
             while len(sel.get_map()) > 0:
                 events = sel.select()

@@ -51,6 +51,17 @@ def safe_rich_status(msg: str):
     return _NoOpConsoleStatus()
 
 
+def safe_rich_progress_bar():
+    """A wrapper for multi-threaded console.status."""
+    if (threading.current_thread() is threading.main_thread() and
+            not sky_logging.is_silent()):
+        global _status
+        if _status is None:
+            _status = RsyncProgressBarProcessor()
+        return _status
+    return _NoOpConsoleStatus()
+
+
 def force_update_rich_status(msg: str):
     """Update the status message even if sky_logging.is_silent() is true."""
     if threading.current_thread() is threading.main_thread():
@@ -132,10 +143,8 @@ class RsyncProgressBarProcessor(LineProcessor, Progress):
                          redirect_stderr=redirect_stderr)
 
     def __enter__(self):
-        if (threading.current_thread() is threading.main_thread() and
-                not sky_logging.is_silent()):
-            self.start()
-            return self
+        self.start()
+        return self
         
 
     def get_current_task_id(self):
@@ -243,9 +252,7 @@ class RsyncProgressBarProcessor(LineProcessor, Progress):
 
     def __exit__(self, except_type, except_value, traceback):
         del except_type, except_value, traceback  # unused
-        if (threading.current_thread() is threading.main_thread() and
-                not sky_logging.is_silent()):
-            self.stop()
+        self.stop()
 
 
 def create_table(field_names: List[str], **kwargs) -> prettytable.PrettyTable:
