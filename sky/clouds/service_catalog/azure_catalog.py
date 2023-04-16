@@ -7,6 +7,7 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 from sky import clouds as cloud_lib
+from sky.clouds import Azure
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
@@ -17,11 +18,11 @@ _DEFAULT_INSTANCE_FAMILY = [
     # The latest general-purpose instance family as of Mar. 2023.
     # CPU: Intel Ice Lake 8370C.
     # Memory: 4 GiB RAM per 1 vCPU;
-    'D_v5',
+    'Ds_v5',
     # The latest memory-optimized instance family as of Mar. 2023.
     # CPU: Intel Ice Lake 8370C.
     # Memory: 8 GiB RAM per 1 vCPU.
-    'E_v5',
+    'Es_v5',
     # The latest compute-optimized instance family as of Mar 2023.
     # CPU: Intel Ice Lake 8370C, Cascade Lake 8272CL, or Skylake 8168.
     # Memory: 2 GiB RAM per 1 vCPU.
@@ -97,7 +98,8 @@ def _get_instance_family(instance_type: str) -> str:
 
 
 def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None) -> Optional[str]:
+                              memory: Optional[str] = None,
+                              disk_tier: Optional[str] = None) -> Optional[str]:
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
     if memory is None:
@@ -106,6 +108,11 @@ def get_default_instance_type(cpus: Optional[str] = None,
         memory_gb_or_ratio = memory
     df = _df[_df['InstanceType'].apply(_get_instance_family).isin(
         _DEFAULT_INSTANCE_FAMILY)]
+
+    def _filter_disk_type(instance_type: str) -> bool:
+        return Azure.check_disk_tier(instance_type, disk_tier)[0]
+
+    df = df.loc[df['InstanceType'].apply(_filter_disk_type)]
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
                                                       memory_gb_or_ratio)
 

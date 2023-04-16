@@ -47,10 +47,11 @@ available_node_types:
         - DeviceName: /dev/sda1
           Ebs:
             VolumeSize: {{disk_size}}
-            # use default Iops for gp3
-            VolumeType: gp3
-            Iops: 3000
-            Throughput: 125 
+            VolumeType: {{disk_tier}}
+            {% if custom_disk_perf %}
+            Iops: {{disk_iops}}
+            Throughput: {{disk_throughput}}
+            {% endif %}
       {% if use_spot %}
       InstanceMarketOptions:
           MarketType: spot
@@ -75,9 +76,11 @@ available_node_types:
         - DeviceName: /dev/sda1
           Ebs:
             VolumeSize: {{disk_size}}
-            VolumeType: gp3
-            Iops: 3000
-            Throughput: 125 
+            VolumeType: {{disk_tier}}
+            {% if custom_disk_perf %}
+            Iops: {{disk_iops}}
+            Throughput: {{disk_throughput}}
+            {% endif %}
       {% if use_spot %}
       InstanceMarketOptions:
           MarketType: spot
