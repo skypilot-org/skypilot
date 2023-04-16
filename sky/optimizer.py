@@ -995,8 +995,10 @@ def _fill_in_launchable_resources(
                 else:
                     all_fuzzy_candidates.update(fuzzy_candidate_list)
             if len(launchable[resources]) == 0:
+                clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
+                    clouds_list[0])
                 logger.info(f'No resource satisfying {resources} '
-                            f'on {clouds_list}.')
+                            f'on {clouds_str}.')
                 if len(all_fuzzy_candidates) > 0:
                     logger.info('Did you mean: '
                                 f'{colorama.Fore.CYAN}'
