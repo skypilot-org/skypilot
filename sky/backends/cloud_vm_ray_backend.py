@@ -2984,10 +2984,10 @@ class CloudVmRayBackend(backends.Backend):
                     stream_logs=False,
                     require_outputs=True)
         elif terminate and isinstance(cloud, clouds.SCP):
-            config['provider']['cache_stopped_nodes'] = not terminate
-            provider = SCPNodeProvider(config['provider'],handle.cluster_name)
-
             try:
+                config['provider']['cache_stopped_nodes'] = not terminate
+                provider = SCPNodeProvider(config['provider'], handle.cluster_name)
+
                 with open(provider.metadata.path, 'r') as f:
                     metadata = json.load(f)
                     node_id = next((key for key in list(metadata.keys()) if key.startswith('INSTANCE')), None)
