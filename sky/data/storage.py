@@ -1100,8 +1100,8 @@ class S3Store(AbstractStore):
         If the bucket does not exist, there are three cases:
           1) Raise an error if the bucket source starts with s3://
           2) Return None if bucket has been externally deleted and
-             sync_on_reconstruction if False
-          2) Create and return a new bucket otherwise
+             sync_on_reconstruction is False
+          3) Create and return a new bucket otherwise
 
         Raises:
             StorageBucketCreateError: If creating the bucket fails
@@ -1136,7 +1136,7 @@ class S3Store(AbstractStore):
                     f'{self.source}` to debug.')
 
         # If bucket cannot be found in both private and public settings,
-        # the bucket is to be created by Sky. However, skip creation if
+        # the bucket is to be created by Sky. However, creation is skipped if
         # Store object is being reconstructed for deletion.
         if self.sync_on_reconstruction:
             bucket = self._create_s3_bucket(self.name)
@@ -1510,8 +1510,8 @@ class GcsStore(AbstractStore):
         If the bucket does not exist, there are three cases:
           1) Raise an error if the bucket source starts with gs://
           2) Return None if bucket has been externally deleted and
-             sync_on_reconstruction if False
-          2) Create and return a new bucket otherwise
+             sync_on_reconstruction is False
+          3) Create and return a new bucket otherwise
 
         Raises:
             StorageBucketCreateError: If creating the bucket fails
@@ -1529,8 +1529,8 @@ class GcsStore(AbstractStore):
             else:
 
                 # If bucket cannot be found (i.e., does not exist), it is to be
-                # created by Sky. However, skip creation if Store object is
-                # being reconstructed for deletion.
+                # created by Sky. However, creation is skipped if Store object
+                # is being reconstructed for deletion.
                 if self.sync_on_reconstruction:
                     bucket = self._create_gcs_bucket(self.name)
                     return bucket, True
@@ -1826,8 +1826,8 @@ class R2Store(AbstractStore):
         If the bucket does not exist, there are three cases:
           1) Raise an error if the bucket source starts with s3://
           2) Return None if bucket has been externally deleted and
-             sync_on_reconstruction if False
-          2) Create and return a new bucket otherwise
+             sync_on_reconstruction is False
+          3) Create and return a new bucket otherwise
 
         Raises:
             StorageBucketCreateError: If creating the bucket fails
