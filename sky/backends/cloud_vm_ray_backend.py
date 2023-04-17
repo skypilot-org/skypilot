@@ -50,8 +50,6 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
-from sky.adaptors import ibm
-from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -774,7 +772,6 @@ class RetryingVmProvisioner(object):
             self._blocked_resources.add(
                 launchable_resources.copy(zone=zone.name))
 
-
     def _update_blocklist_on_azure_error(
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
@@ -809,7 +806,6 @@ class RetryingVmProvisioner(object):
                 resources_lib.Resources(cloud=clouds.Azure()))
         else:
             self._blocked_resources.add(launchable_resources.copy(zone=None))
-
 
     def _update_blocklist_on_lambda_error(
             self, launchable_resources: 'resources_lib.Resources',
@@ -847,7 +843,6 @@ class RetryingVmProvisioner(object):
                     if e.find(r.name) == -1:
                         self._blocked_resources.add(
                             launchable_resources.copy(region=r.name, zone=None))
-
 
     def _update_blocklist_on_ibm_error(
             self, launchable_resources: 'resources_lib.Resources',
@@ -3083,7 +3078,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if (isinstance(cloud, clouds.IBM) and terminate and
                 prev_cluster_status == global_user_state.ClusterStatus.STOPPED):
-            # pylint: disable= W0622 W0703
+            # pylint: disable= W0622 W0703 C0415
+            from sky.adaptors import ibm
+            from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
 
             config_provider = common_utils.read_yaml(
                 handle.cluster_yaml)['provider']
