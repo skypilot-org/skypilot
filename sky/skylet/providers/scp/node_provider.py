@@ -193,7 +193,10 @@ class SCPNodeProvider(NodeProvider):
         """Returns the internal ip (Ray ip) of the given node."""
         return self._get_cached_node(node_id=node_id)['internal_ip']
 
-    def _config_security_group(self, zone_id,vpc, sg_name):
+    def _config_security_group(self, zone_id,vpc, cluster_name):
+        sg_name = cluster_name.replace("-", "") + "sg"
+        if len(sg_name)>20: sg_name = sg_name[:9]+'0'+sg_name[-10:] # should be less than 21
+
         undo_func_stack = []
         try :
             response = self.scp_client.create_security_group(zone_id, vpc, sg_name)
@@ -356,8 +359,7 @@ class SCPNodeProvider(NodeProvider):
 
             SUCCESS = False
             for vpc, subnets in vpc_subnets.items():
-                sg_name = self.cluster_name.replace("-","0") + "0sg"
-                sg_id = self._config_security_group(zone_config.zone_id, vpc, sg_name)  # sg_name
+                sg_id = self._config_security_group(zone_config.zone_id, vpc, self.cluster_name)  # sg_name
                 if sg_id is None: continue
 
                 instance_config['securityGroupIds'] = [sg_id]
