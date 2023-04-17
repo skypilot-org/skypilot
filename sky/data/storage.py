@@ -877,7 +877,7 @@ class S3Store(AbstractStore):
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True):
         self.client: 'boto3.client.Client'
-        self.bucket: Optional[boto3.resource('s3').Bucket]
+        self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed, sync_on_reconstruction)
 
     def _validate(self):
@@ -1126,13 +1126,14 @@ class S3Store(AbstractStore):
                     f'{self.source}. Consider using `aws s3 ls '
                     f'{self.source}` to debug.')
 
+        # If bucket cannot be found in both private and public settings,
+        # the bucket is to be created by Sky. However, skip creation if
+        # Store object is being reconstructed for deletion.
         if self.sync_on_reconstruction:
-            # If bucket cannot be found in both private and public settings,
-            # the bucket is created by Sky.
             bucket = self._create_s3_bucket(self.name)
             return bucket, True
-
-        return None, False
+        else:
+            return None, False
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on s3 bucket
@@ -1240,10 +1241,11 @@ class GcsStore(AbstractStore):
                  name: str,
                  source: str,
                  region: Optional[str] = 'us-central1',
-                 is_sky_managed: Optional[bool] = None):
+                 is_sky_managed: Optional[bool] = None,
+                 sync_on_reconstruction: Optional[bool] = True):
         self.client: 'storage.Client'
         self.bucket: StorageHandle
-        super().__init__(name, source, region, is_sky_managed)
+        super().__init__(name, source, region, is_sky_managed, sync_on_reconstruction)
 
     def _validate(self):
         if self.source is not None:
@@ -1382,8 +1384,13 @@ class GcsStore(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
-        self._delete_gcs_bucket(self.name)
-        logger.info(f'{colorama.Fore.GREEN}Deleted GCS bucket {self.name}.'
+        deleted_by_skypilot = self._delete_gcs_bucket(self.name)
+        if deleted_by_skypilot:
+            msg_str = f'Deleted GCS bucket {self.name}.'
+        else:
+            msg_str = f'GCS bucket {self.name} may have been deleted ' \
+                      f'externally. Removing from local state.'
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
     def get_handle(self) -> StorageHandle:
@@ -1488,9 +1495,11 @@ class GcsStore(AbstractStore):
         """Obtains the GCS bucket.
         If the bucket exists, this method will connect to the bucket.
 
-        If the bucket does not exist, there are two cases:
+        If the bucket does not exist, there are three cases:
           1) Raise an error if the bucket source starts with gs://
-          2) Create a new bucket otherwise
+          2) Return None if bucket has been externally deleted and
+             sync_on_reconstruction if False
+          2) Create and return a new bucket otherwise
 
         Raises:
             StorageBucketCreateError: If creating the bucket fails
@@ -1506,8 +1515,15 @@ class GcsStore(AbstractStore):
                         'Attempted to connect to a non-existent bucket: '
                         f'{self.source}') from e
             else:
-                bucket = self._create_gcs_bucket(self.name)
-                return bucket, True
+
+                # If bucket cannot be found (i.e., does not exist), it is to be
+                # created by Sky. However, skip creation if Store object is
+                # being reconstructed for deletion.
+                if self.sync_on_reconstruction:
+                    bucket = self._create_gcs_bucket(self.name)
+                    return bucket, True
+                else:
+                    return None, False
         except gcp.forbidden_exception():
             # Try public bucket to see if bucket exists
             logger.info(
@@ -1583,33 +1599,43 @@ class GcsStore(AbstractStore):
             f'with storage class {new_bucket.storage_class}')
         return new_bucket
 
-    def _delete_gcs_bucket(self, bucket_name: str) -> None:
+    def _delete_gcs_bucket(self, bucket_name: str) -> bool:
         """Deletes GCS bucket, including all objects in bucket
 
         Args:
           bucket_name: str; Name of bucket
-        """
-        try:
-            self.client.get_bucket(bucket_name)
-        except gcp.forbidden_exception() as e:
-            # Try public bucket to see if bucket exists
-            with ux_utils.print_exception_no_traceback():
-                raise PermissionError(
-                    'External Bucket detected. User not allowed to delete '
-                    'external bucket.') from e
 
-        try:
-            with log_utils.safe_rich_status(
-                    f'[bold cyan]Deleting GCS bucket {bucket_name}[/]'):
+        Returns:
+         bool; True if bucket was deleted, False if it was deleted externally.
+        """
+
+        with log_utils.safe_rich_status(
+                f'[bold cyan]Deleting GCS bucket {bucket_name}[/]'):
+            try:
+                self.client.get_bucket(bucket_name)
+            except gcp.forbidden_exception() as e:
+                # Try public bucket to see if bucket exists
+                with ux_utils.print_exception_no_traceback():
+                    raise PermissionError(
+                        'External Bucket detected. User not allowed to delete '
+                        'external bucket.') from e
+            except gcp.not_found_exception():
+                # If bucket does not exist, it may have been deleted externally.
+                # Do a no-op in that case.
+                logger.debug(
+                    f'Bucket {bucket_name} does not exist. It may have been deleted externally.')
+                return False
+            try:
                 remove_obj_command = ('gsutil -m rm -r'
                                       f' gs://{bucket_name}')
                 subprocess.check_output(remove_obj_command.split(' '),
                                         stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError as e:
-            logger.error(e.output)
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.StorageBucketDeleteError(
-                    f'Failed to delete GCS bucket {bucket_name}.')
+                return True
+            except subprocess.CalledProcessError as e:
+                logger.error(e.output)
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketDeleteError(
+                        f'Failed to delete GCS bucket {bucket_name}.')
 
 
 class R2Store(AbstractStore):
@@ -1623,10 +1649,11 @@ class R2Store(AbstractStore):
                  name: str,
                  source: str,
                  region: Optional[str] = 'auto',
-                 is_sky_managed: Optional[bool] = None):
+                 is_sky_managed: Optional[bool] = None,
+                 sync_on_reconstruction: Optional[bool] = True):
         self.client: 'boto3.client.Client'
         self.bucket: 'StorageHandle'
-        super().__init__(name, source, region, is_sky_managed)
+        super().__init__(name, source, region, is_sky_managed, sync_on_reconstruction)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -1698,8 +1725,13 @@ class R2Store(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
-        self._delete_r2_bucket(self.name)
-        logger.info(f'{colorama.Fore.GREEN}Deleted R2 bucket {self.name}.'
+        deleted_by_skypilot = self._delete_r2_bucket(self.name)
+        if deleted_by_skypilot:
+            msg_str = f'Deleted R2 bucket {self.name}.'
+        else:
+            msg_str = f'R2 bucket {self.name} may have been deleted ' \
+                      f'externally. Removing from local state.'
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
     def get_handle(self) -> StorageHandle:
@@ -1776,10 +1808,12 @@ class R2Store(AbstractStore):
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the R2 bucket.
 
-        If the bucket exists, this method will connect to the bucket.
-        If the bucket does not exist, there are two cases:
+        If the bucket exists, this method will return the bucket.
+        If the bucket does not exist, there are three cases:
           1) Raise an error if the bucket source starts with s3://
-          2) Create a new bucket otherwise
+          2) Return None if bucket has been externally deleted and
+             sync_on_reconstruction if False
+          2) Create and return a new bucket otherwise
 
         Raises:
             StorageBucketCreateError: If creating the bucket fails
@@ -1818,10 +1852,15 @@ class R2Store(AbstractStore):
                     f'--profile={cloudflare.R2_PROFILE_NAME}\' '
                     'to debug.')
 
+
         # If bucket cannot be found in both private and public settings,
-        # the bucket is created by Sky.
-        bucket = self._create_r2_bucket(self.name)
-        return bucket, True
+        # the bucket is to be created by Sky. However, skip creation if
+        # Store object is being reconstructed for deletion.
+        if self.sync_on_reconstruction:
+            bucket = self._create_r2_bucket(self.name)
+            return bucket, True
+        else:
+            return None, False
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on r2 bucket
@@ -1887,6 +1926,9 @@ class R2Store(AbstractStore):
 
         Args:
           bucket_name: str; Name of bucket
+
+        Returns:
+         bool; True if bucket was deleted, False if it was deleted externally.
         """
         # Deleting objects is very slow programatically
         # (i.e. bucket.objects.all().delete() is slow).
@@ -1902,13 +1944,19 @@ class R2Store(AbstractStore):
         try:
             with log_utils.safe_rich_status(
                     f'[bold cyan]Deleting R2 bucket {bucket_name}[/]'):
-                subprocess.check_output(remove_command.split(' '))
+                subprocess.check_output(remove_command.split(' '),
+                                        stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
-            logger.error(e.output)
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.StorageBucketDeleteError(
-                    f'Failed to delete R2 bucket {bucket_name}.')
+            if 'NoSuchBucket' in e.output.decode('utf-8'):
+                logger.debug(f'Bucket {bucket_name} does not exist. It may have been deleted externally.')
+                return False
+            else:
+                logger.error(e.output)
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketDeleteError(
+                        f'Failed to delete R2 bucket {bucket_name}.')
 
         # Wait until bucket deletion propagates on AWS servers
         while data_utils.verify_r2_bucket(bucket_name):
             time.sleep(0.1)
+        return True
