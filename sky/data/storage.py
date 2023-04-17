@@ -158,12 +158,11 @@ class AbstractStore:
             self.is_sky_managed = is_sky_managed
 
         def __repr__(self):
-            return (
-                f'StoreMetadata('
-                f'\n\tname={self.name},'
-                f'\n\tsource={self.source},'
-                f'\n\tregion={self.region},'
-                f'\n\tis_sky_managed={self.is_sky_managed})')
+            return (f'StoreMetadata('
+                    f'\n\tname={self.name},'
+                    f'\n\tsource={self.source},'
+                    f'\n\tregion={self.region},'
+                    f'\n\tis_sky_managed={self.is_sky_managed})')
 
     def __init__(self,
                  name: str,
@@ -434,13 +433,15 @@ class Storage(object):
                         source=self.source,
                         sync_on_reconstruction=self.sync_on_reconstruction)
                 elif s_type == StoreType.GCS:
-                    store = GcsStore.from_metadata(s_metadata,
-                                                   source=self.source,
-                                                   sync_on_reconstruction=self.sync_on_reconstruction)
+                    store = GcsStore.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction)
                 elif s_type == StoreType.R2:
-                    store = R2Store.from_metadata(s_metadata,
-                                                  source=self.source,
-                                                  sync_on_reconstruction=self.sync_on_reconstruction)
+                    store = R2Store.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction)
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Unknown store type: {s_type}')
