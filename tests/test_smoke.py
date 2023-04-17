@@ -1781,7 +1781,6 @@ class TestStorageWithCredentials:
         'abc_',  # ends with an underscore
     ]
 
-
     @staticmethod
     def cli_delete_cmd(store_type, bucket_name):
         if store_type == storage_lib.StoreType.S3:
@@ -1958,13 +1957,12 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
 
-
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
     def test_bucket_external_deletion(self, tmp_scratch_storage_obj,
-                                              store_type):
+                                      store_type):
         # Creates a bucket, deletes it externally using cloud cli commands
         # and then tries to delete it using sky storage delete.
         tmp_scratch_storage_obj.add_store(store_type)
@@ -1986,7 +1984,6 @@ class TestStorageWithCredentials:
         # Run sky storage ls to check if storage object is deleted
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_scratch_storage_obj.name not in out.decode('utf-8')
-
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,

@@ -53,6 +53,10 @@ _BUCKET_FAIL_TO_CONNECT_MESSAGE = (
     '  2. If you are trying to connect to an existing bucket: make sure '
     'your cloud credentials have access to it.')
 
+_BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
+    'Bucket {bucket_name!r} does not exist. '
+    'It may have been deleted externally.')
+
 
 class StoreType(enum.Enum):
     """Enum for the different types of stores."""
@@ -156,12 +160,13 @@ class AbstractStore:
             self.sync_on_reconstruction = sync_on_reconstruction
 
         def __repr__(self):
-            return (f'StoreMetadata('
-                    f'\n\tname={self.name},'
-                    f'\n\tsource={self.source},'
-                    f'\n\tregion={self.region},'
-                    f'\n\tis_sky_managed={self.is_sky_managed},'
-                    f'\n\tsync_on_reconstruction={self.sync_on_reconstruction})')
+            return (
+                f'StoreMetadata('
+                f'\n\tname={self.name},'
+                f'\n\tsource={self.source},'
+                f'\n\tregion={self.region},'
+                f'\n\tis_sky_managed={self.is_sky_managed},'
+                f'\n\tsync_on_reconstruction={self.sync_on_reconstruction})')
 
     def __init__(self,
                  name: str,
@@ -208,8 +213,9 @@ class AbstractStore:
                    region=override_args.get('region', metadata.region),
                    is_sky_managed=override_args.get('is_sky_managed',
                                                     metadata.is_sky_managed),
-                   sync_on_reconstruction=override_args.get('sync_on_reconstruction',
-                                                    metadata.sync_on_reconstruction))
+                   sync_on_reconstruction=override_args.get(
+                       'sync_on_reconstruction',
+                       metadata.sync_on_reconstruction))
 
     def get_metadata(self) -> StoreMetadata:
         return self.StoreMetadata(name=self.name,
@@ -427,9 +433,10 @@ class Storage(object):
                 # When initializing from global_user_state, we override the
                 # source from the YAML
                 if s_type == StoreType.S3:
-                    store = S3Store.from_metadata(s_metadata,
-                                                  source=self.source,
-                                                  sync_on_reconstruction=self.sync_on_reconstruction)
+                    store = S3Store.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction)
                 elif s_type == StoreType.GCS:
                     store = GcsStore.from_metadata(s_metadata,
                                                    source=self.source)
@@ -688,8 +695,10 @@ class Storage(object):
 
         # Initialize store object and get/create bucket
         try:
-            store = store_cls(name=self.name, source=self.source,
-                              sync_on_reconstruction=self.sync_on_reconstruction)
+            store = store_cls(
+                name=self.name,
+                source=self.source,
+                sync_on_reconstruction=self.sync_on_reconstruction)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
             # to state.
@@ -878,7 +887,8 @@ class S3Store(AbstractStore):
                  sync_on_reconstruction: bool = True):
         self.client: 'boto3.client.Client'
         self.bucket: 'StorageHandle'
-        super().__init__(name, source, region, is_sky_managed, sync_on_reconstruction)
+        super().__init__(name, source, region, is_sky_managed,
+                         sync_on_reconstruction)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -1215,7 +1225,9 @@ class S3Store(AbstractStore):
                                         stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
             if 'NoSuchBucket' in e.output.decode('utf-8'):
-                logger.debug(f'Bucket {bucket_name} does not exist. It may have been deleted externally.')
+                logger.debug(
+                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
+                        bucket_name))
                 return False
             else:
                 logger.error(e.output)
@@ -1245,7 +1257,8 @@ class GcsStore(AbstractStore):
                  sync_on_reconstruction: Optional[bool] = True):
         self.client: 'storage.Client'
         self.bucket: StorageHandle
-        super().__init__(name, source, region, is_sky_managed, sync_on_reconstruction)
+        super().__init__(name, source, region, is_sky_managed,
+                         sync_on_reconstruction)
 
     def _validate(self):
         if self.source is not None:
@@ -1623,7 +1636,8 @@ class GcsStore(AbstractStore):
                 # If bucket does not exist, it may have been deleted externally.
                 # Do a no-op in that case.
                 logger.debug(
-                    f'Bucket {bucket_name} does not exist. It may have been deleted externally.')
+                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
+                        bucket_name))
                 return False
             try:
                 remove_obj_command = ('gsutil -m rm -r'
@@ -1653,7 +1667,8 @@ class R2Store(AbstractStore):
                  sync_on_reconstruction: Optional[bool] = True):
         self.client: 'boto3.client.Client'
         self.bucket: 'StorageHandle'
-        super().__init__(name, source, region, is_sky_managed, sync_on_reconstruction)
+        super().__init__(name, source, region, is_sky_managed,
+                         sync_on_reconstruction)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -1852,7 +1867,6 @@ class R2Store(AbstractStore):
                     f'--profile={cloudflare.R2_PROFILE_NAME}\' '
                     'to debug.')
 
-
         # If bucket cannot be found in both private and public settings,
         # the bucket is to be created by Sky. However, skip creation if
         # Store object is being reconstructed for deletion.
@@ -1921,7 +1935,7 @@ class R2Store(AbstractStore):
                     f'{self.name} but failed.') from e
         return cloudflare.resource('s3').Bucket(bucket_name)
 
-    def _delete_r2_bucket(self, bucket_name: str) -> None:
+    def _delete_r2_bucket(self, bucket_name: str) -> bool:
         """Deletes R2 bucket, including all objects in bucket
 
         Args:
@@ -1948,7 +1962,9 @@ class R2Store(AbstractStore):
                                         stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
             if 'NoSuchBucket' in e.output.decode('utf-8'):
-                logger.debug(f'Bucket {bucket_name} does not exist. It may have been deleted externally.')
+                logger.debug(
+                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
+                        bucket_name))
                 return False
             else:
                 logger.error(e.output)
