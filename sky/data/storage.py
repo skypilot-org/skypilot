@@ -151,13 +151,11 @@ class AbstractStore:
                      name: str,
                      source: Optional[SourceType],
                      region: Optional[str] = None,
-                     is_sky_managed: Optional[bool] = None,
-                     sync_on_reconstruction: Optional[bool] = None):
+                     is_sky_managed: Optional[bool] = None):
             self.name = name
             self.source = source
             self.region = region
             self.is_sky_managed = is_sky_managed
-            self.sync_on_reconstruction = sync_on_reconstruction
 
         def __repr__(self):
             return (
@@ -165,8 +163,7 @@ class AbstractStore:
                 f'\n\tname={self.name},'
                 f'\n\tsource={self.source},'
                 f'\n\tregion={self.region},'
-                f'\n\tis_sky_managed={self.is_sky_managed},'
-                f'\n\tsync_on_reconstruction={self.sync_on_reconstruction})')
+                f'\n\tis_sky_managed={self.is_sky_managed})')
 
     def __init__(self,
                  name: str,
@@ -214,8 +211,7 @@ class AbstractStore:
                    is_sky_managed=override_args.get('is_sky_managed',
                                                     metadata.is_sky_managed),
                    sync_on_reconstruction=override_args.get(
-                       'sync_on_reconstruction',
-                       metadata.sync_on_reconstruction))
+                       'sync_on_reconstruction', True))
 
     def get_metadata(self) -> StoreMetadata:
         return self.StoreMetadata(name=self.name,
@@ -439,10 +435,12 @@ class Storage(object):
                         sync_on_reconstruction=self.sync_on_reconstruction)
                 elif s_type == StoreType.GCS:
                     store = GcsStore.from_metadata(s_metadata,
-                                                   source=self.source)
+                                                   source=self.source,
+                                                   sync_on_reconstruction=self.sync_on_reconstruction)
                 elif s_type == StoreType.R2:
                     store = R2Store.from_metadata(s_metadata,
-                                                  source=self.source)
+                                                  source=self.source,
+                                                  sync_on_reconstruction=self.sync_on_reconstruction)
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Unknown store type: {s_type}')
