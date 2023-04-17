@@ -32,59 +32,6 @@ class IBM(clouds.Cloud):
     _regions: List[clouds.Region] = []
 
     @classmethod
-    def regions(cls):
-        if not cls._regions:
-            ## regions and zones
-            cls._regions = [
-                clouds.Region('us-south').set_zones([
-                    clouds.Zone('us-south-1'),
-                    clouds.Zone('us-south-2'),
-                    clouds.Zone('us-south-3')
-                ]),
-                clouds.Region('us-east').set_zones([
-                    clouds.Zone('us-east-1'),
-                    clouds.Zone('us-east-2'),
-                    clouds.Zone('us-east-3'),
-                ]),
-                clouds.Region('eu-de').set_zones([
-                    clouds.Zone('eu-de-1'),
-                    clouds.Zone('eu-de-2'),
-                    clouds.Zone('eu-de-3'),
-                ]),
-                clouds.Region('eu-gb').set_zones([
-                    clouds.Zone('eu-gb-1'),
-                    clouds.Zone('eu-gb-2'),
-                    clouds.Zone('eu-gb-3'),
-                ]),
-                clouds.Region('au-syd').set_zones([
-                    clouds.Zone('au-syd-1'),
-                    clouds.Zone('au-syd-2'),
-                    clouds.Zone('au-syd-3'),
-                ]),
-                clouds.Region('br-sao').set_zones([
-                    clouds.Zone('br-sao-1'),
-                    clouds.Zone('br-sao-2'),
-                    clouds.Zone('br-sao-3'),
-                ]),
-                clouds.Region('ca-tor').set_zones([
-                    clouds.Zone('ca-tor-1'),
-                    clouds.Zone('ca-tor-2'),
-                    clouds.Zone('ca-tor-3'),
-                ]),
-                clouds.Region('jp-osa').set_zones([
-                    clouds.Zone('jp-osa-1'),
-                    clouds.Zone('jp-osa-2'),
-                    clouds.Zone('jp-osa-3'),
-                ]),
-                clouds.Region('jp-tok').set_zones([
-                    clouds.Zone('jp-tok-1'),
-                    clouds.Zone('jp-tok-2'),
-                    clouds.Zone('jp-tok-3'),
-                ]),
-            ]
-        return cls._regions
-
-    @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
         return dict()
@@ -203,7 +150,7 @@ class IBM(clouds.Cloud):
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
-        region: Optional['clouds.Region'],
+        region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
     ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
@@ -221,26 +168,16 @@ class IBM(clouds.Cloud):
         def _get_profile_resources(instance_profile):
             """returns a dict representing the
              cpu, memory and gpu of specified instance profile"""
-            profile_resources_str = instance_profile.split('-')[1]
-            # gpu count based on profile
-            gpu_num = int(
-                profile_resources_str.split('x')[2].split('v')[0]) if (len(
-                    profile_resources_str.split('x')) == 3) else 0
-            # cpu count based on profile
-            cpu_num = int(profile_resources_str.split('x')[0])
-            # memory GBs on profile
-            memory_num = int(profile_resources_str.split('x')[1])
+
+            cpu_num, memory_num = self.get_vcpus_mem_from_instance_type(
+                instance_profile)
+            gpu_num = self.get_accelerators_from_instance_type(instance_profile)
+            gpu_num = list(gpu_num.values())[0] if gpu_num else 0
             return {'CPU': cpu_num, 'memory': memory_num, 'GPU': gpu_num}
 
-        if region is None:
-            assert zones is None, (
-                'Set either both or neither for: region, zones.')
-            region = self._get_default_region()
-            zones = region.zones
-        else:
-            assert zones is not None, (
-                'Set either both or neither for: region, zones.')
         region_name = region.name
+        # zones is guaranteed to be initialized for
+        # clouds implementing 'zones_provision_loop()'
         zone_names = [zone.name for zone in zones]  # type: ignore[union-attr]
 
         r = resources
@@ -356,13 +293,6 @@ class IBM(clouds.Cloud):
         if instance_list is None:
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
-
-    @classmethod
-    def _get_default_region(cls) -> clouds.Region:
-        region_name = get_cred_file_field('region', 'us_south')
-
-        return next(
-            region for region in cls.regions() if region.name == region_name)
 
     @classmethod
     def get_default_image(cls, region) -> str:
