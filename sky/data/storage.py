@@ -1227,7 +1227,7 @@ class S3Store(AbstractStore):
             if 'NoSuchBucket' in e.output.decode('utf-8'):
                 logger.debug(
                     _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
-                        bucket_name))
+                        bucket_name=bucket_name))
                 return False
             else:
                 logger.error(e.output)
@@ -1637,7 +1637,7 @@ class GcsStore(AbstractStore):
                 # Do a no-op in that case.
                 logger.debug(
                     _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
-                        bucket_name))
+                        bucket_name=bucket_name))
                 return False
             try:
                 remove_obj_command = ('gsutil -m rm -r'
@@ -1964,7 +1964,7 @@ class R2Store(AbstractStore):
             if 'NoSuchBucket' in e.output.decode('utf-8'):
                 logger.debug(
                     _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
-                        bucket_name))
+                        bucket_name=bucket_name))
                 return False
             else:
                 logger.error(e.output)
