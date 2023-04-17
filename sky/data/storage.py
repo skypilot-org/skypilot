@@ -147,24 +147,28 @@ class AbstractStore:
                      name: str,
                      source: Optional[SourceType],
                      region: Optional[str] = None,
-                     is_sky_managed: Optional[bool] = None):
+                     is_sky_managed: Optional[bool] = None,
+                     sync_on_reconstruction: Optional[bool] = None):
             self.name = name
             self.source = source
             self.region = region
             self.is_sky_managed = is_sky_managed
+            self.sync_on_reconstruction = sync_on_reconstruction
 
         def __repr__(self):
             return (f'StoreMetadata('
                     f'\n\tname={self.name},'
                     f'\n\tsource={self.source},'
                     f'\n\tregion={self.region},'
-                    f'\n\tis_sky_managed={self.is_sky_managed})')
+                    f'\n\tis_sky_managed={self.is_sky_managed},'
+                    f'\n\tsync_on_reconstruction={self.sync_on_reconstruction})')
 
     def __init__(self,
                  name: str,
                  source: Optional[SourceType],
                  region: Optional[str] = None,
-                 is_sky_managed: Optional[bool] = None):
+                 is_sky_managed: Optional[bool] = None,
+                 sync_on_reconstruction: Optional[bool] = True):
         """Initialize AbstractStore
 
         Args:
@@ -173,6 +177,10 @@ class AbstractStore:
             region: Region to place the bucket in
             is_sky_managed: Whether the store is managed by Sky. If None, it
               must be populated by the implementing class during initialization.
+            sync_on_reconstruction: bool; Whether to sync data if the storage
+              object is found in the global_user_state and reconstructed from
+              there. This is set to false when the Storage object is created not
+              for direct use, e.g. for sky storage delete.
 
         Raises:
             StorageBucketCreateError: If bucket creation fails
@@ -183,6 +191,7 @@ class AbstractStore:
         self.source = source
         self.region = region
         self.is_sky_managed = is_sky_managed
+        self.sync_on_reconstruction = sync_on_reconstruction
         # Whether sky is responsible for the lifecycle of the Store.
         self._validate()
         self.initialize()
@@ -198,7 +207,9 @@ class AbstractStore:
                    source=override_args.get('source', metadata.source),
                    region=override_args.get('region', metadata.region),
                    is_sky_managed=override_args.get('is_sky_managed',
-                                                    metadata.is_sky_managed))
+                                                    metadata.is_sky_managed),
+                   sync_on_reconstruction=override_args.get('sync_on_reconstruction',
+                                                    metadata.sync_on_reconstruction))
 
     def get_metadata(self) -> StoreMetadata:
         return self.StoreMetadata(name=self.name,
@@ -417,7 +428,8 @@ class Storage(object):
                 # source from the YAML
                 if s_type == StoreType.S3:
                     store = S3Store.from_metadata(s_metadata,
-                                                  source=self.source)
+                                                  source=self.source,
+                                                  sync_on_reconstruction=self.sync_on_reconstruction)
                 elif s_type == StoreType.GCS:
                     store = GcsStore.from_metadata(s_metadata,
                                                    source=self.source)
@@ -676,7 +688,8 @@ class Storage(object):
 
         # Initialize store object and get/create bucket
         try:
-            store = store_cls(name=self.name, source=self.source)
+            store = store_cls(name=self.name, source=self.source,
+                              sync_on_reconstruction=self.sync_on_reconstruction)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
             # to state.
@@ -861,10 +874,11 @@ class S3Store(AbstractStore):
                  name: str,
                  source: str,
                  region: Optional[str] = 'us-east-2',
-                 is_sky_managed: Optional[bool] = None):
+                 is_sky_managed: Optional[bool] = None,
+                 sync_on_reconstruction: bool = True):
         self.client: 'boto3.client.Client'
-        self.bucket: 'StorageHandle'
-        super().__init__(name, source, region, is_sky_managed)
+        self.bucket: Optional[boto3.resource('s3').Bucket]
+        super().__init__(name, source, region, is_sky_managed, sync_on_reconstruction)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -996,8 +1010,13 @@ class S3Store(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
-        self._delete_s3_bucket(self.name)
-        logger.info(f'{colorama.Fore.GREEN}Deleted S3 bucket {self.name}.'
+        deleted_by_skypilot = self._delete_s3_bucket(self.name)
+        if deleted_by_skypilot:
+            msg_str = f'Deleted S3 bucket {self.name}.'
+        else:
+            msg_str = f'S3 bucket {self.name} may have been deleted ' \
+                      f'externally. Removing from local state.'
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
     def get_handle(self) -> StorageHandle:
@@ -1065,13 +1084,15 @@ class S3Store(AbstractStore):
         elif self.source.startswith('r2://'):
             data_transfer.r2_to_s3(self.name, self.name)
 
-    def _get_bucket(self) -> Tuple[StorageHandle, bool]:
+    def _get_bucket(self) -> Tuple[Optional[StorageHandle], bool]:
         """Obtains the S3 bucket.
 
-        If the bucket exists, this method will connect to the bucket.
-        If the bucket does not exist, there are two cases:
+        If the bucket exists, this method will return the bucket.
+        If the bucket does not exist, there are three cases:
           1) Raise an error if the bucket source starts with s3://
-          2) Create a new bucket otherwise
+          2) Return None if bucket has been externally deleted and
+             sync_on_reconstruction if False
+          2) Create and return a new bucket otherwise
 
         Raises:
             StorageBucketCreateError: If creating the bucket fails
@@ -1105,10 +1126,13 @@ class S3Store(AbstractStore):
                     f'{self.source}. Consider using `aws s3 ls '
                     f'{self.source}` to debug.')
 
-        # If bucket cannot be found in both private and public settings,
-        # the bucket is created by Sky.
-        bucket = self._create_s3_bucket(self.name)
-        return bucket, True
+        if self.sync_on_reconstruction:
+            # If bucket cannot be found in both private and public settings,
+            # the bucket is created by Sky.
+            bucket = self._create_s3_bucket(self.name)
+            return bucket, True
+
+        return None, False
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on s3 bucket
@@ -1166,11 +1190,14 @@ class S3Store(AbstractStore):
                     f'{self.name} but failed.') from e
         return aws.resource('s3').Bucket(bucket_name)
 
-    def _delete_s3_bucket(self, bucket_name: str) -> None:
+    def _delete_s3_bucket(self, bucket_name: str) -> bool:
         """Deletes S3 bucket, including all objects in bucket
 
         Args:
           bucket_name: str; Name of bucket
+
+        Returns:
+         bool; True if bucket was deleted, False if it was deleted externally.
         """
         # Deleting objects is very slow programatically
         # (i.e. bucket.objects.all().delete() is slow).
@@ -1183,16 +1210,22 @@ class S3Store(AbstractStore):
         try:
             with log_utils.safe_rich_status(
                     f'[bold cyan]Deleting S3 bucket {bucket_name}[/]'):
-                subprocess.check_output(remove_command.split(' '))
+                subprocess.check_output(remove_command.split(' '),
+                                        stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
-            logger.error(e.output)
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.StorageBucketDeleteError(
-                    f'Failed to delete S3 bucket {bucket_name}.')
+            if 'NoSuchBucket' in e.output.decode('utf-8'):
+                logger.debug(f'Bucket {bucket_name} does not exist. It may have been deleted externally.')
+                return False
+            else:
+                logger.error(e.output)
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketDeleteError(
+                        f'Failed to delete S3 bucket {bucket_name}.')
 
         # Wait until bucket deletion propagates on AWS servers
         while data_utils.verify_s3_bucket(bucket_name):
             time.sleep(0.1)
+        return True
 
 
 class GcsStore(AbstractStore):
