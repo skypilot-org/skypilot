@@ -179,6 +179,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
+@pytest.mark.no_ibm  # requires GCP credentials.
 def test_example_app():
     test = Test(
         'example_app',
@@ -939,6 +940,7 @@ def test_ibm_job_queue_multinode():
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
+@pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus
 def test_multi_echo(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -960,6 +962,7 @@ def test_multi_echo(generic_cloud: str):
 
 # ---------- Task: 1 node training. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
+@pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 def test_huggingface(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1069,6 +1072,7 @@ def test_multi_hostname(generic_cloud: str):
 
 # ---------- Task: n=2 nodes with setups. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
+@pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 def test_distributed_tf(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1133,6 +1137,7 @@ def test_azure_start_stop():
 
 # ---------- Testing Autostopping ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
+@pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
 def test_autostop(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1266,6 +1271,7 @@ def test_cancel_azure():
 
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
+@pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 def test_cancel_pytorch(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1288,6 +1294,8 @@ def test_cancel_pytorch(generic_cloud: str):
     run_one_test(test)
 
 
+# can't use `_get_cancel_task_with_cloud()`, as command `nvidia-smi`
+# requires a CUDA public image, which IBM doesn't offer
 @pytest.mark.ibm
 def test_cancel_ibm():
     name = _get_cluster_name()
@@ -1309,6 +1317,7 @@ def test_cancel_ibm():
 
 # ---------- Testing use-spot option ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 def test_use_spot(generic_cloud: str):
     """Test use-spot and sky exec."""
     name = _get_cluster_name()
@@ -1327,6 +1336,7 @@ def test_use_spot(generic_cloud: str):
 
 # ---------- Testing managed spot ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot(generic_cloud: str):
     """Test the spot yaml."""
@@ -1357,6 +1367,7 @@ def test_spot(generic_cloud: str):
 
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_failed_setup(generic_cloud: str):
     """Test managed spot job with failed setup."""
@@ -1441,6 +1452,7 @@ def test_spot_recovery_gcp():
 
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_recovery_default_resources(generic_cloud: str):
     """Test managed spot recovery for default resources."""
@@ -1645,6 +1657,7 @@ def test_spot_cancellation_gcp():
 
 # ---------- Testing storage for managed spot ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_storage(generic_cloud: str):
     """Test storage with managed spot"""
@@ -1697,6 +1710,7 @@ def test_spot_tpu():
 
 # ---------- Testing env for spot ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_inline_env(generic_cloud: str):
     """Test spot env"""
