@@ -385,7 +385,7 @@ def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def get_distinct_cluster_names_from_history() -> List[Optional[str]]:
+def get_distinct_cluster_names_from_history() -> List[Tuple[Any]]:
     rows = _DB.cursor.execute(
         'SELECT DISTINCT name from cluster_history').fetchall()
     return rows
@@ -397,12 +397,12 @@ def get_cluster_from_history_by_name(cluster_name: str) -> List[Optional[Any]]:
     return rows
 
 
-def aggregate_records_by_name(cluster_name: str) -> Optional[Dict[str, Any]]:
+def aggregate_records_by_name(cluster_name: str) -> Dict[str, Any]:
 
     rows = _DB.cursor.execute('SELECT * from cluster_history WHERE name=(?)',
                               (cluster_name,)).fetchall()
 
-    record = {}
+    record: Dict[str, Any] = {}
 
     for row in rows:
         # TODO: use namedtuple instead of dict
@@ -441,14 +441,13 @@ def _get_cluster_usage_intervals(
         return pickle.loads(usage_intervals)
     return None
 
-    
-def get_split_view_records_by_name(
-        cluster_name: str) -> Optional[Dict[str, Any]]:
+
+def get_split_view_records_by_name(cluster_name: str) -> List[Dict[str, Any]]:
 
     rows = _DB.cursor.execute('SELECT * from cluster_history WHERE name=(?)',
                               (cluster_name,)).fetchall()
 
-    records = []
+    records: List[Dict[str, Any]] = []
 
     for row in rows:
         # TODO: use namedtuple instead of dict

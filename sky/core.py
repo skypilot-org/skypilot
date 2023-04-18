@@ -961,7 +961,8 @@ def spot_cost_report(refresh: bool, condensed: bool) -> List[Dict[str, Any]]:
 
     stop_msg = ''
     if not refresh:
-        stop_msg = 'To view the latest job table: sky spot cost --refresh'
+        command = 'sky spot cost-report --refresh'
+        stop_msg = f'To view the latest job table: {command}'
 
     controller_status, handle = spot.is_spot_controller_up(stop_msg)
 

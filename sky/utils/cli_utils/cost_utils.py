@@ -24,6 +24,9 @@ def _aggregate_records_by_name(cluster_name: str,
                                records: List[Any]) -> Dict[str, Any]:
     agg_record: Dict[str, Any] = {}
 
+    # to have most updated cluster status in aggregated record
+    records.sort(key=lambda record: record['launched_at'])
+
     for record in records:
 
         if record['name'] == cluster_name:
@@ -42,6 +45,7 @@ def _aggregate_records_by_name(cluster_name: str,
                 agg_record['usage_intervals'] += record['usage_intervals']
                 agg_record['resources'] = record['resources']
                 agg_record['num_nodes'] = record['num_nodes']
+                agg_record['status'] = record['status']
 
     return agg_record
 

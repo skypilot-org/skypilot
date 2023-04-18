@@ -1810,7 +1810,7 @@ def cost_report(all: bool, condensed: bool, clusters: List[str]):  # pylint: dis
         if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
             cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
                 cluster_name]
-                
+
             # to display most recent entry for each reserved cluster
             # TODO(sgurram): fix assumption of sorted order of clusters
             if cluster_group_name not in reserved_clusters:
