@@ -466,6 +466,15 @@ class Cloud:
             exceptions.NotSupportedError: If the disk tier is not supported.
         """
         raise NotImplementedError
+    
+    @classmethod
+    def check_quota_not_zero(
+        cls,
+        region: str,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]] = None,
+        use_spot: bool = False) -> bool:
+        return True
 
     def __repr__(self):
         return self._REPR
