@@ -3076,8 +3076,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     stream_logs=False,
                     require_outputs=True)
 
-        if (isinstance(cloud, clouds.IBM) and terminate and
-                prev_cluster_status == global_user_state.ClusterStatus.STOPPED):
+        elif (isinstance(cloud, clouds.IBM) and terminate and
+              prev_cluster_status == global_user_state.ClusterStatus.STOPPED):
             # pylint: disable= W0622 W0703 C0415
             from sky.adaptors import ibm
             from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
