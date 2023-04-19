@@ -130,32 +130,48 @@ class AutostopEvent(SkyletEvent):
         if (autostop_config.backend ==
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
             autostop_lib.set_autostopping_started()
+
+            config = common_utils.read_yaml(self._ray_yaml_path)
+            is_cluster_multinode = config['max_workers'] > 0
+
+            # Even for !is_cluster_multinode, we want to call this to replace
+            # cache_stopped_nodes.
             self._replace_yaml_for_stopping(self._ray_yaml_path,
                                             autostop_config.down)
 
-            # `ray up` is required to reset the upscaling speed and min/max
-            # workers. Otherwise, `ray down --workers-only` will continuously
-            # scale down and up.
-            logger.info('Running ray up.')
-            script = (cloud_vm_ray_backend.
-                      write_ray_up_script_with_patched_launch_hash_fn(
-                          self._ray_yaml_path,
-                          ray_up_kwargs={'restart_only': True}))
-            subprocess.run(
-                [sys.executable, script],
-                check=True,
-                # Use environment variables to disable the ray usage collection
-                # (to avoid overheads and potential issues with the usage)
-                # as sdk does not take the argument for disabling the usage
-                # collection.
-                env=dict(os.environ, RAY_USAGE_STATS_ENABLED='0'),
-            )
+            # We do "initial ray up + ray down --workers-only" only for
+            # multinode clusters for two reasons: (1) optimization; they are
+            # not needed for single-node; (2) for single-node SSO clusters, we
+            # have seen a weird bug where user image's /etc/profile.d may
+            # contain the two AWS env vars, and so they take effect in the
+            # initial 'ray up', throwing a RuntimeError when some private VPC
+            # is not found (since it only exists in the assumed role, not in
+            # the custome principal set by the env vars).
+            if is_cluster_multinode:
+                # `ray up` is required to reset the upscaling speed and min/max
+                # workers. Otherwise, `ray down --workers-only` will
+                # continuously scale down and up.
+                logger.info('Running ray up.')
+                script = (cloud_vm_ray_backend.
+                          write_ray_up_script_with_patched_launch_hash_fn(
+                              self._ray_yaml_path,
+                              ray_up_kwargs={'restart_only': True}))
+                subprocess.run(
+                    [sys.executable, script],
+                    check=True,
+                    # Use environment variables to disable the ray usage
+                    # collection (to avoid overheads and potential issues with
+                    # the usage) as sdk does not take the argument for
+                    # disabling the usage collection.
+                    env=dict(os.environ, RAY_USAGE_STATS_ENABLED='0'),
+                )
 
-            logger.info('Running ray down.')
-            # Stop the workers first to avoid orphan workers.
-            subprocess.run(
-                ['ray', 'down', '-y', '--workers-only', self._ray_yaml_path],
-                check=True)
+                logger.info('Running ray down.')
+                # Stop the workers first to avoid orphan workers.
+                subprocess.run([
+                    'ray', 'down', '-y', '--workers-only', self._ray_yaml_path
+                ],
+                               check=True)
 
             logger.info('Running final ray down.')
             subprocess.run(['ray', 'down', '-y', self._ray_yaml_path],
