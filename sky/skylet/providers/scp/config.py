@@ -2,10 +2,12 @@ import copy
 
 
 class ZoneConfig:
-    def __init__(self, scp_client, zone_name):
-        self.zone_name = zone_name
+    def __init__(self, scp_client, node_config):
+        self.zone_name = node_config['region']
+        self.ssh_user = node_config['auth']['ssh_user']
+
         self.scp_client = scp_client
-        self.zone_id = self._get_region_id(zone_name)
+        self.zone_id = self._get_region_id(self.zone_name)
         self.product_ids = self._set_product_list()
         self.product_group_ids = self._set_product_group()
 
@@ -50,8 +52,8 @@ class ZoneConfig:
             'deletionProtectionEnabled': False,
             'dnsEnabled': True,
             'osAdmin':{
-                'osUserId': 'root',
-                'osUserPassword': 'example123$'
+                'osUserId': self.ssh_user,
+                'osUserPassword': 'default!@&$351!'
             },
             'blockStorage':{
                 'blockStorageName': 'skystorage',

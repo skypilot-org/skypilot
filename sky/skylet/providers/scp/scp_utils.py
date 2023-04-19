@@ -81,7 +81,7 @@ def raise_scp_error(response: requests.Response) -> None:
     status_code = response.status_code
     if status_code == 200 or status_code == 202 :
         return
-    print(response.json())
+
     try:
         resp_json = response.json()
 
@@ -114,16 +114,12 @@ class SCPClient:
                 for line in lines
             }
         self.access_key = self._credentials['scp_access_key']
-        self.secret_key = self._credentials.get('scp_secret_key', None)
-        self.client_type = self._credentials.get('scp_client_type', None)
-        self.project_id = self._credentials.get('scp_project_id', None)
-        self.timestamp = self._credentials.get('scp_timestamp', None)
-        self.signature = self._credentials.get('scp_signature', None)
+        self.secret_key = self._credentials['scp_secret_key']
+        self.project_id = self._credentials['scp_project_id']
+        self.client_type = 'OpenApi'
+        self.timestamp = None
+        self.signature = None
 
-        self.user_name = self._credentials.get('user_name', None)
-        self.password = self._credentials.get('password', None)
-        self.ssh_private_key_path = self._credentials.get('ssh_private_key_path', None)
-        self.ssh_public_key_path = self._credentials.get('ssh_public_key_path', None)
 
         self.headers = {
             'X-Cmp-AccessKey': f'{self.access_key}',
@@ -152,7 +148,7 @@ class SCPClient:
         method = 'POST'
         self.set_timestamp()
         self.set_signature(url=url, method=method)
-        print(request_body)
+
         response = requests.post(url, json=request_body, headers=self.headers)
 
         raise_scp_error(response)
@@ -163,7 +159,6 @@ class SCPClient:
         self.set_timestamp()
         self.set_signature(url=url, method=method)
         if request_body:
-            print(request_body)
             response = requests.delete(url, json=request_body, headers=self.headers)
 
         else: response = requests.delete(url,  headers=self.headers)
@@ -289,8 +284,6 @@ class SCPClient:
         if url_info.query:
             enc_params = list(map(lambda item: (item[0], parse.quote(item[1][0])), parse.parse_qs(url_info.query).items()))
             url = f'{url}?{parse.urlencode(enc_params)}'
-
-        print(url)
 
         message = method + url + self.timestamp + self.access_key + self.project_id + self.client_type
         message = bytes(message, 'utf-8')

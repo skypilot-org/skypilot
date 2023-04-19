@@ -350,7 +350,7 @@ class SCPNodeProvider(NodeProvider):
             count -= len(reuse_nodes)
 
         if count:
-            zone_config = ZoneConfig(self.scp_client, node_config['region'])
+            zone_config = ZoneConfig(self.scp_client, node_config)
             vpc_subnets = zone_config.get_vcp_subnets()
             if (len(vpc_subnets) == 0): raise SCPError("This region/zone does not have available VPCS.")
 
@@ -449,6 +449,7 @@ class SCPNodeProvider(NodeProvider):
 
     @staticmethod
     def bootstrap_config(cluster_config):
+
 
         node_config = cluster_config['available_node_types']['ray_head_default']['node_config']
         provider_config = cluster_config['provider']
