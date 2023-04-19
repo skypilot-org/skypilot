@@ -140,13 +140,14 @@ class AutostopEvent(SkyletEvent):
                                             autostop_config.down)
 
             # We do "initial ray up + ray down --workers-only" only for
-            # multinode clusters for two reasons: (1) optimization; they are
-            # not needed for single-node; (2) for single-node SSO clusters, we
+            # multinode clusters for two reasons: (1) optimization: they are
+            # not needed for single-node; (2) for single-node SSO clusters: we
             # have seen a weird bug where user image's /etc/profile.d may
             # contain the two AWS env vars, and so they take effect in the
             # initial 'ray up', throwing a RuntimeError when some private VPC
             # is not found (since it only exists in the assumed role, not in
-            # the custome principal set by the env vars).
+            # the custome principal set by the env vars). We use both this
+            # optimization and removing inheriting os.environ to fix this.
             if is_cluster_multinode:
                 # `ray up` is required to reset the upscaling speed and min/max
                 # workers. Otherwise, `ray down --workers-only` will
@@ -163,7 +164,11 @@ class AutostopEvent(SkyletEvent):
                     # collection (to avoid overheads and potential issues with
                     # the usage) as sdk does not take the argument for
                     # disabling the usage collection.
-                    env=dict(os.environ, RAY_USAGE_STATS_ENABLED='0'),
+                    #
+                    # Do not inherit from os.environ, which may have
+                    # cloud-specific credentials set as env vars (e.g., AWS's
+                    # two env vars). See #1880 and comments above for details.
+                    env=dict(RAY_USAGE_STATS_ENABLED='0'),
                 )
 
                 logger.info('Running ray down.')
