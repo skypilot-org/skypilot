@@ -1177,10 +1177,9 @@ class RetryingVmProvisioner(object):
             to_provision, 'region should have been set by the optimizer.')
         region = clouds.Region(to_provision.region)
     
-        if (cloud.check_quota_not_zero(
+        if (not to_provision.cloud.check_quota_not_zero(
                 to_provision.region,
                 to_provision.instance_type,
-                to_provision.accelerators,
                 to_provision.use_spot == False)):
             logger.error('There is a quota of zero in the region for ast least'
                             'one of the particular resources requested')

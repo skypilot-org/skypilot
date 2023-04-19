@@ -648,8 +648,7 @@ class AWS(clouds.Cloud):
     def check_quota_not_zero(
         cls,
         region: str,
-        instance_type: Optional[str],
-        accelerators: Optional[Dict[str, int]] = None,
+        instance_type: str,
         use_spot: bool = False) -> bool:
 
         try:
@@ -660,48 +659,33 @@ class AWS(clouds.Cloud):
         except ImportError:
             raise ImportError('Fail to import dependencies for AWS.'
                               'Try pip install "skypilot[aws]"') from None
-
-        if instance_type is None and accelerators is None:
-            return True
         
         INSTANCE_MAPPING_URL = 'https://raw.githubusercontent.com/skypilot-org/shethhriday29/skypilot-catalog/blob/master/catalogs/v5/aws/instance_quota_mapping.csv'
-        ACCELERATOR_MAPPING_URL = 'https://raw.githubusercontent.com/skypilot-org/shethhriday29/skypilot-catalog/blob/master/catalogs/v5/aws/accelerator_quota_mapping.csv'        
         instance_mapping = pd.read_csv(INSTANCE_MAPPING_URL)
-        accelerator_mapping = pd.read_csv(ACCELERATOR_MAPPING_URL)
 
         client = boto3.client('service-quotas', region_name=region)
         
-        quotas_to_check = []
-
-        spot_header = 'On-Demand Service Quota Code'
-        if (use_spot) {
+        spot_header = ''
+        if (use_spot):
             spot_header = 'Spot Instance Service Quota Code'
-        }
-
-        if instance_type is not None:
-            instance_quota = instance_mapping.loc[
+        else:
+            spot_header = 'On-Demand Service Quota Code' 
+        
+        quota_code = ''
+        try:
+            quota_code = instance_mapping.loc[
                 instance_mapping['Instance Type'] == instance_type, 
                 spot_header].values[0]
-            
-            if instance_quota not in quotas_to_check:
-                quotas_to_check.append(instance_quota)
         
-        for accelerator_name in accelerators:
-            accelerator_quota = accelerator_mapping.loc[
-                accelerator_mapping['Canonicalized Accelerator Name'] 
-                    == accelerator_name, 
-                spot_header].values[0]
-            
-            if accelerator_quota not in quotas_to_check:
-                quotas_to_check.append(accelerator_quota)
+        except IndexError:
+            return True
         
-        for quota_code in quotas_to_check:
-            response = client.get_service_quota(
-                ServiceCode='ec2',
-                QuotaCode=quota_code)
-                
-            if response['Quota']['Value'] == 0:
-                return False
+        response = client.get_service_quota(
+            ServiceCode='ec2',
+            QuotaCode=quota_code)
+            
+        if response['Quota']['Value'] == 0:
+            return False
 
         return True
 
