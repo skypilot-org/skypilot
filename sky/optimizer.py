@@ -937,6 +937,12 @@ def _fill_in_launchable_resources(
             # launch the instance, and fail over to other zones. We find this
             # behavior acceptable because this will happen only when the user
             # requested GCP 4:P100 or 8:K80 with a very large host VM.
+            elif isinstance(resources.cloud, clouds.SCP):
+                # Check if the host VM satisfies the min/max disk size limits.
+                if resources.disk_size and not clouds.SCP.is_disk_size_allowed(resources.disk_size):
+                    launchable[resources] = []
+                    continue
+
             launchable[resources] = _make_launchables_for_valid_region_zones(
                 resources)
         else:
