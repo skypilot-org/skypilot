@@ -154,7 +154,7 @@ def r2_profile_in_aws_cred() -> bool:
             for line in file:
                 if '[r2]' in line:
                     r2_profile_exists = True
-        return r2_profile_exists
+    return r2_profile_exists
 
 
 def get_credential_file_mounts() -> Dict[str, str]:
