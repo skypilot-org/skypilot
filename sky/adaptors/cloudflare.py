@@ -149,10 +149,11 @@ def r2_profile_in_aws_cred() -> bool:
 
     profile_path = os.path.expanduser(AWS_R2_PROFILE_PATH)
     r2_profile_exists = False
-    with open(profile_path, 'r') as file:
-        for line in file:
-            if '[r2]' in line:
-                r2_profile_exists = True
+    if os.path.isfile(profile_path):
+        with open(profile_path, 'r') as file:
+            for line in file:
+                if '[r2]' in line:
+                    r2_profile_exists = True
     return r2_profile_exists
 
 
