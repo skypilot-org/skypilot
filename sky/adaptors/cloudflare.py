@@ -167,4 +167,3 @@ def get_credential_file_mounts() -> Dict[str, str]:
         ACCOUNT_ID_PATH: ACCOUNT_ID_PATH
     }
     return r2_credential_mounts
-    
