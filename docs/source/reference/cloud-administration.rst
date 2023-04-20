@@ -17,11 +17,15 @@ For users who want to use advanced cloud-specific features (e.g., use SSO; have 
 AWS
 -------------------------------
 
+.. _aws-sso:
+
 AWS SSO
 ~~~~~~~~~~~
 `AWS IAM Identity Center <https://aws.amazon.com/iam/identity-center/>`_ (Successor to AWS Single Sign-On, or SSO) is supported.
 
-To use it, simply ensure that your machine `has AWS CLI V2 installed <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>`_. Use the following to check:
+To use it, ensure that your machine `has AWS CLI V2 installed <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>`_ (by default, ``pip install skypilot[aws]`` installs V1; V2 cannot be installed via pip).
+
+You can use the following to check version:
 
 .. code-block:: console
 
@@ -35,7 +39,7 @@ Using several profiles or accounts
 
 You can use different AWS profiles or accounts to launch different clusters. SkyPilot will remember the owner identity of each cluster and properly protects any "write" operations. All clusters are shown in ``sky status``.
 
-Example:
+Example of mixing a default profile and an SSO profile:
 
 .. code-block:: console
 
