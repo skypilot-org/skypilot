@@ -41,9 +41,9 @@ def check(quiet: bool = False) -> None:
     echo('\r', nl=False)
     status_msg = 'enabled' if r2_is_enabled else 'disabled'
     status_color = 'green' if r2_is_enabled else 'red'
-    echo('  ' + click.style(
-    f'{cloud}: {status_msg}', fg=status_color, bold=True) +
-        ' ' * 10)   
+    echo('  ' +
+         click.style(f'{cloud}: {status_msg}', fg=status_color, bold=True) +
+         ' ' * 10)
     if not r2_is_enabled:
         echo(f'    Reason: {reason}')
 
