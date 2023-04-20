@@ -5,11 +5,13 @@
 import functools
 import threading
 import os
+from typing import Dict
 
 boto3 = None
 botocore = None
 _session_creation_lock = threading.RLock()
 ACCOUNT_ID_PATH = '~/.cloudflare/accountid'
+AWS_R2_PROFILE_PATH = '~/.aws/credentials'
 R2_PROFILE_NAME = 'r2'
 
 
@@ -119,3 +121,38 @@ def create_endpoint():
     endpoint = 'https://' + accountid + '.r2.cloudflarestorage.com'
 
     return endpoint
+
+
+def r2_is_enabled() -> bool:
+    """Checks if Cloudflare R2 is enabled"""
+
+    accountid_path = os.path.expanduser(ACCOUNT_ID_PATH)
+
+    return os.path.exists(accountid_path) and r2_profile_in_aws_cred()
+
+
+def r2_profile_in_aws_cred() -> bool:
+    """Checks if Cloudflare R2 profile is set in aws credentials"""
+
+    profile_path = os.path.expanduser(AWS_R2_PROFILE_PATH)
+    r2_profile_exists = False
+    with open(profile_path, 'r') as file:
+        for line in file:
+            if '[r2]' in line:
+                r2_profile_exists = True
+    return r2_profile_exists
+
+
+def get_credential_file_mounts() -> Dict[str, str]:
+    """Checks if aws credential file is set and update if not
+       Updates file containing account ID information
+
+    Args:
+        file_mounts: stores path to credential files of clouds
+    """
+
+    r2_credential_mounts = {
+        '~/.aws/credentials': '~/.aws/credentials',
+        ACCOUNT_ID_PATH: ACCOUNT_ID_PATH
+    }
+    return r2_credential_mounts
