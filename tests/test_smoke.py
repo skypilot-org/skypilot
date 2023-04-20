@@ -179,7 +179,6 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
-@pytest.mark.no_ibm  # requires GCP credentials.
 def test_example_app():
     test = Test(
         'example_app',
