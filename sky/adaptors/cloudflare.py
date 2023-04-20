@@ -126,14 +126,16 @@ def create_endpoint():
 def check_credentials() -> Tuple[bool, Optional[str]]:
     """Checks if the user has access credentials to this cloud."""
     
-    hints = ''
+    hints = None
     accountid_path = os.path.expanduser(ACCOUNT_ID_PATH)
     if not os.path.exists(accountid_path):
-        hints += 'Account ID from R2 dashboard is not set.' 
+        hints = 'Account ID from R2 dashboard is not set.' 
     if not r2_profile_in_aws_cred():
         if hints:
             hints += ' And '
-        hints = '[r2] profile is not set in ~/.aws/credentials.'
+        else:
+            hints = ''
+        hints += '[r2] profile is not set in ~/.aws/credentials.'
     return (True, hints) if hints else (False, None)
 
 
