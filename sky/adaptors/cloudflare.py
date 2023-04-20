@@ -127,7 +127,7 @@ def r2_is_enabled() -> bool:
     """Checks if Cloudflare R2 is enabled"""
 
     accountid_path = os.path.expanduser(ACCOUNT_ID_PATH)
-    
+
     return os.path.exists(accountid_path) and r2_profile_in_aws_cred()
 
 
@@ -151,5 +151,8 @@ def get_credential_file_mounts() -> Dict[str, str]:
         file_mounts: stores path to credential files of clouds
     """
 
-    r2_credential_mounts = {'~/.aws/credentials': '~/.aws/credentials', ACCOUNT_ID_PATH: ACCOUNT_ID_PATH}
+    r2_credential_mounts = {
+        '~/.aws/credentials': '~/.aws/credentials',
+        ACCOUNT_ID_PATH: ACCOUNT_ID_PATH
+    }
     return r2_credential_mounts
