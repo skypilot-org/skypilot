@@ -137,7 +137,7 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
             hints = ''
         hints += '[r2] profile is not set in ~/.aws/credentials.'
     if hints:
-        hints += (' Please follow the instructions in:'
+        hints += ('\n      Please follow the instructions in:'
                   '\n      https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#cloudflare-r2'  )
 
     return (False, hints) if hints else (True, hints)
