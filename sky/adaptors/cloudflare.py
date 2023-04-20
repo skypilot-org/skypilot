@@ -5,7 +5,7 @@
 import functools
 import threading
 import os
-from typing import Dict
+from typing import Dict, Optional, Tuple
 
 boto3 = None
 botocore = None
@@ -123,12 +123,18 @@ def create_endpoint():
     return endpoint
 
 
-def r2_is_enabled() -> bool:
-    """Checks if Cloudflare R2 is enabled"""
-
+def check_credentials() -> Tuple[bool, Optional[str]]:
+    """Checks if the user has access credentials to this cloud."""
+    
+    hints = ''
     accountid_path = os.path.expanduser(ACCOUNT_ID_PATH)
-
-    return os.path.exists(accountid_path) and r2_profile_in_aws_cred()
+    if not os.path.exists(accountid_path):
+        hints += 'Account ID from R2 dashboard is not set.' 
+    if not r2_profile_in_aws_cred():
+        if hints:
+            hints += ' And '
+        hints = '[r2] profile is not set in ~/.aws/credentials.'
+    return (True, hints) if hints else (False, None)
 
 
 def r2_profile_in_aws_cred() -> bool:
