@@ -273,11 +273,13 @@ class IBM(clouds.Cloud):
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
         if accelerators is None:
-            # No requirements to filter, so just return a default VM type.
-            return (_make([
-                IBM.get_default_instance_type(cpus=resources.cpus,
-                                              memory=resources.memory)
-            ]), fuzzy_candidate_list)
+            # Return a default instance type with the given number of vCPUs.
+            default_instance_type = IBM.get_default_instance_type(
+                cpus=resources.cpus, memory=resources.memory)
+            if default_instance_type is None:
+                return ([], [])
+            else:
+                return (_make([default_instance_type]), [])
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
