@@ -136,7 +136,7 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
         else:
             hints = ''
         hints += '[r2] profile is not set in ~/.aws/credentials.'
-    return (True, hints) if hints else (False, None)
+    return (True, None) if hints else (False, hints)
 
 
 def r2_profile_in_aws_cred() -> bool:
