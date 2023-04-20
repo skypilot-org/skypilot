@@ -53,7 +53,6 @@ def check(quiet: bool = False) -> None:
 
 def get_cloud_credential_file_mounts() -> Dict[str, str]:
     """Returns the files necessary to access all enabled clouds.
-
     Returns a dictionary that will be added to a task's file mounts
     and a list of patterns that will be excluded (used as rsync_exclude).
     """
@@ -66,8 +65,8 @@ def get_cloud_credential_file_mounts() -> Dict[str, str]:
     # as only clouds with computing instances are marked
     # as enabled by skypilot. This will be removed when
     # cloudflare/r2 is added as a 'cloud'.
-    if cloudflare.r2_is_enabled():
-        r2_credential_mounts = cloudflare.get_credential_file_mounts(
-            file_mounts)
+    r2_is_enabled, _ = cloud = cloudflare.check_credentials()
+    if r2_is_enabled:
+        r2_credential_mounts = cloudflare.get_credential_file_mounts()
         file_mounts.update(r2_credential_mounts)
     return file_mounts
