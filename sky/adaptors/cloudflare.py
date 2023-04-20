@@ -129,7 +129,7 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
     hints = None
     accountid_path = os.path.expanduser(ACCOUNT_ID_PATH)
     if not os.path.exists(accountid_path):
-        hints = 'Account ID from R2 dashboard is not set. ' 
+        hints = 'Account ID from R2 dashboard is not set.' 
     if not r2_profile_in_aws_cred():
         if hints:
             hints += ' And '
@@ -137,7 +137,7 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
             hints = ''
         hints += '[r2] profile is not set in ~/.aws/credentials.'
     if hints:
-        hints += (' Please follow the instructions in: '
+        hints += (' Please follow the instructions in:'
                   '\n      https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#cloudflare-r2'  )
 
     return (False, hints) if hints else (True, hints)
