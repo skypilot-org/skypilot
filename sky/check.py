@@ -70,3 +70,4 @@ def get_cloud_credential_file_mounts() -> Dict[str, str]:
         r2_credential_mounts = cloudflare.get_credential_file_mounts()
         file_mounts.update(r2_credential_mounts)
     return file_mounts
+    
