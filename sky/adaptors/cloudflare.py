@@ -165,7 +165,7 @@ def get_credential_file_mounts() -> Dict[str, str]:
     """
 
     r2_credential_mounts = {
-        '~/.aws/credentials': '~/.aws/credentials',
+        AWS_R2_PROFILE_PATH: AWS_R2_PROFILE_PATH,
         ACCOUNT_ID_PATH: ACCOUNT_ID_PATH
     }
     return r2_credential_mounts
