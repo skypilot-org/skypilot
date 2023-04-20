@@ -35,7 +35,8 @@ def check(quiet: bool = False) -> None:
     # support r2 as only clouds with computing instances
     # are added as 'cloud'. This will be removed when
     # cloudflare/r2 is added as a 'cloud'.
-    echo(f'  Checking Cloudflare(for R2 object store)...', nl=False)
+    cloud = 'Cloudflare(for R2 object store)'
+    echo(f'  Checking {cloud}...', nl=False)
     r2_is_enabled, reason = cloudflare.check_credentials()
     echo('\r', nl=False)
     status_msg = 'enabled' if r2_is_enabled else 'disabled'
