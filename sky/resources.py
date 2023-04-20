@@ -648,7 +648,7 @@ class Resources:
                     'Cloud must be specified when image_id is provided.')
 
         if not self._cloud.is_same_cloud(
-                clouds.IBM()) and self._cloud.is_same_cloud(
+                clouds.IBM()) and not self._cloud.is_same_cloud(
                     clouds.AWS()) and not self._cloud.is_same_cloud(
                         clouds.GCP()):
             with ux_utils.print_exception_no_traceback():
