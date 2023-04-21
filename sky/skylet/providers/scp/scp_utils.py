@@ -1,4 +1,10 @@
-"""SCP Cloud helper functions."""
+"""SCP Open-API Functions
+
+This module contains a set of rest api functions accessing SCP Open-API
+"""
+
+
+
 import os
 import json
 import requests
