@@ -3224,7 +3224,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             returncode, _, stderr = self.run_on_head(handle,
                                                      code,
                                                      require_outputs=True,
-                                                     stream_logs=stream_logs)
+                                                     stream_logs=stream_logs,
+                                                     max_retry=1)
             subprocess_utils.handle_returncode(returncode,
                                                code,
                                                'Failed to set autostop',
