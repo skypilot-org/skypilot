@@ -1,4 +1,9 @@
-"""SCP Cloud."""
+"""SCP: Samsung Cloud Platform.
+
+This module includes the set of functions
+to access the SCP catalog and check credentials for the SCP access.
+"""
+
 import json
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -26,7 +31,7 @@ MAX_DISK_SIZE=300
 
 @clouds.CLOUD_REGISTRY.register
 class SCP(clouds.Cloud):
-    """SCP Labs GPU Cloud."""
+    """SCP Cloud."""
 
     _REPR = 'SCP'
 

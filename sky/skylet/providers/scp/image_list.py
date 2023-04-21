@@ -1,3 +1,9 @@
+"""
+This module extracts OS image ID list for each zones
+by accessing SCP Open-API.
+"""
+
+
 
 zones =[
     {
