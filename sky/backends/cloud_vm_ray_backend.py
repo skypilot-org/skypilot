@@ -1176,14 +1176,14 @@ class RetryingVmProvisioner(object):
         assert to_provision.region is not None, (
             to_provision, 'region should have been set by the optimizer.')
         region = clouds.Region(to_provision.region)
-    
+
         if (not to_provision.cloud.check_quota_not_zero(
                 to_provision.region,
                 to_provision.instance_type,
-                to_provision.use_spot == False)):
-            logger.error('There is a quota of zero in the region for ast least'
-                            'one of the particular resources requested')
-            return
+                to_provision.use_spot)):
+                
+                raise exceptions.ResourcesUnavailableError('Zero quota in the region'
+                                                        'with attempted provisioning')
             
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status):

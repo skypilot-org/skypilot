@@ -3,7 +3,7 @@
 name: huggingface
 
 resources:
-  accelerators: V100:4
+  accelerators: A10G:4
   cloud: aws
 
 # Optional: upload a working directory to remote ~/sky_workdir.

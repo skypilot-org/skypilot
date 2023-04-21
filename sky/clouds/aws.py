@@ -660,8 +660,8 @@ class AWS(clouds.Cloud):
             raise ImportError('Fail to import dependencies for AWS.'
                               'Try pip install "skypilot[aws]"') from None
         
-        INSTANCE_MAPPING_URL = 'https://raw.githubusercontent.com/skypilot-org/shethhriday29/skypilot-catalog/blob/master/catalogs/v5/aws/instance_quota_mapping.csv'
-        instance_mapping = pd.read_csv(INSTANCE_MAPPING_URL)
+        from sky.clouds.service_catalog import aws_catalog
+        instance_mapping = aws_catalog.get_mapping()
 
         client = boto3.client('service-quotas', region_name=region)
         
