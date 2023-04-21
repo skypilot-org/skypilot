@@ -1,0 +1,44 @@
+# dnn.yaml
+
+name: huggingface
+
+resources:
+  accelerators: V100:4
+  cloud: aws
+
+# Optional: upload a working directory to remote ~/sky_workdir.
+# Commands in "setup" and "run" will be executed under it.
+#
+# workdir: .
+
+# Optional: upload local files.
+# Format:
+#   /remote/path: /local/path
+#
+# file_mounts:
+#   ~/.vimrc: ~/.vimrc
+#   ~/.netrc: ~/.netrc
+
+setup: |
+  set -e  # Exit if any command failed.
+  git clone https://github.com/huggingface/transformers/ || true
+  cd transformers
+  pip install .
+  cd examples/pytorch/text-classification
+  pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url 
+https://download.pytorch.org/whl/cu113
+
+run: |
+  set -e  # Exit if any command failed.
+  cd transformers/examples/pytorch/text-classification
+  python run_glue.py \
+    --model_name_or_path bert-base-cased \
+    --dataset_name imdb  \
+    --do_train \
+    --max_seq_length 128 \
+    --per_device_train_batch_size 32 \
+    --learning_rate 2e-5 \
+    --max_steps 50 \
+    --output_dir /tmp/imdb/ --overwrite_output_dir \
+    --fp16
+
