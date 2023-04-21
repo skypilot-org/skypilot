@@ -1,6 +1,8 @@
 resources:
   accelerators: A100:1
   disk_size: 1024
+  # Note: The disk_tier option is not offered in skypilot<=0.2.5, we need
+  # to install SkyPilot from source.
   disk_tier: high
 
 setup: |
