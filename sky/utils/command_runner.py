@@ -196,6 +196,7 @@ class SSHCommandRunner:
             stream_logs: bool = True,
             ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
             separate_stderr: bool = False,
+            max_retry: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -214,6 +215,8 @@ class SSHCommandRunner:
             ssh_mode: The mode to use for ssh.
                 See SSHMode for more details.
             separate_stderr: Whether to separate stderr from stdout.
+            max_retry: The maximum number of retries if the command fails with a
+            non-zero return code.
 
 
         Returns:
@@ -275,14 +278,23 @@ class SSHCommandRunner:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
 
-        return log_lib.run_with_log(' '.join(command),
-                                    log_path,
-                                    require_outputs=require_outputs,
-                                    stream_logs=stream_logs,
-                                    process_stream=process_stream,
-                                    shell=True,
-                                    executable=executable,
-                                    **kwargs)
+        backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
+        result = None
+        while max_retry >= 0:
+            result = log_lib.run_with_log(' '.join(command),
+                                          log_path,
+                                          require_outputs=require_outputs,
+                                          stream_logs=stream_logs,
+                                          process_stream=process_stream,
+                                          shell=True,
+                                          executable=executable,
+                                          **kwargs)
+            returncode = result[0] if require_outputs else result
+            if returncode == 0:
+                break
+            max_retry -= 1
+            time.sleep(backoff.current_backoff())
+        return result
 
     def rsync(
         self,
