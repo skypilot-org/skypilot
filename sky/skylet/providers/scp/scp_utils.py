@@ -101,7 +101,7 @@ def _singleton(class_):
     return get_instance
 
 
-def _retry(method, max_tries=5, backoff_s=3):
+def _retry(method, max_tries=20, backoff_s=5):
     @wraps(method)
     def method_with_retries(self, *args, **kwargs):
         try_count = 0
