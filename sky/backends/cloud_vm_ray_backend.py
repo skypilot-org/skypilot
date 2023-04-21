@@ -844,10 +844,10 @@ class RetryingVmProvisioner(object):
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         self._blocked_resources.add(launchable_resources.copy(zone=None))
 
-        # Sometimes, LambdaCloudError will list available regions.
+        # Sometimes, SCPError will list available regions.
         for e in errors:
             if e.find('Regions with capacity available:') != -1:
-                for r in clouds.Lambda.regions():
+                for r in clouds.SCP.regions():
                     if e.find(r.name) == -1:
                         self._blocked_resources.add(
                             launchable_resources.copy(region=r.name, zone=None))
@@ -2988,11 +2988,17 @@ class CloudVmRayBackend(backends.Backend):
                 config['provider']['cache_stopped_nodes'] = not terminate
                 provider = SCPNodeProvider(config['provider'], handle.cluster_name)
 
+                if not os.path.exists(provider.metadata.path):
+                    prefix = "SKYPILOT_ERROR_NO_NODES_LAUNCHED: "
+                    error = "Metadata file does not exist."
+                    raise RuntimeError(prefix + error)
+
                 with open(provider.metadata.path, 'r') as f:
                     metadata = json.load(f)
                     node_id = next((key for key in list(metadata.keys()) if key.startswith('INSTANCE')), None)
                     provider.terminate_node(node_id)
                     returncode = 0
+
             except Exception as e:
                 returncode = 1
                 stdout = f'{e}'

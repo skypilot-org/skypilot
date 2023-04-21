@@ -7,6 +7,7 @@ from sky import clouds
 from sky.clouds import service_catalog
 from sky.skylet.providers.scp import scp_utils
 from sky import exceptions
+from sky import sky_logging
 from sky.skylet.providers.scp.scp_utils import SCPClient
 
 if typing.TYPE_CHECKING:
@@ -18,6 +19,10 @@ _CREDENTIAL_FILES = [
     'scp_credential',
 ]
 
+logger = sky_logging.init_logger(__name__)
+
+MIN_DISK_SIZE=100
+MAX_DISK_SIZE=300
 
 @clouds.CLOUD_REGISTRY.register
 class SCP(clouds.Cloud):
@@ -230,6 +235,10 @@ class SCP(clouds.Cloud):
                                           resources: 'resources_lib.Resources'):
         if resources.use_spot:
             return ([], [])
+        if resources.disk_size is not None and not MIN_DISK_SIZE<=resources.disk_size<=MAX_DISK_SIZE:
+            logger.info(f'The disk size must be between 100 and 300 in SCP. ' \
+                         f'Input: {resources.disk_size}')
+            return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Accelerators are part of the instance type in SCP Cloud
@@ -317,3 +326,11 @@ class SCP(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'scp')
+
+    @staticmethod
+    def is_disk_size_allowed(disk_size):
+        if disk_size<MIN_DISK_SIZE or disk_size>MAX_DISK_SIZE:
+            logger.info(f'The disk size must be between 100 and 300 in SCP. Input: {disk_size}' )
+            return False
+        return True
+
