@@ -867,6 +867,7 @@ class Resources:
         if config is None:
             return Resources()
 
+        config = {k: v for k, v in config.items() if v is not None}
         backend_utils.validate_schema(config, schemas.get_resources_schema(),
                                       'Invalid resources YAML: ')
 

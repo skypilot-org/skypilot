@@ -793,6 +793,7 @@ class Storage(object):
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, Any]) -> 'Storage':
+        config = {k: v for k, v in config.items() if v is not None}
         backend_utils.validate_schema(config, schemas.get_storage_schema(),
                                       'Invalid storage YAML: ')
 
