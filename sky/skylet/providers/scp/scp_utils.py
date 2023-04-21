@@ -10,7 +10,7 @@ import base64
 from typing import Any, Dict, List
 from urllib import parse
 import random
-
+from functools import wraps
 CREDENTIALS_PATH = '~/.scp/scp_credential'
 API_ENDPOINT = 'https://openapi.samsungsdscloud.com'
 TEMP_VM_JSON_PATH = '/tmp/json/tmp_vm_body.json'
@@ -81,7 +81,7 @@ def raise_scp_error(response: requests.Response) -> None:
     status_code = response.status_code
     if status_code == 200 or status_code == 202 :
         return
-
+    print(response.json())
     try:
         resp_json = response.json()
 
@@ -92,7 +92,7 @@ def raise_scp_error(response: requests.Response) -> None:
 
 
 
-def singleton(class_):
+def _singleton(class_):
     instances = {}
     def get_instance(*args, **kwargs):
         if class_ not in instances:
@@ -100,7 +100,25 @@ def singleton(class_):
         return instances[class_]
     return get_instance
 
-@singleton
+
+def _retry(method, max_tries=5, backoff_s=3):
+    @wraps(method)
+    def method_with_retries(self, *args, **kwargs):
+        try_count = 0
+        while try_count < max_tries:
+            try:
+                return method(self, *args, **kwargs)
+            except SCPClientError:
+                try_count += 1
+                if try_count < max_tries:
+                    time.sleep(backoff_s)
+                else:
+                    raise
+
+    return method_with_retries
+
+
+@_singleton
 class SCPClient:
     """Wrapper functions for SCP Cloud API."""
 
@@ -134,6 +152,7 @@ class SCPClient:
         url = f'{API_ENDPOINT}/virtual-server/v3/virtual-servers'
         return self._post(url, instance_config)
 
+    @_retry
     def _get(self, url, contents_key='contents'):
         method = 'GET'
         self.set_timestamp()
@@ -144,16 +163,19 @@ class SCPClient:
         if contents_key is not None : return response.json().get(contents_key, [])
         else:  return response.json()
 
+    @_retry
     def _post(self, url, request_body):
         method = 'POST'
         self.set_timestamp()
         self.set_signature(url=url, method=method)
+        print(request_body)
 
         response = requests.post(url, json=request_body, headers=self.headers)
 
         raise_scp_error(response)
         return response.json()
 
+    @_retry
     def _delete(self, url, request_body=None):
         method = 'DELETE'
         self.set_timestamp()

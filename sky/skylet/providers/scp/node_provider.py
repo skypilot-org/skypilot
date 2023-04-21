@@ -264,6 +264,7 @@ class SCPNodeProvider(NodeProvider):
 
     def _get_firewall_id(self, vpc_id):
         firewall_contents = self.scp_client.list_firwalls()
+        print(firewall_contents)
         firewall_id = [firewall['firewallId'] for firewall in firewall_contents
                        if firewall['vpcId'] == vpc_id and firewall['firewallState'] == 'ACTIVE'][0]
         return firewall_id
@@ -273,26 +274,27 @@ class SCPNodeProvider(NodeProvider):
         try:
             response = self.scp_client.create_instance(instance_config)
             vm_id = response.get('resourceId', None)
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", 1111)
             while True:
                 time.sleep(10)
                 vm_info = self.scp_client.get_vm_info(vm_id)
                 if vm_info["virtualServerState"] == "RUNNING": break
-
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", 222222)
             vm_internal_ip = vm_info['ip']
             undo_func_stack.append(lambda: self._del_vm(vm_id))
             firewall_id = self._get_firewall_id(vpc)
-
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", 3333333)
 
             in_rule_id = self._add_firewall_inbound(firewall_id, vm_internal_ip)
             undo_func_stack.append(lambda: self._del_firwall_rules(firewall_id, in_rule_id))
             out_rule_id = self._add_firewall_outbound(firewall_id, vm_internal_ip)
             undo_func_stack.append(lambda: self._del_firwall_rules(firewall_id, in_rule_id))
-
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", 4444444444444)
             firewall_rules = [in_rule_id, out_rule_id]
             return vm_id, vm_internal_ip, firewall_id, firewall_rules
 
         except Exception as e:
-            print(e)
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", e)
             self._undo_funcs(undo_func_stack)
             return None, None, None, None
 
@@ -357,7 +359,6 @@ class SCPNodeProvider(NodeProvider):
             instance_config = zone_config.bootstrap_instance_config(node_config)
             instance_config['virtualServerName'] = self.cluster_name
 
-            SUCCESS = False
             for vpc, subnets in vpc_subnets.items():
                 sg_id = self._config_security_group(zone_config.zone_id, vpc, self.cluster_name)  # sg_name
                 if sg_id is None: continue
@@ -365,36 +366,33 @@ class SCPNodeProvider(NodeProvider):
                 instance_config['securityGroupIds'] = [sg_id]
                 for subnet in subnets:
                     instance_config['nic']['subnetId'] = subnet
-                    vm_id, vm_internal_ip, firewall_id, firwall_rules = self._create_instance_sequence(vpc,
-                                                                                                          instance_config)
-                    if vm_id:
-                        SUCCESS = True
-                        break
-                if SUCCESS:
-                    break
-                else:
-                    self._del_security_group(sg_id)
+                    SUCCESS = self._try_vm_creation(vpc, sg_id, config_tags, instance_config)
+                    if SUCCESS: return
 
-            if not SUCCESS:
-                raise SCPError("Cannot create VM")
+                self._del_security_group(sg_id)
 
-            vm_external_ip = self.scp_client.get_external_ip(virtual_server_id=vm_id, ip=vm_internal_ip)
 
-            creation_tags = {}
-            creation_tags['virtualServerId'] = vm_id
-            creation_tags['vmInternalIp'] = vm_internal_ip
-            creation_tags['firewallId'] = firewall_id
-            creation_tags['firewallRuleIds'] = firwall_rules
-            creation_tags['securityGroupId'] = sg_id
-            creation_tags['vmExternalIp'] = vm_external_ip
+            raise SCPError("Cannot create VM")
 
-            self.metadata[vm_id] = {'tags': config_tags, 'creation':creation_tags}
 
-        # try:
-        #
-        #     self.scp_client.set_ssh_key(external_ip=vm_external_ip)
-        #     self.scp_client.set_default_config(external_ip=vm_external_ip)
-        # except: raise SCPError("SSH Init Error")
+    def _try_vm_creation(self, vpc, sg_id, config_tags, instance_config):
+        vm_id, vm_internal_ip, firewall_id, firwall_rules = self._create_instance_sequence(vpc, instance_config)
+        if vm_id is None: return False  # if creation success
+
+        vm_external_ip = self.scp_client.get_external_ip(virtual_server_id=vm_id, ip=vm_internal_ip)
+        creation_tags = {}
+        creation_tags['virtualServerId'] = vm_id
+        creation_tags['vmInternalIp'] = vm_internal_ip
+        creation_tags['firewallId'] = firewall_id
+        creation_tags['firewallRuleIds'] = firwall_rules
+        creation_tags['securityGroupId'] = sg_id
+        creation_tags['vmExternalIp'] = vm_external_ip
+        self.metadata[vm_id] = {'tags': config_tags, 'creation': creation_tags}
+        return True
+
+
+
+
 
     def _stopped_nodes(self, tag_filters):
         """Return a list of stopped node ids filtered by the specified tags dict."""

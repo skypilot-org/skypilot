@@ -17,8 +17,9 @@ from typing import List
 # A "generic test" tests a generic functionality (e.g., autostop) that
 # should work on any cloud we support. The cloud used for such a test
 # is controlled by `--generic-cloud` (typically you do not need to set it).
-all_clouds_in_smoke_tests = ['aws', 'gcp', 'azure', 'lambda']
+all_clouds_in_smoke_tests = ['aws', 'gcp', 'azure', 'lambda', 'scp']
 default_clouds_to_run = ['gcp', 'azure']
+
 
 # Translate cloud name to pytest keyword. We need this because
 # @pytest.mark.lambda is not allowed, so we use @pytest.mark.lambda_cloud
@@ -27,7 +28,8 @@ cloud_to_pytest_keyword = {
     'aws': 'aws',
     'gcp': 'gcp',
     'azure': 'azure',
-    'lambda': 'lambda_cloud'
+    'lambda': 'lambda_cloud',
+    'scp' : 'scp'
 }
 
 
@@ -69,6 +71,8 @@ def _get_cloud_to_run(config) -> List[str]:
     for cloud in all_clouds_in_smoke_tests:
         if config.getoption(f'--{cloud}'):
             cloud_to_run.append(cloud)
+
+
     if not cloud_to_run:
         cloud_to_run = default_clouds_to_run
     return cloud_to_run
@@ -135,6 +139,7 @@ def _generic_cloud(config) -> str:
     cloud_to_run = _get_cloud_to_run(config)
     if c not in cloud_to_run:
         c = cloud_to_run[0]
+
     return c
 
 
