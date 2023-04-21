@@ -263,10 +263,13 @@ class SCPNodeProvider(NodeProvider):
 
 
     def _get_firewall_id(self, vpc_id):
+
         firewall_contents = self.scp_client.list_firwalls()
         print(firewall_contents)
+
         firewall_id = [firewall['firewallId'] for firewall in firewall_contents
-                       if firewall['vpcId'] == vpc_id and firewall['firewallState'] == 'ACTIVE'][0]
+                       if firewall['vpcId'] == vpc_id and (firewall['firewallState'] in ['ACTIVE', 'DEPLOYING'])][0]
+
         return firewall_id
 
     def _create_instance_sequence(self, vpc, instance_config):
@@ -283,7 +286,7 @@ class SCPNodeProvider(NodeProvider):
             vm_internal_ip = vm_info['ip']
             undo_func_stack.append(lambda: self._del_vm(vm_id))
             firewall_id = self._get_firewall_id(vpc)
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", 3333333)
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 33333  out of index", 3333333)
 
             in_rule_id = self._add_firewall_inbound(firewall_id, vm_internal_ip)
             undo_func_stack.append(lambda: self._del_firwall_rules(firewall_id, in_rule_id))
