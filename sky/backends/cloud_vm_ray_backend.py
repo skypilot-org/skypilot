@@ -1165,6 +1165,7 @@ class RetryingVmProvisioner(object):
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
+        logger.info('hello, im hriday and i eat food')
 
         # Get previous cluster status
         cluster_exists = prev_cluster_status is not None
@@ -2464,6 +2465,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
+        logger.info('hello, im hriday and i eat food')
         with log_utils.safe_rich_status('[bold cyan]Syncing[/]'):
             subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
 
@@ -3432,6 +3434,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
+        logger.info('hello, im hriday and i eat food')
 
         for dst, src in file_mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
