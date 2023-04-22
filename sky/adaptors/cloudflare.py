@@ -125,9 +125,9 @@ def create_endpoint():
 
 def check_credentials() -> Tuple[bool, Optional[str]]:
     """Checks if the user has access credentials to this cloud.
-    
+
     Returns:
-        A tuple of a boolean value and a hint message where the bool 
+        A tuple of a boolean value and a hint message where the bool
         is True when both credentials needed for R2 is set. It is False
         when either of those are not set, which would hint with a
         string on unset credential.
