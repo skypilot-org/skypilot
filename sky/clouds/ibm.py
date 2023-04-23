@@ -235,9 +235,11 @@ class IBM(clouds.Cloud):
     def get_default_instance_type(
             cls,
             cpus: Optional[str] = None,
-            memory: Optional[str] = None) -> Optional[str]:
+            memory: Optional[str] = None,
+            disk_tier: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
+                                                         disk_tier=disk_tier,
                                                          clouds='ibm')
 
     def get_feasible_launchable_resources(self,
@@ -275,7 +277,9 @@ class IBM(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             default_instance_type = IBM.get_default_instance_type(
-                cpus=resources.cpus, memory=resources.memory)
+                cpus=resources.cpus,
+                memory=resources.memory,
+                disk_tier=resources.disk_tier)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -389,6 +393,11 @@ class IBM(clouds.Cloud):
         # pylint: disable=W0703
         except Exception as e:
             return (False, f'{str(e)}' + help_str)
+
+    @classmethod
+    def check_disk_tier_enabled(cls, instance_type: str,
+                                disk_tier: str) -> None:
+        del instance_type, disk_tier  # unused
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a {remote:local} credential path mapping

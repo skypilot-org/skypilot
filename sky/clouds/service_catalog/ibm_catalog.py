@@ -95,7 +95,9 @@ def list_accelerators(
 
 
 def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None) -> Optional[str]:
+                              memory: Optional[str] = None,
+                              disk_tier: Optional[str] = None) -> Optional[str]:
+    del disk_tier  # unused
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
 
