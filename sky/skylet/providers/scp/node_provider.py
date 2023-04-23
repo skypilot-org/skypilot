@@ -72,6 +72,7 @@ class SCPNodeProvider(NodeProvider):
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
         self.metadata = scp_utils.Metadata(TAG_PATH_PREFIX, cluster_name)
         vms = self._list_instances_in_cluster()
+        self._refresh_security_group(vms)
 
         # The tag file for autodowned clusters is not autoremoved. Hence, if
         # a previous cluster was autodowned and has the same name as the
@@ -225,7 +226,17 @@ class SCPNodeProvider(NodeProvider):
             sg = [sg["securityGroupState"] for sg in sg_contents if sg["securityGroupId"] == sg_id]
             if len(sg) ==0: break
 
-
+    def _refresh_security_group(self, vms):
+        if len(vms)>0:
+            return
+        # remove security group if vm does not exist
+        keys=self.metadata.keys()
+        security_group_id = self.metadata[keys[0]]['creation']['securityGroupId'] if len(keys)>0 else None
+        if security_group_id:
+            try:
+                self._del_security_group(security_group_id)
+            except Exception as e:
+                logger.info(e)
 
     def _del_vm(self, vm_id):
         self.scp_client.terminate_instance(vm_id)
