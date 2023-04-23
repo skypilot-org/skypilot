@@ -2795,7 +2795,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name = handle.cluster_name
         # Check if the cluster is owned by the current user. Raise
         # exceptions.ClusterOwnerIdentityMismatchError
-        backend_utils.check_owner_identity(cluster_name)
+        yellow = colorama.Fore.YELLOW
+        reset = colorama.Style.RESET_ALL
+        try:
+            backend_utils.check_owner_identity(cluster_name)
+        except exceptions.ClusterOwnerIdentityMismatchError as e:
+            if purge:
+                logger.error(e)
+                logger.warning(
+                    f'{yellow}Purge (-p/--purge) is '
+                    f'set, ignoring the above error.{reset}\n{yellow}It is the '
+                    'user\'s responsibility to ensure that this '
+                    f'cluster is actually terminated on the cloud.{reset}')
+                pass
+            else:
+                raise
+
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
 
@@ -2806,7 +2821,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             with filelock.FileLock(
                     lock_path,
                     backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
-                success = self.teardown_no_lock(handle, terminate, purge)
+                success = self.teardown_no_lock(
+                    handle, terminate, purge, refresh_cluster_status=not purge)
             if success and terminate:
                 common_utils.remove_file_if_exists(lock_path)
         except filelock.Timeout as e:
