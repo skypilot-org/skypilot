@@ -1714,7 +1714,7 @@ def _query_status_ibm(
     this function gets called when running `sky status` with -r flag and the cluster's head node is either stopped or down.
     """
 
-    status_map = {
+    status_map: Dict[str, Any] = {
         'pending': global_user_state.ClusterStatus.INIT,
         'starting': global_user_state.ClusterStatus.INIT,
         'restarting': global_user_state.ClusterStatus.INIT,

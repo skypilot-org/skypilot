@@ -424,7 +424,7 @@ class IBMVPCNodeProvider(NodeProvider):
         with self.lock:
             return self.nodes_tags.get(node_id, {})
 
-    def external_ip(self, node_id) -> str:
+    def external_ip(self, node_id) -> Optional[str]:
         """returns node's public ip
 
         Args:
@@ -439,6 +439,7 @@ class IBMVPCNodeProvider(NodeProvider):
             fip = node.get("floating_ips")
             if fip:
                 return fip[0]["address"]
+        return None
 
     def internal_ip(self, node_id) -> str:
         """returns the worker's node private ip address"""
@@ -720,7 +721,7 @@ class IBMVPCNodeProvider(NodeProvider):
 
         return {instance["id"]: instance}
 
-    def create_node(self, base_config, tags, count) -> None:
+    def create_node(self, base_config, tags, count) -> Dict[str, Any]:
         """
         returns dict of {instance_id:instance_data} of nodes.
         creates 'count' number of nodes.
@@ -876,7 +877,7 @@ class IBMVPCNodeProvider(NodeProvider):
             if self.poll_instance_deleted(node_id):
                 self.vpc_provider.delete_vpc(vpc_id_to_delete, self.region)
 
-    def terminate_nodes(self, node_ids) -> Optional[Dict[str, Any]]:
+    def terminate_nodes(self, node_ids):
 
         if not node_ids:
             return
@@ -891,7 +892,7 @@ class IBMVPCNodeProvider(NodeProvider):
             future.result()
 
     @log_in_out
-    def terminate_node(self, node_id) -> Optional[Dict[str, Any]]:
+    def terminate_node(self, node_id):
         """Deletes the VM instance and the associated volume.
         if cache_stopped_nodes is set to true in the cluster config file,
         nodes are stopped instead."""
