@@ -139,15 +139,24 @@ class AutostopEvent(SkyletEvent):
             self._replace_yaml_for_stopping(self._ray_yaml_path,
                                             autostop_config.down)
 
-            # We do "initial ray up + ray down --workers-only" only for
-            # multinode clusters for two reasons: (1) optimization: they are
-            # not needed for single-node; (2) for single-node SSO clusters: we
+            # Use environment variables to disable the ray usage collection (to
+            # avoid overheads and potential issues with the usage) as sdk does
+            # not take the argument for disabling the usage collection.
+            #
+            # Also clear any cloud-specific credentials set as env vars (e.g.,
+            # AWS's two env vars). Reason: for single-node AWS SSO clusters, we
             # have seen a weird bug where user image's /etc/profile.d may
             # contain the two AWS env vars, and so they take effect in the
-            # initial 'ray up', throwing a RuntimeError when some private VPC
-            # is not found (since it only exists in the assumed role, not in
-            # the custome principal set by the env vars). We use both this
-            # optimization and removing inheriting os.environ to fix this.
+            # bootstrap phase of each of these 3 'ray' commands, throwing a
+            # RuntimeError when some private VPC is not found (since the VPC
+            # only exists in the assumed role, not in the custome principal set
+            # by the env vars).  See #1880 for details.
+            env = dict(os.environ, RAY_USAGE_STATS_ENABLED='0')
+            env.pop('AWS_ACCESS_KEY_ID', None)
+            env.pop('AWS_SECRETE_ACCESS_KEY', None)
+
+            # We do "initial ray up + ray down --workers-only" only for
+            # multinode clusters as they are not needed for single-node.
             if is_cluster_multinode:
                 # `ray up` is required to reset the upscaling speed and min/max
                 # workers. Otherwise, `ray down --workers-only` will
@@ -157,37 +166,20 @@ class AutostopEvent(SkyletEvent):
                           write_ray_up_script_with_patched_launch_hash_fn(
                               self._ray_yaml_path,
                               ray_up_kwargs={'restart_only': True}))
-                subprocess.run(
-                    [sys.executable, script],
-                    check=True,
-                    # Use environment variables to disable the ray usage
-                    # collection (to avoid overheads and potential issues with
-                    # the usage) as sdk does not take the argument for
-                    # disabling the usage collection.
-                    #
-                    # Do not inherit from os.environ, which may have
-                    # cloud-specific credentials set as env vars (e.g., AWS's
-                    # two env vars). See #1880 and comments above for details.
-                    env=dict(RAY_USAGE_STATS_ENABLED='0'),
-                )
+                subprocess.run([sys.executable, script], check=True, env=env)
 
                 logger.info('Running ray down.')
                 # Stop the workers first to avoid orphan workers.
-                subprocess.run(
-                    [
-                        'ray', 'down', '-y', '--workers-only',
-                        self._ray_yaml_path
-                    ],
-                    check=True,
-                    # See above on why we don't inherit from os.environ.
-                    env={})
+                subprocess.run([
+                    'ray', 'down', '-y', '--workers-only', self._ray_yaml_path
+                ],
+                               check=True,
+                               env=env)
 
             logger.info('Running final ray down.')
-            subprocess.run(
-                ['ray', 'down', '-y', self._ray_yaml_path],
-                check=True,
-                # See above on why we don't inherit from os.environ.
-                env={})
+            subprocess.run(['ray', 'down', '-y', self._ray_yaml_path],
+                           check=True,
+                           env=env)
         else:
             raise NotImplementedError
 
