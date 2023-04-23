@@ -173,14 +173,21 @@ class AutostopEvent(SkyletEvent):
 
                 logger.info('Running ray down.')
                 # Stop the workers first to avoid orphan workers.
-                subprocess.run([
-                    'ray', 'down', '-y', '--workers-only', self._ray_yaml_path
-                ],
-                               check=True)
+                subprocess.run(
+                    [
+                        'ray', 'down', '-y', '--workers-only',
+                        self._ray_yaml_path
+                    ],
+                    check=True,
+                    # See above on why we don't inherit from os.environ.
+                    env={})
 
             logger.info('Running final ray down.')
-            subprocess.run(['ray', 'down', '-y', self._ray_yaml_path],
-                           check=True)
+            subprocess.run(
+                ['ray', 'down', '-y', self._ray_yaml_path],
+                check=True,
+                # See above on why we don't inherit from os.environ.
+                env={})
         else:
             raise NotImplementedError
 
