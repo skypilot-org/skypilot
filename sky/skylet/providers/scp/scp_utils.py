@@ -91,14 +91,9 @@ class Metadata:
 
 def raise_scp_error(response: requests.Response) -> None:
     """Raise SCPCloudError if appropriate. """
-    print(response.json())
-
     status_code = response.status_code
     if status_code == 200 or status_code == 202 :
         return
-
-
-
     try:
         resp_json = response.json()
         message = resp_json['message']
@@ -192,7 +187,7 @@ class SCPClient:
         method = 'POST'
         self.set_timestamp()
         self.set_signature(url=url, method=method)
-        print(request_body)
+
         response = requests.post(url, json=request_body, headers=self.headers)
 
         raise_scp_error(response)
@@ -342,7 +337,7 @@ class SCPClient:
         self.headers['X-Cmp-Timestamp'] = self.timestamp
 
     def set_signature(self, method:str, url:str) -> None:
-        print(method, ": ", url)
+
         self.signature = self.get_signature(url=url, method=method)
         self.headers['X-Cmp-Signature'] = self.signature
 

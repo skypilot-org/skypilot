@@ -233,7 +233,7 @@ class SCPNodeProvider(NodeProvider):
 
             return sg_id
         except Exception as e:
-            print(e)
+            logger.error("Security Group Creation Fail.")
             self._undo_funcs(undo_func_stack)
             return None
 
@@ -296,8 +296,6 @@ class SCPNodeProvider(NodeProvider):
     def _get_firewall_id(self, vpc_id):
 
         firewall_contents = self.scp_client.list_firwalls()
-        print(firewall_contents)
-
         firewall_id = [firewall['firewallId'] for firewall in firewall_contents
                        if firewall['vpcId'] == vpc_id and (firewall['firewallState'] in ['ACTIVE', 'DEPLOYING'])][0]
 
@@ -318,23 +316,19 @@ class SCPNodeProvider(NodeProvider):
         undo_func_stack = []
         try:
             vm_id, vm_internal_ip = self._create_instance(instance_config)
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", 222222)
 
             undo_func_stack.append(lambda: self._del_vm(vm_id))
             firewall_id = self._get_firewall_id(vpc)
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 33333  out of index", 3333333)
 
             in_rule_id = self._add_firewall_inbound(firewall_id, vm_internal_ip)
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", 4444444444444)
             undo_func_stack.append(lambda: self._del_firwall_rules(firewall_id, in_rule_id))
             out_rule_id = self._add_firewall_outbound(firewall_id, vm_internal_ip)
             undo_func_stack.append(lambda: self._del_firwall_rules(firewall_id, in_rule_id))
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", 555555555555555)
             firewall_rules = [in_rule_id, out_rule_id]
             return vm_id, vm_internal_ip, firewall_id, firewall_rules
 
         except Exception as e:
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", e)
+            logger.error("Instance Creation Fails.")
             self._undo_funcs(undo_func_stack)
             return None, None, None, None
 
@@ -427,7 +421,7 @@ class SCPNodeProvider(NodeProvider):
 
                 self._del_security_group(sg_id)
 
-            raise SCPError("Cannot create VM")
+            raise SCPError("Instance Creation Fails.")
 
 
     def _stopped_nodes(self, tag_filters):
