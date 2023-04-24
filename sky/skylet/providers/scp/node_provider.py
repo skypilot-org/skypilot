@@ -4,6 +4,7 @@ import time
 from threading import RLock
 from typing import Any, Dict, List, Optional
 import copy
+from functools import wraps
 
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler._private.cli_logger import cli_logger
@@ -21,7 +22,7 @@ from ray.autoscaler.tags import (
 from ray.autoscaler._private.util import hash_launch_conf
 from sky.skylet.providers.scp import scp_utils
 from sky.skylet.providers.scp.config import ZoneConfig
-from sky.skylet.providers.scp.scp_utils import SCPClientError
+from sky.skylet.providers.scp.scp_utils import SCPClientError, SCPCreationFailError
 from sky.utils import common_utils
 
 TAG_PATH_PREFIX = '~/.sky/generated/scp/metadata'
@@ -54,6 +55,24 @@ def _validation_check(node_config):
 
 class SCPError(Exception):
     pass
+
+
+def _retry_on_creation(method, max_tries=3, backoff_s=2):
+    @wraps(method)
+    def method_with_retries(self, *args, **kwargs):
+        try_count = 0
+        while try_count < max_tries:
+            try:
+                return method(self, *args, **kwargs)
+            except SCPCreationFailError:
+                logger.warning("Resource Creation Failed. Retrying.")
+                try_count += 1
+                if try_count < max_tries:
+                    time.sleep(backoff_s)
+                else:
+                    raise
+
+    return method_with_retries
 
 
 class SCPNodeProvider(NodeProvider):
@@ -240,7 +259,7 @@ class SCPNodeProvider(NodeProvider):
         self.scp_client.del_firwall_rules(firewall_id, rule_ids)
 
 
-
+    @_retry_on_creation
     def _add_firewall_inbound(self, firewall_id, internal_ip):
 
         rule_info = self.scp_client.add_firewall_inbound_rule(firewall_id, internal_ip)
@@ -251,6 +270,7 @@ class SCPNodeProvider(NodeProvider):
             if rule_info['ruleState'] == "ACTIVE" : break
         return rule_id
 
+    @_retry_on_creation
     def _add_firewall_outbound(self, firewall_id, internal_ip):
 
         rule_info = self.scp_client.add_firewall_outbound_rule(firewall_id, internal_ip)
@@ -272,27 +292,33 @@ class SCPNodeProvider(NodeProvider):
 
         return firewall_id
 
+
+    @_retry_on_creation
+    def _create_instance(self, instance_config):
+        response = self.scp_client.create_instance(instance_config)
+        vm_id = response.get('resourceId', None)
+        while True:
+            time.sleep(10)
+            vm_info = self.scp_client.get_vm_info(vm_id)
+            if vm_info["virtualServerState"] == "RUNNING": break
+        return vm_id, vm_info['ip']
+
     def _create_instance_sequence(self, vpc, instance_config):
         undo_func_stack = []
         try:
-            response = self.scp_client.create_instance(instance_config)
-            vm_id = response.get('resourceId', None)
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", 1111)
-            while True:
-                time.sleep(10)
-                vm_info = self.scp_client.get_vm_info(vm_id)
-                if vm_info["virtualServerState"] == "RUNNING": break
+            vm_id, vm_internal_ip = self._create_instance(instance_config)
             print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", 222222)
-            vm_internal_ip = vm_info['ip']
+
             undo_func_stack.append(lambda: self._del_vm(vm_id))
             firewall_id = self._get_firewall_id(vpc)
             print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 33333  out of index", 3333333)
 
             in_rule_id = self._add_firewall_inbound(firewall_id, vm_internal_ip)
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", 4444444444444)
             undo_func_stack.append(lambda: self._del_firwall_rules(firewall_id, in_rule_id))
             out_rule_id = self._add_firewall_outbound(firewall_id, vm_internal_ip)
             undo_func_stack.append(lambda: self._del_firwall_rules(firewall_id, in_rule_id))
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", 4444444444444)
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", 555555555555555)
             firewall_rules = [in_rule_id, out_rule_id]
             return vm_id, vm_internal_ip, firewall_id, firewall_rules
 
@@ -306,6 +332,22 @@ class SCPNodeProvider(NodeProvider):
         while len(undo_func_list) >0:
             func = undo_func_list.pop()
             func()
+
+
+    def _try_vm_creation(self, vpc, sg_id, config_tags, instance_config):
+        vm_id, vm_internal_ip, firewall_id, firwall_rules = self._create_instance_sequence(vpc, instance_config)
+        if vm_id is None: return False  # if creation success
+
+        vm_external_ip = self.scp_client.get_external_ip(virtual_server_id=vm_id, ip=vm_internal_ip)
+        creation_tags = {}
+        creation_tags['virtualServerId'] = vm_id
+        creation_tags['vmInternalIp'] = vm_internal_ip
+        creation_tags['firewallId'] = firewall_id
+        creation_tags['firewallRuleIds'] = firwall_rules
+        creation_tags['securityGroupId'] = sg_id
+        creation_tags['vmExternalIp'] = vm_external_ip
+        self.metadata[vm_id] = {'tags': config_tags, 'creation': creation_tags}
+        return True
 
     def create_node(self,
                     node_config: Dict[str, Any],
@@ -374,27 +416,7 @@ class SCPNodeProvider(NodeProvider):
 
                 self._del_security_group(sg_id)
 
-
             raise SCPError("Cannot create VM")
-
-
-    def _try_vm_creation(self, vpc, sg_id, config_tags, instance_config):
-        vm_id, vm_internal_ip, firewall_id, firwall_rules = self._create_instance_sequence(vpc, instance_config)
-        if vm_id is None: return False  # if creation success
-
-        vm_external_ip = self.scp_client.get_external_ip(virtual_server_id=vm_id, ip=vm_internal_ip)
-        creation_tags = {}
-        creation_tags['virtualServerId'] = vm_id
-        creation_tags['vmInternalIp'] = vm_internal_ip
-        creation_tags['firewallId'] = firewall_id
-        creation_tags['firewallRuleIds'] = firwall_rules
-        creation_tags['securityGroupId'] = sg_id
-        creation_tags['vmExternalIp'] = vm_external_ip
-        self.metadata[vm_id] = {'tags': config_tags, 'creation': creation_tags}
-        return True
-
-
-
 
 
     def _stopped_nodes(self, tag_filters):
