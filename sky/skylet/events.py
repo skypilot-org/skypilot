@@ -166,20 +166,30 @@ class AutostopEvent(SkyletEvent):
                           write_ray_up_script_with_patched_launch_hash_fn(
                               self._ray_yaml_path,
                               ray_up_kwargs={'restart_only': True}))
+                # Passing env inherited from os.environ is technically not
+                # needed, because we call `python <script>` rather than `ray
+                # <cmd>`. We just need the {RAY_USAGE_STATS_ENABLED: 0} part.
                 subprocess.run([sys.executable, script], check=True, env=env)
 
                 logger.info('Running ray down.')
                 # Stop the workers first to avoid orphan workers.
-                subprocess.run([
-                    'ray', 'down', '-y', '--workers-only', self._ray_yaml_path
-                ],
-                               check=True,
-                               env=env)
+                subprocess.run(
+                    [
+                        'ray', 'down', '-y', '--workers-only',
+                        self._ray_yaml_path
+                    ],
+                    check=True,
+                    # We pass env inherited from os.environ due to calling `ray
+                    # <cmd>`.
+                    env=env)
 
             logger.info('Running final ray down.')
-            subprocess.run(['ray', 'down', '-y', self._ray_yaml_path],
-                           check=True,
-                           env=env)
+            subprocess.run(
+                ['ray', 'down', '-y', self._ray_yaml_path],
+                check=True,
+                # We pass env inherited from os.environ due to calling `ray
+                # <cmd>`.
+                env=env)
         else:
             raise NotImplementedError
 
