@@ -527,7 +527,7 @@ def do_filemounts_and_setup_on_local_workers(
     config = common_utils.read_yaml(cluster_config_file)
 
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
-        cluster_config_file)
+        cluster_config_file, run_as_docker=False)
     if worker_ips is None:
         worker_ips = config['provider']['worker_ips']
     file_mounts = config['file_mounts']

@@ -16,6 +16,7 @@ GIT_EXCLUDE: str
 RSYNC_DISPLAY_OPTION: str
 RSYNC_FILTER_OPTION: str
 RSYNC_EXCLUDE_OPTION: str
+DEFAULT_DOCKER_USER: str
 
 
 def ssh_options_list(ssh_private_key: Optional[str],

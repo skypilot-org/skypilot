@@ -26,6 +26,9 @@ RSYNC_DISPLAY_OPTION = '-Pavz'
 # do_not_exclude" doesn't work, even though git allows it.
 RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
 RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
+# Docker options
+_DEFAULT_DOCKER_PORT = '10022'
+DEFAULT_DOCKER_USER = 'root'
 
 _HASH_MAX_LENGTH = 10
 
@@ -44,6 +47,7 @@ def ssh_options_list(ssh_private_key: Optional[str],
                      ssh_control_name: Optional[str],
                      *,
                      ssh_proxy_command: Optional[str] = None,
+                     ssh_docker_port: str = _DEFAULT_DOCKER_PORT,
                      timeout: int = 30) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     # Forked from Ray SSHOptions:
@@ -83,6 +87,8 @@ def ssh_options_list(ssh_private_key: Optional[str],
         '-i',
         ssh_private_key,
     ] if ssh_private_key is not None else []
+    # default to use docker port here since all command are running under docker
+    ssh_port_option = ['-p', ssh_docker_port]
 
     if ssh_proxy_command is not None:
         logger.debug(f'--- Proxy: {ssh_proxy_command} ---')
@@ -91,7 +97,7 @@ def ssh_options_list(ssh_private_key: Optional[str],
             # must quote this value.
             'ProxyCommand': shlex.quote(ssh_proxy_command),
         })
-    return ssh_key_option + [
+    return ssh_key_option + ssh_port_option + [
         x for y in (['-o', f'{k}={v}']
                     for k, v in arg_dict.items()
                     if v is not None) for x in y

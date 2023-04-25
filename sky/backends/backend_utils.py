@@ -842,6 +842,9 @@ def write_cluster_config(
             assert region_name in ssh_proxy_command_config, (
                 region_name, ssh_proxy_command_config)
             ssh_proxy_command = ssh_proxy_command_config[region_name]
+    public_key_path = os.path.expanduser(auth.PUBLIC_SSH_KEY_PATH)
+    with open(public_key_path, 'r') as f:
+        public_key = f.read()
 
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
@@ -877,6 +880,9 @@ def write_cluster_config(
                 # Not exactly AWS only, but we only test it's supported on AWS
                 # for now:
                 'ssh_proxy_command': ssh_proxy_command,
+
+                # for docker authentication
+                'public_key': public_key,
 
                 # Azure only:
                 'azure_subscription_id': azure_subscription_id,
@@ -1143,11 +1149,13 @@ def wait_until_ray_cluster_ready(
     return True  # success
 
 
-def ssh_credential_from_yaml(cluster_yaml: str) -> Dict[str, str]:
+def ssh_credential_from_yaml(cluster_yaml: str,
+                             run_as_docker: bool = True) -> Dict[str, str]:
     """Returns ssh_user, ssh_private_key and ssh_control name."""
     config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
-    ssh_user = auth_section['ssh_user'].strip()
+    ssh_user = command_runner.DEFAULT_DOCKER_USER \
+        if run_as_docker else auth_section['ssh_user'].strip()
     ssh_private_key = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
