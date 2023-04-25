@@ -5,11 +5,11 @@ on:
   push:
     branches:
       - master
-      - "releases/**"
+      - 'releases/**'
   pull_request:
     branches:
       - master
-      - "releases/**"
+      - 'releases/**'
 jobs:
   python-test:
     strategy:
