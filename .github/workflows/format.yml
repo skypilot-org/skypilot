@@ -37,7 +37,7 @@ jobs:
             --exclude 'sky/skylet/providers/aws/**' \
             --exclude 'sky/skylet/providers/gcp/**' \
             --exclude 'sky/skylet/providers/azure/**' \
-            --exclude 'sky/skylet/providers/ibm/**
+            --exclude 'sky/skylet/providers/ibm/**'
     - name: Running black
       run: |
         black --diff --check sky/skylet/providers/aws/ \
