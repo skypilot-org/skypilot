@@ -2,6 +2,7 @@ import pathlib
 import textwrap
 
 import pytest
+
 from sky.task import Task
 
 
@@ -21,6 +22,7 @@ def test_empty_fields_task(tmp_path):
             setup: echo "Running setup."
             num_nodes:
             run:
+              # commented out, empty run
             """), tmp_path)
     task = Task.from_yaml(config_path)
 
@@ -64,7 +66,7 @@ def test_empty_fields_resources(tmp_path):
     assert resources.accelerators == {'V100': 1}
     assert resources.disk_size is 256
     assert resources.use_spot is False
-    assert resources.cpus == "32"
+    assert resources.cpus == '32'
 
 
 def test_invalid_fields_resources(tmp_path):
@@ -76,7 +78,7 @@ def test_invalid_fields_resources(tmp_path):
             """), tmp_path)
     with pytest.raises(AssertionError) as e:
         Task.from_yaml(config_path)
-        assert 'Invalid task args' in e.value.args[0]
+    assert 'Invalid resource args' in e.value.args[0]
 
 
 def test_empty_fields_storage(tmp_path):
@@ -108,4 +110,4 @@ def test_invalid_fields_storage(tmp_path):
             """), tmp_path)
     with pytest.raises(AssertionError) as e:
         Task.from_yaml(config_path)
-        assert 'Invalid task args' in e.value.args[0]
+    assert 'Invalid storage args' in e.value.args[0]
