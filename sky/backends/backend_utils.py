@@ -2471,7 +2471,7 @@ def stop_handler(signum, frame):
         raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
 
 
-def validate_schema(obj, schema, err_msg_prefix='', skip_none=False):
+def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
     """Validates an object against a given JSON schema.
 
     Args:

@@ -867,10 +867,8 @@ class Resources:
         if config is None:
             return Resources()
 
-        backend_utils.validate_schema(config,
-                                      schemas.get_resources_schema(),
-                                      'Invalid resources YAML: ',
-                                      skip_none=True)
+        backend_utils.validate_schema(config, schemas.get_resources_schema(),
+                                      'Invalid resources YAML: ')
 
         resources_fields = {}
         resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
