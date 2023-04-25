@@ -6,7 +6,7 @@ import os
 import pathlib
 import shlex
 import time
-from typing import List, Optional, Set, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 from sky import sky_logging
 from sky.utils import common_utils, subprocess_utils
@@ -197,7 +197,7 @@ class SSHCommandRunner:
             ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
             separate_stderr: bool = False,
             max_retry: int = 0,
-            end_return_codes: Set[int] = {0},
+            end_return_codes: Tuple[int] = (0,),
             retry_initial_backoff: int = 1,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
@@ -219,9 +219,9 @@ class SSHCommandRunner:
             separate_stderr: Whether to separate stderr from stdout.
             max_retry: The maximum number of retries if the command fails with a
                 non-zero return code.
-            end_return_codes: The set of return codes to stop retrying on.
-                If the command returns with one of these codes, it will not retry.
-            retry_initial_backoff: The initial amount of time to wait between retries.
+            end_return_codes: The list of return codes to stop retrying on.
+                If the command returns with one of these, it will not retry.
+            retry_initial_backoff: The initial amount of backoff in seconds.
 
 
         Returns:
