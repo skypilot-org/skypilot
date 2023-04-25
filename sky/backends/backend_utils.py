@@ -2471,7 +2471,10 @@ def stop_handler(signum, frame):
         raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
 
 
-def validate_schema(obj, schema, err_msg_prefix=''):
+def validate_schema(obj, schema, err_msg_prefix='', skip_none=False):
+    # yaml.safe_load() loads value as None if the field is empty.
+    if skip_none:
+        obj = {k: v for k, v in obj.items() if v is not None}
     err_msg = None
     try:
         validator.SchemaValidator(schema).validate(obj)

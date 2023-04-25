@@ -260,10 +260,10 @@ class Task:
         if config is None:
             config = {}
 
-        config = {k: v for k, v in config.items() if v is not None}
-
-        backend_utils.validate_schema(config, schemas.get_task_schema(),
-                                      'Invalid task YAML: ')
+        backend_utils.validate_schema(config,
+                                      schemas.get_task_schema(),
+                                      'Invalid task YAML: ',
+                                      skip_none=True)
 
         task = Task(
             config.pop('name', None),
