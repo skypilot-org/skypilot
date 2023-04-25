@@ -216,7 +216,7 @@ class SSHCommandRunner:
                 See SSHMode for more details.
             separate_stderr: Whether to separate stderr from stdout.
             max_retry: The maximum number of retries if the command fails with a
-            non-zero return code.
+                non-zero return code.
 
 
         Returns:
