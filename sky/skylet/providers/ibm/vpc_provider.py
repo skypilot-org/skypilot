@@ -273,11 +273,11 @@ class IBMVPCProvider:
         deletes a vpc with the specified id and region.
         an entry point to this module (alongside create_or_fetch_vpc)
         """
-        logger.info(f"Deleting vpc: {vpc_id}")
+        logger.debug(f"Deleting vpc: {vpc_id}")
         tmp_vpc_client = ibm.client(region=region)
         vpc_data = self.get_vpc_data(vpc_id, region)
         if not vpc_data:
-            logger.warn(f"vpc:{vpc_id} not found")
+            logger.warn(f"vpc:{vpc_id} is set for deletion, but wasn't found")
             return None
         self.delete_vms(tmp_vpc_client, vpc_id)
         self.delete_subnets(tmp_vpc_client, vpc_data, region)
@@ -313,9 +313,9 @@ class IBMVPCProvider:
             floating_ips = res.get("floating_ips", [])
             for ip in floating_ips:
                 if ip["name"].startswith(RAY_RECYCLABLE):
-                    logger.info(f"Deleting IP: {ip['id']}")
+                    logger.debug(f"Deleting IP: {ip['id']}")
                     vpc_client.delete_floating_ip(ip["id"])
-            logger.info(f"Deleting VM: {vm_data['id']}")
+            logger.debug(f"Deleting VM: {vm_data['id']}")
             vpc_client.delete_instance(id=vm_data["id"])
 
         # pylint: disable=line-too-long E1136
