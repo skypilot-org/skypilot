@@ -240,6 +240,23 @@ def test_gcp_region():
     run_one_test(test)
 
 
+@pytest.mark.ibm
+def test_ibm_region():
+    name = _get_cluster_name()
+    region = 'eu-de'
+    test = Test(
+        'region',
+        [
+            f'sky launch -y -c {name} --cloud ibm --region {region} examples/minimal.yaml',
+            f'sky exec {name} --cloud ibm examples/minimal.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status --all | grep {name} | grep {region}',  # Ensure the region is correct.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 @pytest.mark.azure
 def test_azure_region():
     name = _get_cluster_name()
@@ -269,6 +286,23 @@ def test_aws_zone():
             f'sky status --all | grep {name} | grep us-west-2b',  # Ensure the zone is correct.
         ],
         f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.ibm
+def test_ibm_zone():
+    name = _get_cluster_name()
+    zone = 'eu-de-2'
+    test = Test(
+        'zone',
+        [
+            f'sky launch -y -c {name} --cloud ibm examples/minimal.yaml --zone {zone}',
+            f'sky exec {name} --cloud ibm examples/minimal.yaml --zone {zone}',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status --all | grep {name} | grep {zone}',  # Ensure the zone is correct.
+        ],
+        f'sky down -y {name} {name}-2 {name}-3',
     )
     run_one_test(test)
 
@@ -734,6 +768,7 @@ def test_cli_logs(generic_cloud: str):
 
 # ---------- Job Queue. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
+@pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus. run test_ibm_job_queue instead
 def test_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -783,7 +818,31 @@ def test_lambda_job_queue():
     run_one_test(test)
 
 
+@pytest.mark.ibm
+def test_ibm_job_queue():
+    name = _get_cluster_name()
+    test = Test(
+        'ibm_job_queue',
+        [
+            f'sky launch -y -c {name} --cloud ibm --gpus v100',
+            f'sky exec {name} -n {name}-1 --cloud ibm -d examples/job_queue/job_ibm.yaml',
+            f'sky exec {name} -n {name}-2 --cloud ibm -d examples/job_queue/job_ibm.yaml',
+            f'sky exec {name} -n {name}-3 --cloud ibm -d examples/job_queue/job_ibm.yaml',
+            f'sky queue {name} | grep {name}-1 | grep RUNNING',
+            f'sky queue {name} | grep {name}-2 | grep RUNNING',
+            f'sky queue {name} | grep {name}-3 | grep PENDING',
+            f'sky cancel -y {name} 2',
+            'sleep 5',
+            f'sky queue {name} | grep {name}-3 | grep RUNNING',
+            f'sky cancel -y {name} 3',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
+@pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue_multinode instead
 def test_job_queue_multinode(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -840,8 +899,47 @@ def test_large_job_queue(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.ibm
+def test_ibm_job_queue_multinode():
+    name = _get_cluster_name()
+    task_file = 'examples/job_queue/job_multinode_ibm.yaml'
+    test = Test(
+        'ibm_job_queue_multinode',
+        [
+            f'sky launch -y -c {name} --cloud ibm --gpus v100 --num-nodes 2',
+            f'sky exec {name} -n {name}-1 -d {task_file}',
+            f'sky exec {name} -n {name}-2 -d {task_file}',
+            f'sky launch -y -c {name} -n {name}-3 --detach-setup -d {task_file}',
+            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-1 | grep RUNNING)',
+            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-2 | grep RUNNING)',
+            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-3 | grep SETTING_UP)',
+            'sleep 90',
+            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-3 | grep PENDING)',
+            f'sky cancel -y {name} 1',
+            'sleep 5',
+            f'sky queue {name} | grep {name}-3 | grep RUNNING',
+            f'sky cancel -y {name} 1 2 3',
+            f'sky launch -c {name} -n {name}-4 --detach-setup -d {task_file}',
+            # Test the job status is correctly set to SETTING_UP, during the setup is running,
+            # and the job can be cancelled during the setup.
+            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-4 | grep SETTING_UP)',
+            f'sky cancel -y {name} 4',
+            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-4 | grep CANCELLED)',
+            f'sky exec {name} --gpus v100:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus v100:0.2 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus v100:1 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky logs {name} 5 --status',
+            f'sky logs {name} 6 --status',
+            f'sky logs {name} 7 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Submitting multiple tasks to the same cluster. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
+@pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus
 def test_multi_echo(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -863,6 +961,7 @@ def test_multi_echo(generic_cloud: str):
 
 # ---------- Task: 1 node training. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
+@pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 def test_huggingface(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -972,6 +1071,7 @@ def test_multi_hostname(generic_cloud: str):
 
 # ---------- Task: n=2 nodes with setups. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
+@pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 def test_distributed_tf(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1036,6 +1136,7 @@ def test_azure_start_stop():
 
 # ---------- Testing Autostopping ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
+@pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
 def test_autostop(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1169,6 +1270,7 @@ def test_cancel_azure():
 
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
+@pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 def test_cancel_pytorch(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1191,8 +1293,30 @@ def test_cancel_pytorch(generic_cloud: str):
     run_one_test(test)
 
 
+# can't use `_get_cancel_task_with_cloud()`, as command `nvidia-smi`
+# requires a CUDA public image, which IBM doesn't offer
+@pytest.mark.ibm
+def test_cancel_ibm():
+    name = _get_cluster_name()
+    test = Test(
+        'ibm-cancel-task',
+        [
+            f'sky launch -y -c {name} --cloud ibm examples/minimal.yaml',
+            f'sky exec {name} -n {name}-1 -d  "while true; do echo \'Hello SkyPilot\'; sleep 2; done"',
+            'sleep 20',
+            f'sky queue {name} | grep {name}-1 | grep RUNNING',
+            f'sky cancel -y {name} 2',
+            f'sleep 5',
+            f'sky queue {name} | grep {name}-1 | grep CANCELLED',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Testing use-spot option ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 def test_use_spot(generic_cloud: str):
     """Test use-spot and sky exec."""
     name = _get_cluster_name()
@@ -1211,6 +1335,7 @@ def test_use_spot(generic_cloud: str):
 
 # ---------- Testing managed spot ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot(generic_cloud: str):
     """Test the spot yaml."""
@@ -1241,6 +1366,7 @@ def test_spot(generic_cloud: str):
 
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_failed_setup(generic_cloud: str):
     """Test managed spot job with failed setup."""
@@ -1325,6 +1451,7 @@ def test_spot_recovery_gcp():
 
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_recovery_default_resources(generic_cloud: str):
     """Test managed spot recovery for default resources."""
@@ -1529,6 +1656,7 @@ def test_spot_cancellation_gcp():
 
 # ---------- Testing storage for managed spot ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_storage(generic_cloud: str):
     """Test storage with managed spot"""
@@ -1581,6 +1709,7 @@ def test_spot_tpu():
 
 # ---------- Testing env for spot ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_inline_env(generic_cloud: str):
     """Test spot env"""
