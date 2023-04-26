@@ -1182,8 +1182,9 @@ class RetryingVmProvisioner(object):
                 to_provision.instance_type,
                 to_provision.use_spot)):
                 
-                raise exceptions.ResourcesUnavailableError('Zero quota in the region'
-                                                        'with attempted provisioning')
+                raise exceptions.ResourcesUnavailableError(
+                    'Zero quota in the region with '
+                    'attempted provisioning')
             
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status):
