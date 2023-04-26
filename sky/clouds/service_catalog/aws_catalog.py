@@ -149,9 +149,15 @@ def _get_df() -> pd.DataFrame:
                 _user_df = _fetch_and_apply_az_mapping(_default_df)
         return _user_df
 
-def get_mapping():
-    return _quotas_df
+def get_quota_code(instance_type: str, spot_header: str) -> str:
+    try:
+        quota_code = _quotas_df.loc[
+            _quotas_df['InstanceType'] == instance_type, 
+            spot_header].values[0]
+        return quota_code
 
+    except IndexError:
+        return None
 
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_get_df(), instance_type)

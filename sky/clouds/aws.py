@@ -661,28 +661,26 @@ class AWS(clouds.Cloud):
                               'Try pip install "skypilot[aws]"') from None
         
         from sky.clouds.service_catalog import aws_catalog
-        instance_mapping = aws_catalog.get_mapping()
-
-        client = boto3.client('service-quotas', region_name=region)
         
         spot_header = ''
         if (use_spot):
-            spot_header = 'Spot Instance Service Quota Code'
+            spot_header = 'SpotInstanceCode'
         else:
-            spot_header = 'On-Demand Service Quota Code' 
+            spot_header = 'OnDemandInstanceCode' 
         
-        quota_code = ''
-        try:
-            quota_code = instance_mapping.loc[
-                instance_mapping['Instance Type'] == instance_type, 
-                spot_header].values[0]
-        
-        except IndexError:
+        quota_code = aws_catalog.get_quota_code(instance_type, spot_header)
+
+        if (quota_code == None):
             return True
         
-        response = client.get_service_quota(
-            ServiceCode='ec2',
-            QuotaCode=quota_code)
+        client = boto3.client('service-quotas', region_name=region)
+        try:
+            response = client.get_service_quota(
+                ServiceCode='ec2',
+                QuotaCode=quota_code)
+        except botocore.exceptions.ClientError as e:
+            return True
+
             
         if response['Quota']['Value'] == 0:
             return False
