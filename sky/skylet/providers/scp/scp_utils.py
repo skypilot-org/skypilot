@@ -11,15 +11,22 @@ from typing import Any, Dict, List
 from urllib import parse
 import random
 from functools import wraps
+import logging
+
 CREDENTIALS_PATH = '~/.scp/scp_credential'
 API_ENDPOINT = 'https://openapi.samsungsdscloud.com'
 TEMP_VM_JSON_PATH = '/tmp/json/tmp_vm_body.json'
 
-
+logger = logging.getLogger(__name__)
 
 class SCPClientError(Exception):
     pass
 
+class SCPOngoingRequestError(Exception):
+    pass
+
+class SCPCreationFailError(Exception):
+    pass
 
 class Metadata:
     """Per-cluster metadata file."""
@@ -87,13 +94,18 @@ def raise_scp_error(response: requests.Response) -> None:
     status_code = response.status_code
     if status_code == 200 or status_code == 202 :
         return
-    print(response.json())
     try:
         resp_json = response.json()
-
         message = resp_json['message']
     except (KeyError, json.decoder.JSONDecodeError):
         raise SCPClientError(f'Unexpected error. Status code: {status_code}')
+
+    if status_code == 404:
+        raise SCPCreationFailError(f'{status_code}: {message}')
+
+    if "There is an ongoing request" in message:
+        raise SCPOngoingRequestError(f'{status_code}: {message}')
+
     raise SCPClientError(f'{status_code}: {message}')
 
 
@@ -107,14 +119,15 @@ def _singleton(class_):
     return get_instance
 
 
-def _retry(method, max_tries=20, backoff_s=5):
+def _retry(method, max_tries=50, backoff_s=5):
     @wraps(method)
     def method_with_retries(self, *args, **kwargs):
         try_count = 0
         while try_count < max_tries:
             try:
                 return method(self, *args, **kwargs)
-            except SCPClientError:
+            except SCPOngoingRequestError:
+                logger.warning("Caught a Ongoing Request. Retrying.")
                 try_count += 1
                 if try_count < max_tries:
                     time.sleep(backoff_s)
@@ -174,7 +187,6 @@ class SCPClient:
         method = 'POST'
         self.set_timestamp()
         self.set_signature(url=url, method=method)
-        print(request_body)
 
         response = requests.post(url, json=request_body, headers=self.headers)
 
@@ -325,7 +337,7 @@ class SCPClient:
         self.headers['X-Cmp-Timestamp'] = self.timestamp
 
     def set_signature(self, method:str, url:str) -> None:
-        print(url)
+
         self.signature = self.get_signature(url=url, method=method)
         self.headers['X-Cmp-Signature'] = self.signature
 
