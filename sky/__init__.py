@@ -31,6 +31,7 @@ Azure = clouds.Azure
 GCP = clouds.GCP
 Lambda = clouds.Lambda
 Local = clouds.Local
+OCI = clouds.OCI
 optimize = Optimizer.optimize
 
 __all__ = [
@@ -41,6 +42,7 @@ __all__ = [
     'GCP',
     'Lambda',
     'Local',
+    'OCI',
     'Optimizer',
     'OptimizeTarget',
     'backends',

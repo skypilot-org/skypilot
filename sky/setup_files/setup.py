@@ -126,7 +126,8 @@ extras_require: Dict[str, List[str]] = {
     'ibm': ['ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services'],
     'docker': ['docker'],
     'lambda': [],
-    'cloudflare': aws_dependencies
+    'cloudflare': aws_dependencies,
+    'oci': ['oci'],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

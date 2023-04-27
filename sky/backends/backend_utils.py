@@ -59,6 +59,13 @@ if typing.TYPE_CHECKING:
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
 
+# [HysunHe] Add OCI needed imports
+from sky.skylet.providers.oci.query_helper import oci_query_helper
+from ray.autoscaler.tags import (
+    TAG_RAY_CLUSTER_NAME,
+    TAG_RAY_NODE_KIND,
+)
+
 logger = sky_logging.init_logger(__name__)
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
@@ -994,6 +1001,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_lambda_authentication(config)
     elif isinstance(cloud, clouds.IBM):
         config = auth.setup_ibm_authentication(config)
+    elif isinstance(cloud, clouds.OCI):
+        config = auth.setup_oci_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
@@ -1769,12 +1778,42 @@ def _query_status_lambda(
     return status_list
 
 
+""" Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI """
+def _query_status_oci(
+        cluster: str,
+        ray_config: Dict[str, Any],  # pylint: disable=unused-argument
+) -> List[global_user_state.ClusterStatus]:
+    del ray_config # unused
+    
+    status_map = {
+        'PROVISIONING': global_user_state.ClusterStatus.INIT,
+        'STARTING': global_user_state.ClusterStatus.INIT,
+        'RUNNING': global_user_state.ClusterStatus.UP,
+        'STOPPING': global_user_state.ClusterStatus.STOPPED,
+        'STOPPED': global_user_state.ClusterStatus.STOPPED,
+        'TERMINATED': None,
+    }
+
+    #TAG_RAY_NODE_KIND
+    status_list = []
+    vms = oci_query_helper.query_instances_by_tags({TAG_RAY_CLUSTER_NAME: cluster})
+    for node in vms:
+        # Check one more field in addtion to the cluster_name
+        if TAG_RAY_NODE_KIND in node.freeform_tags:
+            vm_status = node.lifecycle_state
+            sky_status = status_map[vm_status] if vm_status in status_map else None
+            status_list.append(sky_status)
+            
+    return status_list
+
+
 _QUERY_STATUS_FUNCS = {
     'AWS': _query_status_aws,
     'GCP': _query_status_gcp,
     'Azure': _query_status_azure,
     'Lambda': _query_status_lambda,
     'IBM': _query_status_ibm,
+    'oci': _query_status_oci,
 }
 
 

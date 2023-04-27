@@ -647,13 +647,16 @@ class Resources:
                 raise ValueError(
                     'Cloud must be specified when image_id is provided.')
 
+        """
+          - Apr. 2023 by Hysun He (hysun.he@oracle.com): Add image_id
+            support for Oracle Cloud (OCI)
+        """
         if not self._cloud.is_same_cloud(
-                clouds.IBM()) and not self._cloud.is_same_cloud(
-                    clouds.AWS()) and not self._cloud.is_same_cloud(
-                        clouds.GCP()):
+                clouds.AWS()) and not self._cloud.is_same_cloud(
+                clouds.GCP()) and not self._cloud.is_same_cloud(clouds.OCI()):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'image_id is only supported for AWS, GCP and IBM, please '
+                    'image_id is only supported for AWS and GCP and OCI, please '
                     'explicitly specify the cloud.')
 
         if self._region is not None:

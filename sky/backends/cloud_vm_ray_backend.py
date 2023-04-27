@@ -72,6 +72,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.Lambda: 150,
     clouds.IBM: 160,
     clouds.Local: 90,
+    clouds.OCI: 30 * 60,
 }
 
 # Time gap between retries after failing to provision in all possible places.
@@ -123,6 +124,7 @@ def _get_cluster_config_template(cloud):
         clouds.Lambda: 'lambda-ray.yml.j2',
         clouds.IBM: 'ibm-ray.yml.j2',
         clouds.Local: 'local-ray.yml.j2',
+        clouds.OCI: 'oci-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
 
@@ -761,7 +763,7 @@ class RetryingVmProvisioner(object):
         assert region_with_zones.zones is not None, region_with_zones
         if set(zones) == set(region_with_zones.zones):
             # The underlying AWS NodeProvider will try all specified zones of a
-            # region. (Each boto3 request takes one zone.)
+            ## region. (Each boto3 request takes one zone.)
             logger.warning(f'Got error(s) in all zones of {region.name}:')
         else:
             zones_str = ', '.join(z.name for z in zones)
@@ -905,6 +907,42 @@ class RetryingVmProvisioner(object):
         self._blocked_resources.add(
             launchable_resources.copy(region=region.name, zone=None))
 
+
+    """ Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI """
+    def _update_blocklist_on_oci_error(
+            self, launchable_resources: 'resources_lib.Resources',
+            region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
+            stdout: str, stderr: str):
+        logger.debug("*  _update_blocklist_on_oci_error...")
+
+        # del zones  # Unused.
+        style = colorama.Style
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits + stderr_splits
+            if 'ERR' in s.strip() or 'PANIC' in s.strip()
+        ]
+        if not errors:
+            logger.info('====== stdout ======')
+            for s in stdout_splits:
+                print(s)
+            logger.info('====== stderr ======')
+            for s in stderr_splits:
+                print(s)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Errors occurred during provision; '
+                                   'check logs above.')
+
+        logger.warning(f'Got error(s) in {region.name}:')
+        messages = '\n\t'.join(errors)
+        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
+        self._blocked_resources.add(launchable_resources.copy(zone=None))
+
+        logger.debug("* _update_blocklist_on_oci_error...[Done]")
+
+        
     def _update_blocklist_on_error(
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
@@ -941,6 +979,7 @@ class RetryingVmProvisioner(object):
             clouds.Lambda: self._update_blocklist_on_lambda_error,
             clouds.IBM: self._update_blocklist_on_ibm_error,
             clouds.Local: self._update_blocklist_on_local_error,
+            clouds.OCI: self._update_blocklist_on_oci_error,
         }
         cloud = launchable_resources.cloud
         cloud_type = type(cloud)
