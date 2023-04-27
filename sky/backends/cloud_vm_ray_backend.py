@@ -3150,6 +3150,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # successfully removed cluster as no exception was raised
                 returncode = 0
 
+        # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
+        elif (isinstance(cloud, clouds.OCI) and terminate and
+              prev_cluster_status == global_user_state.ClusterStatus.STOPPED):
+                
+                from sky.skylet.providers.oci.query_helper import oci_query_helper
+                from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
+                oci_query_helper.terminate_instances_by_tags({TAG_RAY_CLUSTER_NAME: cluster_name})
+
+                returncode = 0
+
         elif (terminate and
               (prev_cluster_status == global_user_state.ClusterStatus.STOPPED or
                use_tpu_vm)):

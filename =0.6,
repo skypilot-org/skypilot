@@ -1,0 +1,18 @@
+Collecting pytest-env
+  Downloading pytest_env-0.8.1-py3-none-any.whl (5.2 kB)
+Collecting pytest-xdist
+  Downloading pytest_xdist-3.2.1-py3-none-any.whl (41 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 41.0/41.0 kB 65.8 kB/s eta 0:00:00
+Requirement already satisfied: pytest>=7.1.3 in /home/hysunhe/anaconda3/envs/sky/lib/python3.7/site-packages (from pytest-env) (7.3.1)
+Collecting execnet>=1.1
+  Downloading execnet-1.9.0-py2.py3-none-any.whl (39 kB)
+Requirement already satisfied: pluggy<2.0,>=0.12 in /home/hysunhe/anaconda3/envs/sky/lib/python3.7/site-packages (from pytest>=7.1.3->pytest-env) (1.0.0)
+Requirement already satisfied: tomli>=1.0.0 in /home/hysunhe/anaconda3/envs/sky/lib/python3.7/site-packages (from pytest>=7.1.3->pytest-env) (2.0.1)
+Requirement already satisfied: iniconfig in /home/hysunhe/anaconda3/envs/sky/lib/python3.7/site-packages (from pytest>=7.1.3->pytest-env) (2.0.0)
+Requirement already satisfied: exceptiongroup>=1.0.0rc8 in /home/hysunhe/anaconda3/envs/sky/lib/python3.7/site-packages (from pytest>=7.1.3->pytest-env) (1.1.1)
+Requirement already satisfied: importlib-metadata>=0.12 in /home/hysunhe/anaconda3/envs/sky/lib/python3.7/site-packages (from pytest>=7.1.3->pytest-env) (5.2.0)
+Requirement already satisfied: packaging in /home/hysunhe/anaconda3/envs/sky/lib/python3.7/site-packages (from pytest>=7.1.3->pytest-env) (23.1)
+Requirement already satisfied: typing-extensions>=3.6.4 in /home/hysunhe/anaconda3/envs/sky/lib/python3.7/site-packages (from importlib-metadata>=0.12->pytest>=7.1.3->pytest-env) (4.5.0)
+Requirement already satisfied: zipp>=0.5 in /home/hysunhe/anaconda3/envs/sky/lib/python3.7/site-packages (from importlib-metadata>=0.12->pytest>=7.1.3->pytest-env) (3.15.0)
+Installing collected packages: execnet, pytest-xdist, pytest-env
+Successfully installed execnet-1.9.0 pytest-env-0.8.1 pytest-xdist-3.2.1

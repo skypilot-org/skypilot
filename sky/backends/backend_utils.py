@@ -59,13 +59,6 @@ if typing.TYPE_CHECKING:
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
 
-# [HysunHe] Add OCI needed imports
-from sky.skylet.providers.oci.query_helper import oci_query_helper
-from ray.autoscaler.tags import (
-    TAG_RAY_CLUSTER_NAME,
-    TAG_RAY_NODE_KIND,
-)
-
 logger = sky_logging.init_logger(__name__)
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
@@ -1793,6 +1786,12 @@ def _query_status_oci(
         'STOPPED': global_user_state.ClusterStatus.STOPPED,
         'TERMINATED': None,
     }
+
+    from sky.skylet.providers.oci.query_helper import oci_query_helper
+    from ray.autoscaler.tags import (
+        TAG_RAY_CLUSTER_NAME,
+        TAG_RAY_NODE_KIND,
+    )
 
     #TAG_RAY_NODE_KIND
     status_list = []
