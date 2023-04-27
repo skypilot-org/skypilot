@@ -18,14 +18,14 @@ class oci_conf:
     _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 6
 
-    _VM_PREFIX = 'VM.'
+    _VM_PREFIX = 'VM.Standard'
     _DEFAULT_INSTANCE_FAMILY = [
         # CPU: AMD, Memory: 8 GiB RAM per 1 vCPU;
-        f'{_VM_PREFIX}Standard.E',
+        f'{_VM_PREFIX}.E',
         # CPU: Intel, Memory: 8 GiB RAM per 1 vCPU;
-        f'{_VM_PREFIX}Standard3',
+        f'{_VM_PREFIX}3',
         # CPU: ARM, Memory: 6 GiB RAM per 1 vCPU;
-        # f'{_VM_PREFIX}Standard.A',
+        # f'{_VM_PREFIX}.A',
     ]
 
     MAX_RETRY_COUNT = 3
