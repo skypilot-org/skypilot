@@ -1,3 +1,9 @@
+""" SCP Node provider
+
+This module inherits NodeProvider interface
+to provide the functions accessing SCP nodes
+"""
+
 import logging
 import os
 import time

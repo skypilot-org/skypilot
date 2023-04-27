@@ -1,5 +1,7 @@
-import copy
-
+"""
+This module contains the functions of the initial configuration
+for the SCP zone specific settings.
+"""
 
 class ZoneConfig:
     def __init__(self, scp_client, node_config):
