@@ -619,6 +619,22 @@ def test_lambda_file_mounts():
     run_one_test(test)
 
 
+@pytest.mark.scp
+def test_scp_file_mounts():
+    name = _get_cluster_name()
+    test_commands = [
+        *storage_setup_commands,
+        f'sky launch -y -c {name} {SCP_TYPE} --num-nodes 1 examples/using_file_mounts.yaml',
+        f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+    ]
+    test = Test(
+        'SCP_using_file_mounts',
+        test_commands,
+        f'sky down -y {name}',
+        timeout=20 * 60,  # 20 mins
+    )
+    run_one_test(test)
+
 # ---------- storage ----------
 @pytest.mark.aws
 def test_aws_storage_mounts():
@@ -721,6 +737,29 @@ def test_lambda_logs():
     run_one_test(test)
 
 
+@pytest.mark.scp
+def test_scp_logs():
+    name = _get_cluster_name()
+    timestamp = time.time()
+    test = Test(
+        'SCP_cli_logs',
+        [
+            f'sky launch -y -c {name} {SCP_TYPE} "echo {timestamp} 1"',
+            f'sky exec {name} "echo {timestamp} 2"',
+            f'sky exec {name} "echo {timestamp} 3"',
+            f'sky exec {name} "echo {timestamp} 4"',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} 3 4 --sync-down',
+            f'sky logs {name} * --sync-down',
+            f'sky logs {name} 1 | grep "{timestamp} 1"',
+            f'sky logs {name} | grep "{timestamp} 4"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+
 # ---------- Job Queue. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
 @pytest.mark.no_scp  # SCP does not have K80 gpus
@@ -772,6 +811,30 @@ def test_lambda_job_queue():
     )
     run_one_test(test)
 
+
+@pytest.mark.scp
+def test_scp_job_queue():
+    name = _get_cluster_name()
+    num_of_gpu_launch = 1
+    num_of_gpu_exec = 0.5
+    test = Test(
+        'SCP_job_queue',
+        [
+            f'sky launch -y -c {name} {SCP_TYPE} {SCP_GPU_V100}:{num_of_gpu_launch} examples/job_queue/cluster.yaml',
+            f'sky exec {name} -n {name}-1 {SCP_GPU_V100}:{num_of_gpu_exec} -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-2 {SCP_GPU_V100}:{num_of_gpu_exec} -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-3 {SCP_GPU_V100}:{num_of_gpu_exec} -d examples/job_queue/job.yaml',
+            f'sky queue {name} | grep {name}-1 | grep RUNNING',
+            f'sky queue {name} | grep {name}-2 | grep RUNNING',
+            f'sky queue {name} | grep {name}-3 | grep PENDING',
+            f'sky cancel -y {name} 2',
+            'sleep 5',
+            f'sky queue {name} | grep {name}-3 | grep RUNNING',
+            f'sky cancel -y {name} 3',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
@@ -880,6 +943,23 @@ def test_lambda_huggingface(generic_cloud: str):
             f'sky launch -y -c {name} {LAMBDA_TYPE} examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky exec {name} {LAMBDA_TYPE} examples/huggingface_glue_imdb_app.yaml',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.scp
+def test_scp_huggingface(generic_cloud: str):
+    name = _get_cluster_name()
+    num_of_gpu_launch=1
+    test = Test(
+        'SCP_huggingface_glue_imdb_app',
+        [
+            f'sky launch -y -c {name} {SCP_TYPE} {SCP_GPU_V100}:{num_of_gpu_launch} examples/huggingface_glue_imdb_app.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} {SCP_TYPE} {SCP_GPU_V100}:{num_of_gpu_launch} examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -1158,84 +1238,6 @@ def test_lambda_autodown():
     )
     run_one_test(test)
 
-
-@pytest.mark.scp
-def test_scp_file_mounts():
-    name = _get_cluster_name()
-    test_commands = [
-        *storage_setup_commands,
-        f'sky launch -y -c {name} {SCP_TYPE} --num-nodes 1 examples/using_file_mounts.yaml',
-        f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-    ]
-    test = Test(
-        'SCP_using_file_mounts',
-        test_commands,
-        f'sky down -y {name}',
-        timeout=20 * 60,  # 20 mins
-    )
-    run_one_test(test)
-
-@pytest.mark.scp
-def test_scp_logs():
-    name = _get_cluster_name()
-    timestamp = time.time()
-    test = Test(
-        'SCP_cli_logs',
-        [
-            f'sky launch -y -c {name} {SCP_TYPE} "echo {timestamp} 1"',
-            f'sky exec {name} "echo {timestamp} 2"',
-            f'sky exec {name} "echo {timestamp} 3"',
-            f'sky exec {name} "echo {timestamp} 4"',
-            f'sky logs {name} 2 --status',
-            f'sky logs {name} 3 4 --sync-down',
-            f'sky logs {name} * --sync-down',
-            f'sky logs {name} 1 | grep "{timestamp} 1"',
-            f'sky logs {name} | grep "{timestamp} 4"',
-        ],
-        f'sky down -y {name}',
-    )
-    run_one_test(test)
-
-
-@pytest.mark.scp
-def test_scp_job_queue():
-    name = _get_cluster_name()
-    num_of_gpu_launch = 1
-    num_of_gpu_exec = 0.5
-    test = Test(
-        'SCP_job_queue',
-        [
-            f'sky launch -y -c {name} {SCP_TYPE} {SCP_GPU_V100}:{num_of_gpu_launch} examples/job_queue/cluster.yaml',
-            f'sky exec {name} -n {name}-1 {SCP_GPU_V100}:{num_of_gpu_exec} -d examples/job_queue/job.yaml',
-            f'sky exec {name} -n {name}-2 {SCP_GPU_V100}:{num_of_gpu_exec} -d examples/job_queue/job.yaml',
-            f'sky exec {name} -n {name}-3 {SCP_GPU_V100}:{num_of_gpu_exec} -d examples/job_queue/job.yaml',
-            f'sky queue {name} | grep {name}-1 | grep RUNNING',
-            f'sky queue {name} | grep {name}-2 | grep RUNNING',
-            f'sky queue {name} | grep {name}-3 | grep PENDING',
-            f'sky cancel -y {name} 2',
-            'sleep 5',
-            f'sky queue {name} | grep {name}-3 | grep RUNNING',
-            f'sky cancel -y {name} 3',
-        ],
-        f'sky down -y {name}',
-    )
-    run_one_test(test)
-
-@pytest.mark.scp
-def test_scp_huggingface(generic_cloud: str):
-    name = _get_cluster_name()
-    num_of_gpu_launch=1
-    test = Test(
-        'SCP_huggingface_glue_imdb_app',
-        [
-            f'sky launch -y -c {name} {SCP_TYPE} {SCP_GPU_V100}:{num_of_gpu_launch} examples/huggingface_glue_imdb_app.yaml',
-            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky exec {name} {SCP_TYPE} {SCP_GPU_V100}:{num_of_gpu_launch} examples/huggingface_glue_imdb_app.yaml',
-            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
-        ],
-        f'sky down -y {name}',
-    )
-    run_one_test(test)
 
 @pytest.mark.scp
 def test_scp_autodown():
