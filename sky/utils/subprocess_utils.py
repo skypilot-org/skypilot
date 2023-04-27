@@ -67,8 +67,6 @@ def handle_returncode(returncode: int,
     echo = logger.error if stream_logs else lambda _: None
     if returncode != 0:
         if stderr is not None:
-            logger.info('##############################')
-            logger.info(f'\n this is error: {stderr}')
             echo(stderr)
 
         if callable(error_msg):
