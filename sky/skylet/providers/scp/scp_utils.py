@@ -16,16 +16,23 @@ import base64
 from typing import Any, Dict, List
 from urllib import parse
 import random
+from functools import wraps
+import logging
 
 CREDENTIALS_PATH = '~/.scp/scp_credential'
 API_ENDPOINT = 'https://openapi.samsungsdscloud.com'
 TEMP_VM_JSON_PATH = '/tmp/json/tmp_vm_body.json'
 
-
+logger = logging.getLogger(__name__)
 
 class SCPClientError(Exception):
     pass
 
+class SCPOngoingRequestError(Exception):
+    pass
+
+class SCPCreationFailError(Exception):
+    pass
 
 class Metadata:
     """Per-cluster metadata file."""
@@ -81,24 +88,35 @@ class Metadata:
         with open(self.path, 'w') as f:
             json.dump(metadata, f)
 
+    def keys(self):
+        if not os.path.exists(self.path):
+            return []
+        with open(self.path, 'r') as f:
+            metadata = json.load(f)
+            return list(metadata.keys())
 
 def raise_scp_error(response: requests.Response) -> None:
     """Raise SCPCloudError if appropriate. """
     status_code = response.status_code
     if status_code == 200 or status_code == 202 :
         return
-
     try:
         resp_json = response.json()
-
         message = resp_json['message']
     except (KeyError, json.decoder.JSONDecodeError):
         raise SCPClientError(f'Unexpected error. Status code: {status_code}')
+
+    if status_code == 404:
+        raise SCPCreationFailError(f'{status_code}: {message}')
+
+    if "There is an ongoing request" in message:
+        raise SCPOngoingRequestError(f'{status_code}: {message}')
+
     raise SCPClientError(f'{status_code}: {message}')
 
 
 
-def singleton(class_):
+def _singleton(class_):
     instances = {}
     def get_instance(*args, **kwargs):
         if class_ not in instances:
@@ -106,7 +124,26 @@ def singleton(class_):
         return instances[class_]
     return get_instance
 
-@singleton
+
+def _retry(method, max_tries=50, backoff_s=5):
+    @wraps(method)
+    def method_with_retries(self, *args, **kwargs):
+        try_count = 0
+        while try_count < max_tries:
+            try:
+                return method(self, *args, **kwargs)
+            except SCPOngoingRequestError:
+                logger.warning("Caught a Ongoing Request. Retrying.")
+                try_count += 1
+                if try_count < max_tries:
+                    time.sleep(backoff_s)
+                else:
+                    raise
+
+    return method_with_retries
+
+
+@_singleton
 class SCPClient:
     """Wrapper functions for SCP Cloud API."""
 
@@ -140,6 +177,7 @@ class SCPClient:
         url = f'{API_ENDPOINT}/virtual-server/v3/virtual-servers'
         return self._post(url, instance_config)
 
+    @_retry
     def _get(self, url, contents_key='contents'):
         method = 'GET'
         self.set_timestamp()
@@ -150,6 +188,7 @@ class SCPClient:
         if contents_key is not None : return response.json().get(contents_key, [])
         else:  return response.json()
 
+    @_retry
     def _post(self, url, request_body):
         method = 'POST'
         self.set_timestamp()
@@ -160,6 +199,7 @@ class SCPClient:
         raise_scp_error(response)
         return response.json()
 
+    @_retry
     def _delete(self, url, request_body=None):
         method = 'DELETE'
         self.set_timestamp()
@@ -303,6 +343,7 @@ class SCPClient:
         self.headers['X-Cmp-Timestamp'] = self.timestamp
 
     def set_signature(self, method:str, url:str) -> None:
+
         self.signature = self.get_signature(url=url, method=method)
         self.headers['X-Cmp-Signature'] = self.signature
 

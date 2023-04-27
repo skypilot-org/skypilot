@@ -119,6 +119,7 @@ extras_require = {
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],
     'lambda': [],
+    'scp': [],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])
