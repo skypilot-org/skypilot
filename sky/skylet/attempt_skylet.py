@@ -14,9 +14,10 @@ if os.path.exists(constants.SKYLET_VERSION_FILE):
 with open(constants.SKYLET_VERSION_FILE, 'w+') as f:
     f.write(constants.SKYLET_VERSION)
 
-subprocess.run(
-    'pkill -f "python3 -m sky.skylet.skylet"',
-    shell = True, check=True)
-subprocess.run(
-    'nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &',
-    shell=True, check=True)
+# Does not check if failed because skylet may not exist
+
+# pylint: disable=subprocess-run-check
+subprocess.run('pkill -f "python3 -m sky.skylet.skylet"', shell=True)
+# pylint: disable=subprocess-run-check
+subprocess.run('nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &',
+               shell=True)
