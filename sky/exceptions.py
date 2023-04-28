@@ -164,6 +164,12 @@ class StorageModeError(StorageSpecError):
     pass
 
 
+class StorageMountPathError(StorageSpecError):
+    # Error raised when bucket is successfully initialized, but mounting fails
+    # due to non-empty mount path
+    pass
+
+
 class FetchIPError(Exception):
     """Raised when fetching the IP fails."""
 
