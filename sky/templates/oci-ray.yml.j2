@@ -24,6 +24,8 @@ available_node_types:
       MemoryInGbs: {{memory}}
       AvailabilityDomain: {{zone}}
       ImageId: {{image}}
+      AppCatalogListingId: {{app_catalog_listing_id}}
+      ResourceVersion: {{resource_version}}
       Preemptible: {{use_spot}}
       AuthorizedKey: {{ssh_public_key}}
 {% if num_nodes > 1 %}
@@ -37,6 +39,8 @@ available_node_types:
       MemoryInGbs: {{memory}}
       AvailabilityDomain: {{zone}}
       ImageId: {{image}}
+      AppCatalogListingId: {{app_catalog_listing_id}}
+      ResourceVersion: {{resource_version}}
       Preemptible: {{use_spot}}
       AuthorizedKey: {{ssh_public_key}}
 {%- endif %}
@@ -81,13 +85,13 @@ setup_commands:
     sudo pkill -9 apt-get;
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
+    which nvidia-smi > /dev/null && sudo apt-get install nvidia-driver-525 -y && sudo apt-get install nvidia-driver-525-server -y;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
     which conda > /dev/null 2>&1 || (wget -nc https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b && eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true);
     source ~/.bashrc;
-    pip3 install oci;
     (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful;
     (pip3 list | grep skypilot && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
@@ -96,6 +100,7 @@ setup_commands:
     python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
     sudo iptables -F && echo 'sudo iptables -F' >> ~/.bashrc;
+    pip3 install oci;
     export SKYPILOT_DEBUG=1;
 
 
@@ -109,12 +114,14 @@ setup_commands:
 head_start_ray_commands:
   # Start skylet daemon. (Should not place it in the head_setup_commands, otherwise it will run before skypilot is installed.)
   - ((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.skylet.skylet") || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);
-    ray stop; RAY_SCHEDULER_EVENTS=0 ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} || exit 1;
+    export SKYPILOT_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l);    
+    ray stop; RAY_SCHEDULER_EVENTS=0 ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --num-gpus=$SKYPILOT_NUM_GPUS || exit 1;
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
-  - ray stop; RAY_SCHEDULER_EVENTS=0 ray start --disable-usage-stats --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} || exit 1;
+  - SKYPILOT_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l);
+    ray stop; RAY_SCHEDULER_EVENTS=0 ray start --disable-usage-stats --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --num-gpus=$SKYPILOT_NUM_GPUS || exit 1;
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
 {%- else %}
 worker_start_ray_commands: []

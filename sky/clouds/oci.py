@@ -7,7 +7,6 @@ History:
 """
 import json
 import typing
-import sys
 import logging
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -188,7 +187,17 @@ class OCI(clouds.Cloud):
         else:
             custom_resources = None
 
-        imageId = self._get_image_id(resources.image_id, region.name)
+        image_str = self._get_image_id(resources.image_id, region.name)
+        image_cols = image_str.split('-')
+        if len(image_cols) == 3:
+            imageId = image_cols[0]
+            listingId = image_cols[1]
+            resVer = image_cols[2]
+        else:
+            imageId = image_cols[0]
+            listingId = None
+            resVer = None
+
         cpus = resources.cpus
         if resources.instance_type.startswith(oci_conf._VM_PREFIX):
             cpus = f"{oci_conf._DEFAULT_NUM_VCPUS}" if cpus is None else cpus
@@ -201,6 +210,8 @@ class OCI(clouds.Cloud):
             'memory': resources.memory,
             'zone': resources.zone,
             'image': imageId,
+            'app_catalog_listing_id': listingId,
+            'resource_version': resVer, 
             'use_spot': resources.use_spot
         }
 
@@ -311,8 +322,8 @@ class OCI(clouds.Cloud):
 
     def _get_image_id(self, image_id: Optional[Dict[Optional[str], str]], region_name: str) -> str:
         if image_id is None:
-            logger.fatal("! image_id is required!")
-            sys.exit(1)
+            logger.critical("! image_id is required!")
+            raise Exception("! ERR: image_id is required")
         if None in image_id:
             image_id_str = image_id[None]
         else:
@@ -323,8 +334,8 @@ class OCI(clouds.Cloud):
                                                                  region_name,
                                                                  clouds='oci')
             if image_id_str is None:
-                logger.fatal("! Real image_id not found! - {region_name}:{image_id}")
-                sys.exit(1)
+                logger.critical("! Real image_id not found! - {region_name}:{image_id}")
+                raise
 
         logger.debug(f"* Got real image_id {image_id_str}")
         return image_id_str

@@ -29,6 +29,15 @@ from ray.autoscaler.tags import (
 )
 
 logger = logging.getLogger(__name__)
+def debug_enabled(f):
+    def wrapper(self, *args, **kwargs):
+        dt_str = datetime.now().strftime("%Y%m%d%H%M%S.%f")
+        logger.debug(f"* {dt_str} - Enter {f}, {args}, {kwargs}")
+        try:
+            return f(self, *args, **kwargs)
+        finally:
+            logger.debug(f"* {dt_str} - Exit {f}")
+    return wrapper
 
 def synchronized(f):
     def wrapper(self, *args, **kwargs):
@@ -38,7 +47,6 @@ def synchronized(f):
         finally:
             self.lock.release()
     return wrapper
-
 
 class OCINodeProvider(NodeProvider):
     """Node Provider for OracleCloud (OCI)."""
@@ -96,6 +104,7 @@ class OCINodeProvider(NodeProvider):
     # end _get_filtered_nodes(...)
 
 
+    @debug_enabled
     def non_terminated_nodes(self, tag_filters):
         """Return a list of node ids filtered by the specified tags dict.
         
@@ -105,8 +114,6 @@ class OCINodeProvider(NodeProvider):
         (e.g. is_running(node_id)). This means that non_terminated_nodes() 
         must be called again to refresh results.
         """
-        logger.debug(f"* non_terminated_nodes {tag_filters}")
-        
         VALIDITY_TAGS = [
             TAG_RAY_CLUSTER_NAME,
             TAG_RAY_NODE_KIND,
@@ -120,6 +127,7 @@ class OCINodeProvider(NodeProvider):
     # end non_terminated_nodes(...)
 
 
+    @debug_enabled
     def is_running(self, node_id):
         """Return whether the specified node is running."""
         node = self._get_cached_node(node_id = node_id)
@@ -131,6 +139,7 @@ class OCINodeProvider(NodeProvider):
     # end is_running(...)
 
 
+    @debug_enabled
     def is_terminated(self, node_id):
         """ Return whether the specified node is terminated.
         """
@@ -144,26 +153,27 @@ class OCINodeProvider(NodeProvider):
     # end is_terminated(...)
     
 
+    @debug_enabled
     def node_tags(self, node_id):
         return self.cached_nodes[node_id]["tags"]
 
 
+    @debug_enabled
     def external_ip(self, node_id):
         """Returns the external ip of the given node."""
         return self._get_cached_node(node_id = node_id)['external_ip']
 
 
+    @debug_enabled
     def internal_ip(self, node_id):
         """Returns the internal ip (Ray ip) of the given node."""
         return self._get_cached_node(node_id = node_id)['internal_ip']
 
 
     @synchronized
+    @debug_enabled
     def create_node(self, node_config, tags, count):
         """Creates a number of nodes within the namespace."""
-        logger.debug(f"* create_node, count={count}, tags={tags}, node_config={node_config}")
-        logger.info(f"* cache_stopped_nodes value in config is {self.cache_stopped_nodes}")
-        
         start_time = round(time.time() * 1000)
         starting_insts = []
 
@@ -278,6 +288,8 @@ class OCINodeProvider(NodeProvider):
             batch_id = datetime.now().strftime("%Y%m%d%H%M%S")
             node_type = tags[TAG_RAY_NODE_KIND]
 
+            oci_query_helper.subscribe_image(compartment_id = compartment, listing_id = node_config["AppCatalogListingId"], 
+                                             resource_version = node_config["ResourceVersion"])
             for seq in range(1, count + 1):
                 launch_instance_response = oci_conf.core_client.launch_instance(
                     launch_instance_details=oci.core.models.LaunchInstanceDetails(
@@ -345,10 +357,8 @@ class OCINodeProvider(NodeProvider):
 
 
     @synchronized
+    @debug_enabled
     def set_node_tags(self, node_id, tags):
-        logger.debug(f"* set_node_tags:node={node_id}, tags={tags}")
-        start_time = round(time.time() * 1000)
-
         existing_tags = self._get_cached_node(node_id)["tags"]
         combined_tags = dict(existing_tags, **tags)
         logger.debug(f"* node={node_id}, combined_tags={combined_tags}")
@@ -372,9 +382,6 @@ class OCINodeProvider(NodeProvider):
                 logger.warn(f"! Not ready yet, wait {wait_seconds} seconds & retry!")
                 logger.warn(f"! Exception message is {str(e)}")
                 time.sleep(wait_seconds)
-
-        total_time = round(time.time() * 1000) - start_time
-        logger.debug(f"* set_node_tags for node {node_id}...[Done]. Time elapsed {total_time} millis")
     # end set_node_tags(...)
 
 
