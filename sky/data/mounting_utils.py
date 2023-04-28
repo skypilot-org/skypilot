@@ -88,4 +88,3 @@ def get_mounting_command(
                f' && bash {script_path}'
                f' && rm {script_path}')
     return command
-    

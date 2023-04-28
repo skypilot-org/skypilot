@@ -3560,19 +3560,25 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 src_print = ', '.join(src_print)
             try:
                 backend_utils.parallel_data_transfer_to_nodes(
-                runners,
-                source=src_print,
-                target=dst,
-                cmd=mount_cmd,
-                run_rsync=False,
-                action_message='Mounting',
-                log_path=log_path,
-            )
+                    runners,
+                    source=src_print,
+                    target=dst,
+                    cmd=mount_cmd,
+                    run_rsync=False,
+                    action_message='Mounting',
+                    log_path=log_path,
+                )
             except exceptions.CommandError as e:
                 if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:
-                    mount_path = f'{colorama.Fore.RED}{colorama.Style.BRIGHT}{dst}{colorama.Style.RESET_ALL}'
-                    raise exceptions.StorageMountPathError(f'Mount path {mount_path} is non-empty. {mount_path} may have been already taken by the Kernel. Please set the mount path to another name.') from None
-
+                    mount_path = (f'{colorama.Fore.RED}'
+                                  f'{colorama.Style.BRIGHT}{dst}'
+                                  f'{colorama.Style.RESET_ALL}')
+                    raise exceptions.StorageMountPathError(
+                        f'Mount path {mount_path} you set in ENTRYPOINT' 
+                        f'is non-empty. {mount_path} may have been already'
+                        f' taken by the Kernel. Please set the mount path '
+                        f'to another name.'
+                    ) from None
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
