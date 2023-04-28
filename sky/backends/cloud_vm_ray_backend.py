@@ -3574,11 +3574,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                   f'{colorama.Style.BRIGHT}{dst}'
                                   f'{colorama.Style.RESET_ALL}')
                     raise exceptions.StorageMountPathError(
-                        f'Mount path {mount_path} you set in ENTRYPOINT' 
+                        f'Mount path {mount_path} you set in ENTRYPOINT ' 
                         f'is non-empty. {mount_path} may have been already'
                         f' taken by the Kernel. Please set the mount path '
-                        f'to another name.'
-                    ) from None
+                        f'to another name.') from None
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
