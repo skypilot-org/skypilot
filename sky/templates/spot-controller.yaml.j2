@@ -4,6 +4,8 @@ name: {{task_name}}
 
 resources:
   disk_size: 50
+  cloud: gcp
+  cpus: 4+
 # It is now using default CPU instance type hard-coded in code for spot controller,
 # i.e. m6i.2xlarge (8vCPUs, 32 GB) for AWS, Standard_D8s_v4 (8vCPUs, 32 GB) for Azure, and n1-highmem-8 (8 vCPUs, 52 GB) for GCP.
 # This allows users without the credits for some of the clouds available to use managed spot instances.
@@ -34,6 +36,11 @@ setup: |
   {% if is_dev %}
   echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
   {% endif %}
+
+  # Sky Spot stuff.
+  git clone git@github.com:concretevitamin/skypilot-spot-strategy-source-only.git skypilot-spot-strategy
+  cd skypilot-spot-strategy
+  pip install -e .
 
 run: |
   python -u -m sky.spot.controller \

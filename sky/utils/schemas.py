@@ -144,6 +144,9 @@ def get_task_schema():
         'required': [],
         'additionalProperties': False,
         'properties': {
+            '_sky_spot': {  # TODO(zongheng): experiments.
+                'type': 'object',
+            },
             'name': {
                 'type': 'string',
             },

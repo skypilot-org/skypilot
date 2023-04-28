@@ -1,0 +1,31 @@
+name: test-sky-spot
+
+resources:
+  cloud: AWS
+  use_spot: true
+  spot_recovery: FAILOVER
+  disk_size: 50
+
+  # NOTE: Sky Spot fields:
+  # instance_type: m6i.4xlarge
+  instance_type: p3.2xlarge
+  # instance_type: p4d.24xlarge
+  zone: us-east-1a
+
+num_nodes: 1
+
+run: |
+  echo "Hello, world!"
+
+# NOTE: Sky Spot fields:
+_sky_spot:
+  gap_seconds: 60
+  # strategy: time_sliced
+  strategy: strawman
+  strategy_args:
+    deadline_hours: 52
+    task_duration_hours: 48
+    restart_overhead_hours: 0
+
+    slice_interval_hours: 1
+    use_avg_gain: True

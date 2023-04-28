@@ -4,8 +4,10 @@ import multiprocessing
 import pathlib
 import time
 import traceback
-from typing import Tuple
+from typing import List, Tuple
 
+import boto3
+import botocore
 import filelock
 
 import sky
@@ -63,6 +65,200 @@ class SpotController:
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             self._cluster_name, self._backend, self._task, retry_until_up)
 
+        self._sky_spot_init()
+
+    def _sky_spot_init(self):
+        sky_spot_config = self._task._sky_spot
+        logger.info(f'sky_spot config: {sky_spot_config}')
+
+        if sky_spot_config is not None:
+            logger.info(
+                'SkySpot detected, force setting retry_until_up to False')
+            self._retry_until_up = False
+
+            from sky_spot import env as sky_spot_env
+            from sky_spot import utils as sky_spot_utils
+            from sky_spot.strategies import strategy as strategy_lib
+
+            class SkyPilotControllerEnv(sky_spot_env.Env):
+                NAME = 'skypilot-controller'
+
+                def __init__(self, instance_type: str, cluster_name: str,
+                             zone: str, gap_seconds: float):
+                    self._instance_type = instance_type
+                    self._cluster_name = cluster_name
+                    self._zone = zone
+                    logger.info(
+                        f'SkyPilotControllerEnv: {cluster_name}, zone {zone}, gap_seconds {gap_seconds}'
+                    )
+                    super().__init__(gap_seconds)
+
+                def spot_available(self) -> bool:
+                    if self.cluster_type == sky_spot_utils.ClusterType.SPOT:
+                        # Pull the actual cluster status from the cloud provider to
+                        # determine whether the cluster is preempted.
+                        (cluster_status,
+                         handle) = backend_utils.refresh_cluster_status_handle(
+                             self._cluster_name, force_refresh=True)
+
+                        if cluster_status == global_user_state.ClusterStatus.UP:
+                            # Not preempted.
+                            return True
+                        else:
+                            # Preempted (partially or fully).
+                            # FIXME: weird semantics, Env.observe() relies on this to record
+                            # preemption. Would have thought we could still try to look up
+                            # if spot capacity is available, as the name spot_available()
+                            # suggests.
+                            return False
+
+                    # Current cluster type is {none, on-demand}.
+                    # Use boto3 client to look up capacity reservation result.
+                    # Return that.
+                    # FIXME(zongheng): assumes zone is in this region.
+                    client = boto3.client('ec2', region_name='us-east-1')
+                    instance_type = self._instance_type
+                    zone = self._zone
+                    instance_count = 1
+                    try:
+                        response = client.create_capacity_reservation(
+                            AvailabilityZone=zone,
+                            InstanceType=instance_type,
+                            InstancePlatform='Linux/UNIX',
+                            InstanceCount=instance_count,
+                        )
+                        logger.info(
+                            '************** Spot available **************')
+                        # import pprint
+                        # pprint.pprint(response)
+                    except botocore.exceptions.ClientError as e:
+                        error_code = e.response['Error']['Code']
+                        if error_code == 'InsufficientInstanceCapacity':
+                            logger.info(
+                                f'{instance_type}:{instance_count} Insufficient capacity in {zone}'
+                            )
+                        elif error_code == 'InstanceLimitExceeded':
+                            # Quota
+                            logger.info(
+                                f'{instance_type}:{instance_count} Instance limit exceeded in {zone}'
+                            )
+                        elif error_code == 'Unsupported':
+                            logger.info(
+                                f'{instance_type}:{instance_count} Unsupported in {zone}'
+                            )
+                        else:
+                            logger.info(
+                                f'{instance_type}:{instance_count} Unexpected error in {zone}: {e}'
+                            )
+                        # import ipdb
+                        # ipdb.set_trace()
+                        return False
+                    else:
+                        reservation_id = response['CapacityReservation'][
+                            'CapacityReservationId']
+                        logger.info(
+                            f'{instance_type}:{instance_count} Created reservation {reservation_id} in {zone}'
+                        )
+                        response = client.cancel_capacity_reservation(
+                            CapacityReservationId=reservation_id)
+                        if response['Return']:
+                            logger.info(
+                                f'Cancelled reservation {reservation_id} in {zone}'
+                            )
+                        else:
+                            logger.info(
+                                f'Failed to cancel reservation {reservation_id} in {zone}'
+                            )
+                        return True
+
+            assert not self._retry_until_up, 'For Sky Spot, construct SpotController without retry_until_up'
+            args = argparse.Namespace(**sky_spot_config['strategy_args'])
+            self._sky_spot_strategy = strategy_lib.Strategy.get(
+                sky_spot_config['strategy'])(args)
+            zone = list(self._task.get_resources())[0].zone
+            instance_type = list(self._task.get_resources())[0].instance_type
+            assert zone is not None, 'Must set zone to use this integration'
+            assert instance_type is not None, 'Must set instance_type to use this integration'
+            self._sky_spot_env = SkyPilotControllerEnv(
+                instance_type=instance_type,
+                cluster_name=self._cluster_name,
+                zone=zone,
+                gap_seconds=sky_spot_config['gap_seconds'])
+            self._sky_spot_strategy.reset(env=self._sky_spot_env)
+            logger.info(f'Constructed strategy: {self._sky_spot_strategy}')
+
+            # strategy.step()
+            # # import ipdb
+            # # ipdb.set_trace()
+            # real_env.observe()
+
+    def _sky_spot_launch_spot(self) -> bool:
+        """Launches a spot instance and returns True if successful."""
+        return self._sky_spot_launch_helper(use_spot=True)
+
+    def _sky_spot_launch_on_demand(self) -> bool:
+        """Launches an on-demand instance and returns True if successful."""
+        return self._sky_spot_launch_helper(use_spot=False)
+
+    def _sky_spot_launch_helper(self, use_spot: bool) -> bool:
+        """Launches an instance and returns True if successful."""
+        resources = list(self._task.resources)[0]
+        original_resources = resources
+        new_resources = resources.copy(use_spot=use_spot)
+        self._task.set_resources({new_resources})
+
+        logger.info('Launching use_spot=%s', use_spot)
+        # Not using self.launch to avoid the retry until up logic.
+        job_submitted_at = self._strategy_executor._launch(
+            max_retry=0, raise_on_failure=False)
+
+        # Restore the original dag
+        self._task.set_resources({original_resources})
+
+        return job_submitted_at is not None
+
+    def _sky_spot_run(self):
+        from sky_spot import utils as sky_spot_utils
+        while True:  # For every env.gap_seconds
+            # Observe 'env' and decide on action
+            next_cluster_type = self._sky_spot_strategy.step()
+            logger.info(
+                f'Strategy decision: next_cluster_type {next_cluster_type}')
+
+            # Actually switch cluster type.
+            cluster_type = self._sky_spot_strategy.env.cluster_type  # current
+            logger.info(f'Current cluster_type {cluster_type}')
+            success = False
+            if cluster_type == next_cluster_type:
+                success = True
+                pass
+            else:  # !=
+                recovery_strategy.terminate_cluster(self._cluster_name)
+                if next_cluster_type == sky_spot_utils.ClusterType.NONE:
+                    success = True
+                elif next_cluster_type == sky_spot_utils.ClusterType.SPOT:
+                    logger.info('******** making changes ********')
+                    success = self._sky_spot_launch_spot()
+                elif next_cluster_type == sky_spot_utils.ClusterType.ON_DEMAND:
+                    logger.info('******** making changes ********')
+                    success = self._sky_spot_launch_on_demand()
+                else:
+                    assert False, next_cluster_type
+
+            if success:
+                # Finish switching (if any)
+                # Records decision into env.cluster_type, tick++
+                self._sky_spot_env.step(next_cluster_type)
+            else:
+                # Failed switching (e.g., self._sky_spot_strategy thinks we
+                # should go to spot, but when we actually try it, cloud returns
+                # out-of-capacity)
+                self._sky_spot_env.step(sky_spot_utils.ClusterType.NONE)
+
+            logger.info('Sleeping for %d seconds' %
+                        self._sky_spot_env.gap_seconds)
+            time.sleep(self._sky_spot_env.gap_seconds)
+
     def _run(self):
         """Busy loop monitoring spot cluster status and handling recovery.
 
@@ -85,6 +281,8 @@ class SpotController:
                 3. Any unexpected error happens during the `sky.launch`.
         Other exceptions may be raised depending on the backend.
         """
+        return self._sky_spot_run()
+
         logger.info(f'Started monitoring spot task {self._task_name} '
                     f'(id: {self._job_id})')
         spot_state.set_starting(self._job_id)

@@ -11,6 +11,7 @@ import sky
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import sky_logging
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 from sky.data import data_utils
@@ -20,6 +21,8 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
+
+logger = sky_logging.init_logger(__name__)
 
 # A lambda generating commands (node rank_i, node addrs -> cmd_i).
 CommandGen = Callable[[int, List[str]], Optional[str]]
@@ -165,6 +168,9 @@ class Task:
         # the underlying managed spot task (Task object).
         self.spot_task: Optional['Task'] = None
 
+        # SkySpot config passed from YAML.
+        self._sky_spot = None
+
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
         # Check if the task is legal.
@@ -263,6 +269,8 @@ class Task:
         backend_utils.validate_schema(config, schemas.get_task_schema(),
                                       'Invalid task YAML: ')
 
+        logger.info(f'Config: {config}')
+
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),
@@ -330,6 +338,10 @@ class Task:
         resources = sky.Resources.from_yaml_config(resources)
 
         task.set_resources({resources})
+
+        if '_sky_spot' in config:
+            task._sky_spot = dict(config.pop('_sky_spot'))
+
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
@@ -836,6 +848,8 @@ class Task:
                 mount_path: storage.to_yaml_config()
                 for mount_path, storage in self.storage_mounts.items()
             })
+
+        add_if_not_none('_sky_spot', self._sky_spot)
         return config
 
     def __rshift__(self, b):
