@@ -114,11 +114,7 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
     'monkey_patches' / 'monkey_patch_ray_up.py')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
-_MAYBE_SKYLET_RESTART_CMD = (
-    f'[[ $(cat {constants.SKYLET_VERSION_FILE}) = "{constants.SKYLET_VERSION}"'
-    ' ]] || (pkill -f "python3 -m sky.skylet.skylet";'
-    f' echo {constants.SKYLET_VERSION} > {constants.SKYLET_VERSION_FILE};'
-    'nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);')
+_MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
 
 
 def _get_cluster_config_template(cloud):
