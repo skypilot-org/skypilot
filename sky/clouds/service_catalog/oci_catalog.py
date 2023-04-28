@@ -138,7 +138,7 @@ def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     df = _image_df[_image_df['Tag'].str.fullmatch(tag)]
     AppCatalogListingId = df['AppCatalogListingId'].iloc[0]
     ResourceVersion = df['ResourceVersion'].iloc[0]
-    return f"{image_str}-{AppCatalogListingId}-{ResourceVersion}"
+    return f"{image_str}{oci_conf.IMAGE_TAG_SPERATOR}{AppCatalogListingId}{oci_conf.IMAGE_TAG_SPERATOR}{ResourceVersion}"
 
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:

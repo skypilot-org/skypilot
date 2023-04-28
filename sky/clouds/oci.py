@@ -188,13 +188,14 @@ class OCI(clouds.Cloud):
             custom_resources = None
 
         image_str = self._get_image_id(resources.image_id, region.name)
-        image_cols = image_str.split('-')
+
+        image_cols = image_str.split(oci_conf.IMAGE_TAG_SPERATOR)
         if len(image_cols) == 3:
             imageId = image_cols[0]
             listingId = image_cols[1]
             resVer = image_cols[2]
         else:
-            imageId = image_cols[0]
+            imageId = resources.image_id
             listingId = None
             resVer = None
 

@@ -9,6 +9,7 @@ History:
 
 import logging
 from datetime import datetime
+import pandas as pd
 import re
 import oci
 from sky.skylet.providers.oci.config import oci_conf
@@ -80,8 +81,8 @@ class oci_query_helper:
     @classmethod 
     @debug_enabled
     def subscribe_image(cls, compartment_id, listing_id, resource_version):
-        logger.debug(f"* subscribe_image: {listing_id} - {resource_version}")
-        if not listing_id or not resource_version:
+        if pd.isna(listing_id) or listing_id.strip() == 'None' or listing_id.strip() == 'nan':
+            logger.debug("* listing_id not specified.")
             return 
 
         try:

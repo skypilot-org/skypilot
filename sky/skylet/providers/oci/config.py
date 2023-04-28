@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 class oci_conf:
     ENV_VAR_OCI_CONFIG = 'OCI_CONFIG'
     CONFIG_PATH = '~/.oci/config'
+    IMAGE_TAG_SPERATOR = '|'
 
     _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 6
