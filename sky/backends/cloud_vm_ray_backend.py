@@ -3570,7 +3570,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             )
             except exceptions.CommandError as e:
                 if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:
-                    raise exceptions.StorageUploadError(f'Mount path {dst} is non-empty')
+                    raise exceptions.StorageUploadError(f'Mount path {dst} is non-empty') from None
 
 
         end = time.time()
