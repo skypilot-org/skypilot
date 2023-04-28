@@ -3570,7 +3570,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             )
             except exceptions.CommandError as e:
                 if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:
-                    raise exceptions.StorageMountPathError(f'Mount path {dst} is non-empty. {dst} may be already taken by the Kernel. Please set the mount path to another name.') from None
+                    mount_path = f'{colorama.Fore.RED}{colorama.Style.BRIGHT}{dst}{colorama.Style.RESET_ALL}'
+                    raise exceptions.StorageMountPathError(f'Mount path {mount_path} is non-empty. {mount_path} may have been already taken by the Kernel. Please set the mount path to another name.') from None
 
 
         end = time.time()
