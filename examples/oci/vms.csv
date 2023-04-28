@@ -1,0 +1,6 @@
+InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region,AvailabilityZone
+VM.Standard.E4.Flex,,,2,16,,0.05,0.025,ap-seoul-1,bxtG:AP-SEOUL-1-AD-1
+VM.GPU.A10.1,A10,1,30,240,"{'Gpus': [{'Name': '1x NVIDIA A10 Tensor Core', 'Architecture': 'Ampere', 'Manufacturer': 'NVIDIA', 'Count': 1, 'Interconnect': 'N/A', 'MemoryInfo': {'SizeInMiB': 24576}}], 'TotalGpuMemoryInMiB': 24576}",4,2,ap-seoul-1,bxtG:AP-SEOUL-1-AD-1
+VM.GPU.A10.2,A10,2,60,480,"{'Gpus': [{'Name': '2x NVIDIA A10 Tensor Core', 'Architecture': 'Ampere', 'Manufacturer': 'NVIDIA', 'Count': 2, 'Interconnect': 'N/A', 'MemoryInfo': {'SizeInMiB': 49152}}], 'TotalGpuMemoryInMiB': 49152}",6,3,ap-seoul-1,bxtG:AP-SEOUL-1-AD-1
+BM.GPU.A10.4,A10,4,128,1024,"{'Gpus': [{'Name': '4x NVIDIA A10 Tensor Core', 'Architecture': 'Ampere', 'Manufacturer': 'NVIDIA', 'Count': 4, 'Interconnect': 'N/A', 'MemoryInfo': {'SizeInMiB': 49152}}], 'TotalGpuMemoryInMiB': 98304}",10,,ap-seoul-1,bxtG:AP-SEOUL-1-AD-1
+VM.Standard.A1.Flex,,,2,12,,0.02,0.01,ap-seoul-1,bxtG:AP-SEOUL-1-AD-1
