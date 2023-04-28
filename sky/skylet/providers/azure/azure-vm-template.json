@@ -88,6 +88,17 @@
             "metadata": {
                 "description": "OS disk size in GBs."
             }
+        },
+        "osDiskTier": {
+            "type": "string",
+            "allowedValues": [
+                "Premium_LRS",
+                "StandardSSD_LRS",
+                "Standard_LRS"
+            ],
+            "metadata": {
+                "description": "OS disk tier."
+            }
         }
     },
     "variables": {
@@ -96,7 +107,6 @@
         "networkInterfaceNamePublic": "[concat(parameters('vmName'),'-nic-public')]",
         "networkInterfaceName": "[if(parameters('provisionPublicIp'), variables('networkInterfaceNamePublic'), variables('networkInterfaceNamePrivate'))]",
         "networkIpConfig": "[guid(resourceGroup().id, parameters('vmName'))]",
-        "osDiskType": "Standard_LRS",
         "publicIpAddressName": "[concat(parameters('vmName'), '-ip' )]",
         "subnetRef": "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'ray-vnet', 'ray-subnet')]"
     },
@@ -201,7 +211,7 @@
                     "osDisk": {
                         "createOption": "fromImage",
                         "managedDisk": {
-                            "storageAccountType": "[variables('osDiskType')]"
+                            "storageAccountType": "[parameters('osDiskTier')]"
                         },
                         "diskSizeGB": "[parameters('osDiskSizeGB')]"
                     },

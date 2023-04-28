@@ -11,6 +11,7 @@ from sky.utils import common_utils
 from sky.utils import log_utils
 
 _COMMAND_TRUNC_LENGTH = 25
+NUM_COST_REPORT_LINES = 5
 
 # A record in global_user_state's 'clusters' table.
 _ClusterRecord = Dict[str, Any]
@@ -104,6 +105,20 @@ def show_status_table(cluster_records: List[_ClusterRecord],
     return num_pending_autostop
 
 
+def get_total_cost_of_displayed_records(
+        cluster_records: List[_ClusterCostReportRecord], display_all: bool):
+    """Compute total cost of records to be displayed in cost report."""
+    cluster_records.sort(
+        key=lambda report: -_get_status_value_for_cost_report(report))
+
+    displayed_records = cluster_records[:NUM_COST_REPORT_LINES]
+    if display_all:
+        displayed_records = cluster_records
+
+    total_cost = sum(record['total_cost'] for record in displayed_records)
+    return total_cost
+
+
 def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
                            show_all: bool,
                            reserved_group_name: Optional[str] = None):
@@ -153,7 +168,15 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
             columns.append(status_column.name)
     cluster_table = log_utils.create_table(columns)
 
-    for record in cluster_records:
+    num_lines_to_display = NUM_COST_REPORT_LINES
+    if show_all:
+        num_lines_to_display = len(cluster_records)
+
+    # prioritize showing non-terminated clusters in table
+    cluster_records.sort(
+        key=lambda report: -_get_status_value_for_cost_report(report))
+
+    for record in cluster_records[:num_lines_to_display]:
         row = []
         for status_column in status_columns:
             if status_column.show_by_default or show_all:
@@ -338,6 +361,14 @@ def _is_pending_autostop(cluster_record: _ClusterRecord) -> bool:
 
 
 # ---- 'sky cost-report' helper functions below ----
+
+
+def _get_status_value_for_cost_report(
+        cluster_cost_report_record: _ClusterCostReportRecord) -> int:
+    status = cluster_cost_report_record['status']
+    if status is None:
+        return -1
+    return 1
 
 
 def _get_status_for_cost_report(

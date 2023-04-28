@@ -20,7 +20,7 @@ In the steps below we assume either (1) you have an unexpired download URL, or (
 [**SkyPilot**](https://github.com/skypilot-org/skypilot) is an open-source framework from UC Berkeley for seamlessly running machine learning on any cloud. With a simple CLI, users can easily launch many clusters and jobs, while substantially lowering their cloud bills. Currently, [Lambda Labs](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#lambda-cloud) (low-cost GPU cloud), [AWS](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#aws), [GCP](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#gcp), and [Azure](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#azure) are supported. See [docs](https://skypilot.readthedocs.io/en/latest/) to learn more.
 
 ## Steps
-All YAML files used below live in [the SkyPilot repo](https://github.com/skypilot-org/skypilot/tree/master/examples/llama-llm-chatbots), and the chatbot code is [here](https://github.com/skypilot-org/sky-llama).
+All YAML files used below live in [the SkyPilot repo](https://github.com/skypilot-org/skypilot/tree/master/llm/llama-chatbots), and the chatbot code is [here](https://github.com/skypilot-org/sky-llama).
 
 0. Install SkyPilot and [check that cloud credentials exist](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#cloud-account-setup):
     ```bash
@@ -29,10 +29,10 @@ All YAML files used below live in [the SkyPilot repo](https://github.com/skypilo
     ```
     <img src="https://i.imgur.com/7BUci5n.png" width="485" alt="`sky check` output showing enabled clouds for SkyPilot"/>
 
-1. Get the [example folder](https://github.com/skypilot-org/skypilot/tree/master/examples/llama-llm-chatbots):
+1. Get the [example folder](https://github.com/skypilot-org/skypilot/tree/master/llm/llama-chatbots):
     ```bash
     git clone https://github.com/skypilot-org/skypilot.git
-    cd skypilot/examples/llama-llm-chatbots
+    cd skypilot/llm/llama-chatbots
     ```
 
 2.  a. **If you have an unexpired LLaMA URL from Meta**, run:

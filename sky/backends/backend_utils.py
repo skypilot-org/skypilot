@@ -51,6 +51,7 @@ from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import validator
 from sky.usage import usage_lib
+from sky.adaptors import ibm
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -83,10 +84,12 @@ _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._]default'.format(IP_ADDR_REGEX))
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
-# We use fixed IP address to avoid DNS lookup blocking the check, for machine
-# with no internet connection.
+# We check network connection by going through _TEST_IP_LIST. We may need to
+# check multiple IPs because some IPs may be blocked on certain networks.
+# Fixed IP addresses are used to avoid DNS lookup blocking the check, for
+# machine with no internet connection.
 # Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
-_TEST_IP = 'https://1.1.1.1'
+_TEST_IP_LIST = ['https://1.1.1.1', 'https://8.8.8.8']
 
 # Allow each CPU thread take 2 tasks.
 # Note: This value cannot be too small, otherwise OOM issue may occur.
@@ -989,6 +992,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_azure_authentication(config)
     elif isinstance(cloud, clouds.Lambda):
         config = auth.setup_lambda_authentication(config)
+    elif isinstance(cloud, clouds.IBM):
+        config = auth.setup_ibm_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
@@ -1506,11 +1511,14 @@ def check_network_connection():
     http = requests.Session()
     http.mount('https://', adapter)
     http.mount('http://', adapter)
-    try:
-        http.head(_TEST_IP, timeout=3)
-    except (requests.Timeout, requests.exceptions.ConnectionError) as e:
-        raise exceptions.NetworkError(
-            'Could not refresh the cluster. Network seems down.') from e
+    for i, ip in enumerate(_TEST_IP_LIST):
+        try:
+            http.head(ip, timeout=3)
+            return
+        except (requests.Timeout, requests.exceptions.ConnectionError) as e:
+            if i == len(_TEST_IP_LIST) - 1:
+                raise exceptions.NetworkError('Could not refresh the cluster. '
+                                              'Network seems down.') from e
 
 
 def _process_cli_query(
@@ -1697,6 +1705,48 @@ def _query_status_azure(
     return _process_cli_query('Azure', cluster, query_cmd, '\t', status_map)
 
 
+def _query_status_ibm(
+    cluster: str,
+    ray_config: Dict[str, Any],
+) -> List[global_user_state.ClusterStatus]:
+    """
+    returns a list of Statuses for each of the cluster's nodes.
+    this function gets called when running `sky status` with -r flag and the cluster's head node is either stopped or down.
+    """
+
+    status_map: Dict[str, Any] = {
+        'pending': global_user_state.ClusterStatus.INIT,
+        'starting': global_user_state.ClusterStatus.INIT,
+        'restarting': global_user_state.ClusterStatus.INIT,
+        'running': global_user_state.ClusterStatus.UP,
+        'stopping': global_user_state.ClusterStatus.STOPPED,
+        'stopped': global_user_state.ClusterStatus.STOPPED,
+        'deleting': None,
+        'failed': global_user_state.ClusterStatus.INIT,
+        'cluster_deleted': []
+    }
+
+    client = ibm.client(region=ray_config['provider']['region'])
+    search_client = ibm.search_client()
+    # pylint: disable=E1136
+    vpcs_filtered_by_tags_and_region = search_client.search(
+        query=
+        f'type:vpc AND tags:{cluster} AND region:{ray_config["provider"]["region"]}',
+        fields=['tags', 'region', 'type'],
+        limit=1000).get_result()['items']
+    if not vpcs_filtered_by_tags_and_region:
+        # a vpc could have been removed unkownlingly to skypilot, such as
+        # via `sky autostop --down`, or simply manually (e.g. via console).
+        logger.warning('No vpc exists in '
+                       f'{ray_config["provider"]["region"]} '
+                       f'with tag: {cluster}')
+        return status_map['cluster_deleted']
+    vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(':', 1)[-1]
+    instances = client.list_instances(vpc_id=vpc_id).get_result()['instances']
+
+    return [status_map[instance['status']] for instance in instances]
+
+
 def _query_status_lambda(
         cluster: str,
         ray_config: Dict[str, Any],  # pylint: disable=unused-argument
@@ -1724,6 +1774,7 @@ _QUERY_STATUS_FUNCS = {
     'GCP': _query_status_gcp,
     'Azure': _query_status_azure,
     'Lambda': _query_status_lambda,
+    'IBM': _query_status_ibm,
 }
 
 

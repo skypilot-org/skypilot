@@ -16,8 +16,8 @@ specified in the source becomes available at the destination mount path.
 A storage object can used in either :code:`MOUNT` mode or :code:`COPY` mode.
 
 * In :code:`MOUNT` mode, the backing store is directly "mounted" to the remote VM.
-  I.e., files are fetched when accessed by the task and files written to the
-  mount path are also written to the remote store.
+  I.e., files are streamed when accessed by the task and all writes are replicated
+  to remote bucket (and any other VMs mounting the same bucket).
 
 * In :code:`COPY` mode, the files are pre-fetched and cached on the local disk.
   Writes are not replicated on the remote store.
@@ -36,7 +36,21 @@ the files to a cloud store (e.g. S3, GCS, R2) and have them persist there by
 specifying the :code:`name`, :code:`source` and :code:`persistent` fields. By
 enabling persistence, file_mount sync can be made significantly faster.
 
-Your usage of SkyPilot Storage can fall under four broad use cases:
+Here is an example of a :code:`file_mount` that uses SkyPilot Storage:
+
+.. code-block:: yaml
+
+    file_mounts:
+      /mybucket:
+        name: my-sky-bucket # Make sure it is unique or you own this bucket name
+        source: ~/dataset # Contents of the store. Can be local or an object store path.
+        store: s3 # Could be either of [s3, gcs, r2]. Defaults to None.
+        persistent: True  # Set to False to delete the bucket after the task is done. Defaults to True.
+        mode: MOUNT  # MOUNT or COPY. Defaults to MOUNT if not specified
+
+
+Common Use Cases
+^^^^^^^^^^^^^^^^
 
 1.  **You want to upload your local data to remote VM -** specify the name and
     source fields. Name sets the bucket name that will be used, and source
@@ -54,21 +68,6 @@ Your usage of SkyPilot Storage can fall under four broad use cases:
     nodes -** specify a name (to create a bucket if it doesn't exist) and set
     the mode to MOUNT. This will create an empty scratch space that workers
     can write to. Any writes will show up on all worker's mount points.
-
-When specifying a storage object, you can specify either of two modes:
-
-- :code:`mode: MOUNT` (default)
-    This mode directly mounts the bucket at the specified path on the VM.
-    In effect, files are streamed from the backing source bucket as and when
-    they are accessed by applications. This mode also allows applications to
-    write to the mount path. All writes are replicated to remote bucket (and
-    any other VMs mounting the same bucket).
-
-
-- :code:`mode: COPY`
-    This mode pre-fetches your files from remote storage and caches them on the
-    local disk. Note that in this mode, any writes to the mount path are not
-    replicated to the source bucket.
 
 Here are a few examples covering a range of use cases for sky file_mounts
 and storage mounting:
@@ -111,7 +110,7 @@ and storage mounting:
       /datasets-storage:
         name: sky-dataset-romil # Make sure this name is unique or you own this bucket
         source: ~/datasets
-        store: s3 # Could be either of [s3, gcs]; default: None
+        store: s3 # Could be either of [s3, gcs, r2]; default: None
         persistent: True  # Defaults to True, can be set to false.
         mode: COPY  # Defaults to MOUNT if not specified
 
@@ -152,7 +151,7 @@ and storage mounting:
       # this approach can also be used to create a shared filesystem across workers.
       # See examples/storage/pingpong.yaml for an example.
       /outputs-mount:
-        name: romil-output-bucket
+        name: my-output-bucket
         mode: MOUNT
 
       # *** Uploading multiple files to the same Storage object ***
@@ -211,8 +210,8 @@ and storage mounting:
 Creating a shared file system
 -----------------------------
 
-SkyPilot Storage can also be used to create a shared file-system that multiple tasks
-on different nodes can read and write to. This allows developers to pass files
+SkyPilot Storage can also be used to create a shared file-system backed by a remote object store (e.g., S3)
+that multiple tasks on different nodes can read and write to. This allows developers to pass files
 between workers and even use files as a medium for inter-process communication (IPC).
 
 To create a shared filesystem, simply create a Storage object without a source
@@ -280,7 +279,8 @@ Storage YAML reference
 
       sky.Storage.store: str; either of 's3', 'gcs' or 'r2'
         If you wish to force sky.Storage to be backed by a specific cloud object
-        store, you can specify it here.
+        store, you can specify it here. If not specified, SkyPilot chooses the
+        appropriate object store based on the source path and task's cloud provider.
 
       sky.Storage.persistent: bool
         Whether the remote backing stores in the cloud should be deleted after
@@ -293,5 +293,5 @@ Storage YAML reference
         mounting the remote storage object. With MOUNT mode, files are streamed
         from the remote object store and writes are replicated to the object
         store (and consequently, to other workers mounting the same Storage).
-        With mount mode, files are copied at VM initialization and any writes to
+        With COPY mode, files are copied at VM initialization and any writes to
         the mount path will not be replicated on the object store.
