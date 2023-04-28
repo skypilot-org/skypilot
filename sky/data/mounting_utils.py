@@ -85,6 +85,6 @@ def get_mounting_command(
     command = (f'{first_line}'
                f'{script}'
                f') && chmod +x {script_path}'
-               f' && (bash {script_path} 2> >(error_output=$(cat); echo "Mounting failed, detailed error: $error_output");)'
+               f' && (bash {script_path}'
                f' && rm {script_path}')
     return command
