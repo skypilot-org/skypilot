@@ -3577,8 +3577,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  f' {mount_path} may have been already '
                                  f'taken by the Kernel. Please set the '
                                  f'mount path to another name.')
-                    raise exceptions.StorageMountPathError(
-                        error_msg) from None
+                    raise exceptions.StorageMountPathError(error_msg) from None
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
