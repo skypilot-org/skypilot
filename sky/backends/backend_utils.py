@@ -768,6 +768,7 @@ def write_cluster_config(
         cluster_name: str,
         local_wheel_path: pathlib.Path,
         wheel_hash: str,
+        docker_image: str,
         region: Optional[clouds.Region] = None,
         zones: Optional[List[clouds.Zone]] = None,
         dryrun: bool = False,
@@ -881,8 +882,10 @@ def write_cluster_config(
                 # for now:
                 'ssh_proxy_command': ssh_proxy_command,
 
-                # for docker authentication
+                # For docker authentication
                 'public_key': public_key,
+                # Docker config
+                'docker_image': docker_image,
 
                 # Azure only:
                 'azure_subscription_id': azure_subscription_id,
@@ -1079,15 +1082,18 @@ def wait_until_ray_cluster_ready(
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
     last_nodes_so_far = 0
     start = time.time()
-    runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
+    runner = command_runner.SSHCommandRunner(head_ip,
+                                             **ssh_credentials,
+                                             ssh_port='22')
     with log_utils.console.status(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
-            rc, output, stderr = runner.run('ray status',
-                                            log_path=log_path,
-                                            stream_logs=False,
-                                            require_outputs=True,
-                                            separate_stderr=True)
+            rc, output, stderr = runner.run(
+                'sudo docker exec sky_container "ray status"',
+                log_path=log_path,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
             subprocess_utils.handle_returncode(
                 rc, 'ray status', 'Failed to run ray status on head node.',
                 stderr)
@@ -1150,12 +1156,12 @@ def wait_until_ray_cluster_ready(
 
 
 def ssh_credential_from_yaml(cluster_yaml: str,
-                             run_as_docker: bool = True) -> Dict[str, str]:
+                             docker_user: Optional[str] = None
+                            ) -> Dict[str, str]:
     """Returns ssh_user, ssh_private_key and ssh_control name."""
     config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
-    ssh_user = command_runner.DEFAULT_DOCKER_USER \
-        if run_as_docker else auth_section['ssh_user'].strip()
+    ssh_user = docker_user if docker_user else auth_section['ssh_user'].strip()
     ssh_private_key = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
@@ -1892,7 +1898,8 @@ def _update_cluster_status_no_lock(
             raise exceptions.FetchIPError(
                 reason=exceptions.FetchIPError.Reason.HEAD)
         # Check if ray cluster status is healthy.
-        ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
+        ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
+                                                   handle.docker_user)
         runner = command_runner.SSHCommandRunner(external_ips[0],
                                                  **ssh_credentials)
         rc, output, _ = runner.run('ray status',

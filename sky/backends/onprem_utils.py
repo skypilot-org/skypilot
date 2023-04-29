@@ -396,7 +396,7 @@ def launch_ray_on_local_cluster(cluster_config: Dict[str, Dict[str, Any]],
     # JobSubmissionClient (in subprocess_daemon.py) for completed,
     # failed, or cancelled jobs.
     ssh_options = command_runner.ssh_options_list(
-        ssh_private_key=remote_ssh_key, ssh_control_name=None)
+        ssh_private_key=remote_ssh_key, ssh_control_name=None, ssh_port='22')
     ssh_options = ' '.join(ssh_options)
     port_cmd = (f'ssh -tt -L 8265:localhost:8265 '
                 f'{ssh_options} {ssh_user}@{head_ip} '
@@ -527,7 +527,7 @@ def do_filemounts_and_setup_on_local_workers(
     config = common_utils.read_yaml(cluster_config_file)
 
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
-        cluster_config_file, run_as_docker=False)
+        cluster_config_file)
     if worker_ips is None:
         worker_ips = config['provider']['worker_ips']
     file_mounts = config['file_mounts']

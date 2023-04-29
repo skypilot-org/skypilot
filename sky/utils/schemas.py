@@ -172,6 +172,9 @@ def get_task_schema():
                 'required': [],
                 'additionalProperties': True,
             },
+            'docker_image': {
+                'type': 'string',
+            },
             # inputs and outputs are experimental
             'inputs': {
                 'type': 'object',

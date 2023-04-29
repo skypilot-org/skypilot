@@ -26,9 +26,6 @@ RSYNC_DISPLAY_OPTION = '-Pavz'
 # do_not_exclude" doesn't work, even though git allows it.
 RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
 RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
-# Docker options
-_DEFAULT_DOCKER_PORT = '10022'
-DEFAULT_DOCKER_USER = 'root'
 
 _HASH_MAX_LENGTH = 10
 
@@ -45,9 +42,9 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
 
 def ssh_options_list(ssh_private_key: Optional[str],
                      ssh_control_name: Optional[str],
+                     ssh_port: str,
                      *,
                      ssh_proxy_command: Optional[str] = None,
-                     ssh_docker_port: str = _DEFAULT_DOCKER_PORT,
                      timeout: int = 30) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     # Forked from Ray SSHOptions:
@@ -87,8 +84,7 @@ def ssh_options_list(ssh_private_key: Optional[str],
         '-i',
         ssh_private_key,
     ] if ssh_private_key is not None else []
-    # default to use docker port here since all command are running under docker
-    ssh_port_option = ['-p', ssh_docker_port]
+    ssh_port_option = ['-p', ssh_port]
 
     if ssh_proxy_command is not None:
         logger.debug(f'--- Proxy: {ssh_proxy_command} ---')
@@ -125,6 +121,7 @@ class SSHCommandRunner:
         ssh_private_key: str,
         ssh_control_name: Optional[str] = '__default__',
         ssh_proxy_command: Optional[str] = None,
+        ssh_port: Optional[str] = None,
     ):
         """Initialize SSHCommandRunner.
 
@@ -144,6 +141,8 @@ class SSHCommandRunner:
             ssh_proxy_command: Optional, the value to pass to '-o
                 ProxyCommand'. Useful for communicating with clusters without
                 public IPs using a "jump server".
+            ssh_port: Optional, the port to use for ssh. Default to
+                sky.backends.docker_utils.DEFAULT_DOCKER_PORT.
         """
         self.ip = ip
         self.ssh_user = ssh_user
@@ -152,6 +151,11 @@ class SSHCommandRunner:
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
+        # pylint: disable=import-outside-toplevel
+        from sky.backends.docker_utils import DEFAULT_DOCKER_PORT
+        # default to use docker port here since all command are running
+        # under docker
+        self.ssh_port = ssh_port if ssh_port else DEFAULT_DOCKER_PORT
 
     @staticmethod
     def make_runner_list(
@@ -186,6 +190,7 @@ class SSHCommandRunner:
         return ssh + ssh_options_list(
             self.ssh_private_key,
             self.ssh_control_name,
+            self.ssh_port,
             ssh_proxy_command=self._ssh_proxy_command,
         ) + [f'{self.ssh_user}@{self.ip}']
 
@@ -340,6 +345,7 @@ class SSHCommandRunner:
             ssh_options_list(
                 self.ssh_private_key,
                 self.ssh_control_name,
+                self.ssh_port,
                 ssh_proxy_command=self._ssh_proxy_command,
             ))
         rsync_command.append(f'-e "ssh {ssh_options}"')

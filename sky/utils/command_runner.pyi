@@ -16,11 +16,11 @@ GIT_EXCLUDE: str
 RSYNC_DISPLAY_OPTION: str
 RSYNC_FILTER_OPTION: str
 RSYNC_EXCLUDE_OPTION: str
-DEFAULT_DOCKER_USER: str
 
 
 def ssh_options_list(ssh_private_key: Optional[str],
                      ssh_control_name: Optional[str],
+                     ssh_port: str,
                      *,
                      timeout: int = ...) -> List[str]:
     ...
@@ -42,7 +42,8 @@ class SSHCommandRunner:
                  ip: str,
                  ssh_user: str,
                  ssh_private_key: str,
-                 ssh_control_name: Optional[str] = ...) -> None:
+                 ssh_control_name: Optional[str] = ...,
+                 ssh_port: Optional[str] = ...) -> None:
         ...
 
     @staticmethod

@@ -28,6 +28,10 @@ Available fields:
     # A task can set this to a smaller value than the size of a cluster.
     num_nodes: 4
 
+    # Docker image to use (optional), defaults to a modified version of
+    # Ubuntu 18.04.
+    docker_image: my-docker-image:latest
+
     # Per-node resource requirements (optional).
     resources:
       cloud: aws  # The cloud to use (optional).

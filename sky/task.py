@@ -133,9 +133,8 @@ class Task:
             setup/run command, where ``run`` can either be a str, meaning all
             nodes get the same command, or a lambda, with the semantics
             documented above.
-          docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
-            is used.) The base docker image that this Task will be built on.
-            Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
+          docker_image: The base docker image that this Task will be built on.
+            Defaults to `sky.backends.docker_utils.DEFAULT_DOCKER_IMAGE`.
         """
         self.name = name
         self.run = run
@@ -145,8 +144,10 @@ class Task:
         self.setup = setup
         self._envs = envs or {}
         self.workdir = workdir
-        self.docker_image = (docker_image if docker_image else
-                             'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
+        # pylint: disable=import-outside-toplevel
+        from sky.backends.docker_utils import DEFAULT_DOCKER_IMAGE
+        self.docker_image = (docker_image
+                             if docker_image else DEFAULT_DOCKER_IMAGE)
         # Ignore type error due to a mypy bug.
         # https://github.com/python/mypy/issues/3004
         self.num_nodes = num_nodes  # type: ignore
@@ -330,6 +331,9 @@ class Task:
         resources = sky.Resources.from_yaml_config(resources)
 
         task.set_resources({resources})
+
+        task.docker_image = config.pop('docker_image', None)
+
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
@@ -869,4 +873,7 @@ class Task:
             s += f'\n  resources: {list(self.resources)[0]}'
         else:
             s += '\n  resources: default instances'
+
+        if self.docker_image is not None:
+            s += f'\n  docker_image: {self.docker_image}'
         return s
