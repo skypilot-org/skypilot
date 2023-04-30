@@ -74,6 +74,7 @@ def list_accelerators(
             ret[gpu] += items
     return dict(ret) 
 
+
 def list_accelerator_counts(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,

@@ -144,6 +144,7 @@ def read_catalog(filename: str,
             raise e
     return df
 
+
 def _get_instance_type(
     df: pd.DataFrame,
     instance_type: str,
