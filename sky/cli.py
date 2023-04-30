@@ -32,6 +32,7 @@ import datetime
 import functools
 import multiprocessing
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -3061,14 +3062,22 @@ def show_gpus(
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
                 return
+            
+        # Declaring new variable to to take care of changing variable name
+        new_gpu_name = gpu_name 
+        gpu_name_and_count = new_gpu_name.count(":") > 0
+
+        if (gpu_name_and_count):
+            split_gpu_name = re.split(":", new_gpu_name)
+            new_gpu_name = split_gpu_name[0]
 
         # Show detailed accelerator information
         result = service_catalog.list_accelerators(gpus_only=True,
-                                                   name_filter=gpu_name,
+                                                   name_filter=new_gpu_name,
                                                    region_filter=region,
                                                    clouds=cloud)
         if len(result) == 0:
-            yield f'Resources \'{gpu_name}\' not found. '
+            yield f'Resources \'{new_gpu_name}\' not found. '
             yield 'Try \'sky show-gpus --all\' '
             yield 'to show available accelerators.'
             return
@@ -3113,20 +3122,24 @@ def show_gpus(
                 spot_price_str = f'$ {item.spot_price:.3f}' if not pd.isna(
                     item.spot_price) else '-'
                 region_str = item.region if not pd.isna(item.region) else '-'
-                accelerator_table_vals = [
-                    item.accelerator_name,
-                    item.accelerator_count,
-                    item.cloud,
-                    instance_type_str,
-                    device_memory_str,
-                    cpu_str,
-                    host_memory_str,
-                    price_str,
-                    spot_price_str,
-                ]
-                if not show_all:
-                    accelerator_table_vals.append(region_str)
-                accelerator_table.add_row(accelerator_table_vals)
+
+                requested_accelerator_count = item.accelerator_count if not gpu_name_and_count else int(split_gpu_name[1])
+
+                if (requested_accelerator_count == item.accelerator_count):
+                    accelerator_table_vals = [
+                        item.accelerator_name,
+                        item.accelerator_count,
+                        item.cloud,
+                        instance_type_str,
+                        device_memory_str,
+                        cpu_str,
+                        host_memory_str,
+                        price_str,
+                        spot_price_str,
+                    ]
+                    if not show_all:
+                        accelerator_table_vals.append(region_str)
+                    accelerator_table.add_row(accelerator_table_vals)
 
             if i != 0:
                 yield '\n\n'

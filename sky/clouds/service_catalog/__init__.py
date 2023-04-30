@@ -1,6 +1,7 @@
 """Service catalog."""
 import collections
 import importlib
+import sys
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
@@ -72,8 +73,7 @@ def list_accelerators(
     for result in results:
         for gpu, items in result.items():
             ret[gpu] += items
-    return dict(ret)
-
+    return dict(ret) 
 
 def list_accelerator_counts(
     gpus_only: bool = True,
