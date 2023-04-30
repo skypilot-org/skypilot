@@ -8,7 +8,7 @@ idle_timeout_minutes: 60
 
 docker:
   image: {{docker_image}}
-  container_name: sky_container
+  container_name: {{docker_container_name}}
   run_options:
     {%- if gpu is none %}
     []

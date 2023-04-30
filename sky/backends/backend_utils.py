@@ -849,6 +849,9 @@ def write_cluster_config(
 
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
+    # pylint: disable=import-outside-toplevel
+    from sky.backends.docker_utils import DEFAULT_DOCKER_CONTAINER_NAME
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -884,8 +887,10 @@ def write_cluster_config(
 
                 # For docker authentication
                 'public_key': public_key,
+
                 # Docker config
                 'docker_image': docker_image,
+                'docker_container_name': DEFAULT_DOCKER_CONTAINER_NAME,
 
                 # Azure only:
                 'azure_subscription_id': azure_subscription_id,
@@ -1088,8 +1093,11 @@ def wait_until_ray_cluster_ready(
     with log_utils.console.status(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
+            # pylint: disable=import-outside-toplevel
+            from sky.backends.docker_utils import DEFAULT_DOCKER_CONTAINER_NAME
             rc, output, stderr = runner.run(
-                'sudo docker exec sky_container "ray status"',
+                f'sudo docker exec {DEFAULT_DOCKER_CONTAINER_NAME} '
+                '"ray status"',
                 log_path=log_path,
                 stream_logs=False,
                 require_outputs=True,

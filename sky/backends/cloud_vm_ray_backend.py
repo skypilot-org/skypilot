@@ -1650,8 +1650,11 @@ class RetryingVmProvisioner(object):
                 runner = command_runner.SSHCommandRunner(head_ip,
                                                          **ssh_credentials,
                                                          ssh_port='22')
+                # pylint: disable=import-outside-toplevel
+                from sky.backends.docker_utils import \
+                    DEFAULT_DOCKER_CONTAINER_NAME
                 whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
-                    'sudo docker exec sky_container whoami',
+                    f'sudo docker exec {DEFAULT_DOCKER_CONTAINER_NAME} whoami',
                     stream_logs=False,
                     require_outputs=True)
                 assert whoami_returncode == 0, (
