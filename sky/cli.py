@@ -3062,7 +3062,7 @@ def show_gpus(
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
                 return
-            
+
         new_gpu_name = gpu_name
         gpu_name_and_count = new_gpu_name.count(':') > 0
 
