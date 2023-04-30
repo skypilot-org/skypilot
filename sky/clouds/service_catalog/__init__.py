@@ -1,7 +1,6 @@
 """Service catalog."""
 import collections
 import importlib
-import sys
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
