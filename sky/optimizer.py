@@ -260,9 +260,19 @@ class Optimizer:
             num_resources = len(node.get_resources())
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
+                    location_hint = ''
+                    if node.get_resources():
+                        specified_resources = list(node.get_resources())[0]
+                        if specified_resources.zone is not None:
+                            location_hint = (
+                                f' Zone: {specified_resources.zone}.')
+                        elif specified_resources.region:
+                            location_hint = (
+                                f' Region: {specified_resources.region}.')
+
                     error_msg = (
                         'No launchable resource found for task '
-                        f'{node}.\nThis means the '
+                        f'{node}.{location_hint}\nThis means the '
                         'catalog does not contain any instance types that '
                         'satisfy this request.\n'
                         'To fix: relax or change the resource requirements.\n'
@@ -987,8 +997,10 @@ def _fill_in_launchable_resources(
                 else:
                     all_fuzzy_candidates.update(fuzzy_candidate_list)
             if len(launchable[resources]) == 0:
+                clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
+                    clouds_list[0])
                 logger.info(f'No resource satisfying {resources} '
-                            f'on {clouds_list}.')
+                            f'on {clouds_str}.')
                 if len(all_fuzzy_candidates) > 0:
                     logger.info('Did you mean: '
                                 f'{colorama.Fore.CYAN}'
