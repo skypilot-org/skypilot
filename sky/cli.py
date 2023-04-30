@@ -3063,7 +3063,6 @@ def show_gpus(
                        '(including non-common ones) and pricing.')
                 return
             
-        # Declaring new variable to to take care of changing variable name
         new_gpu_name = gpu_name 
         gpu_name_and_count = new_gpu_name.count(":") > 0
 

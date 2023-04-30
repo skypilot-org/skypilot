@@ -72,7 +72,7 @@ def list_accelerators(
     for result in results:
         for gpu, items in result.items():
             ret[gpu] += items
-    return dict(ret) 
+    return dict(ret)
 
 
 def list_accelerator_counts(
