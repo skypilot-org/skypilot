@@ -242,6 +242,8 @@ def run_with_log(
 
 def make_task_bash_script(codegen: str,
                           env_vars: Optional[Dict[str, str]] = None) -> str:
+    # set -m to enable job control.
+    # Reference: https://stackoverflow.com/questions/11821378/what-does-bashno-job-control-in-this-shell-mean # pylint: disable=line-too-long
     # set -a is used for exporting all variables functions to the environment
     # so that bash `user_script` can access `conda activate`. Detail: #436.
     # Reference: https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html # pylint: disable=line-too-long
@@ -249,6 +251,7 @@ def make_task_bash_script(codegen: str,
     script = [
         textwrap.dedent(f"""\
             #!/bin/bash
+            set -m
             source ~/.bashrc
             set -a
             . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true

@@ -371,6 +371,8 @@ class SSHConfigHelper(object):
             proxy = f'ProxyCommand {proxy_command}'
         else:
             proxy = ''
+        # pylint: disable=import-outside-toplevel
+        from sky.backends.docker_utils import DEFAULT_DOCKER_PORT
         # StrictHostKeyChecking=no skips the host key check for the first
         # time. UserKnownHostsFile=/dev/null and GlobalKnownHostsFile/dev/null
         # prevent the host key from being added to the known_hosts file and
@@ -388,7 +390,7 @@ class SSHConfigHelper(object):
               StrictHostKeyChecking no
               UserKnownHostsFile=/dev/null
               GlobalKnownHostsFile=/dev/null
-              Port 22
+              Port {DEFAULT_DOCKER_PORT}
               {proxy}
             """.rstrip())
         codegen = codegen + '\n'
@@ -850,7 +852,8 @@ def write_cluster_config(
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # pylint: disable=import-outside-toplevel
-    from sky.backends.docker_utils import DEFAULT_DOCKER_CONTAINER_NAME
+    from sky.backends.docker_utils import \
+        DEFAULT_DOCKER_CONTAINER_NAME, DEFAULT_DOCKER_PORT
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
@@ -891,6 +894,7 @@ def write_cluster_config(
                 # Docker config
                 'docker_image': docker_image,
                 'docker_container_name': DEFAULT_DOCKER_CONTAINER_NAME,
+                'docker_port': DEFAULT_DOCKER_PORT,
 
                 # Azure only:
                 'azure_subscription_id': azure_subscription_id,

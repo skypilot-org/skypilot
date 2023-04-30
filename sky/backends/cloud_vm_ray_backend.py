@@ -1661,7 +1661,7 @@ class RetryingVmProvisioner(object):
                     f'Failed to get docker container user. Return '
                     f'code: {whoami_returncode}, Error: {whoami_stderr}')
                 docker_user = whoami_stdout.strip()
-                logger.info(f'Docker container user: {docker_user}')
+                logger.debug(f'Docker container user: {docker_user}')
             return (self.GangSchedulingStatus.CLUSTER_READY, stdout, stderr,
                     head_ip, docker_user)
 
@@ -2459,6 +2459,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             usage_lib.messages.usage.update_final_cluster_status(
                 global_user_state.ClusterStatus.UP)
             auth_config = common_utils.read_yaml(handle.cluster_yaml)['auth']
+            auth_config['ssh_user'] = handle.docker_user
             backend_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
                                                       ip_list, auth_config)
 
@@ -3297,6 +3298,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # be removed after the cluster entry in the database is removed.
         config = common_utils.read_yaml(handle.cluster_yaml)
         auth_config = config['auth']
+        auth_config['ssh_user'] = handle.docker_user
         backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name,
                                                      handle.head_ip,
                                                      auth_config)

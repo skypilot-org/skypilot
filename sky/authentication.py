@@ -225,23 +225,30 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             check=True,
             shell=True,
             stdout=subprocess.DEVNULL)
-        # Enable ssh port for all the instances
-        enable_ssh_cmd = ('gcloud compute firewall-rules create '
-                          'allow-ssh-ingress-from-iap '
-                          '--direction=INGRESS '
-                          '--action=allow '
-                          '--rules=tcp:22 '
-                          '--source-ranges=0.0.0.0/0')
-        proc = subprocess.run(enable_ssh_cmd,
-                              check=False,
-                              shell=True,
-                              stdout=subprocess.DEVNULL,
-                              stderr=subprocess.PIPE)
-        if proc.returncode != 0 and 'already exists' not in proc.stderr.decode(
-                'utf-8'):
-            subprocess_utils.handle_returncode(proc.returncode, enable_ssh_cmd,
-                                               'Failed to enable ssh port.',
-                                               proc.stderr.decode('utf-8'))
+
+        def allow_ssh_port(port):
+            # Enable ssh port for all the instances
+            enable_ssh_cmd = ('gcloud compute firewall-rules create '
+                              'allow-ssh-ingress-from-iap '
+                              '--direction=INGRESS '
+                              '--action=allow '
+                              f'--rules=tcp:{port} '
+                              '--source-ranges=0.0.0.0/0')
+            proc = subprocess.run(enable_ssh_cmd,
+                                  check=False,
+                                  shell=True,
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.PIPE)
+            if proc.returncode != 0 and \
+                'already exists' not in proc.stderr.decode('utf-8'):
+                subprocess_utils.handle_returncode(
+                    proc.returncode, enable_ssh_cmd,
+                    'Failed to enable ssh port.', proc.stderr.decode('utf-8'))
+
+        allow_ssh_port('22')
+        # pylint: disable=import-outside-toplevel
+        from sky.backends.docker_utils import DEFAULT_DOCKER_PORT
+        allow_ssh_port(DEFAULT_DOCKER_PORT)
         return config
 
     # OS Login is not enabled for the project. Add the ssh key directly to the

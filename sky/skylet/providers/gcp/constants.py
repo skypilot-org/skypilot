@@ -31,6 +31,17 @@ FIREWALL_RULES_REQUIRED = [
         ],
         "sourceRanges": ["0.0.0.0/0"],
     },
+    # Allow ssh connection to tocker image from anywhere.
+    {
+        "direction": "INGRESS",
+        "allowed": [
+            {
+                "IPProtocol": "tcp",
+                "ports": ["10022"],
+            }
+        ],
+        "sourceRanges": ["0.0.0.0/0"],
+    },
 ]
 # Template when creating firewall rules for a new VPC.
 FIREWALL_RULES_TEMPLATE = [

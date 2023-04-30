@@ -21,6 +21,7 @@ REQUIRED_RULES = {
     "outbound_udp_all": "selected security group is missing rule permitting outbound UDP access\n",
     "inbound_tcp_sg": "selected security group is missing rule permitting inbound tcp traffic inside selected security group\n",
     "inbound_tcp_22": "selected security group is missing rule permitting inbound traffic to tcp port 22 required for ssh\n",
+    "inbound_tcp_10022": "selected security group is missing rule permitting inbound traffic to tcp port 10022 required for ssh\n",
 }
 INSECURE_RULES = {
     "inbound_tcp_6379": "selected security group is missing rule permitting inbound traffic to tcp port 6379 required for Redis\n",
@@ -412,6 +413,7 @@ class IBMVPCProvider:
                         # there a rule permitting all traffic
                         unsatisfied_rules.pop("inbound_tcp_sg", None)
                         unsatisfied_rules.pop("inbound_tcp_22", None)
+                        unsatisfied_rules.pop("inbound_tcp_10022", None)
                         unsatisfied_rules.pop("inbound_tcp_6379", None)
                         unsatisfied_rules.pop("inbound_tcp_8265", None)
 
@@ -420,6 +422,7 @@ class IBMVPCProvider:
                             # all ports are open
                             unsatisfied_rules.pop("inbound_tcp_sg", None)
                             unsatisfied_rules.pop("inbound_tcp_22", None)
+                            unsatisfied_rules.pop("inbound_tcp_10022", None)
                             unsatisfied_rules.pop("inbound_tcp_6379", None)
                             unsatisfied_rules.pop("inbound_tcp_8265", None)
                         else:
@@ -427,6 +430,8 @@ class IBMVPCProvider:
                             port_max = rule["port_max"]
                             if port_min <= 22 and port_max >= 22:
                                 unsatisfied_rules.pop("inbound_tcp_22", None)
+                            elif port_min <= 10022 and port_max >= 10022:
+                                unsatisfied_rules.pop("inbound_tcp_10022", None)
                             elif port_min <= 6379 and port_max >= 6379:
                                 unsatisfied_rules.pop("inbound_tcp_6379", None)
                             elif port_min <= 8265 and port_max >= 8265:
