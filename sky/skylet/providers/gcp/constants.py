@@ -75,6 +75,21 @@ FIREWALL_RULES_TEMPLATE = [
         "sourceRanges": ["0.0.0.0/0"],
     },
     {
+        "name": "{VPC_NAME}-allow-docker-ssh",
+        "description": "Allows TCP connections from any source to docker inside any instance on the network using port 10022.",
+        "network": "projects/{PROJ_ID}/global/networks/{VPC_NAME}",
+        "selfLink": "projects/{PROJ_ID}/global/firewalls/{VPC_NAME}-allow-docker-ssh",
+        "direction": "INGRESS",
+        "priority": 65534,
+        "allowed": [
+            {
+                "IPProtocol": "tcp",
+                "ports": ["10022"],
+            }
+        ],
+        "sourceRanges": ["0.0.0.0/0"],
+    },
+    {
         "name": "{VPC_NAME}-allow-icmp",
         "description": "Allows ICMP connections from any source to any instance on the network.",
         "network": "projects/{PROJ_ID}/global/networks/{VPC_NAME}",
