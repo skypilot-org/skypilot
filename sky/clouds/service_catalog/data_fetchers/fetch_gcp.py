@@ -1,7 +1,7 @@
 """A script that generates GCP catalog.
 
-This script gathers the metadata of GCP from the SkyPilot catalog repository
-and queries the GCP API to get the real-time prices of the VMs, GPUs, and TPUs.
+This script uses the GCP APIs to query the list and real-time prices of the
+VMs, GPUs, and TPUs. The script takes about 1-2 minutes to run.
 """
 
 import argparse
@@ -37,7 +37,20 @@ PRICE_ROUNDING = 5
 UNSUPPORTED_SERIES = ['f1', 'm2', 'c3', 'g2']
 
 # This zone is only for TPU v4, and does not appear in the skus yet.
-EXCLUDED_ZONES = ['us-central2-b']
+TPU_V4_ZONES = ['us-central2-b']
+# TPU v3 pods are available in us-east1-d, but hidden in the skus.
+# We assume the TPU prices are the same as us-central1.
+HIDDEN_TPU_DF = pd.read_csv(
+     io.StringIO("""\
+ InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region,AvailabilityZone
+ ,tpu-v3-32,1,,,tpu-v3-32,32.0,9.6,us-east1,us-east1-d
+ ,tpu-v3-64,1,,,tpu-v3-64,64.0,19.2,us-east1,us-east1-d
+ ,tpu-v3-128,1,,,tpu-v3-128,128.0,38.4,us-east1,us-east1-d
+ ,tpu-v3-256,1,,,tpu-v3-256,256.0,76.8,us-east1,us-east1-d
+ ,tpu-v3-512,1,,,tpu-v3-512,512.0,153.6,us-east1,us-east1-d
+ ,tpu-v3-1024,1,,,tpu-v3-1024,1024.0,307.2,us-east1,us-east1-d
+ ,tpu-v3-2048,1,,,tpu-v3-2048,2048.0,614.4,us-east1,us-east1-d
+ """))
 
 # TODO(woosuk): Make this more robust.
 SERIES_TO_DISCRIPTION = {
@@ -60,53 +73,11 @@ creds, project_id = google.auth.default()
 gcp_client = discovery.build('compute', 'v1')
 tpu_client = discovery.build('tpu', 'v1')
 
-# TPU v4 does not have a price list in the GCP API.
-tpu_v4_df = pd.read_csv(
-    io.StringIO("""\
-InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region,AvailabilityZone
-n1-highmem-8,,,8.0,52.0,,0.473212,0.099624,us-central2,us-central2-b
-,tpu-v4-8,1,,,tpu-v4-8,12.88,3.864,us-central2,us-central2-b
-,tpu-v4-16,1,,,tpu-v4-16,25.76,7.728,us-central2,us-central2-b
-,tpu-v4-32,1,,,tpu-v4-32,51.52,15.456,us-central2,us-central2-b
-,tpu-v4-64,1,,,tpu-v4-64,103.04,30.912,us-central2,us-central2-b
-,tpu-v4-128,1,,,tpu-v4-128,206.08,61.824,us-central2,us-central2-b
-,tpu-v4-256,1,,,tpu-v4-256,412.16,123.648,us-central2,us-central2-b
-,tpu-v4-384,1,,,tpu-v4-384,618.24,185.472,us-central2,us-central2-b
-,tpu-v4-512,1,,,tpu-v4-512,824.32,247.296,us-central2,us-central2-b
-,tpu-v4-640,1,,,tpu-v4-640,1030.4,309.12,us-central2,us-central2-b
-,tpu-v4-768,1,,,tpu-v4-768,1236.48,370.944,us-central2,us-central2-b
-,tpu-v4-896,1,,,tpu-v4-896,1442.56,432.768,us-central2,us-central2-b
-,tpu-v4-1024,1,,,tpu-v4-1024,1648.64,494.592,us-central2,us-central2-b
-,tpu-v4-1152,1,,,tpu-v4-1152,1854.72,556.416,us-central2,us-central2-b
-,tpu-v4-1280,1,,,tpu-v4-1280,2060.8,618.24,us-central2,us-central2-b
-,tpu-v4-1408,1,,,tpu-v4-1408,2266.88,680.064,us-central2,us-central2-b
-,tpu-v4-1536,1,,,tpu-v4-1536,2472.96,741.888,us-central2,us-central2-b
-,tpu-v4-1664,1,,,tpu-v4-1664,2679.04,803.712,us-central2,us-central2-b
-,tpu-v4-1792,1,,,tpu-v4-1792,2885.12,865.536,us-central2,us-central2-b
-,tpu-v4-1920,1,,,tpu-v4-1920,3091.2,927.36,us-central2,us-central2-b
-,tpu-v4-2048,1,,,tpu-v4-2048,3297.28,989.184,us-central2,us-central2-b
-,tpu-v4-2176,1,,,tpu-v4-2176,3503.36,1051.008,us-central2,us-central2-b
-,tpu-v4-2304,1,,,tpu-v4-2304,3709.44,1112.832,us-central2,us-central2-b
-,tpu-v4-2432,1,,,tpu-v4-2432,3915.52,1174.656,us-central2,us-central2-b
-,tpu-v4-2560,1,,,tpu-v4-2560,4121.6,1236.48,us-central2,us-central2-b
-,tpu-v4-2688,1,,,tpu-v4-2688,4327.68,1298.304,us-central2,us-central2-b
-,tpu-v4-2816,1,,,tpu-v4-2816,4533.76,1360.128,us-central2,us-central2-b
-,tpu-v4-2944,1,,,tpu-v4-2944,4739.84,1421.952,us-central2,us-central2-b
-,tpu-v4-3072,1,,,tpu-v4-3072,4945.92,1483.776,us-central2,us-central2-b
-,tpu-v4-3200,1,,,tpu-v4-3200,5152.0,1545.6,us-central2,us-central2-b
-,tpu-v4-3328,1,,,tpu-v4-3328,5358.08,1607.424,us-central2,us-central2-b
-,tpu-v4-3456,1,,,tpu-v4-3456,5564.16,1669.248,us-central2,us-central2-b
-,tpu-v4-3584,1,,,tpu-v4-3584,5770.24,1731.072,us-central2,us-central2-b
-,tpu-v4-3712,1,,,tpu-v4-3712,5976.32,1792.896,us-central2,us-central2-b
-,tpu-v4-3840,1,,,tpu-v4-3840,6182.4,1854.72,us-central2,us-central2-b
-,tpu-v4-3968,1,,,tpu-v4-3968,6388.48,1916.544,us-central2,us-central2-b
-"""))
-
 
 def get_skus(service_id: str) -> List[Dict[str, Any]]:
     # Get the SKUs from the GCP API.
     cb = discovery.build('cloudbilling', 'v1')
-    service_name = 'services/' + service_id
+    service_name = f'services/{service_id}'
 
     skus = []
     page_token = ''
@@ -204,7 +175,7 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
     df = _get_machine_types(region_prefix)
     # Drop the unsupported series.
     df = df[~df['InstanceType'].str.startswith(tuple(UNSUPPORTED_SERIES))]
-    df = df[~df['AvailabilityZone'].str.startswith(tuple(EXCLUDED_ZONES))]
+    df = df[~df['AvailabilityZone'].str.startswith(tuple(TPU_V4_ZONES))]
 
     # TODO(woosuk): Make this more efficient.
     def get_vm_price(row: pd.Series, spot: bool) -> float:
@@ -288,6 +259,8 @@ def _get_gpus_for_zone(zone: str) -> pd.DataFrame:
             gpu_name = gpu_name.upper()
             if 'VWS' in gpu_name:
                 continue
+            if gpu_name.startswith('TPU-'):
+                continue
             new_gpus.append({
                 'AcceleratorName': gpu_name,
                 'AcceleratorCount': count,
@@ -336,13 +309,9 @@ def get_gpu_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
             return gpu_price
 
         # Not found in the SKUs.
-        # FIXME(woosuk): Remove this once the SKUs are updated.
         gpu = row['AcceleratorName']
         region = row['Region']
-        if gpu == 'T4':
-            assert region in ['europe-west1', 'europe-west2', 'asia-east2'], row
-        elif gpu == 'P100':
-            assert region in ['europe-west4', 'australia-southeast1'], row
+        print(f'The price of {gpu} in {region} is not found in SKUs.')
         return None
 
     df['Price'] = df.apply(lambda row: get_gpu_price(row, spot=False), axis=1)
@@ -383,6 +352,8 @@ def _get_tpu_for_zone(zone: str) -> pd.DataFrame:
 
 def _get_tpus() -> pd.DataFrame:
     zones = _get_all_zones()
+    # Add TPU-v4 zones.
+    zones += TPU_V4_ZONES
     with multiprocessing.Pool() as pool:
         all_tpu_dfs = pool.map(_get_tpu_for_zone, zones)
     tpu_df = pd.concat(all_tpu_dfs, ignore_index=True)
@@ -392,18 +363,11 @@ def _get_tpus() -> pd.DataFrame:
 # TODO: the TPUs fetched fails to contain us-east1
 def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
     df = _get_tpus()
-    df = df[~df['AvailabilityZone'].str.startswith(tuple(EXCLUDED_ZONES))]
 
     def get_tpu_price(row: pd.Series, spot: bool) -> float:
         tpu_price = None
         for sku in skus:
-            # NOTE: Because us-east1-d is a hidden zone that supports TPUs,
-            # no price information is available for it. As a workaround,
-            # we asssume that the price is the same as us-central1.
             tpu_region = row['Region']
-            if tpu_region == 'us-east1':
-                tpu_region = 'us-central1'
-
             if tpu_region not in sku['serviceRegions']:
                 continue
             description = sku['description']
@@ -418,7 +382,12 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
             tpu_name = row['AcceleratorName']
             tpu_version = tpu_name.split('-')[1]
             num_cores = int(tpu_name.split('-')[2])
-            is_pod = num_cores > 8
+            # For TPU-v2 and TPU-v3, the pricing API provides the prices
+            # of 8 TPU cores. The prices can be different based on
+            # whether the TPU is a single device or a pod.
+            # For TPU-v4, the pricing is uniform, and thus the pricing API
+            # only provides the price of TPU-v4 pods.
+            is_pod = num_cores > 8 or tpu_version == 'v4'
 
             if f'Tpu-{tpu_version}' not in description:
                 continue
@@ -430,8 +399,10 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
                     continue
 
             unit_price = _get_unit_price(sku)
-            tpu_device_price = unit_price * row['AcceleratorCount']
-            tpu_price = tpu_device_price * num_cores / 8
+            tpu_device_price = unit_price
+            tpu_core_price = tpu_device_price / 8
+            tpu_price = num_cores * tpu_core_price
+            assert row['AcceleratorCount'] == 1, row
             break
 
         assert tpu_price is not None, row
@@ -458,7 +429,7 @@ def get_catalog_df(region_prefix: str) -> pd.DataFrame:
     tpu_df = get_tpu_df(gcp_tpu_skus)
 
     # Merge the dataframes.
-    df = pd.concat([vm_df, gpu_df, tpu_df, tpu_v4_df])
+    df = pd.concat([vm_df, gpu_df, tpu_df, HIDDEN_TPU_DF])
 
     # Reorder the columns.
     df = df[[
