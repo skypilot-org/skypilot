@@ -73,6 +73,13 @@ Available fields:
       # have a large working directory or tasks that write out large outputs.
       disk_size: 256
 
+      # Disk tier to use for OS (optional).
+      # Could be one of 'low', 'medium', or 'high' (default: 'medium'). Rough performance estimate:
+      #   low: 500 IOPS; read 20MB/s; write 40 MB/s
+      #   medium: 3000 IOPS; read 220 MB/s; write 200 MB/s
+      #   high: 6000 IOPS; 340 MB/s; write 250 MB/s
+      disk_tier: 'medium'
+
       # Additional accelerator metadata (optional); only used for TPU node
       # and TPU VM.
       # Example usage:
@@ -114,6 +121,16 @@ Available fields:
       # GCP
       # To find GCP images: https://cloud.google.com/compute/docs/images
       # image_id: projects/deeplearning-platform-release/global/images/family/tf2-ent-2-1-cpu-ubuntu-2004
+      #
+      # IBM
+      # Create a private VPC image and paste its ID in the following format:
+      # image_id: <unique_image_id>
+      # To create an image manually:
+      # https://cloud.ibm.com/docs/vpc?topic=vpc-creating-and-using-an-image-from-volume.
+      # To use an official VPC image creation tool:
+      # https://www.ibm.com/cloud/blog/use-ibm-packer-plugin-to-create-custom-images-on-ibm-cloud-vpc-infrastructure
+      # To use a more limited but easier to manage tool:
+      # https://github.com/IBM/vpc-img-inst
 
     file_mounts:
       # Uses rsync to sync local files/directories to all nodes of the cluster.

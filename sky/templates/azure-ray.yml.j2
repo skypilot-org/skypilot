@@ -45,6 +45,7 @@ available_node_types:
             imageSku: "{{image_sku}}"
             imageVersion: {{image_version}}
             osDiskSizeGB: {{disk_size}}
+            osDiskTier: {{disk_tier}}
             # optionally set priority to use Spot instances
             {%- if use_spot %}
             priority: Spot
@@ -69,6 +70,7 @@ available_node_types:
             imageSku: "{{image_sku}}"
             imageVersion: {{image_version}}
             osDiskSizeGB: {{disk_size}}
+            osDiskTier: {{disk_tier}}
           {%- if use_spot %}
             priority: Spot
             # set a maximum price for spot instances if desired
