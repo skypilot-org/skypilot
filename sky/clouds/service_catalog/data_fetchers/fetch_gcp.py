@@ -236,6 +236,7 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
     df['Price'] = df.apply(lambda row: get_vm_price(row, spot=False), axis=1)
     df['SpotPrice'] = df.apply(lambda row: get_vm_price(row, spot=True), axis=1)
     df = df.reset_index(drop=True)
+    df.sort_values(['InstanceType', 'Region', 'AvailabilityZone'], inplace=True)
     return df
 
 
@@ -320,6 +321,12 @@ def get_gpu_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
     # Drop invalid rows.
     df = df[df['Price'].notna() | df['SpotPrice'].notna()]
     df = df.reset_index(drop=True)
+    df.sort_values([
+        'AcceleratorName',
+        'AcceleratorCount',
+        'Region',
+        'AvailabilityZone'], inplace=True)
+    df['GpuInfo'] = df['AcceleratorName']
     return df
 
 
@@ -411,7 +418,17 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
     df['Price'] = df.apply(lambda row: get_tpu_price(row, spot=False), axis=1)
     df['SpotPrice'] = df.apply(lambda row: get_tpu_price(row, spot=True),
                                axis=1)
+    df = pd.concat([df, HIDDEN_TPU_DF], ignore_index=True)
     df = df.reset_index(drop=True)
+    df['version_and_size'] = df['AcceleratorName'].apply(
+        lambda name: (name.split('-')[1], int(name.split('-')[2])))
+    df = df.sort_values([
+        'version_and_size',
+        'AcceleratorCount',
+        'Region',
+        'AvailabilityZone'])
+    df.drop(columns=['version_and_size'], inplace=True)
+    df['GpuInfo'] = df['AcceleratorName']
     return df
 
 
@@ -429,7 +446,7 @@ def get_catalog_df(region_prefix: str) -> pd.DataFrame:
     tpu_df = get_tpu_df(gcp_tpu_skus)
 
     # Merge the dataframes.
-    df = pd.concat([vm_df, gpu_df, tpu_df, HIDDEN_TPU_DF])
+    df = pd.concat([vm_df, gpu_df, tpu_df])
 
     # Reorder the columns.
     df = df[[
