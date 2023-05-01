@@ -760,7 +760,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(
             f'Folder in local file mount {src!r} will be synced to SkyPilot '
             f'storage {bucket_name}.')
 
-    # Step 3: Translate local file mounts with file in src to SkyPilot storage.
+    # Step 3: Translate local file src of file_mounts to SkyPilot storage.
     # Hard link the files in src to a temporary directory, and upload folder.
     local_fm_path = os.path.join(
         tempfile.gettempdir(),
