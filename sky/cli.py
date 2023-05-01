@@ -3122,8 +3122,9 @@ def show_gpus(
                     item.spot_price) else '-'
                 region_str = item.region if not pd.isna(item.region) else '-'
 
-                requested_accelerator_count = (item.accelerator_count if not 
-                    gpu_name_and_count else int(split_gpu_name[1]))
+                requested_accelerator_count = (item.accelerator_count
+                                               if not gpu_name_and_count else
+                                               int(split_gpu_name[1]))
 
                 if requested_accelerator_count == item.accelerator_count:
                     accelerator_table_vals = [
