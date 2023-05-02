@@ -123,7 +123,7 @@ def _execute(
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
 ) -> None:
-    """Execute a entrypoint.
+    """Execute an entrypoint.
 
     If sky.Task is given or DAG has not been optimized yet, this will call
     sky.optimize() for the caller.
