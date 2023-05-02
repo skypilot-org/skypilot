@@ -3141,7 +3141,7 @@ def show_gpus(
                     if not show_all:
                         accelerator_table_vals.append(region_str)
                     accelerator_table.add_row(accelerator_table_vals)
-            if i != 0:
+            if i != 0 and len(accelerator_table._rows) != 0:
                 yield '\n\n'
             yield from accelerator_table.get_string()
 
