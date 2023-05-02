@@ -3141,10 +3141,18 @@ def show_gpus(
                     if not show_all:
                         accelerator_table_vals.append(region_str)
                     accelerator_table.add_row(accelerator_table_vals)
-
             if i != 0:
                 yield '\n\n'
             yield from accelerator_table.get_string()
+
+        if len(accelerator_table._rows) == 0:
+            yield f'Resource \'{new_gpu_name}\' '
+            yield f'with quantity {requested_accelerator_count} '
+            yield 'not found. '
+            yield 'Try \'sky show-gpus --all\' '
+            yield 'to show available accelerators '
+            yield 'and their quantities.'
+            return
 
     if show_all:
         click.echo_via_pager(_output())
