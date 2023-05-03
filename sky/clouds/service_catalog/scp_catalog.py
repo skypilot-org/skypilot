@@ -24,6 +24,7 @@ def crop_available_region(df):
     service_zones = scp_client.list_service_zone_names()
     return df[df['Region'].isin(service_zones)]
 
+
 _df = crop_available_region(_df)
 
 
@@ -65,7 +66,6 @@ def get_hourly_cost(instance_type: str,
 
 
 def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
-
 
     return common.get_vcpus_from_instance_type_impl(_df, instance_type)
 

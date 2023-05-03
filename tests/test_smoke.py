@@ -568,7 +568,7 @@ def test_gcp_stale_job_manual_restart():
 
 # ---------- Check Sky's environment variables; workdir. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
-@pytest.mark.no_scp # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_env_check(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -584,7 +584,7 @@ def test_env_check(generic_cloud: str):
 
 # ---------- file_mounts ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
-@pytest.mark.no_scp # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_file_mounts(generic_cloud: str):
     name = _get_cluster_name()
     test_commands = [
@@ -634,6 +634,7 @@ def test_scp_file_mounts():
         timeout=20 * 60,  # 20 mins
     )
     run_one_test(test)
+
 
 # ---------- storage ----------
 @pytest.mark.aws
@@ -759,7 +760,6 @@ def test_scp_logs():
     run_one_test(test)
 
 
-
 # ---------- Job Queue. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
 @pytest.mark.no_scp  # SCP does not have K80 gpus
@@ -835,6 +835,7 @@ def test_scp_job_queue():
         f'sky down -y {name}',
     )
     run_one_test(test)
+
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
@@ -953,7 +954,7 @@ def test_lambda_huggingface(generic_cloud: str):
 @pytest.mark.scp
 def test_scp_huggingface(generic_cloud: str):
     name = _get_cluster_name()
-    num_of_gpu_launch=1
+    num_of_gpu_launch = 1
     test = Test(
         'SCP_huggingface_glue_imdb_app',
         [

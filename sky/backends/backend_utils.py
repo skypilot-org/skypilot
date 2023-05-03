@@ -1735,6 +1735,7 @@ def _query_status_lambda(
             return [status_map[node['status']]]
     return []
 
+
 def _query_status_scp(
         cluster: str,
         ray_config: Dict[str, Any],  # pylint: disable=unused-argument
@@ -1756,6 +1757,7 @@ def _query_status_scp(
         if node['virtualServerName'] == cluster:
             return [status_map.get(node.get('virtualServerState', None), None)]
     return []
+
 
 _QUERY_STATUS_FUNCS = {
     'AWS': _query_status_aws,

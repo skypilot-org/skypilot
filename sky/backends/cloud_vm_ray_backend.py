@@ -2986,7 +2986,8 @@ class CloudVmRayBackend(backends.Backend):
         elif terminate and isinstance(cloud, clouds.SCP):
             try:
                 config['provider']['cache_stopped_nodes'] = not terminate
-                provider = SCPNodeProvider(config['provider'], handle.cluster_name)
+                provider = SCPNodeProvider(config['provider'],
+                                           handle.cluster_name)
 
                 if not os.path.exists(provider.metadata.path):
                     prefix = "SKYPILOT_ERROR_NO_NODES_LAUNCHED: "
@@ -2995,7 +2996,8 @@ class CloudVmRayBackend(backends.Backend):
 
                 with open(provider.metadata.path, 'r') as f:
                     metadata = json.load(f)
-                    node_id = next((key for key in list(metadata.keys()) if key.startswith('INSTANCE')), None)
+                    node_id = next((key for key in list(metadata.keys())
+                                    if key.startswith('INSTANCE')), None)
                     provider.terminate_node(node_id)
                     returncode = 0
 

@@ -3,7 +3,9 @@ This module contains the functions of the initial configuration
 for the SCP zone specific settings.
 """
 
+
 class ZoneConfig:
+
     def __init__(self, scp_client, node_config):
         self.zone_name = node_config['region']
         self.ssh_user = node_config['auth']['ssh_user']
@@ -41,23 +43,23 @@ class ZoneConfig:
     def get_product_group(self, name):
         return self.product_group_ids[name]
 
-
     def bootstrap_instance_config(self, node_config):
 
         instance_config = {"imageId": node_config["imageId"]}
         instance_config['serviceZoneId'] = self.zone_id
         instance_config['serverType'] = node_config['InstanceType']
         instance_config['contractId'] = "None"
-        instance_config['initialScript'] = self._get_vm_init_script(node_config['auth']['ssh_public_key'])
+        instance_config['initialScript'] = self._get_vm_init_script(
+            node_config['auth']['ssh_public_key'])
 
-        miscellaneous ={
+        miscellaneous = {
             'deletionProtectionEnabled': False,
             'dnsEnabled': True,
-            'osAdmin':{
+            'osAdmin': {
                 'osUserId': self.ssh_user,
                 'osUserPassword': 'default!@&$351!'
             },
-            'blockStorage':{
+            'blockStorage': {
                 'blockStorageName': 'skystorage',
                 'diskSize': node_config['diskSize'],
                 'encryptEnabled': False,
@@ -66,7 +68,6 @@ class ZoneConfig:
             "nic": {
                 "natEnabled": True
             },
-
         }
         instance_config.update(miscellaneous)
 
@@ -74,33 +75,49 @@ class ZoneConfig:
 
     def _get_region_id(self, region_name):
         zone_contents = self.scp_client.list_zones()
-        zone_dict = {item['serviceZoneName']: item['serviceZoneId'] for item in zone_contents}
+        zone_dict = {
+            item['serviceZoneName']: item['serviceZoneId']
+            for item in zone_contents
+        }
         return zone_dict[region_name]
 
     def get_vcp_subnets(self):
         vpc_contents = self.scp_client.list_vpcs(self.zone_id)
-        vpc_list = [item['vpcId'] for item in vpc_contents if item['vpcState'] == 'ACTIVE']
+        vpc_list = [
+            item['vpcId']
+            for item in vpc_contents
+            if item['vpcState'] == 'ACTIVE'
+        ]
 
         igw_contents = self.scp_client.list_igw()
-        vps_with_igw = [item['vpcId'] for item in igw_contents if item['internetGatewayState']=='ATTACHED']
+        vps_with_igw = [
+            item['vpcId']
+            for item in igw_contents
+            if item['internetGatewayState'] == 'ATTACHED'
+        ]
 
-        vpc_list = [vpc for vpc in vpc_list if vpc in vps_with_igw ]
+        vpc_list = [vpc for vpc in vpc_list if vpc in vps_with_igw]
 
         subnet_contents = self.scp_client.list_subnets()
 
         vpc_subnets = {}
         for vpc in vpc_list:
-            subnet_list = [item['subnetId'] for item in subnet_contents
-                           if item['subnetState'] == 'ACTIVE' and item["vpcId"] == vpc]
-            if len(subnet_list) > 0: vpc_subnets[vpc] = subnet_list
+            subnet_list = [
+                item['subnetId']
+                for item in subnet_contents
+                if item['subnetState'] == 'ACTIVE' and item["vpcId"] == vpc
+            ]
+            if len(subnet_list) > 0:
+                vpc_subnets[vpc] = subnet_list
 
         return vpc_subnets
 
     def _get_vm_init_script(self, ssh_public_key_path):
 
-        init_script_content = self._get_default_config_cmd() + self._get_ssh_key_gen_cmd(ssh_public_key_path)
+        init_script_content = self._get_default_config_cmd(
+        ) + self._get_ssh_key_gen_cmd(ssh_public_key_path)
         return {
-            "encodingType" : "plain",
+            "encodingType": "plain",
             "initialScriptShell": "bash",
             "initialScriptType": "text",
             "initialScriptContent": init_script_content
@@ -119,9 +136,9 @@ class ZoneConfig:
         cmd = "echo '{}' &>>~/.ssh/authorized_keys;".format(key)
 
         return cmd_st + cmd + cmd_ed
+
     def _get_default_config_cmd(self):
-        cmd_list = ["apt-get update",
-                    "apt-get -y install python3-pip"]
+        cmd_list = ["apt-get update", "apt-get -y install python3-pip"]
 
         res = ""
         for cmd in cmd_list:

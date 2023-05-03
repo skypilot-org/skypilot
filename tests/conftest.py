@@ -20,7 +20,6 @@ from typing import List
 all_clouds_in_smoke_tests = ['aws', 'gcp', 'azure', 'lambda', 'scp']
 default_clouds_to_run = ['gcp', 'azure']
 
-
 # Translate cloud name to pytest keyword. We need this because
 # @pytest.mark.lambda is not allowed, so we use @pytest.mark.lambda_cloud
 # instead.
@@ -29,7 +28,7 @@ cloud_to_pytest_keyword = {
     'gcp': 'gcp',
     'azure': 'azure',
     'lambda': 'lambda_cloud',
-    'scp' : 'scp'
+    'scp': 'scp'
 }
 
 
@@ -71,7 +70,6 @@ def _get_cloud_to_run(config) -> List[str]:
     for cloud in all_clouds_in_smoke_tests:
         if config.getoption(f'--{cloud}'):
             cloud_to_run.append(cloud)
-
 
     if not cloud_to_run:
         cloud_to_run = default_clouds_to_run

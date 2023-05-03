@@ -939,7 +939,8 @@ def _fill_in_launchable_resources(
             # requested GCP 4:P100 or 8:K80 with a very large host VM.
             elif isinstance(resources.cloud, clouds.SCP):
                 # Check if the host VM satisfies the min/max disk size limits.
-                if resources.disk_size and not clouds.SCP.is_disk_size_allowed(resources.disk_size):
+                if resources.disk_size and not clouds.SCP.is_disk_size_allowed(
+                        resources.disk_size):
                     launchable[resources] = []
                     continue
 

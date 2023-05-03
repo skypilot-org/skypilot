@@ -3,8 +3,6 @@
 This module contains a set of rest api functions accessing SCP Open-API
 """
 
-
-
 import os
 import json
 import requests
@@ -25,14 +23,18 @@ TEMP_VM_JSON_PATH = '/tmp/json/tmp_vm_body.json'
 
 logger = logging.getLogger(__name__)
 
+
 class SCPClientError(Exception):
     pass
+
 
 class SCPOngoingRequestError(Exception):
     pass
 
+
 class SCPCreationFailError(Exception):
     pass
+
 
 class Metadata:
     """Per-cluster metadata file."""
@@ -62,7 +64,7 @@ class Metadata:
         # Update metadata
         if value is None:
             if instance_id in metadata:
-                metadata.pop(instance_id) # del entry
+                metadata.pop(instance_id)  # del entry
             if len(metadata) == 0:
                 if os.path.exists(self.path):
                     os.remove(self.path)
@@ -95,10 +97,11 @@ class Metadata:
             metadata = json.load(f)
             return list(metadata.keys())
 
+
 def raise_scp_error(response: requests.Response) -> None:
     """Raise SCPCloudError if appropriate. """
     status_code = response.status_code
-    if status_code == 200 or status_code == 202 :
+    if status_code == 200 or status_code == 202:
         return
     try:
         resp_json = response.json()
@@ -115,17 +118,19 @@ def raise_scp_error(response: requests.Response) -> None:
     raise SCPClientError(f'{status_code}: {message}')
 
 
-
 def _singleton(class_):
     instances = {}
+
     def get_instance(*args, **kwargs):
         if class_ not in instances:
             instances[class_] = class_(*args, **kwargs)
         return instances[class_]
+
     return get_instance
 
 
 def _retry(method, max_tries=50, backoff_s=5):
+
     @wraps(method)
     def method_with_retries(self, *args, **kwargs):
         try_count = 0
@@ -153,8 +158,7 @@ class SCPClient:
         with open(self.credentials, 'r') as f:
             lines = [line.strip() for line in f.readlines() if ' = ' in line]
             self._credentials = {
-                line.split(' = ')[0]: line.split(' = ')[1]
-                for line in lines
+                line.split(' = ')[0]: line.split(' = ')[1] for line in lines
             }
         self.access_key = self._credentials['scp_access_key']
         self.secret_key = self._credentials['scp_secret_key']
@@ -163,14 +167,13 @@ class SCPClient:
         self.timestamp = None
         self.signature = None
 
-
         self.headers = {
             'X-Cmp-AccessKey': f'{self.access_key}',
             'X-Cmp-ClientType': f'{self.client_type}',
             'X-Cmp-ProjectId': f'{self.project_id}',
             'X-Cmp-Timestamp': f'{self.timestamp}',
             'X-Cmp-Signature': f'{self.signature}'
-         }
+        }
 
     def create_instance(self, instance_config):
         """Launch new instances."""
@@ -185,8 +188,10 @@ class SCPClient:
 
         response = requests.get(url, headers=self.headers)
         raise_scp_error(response)
-        if contents_key is not None : return response.json().get(contents_key, [])
-        else:  return response.json()
+        if contents_key is not None:
+            return response.json().get(contents_key, [])
+        else:
+            return response.json()
 
     @_retry
     def _post(self, url, request_body):
@@ -205,9 +210,12 @@ class SCPClient:
         self.set_timestamp()
         self.set_signature(url=url, method=method)
         if request_body:
-            response = requests.delete(url, json=request_body, headers=self.headers)
+            response = requests.delete(url,
+                                       json=request_body,
+                                       headers=self.headers)
 
-        else: response = requests.delete(url,  headers=self.headers)
+        else:
+            response = requests.delete(url, headers=self.headers)
         raise_scp_error(response)
         return response.json()
 
@@ -224,93 +232,84 @@ class SCPClient:
     def add_security_group_in_rule(self, sg_id):
         url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}/rules'
         request_body = {
-              "ruleDirection" : "IN",
-              "services" : [ {
-                "serviceType" : "TCP",
-                "serviceValue" : "22"
-              } ],
-              "sourceIpAddresses" : [ "0.0.0.0/0"],
-              "ruleDescription" : "skypilot ssh rue"
-            }
+            "ruleDirection": "IN",
+            "services": [{
+                "serviceType": "TCP",
+                "serviceValue": "22"
+            }],
+            "sourceIpAddresses": ["0.0.0.0/0"],
+            "ruleDescription": "skypilot ssh rue"
+        }
         return self._post(url, request_body)
-
 
     def add_security_group_out_rule(self, sg_id):
         url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}/rules'
         request_body = {
-              "ruleDirection" : "OUT",
-              "services" : [ {
-                "serviceType" : "TCP",
-                "serviceValue" : "21"
-              },{
-                "serviceType" : "TCP",
-                "serviceValue" : "22"
-              },{
-                "serviceType" : "TCP",
-                "serviceValue" : "80"
-              },{
-                "serviceType" : "TCP",
-                "serviceValue" : "443"
-              }],
-              "destinationIpAddresses" : [ "0.0.0.0/0"],
-              "ruleDescription" : "skypilot out rue"
-            }
+            "ruleDirection": "OUT",
+            "services": [{
+                "serviceType": "TCP",
+                "serviceValue": "21"
+            }, {
+                "serviceType": "TCP",
+                "serviceValue": "22"
+            }, {
+                "serviceType": "TCP",
+                "serviceValue": "80"
+            }, {
+                "serviceType": "TCP",
+                "serviceValue": "443"
+            }],
+            "destinationIpAddresses": ["0.0.0.0/0"],
+            "ruleDescription": "skypilot out rue"
+        }
         return self._post(url, request_body)
-
-
 
     def add_firewall_inbound_rule(self, firewall_id, internal_ip):
         url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules'
         request_body = {
-          "sourceIpAddresses" : ["0.0.0.0/0"],
-          "destinationIpAddresses" : [internal_ip],
-          "services" : [ {
-            "serviceType" : "TCP",
-            "serviceValue" : "22"
-          } ],
-          "ruleDirection" : "IN",
-          "ruleAction" : "ALLOW",
-          "isRuleEnabled" : True,
-          "ruleLocationType" : "FIRST",
-          "ruleDescription" : "description"
+            "sourceIpAddresses": ["0.0.0.0/0"],
+            "destinationIpAddresses": [internal_ip],
+            "services": [{
+                "serviceType": "TCP",
+                "serviceValue": "22"
+            }],
+            "ruleDirection": "IN",
+            "ruleAction": "ALLOW",
+            "isRuleEnabled": True,
+            "ruleLocationType": "FIRST",
+            "ruleDescription": "description"
         }
         return self._post(url, request_body)
-
-
 
     def add_firewall_outbound_rule(self, firewall_id, internal_ip):
         url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules'
         request_body = {
-          "sourceIpAddresses" : [internal_ip],
-          "destinationIpAddresses" : ["0.0.0.0/0"],
-          "services" : [ {
-                "serviceType" : "TCP",
-                "serviceValue" : "21"
-              },{
-                "serviceType" : "TCP",
-                "serviceValue" : "22"
-              },{
-                "serviceType" : "TCP",
-                "serviceValue" : "80"
-              },{
-                "serviceType" : "TCP",
-                "serviceValue" : "443"
-              }],
-          "ruleDirection" : "OUT",
-          "ruleAction" : "ALLOW",
-          "isRuleEnabled" : True,
-          "ruleLocationType" : "FIRST",
-          "ruleDescription" : "description"
+            "sourceIpAddresses": [internal_ip],
+            "destinationIpAddresses": ["0.0.0.0/0"],
+            "services": [{
+                "serviceType": "TCP",
+                "serviceValue": "21"
+            }, {
+                "serviceType": "TCP",
+                "serviceValue": "22"
+            }, {
+                "serviceType": "TCP",
+                "serviceValue": "80"
+            }, {
+                "serviceType": "TCP",
+                "serviceValue": "443"
+            }],
+            "ruleDirection": "OUT",
+            "ruleAction": "ALLOW",
+            "isRuleEnabled": True,
+            "ruleLocationType": "FIRST",
+            "ruleDescription": "description"
         }
         return self._post(url, request_body)
-
-
-
 
     def terminate_instance(self, vm_id):
         url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{vm_id}'
         return self._delete(url)
-
 
     def list_instances(self) -> List[dict]:
         """List existing instances."""
@@ -324,25 +323,34 @@ class SCPClient:
         raise_scp_error(response)
         return response.json().get('data', [])
 
-    def get_signature(self, method:str, url:str) -> str:
+    def get_signature(self, method: str, url: str) -> str:
         url_info = parse.urlsplit(url)
         url = f'{url_info.scheme}://{url_info.netloc}{parse.quote(url_info.path)}'
         if url_info.query:
-            enc_params = list(map(lambda item: (item[0], parse.quote(item[1][0])), parse.parse_qs(url_info.query).items()))
+            enc_params = list(
+                map(lambda item: (item[0], parse.quote(item[1][0])),
+                    parse.parse_qs(url_info.query).items()))
             url = f'{url}?{parse.urlencode(enc_params)}'
 
         message = method + url + self.timestamp + self.access_key + self.project_id + self.client_type
         message = bytes(message, 'utf-8')
         secret = bytes(self.secret_key, 'utf-8')
-        signature = str(base64.b64encode(hmac.new(secret, message, digestmod=hashlib.sha256).digest()), 'utf-8')
+        signature = str(
+            base64.b64encode(
+                hmac.new(secret, message, digestmod=hashlib.sha256).digest()),
+            'utf-8')
 
         return str(signature)
 
     def set_timestamp(self) -> None:
-        self.timestamp = str(int(round(datetime.timestamp(datetime.now() - timedelta(minutes=1)) * 1000)))
+        self.timestamp = str(
+            int(
+                round(
+                    datetime.timestamp(datetime.now() - timedelta(minutes=1)) *
+                    1000)))
         self.headers['X-Cmp-Timestamp'] = self.timestamp
 
-    def set_signature(self, method:str, url:str) -> None:
+    def set_signature(self, method: str, url: str) -> None:
 
         self.signature = self.get_signature(url=url, method=method)
         self.headers['X-Cmp-Signature'] = self.signature
@@ -353,7 +361,8 @@ class SCPClient:
         return self._get(url)
 
     def get_external_ip(self, virtual_server_id, ip):
-        nic_details_list = self.list_nic_details(virtual_server_id=virtual_server_id)
+        nic_details_list = self.list_nic_details(
+            virtual_server_id=virtual_server_id)
         for nic_details in nic_details_list:
             if nic_details['ip'] == ip and nic_details['subnetType'] == 'PUBLIC':
                 return nic_details['natIp']
@@ -385,18 +394,18 @@ class SCPClient:
 
     def del_firwall_rules(self, firewall_id, rule_id_list):
         url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules'
-        request_body={
-              "ruleDeletionType" : "PARTIAL",
-              "ruleIds" : rule_id_list
-            }
+        request_body = {"ruleDeletionType": "PARTIAL", "ruleIds": rule_id_list}
         return self._delete(url, request_body=request_body)
 
-    def list_security_groups(self,  vpc_id=None, sg_name=None):
+    def list_security_groups(self, vpc_id=None, sg_name=None):
         url = f'{API_ENDPOINT}/security-group/v2/security-groups'
-        parameter =[]
-        if vpc_id is not None: parameter.append("vpcId="+vpc_id)
-        if sg_name is not None: parameter.append("securityGroupName=" + sg_name)
-        if len(parameter) >0 : url = url+"?"+"&".join(parameter)
+        parameter = []
+        if vpc_id is not None:
+            parameter.append("vpcId=" + vpc_id)
+        if sg_name is not None:
+            parameter.append("securityGroupName=" + sg_name)
+        if len(parameter) > 0:
+            url = url + "?" + "&".join(parameter)
         return self._get(url)
 
     def list_igw(self):

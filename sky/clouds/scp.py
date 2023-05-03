@@ -26,8 +26,9 @@ _CREDENTIAL_FILES = [
 
 logger = sky_logging.init_logger(__name__)
 
-MIN_DISK_SIZE=100
-MAX_DISK_SIZE=300
+MIN_DISK_SIZE = 100
+MAX_DISK_SIZE = 300
+
 
 @clouds.CLOUD_REGISTRY.register
 class SCP(clouds.Cloud):
@@ -63,7 +64,9 @@ class SCP(clouds.Cloud):
         if not cls._regions:
             scp_client = SCPClient()
             service_zones = scp_client.list_service_zone_names()
-            cls._regions = [clouds.Region(zone_name) for zone_name in service_zones]
+            cls._regions = [
+                clouds.Region(zone_name) for zone_name in service_zones
+            ]
         return cls._regions
 
     @classmethod
@@ -153,7 +156,6 @@ class SCP(clouds.Cloud):
         instance_type: str,
     ) -> Optional[float]:
 
-
         return service_catalog.get_vcpus_from_instance_type(instance_type,
                                                             clouds='scp')
 
@@ -172,7 +174,6 @@ class SCP(clouds.Cloud):
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
 
-
         if acc_dict is not None:
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
@@ -187,12 +188,11 @@ class SCP(clouds.Cloud):
 
     @classmethod
     def _get_image_id(
-            cls,
-            image_id: Optional[Dict[Optional[str], str]],
-            region_name: str,
-            instance_type: str,
+        cls,
+        image_id: Optional[Dict[Optional[str], str]],
+        region_name: str,
+        instance_type: str,
     ) -> str:
-
 
         if image_id is None:
             return cls._get_default_ami(region_name, instance_type)
@@ -214,12 +214,12 @@ class SCP(clouds.Cloud):
                     f'No image found for region {region_name}')
         return image_id_str
 
-
     @classmethod
     def _get_default_ami(cls, region_name: str, instance_type: str) -> str:
         acc = cls.get_accelerators_from_instance_type(instance_type)
-        image_id = service_catalog.get_image_id_from_tag(
-            'skypilot:ubuntu-2004', region_name, clouds='scp')
+        image_id = service_catalog.get_image_id_from_tag('skypilot:ubuntu-2004',
+                                                         region_name,
+                                                         clouds='scp')
         if acc is not None:
             assert len(acc) == 1, acc
             image_id = service_catalog.get_image_id_from_tag(
@@ -234,13 +234,11 @@ class SCP(clouds.Cloud):
             'No image found in catalog for region '
             f'{region_name}. Try setting a valid image_id.')
 
-
-
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
         if resources.use_spot:
             return ([], [])
-        if resources.disk_size is not None and not MIN_DISK_SIZE<=resources.disk_size<=MAX_DISK_SIZE:
+        if resources.disk_size is not None and not MIN_DISK_SIZE <= resources.disk_size <= MAX_DISK_SIZE:
             logger.info(f'The disk size must be between 100 and 300 in SCP. ' \
                          f'Input: {resources.disk_size}')
             return ([], [])
@@ -320,9 +318,7 @@ class SCP(clouds.Cloud):
         return service_catalog.instance_type_exists(instance_type, 'scp')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region,
-                                                    zone,
-                                                    clouds='scp')
+        return service_catalog.validate_region_zone(region, zone, clouds='scp')
 
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
@@ -334,8 +330,9 @@ class SCP(clouds.Cloud):
 
     @staticmethod
     def is_disk_size_allowed(disk_size):
-        if disk_size<MIN_DISK_SIZE or disk_size>MAX_DISK_SIZE:
-            logger.info(f'The disk size must be between 100 and 300 in SCP. Input: {disk_size}' )
+        if disk_size < MIN_DISK_SIZE or disk_size > MAX_DISK_SIZE:
+            logger.info(
+                f'The disk size must be between 100 and 300 in SCP. Input: {disk_size}'
+            )
             return False
         return True
-
