@@ -841,7 +841,7 @@ class RetryingVmProvisioner(object):
         # Sometimes, LambdaCloudError will list available regions.
         for e in errors:
             if e.find('Regions with capacity available:') != -1:
-                for r in clouds.SCP.regions():
+                for r in clouds.Lambda.regions():
                     if e.find(r.name) == -1:
                         self._blocked_resources.add(
                             launchable_resources.copy(region=r.name, zone=None))

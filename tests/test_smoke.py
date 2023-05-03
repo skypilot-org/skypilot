@@ -1229,6 +1229,7 @@ def test_azure_start_stop():
 
 # ---------- Testing Autostopping ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
+@pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_autostop(generic_cloud: str):
     name = _get_cluster_name()
