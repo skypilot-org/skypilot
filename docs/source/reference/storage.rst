@@ -151,7 +151,7 @@ and storage mounting:
       # this approach can also be used to create a shared filesystem across workers.
       # See examples/storage/pingpong.yaml for an example.
       /outputs-mount:
-        name: romil-output-bucket
+        name: my-output-bucket
         mode: MOUNT
 
       # *** Uploading multiple files to the same Storage object ***
@@ -293,5 +293,5 @@ Storage YAML reference
         mounting the remote storage object. With MOUNT mode, files are streamed
         from the remote object store and writes are replicated to the object
         store (and consequently, to other workers mounting the same Storage).
-        With mount mode, files are copied at VM initialization and any writes to
+        With COPY mode, files are copied at VM initialization and any writes to
         the mount path will not be replicated on the object store.

@@ -4,6 +4,7 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import exceptions
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -110,9 +111,10 @@ class Local(clouds.Cloud):
     @classmethod
     def get_default_instance_type(cls,
                                   cpus: Optional[str] = None,
-                                  memory: Optional[str] = None) -> str:
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[str] = None) -> str:
         # There is only "1" instance type for local cloud: on-prem
-        del cpus, memory  # Unused.
+        del cpus, memory, disk_tier  # Unused.
         return Local._DEFAULT_INSTANCE_TYPE
 
     @classmethod
@@ -142,6 +144,8 @@ class Local(clouds.Cloud):
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
+        if resources.disk_tier is not None:
+            return ([], [])
         # The entire local cluster's resources is considered launchable, as the
         # check for task resources is deferred later.
         # The check for task resources meeting cluster resources is run in
@@ -193,3 +197,9 @@ class Local(clouds.Cloud):
             raise ValueError(f'Region {region!r} does not match the Local'
                              ' cloud region {Local.LOCAL_REGION.name!r}.')
         return region, zone
+
+    @classmethod
+    def check_disk_tier_enabled(cls, instance_type: str,
+                                disk_tier: str) -> None:
+        raise exceptions.NotSupportedError(
+            'Local cloud does not support disk tiers.')
