@@ -5,12 +5,8 @@ import numpy as np
 import pandas as pd
 
 import sky
+from sky import clouds
 
-CLOUDS = {
-    'AWS': sky.AWS(),
-    'GCP': sky.GCP(),
-    'Azure': sky.Azure(),
-}
 ALL_INSTANCE_TYPES = sum(sky.list_accelerators(gpus_only=True).values(), [])
 GCP_HOST_VM = 'n1-highmem-8'
 
@@ -69,7 +65,7 @@ def generate_random_dag(
                 if pd.isna(instance_type):
                     instance_type = GCP_HOST_VM
                 resources = sky.Resources(
-                    cloud=CLOUDS[candidate.cloud],
+                    cloud=clouds.CLOUD_REGISTRY.from_str(candidate.cloud),
                     instance_type=instance_type,
                     accelerators={
                         candidate.accelerator_name: candidate.accelerator_count
@@ -120,16 +116,10 @@ def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
                                                       dag.tasks, optimizer_plan)
 
     min_objective = find_min_objective(copy_dag, minimize_cost)
-    assert objective == min_objective
+    assert abs(objective - min_objective) < 1e-3
 
 
-def test_optimizer(monkeypatch):
-    enabled_clouds = list(CLOUDS.values())
-    monkeypatch.setattr(
-        'sky.global_user_state.get_enabled_clouds',
-        lambda: enabled_clouds,
-    )
-    monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
+def test_optimizer(enable_all_clouds):
 
     dag = generate_random_dag(num_tasks=5, seed=0)
     sky.Optimizer._add_dummy_source_sink_nodes(dag)

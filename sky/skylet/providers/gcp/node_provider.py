@@ -184,7 +184,7 @@ class GCPNodeProvider(NodeProvider):
         instances.
         """
         with self.lock:
-            result_dict = dict()
+            result_dict = {}
             labels = tags  # gcp uses "labels" instead of aws "tags"
             labels = dict(sorted(copy.deepcopy(labels).items()))
 

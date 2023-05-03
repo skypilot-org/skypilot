@@ -11,10 +11,11 @@ import json
 import os
 import pathlib
 import pickle
+import sqlite3
 import time
-import uuid
 import typing
 from typing import Any, Dict, List, Tuple, Optional, Set
+import uuid
 
 import colorama
 
@@ -39,7 +40,14 @@ def create_table(cursor, conn):
     # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
     #  This may cause the database locked problem from WSL issue #1441.
     if not common_utils.is_wsl():
-        cursor.execute('PRAGMA journal_mode=WAL')
+        try:
+            cursor.execute('PRAGMA journal_mode=WAL')
+        except sqlite3.OperationalError as e:
+            if 'database is locked' not in str(e):
+                raise
+            # If the database is locked, it is OK to continue, as the WAL mode
+            # is not critical and is likely to be enabled by other processes.
+
     # Table for Clusters
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS clusters (
@@ -155,7 +163,7 @@ class StorageStatus(enum.Enum):
 
 
 def add_or_update_cluster(cluster_name: str,
-                          cluster_handle: 'backends.Backend.ResourceHandle',
+                          cluster_handle: 'backends.ResourceHandle',
                           requested_resources: Optional[Set[Any]],
                           ready: bool,
                           is_launch: bool = True):
@@ -163,7 +171,7 @@ def add_or_update_cluster(cluster_name: str,
 
     Args:
         cluster_name: Name of the cluster.
-        cluster_handle: Backend.ResourceHandle of the cluster.
+        cluster_handle: backends.ResourceHandle of the cluster.
         requested_resources: Resources requested for cluster.
         ready: Whether the cluster is ready to use. If False, the cluster will
             be marked as INIT, otherwise it will be marked as UP.
@@ -189,7 +197,9 @@ def add_or_update_cluster(cluster_name: str,
         usage_intervals = []
 
     # if this is the cluster init or we are starting after a stop
-    if len(usage_intervals) == 0 or usage_intervals[-1][-1] is not None:
+    if not usage_intervals or usage_intervals[-1][-1] is not None:
+        assert cluster_launched_at is not None, (cluster_name, is_launch,
+                                                 usage_intervals)
         usage_intervals.append((cluster_launched_at, None))
 
     if requested_resources:
@@ -264,6 +274,8 @@ def add_or_update_cluster(cluster_name: str,
             cluster_hash,
         ))
 
+    launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
+    launched_resources = getattr(cluster_handle, 'launched_resources', None)
     _DB.cursor.execute(
         'INSERT or REPLACE INTO cluster_history'
         '(cluster_hash, name, num_nodes, requested_resources, '
@@ -287,11 +299,11 @@ def add_or_update_cluster(cluster_name: str,
             # name
             cluster_name,
             # number of nodes
-            cluster_handle.launched_nodes,
+            launched_nodes,
             # requested resources
             pickle.dumps(requested_resources),
             # launched resources
-            pickle.dumps(cluster_handle.launched_resources),
+            pickle.dumps(launched_resources),
             # usage intervals
             pickle.dumps(usage_intervals),
         ))
@@ -306,13 +318,14 @@ def update_last_use(cluster_name: str):
     _DB.conn.commit()
 
 
-def remove_cluster(cluster_name: str, terminate: bool) -> float:
+def remove_cluster(cluster_name: str, terminate: bool) -> None:
     """Removes cluster_name mapping."""
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
     # usage_intervals is not None and not empty
     if usage_intervals:
+        assert cluster_hash is not None, cluster_name
         start_time = usage_intervals.pop()[0]
         end_time = int(time.time())
         usage_intervals.append((start_time, end_time))
@@ -327,7 +340,8 @@ def remove_cluster(cluster_name: str, terminate: bool) -> float:
             return
         # Must invalidate IP list: otherwise 'sky cpunode'
         # on a stopped cpunode will directly try to ssh, which leads to timeout.
-        handle.stable_internal_external_ips = None
+        if hasattr(handle, 'stable_internal_external_ips'):
+            handle.stable_internal_external_ips = None
         _DB.cursor.execute(
             'UPDATE clusters SET handle=(?), status=(?) '
             'WHERE name=(?)', (
@@ -339,12 +353,13 @@ def remove_cluster(cluster_name: str, terminate: bool) -> float:
 
 
 def get_handle_from_cluster_name(
-        cluster_name: str) -> Optional['backends.Backend.ResourceHandle']:
+        cluster_name: str) -> Optional['backends.ResourceHandle']:
     assert cluster_name is not None, 'cluster_name cannot be None'
     rows = _DB.cursor.execute('SELECT handle FROM clusters WHERE name=(?)',
                               (cluster_name,))
     for (handle,) in rows:
         return pickle.loads(handle)
+    return None
 
 
 def get_glob_cluster_names(cluster_name: str) -> List[str]:
@@ -388,6 +403,7 @@ def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
         if launch_time is None:
             return None
         return int(launch_time)
+    return None
 
 
 def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
@@ -397,6 +413,7 @@ def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
         if metadata is None:
             return None
         return json.loads(metadata)
+    return None
 
 
 def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
@@ -411,7 +428,11 @@ def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def _get_cluster_usage_intervals(cluster_hash: str) -> Optional[Dict[str, Any]]:
+def _get_cluster_usage_intervals(
+        cluster_hash: Optional[str]
+) -> Optional[List[Tuple[int, Optional[int]]]]:
+    if cluster_hash is None:
+        return None
     rows = _DB.cursor.execute(
         'SELECT usage_intervals FROM cluster_history WHERE cluster_hash=(?)',
         (cluster_hash,))
@@ -419,19 +440,27 @@ def _get_cluster_usage_intervals(cluster_hash: str) -> Optional[Dict[str, Any]]:
         if usage_intervals is None:
             return None
         return pickle.loads(usage_intervals)
+    return None
 
 
-def _get_cluster_launch_time(cluster_hash: str) -> Optional[Dict[str, Any]]:
+def _get_cluster_launch_time(cluster_hash: str) -> Optional[int]:
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
+    if usage_intervals is None:
+        return None
     return usage_intervals[0][0]
 
 
-def _get_cluster_duration(cluster_hash: str) -> Optional[Dict[str, Any]]:
+def _get_cluster_duration(cluster_hash: str) -> int:
+    total_duration = 0
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
-    total_duration = 0
+    if usage_intervals is None:
+        return total_duration
+
     for i, (start_time, end_time) in enumerate(usage_intervals):
         # duration from latest start time to time of query
+        if start_time is None:
+            continue
         if end_time is None:
             assert i == len(usage_intervals) - 1, i
             end_time = int(time.time())
@@ -440,8 +469,9 @@ def _get_cluster_duration(cluster_hash: str) -> Optional[Dict[str, Any]]:
     return total_duration
 
 
-def _set_cluster_usage_intervals(cluster_hash: str,
-                                 usage_intervals: Dict[str, Any]) -> None:
+def _set_cluster_usage_intervals(
+        cluster_hash: str, usage_intervals: List[Tuple[int,
+                                                       Optional[int]]]) -> None:
     _DB.cursor.execute(
         'UPDATE cluster_history SET usage_intervals=(?) WHERE cluster_hash=(?)',
         (
@@ -457,11 +487,12 @@ def _set_cluster_usage_intervals(cluster_hash: str,
 
 
 def set_owner_identity_for_cluster(cluster_name: str,
-                                   owner_identity: Optional[str]) -> None:
+                                   owner_identity: Optional[List[str]]) -> None:
     if owner_identity is None:
         return
+    owner_identity_str = json.dumps(owner_identity)
     _DB.cursor.execute('UPDATE clusters SET owner=(?) WHERE name=(?)',
-                       (owner_identity, cluster_name))
+                       (owner_identity_str, cluster_name))
 
     count = _DB.cursor.rowcount
     _DB.conn.commit()
@@ -477,6 +508,7 @@ def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
         if cluster_hash is None:
             return None
         return cluster_hash
+    return None
 
 
 def get_launched_resources_from_cluster_hash(
@@ -490,6 +522,26 @@ def get_launched_resources_from_cluster_hash(
             return None
         launched_resources = pickle.loads(launched_resources)
         return num_nodes, launched_resources
+    return None
+
+
+def _load_owner(record_owner: Optional[str]) -> Optional[List[str]]:
+    if record_owner is None:
+        return None
+    try:
+        result = json.loads(record_owner)
+        if result is not None and not isinstance(result, list):
+            # Backwards compatibility for old records, which were stored as
+            # a string instead of a list. It is possible that json.loads
+            # will parse the string with all numbers as an int, so we need
+            # to convert it back to a list of strings.
+            return [str(result)]
+        return result
+    except json.JSONDecodeError:
+        # Backwards compatibility for old records, which were stored as
+        # a string instead of a list. This will happen when the previous
+        # UserId is a string instead of an int.
+        return [record_owner]
 
 
 def get_cluster_from_name(
@@ -511,11 +563,12 @@ def get_cluster_from_name(
             'status': ClusterStatus[status],
             'autostop': autostop,
             'to_down': bool(to_down),
-            'owner': owner,
+            'owner': _load_owner(owner),
             'metadata': json.loads(metadata),
             'cluster_hash': cluster_hash,
         }
         return record
+    return None
 
 
 def get_clusters() -> List[Dict[str, Any]]:
@@ -535,7 +588,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'status': ClusterStatus[status],
             'autostop': autostop,
             'to_down': bool(to_down),
-            'owner': owner,
+            'owner': _load_owner(owner),
             'metadata': json.loads(metadata),
             'cluster_hash': cluster_hash,
         }
@@ -602,7 +655,12 @@ def get_enabled_clouds() -> List[clouds.Cloud]:
     for (value,) in rows:
         ret = json.loads(value)
         break
-    return [clouds.CLOUD_REGISTRY.from_str(cloud) for cloud in ret]
+    enabled_clouds: List[clouds.Cloud] = []
+    for c in ret:
+        cloud = clouds.CLOUD_REGISTRY.from_str(c)
+        if cloud is not None:
+            enabled_clouds.append(cloud)
+    return enabled_clouds
 
 
 def set_enabled_clouds(enabled_clouds: List[str]) -> None:
@@ -648,15 +706,17 @@ def set_storage_status(storage_name: str, status: StorageStatus) -> None:
         raise ValueError(f'Storage {storage_name} not found.')
 
 
-def get_storage_status(storage_name: str) -> None:
+def get_storage_status(storage_name: str) -> Optional[StorageStatus]:
     assert storage_name is not None, 'storage_name cannot be None'
     rows = _DB.cursor.execute('SELECT status FROM storage WHERE name=(?)',
                               (storage_name,))
     for (status,) in rows:
         return StorageStatus[status]
+    return None
 
 
-def set_storage_handle(storage_name: str, handle: 'Storage.StorageMetadata'):
+def set_storage_handle(storage_name: str,
+                       handle: 'Storage.StorageMetadata') -> None:
     _DB.cursor.execute('UPDATE storage SET handle=(?) WHERE name=(?)', (
         pickle.dumps(handle),
         storage_name,
@@ -678,6 +738,7 @@ def get_handle_from_storage_name(
         if handle is None:
             return None
         return pickle.loads(handle)
+    return None
 
 
 def get_glob_storage_name(storage_name: str) -> List[str]:

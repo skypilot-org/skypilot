@@ -17,6 +17,7 @@ jobs:
         python-version: [3.6]
         test-path:
           - tests/test_cli.py
+          - tests/test_config.py
           - tests/test_global_user_state.py
           - tests/test_list_accelerators.py
           - tests/test_optimizer_dryruns.py

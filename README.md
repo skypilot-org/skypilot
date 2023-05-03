@@ -14,7 +14,7 @@
     <img alt="GitHub Release" src="https://img.shields.io/github/release/skypilot-org/skypilot.svg">
   </a>
   
-  <a href="https://join.slack.com/t/skypilot-org/shared_invite/zt-1i4pa7lyc-g6Lo4_rqqCFWOSXdvwTs3Q"> 
+  <a href="http://slack.skypilot.co"> 
     <img alt="Join Slack" src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack">
   </a>
   
@@ -24,6 +24,13 @@
 <h3 align="center">
     Run jobs on any cloud, easily and cost effectively
 </h3>
+
+----
+:fire: :dromedary_camel: *News* :dromedary_camel: :fire: 
+- [April, 2023] **[**SkyPilot YAMLs released**](./llm/vicuna/) for finetuning & serving the Vicuna model with a single command**!
+- [March, 2023] **[Vicuna LLM chatbot](https://vicuna.lmsys.org/) trained** [**using SkyPilot**](./llm/vicuna/) **for $300 on spot instances!** 
+- [March, 2023] *Serve* your own LLaMA LLM chatbot (not finetuned) on any cloud: [**example**](./llm/llama-chatbots/), [**repo**](https://github.com/skypilot-org/sky-llama)
+----
 
 SkyPilot is a framework for easily and cost effectively running ML workloads[^1] on any cloud. 
 
@@ -114,14 +121,15 @@ Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/
 - Framework examples: [PyTorch DDP](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml),  [Distributed](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py) [TensorFlow](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml), [JAX/Flax on TPU](https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml), [Stable Diffusion](https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion), [Detectron2](https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml), [programmatic grid search](https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py), [Docker](https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml), and [many more](./examples).
 
 More information:
-- [Introductory blog post](https://medium.com/@zongheng_yang/skypilot-ml-and-data-science-on-any-cloud-with-massive-cost-savings-244189cc7c0f)
+- [Project blog](https://blog.skypilot.co/)
+- [Introductory blog post](https://blog.skypilot.co/introducing-skypilot/)
 
 ## Issues, feature requests, and questions
 We are excited to hear your feedback! 
 * For issues and feature requests, please [open a GitHub issue](https://github.com/skypilot-org/skypilot/issues/new).
 * For questions, please use [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
 
-For general discussions, join us on the [SkyPilot Slack](https://join.slack.com/t/skypilot-org/shared_invite/zt-1i4pa7lyc-g6Lo4_rqqCFWOSXdvwTs3Q).
+For general discussions, join us on the [SkyPilot Slack](http://slack.skypilot.co).
 
 ## Contributing
 We welcome and value all contributions to the project! Please refer to [CONTRIBUTING](CONTRIBUTING.md) for how to get involved.

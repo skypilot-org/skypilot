@@ -43,7 +43,7 @@ class TestReservedClustersOperations:
     @pytest.fixture
     def _mock_cluster_state(self, _mock_db_conn):
         assert 'state.db' not in global_user_state._DB.db_path
-        handle = backends.CloudVmRayBackend.ResourceHandle(
+        handle = backends.CloudVmRayResourceHandle(
             cluster_name='test-cluster1',
             cluster_yaml='/tmp/cluster1.yaml',
             launched_nodes=2,
@@ -56,7 +56,7 @@ class TestReservedClustersOperations:
             handle,
             requested_resources={handle.launched_resources},
             ready=True)
-        handle = backends.CloudVmRayBackend.ResourceHandle(
+        handle = backends.CloudVmRayResourceHandle(
             cluster_name='test-cluster2',
             cluster_yaml='/tmp/cluster2.yaml',
             launched_nodes=1,
@@ -70,7 +70,7 @@ class TestReservedClustersOperations:
             handle,
             requested_resources={handle.launched_resources},
             ready=True)
-        handle = backends.CloudVmRayBackend.ResourceHandle(
+        handle = backends.CloudVmRayResourceHandle(
             cluster_name='test-cluster3',
             cluster_yaml='/tmp/cluster3.yaml',
             launched_nodes=4,
@@ -83,7 +83,7 @@ class TestReservedClustersOperations:
             handle,
             requested_resources={handle.launched_resources},
             ready=False)
-        handle = backends.CloudVmRayBackend.ResourceHandle(
+        handle = backends.CloudVmRayResourceHandle(
             cluster_name=spot.SPOT_CONTROLLER_NAME,
             cluster_yaml='/tmp/spot_controller.yaml',
             launched_nodes=1,

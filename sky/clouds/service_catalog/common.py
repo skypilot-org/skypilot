@@ -1,4 +1,5 @@
 """Common utilities for service catalog."""
+import ast
 import hashlib
 import os
 import time
@@ -10,9 +11,9 @@ import requests
 import pandas as pd
 
 from sky import sky_logging
-from sky.backends import backend_utils
 from sky.clouds import cloud as cloud_lib
 from sky.clouds.service_catalog import constants
+from sky.utils import log_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -31,6 +32,7 @@ class InstanceTypeInfo(NamedTuple):
     - accelerator_name: Canonical name of the accelerator. E.g. `V100`.
     - accelerator_count: Number of accelerators offered by this instance type.
     - cpu_count: Number of vCPUs offered by this instance type.
+    - device_memory: Device memory in GiB.
     - memory: Instance memory in GiB.
     - price: Regular instance price per hour (cheapest across all regions).
     - spot_price: Spot instance price per hour (cheapest across all regions).
@@ -41,6 +43,7 @@ class InstanceTypeInfo(NamedTuple):
     accelerator_name: str
     accelerator_count: int
     cpu_count: Optional[float]
+    device_memory: Optional[float]
     memory: Optional[float]
     price: float
     spot_price: float
@@ -100,7 +103,7 @@ def read_catalog(filename: str,
             update_frequency_str = ''
             if pull_frequency_hours is not None:
                 update_frequency_str = f' (every {pull_frequency_hours} hours)'
-            with backend_utils.safe_console_status(
+            with log_utils.safe_rich_status(
                 (f'Updating {cloud} catalog: '
                  f'{filename}'
                  f'{update_frequency_str}')) as status:
@@ -178,8 +181,8 @@ def validate_region_zone_impl(
 
     def _get_all_supported_regions_str() -> str:
         all_regions: List[str] = sorted(df['Region'].unique().tolist())
-        return \
-        f'\nList of supported {cloud_name} regions: {", ".join(all_regions)!r}'
+        return (f'\nList of supported {cloud_name} regions: '
+                f'{", ".join(all_regions)!r}')
 
     validated_region, validated_zone = region, zone
 
@@ -253,10 +256,16 @@ def get_hourly_cost_impl(
     return cheapest[price_str]
 
 
-def get_vcpus_from_instance_type_impl(
+def _get_value(value):
+    if pd.isna(value):
+        return None
+    return float(value)
+
+
+def get_vcpus_mem_from_instance_type_impl(
     df: pd.DataFrame,
     instance_type: str,
-) -> Optional[float]:
+) -> Tuple[Optional[float], Optional[float]]:
     df = _get_instance_type(df, instance_type, None)
     if len(df) == 0:
         with ux_utils.print_exception_no_traceback():
@@ -264,10 +273,15 @@ def get_vcpus_from_instance_type_impl(
     assert len(set(df['vCPUs'])) == 1, ('Cannot determine the number of vCPUs '
                                         f'of the instance type {instance_type}.'
                                         f'\n{df}')
+    assert len(set(
+        df['MemoryGiB'])) == 1, ('Cannot determine the memory size '
+                                 f'of the instance type {instance_type}.'
+                                 f'\n{df}')
+
     vcpus = df['vCPUs'].iloc[0]
-    if pd.isna(vcpus):
-        return None
-    return float(vcpus)
+    mem = df['MemoryGiB'].iloc[0]
+
+    return _get_value(vcpus), _get_value(mem)
 
 
 def _filter_with_cpus(df: pd.DataFrame, cpus: Optional[str]) -> pd.DataFrame:
@@ -293,9 +307,50 @@ def _filter_with_cpus(df: pd.DataFrame, cpus: Optional[str]) -> pd.DataFrame:
         return df[df['vCPUs'] == num_cpus]
 
 
-def get_instance_type_for_cpus_impl(
-        df: pd.DataFrame, cpus: Optional[str] = None) -> Optional[str]:
+def _filter_with_mem(df: pd.DataFrame,
+                     memory_gb_or_ratio: Optional[str]) -> pd.DataFrame:
+    if memory_gb_or_ratio is None:
+        return df
+
+    # The following code is partially redundant with the code in
+    # resources.py::_set_memory() but we add it here for safety.
+    if memory_gb_or_ratio.endswith(('+', 'x')):
+        memory_gb_str = memory_gb_or_ratio[:-1]
+    else:
+        memory_gb_str = memory_gb_or_ratio
+    try:
+        memory = float(memory_gb_str)
+    except ValueError:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'The "memory" field should be either a number or '
+                             'a string "<number>+" or "<number>x". Found: '
+                             f'{memory_gb_or_ratio!r}') from None
+    if memory_gb_or_ratio.endswith('+'):
+        return df[df['MemoryGiB'] >= memory]
+    elif memory_gb_or_ratio.endswith('x'):
+        return df[df['MemoryGiB'] >= df['vCPUs'] * memory]
+    else:
+        return df[df['MemoryGiB'] == memory]
+
+
+def get_instance_type_for_cpus_mem_impl(
+        df: pd.DataFrame, cpus: Optional[str],
+        memory_gb_or_ratio: Optional[str]) -> Optional[str]:
+    """Returns the cheapest instance type that satisfies the requirements.
+
+    Args:
+        df: The catalog cloud catalog data frame.
+        cpus: The number of vCPUs. Can be a number or a string "<number>+". If
+            the string ends with "+", then the returned instance type should
+            have at least the given number of vCPUs.
+        memory_gb_or_ratio: The memory size in GB. Can be a number or a string
+            "<number>+" or "<number>x". If the string ends with "+", then the
+            returned instance type should have at least the given memory size.
+            If the string ends with "x", then the returned instance type should
+            have at least the given number of vCPUs times the given ratio.
+    """
     df = _filter_with_cpus(df, cpus)
+    df = _filter_with_mem(df, memory_gb_or_ratio)
     if df.empty:
         return None
     # Sort by the number of vCPUs and then by the price.
@@ -323,6 +378,7 @@ def get_instance_type_for_accelerator_impl(
     acc_name: str,
     acc_count: int,
     cpus: Optional[str] = None,
+    memory: Optional[str] = None,
     use_spot: bool = False,
     region: Optional[str] = None,
     zone: Optional[str] = None,
@@ -348,6 +404,7 @@ def get_instance_type_for_accelerator_impl(
         return (None, fuzzy_candidate_list)
 
     result = _filter_with_cpus(result, cpus)
+    result = _filter_with_mem(result, memory)
     if region is not None:
         result = result[result['Region'] == region]
     if zone is not None:
@@ -381,12 +438,25 @@ def list_accelerators_impl(
     """
     if gpus_only:
         df = df[~df['GpuInfo'].isna()]
+    df = df.copy()  # avoid column assignment warning
+
+    try:
+        gpu_info_df = df['GpuInfo'].apply(ast.literal_eval)
+        df['DeviceMemoryGiB'] = gpu_info_df.apply(
+            lambda row: row['Gpus'][0]['MemoryInfo']['SizeInMiB']) / 1024.0
+    except ValueError:
+        # TODO(zongheng,woosuk): GCP/Azure catalogs do not have well-formed
+        # GpuInfo fields. So the above will throw:
+        #  ValueError: malformed node or string: <_ast.Name object at ..>
+        df['DeviceMemoryGiB'] = None
+
     df = df[[
         'InstanceType',
         'AcceleratorName',
         'AcceleratorCount',
         'vCPUs',
-        'MemoryGiB',
+        'DeviceMemoryGiB',  # device memory
+        'MemoryGiB',  # host memory
         'Price',
         'SpotPrice',
         'Region',
@@ -416,6 +486,7 @@ def list_accelerators_impl(
                 row['AcceleratorName'],
                 row['AcceleratorCount'],
                 row['vCPUs'],
+                row['DeviceMemoryGiB'],
                 row['MemoryGiB'],
                 row['Price'],
                 row['SpotPrice'],

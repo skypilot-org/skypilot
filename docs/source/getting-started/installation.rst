@@ -5,9 +5,9 @@ Install SkyPilot using pip:
 
 .. code-block:: console
 
-  $ # SkyPilot requires python >= 3.6.
+  $ # SkyPilot requires python >= 3.6. For Apple Silicon, use >= 3.8.
   $ # Recommended: use a new conda env to avoid package conflicts.
-  $ conda create -y -n sky python=3.7
+  $ conda create -y -n sky python=3.8
   $ conda activate sky
 
   $ # Choose an extra (default: [aws])
@@ -17,10 +17,9 @@ Install SkyPilot using pip:
   $ # pip install "skypilot[lambda]"
   $ # pip install "skypilot[all]"
 
-
-SkyPilot currently supports four cloud providers: AWS, GCP, Azure, and Lambda Cloud.
+SkyPilot currently supports five cloud providers: AWS, GCP, Azure, Lambda Cloud and Cloudflare (R2).
 If you only have access to certain clouds, use any combination of
-:code:`"[aws,azure,gcp,lambda]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
+:code:`"[aws,azure,gcp,lambda,cloudflare]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
 dependencies installed.
 
 You may also install SkyPilot from source.
@@ -34,7 +33,7 @@ You may also install SkyPilot from source.
 
 .. note::
 
-    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`conda install grpcio=1.43.0` prior to installing SkyPilot.
+    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`pip uninstall grpcio; conda install -c conda-forge grpcio=1.43.0` prior to installing SkyPilot.
 
 .. note::
 
@@ -45,9 +44,12 @@ You may also install SkyPilot from source.
 Cloud account setup
 -------------------
 
-Configure access to at least one cloud:
+If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can properly access your enabled clouds<verify-cloud-access>`.
 
-**AWS**
+Otherwise, configure access to at least one cloud, then run ``sky check``:
+
+AWS
+~~~~~~~~~
 
 To get the **AWS access key** required by :code:`aws configure`, please go to the `AWS IAM Management Console <https://us-east-1.console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials>`_ and click on the "Access keys" dropdown (detailed instructions `here <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_). The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
 
@@ -61,7 +63,8 @@ To get the **AWS access key** required by :code:`aws configure`, please go to th
 
 Note: If you are using AWS IAM Identity Center (AWS SSO), you will need :code:`pip install awscli>=1.27.10`. See `here <https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html>`_ for instructions on how to configure AWS SSO.
 
-**GCP**
+GCP
+~~~~~~~~~
 
 .. code-block:: console
 
@@ -82,7 +85,8 @@ Note: if you encounter *Authorization Error (Error 400: invalid_request)* with t
 
   If you are using multiple GCP projects, list all the configs by :code:`gcloud config configurations list` and activate one by :code:`gcloud config configurations activate <CONFIG_NAME>` (See `GCP docs <https://cloud.google.com/sdk/docs/configurations#activating_a_configuration>`_).
 
-**Azure**
+Azure
+~~~~~~~~~
 
 .. code-block:: console
 
@@ -93,24 +97,53 @@ Note: if you encounter *Authorization Error (Error 400: invalid_request)* with t
 
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
-**Lambda Cloud**
+Lambda Cloud
+~~~~~~~~~~~~~~~~~~
 
-Lambda Labs GPU Cloud is a cloud provider offering low-cost GPUs. You can learn more about them `here <https://lambdalabs.com/>`__.
-
-To configure Lambda Cloud access, go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambda console to generate a key and then add it to :code:`~/.lambda_cloud/lambda_keys` by running:
+`Lambda Cloud <https://lambdalabs.com/>`_ is a cloud provider offering low-cost GPUs. To configure Lambda Cloud access, go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambda console to generate a key and then add it to :code:`~/.lambda_cloud/lambda_keys`:
 
 .. code-block:: console
 
-  $ # Create directory if required
   $ mkdir -p ~/.lambda_cloud
-  $ # Add the line "api_key = <your_api_key_here>" to lambda_keys file
   $ echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
+
+Cloudflare R2
+~~~~~~~~~~~~~~~~~~
+
+Cloudflare offers `R2 <https://www.cloudflare.com/products/r2>`_, an S3-compatible object storage without any egress charges.
+SkyPilot can download/upload data to R2 buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up R2 support, run:
+
+.. code-block:: console
+
+  $ # Install boto
+  $ pip install boto3
+  $ # Configure your R2 credentials
+  $ aws configure --profile r2
+
+In the prompt, enter your R2 Access Key ID and Secret Access Key (see `instructions to generate R2 credentials <https://developers.cloudflare.com/r2/data-access/s3-api/tokens/>`_). Select :code:`auto` for the default region and :code:`json` for the default output format.
+
+.. code-block:: text
+
+  AWS Access Key ID [None]: <access_key_id>
+  AWS Secret Access Key [None]: <access_key_secret>
+  Default region name [None]: auto
+  Default output format [None]: json
+
+Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-started/basic-tasks/find-account-and-zone-ids/>`_ from your R2 dashboard and store it in :code:`~/.cloudflare/accountid` with:
+
+.. code-block:: console
+
+  $ mkdir -p ~/.cloudflare
+  $ echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid
 
 .. note::
 
-  Multi-node clusters and stopping instances are currently not supported on Lambda Cloud.
+  Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
-**Verifying cloud setup**
+.. _verify-cloud-access:
+
+Verifying cloud access
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 After configuring the desired clouds, you can optionally run :code:`sky check` to verify that credentials are correctly set up:
 

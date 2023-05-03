@@ -25,6 +25,7 @@ from sky.core import (status, start, stop, down, autostop, queue, cancel,
                       cost_report)
 
 # Aliases.
+IBM = clouds.IBM
 AWS = clouds.AWS
 Azure = clouds.Azure
 GCP = clouds.GCP
@@ -35,6 +36,7 @@ optimize = Optimizer.optimize
 
 __all__ = [
     '__version__',
+    'IBM',
     'AWS',
     'Azure',
     'GCP',

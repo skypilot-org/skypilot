@@ -16,8 +16,16 @@ def add_column_to_table(
         if row[1] == column_name:
             break
     else:
-        cursor.execute(f'ALTER TABLE {table_name} '
-                       f'ADD COLUMN {column_name} {column_type}')
+        try:
+            cursor.execute(f'ALTER TABLE {table_name} '
+                           f'ADD COLUMN {column_name} {column_type}')
+        except sqlite3.OperationalError as e:
+            if 'duplicate column name' in str(e):
+                # We may be trying to add the same column twice, when
+                # running multiple threads. This is fine.
+                pass
+            else:
+                raise
     conn.commit()
 
 
@@ -45,6 +53,8 @@ class SQLiteConn(threading.local):
     def __init__(self, db_path: str, create_table: Callable):
         super().__init__()
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
+        # NOTE: We use a timeout of 10 seconds to avoid database locked
+        # errors. This is a hack, but it works.
+        self.conn = sqlite3.connect(db_path, timeout=10)
         self.cursor = self.conn.cursor()
         create_table(self.cursor, self.conn)

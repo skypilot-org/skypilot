@@ -41,25 +41,8 @@ def test_infer_tpunode_type():
         assert cli._infer_interactive_node_type(spec) == 'tpunode', spec
 
 
-def test_accelerator_mismatch(monkeypatch):
+def test_accelerator_mismatch(enable_all_clouds):
     """Test the specified accelerator does not match the instance_type."""
-    # Monkey-patching is required because in the test environment, no cloud is
-    # enabled. The optimizer checks the environment to find enabled clouds, and
-    # only generates plans within these clouds. The tests assume that all three
-    # clouds are enabled, so we monkeypatch the `sky.global_user_state` module
-    # to return all three clouds. We also monkeypatch `sky.check.check` so that
-    # when the optimizer tries calling it to update enabled_clouds, it does not
-    # raise exceptions.
-    enabled_clouds = list(clouds.CLOUD_REGISTRY.values())
-    monkeypatch.setattr(
-        'sky.global_user_state.get_enabled_clouds',
-        lambda: enabled_clouds,
-    )
-    monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
-    config_file_backup = tempfile.NamedTemporaryFile(
-        prefix='tmp_backup_config_default', delete=False)
-    monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
-                        config_file_backup.name)
 
     spec = textwrap.dedent("""\
         resources:

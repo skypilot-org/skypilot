@@ -32,6 +32,13 @@ def get_resources_schema():
                     'type': 'number',
                 }],
             },
+            'memory': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'number',
+                }],
+            },
             'accelerators': {
                 'anyOf': [{
                     'type': 'string',
@@ -55,6 +62,9 @@ def get_resources_schema():
             },
             'disk_size': {
                 'type': 'integer',
+            },
+            'disk_tier': {
+                'type': 'string',
             },
             'accelerator_args': {
                 'type': 'object',
