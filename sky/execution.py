@@ -712,9 +712,8 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     elif has_local_source_paths_workdir:
         msg = 'workdir'
     if msg:
-        logger.info(
-            f'{colorama.Fore.YELLOW}Translating {msg} to SkyPilot '
-            f'Storage...{colorama.Style.RESET_ALL}')
+        logger.info(f'{colorama.Fore.YELLOW}Translating {msg} to SkyPilot '
+                    f'Storage...{colorama.Style.RESET_ALL}')
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
