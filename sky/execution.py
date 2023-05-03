@@ -123,7 +123,7 @@ def _execute(
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
 ) -> None:
-    """Execute a entrypoint.
+    """Execute an entrypoint.
 
     If sky.Task is given or DAG has not been optimized yet, this will call
     sky.optimize() for the caller.
@@ -702,12 +702,19 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     if copy_mounts is None:
         copy_mounts = {}
 
-    has_local_source_paths = (task.workdir is not None) or copy_mounts
-    if has_local_source_paths:
+    has_local_source_paths_workdir = task.workdir is not None
+    has_local_source_paths_file_mounts = copy_mounts is not None
+    msg = None
+    if has_local_source_paths_workdir and has_local_source_paths_file_mounts:
+        msg = 'workdir and file_mounts with local source paths'
+    elif has_local_source_paths_file_mounts:
+        msg = 'file_mounts with local source paths'
+    elif has_local_source_paths_workdir:
+        msg = 'workdir'
+    if msg:
         logger.info(
-            f'{colorama.Fore.YELLOW}Translating workdir and file_mounts with '
-            f'local source paths to SkyPilot Storage...'
-            f'{colorama.Style.RESET_ALL}')
+            f'{colorama.Fore.YELLOW}Translating {msg} to SkyPilot '
+            f'Storage...{colorama.Style.RESET_ALL}')
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
@@ -760,7 +767,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(
             f'Folder in local file mount {src!r} will be synced to SkyPilot '
             f'storage {bucket_name}.')
 
-    # Step 3: Translate local file src of file_mounts to SkyPilot storage.
+    # Step 3: Translate local file mounts with file in src to SkyPilot storage.
     # Hard link the files in src to a temporary directory, and upload folder.
     local_fm_path = os.path.join(
         tempfile.gettempdir(),
