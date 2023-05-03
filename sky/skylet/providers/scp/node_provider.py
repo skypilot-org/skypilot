@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 def synchronized(f):
+
     def wrapper(self, *args, **kwargs):
         self.lock.acquire()
         try:
@@ -52,7 +53,7 @@ def _validation_check(node_config):
     err_msg = None
     if 'diskSize' not in node_config:
         err_msg = "Disk size value is mandatory."
-    elif node_config['diskSize'] < 100 or  node_config['diskSize'] > 300:
+    elif node_config['diskSize'] < 100 or node_config['diskSize'] > 300:
         err_msg =  f'The disk size must be between 100 and 300. ' \
                    f'Input: {node_config["diskSize"]}'
     if err_msg:
@@ -64,6 +65,7 @@ class SCPError(Exception):
 
 
 def _retry_on_creation(method, max_tries=3, backoff_s=2):
+
     @wraps(method)
     def method_with_retries(self, *args, **kwargs):
         try_count = 0
@@ -86,15 +88,16 @@ class SCPNodeProvider(NodeProvider):
 
     This provider assumes Lambda Cloud credentials are set.
     """
-    def __init__(self,
-                 provider_config: Dict[str, Any],
+
+    def __init__(self, provider_config: Dict[str, Any],
                  cluster_name: str) -> None:
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
         self.scp_client = scp_utils.SCPClient()
 
         self.cached_nodes = {}
-        self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
+        self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes",
+                                                       True)
         self.metadata = scp_utils.Metadata(TAG_PATH_PREFIX, cluster_name)
         vms = self._list_instances_in_cluster()
         self._refresh_security_group(vms)
@@ -125,15 +128,16 @@ class SCPNodeProvider(NodeProvider):
             launch_hash = hash_launch_conf(head_node_config, config['auth'])
             # Populate tags
             for node in vms:
-                self.metadata[node['virtualServerId']] = {'tags':
-                    {
+                self.metadata[node['virtualServerId']] = {
+                    'tags': {
                         TAG_RAY_CLUSTER_NAME: cluster_name,
                         TAG_RAY_NODE_STATUS: STATUS_UP_TO_DATE,
                         TAG_RAY_NODE_KIND: NODE_KIND_HEAD,
                         TAG_RAY_USER_NODE_TYPE: 'ray_head_default',
                         TAG_RAY_NODE_NAME: f'ray-{cluster_name}-head',
                         TAG_RAY_LAUNCH_CONFIG: launch_hash,
-                    }}
+                    }
+                }
 
     def _list_instances_in_cluster(self) -> List[Dict[str, Any]]:
         """List running instances in cluster."""
@@ -141,15 +145,15 @@ class SCPNodeProvider(NodeProvider):
         node_list = []
         for node in vms:
             if node['virtualServerName'] == self.cluster_name:
-                node['external_ip'] = self.scp_client.get_external_ip(virtual_server_id=node['virtualServerId'],
-                                                                      ip=node['ip'])
+                node['external_ip'] = self.scp_client.get_external_ip(
+                    virtual_server_id=node['virtualServerId'], ip=node['ip'])
                 node_list.append(node)
 
         return node_list
 
     @synchronized
-    def _get_filtered_nodes(self,
-                            tag_filters: Dict[str, str]) -> Dict[str, Any]:
+    def _get_filtered_nodes(self, tag_filters: Dict[str,
+                                                    str]) -> Dict[str, Any]:
 
         def match_tags(vm):
             vm_info = self.metadata[vm['virtualServerId']]
@@ -165,8 +169,12 @@ class SCPNodeProvider(NodeProvider):
         return self.cached_nodes
 
     def _extract_metadata(self, vm: Dict[str, Any]) -> Dict[str, Any]:
-        metadata = { 'virtualServerId': vm['virtualServerId'], 'virtualServerName': vm['virtualServerName'],
-                    'status': vm['virtualServerState'], 'tags': {}}
+        metadata = {
+            'virtualServerId': vm['virtualServerId'],
+            'virtualServerName': vm['virtualServerName'],
+            'status': vm['virtualServerState'],
+            'tags': {}
+        }
         instance_info = self.metadata[vm['virtualServerId']]
         if instance_info is not None:
             metadata['tags'] = instance_info['tags']
@@ -194,7 +202,10 @@ class SCPNodeProvider(NodeProvider):
 
         if self.cache_stopped_nodes:
             print("cache_stopped_nodes value is True")
-            return [k for k, v in nodes.items() if not v["status"].startswith("STOPPED")]
+            return [
+                k for k, v in nodes.items()
+                if not v["status"].startswith("STOPPED")
+            ]
         else:
             print("cache_stopped_nodes value is False")
             return [k for k, v in nodes.items()]
@@ -219,19 +230,28 @@ class SCPNodeProvider(NodeProvider):
         """Returns the internal ip (Ray ip) of the given node."""
         return self._get_cached_node(node_id=node_id)['internal_ip']
 
-    def _config_security_group(self, zone_id,vpc, cluster_name):
+    def _config_security_group(self, zone_id, vpc, cluster_name):
         sg_name = cluster_name.replace("-", "") + "sg"
-        if len(sg_name)>20: sg_name = sg_name[:9]+'0'+sg_name[-10:] # should be less than 21
+        if len(sg_name) > 20:
+            sg_name = sg_name[:9] + '0' + sg_name[
+                -10:]  # should be less than 21
 
         undo_func_stack = []
-        try :
-            response = self.scp_client.create_security_group(zone_id, vpc, sg_name)
+        try:
+            response = self.scp_client.create_security_group(
+                zone_id, vpc, sg_name)
             sg_id = response['resourceId']
             undo_func_stack.append(lambda: self._del_security_group(sg_id))
             while True:
-                sg_contents = self.scp_client.list_security_groups( vpc_id=vpc, sg_name=sg_name)
-                sg = [sg["securityGroupState"] for sg in sg_contents if sg["securityGroupId"] == sg_id]
-                if len(sg) !=0 and sg[0] == "ACTIVE" : break
+                sg_contents = self.scp_client.list_security_groups(
+                    vpc_id=vpc, sg_name=sg_name)
+                sg = [
+                    sg["securityGroupState"]
+                    for sg in sg_contents
+                    if sg["securityGroupId"] == sg_id
+                ]
+                if len(sg) != 0 and sg[0] == "ACTIVE":
+                    break
                 time.sleep(5)
 
             self.scp_client.add_security_group_in_rule(sg_id)
@@ -248,15 +268,21 @@ class SCPNodeProvider(NodeProvider):
         while True:
             time.sleep(5)
             sg_contents = self.scp_client.list_security_groups()
-            sg = [sg["securityGroupState"] for sg in sg_contents if sg["securityGroupId"] == sg_id]
-            if len(sg) ==0: break
+            sg = [
+                sg["securityGroupState"]
+                for sg in sg_contents
+                if sg["securityGroupId"] == sg_id
+            ]
+            if len(sg) == 0:
+                break
 
     def _refresh_security_group(self, vms):
-        if len(vms)>0:
+        if len(vms) > 0:
             return
         # remove security group if vm does not exist
-        keys=self.metadata.keys()
-        security_group_id = self.metadata[keys[0]]['creation']['securityGroupId'] if len(keys)>0 else None
+        keys = self.metadata.keys()
+        security_group_id = self.metadata[
+            keys[0]]['creation']['securityGroupId'] if len(keys) > 0 else None
         if security_group_id:
             try:
                 self._del_security_group(security_group_id)
@@ -268,45 +294,58 @@ class SCPNodeProvider(NodeProvider):
         while True:
             time.sleep(10)
             vm_contents = self.scp_client.list_instances()
-            vms = [vm["virtualServerId"] for vm in vm_contents if vm["virtualServerId"] == vm_id]
-            if len(vms) == 0: break
+            vms = [
+                vm["virtualServerId"]
+                for vm in vm_contents
+                if vm["virtualServerId"] == vm_id
+            ]
+            if len(vms) == 0:
+                break
 
     def _del_firwall_rules(self, firewall_id, rule_ids):
-        if not isinstance(rule_ids, list): rule_ids = [rule_ids]
+        if not isinstance(rule_ids, list):
+            rule_ids = [rule_ids]
         self.scp_client.del_firwall_rules(firewall_id, rule_ids)
-
 
     @_retry_on_creation
     def _add_firewall_inbound(self, firewall_id, internal_ip):
 
-        rule_info = self.scp_client.add_firewall_inbound_rule(firewall_id, internal_ip)
+        rule_info = self.scp_client.add_firewall_inbound_rule(
+            firewall_id, internal_ip)
         rule_id = rule_info['resourceId']
         while True:
             time.sleep(5)
-            rule_info = self.scp_client.get_firewal_rule_info(firewall_id, rule_id)
-            if rule_info['ruleState'] == "ACTIVE" : break
+            rule_info = self.scp_client.get_firewal_rule_info(
+                firewall_id, rule_id)
+            if rule_info['ruleState'] == "ACTIVE":
+                break
         return rule_id
 
     @_retry_on_creation
     def _add_firewall_outbound(self, firewall_id, internal_ip):
 
-        rule_info = self.scp_client.add_firewall_outbound_rule(firewall_id, internal_ip)
+        rule_info = self.scp_client.add_firewall_outbound_rule(
+            firewall_id, internal_ip)
         rule_id = rule_info['resourceId']
         while True:
             time.sleep(5)
-            rule_info = self.scp_client.get_firewal_rule_info(firewall_id, rule_id)
-            if rule_info['ruleState'] == "ACTIVE": break
-        return  rule_id
-
+            rule_info = self.scp_client.get_firewal_rule_info(
+                firewall_id, rule_id)
+            if rule_info['ruleState'] == "ACTIVE":
+                break
+        return rule_id
 
     def _get_firewall_id(self, vpc_id):
 
         firewall_contents = self.scp_client.list_firwalls()
-        firewall_id = [firewall['firewallId'] for firewall in firewall_contents
-                       if firewall['vpcId'] == vpc_id and (firewall['firewallState'] in ['ACTIVE', 'DEPLOYING'])][0]
+        firewall_id = [
+            firewall['firewallId']
+            for firewall in firewall_contents
+            if firewall['vpcId'] == vpc_id and
+            (firewall['firewallState'] in ['ACTIVE', 'DEPLOYING'])
+        ][0]
 
         return firewall_id
-
 
     @_retry_on_creation
     def _create_instance(self, instance_config):
@@ -315,7 +354,8 @@ class SCPNodeProvider(NodeProvider):
         while True:
             time.sleep(10)
             vm_info = self.scp_client.get_vm_info(vm_id)
-            if vm_info["virtualServerState"] == "RUNNING": break
+            if vm_info["virtualServerState"] == "RUNNING":
+                break
         return vm_id, vm_info['ip']
 
     def _create_instance_sequence(self, vpc, instance_config):
@@ -327,9 +367,12 @@ class SCPNodeProvider(NodeProvider):
             firewall_id = self._get_firewall_id(vpc)
 
             in_rule_id = self._add_firewall_inbound(firewall_id, vm_internal_ip)
-            undo_func_stack.append(lambda: self._del_firwall_rules(firewall_id, in_rule_id))
-            out_rule_id = self._add_firewall_outbound(firewall_id, vm_internal_ip)
-            undo_func_stack.append(lambda: self._del_firwall_rules(firewall_id, in_rule_id))
+            undo_func_stack.append(
+                lambda: self._del_firwall_rules(firewall_id, in_rule_id))
+            out_rule_id = self._add_firewall_outbound(firewall_id,
+                                                      vm_internal_ip)
+            undo_func_stack.append(
+                lambda: self._del_firwall_rules(firewall_id, in_rule_id))
             firewall_rules = [in_rule_id, out_rule_id]
             return vm_id, vm_internal_ip, firewall_id, firewall_rules
 
@@ -338,18 +381,19 @@ class SCPNodeProvider(NodeProvider):
             self._undo_funcs(undo_func_stack)
             return None, None, None, None
 
-
     def _undo_funcs(self, undo_func_list):
-        while len(undo_func_list) >0:
+        while len(undo_func_list) > 0:
             func = undo_func_list.pop()
             func()
 
-
     def _try_vm_creation(self, vpc, sg_id, config_tags, instance_config):
-        vm_id, vm_internal_ip, firewall_id, firwall_rules = self._create_instance_sequence(vpc, instance_config)
-        if vm_id is None: return False  # if creation success
+        vm_id, vm_internal_ip, firewall_id, firwall_rules = self._create_instance_sequence(
+            vpc, instance_config)
+        if vm_id is None:
+            return False  # if creation success
 
-        vm_external_ip = self.scp_client.get_external_ip(virtual_server_id=vm_id, ip=vm_internal_ip)
+        vm_external_ip = self.scp_client.get_external_ip(
+            virtual_server_id=vm_id, ip=vm_internal_ip)
         creation_tags = {}
         creation_tags['virtualServerId'] = vm_id
         creation_tags['vmInternalIp'] = vm_internal_ip
@@ -360,12 +404,10 @@ class SCPNodeProvider(NodeProvider):
         self.metadata[vm_id] = {'tags': config_tags, 'creation': creation_tags}
         return True
 
-    def create_node(self,
-                    node_config: Dict[str, Any],
-                    tags: Dict[str, str],
+    def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str],
                     count: int) -> None:
         """Creates a number of nodes within the namespace."""
-        assert count == 1, count   # Only support 1-node clusters for now
+        assert count == 1, count  # Only support 1-node clusters for now
         # raise SCPError("!!!!!!!", node_config)
         """
         0. need VPC where IGW attached, and its public subnets
@@ -388,13 +430,16 @@ class SCPNodeProvider(NodeProvider):
                 TAG_RAY_LAUNCH_CONFIG,
                 TAG_RAY_USER_NODE_TYPE,
             ]
-            filters = {tag: config_tags[tag] for tag in VALIDITY_TAGS if tag in config_tags}
+            filters = {
+                tag: config_tags[tag]
+                for tag in VALIDITY_TAGS
+                if tag in config_tags
+            }
             reuse_nodes = self._stopped_nodes(filters)[:count]
             logger.info(
                 f"Reusing nodes {list(reuse_nodes)}. "
                 "To disable reuse, set `cache_stopped_nodes: False` "
-                "under `provider` in the cluster configuration.",
-            )
+                "under `provider` in the cluster configuration.",)
 
             for vm_id in reuse_nodes:
                 self._start_vm(vm_id=vm_id)
@@ -403,37 +448,44 @@ class SCPNodeProvider(NodeProvider):
                 while True:
                     time.sleep(5)
                     vm_info = self.scp_client.get_vm_info(vm_id)
-                    if vm_info["virtualServerState"] == "RUNNING": break
+                    if vm_info["virtualServerState"] == "RUNNING":
+                        break
 
             count -= len(reuse_nodes)
 
         if count:
             zone_config = ZoneConfig(self.scp_client, node_config)
             vpc_subnets = zone_config.get_vcp_subnets()
-            if (len(vpc_subnets) == 0): raise SCPError("This region/zone does not have available VPCS.")
+            if (len(vpc_subnets) == 0):
+                raise SCPError("This region/zone does not have available VPCS.")
 
             instance_config = zone_config.bootstrap_instance_config(node_config)
             instance_config['virtualServerName'] = self.cluster_name
 
             for vpc, subnets in vpc_subnets.items():
-                sg_id = self._config_security_group(zone_config.zone_id, vpc, self.cluster_name)  # sg_name
-                if sg_id is None: continue
+                sg_id = self._config_security_group(
+                    zone_config.zone_id, vpc, self.cluster_name)  # sg_name
+                if sg_id is None:
+                    continue
 
                 instance_config['securityGroupIds'] = [sg_id]
                 for subnet in subnets:
                     instance_config['nic']['subnetId'] = subnet
-                    SUCCESS = self._try_vm_creation(vpc, sg_id, config_tags, instance_config)
-                    if SUCCESS: return
+                    SUCCESS = self._try_vm_creation(vpc, sg_id, config_tags,
+                                                    instance_config)
+                    if SUCCESS:
+                        return
 
                 self._del_security_group(sg_id)
 
             raise SCPError("Instance Creation Fails.")
 
-
     def _stopped_nodes(self, tag_filters):
         """Return a list of stopped node ids filtered by the specified tags dict."""
         nodes = self._get_filtered_nodes(tag_filters=tag_filters)
-        return [k for k, v in nodes.items() if v["status"].startswith("STOPPED")]
+        return [
+            k for k, v in nodes.items() if v["status"].startswith("STOPPED")
+        ]
 
     @synchronized
     def set_node_tags(self, node_id: str, tags: Dict[str, str]) -> None:
@@ -443,10 +495,8 @@ class SCPNodeProvider(NodeProvider):
 
         # self.metadata[node_id] = {'tags': node['tags']}
         metadata = self.metadata[node_id]
-        metadata['tags'] =  node['tags']
+        metadata['tags'] = node['tags']
         self.metadata[node_id] = metadata
-
-
 
     def terminate_node(self, node_id: str) -> None:
         """Terminates the specified node."""
@@ -456,21 +506,20 @@ class SCPNodeProvider(NodeProvider):
                     f"Stopping instance {node_id}"
                     "(to fully terminate instead, "
                     "set `cache_stopped_nodes: False` "
-                    "under `provider` in the cluster configuration)"
-                )
+                    "under `provider` in the cluster configuration)")
                 self._stop_vm(node_id)
             except:
                 raise SCPError("Errors during stopping a node")
         else:
             try:
                 creation_tags = self.metadata[node_id]['creation']
-                self._del_firwall_rules(creation_tags['firewallId'], creation_tags['firewallRuleIds'])
+                self._del_firwall_rules(creation_tags['firewallId'],
+                                        creation_tags['firewallRuleIds'])
                 self._del_vm(creation_tags['virtualServerId'])
                 self._del_security_group(creation_tags['securityGroupId'])
                 self.metadata[node_id] = None
             except:
                 raise SCPError("Errors during terminating a node")
-
 
     def _get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         self._get_filtered_nodes({})  # Side effect: updates cache
@@ -484,8 +533,8 @@ class SCPNodeProvider(NodeProvider):
     @staticmethod
     def bootstrap_config(cluster_config):
 
-
-        node_config = cluster_config['available_node_types']['ray_head_default']['node_config']
+        node_config = cluster_config['available_node_types'][
+            'ray_head_default']['node_config']
         provider_config = cluster_config['provider']
         node_config['region'] = provider_config['region']
         node_config['auth'] = cluster_config['auth']
@@ -503,12 +552,13 @@ class SCPNodeProvider(NodeProvider):
         while True:
             time.sleep(2)
             vm_info = self.scp_client.get_vm_info(vm_id)
-            if vm_info["virtualServerState"] == "RUNNING": break
+            if vm_info["virtualServerState"] == "RUNNING":
+                break
 
     def _stop_vm(self, vm_id):
         self.scp_client.stop_instance(vm_id)
         while True:
             time.sleep(2)
             vm_info = self.scp_client.get_vm_info(vm_id)
-            if vm_info["virtualServerState"] == "STOPPED": break
-
+            if vm_info["virtualServerState"] == "STOPPED":
+                break
