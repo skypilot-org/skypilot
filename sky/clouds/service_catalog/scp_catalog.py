@@ -17,6 +17,7 @@ _df = common.read_catalog('scp/vms.csv')
 _image_df = common.read_catalog('scp/images.csv')
 # Number of vCPUS for gpu_1x_a100_sxm4
 _DEFAULT_NUM_VCPUS = 8
+_DEFAULT_MEMORY_CPU_RATIO = 2
 
 
 def crop_available_region(df):
@@ -65,22 +66,23 @@ def get_hourly_cost(instance_type: str,
                                        zone)
 
 
-def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
+def get_vcpus_mem_from_instance_type(
+        instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+    return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
-    return common.get_vcpus_from_instance_type_impl(_df, instance_type)
 
-
-def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
-    if cpus is None:
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory: Optional[str] = None,
+                              disk_tier: Optional[str] = None) -> Optional[str]:
+    del disk_tier  # unused
+    if cpus is None and memory is None:
         cpus = str(_DEFAULT_NUM_VCPUS)
-
-    # df = _df[_df['InstanceType'].eq('s1v1m2')]
-
-    # instance = common.get_instance_type_for_cpus_impl(df, cpus)
-    # if not instance:
-    instance = common.get_instance_type_for_cpus_impl(_df, cpus)
-    return instance
-
+    if memory is None:
+        memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
+    else:
+        memory_gb_or_ratio = memory
+    return common.get_instance_type_for_cpus_mem_impl(_df, cpus,
+                                                      memory_gb_or_ratio)
 
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, int]]:

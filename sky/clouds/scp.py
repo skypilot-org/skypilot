@@ -90,20 +90,24 @@ class SCP(clouds.Cloud):
         return regions
 
     @classmethod
-    def region_zones_provision_loop(
+    def zones_provision_loop(
         cls,
         *,
-        instance_type: Optional[str] = None,
+        region: str,
+        num_nodes: int,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+    ) -> Iterator[None]:
+        del num_nodes  # unused
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
-                                            region=None,
+                                            region=region,
                                             zone=None)
-        for region in regions:
-            yield region, region.zones
+        for r in regions:
+            assert r.zones is None, r
+            yield r.zones
 
     def instance_type_to_hourly_cost(self,
                                      instance_type: str,
@@ -151,13 +155,12 @@ class SCP(clouds.Cloud):
             instance_type, clouds='scp')
 
     @classmethod
-    def get_vcpus_from_instance_type(
+    def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[float]:
-
-        return service_catalog.get_vcpus_from_instance_type(instance_type,
-                                                            clouds='scp')
+    ) -> Tuple[Optional[float], Optional[float]]:
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='scp')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
