@@ -13,24 +13,15 @@ import pandas as pd
 import re
 import oci
 from sky.skylet.providers.oci.config import oci_conf
+from sky.skylet.providers.oci import utils
 
 logger = logging.getLogger(__name__)
-
-def debug_enabled(f):
-    def wrapper(self, *args, **kwargs):
-        dt_str = datetime.now().strftime("%Y%m%d%H%M%S.%f")
-        logger.debug(f"* {dt_str} - Enter {f}, {args}, {kwargs}")
-        try:
-            return f(self, *args, **kwargs)
-        finally:
-            logger.debug(f"* {dt_str} - Exit {f}")
-    return wrapper
 
 class oci_query_helper:
 
     # Call Cloud API to try getting the satisfied nodes.
     @classmethod
-    @debug_enabled
+    @utils.debug_enabled(logger=logger)
     def query_instances_by_tags(cls, tag_filters):
         where_clause_tags = ""
         for tag_key in tag_filters:
@@ -79,7 +70,7 @@ class oci_query_helper:
 
 
     @classmethod 
-    @debug_enabled
+    @utils.debug_enabled(logger=logger)
     def subscribe_image(cls, compartment_id, listing_id, resource_version):
         if pd.isna(listing_id) or listing_id.strip() == 'None' or listing_id.strip() == 'nan':
             logger.debug("* listing_id not specified.")

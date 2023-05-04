@@ -3,7 +3,8 @@ Oracle Cloud Infrastructure (OCI)
 
 History:
  - Hysun He (hysun.he@oracle.com) @ Apr, 2023: Initial implementation
- 
+ - Hysun He (hysun.he@oracle.com) @ May 4, 2023: Support use the default 
+   image_id (configurable) if no image_id specified in the task yaml.
 """
 import json
 import typing
@@ -11,13 +12,15 @@ import logging
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky.clouds import service_catalog
+from sky.clouds import service_catalog, cloud
+from sky import exceptions
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
 
 from sky.skylet.providers.oci.config import oci_conf
+from sky.skylet.providers.oci import utils as oci_utils
 
 logger = logging.getLogger(__name__)
 
@@ -187,8 +190,7 @@ class OCI(clouds.Cloud):
         else:
             custom_resources = None
 
-        image_str = self._get_image_id(resources.image_id, region.name)
-
+        image_str = self._get_image_id(resources.image_id, region.name, r.instance_type)
         image_cols = image_str.split(oci_conf.IMAGE_TAG_SPERATOR)
         if len(image_cols) == 3:
             imageId = image_cols[0]
@@ -203,13 +205,24 @@ class OCI(clouds.Cloud):
         if resources.instance_type.startswith(oci_conf._VM_PREFIX):
             cpus = f"{oci_conf._DEFAULT_NUM_VCPUS}" if cpus is None else cpus
 
+        zone = resources.zone
+        if zone is None:
+            # If zone is not specified, try to get the first zone.
+            region_zones_list = service_catalog.get_region_zones_for_instance_type(
+                instance_type=resources.instance_type, 
+                use_spot=resources.use_spot, 
+                 clouds='oci')     
+            zone = [r for r in iter(region_zones_list) if r.name == region.name][0].zones[0].name
+        
+        instance_type = resources.instance_type.split(oci_conf.INSTANCE_TYPE_RES_SPERATOR)[0]
+        
         return {
-            'instance_type': resources.instance_type,
+            'instance_type': instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
             'cpus': cpus,
             'memory': resources.memory,
-            'zone': resources.zone,
+            'zone': zone,
             'image': imageId,
             'app_catalog_listing_id': listingId,
             'resource_version': resVer, 
@@ -321,10 +334,11 @@ class OCI(clouds.Cloud):
         return 0
     
 
-    def _get_image_id(self, image_id: Optional[Dict[Optional[str], str]], region_name: str) -> str:
+    def _get_image_id(self, image_id: Optional[Dict[Optional[str], str]], 
+                      region_name: str, instance_type: str,) -> str:
         if image_id is None:
-            logger.critical("! image_id is required!")
-            raise Exception("! ERR: image_id is required")
+            return self._get_default_image(region_name=region_name, 
+                                               instance_type=instance_type)
         if None in image_id:
             image_id_str = image_id[None]
         else:
@@ -336,7 +350,38 @@ class OCI(clouds.Cloud):
                                                                  clouds='oci')
             if image_id_str is None:
                 logger.critical("! Real image_id not found! - {region_name}:{image_id}")
-                raise
+                # Raise ResourcesUnavailableError to make sure the failover
+                # in CloudVMRayBackend will be correctly triggered.
+                # TODO(zhwu): This is a information leakage to the cloud
+                # implementor, we need to find a better way to handle this.
+                raise exceptions.ResourcesUnavailableError(
+                    '! ERR: No image found in catalog for region '
+                    f'{region_name}. Try setting a valid image_id.')
 
         logger.debug(f"* Got real image_id {image_id_str}")
         return image_id_str
+    
+
+    @oci_utils.debug_enabled(logger=logger)
+    def _get_default_image(self, region_name: str, instance_type: str) -> str:
+        acc = self.get_accelerators_from_instance_type(instance_type)
+
+        if acc is None:
+            image_tag = oci_conf.get_default_image_tag()
+            image_id_str = service_catalog.get_image_id_from_tag(image_tag, region_name, clouds='oci')
+        else:
+            assert len(acc) == 1, acc
+            image_tag = oci_conf.get_default_gpu_image_tag()
+            image_id_str = service_catalog.get_image_id_from_tag(image_tag, region_name, clouds='oci')
+        
+        if image_id_str is not None:
+            logger.debug(f"* Got default image_id {image_id_str} from tag {image_tag}")
+            return image_id_str
+        
+        # Raise ResourcesUnavailableError to make sure the failover in
+        # CloudVMRayBackend will be correctly triggered.
+        # TODO(zhwu): This is a information leakage to the cloud implementor,
+        # we need to find a better way to handle this.
+        raise exceptions.ResourcesUnavailableError(
+            '! ERR: No image found in catalog for region '
+            f'{region_name}. Try update your default image_id settings.')

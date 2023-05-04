@@ -18,6 +18,7 @@ import copy
 # import sys
 from datetime import datetime
 from sky.skylet.providers.oci.config import oci_conf
+from sky.skylet.providers.oci import utils
 from sky.skylet.providers.oci.query_helper import oci_query_helper
 
 from ray.autoscaler.node_provider import NodeProvider
@@ -29,15 +30,6 @@ from ray.autoscaler.tags import (
 )
 
 logger = logging.getLogger(__name__)
-def debug_enabled(f):
-    def wrapper(self, *args, **kwargs):
-        dt_str = datetime.now().strftime("%Y%m%d%H%M%S.%f")
-        logger.debug(f"* {dt_str} - Enter {f}, {args}, {kwargs}")
-        try:
-            return f(self, *args, **kwargs)
-        finally:
-            logger.debug(f"* {dt_str} - Exit {f}")
-    return wrapper
 
 def synchronized(f):
     def wrapper(self, *args, **kwargs):
@@ -104,7 +96,7 @@ class OCINodeProvider(NodeProvider):
     # end _get_filtered_nodes(...)
 
 
-    @debug_enabled
+    @utils.debug_enabled(logger=logger)
     def non_terminated_nodes(self, tag_filters):
         """Return a list of node ids filtered by the specified tags dict.
         
@@ -127,7 +119,7 @@ class OCINodeProvider(NodeProvider):
     # end non_terminated_nodes(...)
 
 
-    @debug_enabled
+    @utils.debug_enabled(logger=logger)
     def is_running(self, node_id):
         """Return whether the specified node is running."""
         node = self._get_cached_node(node_id = node_id)
@@ -139,7 +131,7 @@ class OCINodeProvider(NodeProvider):
     # end is_running(...)
 
 
-    @debug_enabled
+    @utils.debug_enabled(logger=logger)
     def is_terminated(self, node_id):
         """ Return whether the specified node is terminated.
         """
@@ -153,25 +145,25 @@ class OCINodeProvider(NodeProvider):
     # end is_terminated(...)
     
 
-    @debug_enabled
+    @utils.debug_enabled(logger=logger)
     def node_tags(self, node_id):
         return self.cached_nodes[node_id]["tags"]
 
 
-    @debug_enabled
+    @utils.debug_enabled(logger=logger)
     def external_ip(self, node_id):
         """Returns the external ip of the given node."""
         return self._get_cached_node(node_id = node_id)['external_ip']
 
 
-    @debug_enabled
+    @utils.debug_enabled(logger=logger)
     def internal_ip(self, node_id):
         """Returns the internal ip (Ray ip) of the given node."""
         return self._get_cached_node(node_id = node_id)['internal_ip']
 
 
     @synchronized
-    @debug_enabled
+    @utils.debug_enabled(logger=logger)
     def create_node(self, node_config, tags, count):
         """Creates a number of nodes within the namespace."""
         start_time = round(time.time() * 1000)
@@ -357,7 +349,7 @@ class OCINodeProvider(NodeProvider):
 
 
     @synchronized
-    @debug_enabled
+    @utils.debug_enabled(logger=logger)
     def set_node_tags(self, node_id, tags):
         existing_tags = self._get_cached_node(node_id)["tags"]
         combined_tags = dict(existing_tags, **tags)

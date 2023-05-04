@@ -15,6 +15,7 @@ class oci_conf:
     ENV_VAR_OCI_CONFIG = 'OCI_CONFIG'
     CONFIG_PATH = '~/.oci/config'
     IMAGE_TAG_SPERATOR = '|'
+    INSTANCE_TYPE_RES_SPERATOR = '$_'
 
     _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 6
@@ -43,10 +44,6 @@ class oci_conf:
     search_client = oci.resource_search.ResourceSearchClient(oci_config)
     identity_client = oci.identity.IdentityClient(oci_config)
 
-    @classmethod
-    def get_default_instance_type(cls):
-        return skypilot_config.get_nested(('oci', 'default', 'instance_type'), None)
-
 
     @classmethod
     def get_compartment(cls, cluster_name):
@@ -62,3 +59,18 @@ class oci_conf:
         defval = skypilot_config.get_nested(('oci', 'default', 'vcn_ocid'), None) 
         vcn = skypilot_config.get_nested(('oci', cluster_name, 'vcn_ocid'), defval)
         return vcn
+    
+
+    @classmethod
+    def get_default_gpu_image_tag(cls) -> str:
+        # Get the default image tag (for gpu instances). Instead of hardcoding, we give a choice to set the
+        # default image tag (for gpu instances) in the sky's user-config file (if not specified, use the hardcode
+        # one at last)
+        return skypilot_config.get_nested(('oci', 'default', 'image_tag_gpu'), 'skypilot:oci-ubuntu-NVIDIA-VMI-20_04')
+    
+    
+    @classmethod
+    def get_default_image_tag(cls) -> str:
+        # Get the default image tag. Instead of hardcoding, we give a choice to set the default image tag 
+        # in the sky's user-config file. (if not specified, use the hardcode one at last)
+        return skypilot_config.get_nested(('oci', 'default', 'image_tag_general'), 'skypilot:oci-ubuntu-20_04')

@@ -60,13 +60,10 @@ def get_default_instance_type(cpus: Optional[str] = None,
                               disk_tier: Optional[str] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None:
-        i_cpu = oci_conf._DEFAULT_NUM_VCPUS
-        cpus = f'{i_cpu}+'
-    else:
-        i_cpu = round(float(cpus))
+        cpus = f'{oci_conf._DEFAULT_NUM_VCPUS}+'
 
     if memory is None:
-        memory_gb_or_ratio = f"{str(oci_conf._DEFAULT_MEMORY_CPU_RATIO * i_cpu)}+"
+        memory_gb_or_ratio = f'{oci_conf._DEFAULT_MEMORY_CPU_RATIO}x'
     else:
         memory_gb_or_ratio = memory
 
