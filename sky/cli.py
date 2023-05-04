@@ -3065,6 +3065,7 @@ def show_gpus(
 
         new_gpu_name = gpu_name
         gpu_name_and_count = new_gpu_name.count(':') > 0
+        total_table_len = 0
 
         if gpu_name_and_count:
             split_gpu_name = re.split(':', new_gpu_name)
@@ -3141,13 +3142,16 @@ def show_gpus(
                     if not show_all:
                         accelerator_table_vals.append(region_str)
                     accelerator_table.add_row(accelerator_table_vals)
-            if i != 0 and len(accelerator_table._rows) != 0:
+            cur_table_vals_len = len(accelerator_table.get_string())
+            if i != 0 and cur_table_vals_len != 0:
                 yield '\n\n'
             yield from accelerator_table.get_string()
 
-        if len(accelerator_table._rows) == 0:
-            yield f'Resource \'{new_gpu_name}\' '
-            yield f'with quantity {requested_accelerator_count} '
+            total_table_len += cur_table_vals_len
+
+        if total_table_len == 0:
+            yield f'Quantity {requested_accelerator_count} of '
+            yield f'resource \'{new_gpu_name}\' '
             yield 'not found. '
             yield 'Try \'sky show-gpus --all\' '
             yield 'to show available accelerators '
