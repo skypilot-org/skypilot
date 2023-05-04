@@ -89,7 +89,6 @@ class SCP(clouds.Cloud):
             regions = [r for r in regions if r.name == region]
         return regions
 
-
     @classmethod
     def zones_provision_loop(
         cls,
@@ -152,15 +151,6 @@ class SCP(clouds.Cloud):
                                                          clouds='scp')
 
     @classmethod
-    def get_vcpus_mem_from_instance_type(
-        cls,
-        instance_type: str,
-    ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='scp')
-
-
-    @classmethod
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
@@ -168,6 +158,13 @@ class SCP(clouds.Cloud):
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='scp')
 
+    @classmethod
+    def get_vcpus_mem_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Tuple[Optional[float], Optional[float]]:
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='scp')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
