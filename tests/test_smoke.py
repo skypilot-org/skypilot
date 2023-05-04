@@ -648,7 +648,7 @@ def test_env_check(generic_cloud: str):
 
 
 # ---------- file_mounts ----------
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_file_mounts instead.
 def test_file_mounts(generic_cloud: str):
     name = _get_cluster_name()
     test_commands = [
@@ -767,7 +767,7 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
 
 
 # ---------- CLI logs ----------
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_logs instead.
 def test_cli_logs(generic_cloud: str):
     name = _get_cluster_name()
     timestamp = time.time()
@@ -814,7 +814,7 @@ def test_scp_logs():
 # ---------- Job Queue. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus. run test_ibm_job_queue instead
-@pytest.mark.no_scp  # SCP does not have K80 gpus
+@pytest.mark.no_scp  # SCP does not have K80 gpus. Run test_scp_job_queue instead
 def test_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1035,7 +1035,7 @@ def test_multi_echo(generic_cloud: str):
 # ---------- Task: 1 node training. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_huggingface instead.
 def test_huggingface(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1286,7 +1286,7 @@ def test_autostop(generic_cloud: str):
 
 
 # ---------- Testing Autodowning ----------
-@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
 def test_autodown(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
