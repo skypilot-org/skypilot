@@ -89,21 +89,26 @@ class SCP(clouds.Cloud):
             regions = [r for r in regions if r.name == region]
         return regions
 
+
     @classmethod
-    def region_zones_provision_loop(
+    def zones_provision_loop(
         cls,
         *,
-        instance_type: Optional[str] = None,
+        region: str,
+        num_nodes: int,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+    ) -> Iterator[None]:
+        del num_nodes  # unused
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
                                             use_spot,
-                                            region=None,
+                                            region=region,
                                             zone=None)
-        for region in regions:
-            yield region, region.zones
+        for r in regions:
+            assert r.zones is None, r
+            yield r.zones
 
     def instance_type_to_hourly_cost(self,
                                      instance_type: str,
@@ -136,11 +141,24 @@ class SCP(clouds.Cloud):
         return isinstance(other, SCP)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None) -> Optional[str]:
-
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None,
+            disk_tier: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
+                                                         disk_tier=disk_tier,
                                                          clouds='scp')
+
+    @classmethod
+    def get_vcpus_mem_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Tuple[Optional[float], Optional[float]]:
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='scp')
+
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -150,14 +168,6 @@ class SCP(clouds.Cloud):
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='scp')
 
-    @classmethod
-    def get_vcpus_from_instance_type(
-        cls,
-        instance_type: str,
-    ) -> Optional[float]:
-
-        return service_catalog.get_vcpus_from_instance_type(instance_type,
-                                                            clouds='scp')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:

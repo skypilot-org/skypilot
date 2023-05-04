@@ -19,7 +19,7 @@ Install SkyPilot using pip:
 
 SkyPilot currently supports five cloud providers: AWS, GCP, Azure, Lambda Cloud and Cloudflare (R2).
 If you only have access to certain clouds, use any combination of
-:code:`"[aws,azure,gcp,lambda,cloudflare]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
+:code:`"[aws,azure,gcp,lambda,cloudflare,scp]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
 dependencies installed.
 
 You may also install SkyPilot from source.
@@ -140,6 +140,27 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
+SCP
+~~~~~~~~~~~~~~~~~~
+
+Samsung Cloud Platform(SCP) provides cloud services optimized for enterprise customers. Yo can learn more about SCP `here <https://cloud.samsungsds.com/>`__.
+
+To configure SCP access, you need access keys and the ID of the project your tasks will run. Go to the `Access Key Management <https://cloud.samsungsds.com/console/#/common/access-key-manage/list?popup=true>`_ page on your SCP console to generate the access keys, and the Project O verview page for the project ID. Then, add them to :code:`~/.scp/scp_credential` by running:
+
+.. code-block:: console
+
+  $ # Create directory if required
+  $ mkdir -p ~/.scp
+  $ # Add the lines for "access_key", "secret_key", and "project_id" to scp_credential file
+  $ echo "access_key = <your_access_key>" >> ~/.scp/scp_credential
+  $ echo "secret_key = <your_secret_key>" >> ~/.scp/scp_credential
+  $ echo "project_id = <your_project_id>" >> ~/.scp/scp_credential
+
+.. note::
+
+  Multi-node clusters and stopping instances are currently not supported on SCP.
+
+
 .. _verify-cloud-access:
 
 Verifying cloud access
@@ -160,6 +181,7 @@ This will produce a summary like:
     GCP: enabled
     Azure: enabled
     Lambda: enabled
+    SCP: enabled
 
   SkyPilot will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
 
