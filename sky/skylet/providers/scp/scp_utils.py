@@ -160,9 +160,9 @@ class SCPClient:
             self._credentials = {
                 line.split(' = ')[0]: line.split(' = ')[1] for line in lines
             }
-        self.access_key = self._credentials['scp_access_key']
-        self.secret_key = self._credentials['scp_secret_key']
-        self.project_id = self._credentials['scp_project_id']
+        self.access_key = self._credentials['access_key']
+        self.secret_key = self._credentials['secret_key']
+        self.project_id = self._credentials['project_id']
         self.client_type = 'OpenApi'
         self.timestamp = None
         self.signature = None
