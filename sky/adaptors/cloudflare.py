@@ -54,6 +54,7 @@ def session():
 @import_package
 def resource(resource_name: str, **kwargs):
     """Create a Cloudflare resource.
+    
     Args:
         resource_name: Cloudflare resource name (e.g., 's3').
         kwargs: Other options.
@@ -79,6 +80,7 @@ def resource(resource_name: str, **kwargs):
 @functools.lru_cache()
 def client(service_name: str, region):
     """Create an CLOUDFLARE client of a certain service.
+
     Args:
         service_name: CLOUDFLARE service name (e.g., 's3').
         kwargs: Other options.
@@ -167,6 +169,7 @@ def r2_profile_in_aws_cred() -> bool:
 def get_credential_file_mounts() -> Dict[str, str]:
     """Checks if aws credential file is set and update if not
        Updates file containing account ID information
+
     Args:
         file_mounts: stores path to credential files of clouds
     """
@@ -176,4 +179,3 @@ def get_credential_file_mounts() -> Dict[str, str]:
         ACCOUNT_ID_PATH: ACCOUNT_ID_PATH
     }
     return r2_credential_mounts
-    
