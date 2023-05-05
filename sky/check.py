@@ -53,7 +53,7 @@ def check(quiet: bool = False) -> None:
 
 def get_cloud_credential_file_mounts() -> Dict[str, str]:
     """Returns the files necessary to access all enabled clouds.
-    
+
     Returns a dictionary that will be added to a task's file mounts
     and a list of patterns that will be excluded (used as rsync_exclude).
     """

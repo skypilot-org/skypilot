@@ -54,7 +54,7 @@ def session():
 @import_package
 def resource(resource_name: str, **kwargs):
     """Create a Cloudflare resource.
-    
+
     Args:
         resource_name: Cloudflare resource name (e.g., 's3').
         kwargs: Other options.
@@ -124,7 +124,6 @@ def create_endpoint():
 
 
 def check_credentials() -> Tuple[bool, Optional[str]]:
-
     """Checks if the user has access credentials to Cloudflare R2.
 
     Returns:
