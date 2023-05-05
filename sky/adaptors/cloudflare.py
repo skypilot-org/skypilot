@@ -122,7 +122,15 @@ def create_endpoint():
 
 
 def check_credentials() -> Tuple[bool, Optional[str]]:
-    """Checks if the user has access credentials to this cloud."""
+
+    """Checks if the user has access credentials to Cloudflare R2.
+
+    Returns:
+        A tuple of a boolean value and a hint message where the bool
+        is True when both credentials needed for R2 is set. It is False
+        when either of those are not set, which would hint with a
+        string on unset credential.
+    """
 
     hints = None
     accountid_path = os.path.expanduser(ACCOUNT_ID_PATH)
@@ -130,10 +138,10 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
         hints = 'Account ID from R2 dashboard is not set.'
     if not r2_profile_in_aws_cred():
         if hints:
-            hints += ' And '
+            hints += ' Additionally, '
         else:
             hints = ''
-        hints += '[r2] profile is not set in ~/.aws/credentials.'
+        hints += f'[{R2_PROFILE_NAME}] profile is not set in ~/.aws/credentials.'
     if hints:
         hints += (
             '\n      Please follow the instructions in:'
@@ -150,8 +158,9 @@ def r2_profile_in_aws_cred() -> bool:
     if os.path.isfile(profile_path):
         with open(profile_path, 'r') as file:
             for line in file:
-                if '[r2]' in line:
+                if f'[{R2_PROFILE_NAME}]' in line:
                     r2_profile_exists = True
+                    break
     return r2_profile_exists
 
 
@@ -167,3 +176,4 @@ def get_credential_file_mounts() -> Dict[str, str]:
         ACCOUNT_ID_PATH: ACCOUNT_ID_PATH
     }
     return r2_credential_mounts
+    

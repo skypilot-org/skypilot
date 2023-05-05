@@ -270,9 +270,11 @@ class GCP(clouds.Cloud):
     def get_default_instance_type(
             cls,
             cpus: Optional[str] = None,
-            memory: Optional[str] = None) -> Optional[str]:
+            memory: Optional[str] = None,
+            disk_tier: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
+                                                         disk_tier=disk_tier,
                                                          clouds='gcp')
 
     def make_deploy_resources_variables(
@@ -353,6 +355,8 @@ class GCP(clouds.Cloud):
         assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
 
+        resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier)
+
         return resources_vars
 
     def get_feasible_launchable_resources(self, resources):
@@ -363,7 +367,9 @@ class GCP(clouds.Cloud):
         if resources.accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             host_vm_type = GCP.get_default_instance_type(
-                cpus=resources.cpus, memory=resources.memory)
+                cpus=resources.cpus,
+                memory=resources.memory,
+                disk_tier=resources.disk_tier)
             if host_vm_type is None:
                 return ([], [])
             else:
@@ -689,3 +695,18 @@ class GCP(clouds.Cloud):
             zone: Optional[str] = None) -> None:
         service_catalog.check_accelerator_attachable_to_host(
             instance_type, accelerators, zone, 'gcp')
+
+    @classmethod
+    def check_disk_tier_enabled(cls, instance_type: str,
+                                disk_tier: str) -> None:
+        del instance_type, disk_tier  # unused
+
+    @classmethod
+    def _get_disk_type(cls, disk_tier: Optional[str]) -> str:
+        tier = disk_tier or cls._DEFAULT_DISK_TIER
+        tier2name = {
+            'high': 'pd-ssd',
+            'medium': 'pd-balanced',
+            'low': 'pd-standard',
+        }
+        return tier2name[tier]

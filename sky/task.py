@@ -857,7 +857,7 @@ class Task:
         sky.dag.get_current_dag().add_edge(self, b)
 
     def __repr__(self):
-        if self.name:
+        if self.name and self.name != 'sky-cmd':  # CLI launch with a command
             return self.name
         if isinstance(self.run, str):
             run_msg = self.run.replace('\n', '\\n')
@@ -866,7 +866,7 @@ class Task:
             else:
                 run_msg = f'run=\'{run_msg}\''
         elif self.run is None:
-            run_msg = 'run=None'
+            run_msg = 'run=<empty>'
         else:
             run_msg = 'run=<fn>'
 

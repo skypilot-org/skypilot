@@ -2,6 +2,7 @@
 import functools
 import json
 import os
+import re
 import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -114,9 +115,11 @@ class Azure(clouds.Cloud):
     def get_default_instance_type(
             cls,
             cpus: Optional[str] = None,
-            memory: Optional[str] = None) -> Optional[str]:
+            memory: Optional[str] = None,
+            disk_tier: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
+                                                         disk_tier=disk_tier,
                                                          clouds='azure')
 
     def _get_image_config(self, gen_version, instance_type):
@@ -237,7 +240,8 @@ class Azure(clouds.Cloud):
             'region': region_name,
             # Azure does not support specific zones.
             'zones': None,
-            **image_config
+            **image_config,
+            'disk_tier': Azure._get_disk_type(r.disk_tier)
         }
 
     def get_feasible_launchable_resources(self, resources):
@@ -254,16 +258,17 @@ class Azure(clouds.Cloud):
         def _make(instance_list):
             resource_list = []
             for instance_type in instance_list:
-                r = resources.copy(
-                    cloud=Azure(),
-                    instance_type=instance_type,
-                    # Setting this to None as Azure doesn't separately bill /
-                    # attach the accelerators.  Billed as part of the VM type.
-                    accelerators=None,
-                    cpus=None,
-                    memory=None,
-                )
-                resource_list.append(r)
+                if Azure.check_disk_tier(instance_type, resources.disk_tier)[0]:
+                    r = resources.copy(
+                        cloud=Azure(),
+                        instance_type=instance_type,
+                        # Setting this to None as Azure doesn't separately bill /
+                        # attach the accelerators.  Billed as part of the VM type.
+                        accelerators=None,
+                        cpus=None,
+                        memory=None,
+                    )
+                    resource_list.append(r)
             return resource_list
 
         # Currently, handle a filter on accelerators only.
@@ -271,7 +276,9 @@ class Azure(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             default_instance_type = Azure.get_default_instance_type(
-                cpus=resources.cpus, memory=resources.memory)
+                cpus=resources.cpus,
+                memory=resources.memory,
+                disk_tier=resources.disk_tier)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -414,3 +421,53 @@ class Azure(clouds.Cloud):
                     'cli command: "az account set -s <subscription_id>".'
                 ) from e
         return azure_subscription_id
+
+    @classmethod
+    def _is_s_series(cls, instance_type: Optional[str]) -> bool:
+        # For azure naming convention, see https://learn.microsoft.com/en-us/azure/virtual-machines/vm-naming-conventions  # pylint: disable=line-too-long
+        if instance_type is None:
+            return True
+        x = re.match(
+            r'(Standard|Basic)_([A-Z]+)([0-9]+)(-[0-9]+)?'
+            r'([a-z]*)(_[A-Z]+[0-9]+)?(_v[0-9])?(_Promo)?', instance_type)
+        assert x is not None, f'Unknown instance type: {instance_type}'
+        return 's' in x.group(5)
+
+    @classmethod
+    def check_disk_tier(cls, instance_type: Optional[str],
+                        disk_tier: Optional[str]) -> Tuple[bool, str]:
+        if disk_tier is None:
+            return True, ''
+        if disk_tier == 'high':
+            return False, ('Azure disk_tier=high is not supported now. '
+                           'Please use disk_tier={low, medium} instead.')
+        # Only S-series supported premium ssd
+        # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # pylint: disable=line-too-long
+        if cls._get_disk_type(
+                disk_tier
+        ) == 'Premium_LRS' and not Azure._is_s_series(instance_type):
+            return False, (
+                'Azure premium SSDs are only supported for S-series '
+                'instances. To use disk_tier=medium, please make sure '
+                'instance_type is specified to an S-series instance.')
+        return True, ''
+
+    @classmethod
+    def check_disk_tier_enabled(cls, instance_type: str,
+                                disk_tier: str) -> None:
+        ok, msg = cls.check_disk_tier(instance_type, disk_tier)
+        if not ok:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(msg)
+
+    @classmethod
+    def _get_disk_type(cls, disk_tier: Optional[str]) -> str:
+        tier = disk_tier or cls._DEFAULT_DISK_TIER
+        # TODO(tian): Maybe use PremiumV2_LRS/UltraSSD_LRS? Notice these two
+        # cannot be used as OS disks so we might need data disk support
+        tier2name = {
+            'high': 'Disabled',
+            'medium': 'Premium_LRS',
+            'low': 'Standard_LRS',
+        }
+        return tier2name[tier]
