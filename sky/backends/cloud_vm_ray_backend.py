@@ -3574,9 +3574,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                   f'{colorama.Style.BRIGHT}{dst}'
                                   f'{colorama.Style.RESET_ALL}')
                     error_msg = (f'Mount path {mount_path} is non-empty.'
-                                 f' {mount_path} may have been already '
-                                 f'taken by the Kernel. Please set the '
-                                 f'mount path to another name.')
+                                 f' {mount_path} may be a standard unix '
+                                 f'path or may contain files from a previous'
+                                 f' task. To fix, change the mount path'
+                                 f' to an empty or non-existent path.')
                     raise exceptions.StorageMountPathError(error_msg) from None
 
         end = time.time()
