@@ -32,9 +32,8 @@ TPU_SERVICE_ID = 'E000-3F24-B8AA'
 PRICE_ROUNDING = 5
 
 # Refer to: https://github.com/skypilot-org/skypilot/issues/1006
-# C3 series is still in preview.
 # G2 series has L4 GPU, which is not supported by SkyPilot yet
-UNSUPPORTED_SERIES = ['f1', 'm2', 'c3', 'g2']
+UNSUPPORTED_SERIES = ['f1', 'm2', 'g2']
 
 # This zone is only for TPU v4, and does not appear in the skus yet.
 TPU_V4_ZONES = ['us-central2-b']
@@ -57,6 +56,7 @@ SERIES_TO_DISCRIPTION = {
     'a2': 'A2 Instance',
     'c2': 'Compute optimized',
     'c2d': 'C2D AMD Instance',
+    'c3': 'C3 Instance',
     'e2': 'E2 Instance',
     'f1': 'Micro Instance with burstable CPU',
     'g1': 'Small Instance with 1 VCPU',
