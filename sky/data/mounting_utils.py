@@ -60,7 +60,7 @@ def get_mounting_command(
           # Check if mount path contains files
           if [ "$(ls -A $MOUNT_PATH)" ]; then
             echo "Mount path $MOUNT_PATH is not empty. Please make sure its empty."
-            exit 43
+            exit 42
           fi
         fi
         echo "Mounting $SOURCE_BUCKET to $MOUNT_PATH with $MOUNT_BINARY..."
@@ -85,6 +85,7 @@ def get_mounting_command(
     command = (f'{first_line}'
                f'{script}'
                f') && chmod +x {script_path}'
-               f' && bash {script_path} || echo "Mounting failed, detailed error: '
+               f' && bash {script_path}'
                f' && rm {script_path}')
     return command
+    
