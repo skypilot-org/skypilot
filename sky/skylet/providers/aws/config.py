@@ -1030,7 +1030,7 @@ def _create_default_ssh_inbound_rules():
             "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
         },
         {
-            "FromPort": 22,
+            "FromPort": 10022,
             "ToPort": 10022,
             "IpProtocol": "tcp",
             "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
