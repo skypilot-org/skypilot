@@ -1052,20 +1052,33 @@ class S3Store(AbstractStore):
                 contents are uploaded to it.
         """
 
+        def get_excluded_list(src_dir_path):
+            git_ignore_path = os.path.expanduser(src_dir_path) + '/.gitignore'
+            excluded_list = ['.git/*', '.gitignore']
+            if os.path.isfile(git_ignore_path):
+                with open(git_ignore_path, 'r') as file:
+                    for item_to_exclude in file:
+                        excluded_list.append(item_to_exclude[:-1])
+            return excluded_list
+
         def get_file_sync_command(base_dir_path, file_names):
             includes = ' '.join(
                 [f'--include "{file_name}"' for file_name in file_names])
             sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
                             f's3://{self.name}')
+            logger.info(f'get_file_sync_command base_dir_path {base_dir_path}')
+            logger.info(f'get_file_sync_command file_names {file_names}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            sync_command = (
-                'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
-                f'{src_dir_path} '
-                f's3://{self.name}/{dest_dir_name}')
+            excluded_list = get_excluded_list(src_dir_path)
+            excludes = ' '.join(
+                [f'--exclude "{file_name}"' for file_name in excluded_list])
+            sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
+                            f'{src_dir_path} '
+                            f's3://{self.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
@@ -1467,6 +1480,15 @@ class GcsStore(AbstractStore):
                 contents are uploaded to it.
         """
 
+        def get_excluded_list(src_dir_path):
+            git_ignore_path = os.path.expanduser(src_dir_path) + '/.gitignore'
+            excluded_list = ['.git/*', '.gitignore']
+            if os.path.isfile(git_ignore_path):
+                with open(git_ignore_path, 'r') as file:
+                    for item_to_exclude in file:
+                        excluded_list.append(item_to_exclude[:-1])
+            return excluded_list
+
         def get_file_sync_command(base_dir_path, file_names):
             sync_format = '|'.join(file_names)
             sync_command = (f'gsutil -m rsync -x \'^(?!{sync_format}$).*\' '
@@ -1475,8 +1497,10 @@ class GcsStore(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            sync_command = (f'gsutil -m rsync -r -x \'.git/*\' {src_dir_path} '
-                            f'gs://{self.name}/{dest_dir_name}')
+            excluded_list = get_excluded_list(src_dir_path)
+            excludes = '\'(' + '|'.join(excluded_list) + ')\''
+            sync_command = (f'gsutil -m rsync -r -x {excludes} {src_dir_path}'
+                            f' gs://{self.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
@@ -1772,6 +1796,15 @@ class R2Store(AbstractStore):
                 contents are uploaded to it.
         """
 
+        def get_excluded_list(src_dir_path):
+            git_ignore_path = os.path.expanduser(src_dir_path) + '/.gitignore'
+            excluded_list = ['.git/*', '.gitignore']
+            if os.path.isfile(git_ignore_path):
+                with open(git_ignore_path, 'r') as file:
+                    for item_to_exclude in file:
+                        excluded_list.append(item_to_exclude[:-1])
+            return excluded_list
+
         def get_file_sync_command(base_dir_path, file_names):
             includes = ' '.join(
                 [f'--include "{file_name}"' for file_name in file_names])
@@ -1785,13 +1818,15 @@ class R2Store(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
+            excluded_list = get_excluded_list(src_dir_path)
+            excludes = ' '.join(
+                [f'--exclude "{file_name}"' for file_name in excluded_list])
             endpoint_url = cloudflare.create_endpoint()
-            sync_command = (
-                'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
-                f'{src_dir_path} '
-                f's3://{self.name}/{dest_dir_name} '
-                f'--endpoint {endpoint_url} '
-                f'--profile={cloudflare.R2_PROFILE_NAME}')
+            sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
+                            f'{src_dir_path} '
+                            f's3://{self.name}/{dest_dir_name} '
+                            f'--endpoint {endpoint_url} '
+                            f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
 
         # Generate message for upload
