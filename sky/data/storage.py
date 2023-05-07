@@ -24,6 +24,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.utils import log_utils
 from sky.utils import ux_utils
+from sky.utils import command_runner
 
 if typing.TYPE_CHECKING:
     import boto3  # type: ignore
@@ -1053,12 +1054,21 @@ class S3Store(AbstractStore):
         """
 
         def get_excluded_list(src_dir_path):
-            git_ignore_path = os.path.expanduser(src_dir_path) + '/.gitignore'
+            # returns a list of excluded files from .gitignore and
+            # .git/info/exclude
+            expand_src_dir_path = os.path.expanduser(src_dir_path)
+            gitignore_path = expand_src_dir_path + '/.gitignore'
             excluded_list = ['.git/*', '.gitignore']
-            if os.path.isfile(git_ignore_path):
-                with open(git_ignore_path, 'r') as file:
+            if os.path.isfile(gitignore_path):
+                with open(gitignore_path, 'r') as file:
                     for item_to_exclude in file:
                         excluded_list.append(item_to_exclude[:-1])
+            git_exclude_path = os.path.join(expand_src_dir_path, command_runner.GIT_EXCLUDE)
+            if os.path.isfile(git_exclude_path):
+                with open(git_exclude_path, 'r') as file:
+                    for item_to_exclude in file:
+                        if not item_to_exclude.startswith('#'):
+                            excluded_list.append(item_to_exclude[:-1])
             return excluded_list
 
         def get_file_sync_command(base_dir_path, file_names):
@@ -1481,12 +1491,21 @@ class GcsStore(AbstractStore):
         """
 
         def get_excluded_list(src_dir_path):
-            git_ignore_path = os.path.expanduser(src_dir_path) + '/.gitignore'
+            # returns a list of excluded files from .gitignore and
+            # .git/info/exclude
+            expand_src_dir_path = os.path.expanduser(src_dir_path)
+            gitignore_path = expand_src_dir_path + '/.gitignore'
             excluded_list = ['.git/*', '.gitignore']
-            if os.path.isfile(git_ignore_path):
-                with open(git_ignore_path, 'r') as file:
+            if os.path.isfile(gitignore_path):
+                with open(gitignore_path, 'r') as file:
                     for item_to_exclude in file:
                         excluded_list.append(item_to_exclude[:-1])
+            git_exclude_path = os.path.join(expand_src_dir_path, command_runner.GIT_EXCLUDE)
+            if os.path.isfile(git_exclude_path):
+                with open(git_exclude_path, 'r') as file:
+                    for item_to_exclude in file:
+                        if not item_to_exclude.startswith('#'):
+                            excluded_list.append(item_to_exclude[:-1])
             return excluded_list
 
         def get_file_sync_command(base_dir_path, file_names):
@@ -1797,12 +1816,21 @@ class R2Store(AbstractStore):
         """
 
         def get_excluded_list(src_dir_path):
-            git_ignore_path = os.path.expanduser(src_dir_path) + '/.gitignore'
+            # returns a list of excluded files from .gitignore and
+            # .git/info/exclude
+            expand_src_dir_path = os.path.expanduser(src_dir_path)
+            gitignore_path = expand_src_dir_path + '/.gitignore'
             excluded_list = ['.git/*', '.gitignore']
-            if os.path.isfile(git_ignore_path):
-                with open(git_ignore_path, 'r') as file:
+            if os.path.isfile(gitignore_path):
+                with open(gitignore_path, 'r') as file:
                     for item_to_exclude in file:
                         excluded_list.append(item_to_exclude[:-1])
+            git_exclude_path = os.path.join(expand_src_dir_path, command_runner.GIT_EXCLUDE)
+            if os.path.isfile(git_exclude_path):
+                with open(git_exclude_path, 'r') as file:
+                    for item_to_exclude in file:
+                        if not item_to_exclude.startswith('#'):
+                            excluded_list.append(item_to_exclude[:-1])
             return excluded_list
 
         def get_file_sync_command(base_dir_path, file_names):
