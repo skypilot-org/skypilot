@@ -108,7 +108,7 @@ To execute a task on the head node only (a common scenario for tools like
 
 SSH into worker nodes
 ---------------------
-In addition to the head node, the worker nodes of a multi-node cluster also added to ``~/.ssh/config`` as ``<cluster_name>-worker<n>``.
+In addition to the head node, the SSH configurations for the worker nodes of a multi-node cluster are also added to ``~/.ssh/config`` as ``<cluster_name>-worker<n>``.
 This allows you directly to SSH into the worker nodes, if required.
 
 .. code-block:: console
