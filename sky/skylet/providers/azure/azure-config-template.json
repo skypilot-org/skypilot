@@ -14,7 +14,7 @@
         "location": "[resourceGroup().location]"
     },
     "resources": [
-       {
+        {
             "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
             "apiVersion": "2018-11-30",
             "location": "[variables('location')]",
@@ -44,7 +44,7 @@
                     {
                         "name": "SSH",
                         "properties": {
-                            "priority": 1000,
+                            "priority": 1001,
                             "protocol": "TCP",
                             "access": "Allow",
                             "direction": "Inbound",
@@ -55,7 +55,7 @@
                         }
                     },
                     {
-                        "name": "SSH",
+                        "name": "SSH-DOCKER",
                         "properties": {
                             "priority": 1000,
                             "protocol": "TCP",

@@ -243,7 +243,8 @@
                                 }
                             ]
                         }
-                    }
+                    },
+                    "customData": "I2Nsb3VkLWNvbmZpZwpydW5jbWQ6CiAgLSBzZWQgLWkgJ3MvI0Jhbm5lciBub25lL0Jhbm5lciBub25lLycgL2V0Yy9zc2gvc3NoZF9jb25maWcKICAtIGVjaG8gJ1xuaWYgWyAhIC1mICIvdG1wL19fcmVzdGFydGVkIiBdOyB0aGVuXG4gIHN1ZG8gc3lzdGVtY3RsIHJlc3RhcnQgc3NoXG4gIHNsZWVwIDJcbiAgdG91Y2ggL3RtcC9fX3Jlc3RhcnRlZFxuZmknID4+IC9ob21lL2F6dXJldXNlci8uYmFzaHJjCiAg"
                 },
                 "priority": "[parameters('priority')]",
                 "billingProfile": "[parameters('billingProfile')]"
