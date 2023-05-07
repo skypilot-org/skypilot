@@ -209,8 +209,3 @@ class ClusterOwnerIdentityMismatchError(Exception):
 class NoCloudAccessError(Exception):
     """Raised when all clouds are disabled."""
     pass
-
-
-class DockerUserNotSetError(Exception):
-    """Raised when the docker user is not set."""
-    pass
