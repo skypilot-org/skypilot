@@ -42,6 +42,7 @@ TPU_V4_ZONES = ['us-central2-b']
 HIDDEN_TPU_DF = pd.read_csv(
     io.StringIO("""\
  InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region,AvailabilityZone
+ n1-highmem-8,,,8.0,52.0,,0.473212,0.099624,us-central2,us-central2-b
  ,tpu-v3-32,1,,,tpu-v3-32,32.0,9.6,us-east1,us-east1-d
  ,tpu-v3-64,1,,,tpu-v3-64,64.0,19.2,us-east1,us-east1-d
  ,tpu-v3-128,1,,,tpu-v3-128,128.0,38.4,us-east1,us-east1-d
