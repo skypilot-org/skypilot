@@ -701,10 +701,10 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     copy_mounts = task.get_local_to_remote_file_mounts()
     if copy_mounts is None:
         copy_mounts = {}
-        
+
     has_local_source_paths_file_mounts = bool(copy_mounts)
     has_local_source_paths_workdir = task.workdir is not None
-    
+
     msg = None
     if has_local_source_paths_workdir and has_local_source_paths_file_mounts:
         msg = 'workdir and file_mounts with local source paths'
