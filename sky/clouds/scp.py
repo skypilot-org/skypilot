@@ -304,9 +304,9 @@ class SCP(clouds.Cloud):
                            'To configure credentials, go to:\n    '
                            '  https://cloud.samsungsds.com/openapiguide\n    '
                            'to generate API key and add the line\n    '
-                           '  scp_access_key = [YOUR API ACCESS KEY]\n    '
-                           '  scp_secret_key = [YOUR API SECRET KEY]\n    '
-                           '  scp_project_id = [YOUR PROJECT ID]\n    '
+                           '  access_key = [YOUR API ACCESS KEY]\n    '
+                           '  secret_key = [YOUR API SECRET KEY]\n    '
+                           '  project_id = [YOUR PROJECT ID]\n    '
                            'to ~/.scp/scp_credential')
 
         return True, None
