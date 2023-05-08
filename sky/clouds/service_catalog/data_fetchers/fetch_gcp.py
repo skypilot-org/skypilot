@@ -41,16 +41,22 @@ TPU_V4_ZONES = ['us-central2-b']
 # We assume the TPU prices are the same as us-central1.
 HIDDEN_TPU_DF = pd.read_csv(
     io.StringIO("""\
- InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region,AvailabilityZone
- n1-highmem-8,,,8.0,52.0,,0.473212,0.099624,us-central2,us-central2-b
- ,tpu-v3-32,1,,,tpu-v3-32,32.0,9.6,us-east1,us-east1-d
- ,tpu-v3-64,1,,,tpu-v3-64,64.0,19.2,us-east1,us-east1-d
- ,tpu-v3-128,1,,,tpu-v3-128,128.0,38.4,us-east1,us-east1-d
- ,tpu-v3-256,1,,,tpu-v3-256,256.0,76.8,us-east1,us-east1-d
- ,tpu-v3-512,1,,,tpu-v3-512,512.0,153.6,us-east1,us-east1-d
- ,tpu-v3-1024,1,,,tpu-v3-1024,1024.0,307.2,us-east1,us-east1-d
- ,tpu-v3-2048,1,,,tpu-v3-2048,2048.0,614.4,us-east1,us-east1-d
- """))
+InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region,AvailabilityZone
+,tpu-v3-32,1,,,tpu-v3-32,32.0,9.6,us-east1,us-east1-d
+,tpu-v3-64,1,,,tpu-v3-64,64.0,19.2,us-east1,us-east1-d
+,tpu-v3-128,1,,,tpu-v3-128,128.0,38.4,us-east1,us-east1-d
+,tpu-v3-256,1,,,tpu-v3-256,256.0,76.8,us-east1,us-east1-d
+,tpu-v3-512,1,,,tpu-v3-512,512.0,153.6,us-east1,us-east1-d
+,tpu-v3-1024,1,,,tpu-v3-1024,1024.0,307.2,us-east1,us-east1-d
+,tpu-v3-2048,1,,,tpu-v3-2048,2048.0,614.4,us-east1,us-east1-d
+"""))
+# FIXME(woosuk): Remove this once the bug is fixed.
+# See https://github.com/skypilot-org/skypilot/issues/1759#issue-1619614345
+TPU_V4_HOST_DF = pd.read_csv(
+    io.StringIO("""\
+InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region,AvailabilityZone
+n1-highmem-8,,,8.0,52.0,,0.473212,0.099624,us-central2,us-central2-b
+"""))
 
 # TODO(woosuk): Make this more robust.
 SERIES_TO_DISCRIPTION = {
@@ -441,7 +447,7 @@ def get_catalog_df(region_prefix: str) -> pd.DataFrame:
     tpu_df = get_tpu_df(gcp_tpu_skus)
 
     # Merge the dataframes.
-    df = pd.concat([vm_df, gpu_df, tpu_df])
+    df = pd.concat([vm_df, gpu_df, tpu_df, TPU_V4_HOST_DF])
 
     # Reorder the columns.
     df = df[[
