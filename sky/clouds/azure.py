@@ -1,9 +1,11 @@
 """Azure."""
+import base64
 import functools
 import json
 import os
 import re
 import subprocess
+import textwrap
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -233,6 +235,17 @@ class Azure(clouds.Cloud):
         gen_version = azure_catalog.get_gen_version_from_instance_type(
             r.instance_type)
         image_config = self._get_image_config(gen_version, r.instance_type)
+        # Setup commands to eliminate the banner and restart sshd.
+        # This script will modify /etc/ssh/sshd_config and add a bash script
+        # into .bashrc. The bash script will restart sshd if it has not been
+        # restarted, identified by a file /tmp/__restarted is existing.
+        # pylint: disable=line-too-long
+        cloud_init_setup_commands = base64.b64encode(textwrap.dedent("""\
+            #cloud-config
+                runcmd:
+                - sed -i 's/#Banner none/Banner none/' /etc/ssh/sshd_config
+                - echo '\\nif [ ! -f "/tmp/__restarted" ]; then\\n  sudo systemctl restart ssh\\n  sleep 2\\n  touch /tmp/__restarted\\nfi' >> /home/azureuser/.bashrc
+            """).encode('utf-8')).decode('utf-8')
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
@@ -241,7 +254,8 @@ class Azure(clouds.Cloud):
             # Azure does not support specific zones.
             'zones': None,
             **image_config,
-            'disk_tier': Azure._get_disk_type(r.disk_tier)
+            'disk_tier': Azure._get_disk_type(r.disk_tier),
+            'cloud_init_setup_commands': cloud_init_setup_commands
         }
 
     def get_feasible_launchable_resources(self, resources):
