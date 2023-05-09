@@ -1,6 +1,0 @@
-Tag,Region,OS,OSVersion,ImageId,AppCatalogListingId,ResourceVersion
-skypilot:oci-ubuntu-20_04,ap-seoul-1,ubuntu,20.04,ocid1.image.oc1.ap-seoul-1.aaaaaaaafbcowzw7dsvqqq7j7npkaiqq2hksunlcdwwgy3vcinw6iyp7fngq,,20230318
-skypilot:oci-ubuntu-20_04,ap-tokyo-1,ubuntu,20.04,ocid1.image.oc1.ap-tokyo-1.aaaaaaaalnouglkzcdcwejxpvyyehmlhcenjhf4njh4cfpgyavr5egfnxjda,,20230318
-skypilot:oci-ubuntu-20_04,us-ashburn-1,ubuntu,20.04,ocid1.image.oc1.iad.aaaaaaaawvla4out3qbj6g4x5plkxi2n2n6u43vohui4ra4klhuuwxxfexxq,,20230318
-skypilot:oci-ubuntu-20_04,us-phoenix-1,ubuntu,20.04,ocid1.image.oc1.phx.aaaaaaaarxlycpmysknkxzrju6ugw6aucn6w4prkqzm4myqr4uushxg6wpga,,20230318
-skypilot:oci-ubuntu-NVIDIA-VMI-20_04,ap-seoul-1,ubuntu,20.04,ocid1.image.oc1..aaaaaaaaupqzeltt5xqtbtf3mspimqam4ozpmt3r3o5zyg2xg7u5hevlvpaq,ocid1.appcataloglisting.oc1..aaaaaaaapnjluswlxhczeqgao6t737bepuvrvh5tfrlhy2lmalh6bh2fr4hq,20230425
