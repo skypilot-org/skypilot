@@ -2369,13 +2369,13 @@ class TestStorageWithCredentials:
                 with open(git_info_exclude_path, 'a') as file:
                     file.write(f'{git_exclude_file_name}-{i}\n')
 
-        # Create sky Storage with the files created
-        timestamp = str(time.time()).replace('.', '')
-        bucket_name = f'sky-test-{timestamp}'
-        store_obj = storage_lib.Storage(name=bucket_name,
-                                        source=tmpdir, 
-                                        mode=storage_lib.StorageMode.COPY)
-        store_obj.add_store(store_type)
+            # Create sky Storage with the files created
+            timestamp = str(time.time()).replace('.', '')
+            bucket_name = f'sky-test-{timestamp}'
+            store_obj = storage_lib.Storage(name=bucket_name,
+                                            source=tmpdir, 
+                                            mode=storage_lib.StorageMode.COPY)
+            store_obj.add_store(store_type)
 
         # Count the number of files with the given file name
         up_cmd = self.cli_count_name_in_bucket(store_type, \
