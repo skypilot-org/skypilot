@@ -1951,6 +1951,28 @@ class TestStorageWithCredentials:
                 '--profile=r2'
             ]
 
+    @staticmethod
+    def cli_count_name_in_bucket(store_type, bucket_name, file_name):
+        if store_type == storage_lib.StoreType.S3:
+            return [
+                'aws', 's3api', 'list-objects', 
+                '--bucket', bucket_name, '--query', 
+                f'length(Contents[?contains(Key,\'{file_name}\')].Key)'
+            ]
+        if store_type == storage_lib.StoreType.GCS:
+            return [
+                f'gsutil ls gs://{bucket_name}',
+                f'| grep "{file_name}"', '| wc -l'
+            ]
+        if store_type == storage_lib.StoreType.R2:
+            endpoint_url = cloudflare.create_endpoint()
+            return [
+                'aws', 's3api', 'list-objects', 
+                '--bucket', bucket_name, '--query', 
+                f'length(Contents[?contains(Key,\'{file_name}\')].Key)',
+                '--endpoint', endpoint_url, '--profile=r2'
+            ]
+
     @pytest.fixture
     def tmp_source(self, tmp_path):
         # Creates a temporary directory with a file in it
@@ -2003,6 +2025,12 @@ class TestStorageWithCredentials:
 
     @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):
+        # Creates a temporary storage object. Stores must be added in the test.
+        yield from self.yield_storage_object(name=tmp_bucket_name,
+                                             source=tmp_source)
+
+    @pytest.fixture
+    def tmp_copy_storage_obj(self, tmp_bucket_name, tmp_source):
         # Creates a temporary storage object. Stores must be added in the test.
         yield from self.yield_storage_object(name=tmp_bucket_name,
                                              source=tmp_source)
@@ -2304,6 +2332,81 @@ class TestStorageWithCredentials:
                 storage_obj = storage_lib.Storage(name=name)
                 storage_obj.add_store(store_type)
 
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
+    def test_excluded_file_cloud_storage_upload_copy(self, store_type):
+        # tests if files included in .gitignore and .git/info/exclude are
+        # excluded from being transferred to Storage
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create files to be uploaded in the Storage
+            upload_file_name = 'uploaded'
+            subprocess.check_output(f'touch {tmpdir}/{upload_file_name}',
+                                    shell=True)
+
+            # Create files to be excluded from .gitignore and list them in the file
+            gitignore_file_name = 'excluded-gitignore'
+            gitignore_path = f'{tmpdir}/.gitignore'
+            subprocess.check_output(f'touch {gitignore_path}', shell=True)
+            gitignore_path = f'{tmpdir}/.gitignore'
+            for i in range(3):
+                subprocess.check_output(f'touch {tmpdir}/{gitignore_file_name}-{i}',
+                    shell=True)    
+                with open(gitignore_path, 'a') as file:
+                    file.write(f'{gitignore_file_name}-{i}\n')
+
+            # Create files to be excluded from .git/info/exclude and list them in the file
+            git_exclude_file_name = 'excluded-git-info-exclude'
+            subprocess.check_output(f'mkdir -p {tmpdir}/.git/info',
+                                    shell=True)
+            git_info_exclude_path = f'{tmpdir}/.git/info/exclude'
+            subprocess.check_output(f'touch {git_info_exclude_path}', shell=True)
+            for i in range(3):
+                subprocess.check_output(f'touch {tmpdir}/{git_exclude_file_name}-{i}',
+                                        shell=True)
+                with open(git_info_exclude_path, 'a') as file:
+                    file.write(f'{git_exclude_file_name}-{i}\n')
+
+        # Create sky Storage with the files created
+        timestamp = str(time.time()).replace('.', '')
+        bucket_name = f'sky-test-{timestamp}'
+        store_obj = storage_lib.Storage(name=bucket_name,
+                                        source=tmpdir, 
+                                        mode=storage_lib.StorageMode.COPY)
+        store_obj.add_store(store_type)
+
+        # Count the number of files with the given file name
+        up_cmd = self.cli_count_name_in_bucket(store_type, \
+            bucket_name, file_name='uploaded')
+        exc_cmd = self.cli_count_name_in_bucket(store_type, \
+            bucket_name, file_name='excluded')
+        gitignore_cmd = self.cli_count_name_in_bucket(store_type, \
+            bucket_name, file_name='.gitignore')
+        git_exclude_cmd = self.cli_count_name_in_bucket(store_type, \
+            bucket_name, file_name='.git')
+
+        if store_type == storage_lib.StoreType.GCS:
+            up_output = subprocess.check_output(up_cmd, shell=True)
+            exc_output = subprocess.check_output(exc_cmd, shell=True)
+            gitignore_output = subprocess.check_output(gitignore_cmd, shell=True)
+            git_exclude_output = subprocess.check_output(git_exclude_cmd, shell=True)
+        else:
+            up_output = subprocess.check_output(up_cmd)
+            exc_output = subprocess.check_output(exc_cmd)
+            gitignore_output = subprocess.check_output(gitignore_cmd)
+            git_exclude_output = subprocess.check_output(git_exclude_cmd)
+        
+        # Only the 'uploaded' file should exist in the cloud object storage
+        assert '1' in up_output.decode('utf-8'), \
+            f'{upload_file_name} is not uploaded.'
+        assert '0' in exc_output.decode('utf-8'), \
+            f'{gitignore_file_name} or {git_exclude_file_name} is not excluded.'
+        assert '0' in gitignore_output.decode('utf-8'), \
+            f'.gitignore file should not be uploaded'
+        assert '0' in git_exclude_output.decode('utf-8'), \
+            f'.git file should not be uploaded'
 
 # ---------- Testing YAML Specs ----------
 # Our sky storage requires credentials to check the bucket existance when
