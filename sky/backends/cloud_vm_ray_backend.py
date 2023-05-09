@@ -2424,7 +2424,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # update_status will query the ray job status for all INIT /
             # PENDING / RUNNING jobs for the real status, since we do not
             # know the actual previous status of the cluster.
-            job_owner = onprem_utils.get_job_owner(handle.cluster_yaml, handle.docker_user)
+            job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
+                                                   handle.docker_user)
             cmd = job_lib.JobLibCodeGen.update_status(job_owner)
             with log_utils.safe_rich_status('[bold cyan]Preparing Job Queue'):
                 returncode, _, stderr = self.run_on_head(handle,
@@ -2904,7 +2905,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def cancel_jobs(self, handle: CloudVmRayResourceHandle,
                     jobs: Optional[List[int]]):
-        job_owner = onprem_utils.get_job_owner(handle.cluster_yaml, handle.docker_user)
+        job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
+                                               handle.docker_user)
         code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs)
 
         # All error messages should have been redirected to stdout.
@@ -3000,7 +3002,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   job_id: Optional[int],
                   spot_job_id: Optional[int] = None,
                   follow: bool = True) -> int:
-        job_owner = onprem_utils.get_job_owner(handle.cluster_yaml, handle.docker_user)
+        job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
+                                               handle.docker_user)
         code = job_lib.JobLibCodeGen.tail_logs(job_owner,
                                                job_id,
                                                spot_job_id=spot_job_id,

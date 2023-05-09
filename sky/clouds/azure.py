@@ -240,7 +240,8 @@ class Azure(clouds.Cloud):
         # into .bashrc. The bash script will restart sshd if it has not been
         # restarted, identified by a file /tmp/__restarted is existing.
         # pylint: disable=line-too-long
-        cloud_init_setup_commands = base64.b64encode(textwrap.dedent("""\
+        cloud_init_setup_commands = base64.b64encode(
+            textwrap.dedent("""\
             #cloud-config
                 runcmd:
                 - sed -i 's/#Banner none/Banner none/' /etc/ssh/sshd_config
