@@ -647,16 +647,15 @@ class Resources:
                 raise ValueError(
                     'Cloud must be specified when image_id is provided.')
 
-        """
-          - Apr. 2023 by Hysun He (hysun.he@oracle.com): Add image_id
-            support for Oracle Cloud (OCI)
-        """
+        # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
         if not self._cloud.is_same_cloud(
                 clouds.AWS()) and not self._cloud.is_same_cloud(
-                clouds.GCP()) and not self._cloud.is_same_cloud(clouds.OCI()):
+                    clouds.GCP()) and not self._cloud.is_same_cloud(
+                        clouds.IBM()) and not self._cloud.is_same_cloud(
+                            clouds.OCI()):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'image_id is only supported for AWS and GCP and OCI, please '
+                    'image_id is only supported for AWS/GCP/IBM/OCI, please '
                     'explicitly specify the cloud.')
 
         if self._region is not None:
@@ -902,7 +901,7 @@ class Resources:
             resources_fields['zone'] = config.pop('zone')
         if config.get('image_id') is not None:
             logger.warning('image_id in resources is experimental. It only '
-                           'supports AWS/GCP/IBM.')
+                           'supports AWS/GCP/IBM/OCI.')
             resources_fields['image_id'] = config.pop('image_id')
         if config.get('disk_tier') is not None:
             resources_fields['disk_tier'] = config.pop('disk_tier')

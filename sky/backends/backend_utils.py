@@ -1771,13 +1771,13 @@ def _query_status_lambda(
     return status_list
 
 
-""" Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI """
+#Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
 def _query_status_oci(
         cluster: str,
         ray_config: Dict[str, Any],  # pylint: disable=unused-argument
 ) -> List[global_user_state.ClusterStatus]:
-    del ray_config # unused
-    
+    del ray_config  # unused
+
     status_map = {
         'PROVISIONING': global_user_state.ClusterStatus.INIT,
         'STARTING': global_user_state.ClusterStatus.INIT,
@@ -1787,22 +1787,21 @@ def _query_status_oci(
         'TERMINATED': None,
     }
 
+    # pylint: disable=import-outside-toplevel
     from sky.skylet.providers.oci.query_helper import oci_query_helper
     from ray.autoscaler.tags import (
-        TAG_RAY_CLUSTER_NAME,
-        TAG_RAY_NODE_KIND,
-    )
+        TAG_RAY_CLUSTER_NAME,)
 
-    #TAG_RAY_NODE_KIND
     status_list = []
-    vms = oci_query_helper.query_instances_by_tags({TAG_RAY_CLUSTER_NAME: cluster})
+    vms = oci_query_helper.query_instances_by_tags(
+        {TAG_RAY_CLUSTER_NAME: cluster})
     for node in vms:
-        # Check one more field in addtion to the cluster_name
-        if TAG_RAY_NODE_KIND in node.freeform_tags:
-            vm_status = node.lifecycle_state
-            sky_status = status_map[vm_status] if vm_status in status_map else None
-            status_list.append(sky_status)
-            
+        vm_status = node.lifecycle_state
+        if vm_status in status_map:
+            sky_status = status_map[vm_status]
+            if sky_status is not None:
+                status_list.append(sky_status)
+
     return status_list
 
 

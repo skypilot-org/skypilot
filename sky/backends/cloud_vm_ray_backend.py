@@ -72,7 +72,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.Lambda: 150,
     clouds.IBM: 160,
     clouds.Local: 90,
-    clouds.OCI: 30 * 60,
+    clouds.OCI: 300,
 }
 
 # Time gap between retries after failing to provision in all possible places.
@@ -763,7 +763,7 @@ class RetryingVmProvisioner(object):
         assert region_with_zones.zones is not None, region_with_zones
         if set(zones) == set(region_with_zones.zones):
             # The underlying AWS NodeProvider will try all specified zones of a
-            ## region. (Each boto3 request takes one zone.)
+            # region. (Each boto3 request takes one zone.)
             logger.warning(f'Got error(s) in all zones of {region.name}:')
         else:
             zones_str = ', '.join(z.name for z in zones)
@@ -907,15 +907,14 @@ class RetryingVmProvisioner(object):
         self._blocked_resources.add(
             launchable_resources.copy(region=region.name, zone=None))
 
-
-    """ Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI """
+    # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
     def _update_blocklist_on_oci_error(
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
             stdout: str, stderr: str):
-        logger.debug("*  _update_blocklist_on_oci_error...")
+        logger.debug('*  _update_blocklist_on_oci_error...')
 
-        # del zones  # Unused.
+        del zones  # Unused.
         style = colorama.Style
         stdout_splits = stdout.split('\n')
         stderr_splits = stderr.split('\n')
@@ -940,9 +939,8 @@ class RetryingVmProvisioner(object):
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         self._blocked_resources.add(launchable_resources.copy(zone=None))
 
-        logger.debug("* _update_blocklist_on_oci_error...[Done]")
+        logger.debug('* _update_blocklist_on_oci_error...[Done]')
 
-        
     def _update_blocklist_on_error(
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
@@ -3157,12 +3155,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
         elif (isinstance(cloud, clouds.OCI) and terminate and
               prev_cluster_status == global_user_state.ClusterStatus.STOPPED):
-                
-                from sky.skylet.providers.oci.query_helper import oci_query_helper
-                from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
-                oci_query_helper.terminate_instances_by_tags({TAG_RAY_CLUSTER_NAME: cluster_name})
 
-                returncode = 0
+            # pylint: disable=import-outside-toplevel
+            from sky.skylet.providers.oci.query_helper import oci_query_helper
+            from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
+
+            # 0: All terminated successfully, failed count otherwise
+            returncode = oci_query_helper.terminate_instances_by_tags(
+                {TAG_RAY_CLUSTER_NAME: cluster_name})
 
         elif (terminate and
               (prev_cluster_status == global_user_state.ClusterStatus.STOPPED or

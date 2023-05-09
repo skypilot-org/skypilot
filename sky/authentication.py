@@ -395,7 +395,7 @@ def setup_ibm_authentication(config):
     return config
 
 
-""" Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI """
+# Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
 def setup_oci_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r') as f:
@@ -403,14 +403,14 @@ def setup_oci_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Need to use ~ relative path because Ray uses the same
     # path for finding the public key path on both local and head node.
-    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH 
+    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
 
     file_mounts = config['file_mounts']
     file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
     config['file_mounts'] = file_mounts
 
     for node_type in config['available_node_types']:
-        config['available_node_types'][node_type]['node_config']['AuthorizedKey'] = (
-            textwrap.dedent(f"""{public_key}"""))
+        config['available_node_types'][node_type]['node_config'][
+            'AuthorizedKey'] = (textwrap.dedent(f"""{public_key}"""))
 
     return config

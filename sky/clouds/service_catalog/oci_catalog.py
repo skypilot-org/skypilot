@@ -5,7 +5,6 @@ instance types and pricing information for OCI.
 
 History:
  - Hysun He (hysun.he@oracle.com) @ Apr, 2023: Initial implementation
- 
 """
 
 import typing
@@ -50,33 +49,28 @@ def get_hourly_cost(instance_type: str,
                                        zone)
 
 
-def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
-    return common.get_vcpus_from_instance_type_impl(_df, instance_type)
-
-
-
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
                               disk_tier: Optional[str] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None:
-        cpus = f'{oci_conf._DEFAULT_NUM_VCPUS}+'
+        cpus = f'{oci_conf.DEFAULT_NUM_VCPUS}+'
 
     if memory is None:
-        memory_gb_or_ratio = f'{oci_conf._DEFAULT_MEMORY_CPU_RATIO}x'
+        memory_gb_or_ratio = f'{oci_conf.DEFAULT_MEMORY_CPU_RATIO}x'
     else:
         memory_gb_or_ratio = memory
 
     instance_type_prefix = tuple(
-        f'{family}' for family in oci_conf._DEFAULT_INSTANCE_FAMILY)
-    
+        f'{family}' for family in oci_conf.DEFAULT_INSTANCE_FAMILY)
+
     df = _df[_df['InstanceType'].notna()]
     df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
 
-    logger.debug(f"# get_default_instance_type: {df}")
+    logger.debug(f'# get_default_instance_type: {df}')
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
                                                       memory_gb_or_ratio)
-    
+
 
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, int]]:
@@ -96,14 +90,14 @@ def get_instance_type_for_accelerator(
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
-    return common.get_instance_type_for_accelerator_impl(df = _df,
-                                                         acc_name = acc_name,
-                                                         acc_count = acc_count,
-                                                         cpus = cpus,
-                                                         memory = memory,
-                                                         use_spot = use_spot,
-                                                         region = region,
-                                                         zone = zone)
+    return common.get_instance_type_for_accelerator_impl(df=_df,
+                                                         acc_name=acc_name,
+                                                         acc_count=acc_count,
+                                                         cpus=cpus,
+                                                         memory=memory,
+                                                         use_spot=use_spot,
+                                                         region=region,
+                                                         zone=zone)
 
 
 def get_region_zones_for_instance_type(instance_type: str,
@@ -119,9 +113,9 @@ def list_accelerators(
         case_sensitive: bool = True
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in OCI offering GPUs."""
-    return common.list_accelerators_impl('OCI', _df, gpus_only,
-                                         name_filter, region_filter,
-                                         case_sensitive)
+    return common.list_accelerators_impl('OCI', _df, gpus_only, name_filter,
+                                         region_filter, case_sensitive)
+
 
 def get_vcpus_mem_from_instance_type(
         instance_type: str) -> Tuple[Optional[float], Optional[float]]:
@@ -130,15 +124,15 @@ def get_vcpus_mem_from_instance_type(
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     """Returns the image id from the tag."""
-    logger.debug(f"* get_image_id_from_tag: {tag}-{region}")
+    logger.debug(f'* get_image_id_from_tag: {tag}-{region}')
     image_str = common.get_image_id_from_tag_impl(_image_df, tag, region)
     df = _image_df[_image_df['Tag'].str.fullmatch(tag)]
-    AppCatalogListingId = df['AppCatalogListingId'].iloc[0]
-    ResourceVersion = df['ResourceVersion'].iloc[0]
-    return f"{image_str}{oci_conf.IMAGE_TAG_SPERATOR}{AppCatalogListingId}{oci_conf.IMAGE_TAG_SPERATOR}{ResourceVersion}"
+    app_catalog_listing_id = df['AppCatalogListingId'].iloc[0]
+    resource_version = df['ResourceVersion'].iloc[0]
+    return (f'{image_str}{oci_conf.IMAGE_TAG_SPERATOR}{app_catalog_listing_id}'
+            f'{oci_conf.IMAGE_TAG_SPERATOR}{resource_version}')
 
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
     """Returns whether the image tag is valid."""
     return common.is_image_tag_valid_impl(_image_df, tag, region)
-    

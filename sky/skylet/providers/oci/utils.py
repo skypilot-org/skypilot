@@ -2,6 +2,7 @@ from logging import Logger
 from datetime import datetime
 import functools
 
+
 def debug_enabled(logger: Logger):
     def decorate(f):
         @functools.wraps(f)
@@ -12,5 +13,7 @@ def debug_enabled(logger: Logger):
                 return f(*args, **kwargs)
             finally:
                 logger.debug(f"* {dt_str} - Exit {f}")
+
         return wrapper
+
     return decorate
