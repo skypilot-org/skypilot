@@ -65,7 +65,7 @@ def parse_readme(readme: str) -> str:
 
 install_requires = [
     'wheel',
-    # NOTE: ray 2.3.0 requires click>=7.0
+    # NOTE: ray>=2.3.0 requires click>=7.0
     'click>=7.0',
     # NOTE: required by awscli. To avoid ray automatically installing
     # the latest version.
@@ -85,7 +85,7 @@ install_requires = [
     'PrettyTable>=2.0.0',
     # Lower local ray version is not fully supported, due to the
     # autoscaler issues (also tracked in #537).
-    'ray[default]>=1.9.0,<=2.3.0',
+    'ray[default]>=1.9.0,<=2.4.0',
     'rich',
     'tabulate',
     'typing-extensions',
