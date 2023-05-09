@@ -947,7 +947,7 @@ def test_multi_echo(generic_cloud: str):
         'multi_echo',
         [
             f'python examples/multi_echo.py {name} {generic_cloud}',
-            'sleep 70',
+            'sleep 90',
         ] +
         # Ensure jobs succeeded.
         [f'sky logs {name} {i + 1} --status' for i in range(32)] +
