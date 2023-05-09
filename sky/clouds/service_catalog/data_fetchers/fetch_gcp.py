@@ -41,7 +41,8 @@ TPU_V4_ZONES = ['us-central2-b']
 # TPU v3 pods are available in us-east1-d, but hidden in the skus.
 # We assume the TPU prices are the same as us-central1.
 HIDDEN_TPU_DF = pd.read_csv(
-    io.StringIO(textwrap.dedent("""\
+    io.StringIO(
+        textwrap.dedent("""\
  InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region,AvailabilityZone
  ,tpu-v3-32,1,,,tpu-v3-32,32.0,9.6,us-east1,us-east1-d
  ,tpu-v3-64,1,,,tpu-v3-64,64.0,19.2,us-east1,us-east1-d
@@ -54,7 +55,8 @@ HIDDEN_TPU_DF = pd.read_csv(
 # FIXME(woosuk): Remove this once the bug is fixed.
 # See https://github.com/skypilot-org/skypilot/issues/1759#issue-1619614345
 TPU_V4_HOST_DF = pd.read_csv(
-    io.StringIO(textwrap.dedent("""\
+    io.StringIO(
+        textwrap.dedent("""\
  InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region,AvailabilityZone
  n1-highmem-8,,,8.0,52.0,,0.473212,0.099624,us-central2,us-central2-b
  """)))
