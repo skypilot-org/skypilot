@@ -16,7 +16,7 @@ if typing.TYPE_CHECKING:
     from sky.clouds.service_catalog import common
 
 CloudFilter = Optional[Union[List[str], str]]
-_ALL_CLOUDS = ('aws', 'azure', 'gcp', 'lambda')
+_ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda')
 
 
 def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
@@ -174,6 +174,7 @@ def get_vcpus_mem_from_instance_type(
 
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
+                              disk_tier: Optional[str] = None,
                               clouds: CloudFilter = None) -> Optional[str]:
     """Returns the cloud's default instance type for given #vCPUs and memory.
 
@@ -187,7 +188,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
     the given CPU and memory requirement.
     """
     return _map_clouds_catalog(clouds, 'get_default_instance_type', cpus,
-                               memory)
+                               memory, disk_tier)
 
 
 def get_accelerators_from_instance_type(
@@ -288,7 +289,16 @@ def check_accelerator_attachable_to_host(instance_type: str,
 def get_common_gpus() -> List[str]:
     """Returns a list of commonly used GPU names."""
     return [
-        'V100', 'V100-32GB', 'A100', 'A100-80GB', 'P100', 'K80', 'T4', 'M60'
+        'A10',
+        'A10G',
+        'A100',
+        'A100-80GB',
+        'K80',
+        'M60',
+        'P100',
+        'T4',
+        'V100',
+        'V100-32GB',
     ]
 
 

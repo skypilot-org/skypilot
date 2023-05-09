@@ -5,10 +5,11 @@ import hashlib
 import os
 import pathlib
 import shlex
+import time
 from typing import List, Optional, Tuple, Union
 
 from sky import sky_logging
-from sky.utils import subprocess_utils
+from sky.utils import common_utils, subprocess_utils
 from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -292,6 +293,7 @@ class SSHCommandRunner:
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,
+        max_retry: int = 1,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -302,6 +304,8 @@ class SSHCommandRunner:
               for cluster to local.
             log_path: Redirect stdout/stderr to the log_path.
             stream_logs: Stream logs to the stdout/stderr.
+            max_retry: The maximum number of retries for the rsync command.
+              This value should be non-negative.
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -351,16 +355,24 @@ class SSHCommandRunner:
             ])
         command = ' '.join(rsync_command)
 
-        returncode, _, stderr = log_lib.run_with_log(command,
-                                                     log_path=log_path,
-                                                     stream_logs=stream_logs,
-                                                     shell=True,
-                                                     require_outputs=True)
+        backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
+        while max_retry >= 0:
+            returncode, _, stderr = log_lib.run_with_log(
+                command,
+                log_path=log_path,
+                stream_logs=stream_logs,
+                shell=True,
+                require_outputs=True)
+            if returncode == 0:
+                break
+            max_retry -= 1
+            time.sleep(backoff.current_backoff())
 
         direction = 'up' if up else 'down'
-        subprocess_utils.handle_returncode(
-            returncode,
-            command,
-            f'Failed to rsync {direction}: {source} -> {target}',
-            stderr=stderr,
-            stream_logs=stream_logs)
+        error_msg = (f'Failed to rsync {direction}: {source} -> {target}. '
+                     'Ensure that the network is stable, then retry.')
+        subprocess_utils.handle_returncode(returncode,
+                                           command,
+                                           error_msg,
+                                           stderr=stderr,
+                                           stream_logs=stream_logs)

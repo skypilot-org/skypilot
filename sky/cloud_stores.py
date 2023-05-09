@@ -12,7 +12,7 @@ import urllib.parse
 
 from sky.clouds import gcp
 from sky.data import data_utils
-from sky.adaptors import aws
+from sky.adaptors import aws, cloudflare
 
 
 class CloudStorage:
@@ -146,6 +146,65 @@ class GcsCloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
 
+class R2CloudStorage(CloudStorage):
+    """Cloudflare Cloud Storage."""
+
+    # List of commands to install AWS CLI
+    _GET_AWSCLI = [
+        'aws --version >/dev/null 2>&1 || pip3 install awscli',
+    ]
+
+    def is_directory(self, url: str) -> bool:
+        """Returns whether R2 'url' is a directory.
+
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
+        """
+        r2 = cloudflare.resource('s3')
+        bucket_name, path = data_utils.split_r2_path(url)
+        bucket = r2.Bucket(bucket_name)
+
+        num_objects = 0
+        for obj in bucket.objects.filter(Prefix=path):
+            num_objects += 1
+            if obj.key == path:
+                return False
+            # If there are more than 1 object in filter, then it is a directory
+            if num_objects == 3:
+                return True
+
+        # A directory with few or no items
+        return True
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        """Downloads using AWS CLI."""
+        # AWS Sync by default uses 10 threads to upload files to the bucket.
+        # To increase parallelism, modify max_concurrent_requests in your
+        # aws config file (Default path: ~/.aws/config).
+        endpoint_url = cloudflare.create_endpoint()
+        if 'r2://' in source:
+            source = source.replace('r2://', 's3://')
+        download_via_awscli = ('aws s3 sync --no-follow-symlinks '
+                               f'{source} {destination} '
+                               f'--endpoint {endpoint_url} '
+                               f'--profile={cloudflare.R2_PROFILE_NAME}')
+
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        """Downloads a file using AWS CLI."""
+        endpoint_url = cloudflare.create_endpoint()
+        download_via_awscli = (f'aws s3 cp s3://{source} {destination} '
+                               f'--endpoint {endpoint_url} '
+                               f'--profile={cloudflare.R2_PROFILE_NAME}')
+
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+
 def get_storage_from_path(url: str) -> CloudStorage:
     """Returns a CloudStorage by identifying the scheme:// in a URL."""
     result = urllib.parse.urlsplit(url)
@@ -159,4 +218,5 @@ def get_storage_from_path(url: str) -> CloudStorage:
 _REGISTRY = {
     'gs': GcsCloudStorage(),
     's3': S3CloudStorage(),
+    'r2': R2CloudStorage()
 }

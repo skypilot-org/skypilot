@@ -9,6 +9,7 @@ import sys
 import textwrap
 import time
 from typing import Any, Dict, Tuple
+import uuid
 
 import colorama
 from cryptography.hazmat.primitives import serialization
@@ -17,7 +18,7 @@ from cryptography.hazmat.backends import default_backend
 
 from sky import clouds
 from sky import sky_logging
-from sky.adaptors import gcp
+from sky.adaptors import gcp, ibm
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -317,17 +318,76 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Ensure ssh key is registered with Lambda Cloud
     lambda_client = lambda_utils.LambdaCloudClient()
-    if lambda_client.ssh_key_name is None:
-        public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
-        with open(public_key_path, 'r') as f:
-            public_key = f.read()
-        name = f'sky-key-{common_utils.get_user_hash()}'
-        lambda_client.set_ssh_key(name, public_key)
+    public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
+    with open(public_key_path, 'r') as f:
+        public_key = f.read()
+    prefix = f'sky-key-{common_utils.get_user_hash()}'
+    name, exists = lambda_client.get_unique_ssh_key_name(prefix, public_key)
+    if not exists:
+        lambda_client.register_ssh_key(name, public_key)
 
     # Need to use ~ relative path because Ray uses the same
     # path for finding the public key path on both local and head node.
     config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
 
+    file_mounts = config['file_mounts']
+    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
+    config['file_mounts'] = file_mounts
+
+    return config
+
+
+def setup_ibm_authentication(config):
+    """ registers keys if they do not exist in sky folder
+    and updates config file.
+    keys default location: '~/.ssh/sky-key' and '~/.ssh/sky-key.pub'
+    """
+
+    def _get_unique_key_name():
+        suffix_len = 10
+        return f'skypilot-key-{str(uuid.uuid4())[:suffix_len]}'
+
+    client = ibm.client(region=config['provider']['region'])
+    resource_group_id = config['provider']['resource_group_id']
+
+    _, public_key_path = get_or_generate_keys()
+    with open(os.path.abspath(os.path.expanduser(public_key_path)),
+              'r',
+              encoding='utf-8') as file:
+        ssh_key_data = file.read()
+    # pylint: disable=E1136
+    try:
+        res = client.create_key(public_key=ssh_key_data,
+                                name=_get_unique_key_name(),
+                                resource_group={
+                                    'id': resource_group_id
+                                },
+                                type='rsa').get_result()
+        vpc_key_id = res['id']
+        logger.debug(f'Created new key: {res["name"]}')
+
+    except ibm.ibm_cloud_sdk_core.ApiException as e:
+        if 'Key with fingerprint already exists' in e.message:
+            for key in client.list_keys().result['keys']:
+                if (ssh_key_data in key['public_key'] or
+                        key['public_key'] in ssh_key_data):
+                    vpc_key_id = key['id']
+                    logger.debug(f'Reusing key:{key["name"]}, '
+                                 f'matching existing public key.')
+                    break
+        elif 'Key with name already exists' in e.message:
+            raise Exception("""a key with chosen name
+                already registered in the specified region""") from e
+        else:
+            raise Exception('Failed to register a key') from e
+
+    config['auth']['ssh_private_key'] = PRIVATE_SSH_KEY_PATH
+
+    for node_type in config['available_node_types']:
+        config['available_node_types'][node_type]['node_config'][
+            'key_id'] = vpc_key_id
+
+    # Add public key path to file mounts
     file_mounts = config['file_mounts']
     file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
     config['file_mounts'] = file_mounts

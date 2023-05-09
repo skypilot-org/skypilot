@@ -9,8 +9,10 @@ from sky.clouds.azure import Azure
 from sky.clouds.gcp import GCP
 from sky.clouds.lambda_cloud import Lambda
 from sky.clouds.local import Local
+from sky.clouds.ibm import IBM
 
 __all__ = [
+    'IBM',
     'AWS',
     'Azure',
     'Cloud',

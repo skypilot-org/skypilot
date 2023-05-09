@@ -32,6 +32,7 @@ import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 import urllib.parse
 import uuid
+import os
 
 import colorama
 import jinja2
@@ -40,9 +41,11 @@ import pytest
 import sky
 from sky import global_user_state
 from sky.data import storage as storage_lib
+from sky.adaptors import cloudflare
 from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
+from sky.clouds import AWS, GCP, Azure
 
 # For uniquefying users on shared-account cloud providers. Used as part of the
 # cluster names.
@@ -237,6 +240,23 @@ def test_gcp_region():
     run_one_test(test)
 
 
+@pytest.mark.ibm
+def test_ibm_region():
+    name = _get_cluster_name()
+    region = 'eu-de'
+    test = Test(
+        'region',
+        [
+            f'sky launch -y -c {name} --cloud ibm --region {region} examples/minimal.yaml',
+            f'sky exec {name} --cloud ibm examples/minimal.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status --all | grep {name} | grep {region}',  # Ensure the region is correct.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 @pytest.mark.azure
 def test_azure_region():
     name = _get_cluster_name()
@@ -266,6 +286,23 @@ def test_aws_zone():
             f'sky status --all | grep {name} | grep us-west-2b',  # Ensure the zone is correct.
         ],
         f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.ibm
+def test_ibm_zone():
+    name = _get_cluster_name()
+    zone = 'eu-de-2'
+    test = Test(
+        'zone',
+        [
+            f'sky launch -y -c {name} --cloud ibm examples/minimal.yaml --zone {zone}',
+            f'sky exec {name} --cloud ibm examples/minimal.yaml --zone {zone}',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status --all | grep {name} | grep {zone}',  # Ensure the zone is correct.
+        ],
+        f'sky down -y {name} {name}-2 {name}-3',
     )
     run_one_test(test)
 
@@ -678,6 +715,35 @@ def test_gcp_storage_mounts():
         run_one_test(test)
 
 
+@pytest.mark.cloudflare
+def test_cloudflare_storage_mounts(generic_cloud: str):
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_r2_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    endpoint_url = cloudflare.create_endpoint()
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
+        ]
+
+        test = Test(
+            'cloudflare_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
 # ---------- CLI logs ----------
 def test_cli_logs(generic_cloud: str):
     name = _get_cluster_name()
@@ -702,6 +768,7 @@ def test_cli_logs(generic_cloud: str):
 
 # ---------- Job Queue. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
+@pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus. run test_ibm_job_queue instead
 def test_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -751,7 +818,31 @@ def test_lambda_job_queue():
     run_one_test(test)
 
 
+@pytest.mark.ibm
+def test_ibm_job_queue():
+    name = _get_cluster_name()
+    test = Test(
+        'ibm_job_queue',
+        [
+            f'sky launch -y -c {name} --cloud ibm --gpus v100',
+            f'sky exec {name} -n {name}-1 --cloud ibm -d examples/job_queue/job_ibm.yaml',
+            f'sky exec {name} -n {name}-2 --cloud ibm -d examples/job_queue/job_ibm.yaml',
+            f'sky exec {name} -n {name}-3 --cloud ibm -d examples/job_queue/job_ibm.yaml',
+            f'sky queue {name} | grep {name}-1 | grep RUNNING',
+            f'sky queue {name} | grep {name}-2 | grep RUNNING',
+            f'sky queue {name} | grep {name}-3 | grep PENDING',
+            f'sky cancel -y {name} 2',
+            'sleep 5',
+            f'sky queue {name} | grep {name}-3 | grep RUNNING',
+            f'sky cancel -y {name} 3',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
+@pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue_multinode instead
 def test_job_queue_multinode(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -808,8 +899,47 @@ def test_large_job_queue(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.ibm
+def test_ibm_job_queue_multinode():
+    name = _get_cluster_name()
+    task_file = 'examples/job_queue/job_multinode_ibm.yaml'
+    test = Test(
+        'ibm_job_queue_multinode',
+        [
+            f'sky launch -y -c {name} --cloud ibm --gpus v100 --num-nodes 2',
+            f'sky exec {name} -n {name}-1 -d {task_file}',
+            f'sky exec {name} -n {name}-2 -d {task_file}',
+            f'sky launch -y -c {name} -n {name}-3 --detach-setup -d {task_file}',
+            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-1 | grep RUNNING)',
+            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-2 | grep RUNNING)',
+            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-3 | grep SETTING_UP)',
+            'sleep 90',
+            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-3 | grep PENDING)',
+            f'sky cancel -y {name} 1',
+            'sleep 5',
+            f'sky queue {name} | grep {name}-3 | grep RUNNING',
+            f'sky cancel -y {name} 1 2 3',
+            f'sky launch -c {name} -n {name}-4 --detach-setup -d {task_file}',
+            # Test the job status is correctly set to SETTING_UP, during the setup is running,
+            # and the job can be cancelled during the setup.
+            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-4 | grep SETTING_UP)',
+            f'sky cancel -y {name} 4',
+            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-4 | grep CANCELLED)',
+            f'sky exec {name} --gpus v100:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus v100:0.2 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus v100:1 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky logs {name} 5 --status',
+            f'sky logs {name} 6 --status',
+            f'sky logs {name} 7 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Submitting multiple tasks to the same cluster. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
+@pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus
 def test_multi_echo(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -831,6 +961,7 @@ def test_multi_echo(generic_cloud: str):
 
 # ---------- Task: 1 node training. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
+@pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 def test_huggingface(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -940,6 +1071,7 @@ def test_multi_hostname(generic_cloud: str):
 
 # ---------- Task: n=2 nodes with setups. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
+@pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 def test_distributed_tf(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1004,6 +1136,7 @@ def test_azure_start_stop():
 
 # ---------- Testing Autostopping ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
+@pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
 def test_autostop(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1137,6 +1270,7 @@ def test_cancel_azure():
 
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
+@pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 def test_cancel_pytorch(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1159,8 +1293,30 @@ def test_cancel_pytorch(generic_cloud: str):
     run_one_test(test)
 
 
+# can't use `_get_cancel_task_with_cloud()`, as command `nvidia-smi`
+# requires a CUDA public image, which IBM doesn't offer
+@pytest.mark.ibm
+def test_cancel_ibm():
+    name = _get_cluster_name()
+    test = Test(
+        'ibm-cancel-task',
+        [
+            f'sky launch -y -c {name} --cloud ibm examples/minimal.yaml',
+            f'sky exec {name} -n {name}-1 -d  "while true; do echo \'Hello SkyPilot\'; sleep 2; done"',
+            'sleep 20',
+            f'sky queue {name} | grep {name}-1 | grep RUNNING',
+            f'sky cancel -y {name} 2',
+            f'sleep 5',
+            f'sky queue {name} | grep {name}-1 | grep CANCELLED',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Testing use-spot option ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 def test_use_spot(generic_cloud: str):
     """Test use-spot and sky exec."""
     name = _get_cluster_name()
@@ -1179,6 +1335,7 @@ def test_use_spot(generic_cloud: str):
 
 # ---------- Testing managed spot ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot(generic_cloud: str):
     """Test the spot yaml."""
@@ -1209,6 +1366,7 @@ def test_spot(generic_cloud: str):
 
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_failed_setup(generic_cloud: str):
     """Test managed spot job with failed setup."""
@@ -1293,6 +1451,7 @@ def test_spot_recovery_gcp():
 
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_recovery_default_resources(generic_cloud: str):
     """Test managed spot recovery for default resources."""
@@ -1497,6 +1656,7 @@ def test_spot_cancellation_gcp():
 
 # ---------- Testing storage for managed spot ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_storage(generic_cloud: str):
     """Test storage with managed spot"""
@@ -1549,6 +1709,7 @@ def test_spot_tpu():
 
 # ---------- Testing env for spot ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_inline_env(generic_cloud: str):
     """Test spot env"""
@@ -1621,6 +1782,81 @@ def test_azure_start_stop_two_nodes():
     run_one_test(test)
 
 
+# ---------- Testing env for disk tier ----------
+def test_aws_disk_tier():
+
+    def _get_aws_query_command(region, instance_id, field, expected):
+        return (f'aws ec2 describe-volumes --region {region} '
+                f'--filters Name=attachment.instance-id,Values={instance_id} '
+                f'--query Volumes[*].{field} | grep {expected} ; ')
+
+    for disk_tier in ['low', 'medium', 'high']:
+        specs = AWS._get_disk_specs(disk_tier)
+        name = _get_cluster_name() + '-' + disk_tier
+        region = 'us-west-2'
+        test = Test(
+            'aws-disk-tier',
+            [
+                f'sky launch -y -c {name} --cloud aws --region {region} '
+                f'--disk-tier {disk_tier} echo "hello sky"',
+                f'id=`aws ec2 describe-instances --region {region} --filters '
+                f'Name=tag:ray-cluster-name,Values={name} --query '
+                f'Reservations[].Instances[].InstanceId --output text`; ' +
+                _get_aws_query_command(region, '$id', 'VolumeType',
+                                       specs['disk_tier']) +
+                ('' if disk_tier == 'low' else
+                 (_get_aws_query_command(region, '$id', 'Iops',
+                                         specs['disk_iops']) +
+                  _get_aws_query_command(region, '$id', 'Throughput',
+                                         specs['disk_throughput']))),
+            ],
+            f'sky down -y {name}',
+            timeout=10 * 60,  # 10 mins  (it takes around ~6 mins)
+        )
+        run_one_test(test)
+
+
+def test_gcp_disk_tier():
+    for disk_tier in ['low', 'medium', 'high']:
+        type = GCP._get_disk_type(disk_tier)
+        name = _get_cluster_name() + '-' + disk_tier
+        region = 'us-west2'
+        test = Test(
+            'gcp-disk-tier',
+            [
+                f'sky launch -y -c {name} --cloud gcp --region {region} '
+                f'--disk-tier {disk_tier} echo "hello sky"',
+                f'name=`gcloud compute instances list --filter='
+                f'"labels.ray-cluster-name:{name}" --format="value(name)"`; '
+                f'gcloud compute disks list --filter="name=$name" '
+                f'--format="value(type)" | grep {type} '
+            ],
+            f'sky down -y {name}',
+            timeout=6 * 60,  # 6 mins  (it takes around ~3 mins)
+        )
+        run_one_test(test)
+
+
+def test_azure_disk_tier():
+    for disk_tier in ['low', 'medium']:
+        type = Azure._get_disk_type(disk_tier)
+        name = _get_cluster_name() + '-' + disk_tier
+        region = 'westus2'
+        test = Test(
+            'azure-disk-tier',
+            [
+                f'sky launch -y -c {name} --cloud azure --region {region} '
+                f'--disk-tier {disk_tier} echo "hello sky"',
+                f'az resource list --tag ray-cluster-name={name} --query '
+                f'"[?type==\'Microsoft.Compute/disks\'].sku.name" '
+                f'--output tsv | grep {type}'
+            ],
+            f'sky down -y {name}',
+            timeout=20 * 60,  # 20 mins  (it takes around ~12 mins)
+        )
+        run_one_test(test)
+
+
 # ------- Testing the core API --------
 # Most of the core APIs have been tested in the CLI tests.
 # These tests are for testing the return value of the APIs not fully used in CLI.
@@ -1633,6 +1869,87 @@ def test_core_api():
 # ---------- Testing Storage ----------
 class TestStorageWithCredentials:
     """Storage tests which require credentials and network connection"""
+
+    AWS_INVALID_NAMES = [
+        'ab',  # less than 3 characters
+        'abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz1',
+        # more than 63 characters
+        'Abcdef',  # contains an uppercase letter
+        'abc def',  # contains a space
+        'abc..def',  # two adjacent periods
+        '192.168.5.4',  # formatted as an IP address
+        'xn--bucket',  # starts with 'xn--' prefix
+        'bucket-s3alias',  # ends with '-s3alias' suffix
+        'bucket--ol-s3',  # ends with '--ol-s3' suffix
+        '.abc',  # starts with a dot
+        'abc.',  # ends with a dot
+        '-abc',  # starts with a hyphen
+        'abc-',  # ends with a hyphen
+    ]
+
+    GCS_INVALID_NAMES = [
+        'ab',  # less than 3 characters
+        'abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz1',
+        # more than 63 characters (without dots)
+        'Abcdef',  # contains an uppercase letter
+        'abc def',  # contains a space
+        'abc..def',  # two adjacent periods
+        'abc_.def.ghi.jklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz1'
+        # More than 63 characters between dots
+        'abc_.def.ghi.jklmnopqrstuvwxyzabcdefghijklmnopqfghijklmnopqrstuvw' * 5,
+        # more than 222 characters (with dots)
+        '192.168.5.4',  # formatted as an IP address
+        'googbucket',  # starts with 'goog' prefix
+        'googlebucket',  # contains 'google'
+        'g00glebucket',  # variant of 'google'
+        'go0glebucket',  # variant of 'google'
+        'g0oglebucket',  # variant of 'google'
+        '.abc',  # starts with a dot
+        'abc.',  # ends with a dot
+        '_abc',  # starts with an underscore
+        'abc_',  # ends with an underscore
+    ]
+
+    @staticmethod
+    def cli_delete_cmd(store_type, bucket_name):
+        if store_type == storage_lib.StoreType.S3:
+            url = f's3://{bucket_name}'
+            return ['aws', 's3', 'rb', url, '--force']
+        if store_type == storage_lib.StoreType.GCS:
+            url = f'gs://{bucket_name}'
+            return ['gsutil', '-m', 'rm', '-r', url]
+        if store_type == storage_lib.StoreType.R2:
+            endpoint_url = cloudflare.create_endpoint()
+            url = f's3://{bucket_name}'
+            return [
+                'aws', 's3', 'rb', url, '--force', '--endpoint', endpoint_url,
+                '--profile=r2'
+            ]
+
+    @staticmethod
+    def cli_ls_cmd(store_type, bucket_name, suffix=''):
+        if store_type == storage_lib.StoreType.S3:
+            if suffix:
+                url = f's3://{bucket_name}/{suffix}'
+            else:
+                url = f's3://{bucket_name}'
+            return ['aws', 's3', 'ls', url]
+        if store_type == storage_lib.StoreType.GCS:
+            if suffix:
+                url = f'gs://{bucket_name}/{suffix}'
+            else:
+                url = f'gs://{bucket_name}'
+            return ['gsutil', 'ls', url]
+        if store_type == storage_lib.StoreType.R2:
+            endpoint_url = cloudflare.create_endpoint()
+            if suffix:
+                url = f's3://{bucket_name}/{suffix}'
+            else:
+                url = f's3://{bucket_name}'
+            return [
+                'aws', 's3', 'ls', url, '--endpoint', endpoint_url,
+                '--profile=r2'
+            ]
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -1726,6 +2043,20 @@ class TestStorageWithCredentials:
         subprocess.check_call(['gsutil', 'rm', '-r', f'gs://{tmp_bucket_name}'])
 
     @pytest.fixture
+    def tmp_awscli_bucket_r2(self, tmp_bucket_name):
+        # Creates a temporary bucket using awscli
+        endpoint_url = cloudflare.create_endpoint()
+        subprocess.check_call([
+            'aws', 's3', 'mb', f's3://{tmp_bucket_name}', '--endpoint',
+            endpoint_url, '--profile=r2'
+        ])
+        yield tmp_bucket_name
+        subprocess.check_call([
+            'aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force',
+            '--endpoint', endpoint_url, '--profile=r2'
+        ])
+
+    @pytest.fixture
     def tmp_public_storage_obj(self, request):
         # Initializes a storage object with a public bucket
         storage_obj = storage_lib.Storage(source=request.param)
@@ -1733,8 +2064,10 @@ class TestStorageWithCredentials:
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
 
-    @pytest.mark.parametrize(
-        'store_type', [storage_lib.StoreType.S3, storage_lib.StoreType.GCS])
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
                                               store_type):
         # Creates a new bucket with a local source, uploads files to it
@@ -1753,8 +2086,38 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
 
-    @pytest.mark.parametrize(
-        'store_type', [storage_lib.StoreType.S3, storage_lib.StoreType.GCS])
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
+    def test_bucket_external_deletion(self, tmp_scratch_storage_obj,
+                                      store_type):
+        # Creates a bucket, deletes it externally using cloud cli commands
+        # and then tries to delete it using sky storage delete.
+        tmp_scratch_storage_obj.add_store(store_type)
+
+        # Run sky storage ls to check if storage object exists in the output
+        out = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert tmp_scratch_storage_obj.name in out.decode('utf-8')
+
+        # Delete bucket externally
+        cmd = self.cli_delete_cmd(store_type, tmp_scratch_storage_obj.name)
+        subprocess.check_output(cmd)
+
+        # Run sky storage delete to delete the storage object
+        out = subprocess.check_output(
+            ['sky', 'storage', 'delete', tmp_scratch_storage_obj.name])
+        # Make sure bucket was not created during deletion (see issue #1322)
+        assert 'created' not in out.decode('utf-8').lower()
+
+        # Run sky storage ls to check if storage object is deleted
+        out = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert tmp_scratch_storage_obj.name not in out.decode('utf-8')
+
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
     def test_bucket_bulk_deletion(self, store_type):
         # Create a temp folder with over 256 files and folders, upload
         # files and folders to a new bucket, then delete bucket.
@@ -1791,8 +2154,10 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
 
-    @pytest.mark.parametrize('nonexist_bucket_url',
-                             ['s3://{random_name}', 'gs://{random_name}'])
+    @pytest.mark.parametrize('nonexist_bucket_url', [
+        's3://{random_name}', 'gs://{random_name}',
+        pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare)
+    ])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
         # Attempts to create fetch a stroage with a non-existent source.
         # Generate a random bucket name and verify it doesn't exist:
@@ -1811,6 +2176,14 @@ class TestStorageWithCredentials:
                     nonexist_bucket_url.format(random_name=nonexist_bucket_name)
                 ]
                 expected_output = 'BucketNotFoundException'
+            elif nonexist_bucket_url.startswith('r2'):
+                endpoint_url = cloudflare.create_endpoint()
+                command = [
+                    'aws', 's3api', 'head-bucket', '--bucket',
+                    nonexist_bucket_name, '--endpoint', endpoint_url,
+                    '--profile=r2'
+                ]
+                expected_output = '404'
             else:
                 raise ValueError('Unsupported bucket type '
                                  f'{nonexist_bucket_url}')
@@ -1849,24 +2222,12 @@ class TestStorageWithCredentials:
                     name=private_bucket_name)):
             storage_obj = storage_lib.Storage(source=private_bucket)
 
-    @staticmethod
-    def cli_ls_cmd(store_type, bucket_name, suffix=''):
-        if store_type == storage_lib.StoreType.S3:
-            if suffix:
-                url = f's3://{bucket_name}/{suffix}'
-            else:
-                url = f's3://{bucket_name}'
-            return ['aws', 's3', 'ls', url]
-        if store_type == storage_lib.StoreType.GCS:
-            if suffix:
-                url = f'gs://{bucket_name}/{suffix}'
-            else:
-                url = f'gs://{bucket_name}'
-            return ['gsutil', 'ls', url]
-
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
-                              ('tmp_gsutil_bucket', storage_lib.StoreType.GCS)])
+                              ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
+                              pytest.param('tmp_awscli_bucket_r2',
+                                           storage_lib.StoreType.R2,
+                                           marks=pytest.mark.cloudflare)])
     def test_upload_to_existing_bucket(self, ext_bucket_fixture, request,
                                        tmp_source, store_type):
         # Tries uploading existing files to newly created bucket (outside of
@@ -1905,8 +2266,10 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls']).decode('utf-8')
         assert storage_name in out, f'Storage {storage_name} not found in sky storage ls.'
 
-    @pytest.mark.parametrize(
-        'store_type', [storage_lib.StoreType.S3, storage_lib.StoreType.GCS])
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
@@ -1926,6 +2289,20 @@ class TestStorageWithCredentials:
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
+
+    @pytest.mark.parametrize('invalid_name_list, store_type',
+                             [(AWS_INVALID_NAMES, storage_lib.StoreType.S3),
+                              (GCS_INVALID_NAMES, storage_lib.StoreType.GCS),
+                              pytest.param(AWS_INVALID_NAMES,
+                                           storage_lib.StoreType.R2,
+                                           marks=pytest.mark.cloudflare)])
+    def test_invalid_names(self, invalid_name_list, store_type):
+        # Uses a list in the source field to specify a file and a directory to
+        # be uploaded to the storage object.
+        for name in invalid_name_list:
+            with pytest.raises(sky.exceptions.StorageNameError):
+                storage_obj = storage_lib.Storage(name=name)
+                storage_obj.add_store(store_type)
 
 
 # ---------- Testing YAML Specs ----------
