@@ -640,7 +640,7 @@ class JobLibCodeGen:
     _PREFIX = ['import os', 'from sky.skylet import job_lib, log_lib']
 
     @classmethod
-    def add_job(cls, job_name: str, username: str, run_timestamp: str,
+    def add_job(cls, job_name: Optional[str], username: str, run_timestamp: str,
                 resources_str: str) -> str:
         if job_name is None:
             job_name = '-'

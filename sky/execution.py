@@ -123,7 +123,7 @@ def _execute(
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
 ) -> None:
-    """Execute a entrypoint.
+    """Execute an entrypoint.
 
     If sky.Task is given or DAG has not been optimized yet, this will call
     sky.optimize() for the caller.
@@ -415,6 +415,7 @@ def launch(
                 our pre-checks (e.g., cluster name invalid) or a region/zone
                 throwing resource unavailability.
         exceptions.CommandError: any ssh command error.
+        exceptions.NoCloudAccessError: if all clouds are disabled.
     Other exceptions may be raised depending on the backend.
     """
     entrypoint = task
@@ -701,11 +702,19 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     if copy_mounts is None:
         copy_mounts = {}
 
-    has_local_source_paths = (task.workdir is not None) or copy_mounts
-    if has_local_source_paths:
-        logger.info(
-            f'{colorama.Fore.YELLOW}Translating file_mounts with local '
-            f'source paths to SkyPilot Storage...{colorama.Style.RESET_ALL}')
+    has_local_source_paths_file_mounts = bool(copy_mounts)
+    has_local_source_paths_workdir = task.workdir is not None
+
+    msg = None
+    if has_local_source_paths_workdir and has_local_source_paths_file_mounts:
+        msg = 'workdir and file_mounts with local source paths'
+    elif has_local_source_paths_file_mounts:
+        msg = 'file_mounts with local source paths'
+    elif has_local_source_paths_workdir:
+        msg = 'workdir'
+    if msg:
+        logger.info(f'{colorama.Fore.YELLOW}Translating {msg} to SkyPilot '
+                    f'Storage...{colorama.Style.RESET_ALL}')
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
@@ -739,6 +748,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     # 2. When the src is the same, use the same bucket.
     copy_mounts_with_file_in_src = {}
     for i, (dst, src) in enumerate(copy_mounts.items()):
+        assert task.file_mounts is not None
         task.file_mounts.pop(dst)
         if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
             copy_mounts_with_file_in_src[dst] = src
@@ -838,7 +848,6 @@ def _maybe_translate_local_file_mounts_and_sync_up(
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
                         f'Unsupported store type: {store_type}')
-            storage_obj.name = None
             storage_obj.force_delete = True
 
     return task

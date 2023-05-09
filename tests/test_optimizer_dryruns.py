@@ -253,7 +253,7 @@ def test_instance_type_from_cpu_memory(monkeypatch, capfd):
     stdout, _ = capfd.readouterr()
     # Choose General Purpose instance types
     assert 'm6i.2xlarge' in stdout  # AWS, 8 vCPUs, 32 GB memory
-    assert 'Standard_D8_v5' in stdout  # Azure, 8 vCPUs, 32 GB memory
+    assert 'Standard_D8s_v5' in stdout  # Azure, 8 vCPUs, 32 GB memory
     assert 'n2-standard-8' in stdout  # GCP, 8 vCPUs, 32 GB memory
 
     _test_resources_launch(monkeypatch, memory=32)
@@ -261,14 +261,14 @@ def test_instance_type_from_cpu_memory(monkeypatch, capfd):
     # Choose memory-optimized instance types, when the memory
     # is specified
     assert 'r6i.xlarge' in stdout  # AWS, 4 vCPUs, 32 GB memory
-    assert 'Standard_E4_v5' in stdout  # Azure, 4 vCPUs, 32 GB memory
+    assert 'Standard_E4s_v5' in stdout  # Azure, 4 vCPUs, 32 GB memory
     assert 'n2-highmem-4' in stdout  # GCP, 4 vCPUs, 32 GB memory
 
     _test_resources_launch(monkeypatch, memory='64+')
     stdout, _ = capfd.readouterr()
     # Choose memory-optimized instance types
     assert 'r6i.2xlarge' in stdout  # AWS, 8 vCPUs, 64 GB memory
-    assert 'Standard_E8_v5' in stdout  # Azure, 8 vCPUs, 64 GB memory
+    assert 'Standard_E8s_v5' in stdout  # Azure, 8 vCPUs, 64 GB memory
     assert 'n2-highmem-8' in stdout  # GCP, 8 vCPUs, 64 GB memory
     assert 'gpu_1x_a6000' in stdout  # Lambda, 14 vCPUs, 100 GB memory
 
@@ -437,7 +437,7 @@ def test_invalid_image(monkeypatch):
 
     with pytest.raises(ValueError) as e:
         _test_resources(monkeypatch, cloud=sky.Azure(), image_id='some-image')
-    assert 'only supported for AWS and GCP' in str(e.value)
+    assert 'only supported for AWS, GCP and IBM' in str(e.value)
 
 
 def test_valid_image(monkeypatch):

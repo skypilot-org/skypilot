@@ -1,10 +1,11 @@
 """Amazon Web Services."""
+import enum
 import functools
 import json
 import os
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Any
 
 from sky import clouds
 from sky import exceptions
@@ -38,6 +39,19 @@ _CREDENTIAL_FILES = [
 ]
 
 DEFAULT_AMI_GB = 45
+
+
+class AWSIdentityType(enum.Enum):
+    """AWS identity type.
+
+    The account type is determined by the current user identity,
+    based on `aws configure list`. We will check the existence of
+    the value in the output of `aws configure list` to determine
+    the account type.
+    """
+    SSO = 'sso'
+    IAM_ROLE = 'iam-role'
+    STATIC = 'static'
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -269,9 +283,11 @@ class AWS(clouds.Cloud):
     def get_default_instance_type(
             cls,
             cpus: Optional[str] = None,
-            memory: Optional[str] = None) -> Optional[str]:
+            memory: Optional[str] = None,
+            disk_tier: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
+                                                         disk_tier=disk_tier,
                                                          clouds='aws')
 
     # TODO: factor the following three methods, as they are the same logic
@@ -294,7 +310,7 @@ class AWS(clouds.Cloud):
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources', region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Any]:
         assert zones is not None, (region, zones)
 
         region_name = region.name
@@ -317,6 +333,7 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
+            **AWS._get_disk_specs(r.disk_tier)
         }
 
     def get_feasible_launchable_resources(self,
@@ -347,7 +364,9 @@ class AWS(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             default_instance_type = AWS.get_default_instance_type(
-                cpus=resources.cpus, memory=resources.memory)
+                cpus=resources.cpus,
+                memory=resources.memory,
+                disk_tier=resources.disk_tier)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -405,19 +424,27 @@ class AWS(clouds.Cloud):
         static_credential_exists = os.path.isfile(
             os.path.expanduser('~/.aws/credentials'))
         hints = None
-        if cls._is_current_identity_sso():
-            hints = 'AWS SSO is set. '
+        identity_type = cls._current_identity_type()
+        single_cloud_hint = (
+            ' It will work if you use AWS only, but will cause problems '
+            'if you want to use multiple clouds. To set up static credentials, '
+            'try: aws configure')
+        if identity_type == AWSIdentityType.SSO:
+            hints = 'AWS SSO is set.'
             if static_credential_exists:
                 hints += (
                     ' To ensure multiple clouds work correctly, please use SkyPilot '
                     'with static credentials (e.g., ~/.aws/credentials) by unsetting '
                     'the AWS_PROFILE environment variable.')
             else:
-                hints += (
-                    ' It will work if you use AWS only, but will cause problems '
-                    'if you want to use multiple clouds. To set up static credentials, '
-                    'try: aws configure')
-
+                hints += single_cloud_hint
+        elif identity_type == AWSIdentityType.IAM_ROLE:
+            # When using an IAM role, the credentials may not exist in the
+            # ~/.aws/credentials file. So we don't check for the existence of the
+            # file. This will happen when the user is on a VM (or spot-controller)
+            # created by an SSO account, i.e. the VM will be assigned the IAM
+            # role: skypilot-v1.
+            hints = f'AWS IAM role is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
@@ -433,15 +460,30 @@ class AWS(clouds.Cloud):
         return True, hints
 
     @classmethod
-    def _is_current_identity_sso(cls) -> bool:
+    def _current_identity_type(cls) -> Optional[AWSIdentityType]:
         proc = subprocess.run('aws configure list',
                               shell=True,
                               check=False,
                               stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
-            return False
-        return 'sso' in proc.stdout.decode().split()
+            return None
+        # We determine the identity type by looking at the output of
+        # `aws configure list`. The output looks like:
+        #   Name                   Value         Type    Location
+        #   ----                   -----         ----    --------
+        #   profile                <not set>     None    None
+        #   access_key     *       <not set>     sso     None
+        #   secret_key     *       <not set>     sso     None
+        #   region                 <not set>     None    None
+        # We try to determine the identity type by looking for the
+        # string "sso"/"iam-role" in the output, i.e. the "Type" column.
+        if AWSIdentityType.SSO.value in proc.stdout.decode():
+            return AWSIdentityType.SSO
+        elif AWSIdentityType.IAM_ROLE.value in proc.stdout.decode():
+            return AWSIdentityType.IAM_ROLE
+        else:
+            return AWSIdentityType.STATIC
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
@@ -544,8 +586,8 @@ class AWS(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         # TODO(skypilot): ~/.aws/credentials is required for users using multiple clouds.
-        # If this file does not exist, users can launch on AWS via AWS SSO and assign
-        # IAM role to the cluster.
+        # If this file does not exist, users can launch on AWS via AWS SSO or assumed IAM
+        # role (only when the user is on an AWS cluster) and assign IAM role to the cluster.
         # However, if users launch clusters in a non-AWS cloud, those clusters do not
         # understand AWS IAM role so will not be able to access private AWS EC2 resources
         # and S3 buckets.
@@ -559,7 +601,7 @@ class AWS(clouds.Cloud):
         # to define a mechanism to find out the cloud provider of the cluster to be
         # launched in this function and make sure the cluster will not be used for
         # launching clusters in other clouds, e.g. spot controller.
-        if self._is_current_identity_sso():
+        if self._current_identity_type() != AWSIdentityType.STATIC:
             return {}
         return {
             f'~/.aws/{filename}': f'~/.aws/{filename}'
@@ -577,3 +619,27 @@ class AWS(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'aws')
+
+    @classmethod
+    def check_disk_tier_enabled(cls, instance_type: str,
+                                disk_tier: str) -> None:
+        del instance_type, disk_tier  # unused
+
+    @classmethod
+    def _get_disk_type(cls, disk_tier: str) -> str:
+        return 'standard' if disk_tier == 'low' else 'gp3'
+
+    @classmethod
+    def _get_disk_specs(cls, disk_tier: Optional[str]) -> Dict[str, Any]:
+        tier = disk_tier or cls._DEFAULT_DISK_TIER
+        tier2iops = {
+            'high': 7000,
+            'medium': 3500,
+            'low': 0,  # only gp3 is required to set iops
+        }
+        return {
+            'disk_tier': cls._get_disk_type(tier),
+            'disk_iops': tier2iops[tier],
+            'disk_throughput': tier2iops[tier] // 16,
+            'custom_disk_perf': tier != 'low',
+        }
