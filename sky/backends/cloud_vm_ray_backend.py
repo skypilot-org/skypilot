@@ -2807,7 +2807,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'set, ignoring the above error.{reset}\n{yellow}It is the '
                     'user\'s responsibility to ensure that this '
                     f'cluster is actually terminated on the cloud.{reset}')
-                pass
             else:
                 raise
 
@@ -2822,7 +2821,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     lock_path,
                     backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
                 success = self.teardown_no_lock(
-                    handle, terminate, purge, refresh_cluster_status=not purge)
+                    handle,
+                    terminate,
+                    purge,
+                    # The refresh code path checks current user identity can
+                    # throw ClusterOwnerIdentityMismatchError. However, the
+                    # argument/flag `purge` should bypass such ID mismatch
+                    # errors.
+                    refresh_cluster_status=not purge)
             if success and terminate:
                 common_utils.remove_file_if_exists(lock_path)
         except filelock.Timeout as e:
