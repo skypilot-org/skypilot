@@ -1955,20 +1955,20 @@ class TestStorageWithCredentials:
     def cli_count_name_in_bucket(store_type, bucket_name, file_name):
         if store_type == storage_lib.StoreType.S3:
             return [
-                'aws', 's3api', 'list-objects', 
-                '--bucket', bucket_name, '--query', 
+                'aws', 's3api', 'list-objects', '--bucket', bucket_name,
+                '--query',
                 f'length(Contents[?contains(Key,\'{file_name}\')].Key)'
             ]
         if store_type == storage_lib.StoreType.GCS:
             return [
-                f'gsutil ls gs://{bucket_name}',
-                f'| grep "{file_name}"', '| wc -l'
+                f'gsutil ls gs://{bucket_name}', f'| grep "{file_name}"',
+                '| wc -l'
             ]
         if store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             return [
-                'aws', 's3api', 'list-objects', 
-                '--bucket', bucket_name, '--query', 
+                'aws', 's3api', 'list-objects', '--bucket', bucket_name,
+                '--query',
                 f'length(Contents[?contains(Key,\'{file_name}\')].Key)',
                 '--endpoint', endpoint_url, '--profile=r2'
             ]
@@ -2352,20 +2352,20 @@ class TestStorageWithCredentials:
             subprocess.check_output(f'touch {gitignore_path}', shell=True)
             gitignore_path = f'{tmpdir}/.gitignore'
             for i in range(3):
-                subprocess.check_output(f'touch {tmpdir}/{gitignore_file_name}-{i}',
-                    shell=True)    
+                subprocess.check_output(
+                    f'touch {tmpdir}/{gitignore_file_name}-{i}', shell=True)
                 with open(gitignore_path, 'a') as file:
                     file.write(f'{gitignore_file_name}-{i}\n')
 
             # Create files to be excluded from .git/info/exclude and list them in the file
             git_exclude_file_name = 'excluded-git-info-exclude'
-            subprocess.check_output(f'mkdir -p {tmpdir}/.git/info',
-                                    shell=True)
+            subprocess.check_output(f'mkdir -p {tmpdir}/.git/info', shell=True)
             git_info_exclude_path = f'{tmpdir}/.git/info/exclude'
-            subprocess.check_output(f'touch {git_info_exclude_path}', shell=True)
+            subprocess.check_output(f'touch {git_info_exclude_path}',
+                                    shell=True)
             for i in range(3):
-                subprocess.check_output(f'touch {tmpdir}/{git_exclude_file_name}-{i}',
-                                        shell=True)
+                subprocess.check_output(
+                    f'touch {tmpdir}/{git_exclude_file_name}-{i}', shell=True)
                 with open(git_info_exclude_path, 'a') as file:
                     file.write(f'{git_exclude_file_name}-{i}\n')
 
@@ -2373,7 +2373,7 @@ class TestStorageWithCredentials:
             timestamp = str(time.time()).replace('.', '')
             bucket_name = f'sky-test-{timestamp}'
             store_obj = storage_lib.Storage(name=bucket_name,
-                                            source=tmpdir, 
+                                            source=tmpdir,
                                             mode=storage_lib.StorageMode.COPY)
             store_obj.add_store(store_type)
 
@@ -2390,14 +2390,16 @@ class TestStorageWithCredentials:
         if store_type == storage_lib.StoreType.GCS:
             up_output = subprocess.check_output(up_cmd, shell=True)
             exc_output = subprocess.check_output(exc_cmd, shell=True)
-            gitignore_output = subprocess.check_output(gitignore_cmd, shell=True)
-            git_exclude_output = subprocess.check_output(git_exclude_cmd, shell=True)
+            gitignore_output = subprocess.check_output(gitignore_cmd,
+                                                       shell=True)
+            git_exclude_output = subprocess.check_output(git_exclude_cmd,
+                                                         shell=True)
         else:
             up_output = subprocess.check_output(up_cmd)
             exc_output = subprocess.check_output(exc_cmd)
             gitignore_output = subprocess.check_output(gitignore_cmd)
             git_exclude_output = subprocess.check_output(git_exclude_cmd)
-        
+
         # Only the 'uploaded' file should exist in the cloud object storage
         assert '1' in up_output.decode('utf-8'), \
             f'{upload_file_name} is not uploaded.'
@@ -2407,6 +2409,7 @@ class TestStorageWithCredentials:
             f'.gitignore file should not be uploaded'
         assert '0' in git_exclude_output.decode('utf-8'), \
             f'.git file should not be uploaded'
+
 
 # ---------- Testing YAML Specs ----------
 # Our sky storage requires credentials to check the bucket existance when

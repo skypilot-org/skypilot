@@ -1063,7 +1063,8 @@ class S3Store(AbstractStore):
                 with open(gitignore_path, 'r') as file:
                     for item_to_exclude in file:
                         excluded_list.append(item_to_exclude[:-1])
-            git_exclude_path = os.path.join(expand_src_dir_path, command_runner.GIT_EXCLUDE)
+            git_exclude_path = os.path.join(expand_src_dir_path,
+                                            command_runner.GIT_EXCLUDE)
             if os.path.isfile(git_exclude_path):
                 with open(git_exclude_path, 'r') as file:
                     for item_to_exclude in file:
@@ -1500,7 +1501,8 @@ class GcsStore(AbstractStore):
                 with open(gitignore_path, 'r') as file:
                     for item_to_exclude in file:
                         excluded_list.append(item_to_exclude[:-1])
-            git_exclude_path = os.path.join(expand_src_dir_path, command_runner.GIT_EXCLUDE)
+            git_exclude_path = os.path.join(expand_src_dir_path,
+                                            command_runner.GIT_EXCLUDE)
             if os.path.isfile(git_exclude_path):
                 with open(git_exclude_path, 'r') as file:
                     for item_to_exclude in file:
@@ -1825,7 +1827,8 @@ class R2Store(AbstractStore):
                 with open(gitignore_path, 'r') as file:
                     for item_to_exclude in file:
                         excluded_list.append(item_to_exclude[:-1])
-            git_exclude_path = os.path.join(expand_src_dir_path, command_runner.GIT_EXCLUDE)
+            git_exclude_path = os.path.join(expand_src_dir_path,
+                                            command_runner.GIT_EXCLUDE)
             if os.path.isfile(git_exclude_path):
                 with open(git_exclude_path, 'r') as file:
                     for item_to_exclude in file:
