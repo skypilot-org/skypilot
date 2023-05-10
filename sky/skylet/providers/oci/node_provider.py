@@ -16,7 +16,6 @@ import time
 import threading
 import copy
 
-# import sys
 from datetime import datetime
 from sky.skylet.providers.oci.config import oci_conf
 from sky.skylet.providers.oci import utils
@@ -59,26 +58,29 @@ class OCINodeProvider(NodeProvider):
     # end __init__(...)
 
     @synchronized
-    def _get_filtered_nodes(self, tag_filters):
+    def _get_filtered_nodes(self, tag_filters, force=False):
         # Make sure the cluster_name is always an criterion
         tag_filters = {**tag_filters, TAG_RAY_CLUSTER_NAME: self.cluster_name}
         logger.debug(f"* _get_filtered_nodes {tag_filters}")
 
         return_nodes = {}
-        # Query cache first to reduce API call.
-        cache_hit = False
-        for k, node in self.cached_nodes.items():
-            tags = node["tags"]
-            unmatched_tags = [
-                k for k, v in tag_filters.items() if k not in tags or v != tags[k]
-            ]
-            if len(unmatched_tags) == 0:
-                return_nodes[k] = node
-                cache_hit |= True
+        if not force:
+            # Query cache first to reduce API call.
+            cache_hit = False
+            for k, node in self.cached_nodes.items():
+                tags = node["tags"]
+                unmatched_tags = [
+                    k for k, v in tag_filters.items() if k not in tags or v != tags[k]
+                ]
+                if len(unmatched_tags) == 0:
+                    return_nodes[k] = node
+                    cache_hit |= True
 
-        if cache_hit:
-            logger.debug(f"*  _get_filtered_nodes...[Done: Cache Hit] {return_nodes}")
-            return return_nodes
+            if cache_hit:
+                logger.debug(
+                    f"*  _get_filtered_nodes...[Done: Cache Hit] {return_nodes}"
+                )
+                return return_nodes
 
         insts = oci_query_helper.query_instances_by_tags(tag_filters)
         for inst in insts:
@@ -176,7 +178,6 @@ class OCINodeProvider(NodeProvider):
         """Creates a number of nodes within the namespace."""
         start_time = round(time.time() * 1000)
         starting_insts = []
-
         """ Check first if it neccessary to create new nodes / start stopped nodes """
         VALIDITY_TAGS = [
             TAG_RAY_CLUSTER_NAME,
@@ -197,7 +198,6 @@ class OCINodeProvider(NodeProvider):
                 f"* No need to create new node since there are enough running nodes"
             )
             return
-
         """ Starting stopped nodes if cache_stopped_nodes=True """
         if self.cache_stopped_nodes:
             logger.debug("* Checking and try reusing existing stopped nodes")
@@ -211,13 +211,19 @@ class OCINodeProvider(NodeProvider):
             nodes_matching_launch_config = self.stopped_nodes(
                 filters_with_launch_config
             )
+
             reuse_nodes = []
             if len(nodes_matching_launch_config) >= count:
                 reuse_nodes = nodes_matching_launch_config[:count]
             else:
                 nodes_all = self.stopped_nodes(filters)
+                nodes_matching_launch_config_ids = [
+                    n["id"] for n in nodes_matching_launch_config
+                ]
                 nodes_non_matching_launch_config = [
-                    n for n in nodes_all if n not in nodes_matching_launch_config
+                    n
+                    for n in nodes_all
+                    if n["id"] not in nodes_matching_launch_config_ids
                 ]
                 reuse_nodes = (
                     nodes_matching_launch_config + nodes_non_matching_launch_config
@@ -229,6 +235,18 @@ class OCINodeProvider(NodeProvider):
                 "To disable reuse, set `cache_stopped_nodes: False` "
                 "under `provider` in the cluster configuration.",
             )
+
+            for reuse_node in reuse_nodes:
+                if reuse_node["status"] == "STOPPING":
+                    get_instance_response = oci_conf.core_client.get_instance(
+                        instance_id=reuse_node["id"]
+                    )
+                    oci.wait_until(
+                        oci_conf.core_client,
+                        get_instance_response,
+                        "lifecycle_state",
+                        "STOPPED",
+                    )
 
             for matched_node_id in reuse_nodes:
                 instance_action_response = oci_conf.core_client.instance_action(
@@ -254,7 +272,6 @@ class OCINodeProvider(NodeProvider):
                 )
             )
         # end if self.cache_stopped_nodes:...
-
         """ Let's create additional new nodes (if neccessary) """
         if count > 0:
             compartment = oci_conf.get_compartment(self.cluster_name)
@@ -429,7 +446,7 @@ class OCINodeProvider(NodeProvider):
 
     @synchronized
     def terminate_node(self, node_id):
-        # """Terminates the specified node."""
+        """Terminates the specified node."""
         logger.info(f"* terminate_node {node_id}...")
         node = self._get_node(node_id)
 
@@ -438,7 +455,6 @@ class OCINodeProvider(NodeProvider):
             True if node and (str(node["tags"]["sky_spot_flag"]) == "true") else False
         )
 
-        stopping_insts = []
         if self.cache_stopped_nodes and not preemptibleFlag:
             logger.info(
                 f"* Stopping instance {node_id}"
@@ -450,11 +466,9 @@ class OCINodeProvider(NodeProvider):
                 instance_id=node_id, action="STOP"
             )
             logger.info(f"* Stopping the instance {instance_action_response.data.id}")
-            get_instance_response = oci_conf.core_client.get_instance(
-                instance_id=node_id
-            )
-            logger.debug(get_instance_response.data)
-            stopping_insts.append(node_id)
+            if node_id in self.cached_nodes:
+                self.cached_nodes[node_id]["status"] = "STOPPED"
+            state_word = "Stopped"
         else:
             terminate_instance_response = oci_conf.core_client.terminate_instance(
                 node_id
@@ -462,14 +476,9 @@ class OCINodeProvider(NodeProvider):
             logger.debug(terminate_instance_response.data)
             if node_id in self.cached_nodes:
                 del self.cached_nodes[node_id]
+            state_word = "Terminated"
 
-        for stopping_node_id in stopping_insts:
-            # Better to treat stopping as stopped?
-            # oci.wait_until(oci_conf.core_client, get_instance_response, 'lifecycle_state', 'STOPPED')
-            if stopping_node_id in self.cached_nodes:
-                self.cached_nodes[stopping_node_id]["status"] = "STOPPED"
-
-        logger.info(f"* Teminated {node_id} w/ sky_spot_flag: {preemptibleFlag}.")
+        logger.info(f"* {state_word} {node_id} w/ sky_spot_flag: {preemptibleFlag}.")
 
     # end terminate_node(...)
 
@@ -484,8 +493,8 @@ class OCINodeProvider(NodeProvider):
 
     def stopped_nodes(self, tag_filters):
         """Return a list of stopped node ids filtered by the specified tags dict."""
-        nodes = self._get_filtered_nodes(tag_filters=tag_filters)
-        return [k for k, v in nodes.items() if v["status"] == "STOPPED"]
+        nodes = self._get_filtered_nodes(tag_filters=tag_filters, force=True)
+        return [v for _, v in nodes.items() if v["status"] in ("STOPPED", "STOPPING")]
 
     def running_nodes(self, tag_filters):
         """Return a list of running node ids filtered by the specified tags dict."""

@@ -13,7 +13,9 @@ net_client = None
 search_client = None
 identity_client = None
 
+
 def import_package(func):
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         global oci
@@ -29,6 +31,7 @@ def import_package(func):
 
     return wrapper
 
+
 @import_package
 def get_oci_config():
     global oci_config
@@ -40,6 +43,7 @@ def get_oci_config():
         oci_config = oci.config.from_file(file_location=conf_file_path)
     return oci_config
 
+
 @import_package
 def get_core_client():
     global core_client
@@ -47,12 +51,14 @@ def get_core_client():
         core_client = oci.core.ComputeClient(get_oci_config())
     return core_client
 
+
 @import_package
 def get_net_client():
     global net_client
     if net_client is None:
         net_client = oci.core.VirtualNetworkClient(get_oci_config())
     return net_client
+
 
 @import_package
 def get_search_client():
@@ -62,12 +68,14 @@ def get_search_client():
             get_oci_config())
     return search_client
 
+
 @import_package
 def get_identity_client():
     global identity_client
     if identity_client is None:
         identity_client = oci.identity.IdentityClient(get_oci_config())
     return identity_client
+
 
 @import_package
 def service_exception():
