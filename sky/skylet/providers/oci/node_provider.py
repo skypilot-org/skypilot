@@ -450,6 +450,9 @@ class OCINodeProvider(NodeProvider):
         """Terminates the specified node."""
         logger.info(f"* terminate_node {node_id}...")
         node = self._get_node(node_id)
+        if node is None:
+            logger.info(f"* The node is not existed: {node_id}..")
+            return  # Node not exists yet.
 
         logger.debug(f"* sky_spot_flag: {node['tags']['sky_spot_flag']}")
         preemptibleFlag = (
@@ -484,7 +487,7 @@ class OCINodeProvider(NodeProvider):
     # end terminate_node(...)
 
     def _get_node(self, node_id):
-        self._get_filtered_nodes({})  # All except for those terminated.
+        self._get_filtered_nodes({}, force=True)  # All except for those terminated.
         return self.cached_nodes.get(node_id, None)
 
     def _get_cached_node(self, node_id):
