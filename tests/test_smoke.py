@@ -2030,12 +2030,6 @@ class TestStorageWithCredentials:
                                              source=tmp_source)
 
     @pytest.fixture
-    def tmp_copy_storage_obj(self, tmp_bucket_name, tmp_source):
-        # Creates a temporary storage object. Stores must be added in the test.
-        yield from self.yield_storage_object(name=tmp_bucket_name,
-                                             source=tmp_source)
-
-    @pytest.fixture
     def tmp_local_list_storage_obj(self, tmp_bucket_name, tmp_source):
         # Creates a temp storage object which uses a list of paths as source.
         # Stores must be added in the test. After upload, the bucket should
