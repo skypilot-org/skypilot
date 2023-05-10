@@ -170,7 +170,6 @@ class OCI(clouds.Cloud):
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         assert region is not None, resources
-        assert zones is not None, region
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -196,9 +195,20 @@ class OCI(clouds.Cloud):
             cpus = f'{oci_conf.DEFAULT_NUM_VCPUS}' if cpus is None else cpus
 
         zone = resources.zone
+        # TODO(Hysun): error-and-try all zones.
         if zone is None:
             # If zone is not specified, try to get the first zone.
-            zone = zones[0].name
+            if zones is None:
+                region_zones_list = service_catalog.get_region_zones_for_instance_type(
+                    instance_type=resources.instance_type,
+                    use_spot=resources.use_spot,
+                    clouds='oci')
+                zones = [
+                    r for r in iter(region_zones_list) if r.name == region.name
+                ][0].zones
+
+            if zones is not None:
+                zone = zones[0].name
 
         instance_type = resources.instance_type.split(
             oci_conf.INSTANCE_TYPE_RES_SPERATOR)[0]

@@ -248,7 +248,8 @@ class OCINodeProvider(NodeProvider):
                         "STOPPED",
                     )
 
-            for matched_node_id in reuse_nodes:
+            for matched_node in reuse_nodes:
+                matched_node_id = matched_node["id"]
                 instance_action_response = oci_conf.core_client.instance_action(
                     instance_id=matched_node_id, action="START"
                 )
