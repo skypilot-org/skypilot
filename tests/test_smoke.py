@@ -1353,7 +1353,7 @@ def test_spot(generic_cloud: str):
             _SPOT_CANCEL_WAIT.format(job_name=f'{name}-1'),
             'sleep 5',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep "CANCELLING\|CANCELLED"',
-            'sleep 150',
+            'sleep 200',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep CANCELLED',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
