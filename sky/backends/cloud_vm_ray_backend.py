@@ -2802,11 +2802,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         except exceptions.ClusterOwnerIdentityMismatchError as e:
             if purge:
                 logger.error(e)
+                verb = 'terminate' if terminate else 'stop'
+                verbed = 'terminated' if terminate else 'stopped'
                 logger.warning(
                     f'{yellow}Purge (-p/--purge) is '
-                    f'set, ignoring the above error.{reset}\n{yellow}It is the '
+                    f'set, ignoring the above error and proceeding to attempt '
+                    f'to {verb} the cluster.{reset}\n{yellow}It is the '
                     'user\'s responsibility to ensure that this '
-                    f'cluster is actually terminated on the cloud.{reset}')
+                    f'cluster is actually {verbed} on the cloud.{reset}')
             else:
                 raise
 
