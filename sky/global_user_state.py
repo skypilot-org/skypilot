@@ -22,7 +22,6 @@ import colorama
 from sky import clouds
 from sky.utils import db_utils
 from sky.utils import common_utils
-from sky.adaptors import cloudflare
 
 if typing.TYPE_CHECKING:
     from sky import backends
