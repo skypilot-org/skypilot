@@ -1078,6 +1078,8 @@ class S3Store(AbstractStore):
             sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
                             f's3://{self.name}')
+            logger.info(f'get_file_sync_command base_dir_path {base_dir_path}')
+            logger.info(f'get_file_sync_command file_names {file_names}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
