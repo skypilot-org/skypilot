@@ -59,6 +59,18 @@ available_node_types:
           #   SpotOptions:
           #       MaxPrice: MAX_HOURLY_PRICE
       {% endif %}
+      UserData: |
+        #cloud-config
+        users:
+          - name: {{ssh_user}}
+            shell: /bin/bash
+            sudo: ALL=(ALL) NOPASSWD:ALL
+            ssh-authorized-keys:
+              - {{ssh_public_key_content}}
+        bootcmd:
+          - echo 'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/10cloudinit-disable
+          - apt-get -y purge update-notifier-common ubuntu-release-upgrader-core landscape-common unattended-upgrades
+          - echo "Removed APT" | systemd-cat
       TagSpecifications:
         - ResourceType: instance
           Tags:
@@ -88,6 +100,18 @@ available_node_types:
           #   SpotOptions:
           #       MaxPrice: MAX_HOURLY_PRICE
       {% endif %}
+      UserData: |
+        #cloud-config
+        users:
+          - name: {{ssh_user}}
+            shell: /bin/bash
+            sudo: ALL=(ALL) NOPASSWD:ALL
+            ssh-authorized-keys:
+              - {{ssh_public_key_content}}
+        bootcmd:
+          - echo 'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/10cloudinit-disable
+          - apt-get -y purge update-notifier-common ubuntu-release-upgrader-core landscape-common unattended-upgrades
+          - echo "Removed APT" | systemd-cat
       TagSpecifications:
         - ResourceType: instance
           Tags:

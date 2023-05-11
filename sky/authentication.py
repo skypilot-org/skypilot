@@ -15,6 +15,7 @@ import colorama
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
+import yaml
 
 from sky import clouds
 from sky import sky_logging
@@ -87,6 +88,13 @@ def get_or_generate_keys() -> Tuple[str, str]:
             f'{public_key_path} does not exist.')
     return private_key_path, public_key_path
 
+def _replace_ssh_info_in_config(config: Dict[str, Any],
+                                public_key: str) -> Dict[str, Any]:
+    config_str = common_utils.dump_yaml_str(config)
+    config_str = config_str.replace('{{ssh_user}}', config['auth']['ssh_user'])
+    config_str = config_str.replace('{{ssh_public_key_content}}', public_key)
+    config = yaml.safe_load(config_str)
+    return config
 
 def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
@@ -97,17 +105,7 @@ def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # ec2.describe_key_pairs.
     # Note that sudo and shell need to be specified to ensure setup works.
     # Reference: https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups  # pylint: disable=line-too-long
-    for node_type in config['available_node_types']:
-        config['available_node_types'][node_type]['node_config']['UserData'] = (
-            textwrap.dedent(f"""\
-            #cloud-config
-            users:
-            - name: {config['auth']['ssh_user']}
-              shell: /bin/bash
-              sudo: ALL=(ALL) NOPASSWD:ALL
-              ssh-authorized-keys:
-                - {public_key}
-            """))
+    config = _replace_ssh_info_in_config(config, public_key)
     return config
 
 
