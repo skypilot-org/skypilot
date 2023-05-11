@@ -171,9 +171,9 @@ class SpotController:
                     self.logger.info(
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
-                    # TODO(zhwu): Download the logs, and stream them from the local
-                    # disk, instead of streaming them from the spot cluster, to make
-                    # it faster and more reliable.
+                    # TODO(zhwu): Download the logs, and stream them from the
+                    # local disk, instead of streaming them from the spot
+                    # cluster, to make it faster and more reliable.
                     returncode = self._backend.tail_logs(
                         handle, None, spot_job_id=self._job_id)
                     self.logger.info(f'\n== End of logs (ID: {self._job_id}, '
