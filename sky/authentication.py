@@ -88,6 +88,7 @@ def get_or_generate_keys() -> Tuple[str, str]:
             f'{public_key_path} does not exist.')
     return private_key_path, public_key_path
 
+
 def _replace_ssh_info_in_config(config: Dict[str, Any],
                                 public_key: str) -> Dict[str, Any]:
     config_str = common_utils.dump_yaml_str(config)
@@ -95,6 +96,7 @@ def _replace_ssh_info_in_config(config: Dict[str, Any],
     config_str = config_str.replace('{{ssh_public_key_content}}', public_key)
     config = yaml.safe_load(config_str)
     return config
+
 
 def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
