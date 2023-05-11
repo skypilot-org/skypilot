@@ -127,6 +127,9 @@ _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
 #    it's possible to failover to 1b, which leaves a leaked instance in 1a. Here,
 #    we use the new yaml's zone field, which is guaranteed to be the existing zone
 #    '1a'.
+# - UserData: The UserData field of the old yaml may be outdated, and we want to
+#   use the new yaml's UserData field, which contains the authorized key setup as
+#   well as the disabling of the auto-update with apt-get.
 _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('provider', 'availability_zone'),
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
