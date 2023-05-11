@@ -22,7 +22,9 @@ from sky.spot import spot_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
-logger = sky_logging.init_logger(__name__)
+# Use the explicit logger name so that the logger is under the
+# `sky.spot.controller` namespace when executed directly.
+logger = sky_logging.init_logger('sky.spot.controller')
 
 
 def _get_task_and_name(task_yaml: str) -> Tuple['sky.Task', str]:
@@ -40,14 +42,8 @@ class SpotController:
         # Re-initialize the logger, as this is a new process.
         # Using the same logger will cause the log not being printed to the
         # console.
-        # Get a unique name for this process
-        process_name = multiprocessing.current_process().name
-
         # Create a logger for this process
-        self.logger = sky_logging.init_logger(process_name)
-        print(self.logger)
-        self.logger.addHandler(sky_logging.create_handler())
-        self.logger.info(f'Initialized spot controller for job {job_id}')
+        self.logger = sky_logging.init_logger(f'{logger.name}.controller_process')
         
         self._job_id = job_id
         self._task, self._task_name = _get_task_and_name(task_yaml)
