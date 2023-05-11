@@ -43,8 +43,9 @@ class SpotController:
         # Using the same logger will cause the log not being printed to the
         # console.
         # Create a logger for this process
-        self.logger = sky_logging.init_logger(f'{logger.name}.controller_process')
-        
+        self.logger = sky_logging.init_logger(
+            f'{logger.name}.controller_process')
+
         self._job_id = job_id
         self._task, self._task_name = _get_task_and_name(task_yaml)
 
