@@ -65,7 +65,7 @@ available_node_types:
           - name: skypilot:ssh_user
             shell: /bin/bash
             sudo: ALL=(ALL) NOPASSWD:ALL
-            ssh-authorized-keys:
+            ssh_authorized_keys:
               - skypilot:ssh_public_key_content
         bootcmd:
           - echo 'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/10cloudinit-disable
@@ -106,7 +106,7 @@ available_node_types:
           - name: skypilot:ssh_user
             shell: /bin/bash
             sudo: ALL=(ALL) NOPASSWD:ALL
-            ssh-authorized-keys:
+            ssh_authorized_keys:
               - skypilot:ssh_public_key_content
         bootcmd:
           - echo 'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/10cloudinit-disable
