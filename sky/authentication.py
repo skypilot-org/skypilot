@@ -92,8 +92,10 @@ def get_or_generate_keys() -> Tuple[str, str]:
 def _replace_ssh_info_in_config(config: Dict[str, Any],
                                 public_key: str) -> Dict[str, Any]:
     config_str = common_utils.dump_yaml_str(config)
-    config_str = config_str.replace('skypilot:ssh_user', config['auth']['ssh_user'])
-    config_str = config_str.replace('skypilot:ssh_public_key_content', public_key)
+    config_str = config_str.replace('skypilot:ssh_user',
+                                    config['auth']['ssh_user'])
+    config_str = config_str.replace('skypilot:ssh_public_key_content',
+                                    public_key)
     config = yaml.safe_load(config_str)
     return config
 
