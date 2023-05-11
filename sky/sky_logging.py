@@ -40,19 +40,24 @@ _logging_config = threading.local()
 print = builtins.print  # pylint: disable=redefined-builtin
 
 
+def create_handler():
+    handler = logging.StreamHandler(sys.stdout)
+    handler.flush = sys.stdout.flush  # type: ignore
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        handler.setLevel(logging.DEBUG)
+    else:
+        handler.setLevel(logging.INFO)
+    fmt = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT)
+    handler.setFormatter(fmt)
+    return handler
+
+
 def _setup_logger():
     _root_logger.setLevel(logging.DEBUG)
     global _default_handler
     if _default_handler is None:
-        _default_handler = logging.StreamHandler(sys.stdout)
-        _default_handler.flush = sys.stdout.flush  # type: ignore
-        if env_options.Options.SHOW_DEBUG_INFO.get():
-            _default_handler.setLevel(logging.DEBUG)
-        else:
-            _default_handler.setLevel(logging.INFO)
+        _default_handler = create_handler()
         _root_logger.addHandler(_default_handler)
-    fmt = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT)
-    _default_handler.setFormatter(fmt)
     # Setting this will avoid the message
     # being propagated to the parent logger.
     _root_logger.propagate = False
@@ -62,6 +67,7 @@ def _setup_logger():
 # This is thread-safe as the module is only imported once,
 # guaranteed by the Python GIL.
 _setup_logger()
+
 
 
 def init_logger(name: str):

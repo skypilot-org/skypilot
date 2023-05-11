@@ -36,6 +36,19 @@ class SpotController:
 
     def __init__(self, job_id: int, task_yaml: str,
                  retry_until_up: bool) -> None:
+
+        # Re-initialize the logger, as this is a new process.
+        # Using the same logger will cause the log not being printed to the
+        # console.
+        # Get a unique name for this process
+        process_name = multiprocessing.current_process().name
+
+        # Create a logger for this process
+        self.logger = sky_logging.init_logger(process_name)
+        print(self.logger)
+        self.logger.addHandler(sky_logging.create_handler())
+        self.logger.info(f'Initialized spot controller for job {job_id}')
+        
         self._job_id = job_id
         self._task, self._task_name = _get_task_and_name(task_yaml)
 
@@ -57,7 +70,8 @@ class SpotController:
             self._task_name,
             self._backend.run_timestamp,
             resources_str=backend_utils.get_task_resources_str(self._task))
-        logger.info(f'Submitted spot job; SKYPILOT_JOB_ID: {job_id_env_var}')
+        self.logger.info(
+            f'Submitted spot job; SKYPILOT_JOB_ID: {job_id_env_var}')
         self._cluster_name = spot_utils.generate_spot_cluster_name(
             self._task_name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
@@ -85,8 +99,8 @@ class SpotController:
                 3. Any unexpected error happens during the `sky.launch`.
         Other exceptions may be raised depending on the backend.
         """
-        logger.info(f'Started monitoring spot task {self._task_name} '
-                    f'(id: {self._job_id})')
+        self.logger.info(f'Started monitoring spot task {self._task_name} '
+                         f'(id: {self._job_id})')
         spot_state.set_starting(self._job_id)
         job_submitted_at = self._strategy_executor.launch()
 
@@ -99,7 +113,7 @@ class SpotController:
             try:
                 backend_utils.check_network_connection()
             except exceptions.NetworkError:
-                logger.info(
+                self.logger.info(
                     'Network is not available. Retrying again in '
                     f'{spot_utils.JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
                 continue
@@ -126,6 +140,12 @@ class SpotController:
                     self._task.num_nodes == 1):
                 continue
 
+            if job_status in [
+                    job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
+            ]:
+                # Add a grace period before the check of preemption to avoid false
+                # alarm for job failure.
+                time.sleep(5)
             # Pull the actual cluster status from the cloud provider to
             # determine whether the cluster is preempted.
             (cluster_status,
@@ -138,7 +158,7 @@ class SpotController:
                 # Spot recovery is needed (will be done later in the code).
                 cluster_status_str = ('' if cluster_status is None else
                                       f' (status: {cluster_status.value})')
-                logger.info(
+                self.logger.info(
                     f'Cluster is preempted{cluster_status_str}. Recovering...')
             else:
                 if job_status is not None and not job_status.is_terminal():
@@ -151,13 +171,13 @@ class SpotController:
                     end_time = spot_utils.get_job_timestamp(self._backend,
                                                             self._cluster_name,
                                                             get_end_time=True)
-                    logger.info(
+                    self.logger.info(
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
-                    self._backend.tail_logs(handle,
-                                            None,
-                                            spot_job_id=self._job_id)
-                    logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
+                    returncode = self._backend.tail_logs(
+                        handle, None, spot_job_id=self._job_id)
+                    self.logger.info(f'\n== End of logs (ID: {self._job_id}, '
+                                     f'tail_log returncode: {returncode}) ==')
                     spot_status_to_set = spot_state.SpotStatus.FAILED
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
                         spot_status_to_set = spot_state.SpotStatus.FAILED_SETUP
@@ -174,9 +194,9 @@ class SpotController:
                 # job status. Try to recover the job (will not restart the
                 # cluster, if the cluster is healthy).
                 assert job_status is None, job_status
-                logger.info('Failed to fetch the job status while the '
-                            'cluster is healthy. Try to recover the job '
-                            '(the cluster will not be restarted).')
+                self.logger.info('Failed to fetch the job status while the '
+                                 'cluster is healthy. Try to recover the job '
+                                 '(the cluster will not be restarted).')
 
             # When the handle is None, the cluster should be cleaned up already.
             if handle is not None:
@@ -185,7 +205,8 @@ class SpotController:
                 if resources.need_cleanup_after_preemption():
                     # Some spot resource (e.g., Spot TPU VM) may need to be
                     # cleaned up after preemption.
-                    logger.info('Cleaning up the preempted spot cluster...')
+                    self.logger.info(
+                        'Cleaning up the preempted spot cluster...')
                     recovery_strategy.terminate_cluster(self._cluster_name)
 
             # Try to recover the spot jobs, when the cluster is preempted
@@ -205,7 +226,7 @@ class SpotController:
             failure_reason = ('; '.join(
                 common_utils.format_exception(reason, use_bracket=True)
                 for reason in e.reasons))
-            logger.error(failure_reason)
+            self.logger.error(failure_reason)
             spot_state.set_failed(
                 self._job_id,
                 failure_type=spot_state.SpotStatus.FAILED_PRECHECKS,
@@ -213,7 +234,7 @@ class SpotController:
         except exceptions.SpotJobReachedMaxRetriesError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
-            logger.error(common_utils.format_exception(e))
+            self.logger.error(common_utils.format_exception(e))
             # The spot job should be marked as FAILED_NO_RESOURCE, as the
             # spot job may be able to launch next time.
             spot_state.set_failed(
@@ -221,10 +242,10 @@ class SpotController:
                 failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE,
                 failure_reason=common_utils.format_exception(e))
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            logger.error(traceback.format_exc())
+            self.logger.error(traceback.format_exc())
             msg = ('Unexpected error occurred: '
                    f'{common_utils.format_exception(e, use_bracket=True)}')
-            logger.error(msg)
+            self.logger.error(msg)
             spot_state.set_failed(
                 self._job_id,
                 failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
