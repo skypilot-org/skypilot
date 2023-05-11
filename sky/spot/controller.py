@@ -140,8 +140,8 @@ class SpotController:
             if job_status in [
                     job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
             ]:
-                # Add a grace period before the check of preemption to avoid false
-                # alarm for job failure.
+                # Add a grace period before the check of preemption to avoid
+                # false alarm for job failure.
                 time.sleep(5)
             # Pull the actual cluster status from the cloud provider to
             # determine whether the cluster is preempted.
@@ -171,6 +171,9 @@ class SpotController:
                     self.logger.info(
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
+                    # TODO(zhwu): Download the logs, and stream them from the local
+                    # disk, instead of streaming them from the spot cluster, to make
+                    # it faster and more reliable.
                     returncode = self._backend.tail_logs(
                         handle, None, spot_job_id=self._job_id)
                     self.logger.info(f'\n== End of logs (ID: {self._job_id}, '
