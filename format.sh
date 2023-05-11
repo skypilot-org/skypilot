@@ -51,7 +51,7 @@ YAPF_EXCLUDES=(
     '--exclude' 'sky/skylet/providers/gcp/**'
     '--exclude' 'sky/skylet/providers/azure/**'
     '--exclude' 'sky/skylet/providers/ibm/**'
-    '--exclude' 'sky/skylet/providers/oci/**'
+    # '--exclude' 'sky/skylet/providers/oci/**'
 )
 
 BLACK_INCLUDES=(

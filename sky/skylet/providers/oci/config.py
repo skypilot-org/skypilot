@@ -32,28 +32,22 @@ class oci_conf:
     MAX_RETRY_COUNT = 3
     RETRY_INTERVAL_BASE_SECONDS = 5
 
-    oci_config = oci.get_oci_config()
-    core_client = oci.get_core_client()
-    net_client = oci.get_net_client()
-    search_client = oci.get_search_client()
-    identity_client = oci.get_identity_client()
-
     @classmethod
-    def get_compartment(cls, cluster_name):
+    def get_compartment(cls, region):
         # Allow task(cluster)-specific compartment/VCN parameters.
         defval = skypilot_config.get_nested(
             ("oci", "default", "compartment_ocid"), None
         )
         compartment = skypilot_config.get_nested(
-            ("oci", cluster_name, "compartment_ocid"), defval
+            ("oci", region, "compartment_ocid"), defval
         )
         return compartment
 
     @classmethod
-    def get_vcn(cls, cluster_name):
+    def get_vcn_subnet(cls, region):
         # Allow task(cluster)-specific compartment/VCN parameters.
-        defval = skypilot_config.get_nested(("oci", "default", "vcn_ocid"), None)
-        vcn = skypilot_config.get_nested(("oci", cluster_name, "vcn_ocid"), defval)
+        defval = skypilot_config.get_nested(("oci", "default", "vcn_subnet"), None)
+        vcn = skypilot_config.get_nested(("oci", region, "vcn_subnet"), defval)
         return vcn
 
     @classmethod

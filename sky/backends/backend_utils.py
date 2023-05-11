@@ -1776,7 +1776,7 @@ def _query_status_oci(
         cluster: str,
         ray_config: Dict[str, Any],  # pylint: disable=unused-argument
 ) -> List[global_user_state.ClusterStatus]:
-    del ray_config  # unused
+    region = ray_config['provider']['region']
 
     status_map = {
         'PROVISIONING': global_user_state.ClusterStatus.INIT,
@@ -1794,7 +1794,7 @@ def _query_status_oci(
 
     status_list = []
     vms = oci_query_helper.query_instances_by_tags(
-        {TAG_RAY_CLUSTER_NAME: cluster})
+        tag_filters={TAG_RAY_CLUSTER_NAME: cluster}, region=region)
     for node in vms:
         vm_status = node.lifecycle_state
         if vm_status in status_map:

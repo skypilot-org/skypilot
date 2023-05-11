@@ -20,6 +20,7 @@ from datetime import datetime
 from sky.skylet.providers.oci.config import oci_conf
 from sky.skylet.providers.oci import utils
 from sky.skylet.providers.oci.query_helper import oci_query_helper
+from sky.adaptors import oci as oci_adaptor
 
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import (
@@ -51,6 +52,7 @@ class OCINodeProvider(NodeProvider):
         self.lock = threading.RLock()
         self.cached_nodes = {}
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
+        self.region = provider_config["region"]
 
         # Do a read-ahead cache loading to improve performance.
         self._get_filtered_nodes({})
@@ -82,7 +84,7 @@ class OCINodeProvider(NodeProvider):
                 )
                 return return_nodes
 
-        insts = oci_query_helper.query_instances_by_tags(tag_filters)
+        insts = oci_query_helper.query_instances_by_tags(tag_filters, self.region)
         for inst in insts:
             logger.debug(f"* Got instance: {inst}")
 
@@ -238,11 +240,11 @@ class OCINodeProvider(NodeProvider):
 
             for reuse_node in reuse_nodes:
                 if reuse_node["status"] == "STOPPING":
-                    get_instance_response = oci_conf.core_client.get_instance(
-                        instance_id=reuse_node["id"]
-                    )
+                    get_instance_response = oci_adaptor.get_core_client(
+                        self.region
+                    ).get_instance(instance_id=reuse_node["id"])
                     oci.wait_until(
-                        oci_conf.core_client,
+                        oci_adaptor.get_core_client(self.region),
                         get_instance_response,
                         "lifecycle_state",
                         "STOPPED",
@@ -250,9 +252,9 @@ class OCINodeProvider(NodeProvider):
 
             for matched_node in reuse_nodes:
                 matched_node_id = matched_node["id"]
-                instance_action_response = oci_conf.core_client.instance_action(
-                    instance_id=matched_node_id, action="START"
-                )
+                instance_action_response = oci_adaptor.get_core_client(
+                    self.region
+                ).instance_action(instance_id=matched_node_id, action="START")
 
                 starting_inst = instance_action_response.data
                 starting_insts.append(
@@ -275,8 +277,8 @@ class OCINodeProvider(NodeProvider):
         # end if self.cache_stopped_nodes:...
         """ Let's create additional new nodes (if neccessary) """
         if count > 0:
-            compartment = oci_conf.get_compartment(self.cluster_name)
-            vcn = oci_conf.get_vcn(self.cluster_name)
+            compartment = oci_conf.get_compartment(self.region)
+            vcn = oci_conf.get_vcn_subnet(self.region)
 
             ocpu_count = 0
             vcpu_str = node_config["VCPUs"]
@@ -333,9 +335,12 @@ class OCINodeProvider(NodeProvider):
                 compartment_id=compartment,
                 listing_id=node_config["AppCatalogListingId"],
                 resource_version=node_config["ResourceVersion"],
+                region=self.region,
             )
             for seq in range(1, count + 1):
-                launch_instance_response = oci_conf.core_client.launch_instance(
+                launch_instance_response = oci_adaptor.get_core_client(
+                    self.region
+                ).launch_instance(
                     launch_instance_details=oci.core.models.LaunchInstanceDetails(
                         availability_domain=node_config["AvailabilityDomain"],
                         compartment_id=compartment,
@@ -370,11 +375,11 @@ class OCINodeProvider(NodeProvider):
 
         for ninst in starting_insts:
             # Waiting for the instance to be RUNNING state
-            get_instance_response = oci_conf.core_client.get_instance(
-                instance_id=ninst["inst_id"]
-            )
+            get_instance_response = oci_adaptor.get_core_client(
+                self.region
+            ).get_instance(instance_id=ninst["inst_id"])
             oci.wait_until(
-                oci_conf.core_client,
+                oci_adaptor.get_core_client(self.region),
                 get_instance_response,
                 "lifecycle_state",
                 "RUNNING",
@@ -392,14 +397,18 @@ class OCINodeProvider(NodeProvider):
     # end create_node(...)
 
     def get_inst_obj(self, inst_info):
-        list_vnic_attachments_response = oci_conf.core_client.list_vnic_attachments(
+        list_vnic_attachments_response = oci_adaptor.get_core_client(
+            self.region
+        ).list_vnic_attachments(
             availability_domain=inst_info["ad"],
             compartment_id=inst_info["compartment"],
             instance_id=inst_info["inst_id"],
         )
 
         vnic = list_vnic_attachments_response.data[0]
-        get_vnic_response = oci_conf.net_client.get_vnic(vnic_id=vnic.vnic_id).data
+        get_vnic_response = (
+            oci_adaptor.get_net_client(self.region).get_vnic(vnic_id=vnic.vnic_id).data
+        )
 
         internal_ip = get_vnic_response.private_ip
         external_ip = get_vnic_response.public_ip
@@ -427,7 +436,9 @@ class OCINodeProvider(NodeProvider):
         retry_count = 0
         while retry_count < oci_conf.MAX_RETRY_COUNT:
             try:
-                update_instance_response = oci_conf.core_client.update_instance(
+                update_instance_response = oci_adaptor.get_core_client(
+                    self.region
+                ).update_instance(
                     instance_id=node_id,
                     update_instance_details=oci.core.models.UpdateInstanceDetails(
                         freeform_tags=combined_tags
@@ -466,17 +477,17 @@ class OCINodeProvider(NodeProvider):
                 "set `cache_stopped_nodes: False` "
                 "under `provider` in the cluster configuration)"
             )
-            instance_action_response = oci_conf.core_client.instance_action(
-                instance_id=node_id, action="STOP"
-            )
+            instance_action_response = oci_adaptor.get_core_client(
+                self.region
+            ).instance_action(instance_id=node_id, action="STOP")
             logger.info(f"* Stopping the instance {instance_action_response.data.id}")
             if node_id in self.cached_nodes:
                 self.cached_nodes[node_id]["status"] = "STOPPED"
             state_word = "Stopped"
         else:
-            terminate_instance_response = oci_conf.core_client.terminate_instance(
-                node_id
-            )
+            terminate_instance_response = oci_adaptor.get_core_client(
+                self.region
+            ).terminate_instance(node_id)
             logger.debug(terminate_instance_response.data)
             if node_id in self.cached_nodes:
                 del self.cached_nodes[node_id]

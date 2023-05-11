@@ -14,7 +14,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky.clouds import service_catalog
 from sky import exceptions
-from sky.adaptors import oci
+from sky.adaptors import oci as oci_adaptor
 from sky.skylet.providers.oci.config import oci_conf
 from sky.skylet.providers.oci import utils as oci_utils
 
@@ -199,13 +199,12 @@ class OCI(clouds.Cloud):
         if zone is None:
             # If zone is not specified, try to get the first zone.
             if zones is None:
-                region_zones_list = service_catalog.get_region_zones_for_instance_type(
+                regions = service_catalog.get_region_zones_for_instance_type(
                     instance_type=resources.instance_type,
                     use_spot=resources.use_spot,
                     clouds='oci')
-                zones = [
-                    r for r in iter(region_zones_list) if r.name == region.name
-                ][0].zones
+                zones = [r for r in iter(regions) if r.name == region.name
+                        ][0].zones
 
             if zones is not None:
                 zone = zones[0].name
@@ -283,12 +282,12 @@ class OCI(clouds.Cloud):
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         try:
-            user = oci_conf.identity_client.get_user(
-                oci_conf.oci_config['user']).data
+            user = oci_adaptor.get_identity_client().get_user(
+                oci_adaptor.get_oci_config()['user']).data
             logger.info('* check_credentials passed.')
             return True, (f'User name is {user.name}'
                           f'Status is {user.lifecycle_state}')
-        except oci.service_exception() as e:
+        except oci_adaptor.service_exception() as e:
             logger.error(f'!!! check_credentials: {str(e)}')
             return False, str(e)
 
