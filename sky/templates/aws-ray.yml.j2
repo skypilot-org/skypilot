@@ -62,11 +62,11 @@ available_node_types:
       UserData: |
         #cloud-config
         users:
-          - name: {{ssh_user}}
+          - name: skypilot:ssh_user
             shell: /bin/bash
             sudo: ALL=(ALL) NOPASSWD:ALL
             ssh-authorized-keys:
-              - {{ssh_public_key_content}}
+              - skypilot:ssh_public_key_content
         bootcmd:
           - echo 'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/10cloudinit-disable
           - apt-get -y purge update-notifier-common ubuntu-release-upgrader-core landscape-common unattended-upgrades
@@ -103,11 +103,11 @@ available_node_types:
       UserData: |
         #cloud-config
         users:
-          - name: {{ssh_user}}
+          - name: skypilot:ssh_user
             shell: /bin/bash
             sudo: ALL=(ALL) NOPASSWD:ALL
             ssh-authorized-keys:
-              - {{ssh_public_key_content}}
+              - skypilot:ssh_public_key_content
         bootcmd:
           - echo 'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/10cloudinit-disable
           - apt-get -y purge update-notifier-common ubuntu-release-upgrader-core landscape-common unattended-upgrades
