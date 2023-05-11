@@ -88,7 +88,7 @@ def get_or_generate_keys() -> Tuple[str, str]:
     return private_key_path, public_key_path
 
 
-def _replace_ssh_info_in_config(config: Dict[str, Any],
+def _replace_cloud_init_ssh_info_in_config(config: Dict[str, Any],
                                 public_key: str) -> Dict[str, Any]:
     config_str = common_utils.dump_yaml_str(config)
     config_str = config_str.replace('skypilot:ssh_user',
@@ -103,10 +103,7 @@ def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r') as f:
         public_key = f.read()
-    # Use cloud init in UserData to set up the authorized_keys to get
-    # around the number of keys limit and permission issues with
-    # ec2.describe_key_pairs.
-    config = _replace_ssh_info_in_config(config, public_key)
+    config = _replace_cloud_init_ssh_info_in_config(config, public_key)
     return config
 
 
