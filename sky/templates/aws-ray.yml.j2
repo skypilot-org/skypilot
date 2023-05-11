@@ -59,6 +59,26 @@ available_node_types:
           #   SpotOptions:
           #       MaxPrice: MAX_HOURLY_PRICE
       {% endif %}
+      # Use cloud init in UserData to set up the authorized_keys to get
+      # around the number of keys limit and permission issues with
+      # ec2.describe_key_pairs.
+      # Note that sudo and shell need to be specified to ensure setup works.
+      # Reference: https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups
+      # The bootcmd is to disable automatic APT updates, to avoid the lock
+      # when user call `apt install` on the node.
+      # Reference: https://unix.stackexchange.com/a/471192
+      UserData: |
+        #cloud-config
+        users:
+          - name: skypilot:ssh_user
+            shell: /bin/bash
+            sudo: ALL=(ALL) NOPASSWD:ALL
+            ssh_authorized_keys:
+              - skypilot:ssh_public_key_content
+        bootcmd:
+          - echo 'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/10cloudinit-disable
+          - apt-get -y purge update-notifier-common ubuntu-release-upgrader-core landscape-common unattended-upgrades
+          - echo "Removed APT" | systemd-cat
       TagSpecifications:
         - ResourceType: instance
           Tags:
@@ -88,6 +108,18 @@ available_node_types:
           #   SpotOptions:
           #       MaxPrice: MAX_HOURLY_PRICE
       {% endif %}
+      UserData: |
+        #cloud-config
+        users:
+          - name: skypilot:ssh_user
+            shell: /bin/bash
+            sudo: ALL=(ALL) NOPASSWD:ALL
+            ssh_authorized_keys:
+              - skypilot:ssh_public_key_content
+        bootcmd:
+          - echo 'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/10cloudinit-disable
+          - apt-get -y purge update-notifier-common ubuntu-release-upgrader-core landscape-common unattended-upgrades
+          - echo "Removed APT" | systemd-cat
       TagSpecifications:
         - ResourceType: instance
           Tags:
@@ -127,17 +159,7 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
-    sudo systemctl stop unattended-upgrades || true;
-    sudo systemctl disable unattended-upgrades || true;
-    sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
-    p=$(mylsof "/var/lib/dpkg/lock-frontend"); echo "$p";
-    sudo kill -9 `echo "$p" | tail -n 1` || true;
-    sudo rm /var/lib/dpkg/lock-frontend;
-    sudo pkill -9 dpkg;
-    sudo pkill -9 apt-get;
-    sudo dpkg --configure --force-overwrite -a;
-    mkdir -p ~/.ssh; touch ~/.ssh/config;
+  - mkdir -p ~/.ssh; touch ~/.ssh/config;
     pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
