@@ -106,8 +106,6 @@ def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Use cloud init in UserData to set up the authorized_keys to get
     # around the number of keys limit and permission issues with
     # ec2.describe_key_pairs.
-    # Note that sudo and shell need to be specified to ensure setup works.
-    # Reference: https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups  # pylint: disable=line-too-long
     config = _replace_ssh_info_in_config(config, public_key)
     return config
 

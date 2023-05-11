@@ -59,6 +59,14 @@ available_node_types:
           #   SpotOptions:
           #       MaxPrice: MAX_HOURLY_PRICE
       {% endif %}
+      # Use cloud init in UserData to set up the authorized_keys to get
+      # around the number of keys limit and permission issues with
+      # ec2.describe_key_pairs.
+      # Note that sudo and shell need to be specified to ensure setup works.
+      # Reference: https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups
+      # The bootcmd is to disable automatic APT updates, to avoid the lock
+      # when user call `apt install` on the node.
+      # Reference: https://unix.stackexchange.com/a/471192
       UserData: |
         #cloud-config
         users:
