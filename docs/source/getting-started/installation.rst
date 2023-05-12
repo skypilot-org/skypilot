@@ -5,9 +5,9 @@ Install SkyPilot using pip:
 
 .. code-block:: console
 
-  $ # SkyPilot requires python >= 3.6.
+  $ # SkyPilot requires python >= 3.7. For Apple Silicon, use >= 3.8.
   $ # Recommended: use a new conda env to avoid package conflicts.
-  $ conda create -y -n sky python=3.7
+  $ conda create -y -n sky python=3.8
   $ conda activate sky
 
   $ # Choose an extra (default: [aws])
@@ -16,7 +16,6 @@ Install SkyPilot using pip:
   $ # pip install "skypilot[azure]"
   $ # pip install "skypilot[lambda]"
   $ # pip install "skypilot[all]"
-
 
 SkyPilot currently supports five cloud providers: AWS, GCP, Azure, Lambda Cloud and Cloudflare (R2).
 If you only have access to certain clouds, use any combination of

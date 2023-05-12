@@ -16,7 +16,7 @@ We use GitHub to track issues and features. For new contributors, we recommend l
 
 ### Installing SkyPilot for development
 ```bash
-# SkyPilot requires python >= 3.6.
+# SkyPilot requires python >= 3.7.
 # You can just install the dependencies for
 # certain clouds, e.g., ".[aws,azure,gcp,lambda]"
 pip install -e ".[all]"
