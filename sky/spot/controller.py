@@ -170,7 +170,7 @@ class SpotController:
                     returncode = self._backend.tail_logs(
                         handle, None, spot_job_id=self._job_id)
                     logger.info(f'\n== End of logs (ID: {self._job_id}, '
-                                f'tail_log returncode: {returncode}) ==')
+                                f'tail_logs returncode: {returncode}) ==')
                     spot_status_to_set = spot_state.SpotStatus.FAILED
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
                         spot_status_to_set = spot_state.SpotStatus.FAILED_SETUP
