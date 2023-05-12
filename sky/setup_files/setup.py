@@ -118,8 +118,10 @@ extras_require: Dict[str, List[str]] = {
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
     # azure-identity is needed in node_provider.
+    # We need azure-identity>=1.13.0 to enable the customization of the
+    # timeout of AzureCliCredential.
     'azure': [
-        'azure-cli>=2.31.0', 'azure-core', 'azure-identity',
+        'azure-cli>=2.31.0', 'azure-core', 'azure-identity>=1.13.0',
         'azure-mgmt-network'
     ],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
