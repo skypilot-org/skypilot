@@ -88,8 +88,8 @@ class SpotController:
                 3. Any unexpected error happens during the `sky.launch`.
         Other exceptions may be raised depending on the backend.
         """
-        logger.info(f'Started monitoring spot task {self._task_name} '
-                    f'(id: {self._job_id})')
+        logger.info(f'Started monitoring spot job {self._job_id}, '
+                    f'name: {self._task_name!r}.')
         spot_state.set_starting(self._job_id)
         job_submitted_at = self._strategy_executor.launch()
 
@@ -318,7 +318,7 @@ def start(job_id, task_yaml, retry_until_up):
         cancelling = True
     finally:
         if controller_process is not None:
-            logger.info(f'Killing controller process {controller_process.pid}')
+            logger.info(f'Killing controller process {controller_process.pid}.')
             # NOTE: it is ok to kill or join a killed process.
             # Kill the controller process first; if its child process is
             # killed first, then the controller process will raise errors.
@@ -328,7 +328,7 @@ def start(job_id, task_yaml, retry_until_up):
             controller_process.join()
             logger.info(f'Controller process {controller_process.pid} killed.')
 
-        logger.info(f'Cleaning up spot clusters of job {job_id}.')
+        logger.info(f'Cleaning up spot cluster of job {job_id}.')
         # NOTE: Originally, we send an interruption signal to the controller
         # process and the controller process handles cleanup. However, we
         # figure out the behavior differs from cloud to cloud
@@ -337,7 +337,7 @@ def start(job_id, task_yaml, retry_until_up):
         # But anyway, a clean solution is killing the controller process
         # directly, and then cleanup the cluster state.
         _cleanup(job_id, task_yaml=task_yaml)
-        logger.info(f'Spot clusters of job {job_id} has been taken down.')
+        logger.info(f'Spot cluster of job {job_id} has been taken down.')
 
         if cancelling:
             spot_state.set_cancelled(job_id)
