@@ -64,15 +64,18 @@ available_node_types:
                 - name: skypilot:ssh_user
                   shell: /bin/bash
                   sudo: ALL=(ALL) NOPASSWD:ALL
-                  ssh-authorized-keys:
+                  ssh_authorized_keys:
                     - skypilot:ssh_public_key_content
-              bootcmd:
-                - echo 'ClientAliveInterval 720' >> /etc/ssh/sshd_config
-                - echo 'ClientAliveCountMax 720' >> /etc/ssh/sshd_config
-                - systemctl restart sshd
-                - echo 'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/10cloudinit-disable
-                - apt-get -y purge update-notifier-common ubuntu-release-upgrader-core landscape-common unattended-upgrades
-                - echo "Removed APT" | systemd-cat
+              write_files:
+                - path: /etc/apt/apt.conf.d/20auto-upgrades
+                  content: |
+                    APT::Periodic::Update-Package-Lists "0";
+                    APT::Periodic::Download-Upgradeable-Packages "0";
+                    APT::Periodic::AutocleanInterval "0";
+                    APT::Periodic::Unattended-Upgrade "0";
+                - path: /etc/apt/apt.conf.d/10cloudinit-disable
+                  content: |
+                    APT::Periodic::Enable "0";
   {%- if gpu is not none %}
     {%- if 'tesla-k80' in gpu %}
               runcmd:
@@ -128,15 +131,18 @@ available_node_types:
                 - name: skypilot:ssh_user
                   shell: /bin/bash
                   sudo: ALL=(ALL) NOPASSWD:ALL
-                  ssh-authorized-keys:
+                  ssh_authorized_keys:
                     - skypilot:ssh_public_key_content
-              bootcmd:
-                - echo 'ClientAliveInterval 720' >> /etc/ssh/sshd_config
-                - echo 'ClientAliveCountMax 720' >> /etc/ssh/sshd_config
-                - systemctl restart sshd
-                - echo 'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/10cloudinit-disable
-                - apt-get -y purge update-notifier-common ubuntu-release-upgrader-core landscape-common unattended-upgrades
-                - echo "Removed APT" | systemd-cat
+              write_files:
+                - path: /etc/apt/apt.conf.d/20auto-upgrades
+                  content: |
+                    APT::Periodic::Update-Package-Lists "0";
+                    APT::Periodic::Download-Upgradeable-Packages "0";
+                    APT::Periodic::AutocleanInterval "0";
+                    APT::Periodic::Unattended-Upgrade "0";
+                - path: /etc/apt/apt.conf.d/10cloudinit-disable
+                  content: |
+                    APT::Periodic::Enable "0";
     {%- if gpu is not none %}
       {%- if 'tesla-k80' in gpu %}
               runcmd:
