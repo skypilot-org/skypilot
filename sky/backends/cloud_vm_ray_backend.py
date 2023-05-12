@@ -2586,11 +2586,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             ray_port_file = constants.SKY_REMOTE_RAY_PORT_FILE
             job_submit_cmd = (
-                f'RAY_DASHBOARD_PORT=$(jq ".ray_dashboard_port // empty" {ray_port_file} 2> /dev/null); '
+                'RAY_DASHBOARD_PORT=$(jq ".ray_dashboard_port // empty" '
+                f'{ray_port_file} 2> /dev/null); '
                 'RAY_DASHBOARD_PORT=${RAY_DASHBOARD_PORT:-8265};'
                 f'{cd} && mkdir -p {remote_log_dir} && ray job submit '
-                f'--address=http://127.0.0.1:$RAY_DASHBOARD_PORT --submission-id {ray_job_id} '
-                '--no-wait '
+                '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
+                f'--submission-id {ray_job_id} --no-wait '
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
         returncode, stdout, stderr = self.run_on_head(handle,
