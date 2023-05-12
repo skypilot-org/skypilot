@@ -39,18 +39,16 @@ class oci_query_helper:
         qv = oci.resource_search.models.StructuredSearchDetails(
             query=qv_str,
             type="Structured",
-            matching_context_type=oci.resource_search.models.SearchDetails.MATCHING_CONTEXT_TYPE_NONE,
+            matching_context_type=oci.resource_search.models.SearchDetails.
+            MATCHING_CONTEXT_TYPE_NONE,
         )
 
         list_instances_response = oci_adaptor.get_search_client(
-            region
-        ).search_resources(qv)
+            region).search_resources(qv)
         result_set = list_instances_response.data.items
         logger.debug(f"* Query result: {result_set}")
 
         return result_set
-
-    # end query_instances_by_tags(...)
 
     @classmethod
     def terminate_instances_by_tags(cls, tag_filters, region) -> int:
@@ -78,32 +76,30 @@ class oci_query_helper:
 
         return fail_count
 
-    # end terminate_instances_by_tags(...)
-
     @classmethod
     @utils.debug_enabled(logger=logger)
-    def subscribe_image(cls, compartment_id, listing_id, resource_version, region):
-        if (
-            pd.isna(listing_id)
-            or listing_id.strip() == "None"
-            or listing_id.strip() == "nan"
-        ):
+    def subscribe_image(cls, compartment_id, listing_id, resource_version,
+                        region):
+        if (pd.isna(listing_id) or listing_id.strip() == "None" or
+                listing_id.strip() == "nan"):
             logger.debug("* listing_id not specified.")
             return
 
         core_client = oci_adaptor.get_core_client(region)
         try:
             agreements_response = core_client.get_app_catalog_listing_agreements(
-                listing_id=listing_id, resource_version=resource_version
-            )
+                listing_id=listing_id, resource_version=resource_version)
             agreements = agreements_response.data
 
             core_client.create_app_catalog_subscription(
-                create_app_catalog_subscription_details=oci.core.models.CreateAppCatalogSubscriptionDetails(
+                create_app_catalog_subscription_details=oci.core.models.
+                CreateAppCatalogSubscriptionDetails(
                     compartment_id=compartment_id,
                     listing_id=listing_id,
-                    listing_resource_version=agreements.listing_resource_version,
-                    oracle_terms_of_use_link=agreements.oracle_terms_of_use_link,
+                    listing_resource_version=agreements.
+                    listing_resource_version,
+                    oracle_terms_of_use_link=agreements.
+                    oracle_terms_of_use_link,
                     time_retrieved=datetime.strptime(
                         re.sub(
                             "\d{3}\+\d{2}\:\d{2}",
@@ -115,15 +111,12 @@ class oci_query_helper:
                     ),
                     signature=agreements.signature,
                     eula_link=agreements.eula_link,
-                )
-            )
+                ))
         except Exception as e:
             logger.critical(
                 f"! subscribe_image: {listing_id} - {resource_version} ... [Failed]"
-                f"! Error message: {str(e)}"
-            )
+                f"! Error message: {str(e)}")
             raise RuntimeError("ERR: Image subscription error!")
 
-        logger.debug(f"* subscribe_image: {listing_id} - {resource_version} ... [Done]")
-
-    # end subscribe_image(...)
+        logger.debug(
+            f"* subscribe_image: {listing_id} - {resource_version} ... [Done]")

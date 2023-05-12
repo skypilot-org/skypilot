@@ -4,7 +4,9 @@ import functools
 
 
 def debug_enabled(logger: Logger):
+
     def decorate(f):
+
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
             dt_str = datetime.now().strftime("%Y%m%d%H%M%S.%f")

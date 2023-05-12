@@ -316,11 +316,10 @@ class OCI(clouds.Cloud):
             accelerator, acc_count, region, zone, 'oci')
 
     def get_image_size(self, image_id: str, region: Optional[str]) -> float:
-        """ We ignore checking the image size because most of situations the
-            boot volume size is larger than the image size. For specific rare
-            situations, the configuration/setup commands should make sure the
-            correct size of the disk.
-        """
+        # We ignore checking the image size because most of situations the
+        # boot volume size is larger than the image size. For specific rare
+        # situations, the configuration/setup commands should make sure the
+        # correct size of the disk.
         return 0
 
     def _get_image_id(

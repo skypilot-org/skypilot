@@ -36,17 +36,16 @@ class oci_conf:
     def get_compartment(cls, region):
         # Allow task(cluster)-specific compartment/VCN parameters.
         defval = skypilot_config.get_nested(
-            ("oci", "default", "compartment_ocid"), None
-        )
+            ("oci", "default", "compartment_ocid"), None)
         compartment = skypilot_config.get_nested(
-            ("oci", region, "compartment_ocid"), defval
-        )
+            ("oci", region, "compartment_ocid"), defval)
         return compartment
 
     @classmethod
     def get_vcn_subnet(cls, region):
         # Allow task(cluster)-specific compartment/VCN parameters.
-        defval = skypilot_config.get_nested(("oci", "default", "vcn_subnet"), None)
+        defval = skypilot_config.get_nested(("oci", "default", "vcn_subnet"),
+                                            None)
         vcn = skypilot_config.get_nested(("oci", region, "vcn_subnet"), defval)
         return vcn
 
@@ -56,13 +55,13 @@ class oci_conf:
         # default image tag (for gpu instances) in the sky's user-config file (if not specified, use the hardcode
         # one at last)
         return skypilot_config.get_nested(
-            ("oci", "default", "image_tag_gpu"), "skypilot:oci-ubuntu-NVIDIA-VMI-20_04"
-        )
+            ("oci", "default", "image_tag_gpu"),
+            "skypilot:oci-ubuntu-NVIDIA-VMI-20_04")
 
     @classmethod
     def get_default_image_tag(cls) -> str:
         # Get the default image tag. Instead of hardcoding, we give a choice to set the default image tag
         # in the sky's user-config file. (if not specified, use the hardcode one at last)
         return skypilot_config.get_nested(
-            ("oci", "default", "image_tag_general"), "skypilot:oci-ubuntu-20_04"
-        )
+            ("oci", "default", "image_tag_general"),
+            "skypilot:oci-ubuntu-20_04")
