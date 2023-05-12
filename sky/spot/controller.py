@@ -23,7 +23,8 @@ from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
 # Use the explicit logger name so that the logger is under the
-# `sky.spot.controller` namespace when executed directly.
+# `sky.spot.controller` namespace when executed directly, so as
+# to inherit the setup from the `sky` logger.
 logger = sky_logging.init_logger('sky.spot.controller')
 
 
@@ -38,13 +39,6 @@ class SpotController:
 
     def __init__(self, job_id: int, task_yaml: str,
                  retry_until_up: bool) -> None:
-
-        # Re-initialize the logger, as this is a new process.
-        # Using the same logger will cause the log not being printed to the
-        # console.
-        # Create a logger for this process
-        self.logger = sky_logging.init_logger(
-            f'{logger.name}.controller_process')
 
         self._job_id = job_id
         self._task, self._task_name = _get_task_and_name(task_yaml)
@@ -67,7 +61,7 @@ class SpotController:
             self._task_name,
             self._backend.run_timestamp,
             resources_str=backend_utils.get_task_resources_str(self._task))
-        self.logger.info(
+        logger.info(
             f'Submitted spot job; SKYPILOT_JOB_ID: {job_id_env_var}')
         self._cluster_name = spot_utils.generate_spot_cluster_name(
             self._task_name, self._job_id)
@@ -96,7 +90,7 @@ class SpotController:
                 3. Any unexpected error happens during the `sky.launch`.
         Other exceptions may be raised depending on the backend.
         """
-        self.logger.info(f'Started monitoring spot task {self._task_name} '
+        logger.info(f'Started monitoring spot task {self._task_name} '
                          f'(id: {self._job_id})')
         spot_state.set_starting(self._job_id)
         job_submitted_at = self._strategy_executor.launch()
@@ -110,7 +104,7 @@ class SpotController:
             try:
                 backend_utils.check_network_connection()
             except exceptions.NetworkError:
-                self.logger.info(
+                logger.info(
                     'Network is not available. Retrying again in '
                     f'{spot_utils.JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
                 continue
@@ -155,7 +149,7 @@ class SpotController:
                 # Spot recovery is needed (will be done later in the code).
                 cluster_status_str = ('' if cluster_status is None else
                                       f' (status: {cluster_status.value})')
-                self.logger.info(
+                logger.info(
                     f'Cluster is preempted{cluster_status_str}. Recovering...')
             else:
                 if job_status is not None and not job_status.is_terminal():
@@ -168,7 +162,7 @@ class SpotController:
                     end_time = spot_utils.get_job_timestamp(self._backend,
                                                             self._cluster_name,
                                                             get_end_time=True)
-                    self.logger.info(
+                    logger.info(
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
                     # TODO(zhwu): Download the logs, and stream them from the
@@ -176,7 +170,7 @@ class SpotController:
                     # cluster, to make it faster and more reliable.
                     returncode = self._backend.tail_logs(
                         handle, None, spot_job_id=self._job_id)
-                    self.logger.info(f'\n== End of logs (ID: {self._job_id}, '
+                    logger.info(f'\n== End of logs (ID: {self._job_id}, '
                                      f'tail_log returncode: {returncode}) ==')
                     spot_status_to_set = spot_state.SpotStatus.FAILED
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
@@ -194,7 +188,7 @@ class SpotController:
                 # job status. Try to recover the job (will not restart the
                 # cluster, if the cluster is healthy).
                 assert job_status is None, job_status
-                self.logger.info('Failed to fetch the job status while the '
+                logger.info('Failed to fetch the job status while the '
                                  'cluster is healthy. Try to recover the job '
                                  '(the cluster will not be restarted).')
 
@@ -205,7 +199,7 @@ class SpotController:
                 if resources.need_cleanup_after_preemption():
                     # Some spot resource (e.g., Spot TPU VM) may need to be
                     # cleaned up after preemption.
-                    self.logger.info(
+                    logger.info(
                         'Cleaning up the preempted spot cluster...')
                     recovery_strategy.terminate_cluster(self._cluster_name)
 
@@ -226,7 +220,7 @@ class SpotController:
             failure_reason = ('; '.join(
                 common_utils.format_exception(reason, use_bracket=True)
                 for reason in e.reasons))
-            self.logger.error(failure_reason)
+            logger.error(failure_reason)
             spot_state.set_failed(
                 self._job_id,
                 failure_type=spot_state.SpotStatus.FAILED_PRECHECKS,
@@ -234,7 +228,7 @@ class SpotController:
         except exceptions.SpotJobReachedMaxRetriesError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
-            self.logger.error(common_utils.format_exception(e))
+            logger.error(common_utils.format_exception(e))
             # The spot job should be marked as FAILED_NO_RESOURCE, as the
             # spot job may be able to launch next time.
             spot_state.set_failed(
@@ -242,10 +236,10 @@ class SpotController:
                 failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE,
                 failure_reason=common_utils.format_exception(e))
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            self.logger.error(traceback.format_exc())
+            logger.error(traceback.format_exc())
             msg = ('Unexpected error occurred: '
                    f'{common_utils.format_exception(e, use_bracket=True)}')
-            self.logger.error(msg)
+            logger.error(msg)
             spot_state.set_failed(
                 self._job_id,
                 failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
