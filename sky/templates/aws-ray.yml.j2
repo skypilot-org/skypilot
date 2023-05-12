@@ -66,7 +66,7 @@ available_node_types:
       # Reference: https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups
       # The bootcmd is to disable automatic APT updates, to avoid the lock
       # when user call `apt install` on the node.
-      # Reference: https://unix.stackexchange.com/a/471192
+      # Reference: https://askubuntu.com/questions/1322292/how-do-i-turn-off-automatic-updates-completely-and-for-real
       UserData: |
         #cloud-config
         users:
@@ -75,13 +75,16 @@ available_node_types:
             sudo: ALL=(ALL) NOPASSWD:ALL
             ssh_authorized_keys:
               - skypilot:ssh_public_key_content
-        runcmd:
-          - echo 'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/10cloudinit-disable
-          - echo "APT::Periodic::Update-Package-Lists \"0\";" >> /etc/apt/apt.conf.d/20auto-upgrades
-          - echo "APT::Periodic::Download-Upgradeable-Packages \"0\";" >> /etc/apt/apt.conf.d/20auto-upgrades
-          - echo "APT::Periodic::AutocleanInterval \"0\";" >> /etc/apt/apt.conf.d/20auto-upgrades
-          - echo "APT::Periodic::Unattended-Upgrade \"0\";" >> /etc/apt/apt.conf.d/20auto-upgrades
-          - echo "Removed APT" | systemd-cat
+        write_files:
+          - path: /etc/apt/apt.conf.d/20auto-upgrades
+            content: |
+              APT::Periodic::Update-Package-Lists "0";
+              APT::Periodic::Download-Upgradeable-Packages "0";
+              APT::Periodic::AutocleanInterval "0";
+              APT::Periodic::Unattended-Upgrade "0";
+          - path: /etc/apt/apt.conf.d/10cloudinit-disable
+            content: |
+              APT::Periodic::Enable "0";
       TagSpecifications:
         - ResourceType: instance
           Tags:
@@ -119,13 +122,16 @@ available_node_types:
             sudo: ALL=(ALL) NOPASSWD:ALL
             ssh_authorized_keys:
               - skypilot:ssh_public_key_content
-        runcmd:
-          - echo 'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/10cloudinit-disable
-          - echo "APT::Periodic::Update-Package-Lists \"0\";" >> /etc/apt/apt.conf.d/20auto-upgrades
-          - echo "APT::Periodic::Download-Upgradeable-Packages \"0\";" >> /etc/apt/apt.conf.d/20auto-upgrades
-          - echo "APT::Periodic::AutocleanInterval \"0\";" >> /etc/apt/apt.conf.d/20auto-upgrades
-          - echo "APT::Periodic::Unattended-Upgrade \"0\";" >> /etc/apt/apt.conf.d/20auto-upgrades
-          - echo "Removed APT" | systemd-cat
+        write_files:
+          - path: /etc/apt/apt.conf.d/20auto-upgrades
+            content: |
+              APT::Periodic::Update-Package-Lists "0";
+              APT::Periodic::Download-Upgradeable-Packages "0";
+              APT::Periodic::AutocleanInterval "0";
+              APT::Periodic::Unattended-Upgrade "0";
+          - path: /etc/apt/apt.conf.d/10cloudinit-disable
+            content: |
+              APT::Periodic::Enable "0";
       TagSpecifications:
         - ResourceType: instance
           Tags:
