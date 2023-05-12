@@ -1,6 +1,7 @@
 """Module to enable a single SkyPilot key for all VMs in each cloud."""
 import copy
 import functools
+import json
 import os
 import re
 import socket
@@ -132,92 +133,30 @@ def _wait_for_compute_global_operation(project_name: str, operation_name: str,
     return result
 
 
-# Snippets of code inspired from
-# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/config.py
-# Takes in config, a yaml dict and outputs a postprocessed dict
-# TODO(weilin): refactor the implementation to incorporate Ray autoscaler to
-# avoid duplicated codes.
-# Retry for the GCP as sometimes there will be connection reset by peer error.
-@common_utils.retry
-def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    private_key_path, public_key_path = get_or_generate_keys()
-    config = copy.deepcopy(config)
+def _maybe_gcp_add_ssh_key_to_account(compute, project, config: Dict[str, Any],
+                                      os_login_enabled: bool):
+    """Add ssh key to GCP account if using Debian image without cloud-init.
 
-    project_id = config['provider']['project_id']
-    compute = gcp.build('compute',
-                        'v1',
-                        credentials=None,
-                        cache_discovery=False)
+    This function is for backward compatibility. It is only used when the user
+    is using the old Debian image without cloud-init. In this case, we need to
+    add the ssh key to the GCP account so that we can ssh into the instance.
+    """
+    private_key_path, public_key_path = get_or_generate_keys()
     user = config['auth']['ssh_user']
 
-    try:
-        project = compute.projects().get(project=project_id).execute()
-    except gcp.http_error_exception() as e:
-        # Can happen for a new project where Compute Engine API is disabled.
-        #
-        # Example message:
-        # 'Compute Engine API has not been used in project 123456 before
-        # or it is disabled. Enable it by visiting
-        # https://console.developers.google.com/apis/api/compute.googleapis.com/overview?project=123456
-        # then retry. If you enabled this API recently, wait a few minutes for
-        # the action to propagate to our systems and retry.'
-        if ' API has not been used in project' in e.reason:
-            match = re.fullmatch(r'(.+)(https://.*project=\d+) (.+)', e.reason)
-            if match is None:
-                raise  # This should not happen.
-            yellow = colorama.Fore.YELLOW
-            reset = colorama.Style.RESET_ALL
-            bright = colorama.Style.BRIGHT
-            dim = colorama.Style.DIM
-            logger.error(
-                f'{yellow}Certain GCP APIs are disabled for the GCP project '
-                f'{project_id}.{reset}')
-            logger.error('Details:')
-            logger.error(f'{dim}{match.group(1)}{reset}\n'
-                         f'{dim}    {match.group(2)}{reset}\n'
-                         f'{dim}{match.group(3)}{reset}')
-            logger.error(
-                f'{yellow}To fix, enable these APIs by running:{reset} '
-                f'{bright}sky check{reset}')
-            sys.exit(1)
-        else:
-            raise
-    except socket.timeout:
-        logger.error('Socket timed out when trying to get the GCP project. '
-                     'Please check your network connection.')
-        raise
-
-    project_oslogin: str = next(  # type: ignore
-        (item for item in project['commonInstanceMetadata'].get('items', [])
-         if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
-
-    if project_oslogin.lower() == 'true':
-        # project.
-        logger.info(
-            f'OS Login is enabled for GCP project {project_id}. Running '
-            'additional authentication steps.')
-        # Read the account information from the credential file, since the user
-        # should be set according the account, when the oslogin is enabled.
-        config_path = os.path.expanduser(clouds.gcp.GCP_CONFIG_PATH)
-        sky_backup_config_path = os.path.expanduser(
-            clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH)
-        assert os.path.exists(sky_backup_config_path), (
-            'GCP credential backup file '
-            f'{sky_backup_config_path!r} does not exist.')
-
-        with open(sky_backup_config_path, 'r') as infile:
-            for line in infile:
-                if line.startswith('account'):
-                    account = line.split('=')[1].strip()
-                    break
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        'GCP authentication failed, as the oslogin is enabled '
-                        f'but the file {config_path} does not contain the '
-                        'account information.')
-        config['auth']['ssh_user'] = account.replace('@', '_').replace('.', '_')
-
+    node_config = config.get('available_node_types',
+                             {}).get('ray_head_default',
+                                     {}).get('node_config', {})
+    image_id = node_config.get('disks', [{}])[0].get('initializeParams',
+                                                     {}).get('sourceImage')
+    # image_id is None when TPU VM is used, as TPU VM does not use image.
+    if image_id is not None and 'debian' not in image_id.lower():
+        image_infos = clouds.GCP.get_image_infos(image_id)
+        if 'debian' not in json.dumps(image_infos).lower():
+            # The non-Debian images have the ssh key setup by cloud-init.
+            return
+    logger.info('Adding ssh key to GCP account.')
+    if os_login_enabled:
         # Add ssh key to GCP with oslogin
         subprocess.run(
             'gcloud compute os-login ssh-keys add '
@@ -246,9 +185,6 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # OS Login is not enabled for the project. Add the ssh key directly to the
     # metadata.
-    # TODO(zhwu): Use cloud init to add ssh public key, to avoid the permission
-    # issue. A blocker is that the cloud init is not installed in the debian
-    # image by default.
     project_keys: str = next(  # type: ignore
         (item for item in project['commonInstanceMetadata'].get('items', [])
          if item['key'] == 'ssh-keys'), {}).get('value', '')
@@ -293,6 +229,101 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             body=project['commonInstanceMetadata']).execute()
         _wait_for_compute_global_operation(project['name'], operation['name'],
                                            compute)
+
+
+# Snippets of code inspired from
+# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/config.py
+# Takes in config, a yaml dict and outputs a postprocessed dict
+# TODO(weilin): refactor the implementation to incorporate Ray autoscaler to
+# avoid duplicated codes.
+# Retry for the GCP as sometimes there will be connection reset by peer error.
+@common_utils.retry
+def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r') as f:
+        public_key = f.read()
+    config = copy.deepcopy(config)
+
+    project_id = config['provider']['project_id']
+    compute = gcp.build('compute',
+                        'v1',
+                        credentials=None,
+                        cache_discovery=False)
+
+    try:
+        project = compute.projects().get(project=project_id).execute()
+    except gcp.http_error_exception() as e:
+        # Can happen for a new project where Compute Engine API is disabled.
+        #
+        # Example message:
+        # 'Compute Engine API has not been used in project 123456 before
+        # or it is disabled. Enable it by visiting
+        # https://console.developers.google.com/apis/api/compute.googleapis.com/overview?project=123456
+        # then retry. If you enabled this API recently, wait a few minutes for
+        # the action to propagate to our systems and retry.'
+        if ' API has not been used in project' in e.reason:
+            match = re.fullmatch(r'(.+)(https://.*project=\d+) (.+)', e.reason)
+            if match is None:
+                raise  # This should not happen.
+            yellow = colorama.Fore.YELLOW
+            reset = colorama.Style.RESET_ALL
+            bright = colorama.Style.BRIGHT
+            dim = colorama.Style.DIM
+            logger.error(
+                f'{yellow}Certain GCP APIs are disabled for the GCP project '
+                f'{project_id}.{reset}')
+            logger.error('Details:')
+            logger.error(f'{dim}{match.group(1)}{reset}\n'
+                         f'{dim}    {match.group(2)}{reset}\n'
+                         f'{dim}{match.group(3)}{reset}')
+            logger.error(
+                f'{yellow}To fix, enable these APIs by running:{reset} '
+                f'{bright}sky check{reset}')
+            sys.exit(1)
+        else:
+            raise
+    except socket.timeout:
+        logger.error('Socket timed out when trying to get the GCP project. '
+                     'Please check your network connection.')
+        raise
+
+    project_oslogin: str = next(  # type: ignore
+        (item for item in project['commonInstanceMetadata'].get('items', [])
+         if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
+
+    oslogin_enabled = project_oslogin.lower() == 'true'
+    if oslogin_enabled:
+        # project.
+        logger.info(
+            f'OS Login is enabled for GCP project {project_id}. Running '
+            'additional authentication steps.')
+        # Read the account information from the credential file, since the user
+        # should be set according the account, when the oslogin is enabled.
+        config_path = os.path.expanduser(clouds.gcp.GCP_CONFIG_PATH)
+        sky_backup_config_path = os.path.expanduser(
+            clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH)
+        assert os.path.exists(sky_backup_config_path), (
+            'GCP credential backup file '
+            f'{sky_backup_config_path!r} does not exist.')
+
+        with open(sky_backup_config_path, 'r') as infile:
+            for line in infile:
+                if line.startswith('account'):
+                    account = line.split('=')[1].strip()
+                    break
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'GCP authentication failed, as the oslogin is enabled '
+                        f'but the file {config_path} does not contain the '
+                        'account information.')
+        config['auth']['ssh_user'] = account.replace('@', '_').replace('.', '_')
+
+    config = _replace_cloud_init_ssh_info_in_config(config, public_key)
+    # This function is for backward compatibility, as the user using the old
+    # Debian-based image may not have the cloud-init enabled, and we need to
+    # add the ssh key to the account.
+    _maybe_gcp_add_ssh_key_to_account(compute, project, config, oslogin_enabled)
     return config
 
 

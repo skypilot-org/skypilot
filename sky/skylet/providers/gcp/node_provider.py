@@ -362,3 +362,53 @@ class GCPNodeProvider(NodeProvider):
     @staticmethod
     def bootstrap_config(cluster_config):
         return bootstrap_gcp(cluster_config)
+
+    def get_command_runner(
+        self,
+        log_prefix,
+        node_id,
+        auth_config,
+        cluster_name,
+        process_runner,
+        use_internal_ip,
+        docker_config,
+    ):
+        from ray.autoscaler._private.command_runner import (
+            DockerCommandRunner,
+            SSHCommandRunner,
+        )
+
+        class SSHCommandRunnerWithRetry(SSHCommandRunner):
+            def _run_helper(
+                self, final_cmd, with_output=False, exit_on_fail=False, silent=False
+            ):
+                """Wrapper around _run_helper to retry on failure."""
+                retry_cnt = 0
+                import click
+
+                while True:
+                    try:
+                        return super()._run_helper(
+                            final_cmd, with_output, exit_on_fail, silent
+                        )
+                    except click.ClickException as e:
+                        retry_cnt += 1
+                        if retry_cnt > 3:
+                            raise e
+                        logger.info(f"Retrying SSH command in 5 seconds: {e}")
+                        time.sleep(5)
+
+        # Adopted from super().get_command_runner()
+        common_args = {
+            "log_prefix": log_prefix,
+            "node_id": node_id,
+            "provider": self,
+            "auth_config": auth_config,
+            "cluster_name": cluster_name,
+            "process_runner": process_runner,
+            "use_internal_ip": use_internal_ip,
+        }
+        if docker_config and docker_config["container_name"] != "":
+            return DockerCommandRunner(docker_config, **common_args)
+        else:
+            return SSHCommandRunnerWithRetry(**common_args)

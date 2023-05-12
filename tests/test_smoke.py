@@ -1107,6 +1107,7 @@ def test_gcp_start_stop():
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -1783,6 +1784,7 @@ def test_azure_start_stop_two_nodes():
 
 
 # ---------- Testing env for disk tier ----------
+@pytest.mark.aws
 def test_aws_disk_tier():
 
     def _get_aws_query_command(region, instance_id, field, expected):
@@ -1811,11 +1813,11 @@ def test_aws_disk_tier():
                                          specs['disk_throughput']))),
             ],
             f'sky down -y {name}',
-            timeout=10 * 60,  # 10 mins  (it takes around ~6 mins)
+            timeout=12 * 60,
         )
         run_one_test(test)
 
-
+@pytest.mark.gcp
 def test_gcp_disk_tier():
     for disk_tier in ['low', 'medium', 'high']:
         type = GCP._get_disk_type(disk_tier)
@@ -1837,6 +1839,7 @@ def test_gcp_disk_tier():
         run_one_test(test)
 
 
+@pytest.mark.azure
 def test_azure_disk_tier():
     for disk_tier in ['low', 'medium']:
         type = Azure._get_disk_type(disk_tier)

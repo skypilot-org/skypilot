@@ -5,7 +5,7 @@ import os
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -235,17 +235,15 @@ class GCP(clouds.Cloud):
     def is_same_cloud(self, other):
         return isinstance(other, GCP)
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
-        del region  # unused
-        if image_id.startswith('skypilot:'):
-            return DEFAULT_GCP_IMAGE_GB
+    @classmethod
+    def get_image_infos(cls, image_id) -> Dict[str, Any]:
         try:
             compute = gcp.build('compute',
                                 'v1',
                                 credentials=None,
                                 cache_discovery=False)
         except gcp.credential_error_exception() as e:
-            return DEFAULT_GCP_IMAGE_GB
+            return {}
         try:
             image_attrs = image_id.split('/')
             if len(image_attrs) == 1:
@@ -254,7 +252,7 @@ class GCP(clouds.Cloud):
             image_name = image_attrs[-1]
             image_infos = compute.images().get(project=project,
                                                image=image_name).execute()
-            return float(image_infos['diskSizeGb'])
+            return image_infos
         except gcp.http_error_exception() as e:
             if e.resp.status == 403:
                 with ux_utils.print_exception_no_traceback():
@@ -265,6 +263,15 @@ class GCP(clouds.Cloud):
                     raise ValueError(f'Image {image_id!r} not found in '
                                      'GCP.') from None
             raise
+
+    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+        del region  # unused
+        if image_id.startswith('skypilot:'):
+            return DEFAULT_GCP_IMAGE_GB
+        image_infos = self.get_image_infos(image_id)
+        if 'diskSizeGb' not in image_infos:
+            return DEFAULT_GCP_IMAGE_GB
+        return float(image_infos['diskSizeGb'])
 
     @classmethod
     def get_default_instance_type(
@@ -287,10 +294,10 @@ class GCP(clouds.Cloud):
 
         # gcloud compute images list \
         # --project deeplearning-platform-release \
-        # --no-standard-images
+        # --no-standard-images | grep ubuntu-2004
         # We use the debian image, as the ubuntu image has some connectivity
         # issue when first booted.
-        image_id = 'skypilot:cpu-debian-10'
+        image_id = 'skypilot:cpu-ubuntu-2004'
 
         r = resources
         # Find GPU spec, if any.
@@ -330,17 +337,11 @@ class GCP(clouds.Cloud):
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
                         acc.lower())
                 resources_vars['gpu_count'] = acc_count
-                if acc == 'K80':
-                    # Though the image is called cu113, it actually has later
-                    # versions of CUDA as noted below.
-                    # CUDA driver version 470.57.02, CUDA Library 11.4
-                    image_id = 'skypilot:k80-debian-10'
-                else:
-                    # Though the image is called cu113, it actually has later
-                    # versions of CUDA as noted below.
-                    # CUDA driver version 510.47.03, CUDA Library 11.6
-                    # Does not support torch==1.13.0 with cu117
-                    image_id = 'skypilot:gpu-debian-10'
+                # Though the image is called cu113, it actually has later
+                # versions of CUDA as noted below.
+                # CUDA driver version 510.47.03, CUDA Library 11.6
+                # K80: CUDA driver version 470.103.01, CUDA Library 11.4
+                image_id = 'skypilot:gpu-ubuntu-2004'
 
         if resources.image_id is not None:
             if None in resources.image_id:

@@ -55,14 +55,35 @@ available_node_types:
             # See https://cloud.google.com/deep-learning-vm/docs/images
             sourceImage: {{image_id}}
             diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
+      metadata:
+        items:
+          - key: user-data
+            value: |
+              #cloud-config
+              users:
+                - name: skypilot:ssh_user
+                  shell: /bin/bash
+                  sudo: ALL=(ALL) NOPASSWD:ALL
+                  ssh-authorized-keys:
+                    - skypilot:ssh_public_key_content
+              bootcmd:
+                - echo 'ClientAliveInterval 720' >> /etc/ssh/sshd_config
+                - echo 'ClientAliveCountMax 720' >> /etc/ssh/sshd_config
+                - systemctl restart sshd
+                - echo 'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/10cloudinit-disable
+                - apt-get -y purge update-notifier-common ubuntu-release-upgrader-core landscape-common unattended-upgrades
+                - echo "Removed APT" | systemd-cat
   {%- if gpu is not none %}
+    {%- if 'tesla-k80' in gpu %}
+              runcmd:
+                - curl https://raw.githubusercontent.com/GoogleCloudPlatform/compute-gpu-installation/main/linux/install_gpu_driver.py --output install_gpu_driver.py
+                - python3 install_gpu_driver.py
+    {%- endif %}
+          - key: install-nvidia-driver
+            value: true
       guestAccelerators:
         - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
           acceleratorCount: {{gpu_count}}
-      metadata:
-        items:
-          - key: install-nvidia-driver
-            value: "True"
   {%- endif %}
       scheduling:
   {%- if use_spot %}
@@ -98,14 +119,35 @@ available_node_types:
             # See https://cloud.google.com/deep-learning-vm/docs/images
             sourceImage: {{image_id}}
             diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
+      metadata:
+        items:
+          - key: user-data
+            value: |
+              #cloud-config
+              users:
+                - name: skypilot:ssh_user
+                  shell: /bin/bash
+                  sudo: ALL=(ALL) NOPASSWD:ALL
+                  ssh-authorized-keys:
+                    - skypilot:ssh_public_key_content
+              bootcmd:
+                - echo 'ClientAliveInterval 720' >> /etc/ssh/sshd_config
+                - echo 'ClientAliveCountMax 720' >> /etc/ssh/sshd_config
+                - systemctl restart sshd
+                - echo 'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/10cloudinit-disable
+                - apt-get -y purge update-notifier-common ubuntu-release-upgrader-core landscape-common unattended-upgrades
+                - echo "Removed APT" | systemd-cat
     {%- if gpu is not none %}
+      {%- if 'tesla-k80' in gpu %}
+              runcmd:
+                - curl https://raw.githubusercontent.com/GoogleCloudPlatform/compute-gpu-installation/main/linux/install_gpu_driver.py --output install_gpu_driver.py
+                - python3 install_gpu_driver.py
+      {%- endif %}
+          - key: install-nvidia-driver
+            value: true
       guestAccelerators:
         - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
           acceleratorCount: {{gpu_count}}
-      metadata:
-        items:
-          - key: install-nvidia-driver
-            value: "True"
     {%- endif %}
       scheduling:
     {%- if use_spot %}
@@ -150,17 +192,7 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
-    sudo systemctl stop unattended-upgrades || true;
-    sudo systemctl disable unattended-upgrades || true;
-    sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
-    p=$(mylsof "/var/lib/dpkg/lock-frontend"); echo "$p";
-    sudo kill -9 `echo "$p" | tail -n 1` || true;
-    sudo rm /var/lib/dpkg/lock-frontend;
-    sudo pkill -9 dpkg;
-    sudo pkill -9 apt-get;
-    sudo dpkg --configure --force-overwrite -a;
-    mkdir -p ~/.ssh; touch ~/.ssh/config;
+  - mkdir -p ~/.ssh; touch ~/.ssh/config;
     pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
@@ -170,7 +202,7 @@ setup_commands:
     test -f /home/gcpuser/miniconda3/etc/profile.d/conda.sh && source /home/gcpuser/miniconda3/etc/profile.d/conda.sh && conda activate base || true;
     pip3 install --upgrade google-api-python-client;
   {%- endif %}
-    (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+    (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 uninstall -y ray && pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
     (pip3 list | grep skypilot && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[gcp]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
@@ -184,12 +216,23 @@ setup_commands:
 # items! The same comment applies for worker_start_ray_commands.
 #
 # Increment the following for catching performance bugs easier:
-#   current num items (num SSH connections): 1
+#   current num items (num SSH connections): 2
 head_start_ray_commands:
   # Start skylet daemon. (Should not place it in the head_setup_commands, otherwise it will run before sky is installed.)
   # NOTE: --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
   # Line "which prlimit ..": increase the limit of the number of open files for the raylet process, as the `ulimit` may not take effect at this point, because it requires
   # all the sessions to be reloaded. This is a workaround.
+{%- if gpu is not none %}
+  - |
+    echo "Installing NVIDIA GPU driver." >> ~/.sky/nvlog
+    while ! nvidia-smi &> /dev/null
+    do
+      echo "Waiting for NVIDIA drivers to be installed..." >> ~/.sky/nvlog
+      sleep 5
+    done
+    sleep 10
+    echo "NVIDIA GPU is ready." >> ~/.sky/nvlog
+{%- endif %}
   - ((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.skylet.skylet") || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);
     export SKYPILOT_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l);
     ray stop; RAY_SCHEDULER_EVENTS=0 ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --num-gpus=$SKYPILOT_NUM_GPUS || exit 1;
@@ -198,6 +241,17 @@ head_start_ray_commands:
 # Worker commands are needed for TPU VM Pods
 {%- if num_nodes > 1 or tpu_vm %}
 worker_start_ray_commands:
+{%- if gpu is not none %}
+  - |
+    echo "Installing NVIDIA GPU driver." >> ~/.sky/nvlog
+    while ! nvidia-smi &> /dev/null
+    do
+      echo "Waiting for NVIDIA drivers to be installed..." >> ~/.sky/nvlog
+      sleep 5
+    done
+    sleep 10
+    echo "NVIDIA GPU is ready." >> ~/.sky/nvlog
+{%- endif %}
   - SKYPILOT_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l);
     ray stop; RAY_SCHEDULER_EVENTS=0 ray start --disable-usage-stats --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --num-gpus=$SKYPILOT_NUM_GPUS || exit 1;
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
