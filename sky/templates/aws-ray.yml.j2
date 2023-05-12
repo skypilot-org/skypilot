@@ -75,9 +75,12 @@ available_node_types:
             sudo: ALL=(ALL) NOPASSWD:ALL
             ssh_authorized_keys:
               - skypilot:ssh_public_key_content
-        bootcmd:
+        runcmd:
           - echo 'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/10cloudinit-disable
-          - apt-get -y purge update-notifier-common ubuntu-release-upgrader-core landscape-common unattended-upgrades
+          - echo "APT::Periodic::Update-Package-Lists \"0\";" >> /etc/apt/apt.conf.d/20auto-upgrades
+          - echo "APT::Periodic::Download-Upgradeable-Packages \"0\";" >> /etc/apt/apt.conf.d/20auto-upgrades
+          - echo "APT::Periodic::AutocleanInterval \"0\";" >> /etc/apt/apt.conf.d/20auto-upgrades
+          - echo "APT::Periodic::Unattended-Upgrade \"0\";" >> /etc/apt/apt.conf.d/20auto-upgrades
           - echo "Removed APT" | systemd-cat
       TagSpecifications:
         - ResourceType: instance
@@ -116,9 +119,12 @@ available_node_types:
             sudo: ALL=(ALL) NOPASSWD:ALL
             ssh_authorized_keys:
               - skypilot:ssh_public_key_content
-        bootcmd:
+        runcmd:
           - echo 'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/10cloudinit-disable
-          - apt-get -y purge update-notifier-common ubuntu-release-upgrader-core landscape-common unattended-upgrades
+          - echo "APT::Periodic::Update-Package-Lists \"0\";" >> /etc/apt/apt.conf.d/20auto-upgrades
+          - echo "APT::Periodic::Download-Upgradeable-Packages \"0\";" >> /etc/apt/apt.conf.d/20auto-upgrades
+          - echo "APT::Periodic::AutocleanInterval \"0\";" >> /etc/apt/apt.conf.d/20auto-upgrades
+          - echo "APT::Periodic::Unattended-Upgrade \"0\";" >> /etc/apt/apt.conf.d/20auto-upgrades
           - echo "Removed APT" | systemd-cat
       TagSpecifications:
         - ResourceType: instance
