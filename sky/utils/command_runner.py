@@ -232,6 +232,7 @@ class SSHCommandRunner:
             cmd = ' '.join(cmd)
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
+        log_dir = log_dir if log_dir else os.devnull
         os.makedirs(log_dir, exist_ok=True)
         # We need this to correctly run the cmd, and get the output.
         command = [
