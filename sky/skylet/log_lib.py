@@ -46,13 +46,15 @@ def process_subprocess_stream(
                               encoding='utf-8',
                               newline='',
                               errors='replace')
-    sel.register(out_io, selectors.EVENT_READ)
+    if sys.platform != 'win32':
+        sel.register(out_io, selectors.EVENT_READ)
     if proc.stderr is not None:
         err_io = io.TextIOWrapper(proc.stderr,
                                   encoding='utf-8',
                                   newline='',
                                   errors='replace')
-        sel.register(err_io, selectors.EVENT_READ)
+        if sys.platform != 'win32':
+            sel.register(err_io, selectors.EVENT_READ)
 
     stdout = ''
     stderr = ''
@@ -147,6 +149,7 @@ def run_with_log(
 
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
+    dirname = dirname if dirname else os.devnull
     if use_sudo:
         # Sudo case is encountered when submitting
         # a job for Sky on-prem, when a non-admin user submits a job.
