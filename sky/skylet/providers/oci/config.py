@@ -4,10 +4,10 @@ History:
  - Hysun He (hysun.he@oracle.com) @ Apr, 2023: Initial implementation
  
 """
-import os
 import logging
+import os
 from sky import skypilot_config
-from sky.adaptors import oci
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +43,7 @@ class oci_conf:
 
     @classmethod
     def get_vcn_subnet(cls, region):
-        # Allow task(cluster)-specific compartment/VCN parameters.
-        defval = skypilot_config.get_nested(("oci", "default", "vcn_subnet"),
-                                            None)
-        vcn = skypilot_config.get_nested(("oci", region, "vcn_subnet"), defval)
+        vcn = skypilot_config.get_nested(("oci", region, "vcn_subnet"), None)
         return vcn
 
     @classmethod
@@ -65,3 +62,18 @@ class oci_conf:
         return skypilot_config.get_nested(
             ("oci", "default", "image_tag_general"),
             "skypilot:oci-ubuntu-20_04")
+
+    @classmethod
+    def get_sky_user_config_file(cls) -> str:
+        config_path_via_env_var = os.environ.get(
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+        if config_path_via_env_var is not None:
+            config_path = config_path_via_env_var
+        else:
+            config_path = skypilot_config.CONFIG_PATH
+        return config_path
+
+    @classmethod
+    def get_profile(cls) -> str:
+        return skypilot_config.get_nested(
+            ("oci", "default", "oci_config_profile"), "DEFAULT")

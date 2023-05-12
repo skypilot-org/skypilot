@@ -6,6 +6,7 @@ History:
  - Hysun He (hysun.he@oracle.com) @ May 4, 2023: Support use the default
    image_id (configurable) if no image_id specified in the task yaml.
 """
+import os
 import json
 import typing
 import logging
@@ -134,9 +135,6 @@ class OCI(clouds.Cloud):
         #     logger.debug(f"* ! Region {region} is not listed for cost calc!")
         #     return 0.0
         return (num_gigabytes - 10 * 1024) * 0.0085
-
-    def __repr__(self):
-        return 'oci'
 
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
         # Returns true if the two clouds are the same cloud type.
@@ -281,19 +279,36 @@ class OCI(clouds.Cloud):
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud."""
+
+        help_str = (f'Missing credential file at {oci_adaptor.CONFIG_PATH}. '
+                    'To configure credentials, go to:\n'
+                    '      https://docs.oracle.com/en-us/iaas/Content/API/'
+                    'Concepts/apisigningkey.htm')
+        if not os.path.isfile(os.path.expanduser(oci_adaptor.CONFIG_PATH)):
+            return (False,
+                    f'{oci_adaptor.CONFIG_PATH} does not exist.' + help_str)
         try:
-            user = oci_adaptor.get_identity_client().get_user(
-                oci_adaptor.get_oci_config()['user']).data
-            logger.info('* check_credentials passed.')
-            return True, (f'User name is {user.name}'
-                          f'Status is {user.lifecycle_state}')
-        except oci_adaptor.service_exception() as e:
-            logger.error(f'!!! check_credentials: {str(e)}')
-            return False, str(e)
+            user = oci_adaptor.get_identity_client(
+                region=None, profile=oci_conf.get_profile()).get_user(
+                    oci_adaptor.get_oci_config()['user']).data
+            del user
+            return True, None
+        except oci_adaptor.service_exception():
+            return False, 'OCI credential is not correctly set.' + help_str
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
-        return dict()
+        oci_cfg_file = oci_adaptor.get_config_file()
+        oci_cfg = oci_adaptor.get_oci_config()
+        api_key_file = oci_cfg['key_file']
+        sky_cfg_file = oci_conf.get_sky_user_config_file()
+
+        return {
+            f'{oci_cfg_file}': f'{oci_cfg_file}',
+            f'{api_key_file}': f'{api_key_file}',
+            f'{sky_cfg_file}': f'{sky_cfg_file}',
+        }
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:

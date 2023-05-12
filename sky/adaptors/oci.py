@@ -27,36 +27,43 @@ def import_package(func):
     return wrapper
 
 
-@import_package
-def get_oci_config(region=None):
+def get_config_file() -> str:
     conf_file_path = CONFIG_PATH
     config_path_via_env_var = os.environ.get(ENV_VAR_OCI_CONFIG)
     if config_path_via_env_var is not None:
         conf_file_path = config_path_via_env_var
-    oci_config = oci.config.from_file(file_location=conf_file_path)
+    return conf_file_path
+
+
+@import_package
+def get_oci_config(region=None, profile='DEFAULT'):
+    conf_file_path = get_config_file()
+    oci_config = oci.config.from_file(file_location=conf_file_path,
+                                      profile_name=profile)
     if region is not None:
         oci_config['region'] = region
     return oci_config
 
 
 @import_package
-def get_core_client(region=None):
-    return oci.core.ComputeClient(get_oci_config(region))
+def get_core_client(region=None, profile='DEFAULT'):
+    return oci.core.ComputeClient(get_oci_config(region, profile))
 
 
 @import_package
-def get_net_client(region=None):
-    return oci.core.VirtualNetworkClient(get_oci_config(region))
+def get_net_client(region=None, profile='DEFAULT'):
+    return oci.core.VirtualNetworkClient(get_oci_config(region, profile))
 
 
 @import_package
-def get_search_client(region=None):
-    return oci.resource_search.ResourceSearchClient(get_oci_config(region))
+def get_search_client(region=None, profile='DEFAULT'):
+    return oci.resource_search.ResourceSearchClient(
+        get_oci_config(region, profile))
 
 
 @import_package
-def get_identity_client(region=None):
-    return oci.identity.IdentityClient(get_oci_config(region))
+def get_identity_client(region=None, profile='DEFAULT'):
+    return oci.identity.IdentityClient(get_oci_config(region, profile))
 
 
 @import_package

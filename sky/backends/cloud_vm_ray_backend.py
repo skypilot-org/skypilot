@@ -920,9 +920,10 @@ class RetryingVmProvisioner(object):
         errors = [
             s.strip()
             for s in stdout_splits + stderr_splits
-            if 'oci.exceptions.ServiceError' in s.strip() and
-            ('NotAuthorizedOrNotFound' in s.strip() or
-             'CannotParseRequest' in s.strip() or 'InternalError' in s.strip())
+            if ('VcnSubnetNotFound' in s.strip()) or
+            ('oci.exceptions.ServiceError' in s.strip() and
+             ('NotAuthorizedOrNotFound' in s.strip() or 'CannotParseRequest' in
+              s.strip() or 'InternalError' in s.strip()))
         ]
         if not errors:
             logger.info('====== stdout ======')

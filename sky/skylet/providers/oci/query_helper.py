@@ -44,7 +44,7 @@ class oci_query_helper:
         )
 
         list_instances_response = oci_adaptor.get_search_client(
-            region).search_resources(qv)
+            region, oci_conf.get_profile()).search_resources(qv)
         result_set = list_instances_response.data.items
         logger.debug(f"* Query result: {result_set}")
 
@@ -60,7 +60,8 @@ class oci_query_helper:
             logger.debug(f"* Got instance(to be terminated): {inst_id}")
 
             try:
-                oci_adaptor.get_core_client(region).terminate_instance(inst_id)
+                oci_adaptor.get_core_client(
+                    region, oci_conf.get_profile()).terminate_instance(inst_id)
             except Exception as e:
                 logger.error(f"!!! Terminate instance failed: {inst_id}")
                 logger.error(f"!!! {str(e)}")
@@ -85,7 +86,8 @@ class oci_query_helper:
             logger.debug("* listing_id not specified.")
             return
 
-        core_client = oci_adaptor.get_core_client(region)
+        core_client = oci_adaptor.get_core_client(region,
+                                                  oci_conf.get_profile())
         try:
             agreements_response = core_client.get_app_catalog_listing_agreements(
                 listing_id=listing_id, resource_version=resource_version)
@@ -120,3 +122,9 @@ class oci_query_helper:
 
         logger.debug(
             f"* subscribe_image: {listing_id} - {resource_version} ... [Done]")
+
+    @classmethod
+    @utils.debug_enabled(logger=logger)
+    def find_vcn_subnet(cls, region):
+        # TODO: Query subnet id according to the skypilot-vcn
+        return oci_conf.get_vcn_subnet(region)
