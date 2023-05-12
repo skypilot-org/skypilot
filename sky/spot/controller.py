@@ -61,8 +61,7 @@ class SpotController:
             self._task_name,
             self._backend.run_timestamp,
             resources_str=backend_utils.get_task_resources_str(self._task))
-        logger.info(
-            f'Submitted spot job; SKYPILOT_JOB_ID: {job_id_env_var}')
+        logger.info(f'Submitted spot job; SKYPILOT_JOB_ID: {job_id_env_var}')
         self._cluster_name = spot_utils.generate_spot_cluster_name(
             self._task_name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
@@ -91,7 +90,7 @@ class SpotController:
         Other exceptions may be raised depending on the backend.
         """
         logger.info(f'Started monitoring spot task {self._task_name} '
-                         f'(id: {self._job_id})')
+                    f'(id: {self._job_id})')
         spot_state.set_starting(self._job_id)
         job_submitted_at = self._strategy_executor.launch()
 
@@ -171,7 +170,7 @@ class SpotController:
                     returncode = self._backend.tail_logs(
                         handle, None, spot_job_id=self._job_id)
                     logger.info(f'\n== End of logs (ID: {self._job_id}, '
-                                     f'tail_log returncode: {returncode}) ==')
+                                f'tail_log returncode: {returncode}) ==')
                     spot_status_to_set = spot_state.SpotStatus.FAILED
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
                         spot_status_to_set = spot_state.SpotStatus.FAILED_SETUP
@@ -189,8 +188,8 @@ class SpotController:
                 # cluster, if the cluster is healthy).
                 assert job_status is None, job_status
                 logger.info('Failed to fetch the job status while the '
-                                 'cluster is healthy. Try to recover the job '
-                                 '(the cluster will not be restarted).')
+                            'cluster is healthy. Try to recover the job '
+                            '(the cluster will not be restarted).')
 
             # When the handle is None, the cluster should be cleaned up already.
             if handle is not None:
@@ -199,8 +198,7 @@ class SpotController:
                 if resources.need_cleanup_after_preemption():
                     # Some spot resource (e.g., Spot TPU VM) may need to be
                     # cleaned up after preemption.
-                    logger.info(
-                        'Cleaning up the preempted spot cluster...')
+                    logger.info('Cleaning up the preempted spot cluster...')
                     recovery_strategy.terminate_cluster(self._cluster_name)
 
             # Try to recover the spot jobs, when the cluster is preempted
