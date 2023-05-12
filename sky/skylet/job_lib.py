@@ -175,7 +175,8 @@ def _create_ray_job_submission_client():
             f'Failed to import job_submission with ray=={ray.__version__}')
         raise
     port = get_job_submission_port()
-    return job_submission.JobSubmissionClient(address=f'http://127.0.0.1:{port}')
+    return job_submission.JobSubmissionClient(
+        address=f'http://127.0.0.1:{port}')
 
 
 def make_ray_job_id(sky_job_id: int, job_owner: str) -> str:

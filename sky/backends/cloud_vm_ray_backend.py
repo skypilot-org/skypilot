@@ -2679,7 +2679,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         switch_user_cmd = ' '.join(switch_user_cmd)
         job_submit_cmd = (
             'ray job submit '
-            f'--address=http://127.0.0.1:8265 --submission-id {ray_job_id} '
+            '--address='
+            f'http://127.0.0.1:{constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
+            f'--submission-id {ray_job_id} '
             f'--no-wait -- {switch_user_cmd}')
         return job_submit_cmd
 
