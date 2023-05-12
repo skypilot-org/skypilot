@@ -2823,15 +2823,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             with filelock.FileLock(
                     lock_path,
                     backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
-                success = self.teardown_no_lock(
-                    handle,
-                    terminate,
-                    purge,
-                    # The refresh code path checks current user identity can
-                    # throw ClusterOwnerIdentityMismatchError. However, the
-                    # argument/flag `purge` should bypass such ID mismatch
-                    # errors.
-                    refresh_cluster_status=not purge)
+                success = self.teardown_no_lock(handle, terminate, purge)
             if success and terminate:
                 common_utils.remove_file_if_exists(lock_path)
         except filelock.Timeout as e:
@@ -3031,7 +3023,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if refresh_cluster_status:
             prev_cluster_status, _ = (
                 backend_utils.refresh_cluster_status_handle(
-                    handle.cluster_name, acquire_per_cluster_status_lock=False))
+                    handle.cluster_name,
+                    acquire_per_cluster_status_lock=False,
+                    # The refresh code path checks current user identity can
+                    # throw ClusterOwnerIdentityMismatchError. However, the
+                    # argument/flag `purge` should bypass such ID mismatch
+                    # errors.
+                    skip_identity_check=purge))
         else:
             record = global_user_state.get_cluster_from_name(
                 handle.cluster_name)
