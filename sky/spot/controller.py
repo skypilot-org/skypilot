@@ -39,7 +39,6 @@ class SpotController:
 
     def __init__(self, job_id: int, task_yaml: str,
                  retry_until_up: bool) -> None:
-
         self._job_id = job_id
         self._task, self._task_name = _get_task_and_name(task_yaml)
 
