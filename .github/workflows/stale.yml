@@ -22,7 +22,6 @@ jobs:
           days-before-pr-close: 10
           exempt-issue-labels: 'P0,P1'
           exempt-pr-labels: 'P0,P1'
-          debug-only: true
           ascending: true
           operations-per-run: 100
 
