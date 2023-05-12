@@ -1817,6 +1817,7 @@ def test_aws_disk_tier():
         )
         run_one_test(test)
 
+
 @pytest.mark.gcp
 def test_gcp_disk_tier():
     for disk_tier in ['low', 'medium', 'high']:
