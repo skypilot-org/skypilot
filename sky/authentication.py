@@ -10,11 +10,11 @@ import time
 from typing import Any, Dict, Tuple
 import uuid
 
-import yaml
 import colorama
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
+import yaml
 
 from sky import clouds
 from sky import sky_logging
