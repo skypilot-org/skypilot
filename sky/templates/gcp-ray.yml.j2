@@ -246,7 +246,9 @@ head_start_ray_commands:
       echo "Waiting for NVIDIA drivers to be installed..." >> ~/.sky/nvlog
       sleep 5
     done
-    sleep 10
+    # Magic number for waiting the nvidia driver to be ready and the instance
+    # to be rebooted.
+    sleep 18
     echo "NVIDIA GPU is ready." >> ~/.sky/nvlog
 {%- endif %}
   - ((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.skylet.skylet") || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);
@@ -265,7 +267,9 @@ worker_start_ray_commands:
       echo "Waiting for NVIDIA drivers to be installed..." >> ~/.sky/nvlog
       sleep 5
     done
-    sleep 10
+    # Magic number for waiting the nvidia driver to be ready and the instance
+    # to be rebooted.
+    sleep 18
     echo "NVIDIA GPU is ready." >> ~/.sky/nvlog
 {%- endif %}
   - SKYPILOT_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l);
