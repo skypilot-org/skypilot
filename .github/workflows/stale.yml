@@ -1,8 +1,5 @@
 name: 'Close stale issues and PRs'
 on:
-  push:
-    branches:
-      - test-stale
   schedule:
     - cron: '30 1 * * *'
 
