@@ -76,6 +76,11 @@ available_node_types:
                 - path: /etc/apt/apt.conf.d/10cloudinit-disable
                   content: |
                     APT::Periodic::Enable "0";
+                - path: /etc/ssh/sshd_config
+                  append: true
+                  content: |
+                    ClientAliveInterval 720
+                    ClientAliveCountMax 720
   {%- if gpu is not none %}
     {%- if 'tesla-k80' in gpu %}
               runcmd:
@@ -143,6 +148,11 @@ available_node_types:
                 - path: /etc/apt/apt.conf.d/10cloudinit-disable
                   content: |
                     APT::Periodic::Enable "0";
+                - path: /etc/ssh/sshd_config
+                  append: true
+                  content: |
+                    ClientAliveInterval 720
+                    ClientAliveCountMax 720
     {%- if gpu is not none %}
       {%- if 'tesla-k80' in gpu %}
               runcmd:
