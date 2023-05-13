@@ -259,7 +259,8 @@ class Azure(clouds.Cloud):
             resource_list = []
             for instance_type in instance_list:
                 disk_tier = resources.disk_tier
-                ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
+                ok, _ = Azure.check_disk_tier(
+                    instance_type, disk_tier or clouds.Cloud._DEFAULT_DISK_TIER)
                 if not ok and resources.disk_tier is None:
                     # Auto failover to low disk tier when disk tier
                     # are not specified
@@ -442,6 +443,8 @@ class Azure(clouds.Cloud):
     @classmethod
     def check_disk_tier(cls, instance_type: Optional[str],
                         disk_tier: Optional[str]) -> Tuple[bool, str]:
+        if disk_tier is None:
+            return True, ''
         if disk_tier == 'high':
             return False, ('Azure disk_tier=high is not supported now. '
                            'Please use disk_tier={low, medium} instead.')
