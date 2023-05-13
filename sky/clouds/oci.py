@@ -304,11 +304,19 @@ class OCI(clouds.Cloud):
         api_key_file = oci_cfg['key_file']
         sky_cfg_file = oci_conf.get_sky_user_config_file()
 
-        return {
-            f'{oci_cfg_file}': f'{oci_cfg_file}',
-            f'{api_key_file}': f'{api_key_file}',
-            f'{sky_cfg_file}': f'{sky_cfg_file}',
+        # OCI config and API key file are mandatory
+        credential_files = [oci_cfg_file, api_key_file]
+
+        # Sky config file is optional
+        if os.path.exists(sky_cfg_file):
+            credential_files.append(sky_cfg_file)
+
+        file_mounts = {
+            f'{filename}': f'{filename}' for filename in credential_files
         }
+
+        logger.debug(f'OCI credential file mounts: {file_mounts}')
+        return file_mounts
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:

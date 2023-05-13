@@ -261,8 +261,8 @@ class OCINodeProvider(NodeProvider):
 
         # Let's create additional new nodes (if neccessary)
         if count > 0:
-            compartment = oci_conf.get_compartment(self.region)
-            vcn = oci_query_helper.find_vcn_subnet(self.region)
+            compartment = oci_query_helper.find_compartment(self.region)
+            vcn = oci_query_helper.find_create_vcn_subnet(self.region)
             if vcn is None:
                 raise RuntimeError("VcnSubnetNotFound Error!")
 

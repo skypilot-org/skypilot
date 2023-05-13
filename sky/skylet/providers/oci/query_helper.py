@@ -123,8 +123,97 @@ class oci_query_helper:
         logger.debug(
             f"* subscribe_image: {listing_id} - {resource_version} ... [Done]")
 
+
     @classmethod
     @utils.debug_enabled(logger=logger)
-    def find_vcn_subnet(cls, region):
-        # TODO: Query subnet id according to the skypilot-vcn
-        return oci_conf.get_vcn_subnet(region)
+    def find_compartment(cls, region) -> str:
+        """ If compartment is not configured, we use root compartment """
+        # Try to use the configured one first
+        skypilot_compartment = oci_conf.get_compartment(region)
+        if skypilot_compartment is not None:
+            return skypilot_compartment
+        
+        # If not specified, we try to find the one skypilot-compartment
+        root = oci_adaptor.get_oci_config(region)['tenancy']
+        list_compartments_response = oci_conf.identity_client.list_compartments(
+            compartment_id=root,
+            name=oci_conf.COMPARTMENT,
+            lifecycle_state='ACTIVE',
+            limit=1
+        )
+        compartments = list_compartments_response.data
+        if len(compartments) > 0:
+            skypilot_compartment = compartments[0].compartmentId
+            return skypilot_compartment
+        
+        # Finally, we use root compartment none matches above 
+        skypilot_compartment = root
+        return skypilot_compartment
+    
+
+    @classmethod
+    @utils.debug_enabled(logger=logger)
+    def find_create_vcn_subnet(cls, region) -> str:
+        """ If sub is not configured, we find/create VCN skypilot_vcn """
+        subnet = oci_conf.get_vcn_subnet(region)
+        if subnet is not None:
+            return subnet
+
+        net_client = oci_adaptor.get_net_client(region, oci_conf.get_profile())
+        skypilot_compartment = cls.find_compartment(region)
+        list_vcns_response = net_client.list_vcns(
+            compartment_id=skypilot_compartment,
+            display_name=oci_conf.VCN_NAME,
+            lifecycle_state="AVAILABLE")
+        vcns = list_vcns_response.data
+        if len(vcns) > 0:
+            skypilot_vcn = vcns[0].id
+            list_subnets_response = net_client.list_subnets(
+                compartment_id=skypilot_compartment,
+                limit=1,
+                vcn_id=skypilot_vcn,
+                display_name=oci_conf.VCN_SUBNET_NAME,
+                lifecycle_state="AVAILABLE")
+            logger.debug(f'Got VCN subnet \n{list_subnets_response.data}')
+            subnet = list_subnets_response.data[0].id
+        else:
+            create_vcn_response = net_client.create_vcn(
+                create_vcn_details=oci.core.models.CreateVcnDetails(
+                    compartment_id=skypilot_compartment,
+                    cidr_blocks=[oci_conf.VCN_CIDR],
+                    display_name=oci_conf.VCN_NAME,
+                    is_ipv6_enabled=False,
+                    dns_label=oci_conf.VCN_DNS_LABEL))
+            vcn_data = create_vcn_response.data
+            skypilot_vcn = vcn_data.id
+            route_table = vcn_data.default_route_table_id
+            security_list = vcn_data.default_security_list_id
+            dhcp_options_id = vcn_data.default_dhcp_options_id
+            logger.debug(f'Created VCN \n{vcn_data}')
+
+            create_ig_response = net_client.create_internet_gateway(
+                create_internet_gateway_details=oci.core.models.
+                CreateInternetGatewayDetails(
+                    compartment_id=skypilot_compartment,
+                    is_enabled=True,
+                    vcn_id=skypilot_vcn,
+                    display_name=oci_conf.VCN_INTERNET_GATEWAY_NAME,
+                    route_table_id=route_table))
+            logger.debug(
+                f'Created internet gateway \n{create_ig_response.data}')
+
+            create_subnet_response = net_client.create_subnet(
+                create_subnet_details=oci.core.models.CreateSubnetDetails(
+                    cidr_block=oci_conf.VCN_SUBNET_CIDR,
+                    compartment_id=skypilot_compartment,
+                    vcn_id=skypilot_vcn,
+                    dhcp_options_id=dhcp_options_id,
+                    display_name=oci_conf.VCN_SUBNET_NAME,
+                    prohibit_internet_ingress=False,
+                    prohibit_public_ip_on_vnic=False,
+                    route_table_id=route_table,
+                    security_list_ids=[security_list]))
+            logger.debug(f'Created subnet \n{create_subnet_response.data}')
+            subnet = create_subnet_response.data.id
+
+        return subnet
