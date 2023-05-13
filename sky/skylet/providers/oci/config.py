@@ -29,7 +29,7 @@ class oci_conf:
         # f'{VM_PREFIX}.A',
     ]
 
-    COMPARTMENT = "skypilot-compartment"
+    COMPARTMENT = "skypilot_compartment"
     VCN_NAME = "skypilot_vcn"
     VCN_DNS_LABEL = "skypilotvcn"
     VCN_INTERNET_GATEWAY_NAME = "skypilot_vcn_internet_gateway"

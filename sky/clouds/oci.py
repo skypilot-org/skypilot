@@ -287,7 +287,7 @@ class OCI(clouds.Cloud):
                     'Concepts/apisigningkey.htm')
         if not os.path.isfile(os.path.expanduser(oci_adaptor.CONFIG_PATH)):
             return (False,
-                    f'{oci_adaptor.CONFIG_PATH} does not exist.' + help_str)
+                    f'{oci_adaptor.CONFIG_PATH} does not exist. ' + help_str)
         try:
             user = oci_adaptor.get_identity_client(
                 region=None, profile=oci_conf.get_profile()).get_user(
@@ -295,7 +295,7 @@ class OCI(clouds.Cloud):
             del user
             return True, None
         except oci_adaptor.service_exception():
-            return False, 'OCI credential is not correctly set.' + help_str
+            return False, 'OCI credential is not correctly set. ' + help_str
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
