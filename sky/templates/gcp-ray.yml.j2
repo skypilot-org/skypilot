@@ -54,6 +54,7 @@ available_node_types:
             diskSizeGb: {{disk_size}}
             # See https://cloud.google.com/deep-learning-vm/docs/images
             sourceImage: {{image_id}}
+            diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
   {%- if gpu is not none %}
       guestAccelerators:
         - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
@@ -96,6 +97,7 @@ available_node_types:
             diskSizeGb: {{disk_size}}
             # See https://cloud.google.com/deep-learning-vm/docs/images
             sourceImage: {{image_id}}
+            diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
     {%- if gpu is not none %}
       guestAccelerators:
         - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}

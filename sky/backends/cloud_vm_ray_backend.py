@@ -65,7 +65,14 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
 # Timeout (seconds) for provision progress: if in this duration no new nodes
 # are launched, abort and failover.
-_NODES_LAUNCHING_PROGRESS_TIMEOUT = 90
+_NODES_LAUNCHING_PROGRESS_TIMEOUT = {
+    clouds.AWS: 90,
+    clouds.Azure: 90,
+    clouds.GCP: 120,
+    clouds.Lambda: 150,
+    clouds.IBM: 160,
+    clouds.Local: 90,
+}
 
 # Time gap between retries after failing to provision in all possible places.
 # Used only if --retry-until-up is set.
@@ -114,6 +121,7 @@ def _get_cluster_config_template(cloud):
         clouds.Azure: 'azure-ray.yml.j2',
         clouds.GCP: 'gcp-ray.yml.j2',
         clouds.Lambda: 'lambda-ray.yml.j2',
+        clouds.IBM: 'ibm-ray.yml.j2',
         clouds.Local: 'local-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
@@ -656,6 +664,15 @@ class RetryingVmProvisioner(object):
                     # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # pylint: disable=line-too-long
                     self._blocked_resources.add(
                         launchable_resources.copy(zone=zone.name))
+                elif code == 'RESOURCE_NOT_FOUND':
+                    # https://github.com/skypilot-org/skypilot/issues/1797
+                    # In the inner provision loop we have used retries to
+                    # recover but failed. This indicates this zone is most
+                    # likely out of capacity. The provision loop will terminate
+                    # any potentially live VMs before moving onto the next
+                    # zone.
+                    self._blocked_resources.add(
+                        launchable_resources.copy(zone=zone.name))
                 else:
                     assert False, error
         elif len(httperror_str) >= 1:
@@ -832,6 +849,37 @@ class RetryingVmProvisioner(object):
                         self._blocked_resources.add(
                             launchable_resources.copy(region=r.name, zone=None))
 
+    def _update_blocklist_on_ibm_error(
+            self, launchable_resources: 'resources_lib.Resources',
+            region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
+            stdout: str, stderr: str):
+
+        style = colorama.Style
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits + stderr_splits
+            if 'ERR' in s.strip() or 'PANIC' in s.strip()
+        ]
+        if not errors:
+            logger.info('====== stdout ======')
+            for s in stdout_splits:
+                print(s)
+            logger.info('====== stderr ======')
+            for s in stderr_splits:
+                print(s)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Errors occurred during provision; '
+                                   'check logs above.')
+        logger.warning(f'Got error(s) on IBM cluster, in {region.name}:')
+        messages = '\n\t'.join(errors)
+        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
+
+        for zone in zones:  # type: ignore[union-attr]
+            self._blocked_resources.add(
+                launchable_resources.copy(zone=zone.name))
+
     def _update_blocklist_on_local_error(
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
@@ -896,6 +944,7 @@ class RetryingVmProvisioner(object):
             clouds.Azure: self._update_blocklist_on_azure_error,
             clouds.GCP: self._update_blocklist_on_gcp_error,
             clouds.Lambda: self._update_blocklist_on_lambda_error,
+            clouds.IBM: self._update_blocklist_on_ibm_error,
             clouds.Local: self._update_blocklist_on_local_error,
         }
         cloud = launchable_resources.cloud
@@ -965,8 +1014,9 @@ class RetryingVmProvisioner(object):
                 # cluster is launched.
                 handle = global_user_state.get_handle_from_cluster_name(
                     cluster_name)
-                assert handle is not None, (
-                    f'handle should not be None {cluster_name!r}')
+                assert isinstance(handle, CloudVmRayResourceHandle), (
+                    'handle should be CloudVmRayResourceHandle (found: '
+                    f'{type(handle)}) {cluster_name!r}')
                 config = common_utils.read_yaml(handle.cluster_yaml)
                 # This is for the case when the zone field is not set in the
                 # launched resources in a previous launch (e.g., ctrl-c during
@@ -1142,7 +1192,7 @@ class RetryingVmProvisioner(object):
         dryrun: bool,
         stream_logs: bool,
         cluster_name: str,
-        cloud_user_identity: Optional[str],
+        cloud_user_identity: Optional[List[str]],
         prev_cluster_status: Optional[global_user_state.ClusterStatus],
     ):
         """The provision retry loop."""
@@ -1151,6 +1201,8 @@ class RetryingVmProvisioner(object):
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
+        os.makedirs(self.log_dir, exist_ok=True)
+        os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
@@ -1522,6 +1574,18 @@ class RetryingVmProvisioner(object):
                         'Retrying due to list request rate limit exceeded.')
                     return True
 
+                # https://github.com/skypilot-org/skypilot/issues/1797
+                # "The resource 'projects/xxx/zones/us-central1-b/instances/ray-yyy-head-<hash>-compute' was not found" # pylint: disable=line-too-long
+                pattern = (r'\'code\': \'RESOURCE_NOT_FOUND\'.*The resource'
+                           r'.*instances\/.*-compute\' was not found')
+                result = re.search(pattern, stderr)
+                if result is not None:
+                    # Retry. Unlikely will succeed if it's due to no capacity.
+                    logger.info(
+                        'Retrying due to the possibly flaky RESOURCE_NOT_FOUND '
+                        'error.')
+                    return True
+
             if ('Processing file mounts' in stdout and
                     'Running setup commands' not in stdout and
                     'Failed to setup head node.' in stderr):
@@ -1604,7 +1668,8 @@ class RetryingVmProvisioner(object):
             cluster_config_file,
             cluster_handle.launched_nodes,
             log_path=log_abs_path,
-            nodes_launching_progress_timeout=_NODES_LAUNCHING_PROGRESS_TIMEOUT,
+            nodes_launching_progress_timeout=_NODES_LAUNCHING_PROGRESS_TIMEOUT[
+                type(to_provision_cloud)],
             is_local_cloud=isinstance(to_provision_cloud, clouds.Local))
         if cluster_ready:
             cluster_status = self.GangSchedulingStatus.CLUSTER_READY
@@ -2259,7 +2324,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 return None
             cluster_config_file = config_dict['ray']
 
-            handle = self.ResourceHandle(
+            handle = CloudVmRayResourceHandle(
                 cluster_name=cluster_name,
                 cluster_yaml=cluster_config_file,
                 launched_nodes=config_dict['launched_nodes'],
@@ -2321,7 +2386,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _update_after_cluster_provisioned(
             self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
-            prev_cluster_status: global_user_state.ClusterStatus,
+            prev_cluster_status: Optional[global_user_state.ClusterStatus],
             ip_list: List[str], lock_path: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
@@ -2429,6 +2494,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{style.BRIGHT}{workdir}{style.RESET_ALL}'
             f' -> '
             f'{style.BRIGHT}{SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
+        os.makedirs(self.log_dir, exist_ok=True)
+        os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
@@ -2685,8 +2752,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'--no-wait -- {switch_user_cmd}')
         return job_submit_cmd
 
-    def _add_job(self, handle: CloudVmRayResourceHandle, job_name: str,
-                 resources_str: str) -> int:
+    def _add_job(self, handle: CloudVmRayResourceHandle,
+                 job_name: Optional[str], resources_str: str) -> int:
         username = getpass.getuser()
         code = job_lib.JobLibCodeGen.add_job(job_name, username,
                                              self.run_timestamp, resources_str)
@@ -3023,6 +3090,42 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     shell=True,
                     stream_logs=False,
                     require_outputs=True)
+
+        elif (isinstance(cloud, clouds.IBM) and terminate and
+              prev_cluster_status == global_user_state.ClusterStatus.STOPPED):
+            # pylint: disable= W0622 W0703 C0415
+            from sky.adaptors import ibm
+            from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
+
+            config_provider = common_utils.read_yaml(
+                handle.cluster_yaml)['provider']
+            region = config_provider['region']
+            cluster_name = handle.cluster_name
+            search_client = ibm.search_client()
+            vpc_found = False
+            # pylint: disable=unsubscriptable-object
+            vpcs_filtered_by_tags_and_region = search_client.search(
+                query=f'type:vpc AND tags:{cluster_name} AND region:{region}',
+                fields=['tags', 'region', 'type'],
+                limit=1000).get_result()['items']
+            try:
+                # pylint: disable=line-too-long
+                vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(
+                    ':', 1)[-1]
+                vpc_found = True
+            except Exception:
+                logger.critical('failed to locate vpc for ibm cloud')
+                returncode = -1
+
+            if vpc_found:
+                # # pylint: disable=line-too-long E1136
+                # Delete VPC and it's associated resources
+                vpc_provider = IBMVPCProvider(
+                    config_provider['resource_group_id'], region, cluster_name)
+                vpc_provider.delete_vpc(vpc_id, region)
+                # successfully removed cluster as no exception was raised
+                returncode = 0
+
         elif (terminate and
               (prev_cluster_status == global_user_state.ClusterStatus.STOPPED or
                use_tpu_vm)):
@@ -3403,6 +3506,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'{fore.YELLOW}Source path {src!r} is a symlink. '
                         f'Symlink contents are not uploaded.{style.RESET_ALL}')
 
+        os.makedirs(self.log_dir, exist_ok=True)
+        os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')

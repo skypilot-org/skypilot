@@ -54,7 +54,7 @@ class _CloudRegistry(dict):
             return None
         if name.lower() not in self:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Cloud {name} is not a valid cloud among '
+                raise ValueError(f'Cloud {name!r} is not a valid cloud among '
                                  f'{list(self.keys())}')
         return self.get(name.lower())
 
@@ -72,6 +72,7 @@ class Cloud:
     """A cloud provider."""
 
     _REPR = '<Cloud>'
+    _DEFAULT_DISK_TIER = 'medium'
 
     @classmethod
     def _cloud_unsupported_features(
@@ -251,8 +252,10 @@ class Cloud:
     def get_default_instance_type(
             cls,
             cpus: Optional[str] = None,
-            memory: Optional[str] = None) -> Optional[str]:
-        """Returns the default instance type with the given #vCPUs and memory.
+            memory: Optional[str] = None,
+            disk_tier: Optional[str] = None) -> Optional[str]:
+        """Returns the default instance type with the given #vCPUs, memory and
+        disk tier.
 
         For example, if cpus='4', this method returns the default instance type
         with 4 vCPUs.  If cpus='4+', this method returns the default instance
@@ -262,9 +265,14 @@ class Cloud:
         memory.  If 'memory=4+', this method returns the default instance
         type with 4GB or more memory.
 
-        When cpus is None or memory is None, this method will never return None.
-        This method may return None if the cloud's default instance family
-        does not have a VM with the given number of vCPUs (e.g., when cpus='7').
+        If disk_rier='medium', this method returns the default instance type
+        that support medium disk tier.
+
+        When cpus is None, memory is None or disk tier is None, this method will
+        never return None. This method may return None if the cloud's default
+        instance family does not have a VM with the given number of vCPUs
+        (e.g., when cpus='7') or does not have a VM with the give disk tier
+        (e.g. Azure, disk_tier='high').
         """
         raise NotImplementedError
 
@@ -295,8 +303,9 @@ class Cloud:
         """
         raise NotImplementedError
 
+    # TODO(zhwu): Make the return type immutable.
     @classmethod
-    def get_current_user_identity(cls) -> Optional[str]:
+    def get_current_user_identity(cls) -> Optional[List[str]]:
         """(Advanced) Returns currently active user identity of this cloud.
 
         The user "identity" is associated with each SkyPilot cluster they
@@ -319,10 +328,19 @@ class Cloud:
         resources are used when the user invoked each cloud's default
         CLI/API.
 
+        The returned identity is a list of strings. The list is in the order of
+        strictness, i.e., the first element is the most strict identity, and
+        the last element is the least strict identity.
+        When performing an identity check between the current active identity
+        and the owner identity associated with a cluster, we compare the two
+        lists in order: if a position does not match, we go to the next. To
+        see an example, see the docstring of the AWS.get_current_user_identity.
+
+
         Example identities (see cloud implementations):
-            - AWS: unique aws:user_id
-            - GCP: email address + project ID
-            - Azure: email address + subscription ID
+            - AWS: [UserId, AccountId]
+            - GCP: [email address + project ID]
+            - Azure: [email address + subscription ID]
 
         Returns:
             None if the cloud does not have a concept of user identity
@@ -438,6 +456,16 @@ class Cloud:
                     f'Cluster name {cluster_name!r} has {len(cluster_name)} '
                     'chars; maximum length is '
                     f'{max_cluster_name_len_limit} chars{cloud_name}.')
+
+    @classmethod
+    def check_disk_tier_enabled(cls, instance_type: str,
+                                disk_tier: str) -> None:
+        """Errors out if the disk tier is not supported by the cloud provider.
+
+        Raises:
+            exceptions.NotSupportedError: If the disk tier is not supported.
+        """
+        raise NotImplementedError
 
     def __repr__(self):
         return self._REPR

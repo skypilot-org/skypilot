@@ -90,7 +90,7 @@ install_requires = [
     'rich',
     'tabulate',
     'typing-extensions',
-    'filelock',  # TODO(mraheja): Enforce >=3.6.0 when python version is >= 3.7
+    'filelock>=3.6.0',
     # This is used by ray. The latest 1.44.0 will generate an error
     # `Fork support is only compatible with the epoll1 and poll
     # polling strategies`
@@ -106,21 +106,29 @@ install_requires = [
 
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the following
 # packages dependencies are changed.
+aws_dependencies = [
+    # awscli>=1.27.10 is required for SSO support.
+    'awscli',
+    'boto3',
+    # 'Crypto' module used in authentication.py for AWS.
+    'pycryptodome==3.12.0',
+]
 extras_require: Dict[str, List[str]] = {
-    'aws': [
-        # awscli>=1.27.10 is required for SSO support.
-        'awscli',
-        'boto3',
-        # 'Crypto' module used in authentication.py for AWS.
-        'pycryptodome==3.12.0',
-    ],
+    'aws': aws_dependencies,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
     # azure-identity is needed in node_provider.
-    'azure': ['azure-cli>=2.31.0', 'azure-core', 'azure-identity'],
+    # We need azure-identity>=1.13.0 to enable the customization of the
+    # timeout of AzureCliCredential.
+    'azure': [
+        'azure-cli>=2.31.0', 'azure-core', 'azure-identity>=1.13.0',
+        'azure-mgmt-network'
+    ],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
+    'ibm': ['ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services'],
     'docker': ['docker'],
     'lambda': [],
+    'cloudflare': aws_dependencies
 }
 
 extras_require['all'] = sum(extras_require.values(), [])
@@ -151,7 +159,7 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     setup_requires=['wheel'],
-    requires_python='>=3.6',
+    requires_python='>=3.7',
     install_requires=install_requires,
     extras_require=extras_require,
     entry_points={
@@ -159,7 +167,6 @@ setuptools.setup(
     },
     include_package_data=True,
     classifiers=[
-        'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',

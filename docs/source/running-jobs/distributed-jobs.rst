@@ -104,3 +104,20 @@ To execute a task on the head node only (a common scenario for tools like
      if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
          # Launch the head-only command here.
      fi
+
+
+SSH into worker nodes
+---------------------
+In addition to the head node, the SSH configurations for the worker nodes of a multi-node cluster are also added to ``~/.ssh/config`` as ``<cluster_name>-worker<n>``.
+This allows you directly to SSH into the worker nodes, if required.
+
+.. code-block:: console
+
+  # Assuming 3 nodes in a cluster named mycluster
+
+  # Head node.
+  $ ssh mycluster
+
+  # Worker nodes.
+  $ ssh mycluster-worker1
+  $ ssh mycluster-worker2
