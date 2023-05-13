@@ -208,6 +208,31 @@ class oci_query_helper:
                 logger.debug(
                     f'Created internet gateway \n{create_ig_response.data}')
 
+                update_route_table_response = net_client.update_route_table(
+                    rt_id=route_table,
+                    update_route_table_details=oci.core.models.UpdateRouteTableDetails(
+                        route_rules=[
+                            oci.core.models.RouteRule(
+                                network_entity_id=create_ig_response.data.id,
+                                destination='0.0.0.0/0',
+                                destination_type='CIDR_BLOCK',
+                                description='Route table for SkyPilot VCN',
+                                route_type='STATIC')]))
+                logger.debug(f'Route table: \n{update_route_table_response.data}')
+                
+                list_services_response = net_client.list_services(limit=100)
+                services = [s for s in list_services_response.data if str(s.cidr_block).startswith('all-') and str(s.cidr_block).endswith('-services-in-oracle-services-network')]        
+                if len(services) > 0:
+                    create_sg_response = net_client.create_service_gateway(
+                        create_service_gateway_details=oci.core.models.CreateServiceGatewayDetails(
+                            compartment_id=skypilot_compartment,
+                            services=[
+                                oci.core.models.ServiceIdRequestDetails(
+                                    service_id=services[0].id)],
+                            vcn_id=skypilot_vcn,
+                            route_table_id=route_table))
+                    logger.debug(f'Service Gateway: \n{create_sg_response.data}')
+                
                 create_subnet_response = net_client.create_subnet(
                     create_subnet_details=oci.core.models.CreateSubnetDetails(
                         cidr_block=oci_conf.VCN_SUBNET_CIDR,
@@ -226,4 +251,5 @@ class oci_query_helper:
                              f'{oci_conf.VCN_NAME} failed {str(e)}')
                 logger.error(e)
                 subnet = None
+                
         return subnet
