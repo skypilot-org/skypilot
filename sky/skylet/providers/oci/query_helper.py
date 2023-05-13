@@ -268,11 +268,37 @@ class oci_query_helper:
                 update_security_list_details=oci.core.models.
                 UpdateSecurityListDetails(ingress_security_rules=[
                     oci.core.models.IngressSecurityRule(
+                        protocol="6",
+                        source=oci_conf.VCN_CIDR_INTERNET,
+                        is_stateless=False,
+                        source_type="CIDR_BLOCK",
+                        tcp_options=oci.core.models.TcpOptions(
+                            destination_port_range=oci.core.models.PortRange(
+                                max=22, min=22),
+                            source_port_range=oci.core.models.PortRange(
+                                max=65535, min=1)),
+                        description="Allow SSH port."),
+                    oci.core.models.IngressSecurityRule(
                         protocol="all",
                         source=oci_conf.VCN_SUBNET_CIDR,
                         is_stateless=False,
                         source_type="CIDR_BLOCK",
-                        description="Allow all traffic from/to same subnet.")
+                        description="Allow all traffic from/to same subnet."),
+                    oci.core.models.IngressSecurityRule(
+                        protocol="1",
+                        source=oci_conf.VCN_CIDR_INTERNET,
+                        is_stateless=False,
+                        source_type="CIDR_BLOCK",
+                        icmp_options=oci.core.models.IcmpOptions(type=3,
+                                                                 code=4),
+                        description="ICMP traffic."),
+                    oci.core.models.IngressSecurityRule(
+                        protocol="1",
+                        source=oci_conf.VCN_CIDR,
+                        is_stateless=False,
+                        source_type="CIDR_BLOCK",
+                        icmp_options=oci.core.models.IcmpOptions(type=3),
+                        description="ICMP traffic (VCN)."),
                 ]))
             logger.debug(
                 f'Updated security_list: \n{update_security_list_response.data}'

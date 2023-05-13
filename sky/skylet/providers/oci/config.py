@@ -34,6 +34,7 @@ class oci_conf:
     VCN_DNS_LABEL = "skypilotvcn"
     VCN_INTERNET_GATEWAY_NAME = "skypilot_vcn_internet_gateway"
     VCN_SUBNET_NAME = "skypilot_subnet"
+    VCN_CIDR_INTERNET = "0.0.0.0/0"
     VCN_CIDR = "192.168.0.0/16"
     VCN_SUBNET_CIDR = "192.168.0.0/18"
 
