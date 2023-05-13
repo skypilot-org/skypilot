@@ -5,6 +5,7 @@ import click
 
 from sky import clouds
 from sky import global_user_state
+from sky.adaptors import cloudflare
 
 
 def check(quiet: bool = False) -> None:
@@ -61,4 +62,12 @@ def get_cloud_credential_file_mounts() -> Dict[str, str]:
     for cloud in enabled_clouds:
         cloud_file_mounts = cloud.get_credential_file_mounts()
         file_mounts.update(cloud_file_mounts)
+    # Currently, get_enabled_clouds() does not support r2
+    # as only clouds with computing instances are marked
+    # as enabled by skypilot. This will be removed when
+    # cloudflare/r2 is added as a 'cloud'.
+    r2_is_enabled, _ = cloud = cloudflare.check_credentials()
+    if r2_is_enabled:
+        r2_credential_mounts = cloudflare.get_credential_file_mounts()
+        file_mounts.update(r2_credential_mounts)
     return file_mounts
