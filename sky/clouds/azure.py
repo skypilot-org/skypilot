@@ -258,17 +258,23 @@ class Azure(clouds.Cloud):
         def _make(instance_list):
             resource_list = []
             for instance_type in instance_list:
-                if Azure.check_disk_tier(instance_type, resources.disk_tier)[0]:
-                    r = resources.copy(
-                        cloud=Azure(),
-                        instance_type=instance_type,
-                        # Setting this to None as Azure doesn't separately bill /
-                        # attach the accelerators.  Billed as part of the VM type.
-                        accelerators=None,
-                        cpus=None,
-                        memory=None,
-                    )
-                    resource_list.append(r)
+                disk_tier = resources.disk_tier
+                ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
+                if not ok and resources.disk_tier is None:
+                    # Auto failover to low disk tier when disk tier
+                    # are not specified
+                    disk_tier = 'low'
+                r = resources.copy(
+                    cloud=Azure(),
+                    instance_type=instance_type,
+                    disk_tier=disk_tier,
+                    # Setting this to None as Azure doesn't separately bill /
+                    # attach the accelerators.  Billed as part of the VM type.
+                    accelerators=None,
+                    cpus=None,
+                    memory=None,
+                )
+                resource_list.append(r)
             return resource_list
 
         # Currently, handle a filter on accelerators only.
@@ -436,8 +442,6 @@ class Azure(clouds.Cloud):
     @classmethod
     def check_disk_tier(cls, instance_type: Optional[str],
                         disk_tier: Optional[str]) -> Tuple[bool, str]:
-        if disk_tier is None:
-            return True, ''
         if disk_tier == 'high':
             return False, ('Azure disk_tier=high is not supported now. '
                            'Please use disk_tier={low, medium} instead.')
