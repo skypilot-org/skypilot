@@ -157,8 +157,10 @@ class oci_query_helper:
         """ If sub is not configured, we find/create VCN skypilot_vcn """
         subnet = oci_conf.get_vcn_subnet(region)
         if subnet is not None:
+            # User explicitly specified the subnet in sky config.
             return subnet
 
+        # Try to reuse the skypilot_vcn.
         net_client = oci_adaptor.get_net_client(region, oci_conf.get_profile())
         skypilot_compartment = cls.find_compartment(region)
         list_vcns_response = net_client.list_vcns(
@@ -167,6 +169,7 @@ class oci_query_helper:
             lifecycle_state="AVAILABLE")
         vcns = list_vcns_response.data
         if len(vcns) > 0:
+            # Found the VCN.
             skypilot_vcn = vcns[0].id
             list_subnets_response = net_client.list_subnets(
                 compartment_id=skypilot_compartment,
@@ -182,85 +185,103 @@ class oci_query_helper:
                                    f'{oci_conf.VCN_SUBNET_NAME} found in '
                                    'the VCN {oci_conf.VCN_NAME}')
             subnet = list_subnets_response.data[0].id
-        else:
-            try:
-                create_vcn_response = net_client.create_vcn(
-                    create_vcn_details=oci.core.models.CreateVcnDetails(
+            return subnet
+
+        # Create the skypilot_vcn and related resources
+        try:
+            create_vcn_response = net_client.create_vcn(
+                create_vcn_details=oci.core.models.CreateVcnDetails(
+                    compartment_id=skypilot_compartment,
+                    cidr_blocks=[oci_conf.VCN_CIDR],
+                    display_name=oci_conf.VCN_NAME,
+                    is_ipv6_enabled=False,
+                    dns_label=oci_conf.VCN_DNS_LABEL))
+            vcn_data = create_vcn_response.data
+            skypilot_vcn = vcn_data.id
+            route_table = vcn_data.default_route_table_id
+            security_list = vcn_data.default_security_list_id
+            dhcp_options_id = vcn_data.default_dhcp_options_id
+            logger.debug(f'Created VCN \n{vcn_data}')
+
+            # Create internet gateway for internet access
+            create_ig_response = net_client.create_internet_gateway(
+                create_internet_gateway_details=oci.core.models.
+                CreateInternetGatewayDetails(
+                    compartment_id=skypilot_compartment,
+                    is_enabled=True,
+                    vcn_id=skypilot_vcn,
+                    display_name=oci_conf.VCN_INTERNET_GATEWAY_NAME))
+            logger.debug(
+                f'Created internet gateway \n{create_ig_response.data}')
+
+            # Create a public subnet.
+            create_subnet_response = net_client.create_subnet(
+                create_subnet_details=oci.core.models.CreateSubnetDetails(
+                    cidr_block=oci_conf.VCN_SUBNET_CIDR,
+                    compartment_id=skypilot_compartment,
+                    vcn_id=skypilot_vcn,
+                    dhcp_options_id=dhcp_options_id,
+                    display_name=oci_conf.VCN_SUBNET_NAME,
+                    prohibit_internet_ingress=False,
+                    prohibit_public_ip_on_vnic=False,
+                    route_table_id=route_table,
+                    security_list_ids=[security_list]))
+            subnet = create_subnet_response.data.id
+            logger.debug(f'Created subnet \n{create_subnet_response.data}')
+
+            list_services_response = net_client.list_services(limit=100)
+            services = [
+                s for s in list_services_response.data
+                if str(s.cidr_block).startswith('all-') and str(s.cidr_block).
+                endswith('-services-in-oracle-services-network')
+            ]
+            if len(services) > 0:
+                # Create service gateway for regional services.
+                create_sg_response = net_client.create_service_gateway(
+                    create_service_gateway_details=oci.core.models.
+                    CreateServiceGatewayDetails(
                         compartment_id=skypilot_compartment,
-                        cidr_blocks=[oci_conf.VCN_CIDR],
-                        display_name=oci_conf.VCN_NAME,
-                        is_ipv6_enabled=False,
-                        dns_label=oci_conf.VCN_DNS_LABEL))
-                vcn_data = create_vcn_response.data
-                skypilot_vcn = vcn_data.id
-                route_table = vcn_data.default_route_table_id
-                security_list = vcn_data.default_security_list_id
-                dhcp_options_id = vcn_data.default_dhcp_options_id
-                logger.debug(f'Created VCN \n{vcn_data}')
+                        services=[
+                            oci.core.models.ServiceIdRequestDetails(
+                                service_id=services[0].id)
+                        ],
+                        vcn_id=skypilot_vcn))
+                logger.debug(f'Service Gateway: \n{create_sg_response.data}')
 
-                create_ig_response = net_client.create_internet_gateway(
-                    create_internet_gateway_details=oci.core.models.
-                    CreateInternetGatewayDetails(
-                        compartment_id=skypilot_compartment,
-                        is_enabled=True,
-                        vcn_id=skypilot_vcn,
-                        display_name=oci_conf.VCN_INTERNET_GATEWAY_NAME))
-                logger.debug(
-                    f'Created internet gateway \n{create_ig_response.data}')
+            # Update route table: bind to the internet gateway
+            update_route_table_response = net_client.update_route_table(
+                rt_id=route_table,
+                update_route_table_details=oci.core.models.
+                UpdateRouteTableDetails(route_rules=[
+                    oci.core.models.RouteRule(
+                        network_entity_id=create_ig_response.data.id,
+                        destination='0.0.0.0/0',
+                        destination_type='CIDR_BLOCK',
+                        description='Route table for SkyPilot VCN',
+                        route_type='STATIC')
+                ]))
+            logger.debug(f'Route table: \n{update_route_table_response.data}')
 
-                create_subnet_response = net_client.create_subnet(
-                    create_subnet_details=oci.core.models.CreateSubnetDetails(
-                        cidr_block=oci_conf.VCN_SUBNET_CIDR,
-                        compartment_id=skypilot_compartment,
-                        vcn_id=skypilot_vcn,
-                        dhcp_options_id=dhcp_options_id,
-                        display_name=oci_conf.VCN_SUBNET_NAME,
-                        prohibit_internet_ingress=False,
-                        prohibit_public_ip_on_vnic=False,
-                        route_table_id=route_table,
-                        security_list_ids=[security_list]))
-                logger.debug(f'Created subnet \n{create_subnet_response.data}')
+            # Update security list: Allow all traffic in the same subnet
+            update_security_list_response = net_client.update_security_list(
+                security_list_id=security_list,
+                update_security_list_details=oci.core.models.
+                UpdateSecurityListDetails(ingress_security_rules=[
+                    oci.core.models.IngressSecurityRule(
+                        protocol="all",
+                        source=oci_conf.VCN_SUBNET_CIDR,
+                        is_stateless=False,
+                        source_type="CIDR_BLOCK",
+                        description="Allow all traffic from/to same subnet.")
+                ]))
+            logger.debug(
+                f'Updated security_list: \n{update_security_list_response.data}'
+            )
 
-                list_services_response = net_client.list_services(limit=100)
-                services = [
-                    s for s in list_services_response.data
-                    if str(s.cidr_block).startswith('all-') and
-                    str(s.cidr_block).endswith(
-                        '-services-in-oracle-services-network')
-                ]
-                if len(services) > 0:
-                    create_sg_response = net_client.create_service_gateway(
-                        create_service_gateway_details=oci.core.models.
-                        CreateServiceGatewayDetails(
-                            compartment_id=skypilot_compartment,
-                            services=[
-                                oci.core.models.ServiceIdRequestDetails(
-                                    service_id=services[0].id)
-                            ],
-                            vcn_id=skypilot_vcn))
-                    logger.debug(
-                        f'Service Gateway: \n{create_sg_response.data}')
-
-                update_route_table_response = net_client.update_route_table(
-                    rt_id=route_table,
-                    update_route_table_details=oci.core.models.
-                    UpdateRouteTableDetails(route_rules=[
-                        oci.core.models.RouteRule(
-                            network_entity_id=create_ig_response.data.id,
-                            destination='0.0.0.0/0',
-                            destination_type='CIDR_BLOCK',
-                            description='Route table for SkyPilot VCN',
-                            route_type='STATIC')
-                    ]))
-                logger.debug(
-                    f'Route table: \n{update_route_table_response.data}')
-
-                subnet = create_subnet_response.data.id
-
-            except oci_adaptor.service_exception() as e:
-                logger.error(f'Create VCN Error: Create new VCN '
-                             f'{oci_conf.VCN_NAME} failed {str(e)}')
-                logger.error(e)
-                subnet = None
+        except oci_adaptor.service_exception() as e:
+            logger.error(f'Create VCN Error: Create new VCN '
+                         f'{oci_conf.VCN_NAME} failed {str(e)}')
+            logger.error(e)
+            subnet = None
 
         return subnet
