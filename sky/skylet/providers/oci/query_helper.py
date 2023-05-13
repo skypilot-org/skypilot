@@ -124,7 +124,6 @@ class oci_query_helper:
         logger.debug(
             f"* subscribe_image: {listing_id} - {resource_version} ... [Done]")
 
-
     @classmethod
     @utils.debug_enabled(logger=logger)
     def find_compartment(cls, region) -> str:
@@ -133,24 +132,23 @@ class oci_query_helper:
         skypilot_compartment = oci_conf.get_compartment(region)
         if skypilot_compartment is not None:
             return skypilot_compartment
-        
+
         # If not specified, we try to find the one skypilot-compartment
         root = oci_adaptor.get_oci_config(region)['tenancy']
-        list_compartments_response = oci_conf.identity_client.list_compartments(
-            compartment_id=root,
-            name=oci_conf.COMPARTMENT,
-            lifecycle_state='ACTIVE',
-            limit=1
-        )
+        list_compartments_response = oci_adaptor.get_identity_client(
+            region,
+            oci_conf.get_profile()).list_compartments(compartment_id=root,
+                                                      name=oci_conf.COMPARTMENT,
+                                                      lifecycle_state='ACTIVE',
+                                                      limit=1)
         compartments = list_compartments_response.data
         if len(compartments) > 0:
             skypilot_compartment = compartments[0].compartmentId
             return skypilot_compartment
-        
-        # Finally, we use root compartment none matches above 
+
+        # Finally, we use root compartment none matches above
         skypilot_compartment = root
         return skypilot_compartment
-    
 
     @classmethod
     @utils.debug_enabled(logger=logger)
@@ -225,7 +223,7 @@ class oci_query_helper:
                 subnet = create_subnet_response.data.id
             except oci_adaptor.service_exception() as e:
                 logger.error(f'Create VCN Error: Create new VCN '
-                                   f'{oci_conf.VCN_NAME} failed {str(e)}')                
+                             f'{oci_conf.VCN_NAME} failed {str(e)}')
                 logger.error(e)
                 subnet = None
         return subnet
