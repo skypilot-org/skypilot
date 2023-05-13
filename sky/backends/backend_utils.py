@@ -1900,14 +1900,13 @@ def _update_cluster_status_no_lock(
         if ready_head + ready_workers == handle.launched_nodes:
             ray_cluster_up = True
 
-        # For non-spot clusters: If ray status shows all nodes are healthy, it
-        # is safe to set the status to UP as starting ray is the final step of
-        # sky launch.
-        #
-        # For spot clusters: the above can be unsafe because the Ray cluster
-        # may remain healthy for a while before the cloud completely preempts
-        # the VMs. Thus, we ddditionally query the VM state from the cloud
-        # provider.
+        # For non-spot clusters:
+        # If ray status shows all nodes are healthy, it is safe to set
+        # the status to UP as starting ray is the final step of sky launch.
+        # For spot clusters, the above can be unsafe because the Ray cluster
+        # may remain healthy for a while before the cloud completely
+        # preempts the VMs.
+        # Additionally, we query the VM state from the cloud provider.
         if ray_cluster_up and not use_spot:
             record['status'] = global_user_state.ClusterStatus.UP
             global_user_state.add_or_update_cluster(cluster_name,
@@ -2079,11 +2078,10 @@ def _update_cluster_status(
 
 
 def _refresh_cluster_record(
-    cluster_name: str,
-    *,
-    force_refresh: bool = False,
-    acquire_per_cluster_status_lock: bool = True,
-    skip_identity_check: bool = False,
+        cluster_name: str,
+        *,
+        force_refresh: bool = False,
+        acquire_per_cluster_status_lock: bool = True
 ) -> Optional[Dict[str, Any]]:
     """Refresh the cluster, and return the possibly updated record.
 
@@ -2099,10 +2097,6 @@ def _refresh_cluster_record(
                 2. is a non-spot cluster, is not STOPPED, and autostop is set.
         acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
             before updating the status.
-        skip_identity_check: Whether to skip the identity check. This is
-            currently only used for the `sky down --purge` codepath, where we
-            want to allow the user to delete clusters that were created using a
-            different identity from the local cluster table.
 
     Returns:
         If the cluster is terminated or does not exist, return None.
@@ -2117,12 +2111,11 @@ def _refresh_cluster_record(
           fetched from the cloud provider or there are leaked nodes causing
           the node number larger than expected.
     """
+
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return None
-
-    if not skip_identity_check:
-        check_owner_identity(cluster_name)
+    check_owner_identity(cluster_name)
 
     handle = record['handle']
     if isinstance(handle, backends.CloudVmRayResourceHandle):
@@ -2143,7 +2136,6 @@ def refresh_cluster_status_handle(
     *,
     force_refresh: bool = False,
     acquire_per_cluster_status_lock: bool = True,
-    skip_identity_check: bool = False,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
            Optional[backends.ResourceHandle]]:
     """Refresh the cluster, and return the possibly updated status and handle.
@@ -2155,8 +2147,7 @@ def refresh_cluster_status_handle(
     record = _refresh_cluster_record(
         cluster_name,
         force_refresh=force_refresh,
-        acquire_per_cluster_status_lock=acquire_per_cluster_status_lock,
-        skip_identity_check=skip_identity_check)
+        acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
     if record is None:
         return None, None
     return record['status'], record['handle']

@@ -2835,6 +2835,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # exceptions.ClusterOwnerIdentityMismatchError
         yellow = colorama.Fore.YELLOW
         reset = colorama.Style.RESET_ALL
+        is_identity_mismatch_and_purge = False
         try:
             backend_utils.check_owner_identity(cluster_name)
         except exceptions.ClusterOwnerIdentityMismatchError as e:
@@ -2843,11 +2844,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 verb = 'terminate' if terminate else 'stop'
                 verbed = 'terminated' if terminate else 'stopped'
                 logger.warning(
-                    f'{yellow}Purge (-p/--purge) is '
-                    f'set, ignoring the above error and proceeding to attempt '
-                    f'to {verb} the cluster.{reset}\n{yellow}It is the '
-                    'user\'s responsibility to ensure that this '
+                    f'{yellow}Purge (-p/--purge) is set, ignoring the '
+                    f'identity mismatch error and removing '
+                    f'the cluser record from cluster table.{reset}\n{yellow}It '
+                    'is the user\'s responsibility to ensure that this '
                     f'cluster is actually {verbed} on the cloud.{reset}')
+                is_identity_mismatch_and_purge = True
             else:
                 raise
 
@@ -2861,7 +2863,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             with filelock.FileLock(
                     lock_path,
                     backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
-                success = self.teardown_no_lock(handle, terminate, purge)
+                success = self.teardown_no_lock(
+                    handle,
+                    terminate,
+                    purge,
+                    # When --purge is set and we already see an ID mismatch
+                    # error, we skip the refresh codepath. This is because
+                    # refresh checks current user identity can throw
+                    # ClusterOwnerIdentityMismatchError. The argument/flag
+                    # `purge` should bypass such ID mismatch errors.
+                    refresh_cluster_status=not is_identity_mismatch_and_purge)
             if success and terminate:
                 common_utils.remove_file_if_exists(lock_path)
         except filelock.Timeout as e:
@@ -3061,13 +3072,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if refresh_cluster_status:
             prev_cluster_status, _ = (
                 backend_utils.refresh_cluster_status_handle(
-                    handle.cluster_name,
-                    acquire_per_cluster_status_lock=False,
-                    # The refresh code path checks current user identity can
-                    # throw ClusterOwnerIdentityMismatchError. However, the
-                    # argument/flag `purge` should bypass such ID mismatch
-                    # errors.
-                    skip_identity_check=purge))
+                    handle.cluster_name, acquire_per_cluster_status_lock=False))
         else:
             record = global_user_state.get_cluster_from_name(
                 handle.cluster_name)
