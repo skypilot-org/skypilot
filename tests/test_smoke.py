@@ -1375,7 +1375,7 @@ def test_spot_failed_setup(generic_cloud: str):
         'spot-failed-setup',
         [
             f'sky spot launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
-            'sleep 300',
+            'sleep 330',
             # Make sure the job failed quickly.
             f'{_SPOT_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED_SETUP"',
         ],
@@ -1910,6 +1910,47 @@ class TestStorageWithCredentials:
         'abc_',  # ends with an underscore
     ]
 
+    @staticmethod
+    def cli_delete_cmd(store_type, bucket_name):
+        if store_type == storage_lib.StoreType.S3:
+            url = f's3://{bucket_name}'
+            return ['aws', 's3', 'rb', url, '--force']
+        if store_type == storage_lib.StoreType.GCS:
+            url = f'gs://{bucket_name}'
+            return ['gsutil', '-m', 'rm', '-r', url]
+        if store_type == storage_lib.StoreType.R2:
+            endpoint_url = cloudflare.create_endpoint()
+            url = f's3://{bucket_name}'
+            return [
+                'aws', 's3', 'rb', url, '--force', '--endpoint', endpoint_url,
+                '--profile=r2'
+            ]
+
+    @staticmethod
+    def cli_ls_cmd(store_type, bucket_name, suffix=''):
+        if store_type == storage_lib.StoreType.S3:
+            if suffix:
+                url = f's3://{bucket_name}/{suffix}'
+            else:
+                url = f's3://{bucket_name}'
+            return ['aws', 's3', 'ls', url]
+        if store_type == storage_lib.StoreType.GCS:
+            if suffix:
+                url = f'gs://{bucket_name}/{suffix}'
+            else:
+                url = f'gs://{bucket_name}'
+            return ['gsutil', 'ls', url]
+        if store_type == storage_lib.StoreType.R2:
+            endpoint_url = cloudflare.create_endpoint()
+            if suffix:
+                url = f's3://{bucket_name}/{suffix}'
+            else:
+                url = f's3://{bucket_name}'
+            return [
+                'aws', 's3', 'ls', url, '--endpoint', endpoint_url,
+                '--profile=r2'
+            ]
+
     @pytest.fixture
     def tmp_source(self, tmp_path):
         # Creates a temporary directory with a file in it
@@ -2049,6 +2090,34 @@ class TestStorageWithCredentials:
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
+    def test_bucket_external_deletion(self, tmp_scratch_storage_obj,
+                                      store_type):
+        # Creates a bucket, deletes it externally using cloud cli commands
+        # and then tries to delete it using sky storage delete.
+        tmp_scratch_storage_obj.add_store(store_type)
+
+        # Run sky storage ls to check if storage object exists in the output
+        out = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert tmp_scratch_storage_obj.name in out.decode('utf-8')
+
+        # Delete bucket externally
+        cmd = self.cli_delete_cmd(store_type, tmp_scratch_storage_obj.name)
+        subprocess.check_output(cmd)
+
+        # Run sky storage delete to delete the storage object
+        out = subprocess.check_output(
+            ['sky', 'storage', 'delete', tmp_scratch_storage_obj.name])
+        # Make sure bucket was not created during deletion (see issue #1322)
+        assert 'created' not in out.decode('utf-8').lower()
+
+        # Run sky storage ls to check if storage object is deleted
+        out = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert tmp_scratch_storage_obj.name not in out.decode('utf-8')
+
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
     def test_bucket_bulk_deletion(self, store_type):
         # Create a temp folder with over 256 files and folders, upload
         # files and folders to a new bucket, then delete bucket.
@@ -2152,31 +2221,6 @@ class TestStorageWithCredentials:
                 match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
                     name=private_bucket_name)):
             storage_obj = storage_lib.Storage(source=private_bucket)
-
-    @staticmethod
-    def cli_ls_cmd(store_type, bucket_name, suffix=''):
-        if store_type == storage_lib.StoreType.S3:
-            if suffix:
-                url = f's3://{bucket_name}/{suffix}'
-            else:
-                url = f's3://{bucket_name}'
-            return ['aws', 's3', 'ls', url]
-        if store_type == storage_lib.StoreType.GCS:
-            if suffix:
-                url = f'gs://{bucket_name}/{suffix}'
-            else:
-                url = f'gs://{bucket_name}'
-            return ['gsutil', 'ls', url]
-        if store_type == storage_lib.StoreType.R2:
-            endpoint_url = cloudflare.create_endpoint()
-            if suffix:
-                url = f's3://{bucket_name}/{suffix}'
-            else:
-                url = f's3://{bucket_name}'
-            return [
-                'aws', 's3', 'ls', url, '--endpoint', endpoint_url,
-                '--profile=r2'
-            ]
 
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
