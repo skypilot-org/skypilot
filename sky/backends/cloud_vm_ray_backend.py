@@ -923,7 +923,8 @@ class RetryingVmProvisioner(object):
             if ('VcnSubnetNotFound' in s.strip()) or
             ('oci.exceptions.ServiceError' in s.strip() and
              ('NotAuthorizedOrNotFound' in s.strip() or 'CannotParseRequest' in
-              s.strip() or 'InternalError' in s.strip()))
+              s.strip() or 'InternalError' in s.strip() or
+              'LimitExceeded' in s.strip() or 'NotAuthenticated' in s.strip()))
         ]
         if not errors:
             logger.info('====== stdout ======')
