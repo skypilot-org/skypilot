@@ -81,26 +81,3 @@ def patch() -> None:
 
     from ray.autoscaler._private import updater
     _run_patch(updater.__file__, _to_absolute('updater.py.patch'))
-
-    # Fix the Azure get-access-token (used by ray azure node_provider) timeout issue,
-    # by increasing the timeout.
-    # Tracked in https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
-    # Only patch it if azure cli is installed.
-    # Patch the azure_cli.py with `sed` instead of patching the file directly,
-    # because different versions of azure-cli-core have different line numbers.
-    try:
-        import azure
-        from azure.identity._credentials import azure_cli
-        version = pkg_resources.get_distribution("azure-cli-core").version
-        target_file = azure_cli.__file__
-        orig_file = f'{target_file}.{version}'
-        script = f"""\
-        if [ ! -f {orig_file} ]; then
-            echo Create backup file {orig_file}
-            cp {target_file} {orig_file}
-        fi
-        sed 's/kwargs["timeout"] = 10/kwargs["timeout"] = 30/g' {orig_file} > {target_file}
-        """
-        subprocess.run(script, shell=True, check=False)
-    except ImportError:
-        pass
