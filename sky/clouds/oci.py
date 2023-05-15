@@ -188,13 +188,10 @@ class OCI(clouds.Cloud):
             listing_id = None
             res_ver = None
 
-        instance_type_splits = resources.instance_type.split(
-            oci_conf.INSTANCE_TYPE_RES_SPERATOR)
-        instance_type = instance_type_splits[0]
-
         cpus = resources.cpus
-        if cpus is None and len(instance_type_splits) > 1:
-            cpu_mem = instance_type_splits[1].split(oci_conf.CPU_MEM_SPERATOR)
+        if cpus is None:
+            cpu_mem = OCI.get_vcpus_mem_from_instance_type(
+                resources.instance_type)
             cpus = cpu_mem[0]
             mems = cpu_mem[1]
             resources = resources.copy(
@@ -219,6 +216,9 @@ class OCI(clouds.Cloud):
 
             if zones is not None:
                 zone = zones[0].name
+
+        instance_type = resources.instance_type.split(
+            oci_conf.INSTANCE_TYPE_RES_SPERATOR)[0]
 
         return {
             'instance_type': instance_type,
