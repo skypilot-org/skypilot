@@ -69,6 +69,11 @@ GCLOUD_INSTALLATION_COMMAND = f'pushd /tmp &>/dev/null && \
 
 # TODO(zhwu): Move the default AMI size to the catalog instead.
 DEFAULT_GCP_IMAGE_GB = 50
+_DEFAULT_CPU_IMAGE = 'skypilot:cpu-ubuntu-2004'
+# Other GPUs: CUDA driver version 510.47.03, CUDA Library 11.6
+# K80: CUDA driver version 470.103.01, CUDA Library 11.4 (we manually install the older
+# CUDA driver in the gcp-ray.yaml to support K80)
+_DEFAULT_GPU_IMAGE = 'skypilot:gpu-ubuntu-2004'
 
 
 def _run_output(cmd):
@@ -236,7 +241,7 @@ class GCP(clouds.Cloud):
         return isinstance(other, GCP)
 
     @classmethod
-    def get_image_infos(cls, image_id) -> Dict[str, Any]:
+    def get_image_info(cls, image_id) -> Dict[str, Any]:
         try:
             compute = gcp.build('compute',
                                 'v1',
@@ -250,9 +255,9 @@ class GCP(clouds.Cloud):
                 raise ValueError(f'Image {image_id!r} not found in GCP.')
             project = image_attrs[1]
             image_name = image_attrs[-1]
-            image_infos = compute.images().get(project=project,
+            image_info = compute.images().get(project=project,
                                                image=image_name).execute()
-            return image_infos
+            return image_info
         except gcp.http_error_exception() as e:
             if e.resp.status == 403:
                 with ux_utils.print_exception_no_traceback():
@@ -267,11 +272,17 @@ class GCP(clouds.Cloud):
     def get_image_size(self, image_id: str, region: Optional[str]) -> float:
         del region  # unused
         if image_id.startswith('skypilot:'):
+            # Hack: this utilizes the knowledge that both the selected debian
+            # and ubuntu images on GCP have the same size of 50GB, to reduce
+            # the overhead for querying the image size.
             return DEFAULT_GCP_IMAGE_GB
-        image_infos = self.get_image_infos(image_id)
-        if 'diskSizeGb' not in image_infos:
+        image_info = self.get_image_info(image_id)
+        if 'diskSizeGb' not in image_info:
+            # All the images in GCP should have the diskSizeGb field, but
+            # just in case, we do not want to crash the program, as the image
+            # size check is not critical.
             return DEFAULT_GCP_IMAGE_GB
-        return float(image_infos['diskSizeGb'])
+        return float(image_info['diskSizeGb'])
 
     @classmethod
     def get_default_instance_type(
@@ -295,9 +306,7 @@ class GCP(clouds.Cloud):
         # gcloud compute images list \
         # --project deeplearning-platform-release \
         # --no-standard-images | grep ubuntu-2004
-        # We use the debian image, as the ubuntu image has some connectivity
-        # issue when first booted.
-        image_id = 'skypilot:cpu-ubuntu-2004'
+        image_id = _DEFAULT_CPU_IMAGE
 
         r = resources
         # Find GPU spec, if any.
@@ -337,11 +346,8 @@ class GCP(clouds.Cloud):
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
                         acc.lower())
                 resources_vars['gpu_count'] = acc_count
-                # Though the image is called cu113, it actually has later
-                # versions of CUDA as noted below.
-                # CUDA driver version 510.47.03, CUDA Library 11.6
-                # K80: CUDA driver version 470.103.01, CUDA Library 11.4
-                image_id = 'skypilot:gpu-ubuntu-2004'
+
+                image_id = _DEFAULT_GPU_IMAGE
 
         if resources.image_id is not None:
             if None in resources.image_id:

@@ -76,19 +76,15 @@ available_node_types:
                 - path: /etc/apt/apt.conf.d/10cloudinit-disable
                   content: |
                     APT::Periodic::Enable "0";
-                - path: /etc/ssh/sshd_config
-                  append: true
-                  content: |
-                    ClientAliveInterval 720
-                    ClientAliveCountMax 720
   {%- if gpu is not none %}
     {%- if 'tesla-k80' in gpu %}
               runcmd:
                 - curl https://raw.githubusercontent.com/GoogleCloudPlatform/compute-gpu-installation/main/linux/install_gpu_driver.py --output install_gpu_driver.py
                 - python3 install_gpu_driver.py
-    {%- endif %}
+    {%- else %}
           - key: install-nvidia-driver
             value: true
+    {%- endif %}
       guestAccelerators:
         - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
           acceleratorCount: {{gpu_count}}
@@ -148,19 +144,15 @@ available_node_types:
                 - path: /etc/apt/apt.conf.d/10cloudinit-disable
                   content: |
                     APT::Periodic::Enable "0";
-                - path: /etc/ssh/sshd_config
-                  append: true
-                  content: |
-                    ClientAliveInterval 720
-                    ClientAliveCountMax 720
     {%- if gpu is not none %}
       {%- if 'tesla-k80' in gpu %}
               runcmd:
                 - curl https://raw.githubusercontent.com/GoogleCloudPlatform/compute-gpu-installation/main/linux/install_gpu_driver.py --output install_gpu_driver.py
                 - python3 install_gpu_driver.py
-      {%- endif %}
+      {%- else %}
           - key: install-nvidia-driver
             value: true
+      {%- endif %}
       guestAccelerators:
         - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
           acceleratorCount: {{gpu_count}}
@@ -198,12 +190,13 @@ initialization_commands: []
 # Increment the following for catching performance bugs easier:
 #   current num items (num SSH connections): 1  (+1 if tpu_vm)
 setup_commands:
-  # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Line 'mkdir -p ..': Create ~/.ssh/config file in case the file does not exist in the custom image.
   # Line 'pip3 --v ..': Make sure python3 & pip3 are available on this image.
   # Line 'which conda ..': some images (TPU VM) do not install conda by
   # default. 'source ~/.bashrc' is needed so conda takes effect for the next
   # commands.
+  # Line 'pip3 list | ..': Install the correct version of ray[default] if it is not. The 'python3 -c "import ray"' is to check the integrity of the
+  # installed ray package. The integrity check is needed because the reboot of the machine during the ray installation may cause the corruption.
   # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
@@ -246,8 +239,9 @@ head_start_ray_commands:
       echo "Waiting for NVIDIA drivers to be installed..." >> ~/.sky/nvlog
       sleep 5
     done
-    # Magic number for waiting the nvidia driver to be ready and the instance
-    # to be rebooted.
+    # Magic number for waiting for the nvidia driver to be ready and the instance
+    # to be rebooted. The number is determined by experiments, and it is the
+    # minimum number that works.
     sleep 18
     echo "NVIDIA GPU is ready." >> ~/.sky/nvlog
 {%- endif %}
@@ -267,8 +261,9 @@ worker_start_ray_commands:
       echo "Waiting for NVIDIA drivers to be installed..." >> ~/.sky/nvlog
       sleep 5
     done
-    # Magic number for waiting the nvidia driver to be ready and the instance
-    # to be rebooted.
+    # Magic number for waiting for the nvidia driver to be ready and the instance
+    # to be rebooted. The number is determined by experiments, and it is the
+    # minimum number that works.
     sleep 18
     echo "NVIDIA GPU is ready." >> ~/.sky/nvlog
 {%- endif %}

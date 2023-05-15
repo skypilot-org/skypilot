@@ -133,7 +133,7 @@ def _wait_for_compute_global_operation(project_name: str, operation_name: str,
     return result
 
 
-def _maybe_gcp_add_ssh_key_to_account(compute, project, config: Dict[str, Any],
+def _maybe_add_ssh_key_to_gcp_project_if_debian(compute, project, config: Dict[str, Any],
                                       os_login_enabled: bool):
     """Add ssh key to GCP account if using Debian image without cloud-init.
 
@@ -151,8 +151,8 @@ def _maybe_gcp_add_ssh_key_to_account(compute, project, config: Dict[str, Any],
                                                      {}).get('sourceImage')
     # image_id is None when TPU VM is used, as TPU VM does not use image.
     if image_id is not None and 'debian' not in image_id.lower():
-        image_infos = clouds.GCP.get_image_infos(image_id)
-        if 'debian' not in json.dumps(image_infos).lower():
+        image_info = clouds.GCP.get_image_info(image_id)
+        if 'debian' not in json.dumps(image_info).lower():
             # The non-Debian images have the ssh key setup by cloud-init.
             return
     logger.info('Adding ssh key to GCP account.')
@@ -323,7 +323,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # This function is for backward compatibility, as the user using the old
     # Debian-based image may not have the cloud-init enabled, and we need to
     # add the ssh key to the account.
-    _maybe_gcp_add_ssh_key_to_account(compute, project, config, oslogin_enabled)
+    _maybe_add_ssh_key_to_gcp_project_if_debian(compute, project, config, oslogin_enabled)
     return config
 
 

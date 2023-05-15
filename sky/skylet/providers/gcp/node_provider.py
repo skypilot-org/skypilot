@@ -382,7 +382,19 @@ class GCPNodeProvider(NodeProvider):
             def _run_helper(
                 self, final_cmd, with_output=False, exit_on_fail=False, silent=False
             ):
-                """Wrapper around _run_helper to retry on failure."""
+                """Wrapper around _run_helper to retry on failure.
+
+                Fix the ssh connection issue caused by control master for GCP with ubuntu
+                image. Before the fix, the ssh connection will be disconnected when ray
+                trying to setup the runtime dependencies, which is probably because the
+                ssh connection is unstable when the cluster is just provisioned
+                https://github.com/ray-project/ray/issues/16539#issuecomment-1073138982.
+                The root cause can be that the GCP's async nvidia-driver installation will
+                reboot the machine when finished.
+                
+                We added retry for the ssh commands executed by ray up, which is ok since
+                our setup commands are idempotent.
+                """
                 retry_cnt = 0
                 import click
 
