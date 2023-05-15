@@ -169,15 +169,15 @@ class OCI(clouds.Cloud):
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         assert region is not None, resources
 
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         if acc_dict is not None:
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
 
         image_str = self._get_image_id(resources.image_id, region.name,
-                                       r.instance_type)
+                                       resources.instance_type)
         image_cols = image_str.split(oci_conf.IMAGE_TAG_SPERATOR)
         if len(image_cols) == 3:
             image_id = image_cols[0]
@@ -188,12 +188,25 @@ class OCI(clouds.Cloud):
             listing_id = None
             res_ver = None
 
+        instance_type_splits = resources.instance_type.split(
+            oci_conf.INSTANCE_TYPE_RES_SPERATOR)
+        instance_type = instance_type_splits[0]
+
         cpus = resources.cpus
-        if resources.instance_type.startswith(oci_conf.VM_PREFIX):
-            cpus = f'{oci_conf.DEFAULT_NUM_VCPUS}' if cpus is None else cpus
+        if cpus is None and len(instance_type_splits) > 1:
+            cpu_mem = instance_type_splits[1].split(oci_conf.CPU_MEM_SPERATOR)
+            cpus = cpu_mem[0]
+            mems = cpu_mem[1]
+            resources = resources.copy(
+                cpus=cpus,
+                memory=mems,
+            )
+
+        if cpus is None and resources.instance_type.startswith(
+                oci_conf.VM_PREFIX):
+            cpus = f'{oci_conf.DEFAULT_NUM_VCPUS}'
 
         zone = resources.zone
-        # TODO(Hysun): error-and-try all zones.
         if zone is None:
             # If zone is not specified, try to get the first zone.
             if zones is None:
@@ -206,9 +219,6 @@ class OCI(clouds.Cloud):
 
             if zones is not None:
                 zone = zones[0].name
-
-        instance_type = resources.instance_type.split(
-            oci_conf.INSTANCE_TYPE_RES_SPERATOR)[0]
 
         return {
             'instance_type': instance_type,

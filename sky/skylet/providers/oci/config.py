@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 class oci_conf:
     IMAGE_TAG_SPERATOR = "|"
     INSTANCE_TYPE_RES_SPERATOR = "$_"
+    CPU_MEM_SPERATOR = "_"
 
     DEFAULT_NUM_VCPUS = 8
     DEFAULT_MEMORY_CPU_RATIO = 6
