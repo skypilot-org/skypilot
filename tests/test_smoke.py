@@ -791,6 +791,7 @@ def test_job_queue(generic_cloud: str):
             f'sky logs {name} 5 --status',
         ],
         f'sky down -y {name}',
+        timeout=20 * 60,
     )
     run_one_test(test)
 
