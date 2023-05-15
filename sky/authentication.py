@@ -133,8 +133,9 @@ def _wait_for_compute_global_operation(project_name: str, operation_name: str,
     return result
 
 
-def _maybe_add_ssh_key_to_gcp_project_if_debian(compute, project, config: Dict[str, Any],
-                                      os_login_enabled: bool):
+def _maybe_add_ssh_key_to_gcp_project_if_debian(compute, project,
+                                                config: Dict[str, Any],
+                                                os_login_enabled: bool):
     """Add ssh key to GCP account if using Debian image without cloud-init.
 
     This function is for backward compatibility. It is only used when the user
@@ -323,7 +324,8 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # This function is for backward compatibility, as the user using the old
     # Debian-based image may not have the cloud-init enabled, and we need to
     # add the ssh key to the account.
-    _maybe_add_ssh_key_to_gcp_project_if_debian(compute, project, config, oslogin_enabled)
+    _maybe_add_ssh_key_to_gcp_project_if_debian(compute, project, config,
+                                                oslogin_enabled)
     return config
 
 

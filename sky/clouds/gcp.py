@@ -70,9 +70,9 @@ GCLOUD_INSTALLATION_COMMAND = f'pushd /tmp &>/dev/null && \
 # TODO(zhwu): Move the default AMI size to the catalog instead.
 DEFAULT_GCP_IMAGE_GB = 50
 _DEFAULT_CPU_IMAGE = 'skypilot:cpu-ubuntu-2004'
-# Other GPUs: CUDA driver version 510.47.03, CUDA Library 11.6
-# K80: CUDA driver version 470.103.01, CUDA Library 11.4 (we manually install the older
-# CUDA driver in the gcp-ray.yaml to support K80)
+# Other GPUs: CUDA driver version 510.47.03, CUDA Library 11.6.
+# K80: CUDA driver version 470.103.01, CUDA Library 11.4 (we manually install
+# the older CUDA driver in the gcp-ray.yaml to support K80).
 _DEFAULT_GPU_IMAGE = 'skypilot:gpu-ubuntu-2004'
 
 
@@ -256,7 +256,7 @@ class GCP(clouds.Cloud):
             project = image_attrs[1]
             image_name = image_attrs[-1]
             image_info = compute.images().get(project=project,
-                                               image=image_name).execute()
+                                              image=image_name).execute()
             return image_info
         except gcp.http_error_exception() as e:
             if e.resp.status == 403:

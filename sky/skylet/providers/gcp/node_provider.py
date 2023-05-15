@@ -391,7 +391,7 @@ class GCPNodeProvider(NodeProvider):
                 https://github.com/ray-project/ray/issues/16539#issuecomment-1073138982.
                 The root cause can be that the GCP's async nvidia-driver installation will
                 reboot the machine when finished.
-                
+
                 We added retry for the ssh commands executed by ray up, which is ok since
                 our setup commands are idempotent.
                 """
