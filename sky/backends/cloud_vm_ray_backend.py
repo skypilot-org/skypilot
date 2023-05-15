@@ -72,7 +72,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.Lambda: 150,
     clouds.IBM: 160,
     clouds.Local: 90,
-    clouds.OCI: 300,
+    clouds.OCI: 20 * 60,
 }
 
 # Time gap between retries after failing to provision in all possible places.
