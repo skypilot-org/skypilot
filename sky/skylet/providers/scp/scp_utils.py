@@ -1,21 +1,21 @@
-"""SCP Open-API Functions
+"""SCP Open-API Functions.
 
-This module contains a set of rest api functions accessing SCP Open-API
+This module contains a set of rest api functions accessing SCP Open-API.
 """
-
-import os
-import json
-import requests
-import time
-from datetime import datetime, timedelta
+import base64
+import datetime
 import hashlib
 import hmac
-import base64
+import json
+import logging
+import os
+import requests
+import time
+from functools import wraps
 from typing import Any, Dict, List
 from urllib import parse
-import random
-from functools import wraps
-import logging
+
+
 
 CREDENTIALS_PATH = '~/.scp/scp_credential'
 API_ENDPOINT = 'https://openapi.samsungsdscloud.com'
@@ -346,7 +346,7 @@ class SCPClient:
         self.timestamp = str(
             int(
                 round(
-                    datetime.timestamp(datetime.now() - timedelta(minutes=1)) *
+                    datetime.datetime.timestamp(datetime.now() - datetime.timedelta(minutes=1)) *
                     1000)))
         self.headers['X-Cmp-Timestamp'] = self.timestamp
 

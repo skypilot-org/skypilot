@@ -408,7 +408,6 @@ class SCPNodeProvider(NodeProvider):
                     count: int) -> None:
         """Creates a number of nodes within the namespace."""
         assert count == 1, count  # Only support 1-node clusters for now
-        # raise SCPError("!!!!!!!", node_config)
         """
         0. need VPC where IGW attached, and its public subnets
         1. select a VPC
