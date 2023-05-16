@@ -105,6 +105,9 @@ _CTRL_C_TIP_MESSAGE = ('INFO: Tip: use Ctrl-C to exit log streaming '
 
 _MAX_RAY_UP_RETRY = 5
 
+# Number of retries for getting zones.
+_MAX_GET_ZONE_RETRY = 3
+
 _JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
 
 # Path to the monkey-patched ray up script.
@@ -2354,8 +2357,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         ip_list, **ssh_credentials)
 
                     def _get_zone(runner):
-                        returncode, stdout, stderr = runner.run(
-                            get_zone_cmd, require_outputs=True)
+                        retry_count = 0
+                        backoff = common_utils.Backoff(initial_backoff=1,
+                                                       max_backoff_factor=3)
+                        while True:
+                            returncode, stdout, stderr = runner.run(
+                                get_zone_cmd, require_outputs=True)
+                            if returncode == 0:
+                                break
+                            retry_count += 1
+                            if retry_count <= _MAX_GET_ZONE_RETRY:
+                                time.sleep(backoff.current_backoff())
+                                continue
                         subprocess_utils.handle_returncode(
                             returncode,
                             get_zone_cmd,
