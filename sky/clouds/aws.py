@@ -461,6 +461,17 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _current_identity_type(cls) -> Optional[AWSIdentityType]:
+        if aws.session().get_credentials().token is not None:
+            # We have seen the following case: user is using an Okta wrapper
+            # which generates temporary env vars for AWS credentials (including
+            # AWS_SESSION_TOKEN). This technically is using SSO, but the `aws
+            # configure list` output check below would show `env` in the Type
+            # column, rather than `sso` that we expect; hence it would fail to
+            # detect it's using SSO, causing troubles when creating multinode
+            # clusters.
+            #
+            # Thus, do this check first. `.token` seems to be non-None iff SSO.
+            return AWSIdentityType.SSO
         proc = subprocess.run('aws configure list',
                               shell=True,
                               check=False,
