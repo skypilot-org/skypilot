@@ -296,8 +296,7 @@ class OCI(clouds.Cloud):
                     '      https://docs.oracle.com/en-us/iaas/Content/API/'
                     'Concepts/apisigningkey.htm')
         if not os.path.isfile(os.path.expanduser(oci_adaptor.CONFIG_PATH)):
-            return (False,
-                    f'{oci_adaptor.CONFIG_PATH} does not exist. ' + help_str)
+            return (False, help_str)
         try:
             user = oci_adaptor.get_identity_client(
                 region=None, profile=oci_conf.get_profile()).get_user(

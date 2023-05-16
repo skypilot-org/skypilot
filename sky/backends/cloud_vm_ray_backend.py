@@ -72,7 +72,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.Lambda: 150,
     clouds.IBM: 160,
     clouds.Local: 90,
-    clouds.OCI: 20 * 60,
+    clouds.OCI: 300,
 }
 
 # Time gap between retries after failing to provision in all possible places.
@@ -3160,8 +3160,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 returncode = 0
 
         # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
+        # May, 2023 by Hysun: Allow terminate INIT cluster which may have
+        # some instances provisioning in backgroud but not completed.
         elif (isinstance(cloud, clouds.OCI) and terminate and
-              prev_cluster_status == global_user_state.ClusterStatus.STOPPED):
+              prev_cluster_status in (global_user_state.ClusterStatus.STOPPED,
+                                      global_user_state.ClusterStatus.INIT)):
             region = config['provider']['region']
 
             # pylint: disable=import-outside-toplevel
