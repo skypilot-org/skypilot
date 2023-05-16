@@ -50,7 +50,7 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
-from sky.skylet.providers.scp.node_provider import SCPNodeProvider
+from sky.skylet.providers.scp.node_provider import SCPNodeProvider, SCPError
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -3155,24 +3155,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 returncode = 0
 
         elif terminate and isinstance(cloud, clouds.SCP):
+            config['provider']['cache_stopped_nodes'] = not terminate
+            provider = SCPNodeProvider(config['provider'], handle.cluster_name)
             try:
-                config['provider']['cache_stopped_nodes'] = not terminate
-                provider = SCPNodeProvider(config['provider'],
-                                           handle.cluster_name)
-
                 if not os.path.exists(provider.metadata.path):
-                    prefix = "SKYPILOT_ERROR_NO_NODES_LAUNCHED: "
-                    error = "Metadata file does not exist."
-                    raise RuntimeError(prefix + error)
+                    prefix = 'SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
+                    error = 'Metadata file does not exist.'
+                    raise SCPError(prefix + error)
 
                 with open(provider.metadata.path, 'r') as f:
                     metadata = json.load(f)
                     node_id = next((key for key in list(metadata.keys())
                                     if key.startswith('INSTANCE')), None)
                     provider.terminate_node(node_id)
-                    returncode = 0
-
-            except Exception as e:
+                returncode = 0
+            except SCPError as e:
                 returncode = 1
                 stdout = f'{e}'
                 stderr = f'{e}'
