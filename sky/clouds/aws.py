@@ -461,7 +461,8 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _current_identity_type(cls) -> Optional[AWSIdentityType]:
-        if aws.session().get_credentials().token is not None:
+        credentials = aws.session().get_credentials()
+        if credentials is not None and credentials.token is not None:
             # We have seen the following case: user is using an Okta wrapper
             # which generates temporary env vars for AWS credentials (including
             # AWS_SESSION_TOKEN). This technically is using SSO, but the `aws
