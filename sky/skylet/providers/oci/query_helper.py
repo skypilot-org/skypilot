@@ -144,7 +144,7 @@ class oci_query_helper:
                                                       limit=1)
         compartments = list_compartments_response.data
         if len(compartments) > 0:
-            skypilot_compartment = compartments[0].compartment_id
+            skypilot_compartment = compartments[0].id
             return skypilot_compartment
 
         # Finally, we use root compartment none matches above
