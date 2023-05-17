@@ -3159,7 +3159,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             provider = SCPNodeProvider(config['provider'], handle.cluster_name)
             try:
                 if not os.path.exists(provider.metadata.path):
-                    raise RuntimeError('SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
+                    raise SCPError('SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
                                        'Metadata file does not exist.')
 
                 with open(provider.metadata.path, 'r') as f:
