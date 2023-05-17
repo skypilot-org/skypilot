@@ -1568,7 +1568,7 @@ class GcsStore(AbstractStore):
                             item = re.sub(r'\*', '.*', item)
                             item = re.sub(r'\.\*\.\*', '.*', item)
                             item = re.sub('!', '^', item)
-                            item = re.sub('\?', '.', item)
+                            item = re.sub(r'\?', '.', item)
                             if item.startswith('/'):
                                 item = item[1:]
                             excluded_list.append(item)
