@@ -13,7 +13,6 @@ from sky.clouds import service_catalog
 from sky.skylet.providers.scp import scp_utils
 from sky import exceptions
 from sky import sky_logging
-from sky.skylet.providers.scp.scp_utils import SCPClient
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -26,8 +25,8 @@ _CREDENTIAL_FILES = [
 
 logger = sky_logging.init_logger(__name__)
 
-MIN_DISK_SIZE = 100
-MAX_DISK_SIZE = 300
+_SCP_MIN_DISK_SIZE_GB = 100
+_SCP_MAX_DISK_SIZE_GB = 300
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -36,12 +35,9 @@ class SCP(clouds.Cloud):
 
     _REPR = 'SCP'
 
-    # Lamdba has a 64 char limit for cluster name.
-    # Reference: https://cloud.lambdalabs.com/api/v1/docs#operation/launchInstance # pylint: disable=line-too-long
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 64
-    # Currently, none of clouds.CloudImplementationFeatures are implemented
-    # for SCP Cloud.
-    # STOP/AUTOSTOP: The SCP cloud provider does not support stopping VMs.
+    # SCP has a 28 char limit for cluster name.
+    # Reference: https://cloud.samsungsds.com/openapiguide/#/docs/v2-en-virtual_server-definitions-VirtualServerCreateV3Request
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 28
     # MULTI_NODE: Multi-node is not supported by the implementation yet.
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the SCP Cloud implementation yet.',
@@ -62,7 +58,7 @@ class SCP(clouds.Cloud):
     def regions(cls) -> List[clouds.Region]:
 
         if not cls._regions:
-            scp_client = SCPClient()
+            scp_client = scp_utils.SCPClient()
             service_zones = scp_client.list_service_zone_names()
             cls._regions = [
                 clouds.Region(zone_name) for zone_name in service_zones
@@ -126,14 +122,11 @@ class SCP(clouds.Cloud):
                                     region: Optional[str] = None,
                                     zone: Optional[str] = None) -> float:
         del accelerators, use_spot, region, zone  # unused
-        # Lambda includes accelerators as part of the instance type.
+        # SCP includes accelerators as part of the instance type.
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
         return 0.0
-
-    def __repr__(self):
-        return 'SCP'
 
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
         # Returns true if the two clouds are the same cloud type.
@@ -245,9 +238,9 @@ class SCP(clouds.Cloud):
                                           resources: 'resources_lib.Resources'):
         if resources.use_spot:
             return ([], [])
-        if resources.disk_size is not None and not MIN_DISK_SIZE <= resources.disk_size <= MAX_DISK_SIZE:
-            logger.info(f'The disk size must be between 100 and 300 in SCP. ' \
-                         f'Input: {resources.disk_size}')
+        if resources.disk_size is not None and not _SCP_MIN_DISK_SIZE_GB <= resources.disk_size <= _SCP_MAX_DISK_SIZE_GB:
+            logger.info(f'In SCP, the disk size must range between {_SCP_MIN_DISK_SIZE_GB} GB '
+                        f'and {_SCP_MAX_DISK_SIZE_GB} GB. Input: {resources.disk_size}')
             return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
@@ -296,18 +289,17 @@ class SCP(clouds.Cloud):
         return (_make(instance_list), fuzzy_candidate_list)
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
-        # return True, None
         try:
             scp_utils.SCPClient().list_instances()
         except (AssertionError, KeyError, scp_utils.SCPClientError):
             return False, ('Failed to access SCP with credentials. '
-                           'To configure credentials, go to:\n    '
-                           '  https://cloud.samsungsds.com/openapiguide\n    '
-                           'to generate API key and add the line\n    '
-                           '  access_key = [YOUR API ACCESS KEY]\n    '
-                           '  secret_key = [YOUR API SECRET KEY]\n    '
-                           '  project_id = [YOUR PROJECT ID]\n    '
-                           'to ~/.scp/scp_credential')
+                           'To configure credentials, go to:\n'
+                           ' https://cloud.samsungsds.com/openapiguide\n'
+                           ' to generate API key and add the line\n'
+                           ' access_key = [YOUR API ACCESS KEY]\n'
+                           ' secret_key = [YOUR API SECRET KEY]\n'
+                           ' project_id = [YOUR PROJECT ID]\n'
+                           ' to ~/.scp/scp_credential')
 
         return True, None
 
@@ -318,7 +310,7 @@ class SCP(clouds.Cloud):
         }
 
     def get_current_user_identity(self) -> Optional[str]:
-        # TODO(ewzeng): Implement get_current_user_identity for SCP
+        # TODO(jgoo1): Implement get_current_user_identity for SCP
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
@@ -337,9 +329,8 @@ class SCP(clouds.Cloud):
 
     @staticmethod
     def is_disk_size_allowed(disk_size):
-        if disk_size < MIN_DISK_SIZE or disk_size > MAX_DISK_SIZE:
-            logger.info(
-                f'The disk size must be between 100 and 300 in SCP. Input: {disk_size}'
-            )
+        if disk_size < _SCP_MIN_DISK_SIZE_GB or disk_size > _SCP_MAX_DISK_SIZE_GB:
+            logger.info(f'In SCP, the disk size must range between {_SCP_MIN_DISK_SIZE_GB} GB '
+                        f'and {_SCP_MAX_DISK_SIZE_GB} GB. Input: {disk_size}')
             return False
         return True

@@ -66,8 +66,6 @@ setup_commands:
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   - sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;
-    sudo pip3 install --upgrade --ignore-installed pip setuptools;
-    sudo pip3 install -U "ray[default]";
     sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
     sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
     sudo pkill -9 apt-get;
