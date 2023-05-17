@@ -15,21 +15,27 @@ logger = sky_logging.init_logger(__name__)
 ibm_vpc = None
 ibm_cloud_sdk_core = None
 ibm_platform_services = None
+ibm_boto3 = None
+ibm_botocore = None
 
 
 def import_package(func):
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        global ibm_vpc, ibm_cloud_sdk_core, ibm_platform_services
+        global ibm_vpc, ibm_cloud_sdk_core, ibm_platform_services, ibm_boto3, ibm_botocore
         if None in [ibm_vpc, ibm_cloud_sdk_core, ibm_platform_services]:
             try:
                 import ibm_vpc as _ibm_vpc
                 import ibm_cloud_sdk_core as _ibm_cloud_sdk_core
                 import ibm_platform_services as _ibm_platform_services
+                import ibm_boto3 as _ibm_boto3
+                import ibm_botocore as _ibm_botocore
                 ibm_vpc = _ibm_vpc
                 ibm_cloud_sdk_core = _ibm_cloud_sdk_core
                 ibm_platform_services = _ibm_platform_services
+                ibm_boto3 = _ibm_boto3
+                ibm_botocore = _ibm_botocore
             except ImportError:
                 raise ImportError(
                     'Failed to import dependencies for IBM. '
@@ -46,6 +52,15 @@ def read_credential_file():
 
 def get_api_key():
     return read_credential_file()['iam_api_key']
+
+
+def get_hmac_keys():
+    cred_file = read_credential_file()
+    return cred_file['access_key_id'], cred_file['secret_access_key']
+
+
+def get_storage_instance_id():
+    return read_credential_file()['cos_instance_id']
 
 
 @import_package
@@ -105,3 +120,25 @@ def search_client():
 def tagging_client():
     return ibm_platform_services.GlobalTaggingV1(
         authenticator=_get_authenticator())
+
+
+@import_package
+def get_cos_client(region: str = 'us-east'):
+    return ibm_boto3.client(  # type: ignore[union-attr]
+        service_name='s3',
+        ibm_api_key_id=get_api_key(),
+        config=ibm_botocore.client.Config(  # type: ignore[union-attr]
+            signature_version='oauth'),
+        endpoint_url=f'https://s3.{region}.cloud-object-storage.appdomain.cloud'
+    )
+
+
+@import_package
+def get_cos_resource(region: str = 'us-east'):
+    return ibm_boto3.resource(  # type: ignore[union-attr]
+        's3',
+        ibm_api_key_id=get_api_key(),
+        config=ibm_botocore.client.Config(  # type: ignore[union-attr]
+            signature_version='oauth'),
+        endpoint_url=f'https://s3.{region}.cloud-object-storage.appdomain.cloud',
+        ibm_service_instance_id=get_storage_instance_id())
