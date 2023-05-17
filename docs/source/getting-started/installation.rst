@@ -15,11 +15,12 @@ Install SkyPilot using pip:
   $ # pip install "skypilot[gcp]"
   $ # pip install "skypilot[azure]"
   $ # pip install "skypilot[lambda]"
+  $ # pip install "skypilot[ibm]"
   $ # pip install "skypilot[all]"
 
-SkyPilot currently supports five cloud providers: AWS, GCP, Azure, Lambda Cloud and Cloudflare (for R2 object store).
+SkyPilot currently supports six cloud providers: AWS, GCP, Azure, Lambda Cloud, IBM and Cloudflare (for R2 object store).
 If you only have access to certain clouds, use any combination of
-:code:`"[aws,azure,gcp,lambda,cloudflare]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
+:code:`"[aws,azure,gcp,lambda,cloudflare,ibm]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
 dependencies installed.
 
 You may also install SkyPilot from source.
@@ -120,6 +121,19 @@ To access IBM's services, store the following fields in ``~/.ibm/credentials.yam
 - Create a new API key by following `this guide <https://www.ibm.com/docs/en/app-connect/container?topic=servers-creating-cloud-api-key>`_.
 - Obtain a resource group's ID from the `web console <https://cloud.ibm.com/account/resource-groups>`_.
 
+To access IBM's Object Storage (COS) append the following fields to the credentials file:
+.. code-block:: text
+  cos_instance_id: <instance_id>
+  access_key_id: <access_key_id>
+  secret_access_key: <secret_key_id>
+
+Follow the next steps to create/extract the above fields:
+1. Create/Select a cos instance from the `web console <https://cloud.ibm.com/objectstorage/>`__.
+2. From "Service Credentials" tab, click "New Credential" and toggle "Include HMAC Credential".
+3. Copy "secret_access_key" and "access_key_id" to file.
+4. Extract cos_instance_id from "resource_instance_id" by copying the string between the last occurrence of ":" and "::",
+   e.g., see "resource_instance_id" in the following example: `"resource_instance_id": "crn:v1:bluemix:public:cloud-object-storage:global:a/<random_staring>:<resource_instance_id>::"`.
+
 .. note::
   Stock images aren't currently providing ML tools out of the box.
   Create private images with the necessary tools (e.g. CUDA), by following the IBM segment in `this documentation <https://github.com/skypilot-org/skypilot/blob/master/docs/source/reference/yaml-spec.rst>`_. 
@@ -178,6 +192,7 @@ This will produce a summary like:
     GCP: enabled
     Azure: enabled
     Lambda: enabled
+    IBM: enabled
 
   SkyPilot will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
 
