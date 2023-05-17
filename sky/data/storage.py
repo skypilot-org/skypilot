@@ -1558,12 +1558,17 @@ class GcsStore(AbstractStore):
             if os.path.isfile(exclude_file_path):
                 with open(exclude_file_path, 'r') as file:
                     for item in file:
+                        # gsutil rsync does not support include filter
+                        if item.startswith('!'):
+                            continue
                         if not item.startswith('#'):
                             # removing '\n' at the end
                             item = item[:-1]
                             item = re.sub(r'\.', '\\.', item)
                             item = re.sub(r'\*', '.*', item)
                             item = re.sub(r'\.\*\.\*', '.*', item)
+                            item = re.sub('!', '^', item)
+                            item = re.sub('\?', '.', item)
                             if item.startswith('/'):
                                 item = item[1:]
                             excluded_list.append(item)
