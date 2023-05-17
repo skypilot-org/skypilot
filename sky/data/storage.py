@@ -1,5 +1,6 @@
 """Storage and Store Classes for Sky Data."""
 import enum
+import fnmatch
 import os
 import re
 import subprocess
@@ -1053,24 +1054,83 @@ class S3Store(AbstractStore):
                 contents are uploaded to it.
         """
 
-        def get_excluded_list(src_dir_path):
+        def postprocess_list(list_to_format: List[str]):
+            # process '/' at the start and the end of the item
+            for idx, item in enumerate(list_to_format):
+                if item.endswith('/'):
+                    list_to_format[idx] = item + '*'
+                elif item.startswith('/'):
+                    list_to_format[idx] = item[1:]
+
+        def process_double_asterisk(src_dir_path: str, item: str) -> List[str]:
+            # Need to check if any item with preceding '**' is
+            # a directory as --exclude filter fails to recognize it
+            parent_path = os.path.expanduser(src_dir_path)
+            processed_list = []
+            split_list = item.split('/')
+            name_to_process = split_list[-1]
+            if len(split_list) <= 2:  # when ITEM is in a form of '**/file'
+                for root, dirs, files in os.walk(parent_path):
+                    for name in fnmatch.filter(dirs, name_to_process):
+                        processed_list.append(f'**/{name}/')
+                    for name in fnmatch.filter(files, name_to_process):
+                        processed_list.append(f'**/{name}')
+            else:  # when ITEM is longer than '**/file'
+                # contains the consecutive directories after **
+                # and before the item to be excluded
+                # i.e. item is set to '**/dir1/dir2/dir3/*.txt'
+                # seq_path_list will be ['dir1','dir2','dir3']
+                seq_path_list = split_list[1:-1]
+                for root, dirs, files in os.walk(parent_path):
+                    sequence_path_length = len(seq_path_list)
+                    # checks if the subdirectories match the read pattern
+                    # from .gitignore or .git/info/exclude
+                    if seq_path_list == root.split('/')[-sequence_path_length:]:
+                        sub_path = os.path.join('**', *seq_path_list)
+                        for name in fnmatch.filter(dirs, name_to_process):
+                            processed_list.append(f'{sub_path}/{name}/')
+                        for name in fnmatch.filter(files, name_to_process):
+                            processed_list.append(f'{sub_path}/{name}')
+            return processed_list
+
+        def preprocess_list(src_dir_path: str, exclude_file_path: str,
+                            excluded_list: List[str], included_list: List[str]):
+            # process prefixes of '#', '!' and '**'
+            if os.path.isfile(exclude_file_path):
+                with open(exclude_file_path, 'r') as file:
+                    for item in file:
+                        if not item.startswith('#'):
+                            if item.startswith('!'):
+                                # removing '!' and '\n'
+                                included_list.append(item[1:-1])
+                            elif item.startswith('**'):
+                                processed_item = process_double_asterisk(
+                                    src_dir_path, item[:-1])
+                                excluded_list += processed_item
+                            else:
+                                excluded_list.append(item[:-1])
+
+        def format_gitignore_to_aws_cli(
+                src_dir_path: str) -> Tuple[List[str], List[str]]:
             # returns a list of excluded files from .gitignore and
-            # .git/info/exclude
+            # .git/info/exclude after formatting in a way aws cli
+            # can comprehend. INCLUDED_LIST contains items preceding
+            # with '!'
             expand_src_dir_path = os.path.expanduser(src_dir_path)
-            gitignore_path = expand_src_dir_path + '/.gitignore'
-            excluded_list = ['.git/*', '.gitignore']
-            if os.path.isfile(gitignore_path):
-                with open(gitignore_path, 'r') as file:
-                    for item_to_exclude in file:
-                        excluded_list.append(item_to_exclude[:-1])
+            gitignore_path = os.path.join(expand_src_dir_path, '.gitignore')
             git_exclude_path = os.path.join(expand_src_dir_path,
                                             command_runner.GIT_EXCLUDE)
-            if os.path.isfile(git_exclude_path):
-                with open(git_exclude_path, 'r') as file:
-                    for item_to_exclude in file:
-                        if not item_to_exclude.startswith('#'):
-                            excluded_list.append(item_to_exclude[:-1])
-            return excluded_list
+
+            excluded_list: List[str] = ['.git/*', '.gitignore']
+            included_list: List[str] = []
+
+            preprocess_list(src_dir_path, gitignore_path, excluded_list,
+                            included_list)
+            preprocess_list(src_dir_path, git_exclude_path, excluded_list,
+                            included_list)
+            postprocess_list(excluded_list)
+            postprocess_list(included_list)
+            return included_list, excluded_list
 
         def get_file_sync_command(base_dir_path, file_names):
             includes = ' '.join(
@@ -1082,12 +1142,16 @@ class S3Store(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            excluded_list = get_excluded_list(src_dir_path)
+            included_list, excluded_list = format_gitignore_to_aws_cli(
+                src_dir_path)
+            includes = ' '.join(
+                [f'--include "{file_name}"' for file_name in included_list])
             excludes = ' '.join(
                 [f'--exclude "{file_name}"' for file_name in excluded_list])
-            sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
-                            f'{src_dir_path} '
-                            f's3://{self.name}/{dest_dir_name}')
+            sync_command = (
+                f'aws s3 sync --no-follow-symlinks {excludes} {includes} '
+                f'{src_dir_path} '
+                f's3://{self.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
@@ -1489,23 +1553,34 @@ class GcsStore(AbstractStore):
                 contents are uploaded to it.
         """
 
-        def get_excluded_list(src_dir_path):
+        def process_list(exclude_file_path: str, excluded_list: List[str]):
+            # replaces '**' and '*' with '.*' and adds '\' in front of '.'
+            if os.path.isfile(exclude_file_path):
+                with open(exclude_file_path, 'r') as file:
+                    for item in file:
+                        if not item.startswith('#'):
+                            # removing '\n' at the end
+                            item = item[:-1]
+                            item = re.sub(r'\.', '\\.', item)
+                            item = re.sub(r'\*', '.*', item)
+                            item = re.sub(r'\.\*\.\*', '.*', item)
+                            if item.startswith('/'):
+                                item = item[1:]
+                            excluded_list.append(item)
+
+        def format_gitignore_to_gsutil(src_dir_path: str):
             # returns a list of excluded files from .gitignore and
-            # .git/info/exclude
+            # .git/info/exclude after formatting in a way gsutil
+            # rsync can comprehend
             expand_src_dir_path = os.path.expanduser(src_dir_path)
-            gitignore_path = expand_src_dir_path + '/.gitignore'
-            excluded_list = ['.git/*', '.gitignore']
-            if os.path.isfile(gitignore_path):
-                with open(gitignore_path, 'r') as file:
-                    for item_to_exclude in file:
-                        excluded_list.append(item_to_exclude[:-1])
+            gitignore_path = os.path.join(expand_src_dir_path, '.gitignore')
             git_exclude_path = os.path.join(expand_src_dir_path,
                                             command_runner.GIT_EXCLUDE)
-            if os.path.isfile(git_exclude_path):
-                with open(git_exclude_path, 'r') as file:
-                    for item_to_exclude in file:
-                        if not item_to_exclude.startswith('#'):
-                            excluded_list.append(item_to_exclude[:-1])
+
+            excluded_list = [r'\.git/.*', r'\.gitignore']
+
+            process_list(gitignore_path, excluded_list)
+            process_list(git_exclude_path, excluded_list)
             return excluded_list
 
         def get_file_sync_command(base_dir_path, file_names):
@@ -1516,7 +1591,7 @@ class GcsStore(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            excluded_list = get_excluded_list(src_dir_path)
+            excluded_list = format_gitignore_to_gsutil(src_dir_path)
             excludes = '\'(' + '|'.join(excluded_list) + ')\''
             sync_command = (f'gsutil -m rsync -r -x {excludes} {src_dir_path}'
                             f' gs://{self.name}/{dest_dir_name}')
@@ -1815,24 +1890,83 @@ class R2Store(AbstractStore):
                 contents are uploaded to it.
         """
 
-        def get_excluded_list(src_dir_path):
+        def postprocess_list(list_to_format: List[str]):
+            # process '/' at the start and the end of the item
+            for idx, item in enumerate(list_to_format):
+                if item.endswith('/'):
+                    list_to_format[idx] = item + '*'
+                elif item.startswith('/'):
+                    list_to_format[idx] = item[1:]
+
+        def process_double_asterisk(src_dir_path: str, item: str) -> List[str]:
+            # Need to check if any item with preceding '**' is
+            # a directory as --exclude filter fails to recognize it
+            parent_path = os.path.expanduser(src_dir_path)
+            processed_list = []
+            split_list = item.split('/')
+            name_to_process = split_list[-1]
+            if len(split_list) <= 2:  # when ITEM is in a form of '**/file'
+                for root, dirs, files in os.walk(parent_path):
+                    for name in fnmatch.filter(dirs, name_to_process):
+                        processed_list.append(f'**/{name}/')
+                    for name in fnmatch.filter(files, name_to_process):
+                        processed_list.append(f'**/{name}')
+            else:  # when ITEM is longer than '**/file'
+                # contains the consecutive directories after **
+                # and before the item to be excluded
+                # i.e. item is set to '**/dir1/dir2/dir3/*.txt'
+                # seq_path_list will be ['dir1','dir2','dir3']
+                seq_path_list = split_list[1:-1]
+                for root, dirs, files in os.walk(parent_path):
+                    sequence_path_length = len(seq_path_list)
+                    # checks if the subdirectories match the read pattern
+                    # from .gitignore or .git/info/exclude
+                    if seq_path_list == root.split('/')[-sequence_path_length:]:
+                        sub_path = os.path.join('**', *seq_path_list)
+                        for name in fnmatch.filter(dirs, name_to_process):
+                            processed_list.append(f'{sub_path}/{name}/')
+                        for name in fnmatch.filter(files, name_to_process):
+                            processed_list.append(f'{sub_path}/{name}')
+            return processed_list
+
+        def preprocess_list(src_dir_path: str, exclude_file_path: str,
+                            excluded_list: List[str], included_list: List[str]):
+            # process prefixes of '#', '!' and '**'
+            if os.path.isfile(exclude_file_path):
+                with open(exclude_file_path, 'r') as file:
+                    for item in file:
+                        if not item.startswith('#'):
+                            if item.startswith('!'):
+                                # removing '!' and '\n'
+                                included_list.append(item[1:-1])
+                            elif item.startswith('**'):
+                                processed_item = process_double_asterisk(
+                                    src_dir_path, item[:-1])
+                                excluded_list += processed_item
+                            else:
+                                excluded_list.append(item[:-1])
+
+        def format_gitignore_to_aws_cli(
+                src_dir_path: str) -> Tuple[List[str], List[str]]:
             # returns a list of excluded files from .gitignore and
-            # .git/info/exclude
+            # .git/info/exclude after formatting in a way aws cli
+            # can comprehend. INCLUDED_LIST contains items preceding
+            # with '!'
             expand_src_dir_path = os.path.expanduser(src_dir_path)
-            gitignore_path = expand_src_dir_path + '/.gitignore'
-            excluded_list = ['.git/*', '.gitignore']
-            if os.path.isfile(gitignore_path):
-                with open(gitignore_path, 'r') as file:
-                    for item_to_exclude in file:
-                        excluded_list.append(item_to_exclude[:-1])
+            gitignore_path = os.path.join(expand_src_dir_path, '.gitignore')
             git_exclude_path = os.path.join(expand_src_dir_path,
                                             command_runner.GIT_EXCLUDE)
-            if os.path.isfile(git_exclude_path):
-                with open(git_exclude_path, 'r') as file:
-                    for item_to_exclude in file:
-                        if not item_to_exclude.startswith('#'):
-                            excluded_list.append(item_to_exclude[:-1])
-            return excluded_list
+
+            excluded_list: List[str] = ['.git/*', '.gitignore']
+            included_list: List[str] = []
+
+            preprocess_list(src_dir_path, gitignore_path, excluded_list,
+                            included_list)
+            preprocess_list(src_dir_path, git_exclude_path, excluded_list,
+                            included_list)
+            postprocess_list(excluded_list)
+            postprocess_list(included_list)
+            return included_list, excluded_list
 
         def get_file_sync_command(base_dir_path, file_names):
             includes = ' '.join(
@@ -1847,12 +1981,15 @@ class R2Store(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            excluded_list = get_excluded_list(src_dir_path)
+            included_list, excluded_list = format_gitignore_to_aws_cli(
+                src_dir_path)
+            includes = ' '.join(
+                [f'--include "{file_name}"' for file_name in included_list])
             excludes = ' '.join(
                 [f'--exclude "{file_name}"' for file_name in excluded_list])
             endpoint_url = cloudflare.create_endpoint()
             sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
-                            f'{src_dir_path} '
+                            f'{includes} {src_dir_path} '
                             f's3://{self.name}/{dest_dir_name} '
                             f'--endpoint {endpoint_url} '
                             f'--profile={cloudflare.R2_PROFILE_NAME}')

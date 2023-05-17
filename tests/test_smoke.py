@@ -1959,12 +1959,11 @@ class TestStorageWithCredentials:
                 '--query',
                 f'length(Contents[?contains(Key,\'{file_name}\')].Key)'
             ]
-        if store_type == storage_lib.StoreType.GCS:
+        elif store_type == storage_lib.StoreType.GCS:
             return [
-                f'gsutil ls gs://{bucket_name}', f'| grep "{file_name}"',
-                '| wc -l'
+                f'gsutil ls gs://{bucket_name} | grep "{file_name}" | wc -l'
             ]
-        if store_type == storage_lib.StoreType.R2:
+        elif store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             return [
                 'aws', 's3api', 'list-objects', '--bucket', bucket_name,
