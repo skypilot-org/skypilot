@@ -387,8 +387,8 @@ class SCPNodeProvider(NodeProvider):
             func()
 
     def _try_vm_creation(self, vpc, sg_id, config_tags, instance_config):
-        vm_id, vm_internal_ip, firewall_id, firwall_rules = self._create_instance_sequence(
-            vpc, instance_config)
+        vm_id, vm_internal_ip, firewall_id, firwall_rules = \
+            self._create_instance_sequence(vpc, instance_config)
         if vm_id is None:
             return False  # if creation success
 

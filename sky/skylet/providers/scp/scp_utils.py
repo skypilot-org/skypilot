@@ -332,7 +332,8 @@ class SCPClient:
                     parse.parse_qs(url_info.query).items()))
             url = f'{url}?{parse.urlencode(enc_params)}'
 
-        message = method + url + self.timestamp + self.access_key + self.project_id + self.client_type
+        message = method + url + self.timestamp \
+                  + self.access_key + self.project_id + self.client_type
         message = bytes(message, 'utf-8')
         secret = bytes(self.secret_key, 'utf-8')
         signature = str(
@@ -344,10 +345,8 @@ class SCPClient:
 
     def set_timestamp(self) -> None:
         self.timestamp = str(
-            int(
-                round(
-                    datetime.datetime.timestamp(datetime.now() - datetime.timedelta(minutes=1)) *
-                    1000)))
+            int( round( datetime.datetime.timestamp(datetime.now()
+                                   - datetime.timedelta(minutes=1)) * 1000)))
         self.headers['X-Cmp-Timestamp'] = self.timestamp
 
     def set_signature(self, method: str, url: str) -> None:
