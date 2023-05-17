@@ -274,7 +274,7 @@ def path_size_megabytes(path: str) -> int:
             f'{git_exclude_filter} --dry-run {path!r}',
             shell=True).splitlines()[-1])
     total_bytes = rsync_output.split(' ')[3].replace(',', '')
-    return int(total_bytes) // 10**6
+    return int(float(total_bytes)) // 10**6
 
 
 class FileMountHelper(object):
