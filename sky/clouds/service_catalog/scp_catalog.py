@@ -15,7 +15,6 @@ if typing.TYPE_CHECKING:
 
 _df = common.read_catalog('scp/vms.csv')
 _image_df = common.read_catalog('scp/images.csv')
-# Number of vCPUS for gpu_1x_a100_sxm4
 _DEFAULT_NUM_VCPUS = 8
 _DEFAULT_MEMORY_CPU_RATIO = 2
 
