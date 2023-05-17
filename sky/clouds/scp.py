@@ -238,9 +238,13 @@ class SCP(clouds.Cloud):
                                           resources: 'resources_lib.Resources'):
         if resources.use_spot:
             return ([], [])
-        if resources.disk_size is not None and not _SCP_MIN_DISK_SIZE_GB <= resources.disk_size <= _SCP_MAX_DISK_SIZE_GB:
-            logger.info(f'In SCP, the disk size must range between {_SCP_MIN_DISK_SIZE_GB} GB '
-                        f'and {_SCP_MAX_DISK_SIZE_GB} GB. Input: {resources.disk_size}')
+        if resources.disk_size and \
+               (resources.disk_size < _SCP_MIN_DISK_SIZE_GB or
+                resources.disk_size > _SCP_MAX_DISK_SIZE_GB):
+            logger.info(f'In SCP, the disk size must range between'
+                        f' {_SCP_MIN_DISK_SIZE_GB} GB '
+                        f'and {_SCP_MAX_DISK_SIZE_GB} GB. '
+                        f'Input: {resources.disk_size}')
             return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
@@ -329,8 +333,11 @@ class SCP(clouds.Cloud):
 
     @staticmethod
     def is_disk_size_allowed(disk_size):
-        if disk_size < _SCP_MIN_DISK_SIZE_GB or disk_size > _SCP_MAX_DISK_SIZE_GB:
-            logger.info(f'In SCP, the disk size must range between {_SCP_MIN_DISK_SIZE_GB} GB '
-                        f'and {_SCP_MAX_DISK_SIZE_GB} GB. Input: {disk_size}')
+        if disk_size < _SCP_MIN_DISK_SIZE_GB \
+                or disk_size > _SCP_MAX_DISK_SIZE_GB:
+            logger.info(f'In SCP, the disk size must range between'
+                        f' {_SCP_MIN_DISK_SIZE_GB} GB '
+                        f'and {_SCP_MAX_DISK_SIZE_GB} GB. '
+                        f'Input: {disk_size}')
             return False
         return True
