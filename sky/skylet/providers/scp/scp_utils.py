@@ -345,7 +345,7 @@ class SCPClient:
 
     def set_timestamp(self) -> None:
         self.timestamp = str(
-            int( round( datetime.datetime.timestamp(datetime.now()
+            int( round( datetime.datetime.timestamp(datetime.datetime.now()
                                    - datetime.timedelta(minutes=1)) * 1000)))
         self.headers['X-Cmp-Timestamp'] = self.timestamp
 
