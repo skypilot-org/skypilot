@@ -3165,8 +3165,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                 with open(provider.metadata.path, 'r') as f:
                     metadata = json.load(f)
-                    node_id = next((key for key in list(metadata.keys())
-                                    if key.startswith('INSTANCE')), None)
+                    node_id = next(iter(metadata.values())).get('creation',{}).get('virtualServerId',None)
                     provider.terminate_node(node_id)
                 returncode = 0
             except SCPError as e:

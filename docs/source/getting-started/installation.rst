@@ -143,9 +143,9 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 SCP
 ~~~~~~~~~~~~~~~~~~
 
-Samsung Cloud Platform(SCP) provides cloud services optimized for enterprise customers. Yo can learn more about SCP `here <https://cloud.samsungsds.com/>`__.
+Samsung Cloud Platform(SCP) provides cloud services optimized for enterprise customers. You can learn more about SCP `here <https://cloud.samsungsds.com/>`__.
 
-To configure SCP access, you need access keys and the ID of the project your tasks will run. Go to the `Access Key Management <https://cloud.samsungsds.com/console/#/common/access-key-manage/list?popup=true>`_ page on your SCP console to generate the access keys, and the Project O verview page for the project ID. Then, add them to :code:`~/.scp/scp_credential` by running:
+To configure SCP access, you need access keys and the ID of the project your tasks will run. Go to the `Access Key Management <https://cloud.samsungsds.com/console/#/common/access-key-manage/list?popup=true>`_ page on your SCP console to generate the access keys, and the Project Overview page for the project ID. Then, add them to :code:`~/.scp/scp_credential` by running:
 
 .. code-block:: console
 
@@ -158,7 +158,7 @@ To configure SCP access, you need access keys and the ID of the project your tas
 
 .. note::
 
-  Multi-node clusters and stopping instances are currently not supported on SCP.
+  Multi-node clusters are currently not supported on SCP.
 
 
 .. _verify-cloud-access:
