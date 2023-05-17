@@ -588,8 +588,9 @@ class Storage(object):
                          split_path.path.strip('/') != '') or
                         (split_path.scheme == 'cos' and
                          not re.match(r'^/[-\w]+(/\s*)?$', split_path.path))):
-                        # cos uri contains a region. e.g. cos://region/bucket_name
-                        # regex allows split_path.path to include /bucket or /bucket/optional_whitespaces
+                        # regex allows split_path.path to include /bucket
+                        # or /bucket/optional_whitespaces while considering
+                        # cos URI's regions (cos://region/bucket_name)
                         with ux_utils.print_exception_no_traceback():
                             raise exceptions.StorageModeError(
                                 'MOUNT mode does not support'
@@ -2123,7 +2124,8 @@ class CosStore(AbstractStore):
     def validate_name(cls, name) -> str:
         """Validates the name of a COS bucket.
 
-        Rules source: https://ibm.github.io/ibm-cos-sdk-java/com/ibm/cloud/objectstorage/services/s3/model/Bucket.html
+        Rules source: https://ibm.github.io/ibm-cos-sdk-java/com/
+        ibm/cloud/objectstorage/services/s3/model/Bucket.html
         """
 
         def _raise_no_traceback_name_error(err_str):
@@ -2145,7 +2147,7 @@ class CosStore(AbstractStore):
                     'It must begin and end with a letter or number.')
 
             # Check for two adjacent periods or dashes
-            if any(substring in name for substring in ["..", "--"]):
+            if any(substring in name for substring in ['..', '--']):
                 _raise_no_traceback_name_error(
                     f'Invalid store name: name {name} must not contain '
                     'two adjacent periods/dashes')
@@ -2188,19 +2190,19 @@ class CosStore(AbstractStore):
          otherwise returns empty string.
         :param bucket_name: name of the bucket
         :param region: if specified looks for the bucket in that region only,
-            otherwise, bucket is searched across all available regions. 
+            otherwise, bucket is searched across all available regions.
         """
-        for region in self.REGIONS if not region else [region]:
+        for region_scanned in self.REGIONS if not region else [region]:
             try:
                 # only way to change searched region
                 # is to reinitialize a client with a new region
-                tmp_client = ibm.get_cos_client(region)
+                tmp_client = ibm.get_cos_client(region_scanned)
                 tmp_client.head_bucket(Bucket=bucket_name)
-                logger.debug(f'bucket was found in {region}')
-                return region
+                logger.debug(f'bucket was found in {region_scanned}')
+                return region_scanned
             except self.ibm_botocore.exceptions.ClientError as e:
                 if e.response['Error']['Code'] == '404':
-                    logger.debug(f'bucket was not found in {region}')
+                    logger.debug(f'bucket was not found in {region_scanned}')
                 elif e.response['Error']['Code'] == '403':
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageBucketCreateError(
@@ -2212,7 +2214,7 @@ class CosStore(AbstractStore):
         return ''
 
     def upload(self):
-        """Uploads local (i.e. func not invoked on remote VM) source to store bucket.
+        """Uploads files from local machine to bucket.
 
         Upload must be called by the Storage handler - it is not called on
         Store initialization.
@@ -2225,7 +2227,7 @@ class CosStore(AbstractStore):
                 self.batch_ibm_rsync(self.source, create_dirs=True)
             elif self.source is not None:
                 if self.source.startswith('cos://'):
-                    # cos bucket used as a source, can't be used as dest.
+                    # cos bucket used as a dest, can't be used as source.
                     pass
                 elif self.source.startswith('s3://'):
                     raise Exception('IBM COS currently not supporting'
@@ -2269,13 +2271,13 @@ class CosStore(AbstractStore):
         """
 
         def get_sync_command(src_dir_path, dest_dir_name) -> str:
-            """returns an rclone command that copies files in 'from src_dir_path'
-            to 'dest_dir_name'.
+            """returns an rclone command that copies files in
+              'from src_dir_path' to 'dest_dir_name'.
 
-            `rclone copy` copies files from source path to target. 
+            `rclone copy` copies files from source path to target.
             files with identical names at won't be copied over, unless
             their modification date is more recent.
-            works similarly to `aws sync` (without --delete). 
+            works similarly to `aws sync` (without --delete).
 
             Args:
                 src_dir_path (str): source path from which to copy files.
@@ -2300,8 +2302,8 @@ class CosStore(AbstractStore):
 
         with log_utils.safe_rich_status(
                 f'[bold cyan]Syncing '
-                f'[green]{source_message}[/] to [green]cos://{self.region}/{self.name}/[/]'
-        ):
+                f'[green]{source_message}[/] to '
+                f'[green]cos://{self.region}/{self.name}/[/]'):
             data_utils.parallel_upload_rclone(
                 source_path_list,
                 get_sync_command,
@@ -2316,15 +2318,15 @@ class CosStore(AbstractStore):
 
         returns:
         StorageHandle(str) - bucket name
-        bool - indicates whether a new bucket was created.  
+        bool - indicates whether a new bucket was created.
         """
         bucket_region = self.does_bucket_exist(self.name)
         if bucket_region and bucket_region != self.region:
             # bucket exists but not in the expected region!
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f"Bucket {self.name} exists in {bucket_region}. Expected: {self.region}"
-                )
+                    f'Bucket {self.name} exists in {bucket_region}. '
+                    f'Expected: {self.region}')
         data_utils.store_rclone_config(
             self.name,
             self.region,  # type: ignore
@@ -2359,11 +2361,13 @@ class CosStore(AbstractStore):
             self.bucket.name,
             self.region,  # type: ignore
             True)
-        # configure_rclone_profile cmd stores bucket profile in rclone config file at the cluster's nodes.
+        # 'configure_rclone_profile' cmd stores bucket profile
+        # in rclone config file at the cluster's nodes.
+        # pylint: disable=line-too-long
         configure_rclone_profile = (
             f' mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> ~/.config/rclone/rclone.conf'
         )
-        install_cmd = f'rclone version >/dev/null 2>&1 || curl https://rclone.org/install.sh | sudo bash'
+        install_cmd = 'rclone version >/dev/null 2>&1 || curl https://rclone.org/install.sh | sudo bash'
         # --daemon will keep the mounting process running in the background.
         mount_cmd = f'{install_cmd} && {configure_rclone_profile} && rclone mount {self.bucket.name}:{self.bucket.name} {mount_path} --daemon'
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
@@ -2413,6 +2417,6 @@ class CosStore(AbstractStore):
             bucket.delete()
             bucket.wait_until_not_exists()
         except self.ibm_botocore.exceptions.ClientError as e:
-            if e.__class__.__name__ == "NoSuchBucket":
-                logger.debug("bucket already removed")
+            if e.__class__.__name__ == 'NoSuchBucket':
+                logger.debug('bucket already removed')
         data_utils.delete_rclone_bucket_profile(self.name)

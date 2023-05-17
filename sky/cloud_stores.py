@@ -223,6 +223,7 @@ class CosCloudStorage(CloudStorage):
     """IBM Cloud Storage."""
     _REGIONS = data_utils.get_cos_regions()
     # install rclone if package isn't already installed
+    # pylint: disable=line-too-long
     _GET_RCLONE = [
         'rclone version >/dev/null 2>&1 || curl https://rclone.org/install.sh | sudo bash',
     ]

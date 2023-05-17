@@ -749,8 +749,7 @@ def test_ibm_storage_mounts():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml').read_text(
-        )
+        'tests/test_yamls/test_storage_mounting.yaml').read_text()
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:

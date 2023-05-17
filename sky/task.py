@@ -755,8 +755,9 @@ class Task:
                         # source is a cos bucket's uri
                         blob_path = storage.source
                     else:
-                        # source is a bucket name. extract region from rclone.conf
+                        # source is a bucket name.
                         assert storage.name is not None, storage
+                        # extract region from rclone.conf
                         cos_region = data_utils.get_cos_region_from_rclone(
                             storage.name)
                         blob_path = f'cos://{cos_region}/{storage.name}'

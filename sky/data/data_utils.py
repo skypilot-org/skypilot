@@ -60,7 +60,7 @@ def split_cos_path(s3_path: str) -> Tuple[str, str, str]:
         url expected format: "cos://region/bucket_name/optional_data_path" """
 
     # regex pattern: 3rd group differs from 2nd by accepting '/'
-    pattern_region_bucket_data = r"cos://([-\w]+)/([-\w]+)(.*)"
+    pattern_region_bucket_data = r'cos://([-\w]+)/([-\w]+)(.*)'
     match = re.match(pattern_region_bucket_data, s3_path)
     if match:
         region, bucket_name, data_path = match.group(1), match.group(
@@ -143,6 +143,7 @@ def verify_cos_bucket(name: str) -> bool:
             tmp_client.head_bucket(Bucket=name)
             logger.debug(f'bucket was found in {region}')
             return True
+        # pylint: disable=line-too-long
         except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr]
             if e.response['Error']['Code'] == '404':
                 logger.debug(f'bucket was not found in {region}')
@@ -325,12 +326,12 @@ def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
 def store_rclone_config(bucket_name: str,
                         region: str,
                         apply_changes: bool = True):
-    """creates a configuration files for rclone - used for 
+    """creates a configuration files for rclone - used for
     bucket syncing and mounting """
-
+    # pylint: disable=import-outside-toplevel
     import textwrap
 
-    rclone_file = os.path.expanduser("~/.config/rclone/rclone.conf")
+    rclone_file = os.path.expanduser('~/.config/rclone/rclone.conf')
     access_key_id, secret_access_key = ibm.get_hmac_keys()
 
     config_data = textwrap.dedent(f"""\
@@ -350,7 +351,7 @@ def store_rclone_config(bucket_name: str,
         os.makedirs(os.path.dirname(rclone_file), exist_ok=True)
     # create rclone.conf if doesn't exist
     if not os.path.isfile(rclone_file):
-        open("file", "w").close()
+        open('file', 'w').close()
 
     with FileLock(rclone_file + '.lock'):
         profiles_to_keep = _remove_bucket_profile_rclone(bucket_name)
@@ -358,12 +359,12 @@ def store_rclone_config(bucket_name: str,
         # write back file without profile: [bucket_name]
         # to which the new bucket profile is appended
         if apply_changes:
-            with open(f"{rclone_file}", "w") as file:
-                # fcntl.flock(file.fileno(), fcntl.LOCK_EX)
+            with open(f'{rclone_file}', 'w') as file:
                 if profiles_to_keep:
                     file.writelines(profiles_to_keep)
-                    # add a new line to config_data if last file line contains data
                     if profiles_to_keep[-1].strip():
+                        # add a new line to config_data
+                        # if last file line contains data
                         config_data += '\n'
                 file.write(config_data)
 
@@ -372,16 +373,16 @@ def store_rclone_config(bucket_name: str,
 
 def get_cos_region_from_rclone(bucket_name):
     """returns region field of the specified bucket in rclone.conf"""
-    with open(os.path.expanduser("~/.config/rclone/rclone.conf")) as file:
+    with open(os.path.expanduser('~/.config/rclone/rclone.conf')) as file:
         bucket_profile_found = False
         for line in file:
-            if line.lstrip().startswith("#"):  # skip user's comments.
+            if line.lstrip().startswith('#'):  # skip user's comments.
                 continue
-            if line.strip() == f"[{bucket_name}]":
+            if line.strip() == f'[{bucket_name}]':
                 bucket_profile_found = True
-            elif bucket_profile_found and line.startswith("region"):
-                return line.split("=")[1].strip()
-            elif bucket_profile_found and line.startswith("["):
+            elif bucket_profile_found and line.startswith('region'):
+                return line.split('=')[1].strip()
+            elif bucket_profile_found and line.startswith('['):
                 # for efficiency stop if we've searched past the
                 # requested bucket profile with no match
                 return None
@@ -392,25 +393,25 @@ def get_cos_region_from_rclone(bucket_name):
 def delete_rclone_bucket_profile(bucket_name):
     """deletes specified bucket profile for rclone.conf"""
 
-    rclone_file = os.path.expanduser("~/.config/rclone/rclone.conf")
+    rclone_file = os.path.expanduser('~/.config/rclone/rclone.conf')
     if not os.path.isfile(rclone_file):
-        logger.warn("rclone configuration file wasn't found")
+        logger.warning('rclone configuration file wasn\'t found')
         return
 
     with FileLock(rclone_file + '.lock'):
         profiles_to_keep = _remove_bucket_profile_rclone(bucket_name)
 
         # write back file without profile: [bucket_name]
-        with open(f"{rclone_file}", "w") as file:
+        with open(f'{rclone_file}', 'w') as file:
             file.writelines(profiles_to_keep)
 
 
 def _remove_bucket_profile_rclone(bucket_name: str) -> List[str]:
     """returns rclone profiles without profiles matching [bucket_name]"""
 
-    rclone_file = os.path.expanduser("~/.config/rclone/rclone.conf")
+    rclone_file = os.path.expanduser('~/.config/rclone/rclone.conf')
 
-    with open(f"{rclone_file}", "r") as file:
+    with open(f'{rclone_file}', 'r') as file:
         lines = file.readlines()  # returns a list of the file's lines
         # delete existing bucket profile that match: '[bucket_name]'
         lines_to_keep = []  # lines to write back to file
@@ -418,14 +419,14 @@ def _remove_bucket_profile_rclone(bucket_name: str) -> List[str]:
         skip_lines = False
 
     for line in lines:
-        if line.lstrip().startswith("#") and not skip_lines:
+        if line.lstrip().startswith('#') and not skip_lines:
             # keep user comments only if they aren't under
             # a profile we are discarding
             lines_to_keep.append(line)
-        elif f"[{bucket_name}]" in line:
+        elif f'[{bucket_name}]' in line:
             skip_lines = True
         elif skip_lines:
-            if "[" in line:
+            if '[' in line:
                 # former profile segment ended, new one begins
                 skip_lines = False
                 lines_to_keep.append(line)

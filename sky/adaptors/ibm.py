@@ -23,7 +23,8 @@ def import_package(func):
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        global ibm_vpc, ibm_cloud_sdk_core, ibm_platform_services, ibm_boto3, ibm_botocore
+        global ibm_vpc, ibm_cloud_sdk_core, ibm_platform_services
+        global ibm_boto3, ibm_botocore
         if None in [ibm_vpc, ibm_cloud_sdk_core, ibm_platform_services]:
             try:
                 import ibm_vpc as _ibm_vpc
@@ -135,6 +136,7 @@ def get_cos_client(region: str = 'us-east'):
 
 @import_package
 def get_cos_resource(region: str = 'us-east'):
+    # pylint: disable=line-too-long
     return ibm_boto3.resource(  # type: ignore[union-attr]
         's3',
         ibm_api_key_id=get_api_key(),
