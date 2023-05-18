@@ -1791,7 +1791,7 @@ def _query_status_scp(
     vms = scp_utils.SCPClient().list_instances()
     for node in vms:
         if node['virtualServerName'] == cluster:
-            return [status_map.get(node.get('virtualServerState', None), None)]
+            return [status_map[node['virtualServerState']]]
     return []
 
 
