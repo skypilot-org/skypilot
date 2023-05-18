@@ -15,8 +15,6 @@ from functools import wraps
 from typing import Any, Dict, List
 from urllib import parse
 
-
-
 CREDENTIALS_PATH = '~/.scp/scp_credential'
 API_ENDPOINT = 'https://openapi.samsungsdscloud.com'
 TEMP_VM_JSON_PATH = '/tmp/json/tmp_vm_body.json'
@@ -345,8 +343,11 @@ class SCPClient:
 
     def set_timestamp(self) -> None:
         self.timestamp = str(
-            int( round( datetime.datetime.timestamp(datetime.datetime.now()
-                                   - datetime.timedelta(minutes=1)) * 1000)))
+            int(
+                round(
+                    datetime.datetime.timestamp(datetime.datetime.now() -
+                                                datetime.timedelta(minutes=1)) *
+                    1000)))
         self.headers['X-Cmp-Timestamp'] = self.timestamp
 
     def set_signature(self, method: str, url: str) -> None:
