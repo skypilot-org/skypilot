@@ -28,7 +28,7 @@ from ray.autoscaler.tags import (
 from ray.autoscaler._private.util import hash_launch_conf
 from sky.skylet.providers.scp import scp_utils
 from sky.skylet.providers.scp.config import ZoneConfig
-from sky.skylet.providers.scp.scp_utils import SCPClientError, SCPCreationFailError
+from sky.skylet.providers.scp.scp_utils import SCPCreationFailError
 from sky.utils import common_utils
 
 TAG_PATH_PREFIX = '~/.sky/generated/scp/metadata'
@@ -98,7 +98,8 @@ class SCPNodeProvider(NodeProvider):
         self.cached_nodes:Dict[str, Any] = {}
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes",
                                                        True)
-        self.metadata = scp_utils.Metadata(TAG_PATH_PREFIX, cluster_name)
+        self.metadata : Optional[scp_utils.Metadata] =\
+            scp_utils.Metadata(TAG_PATH_PREFIX, cluster_name)
         vms = self._list_instances_in_cluster()
         self._refresh_security_group(vms)
 
