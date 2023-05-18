@@ -158,12 +158,9 @@ class SCP(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            region: Optional['clouds.Region'],
+            self, resources: 'resources_lib.Resources', region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del zones
-        if region is None:
-            region = self._get_default_region()
+        assert zones is None, 'SCP does not support zones.'
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -288,7 +285,7 @@ class SCP(clouds.Cloud):
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         try:
             scp_utils.SCPClient().list_instances()
         except (AssertionError, KeyError, scp_utils.SCPClientError):
@@ -309,7 +306,7 @@ class SCP(clouds.Cloud):
             for filename in _CREDENTIAL_FILES
         }
 
-    def get_current_user_identity(self) -> Optional[str]:
+    def get_current_user_identity(self) -> Optional[List[str]]:
         # TODO(jgoo1): Implement get_current_user_identity for SCP
         return None
 

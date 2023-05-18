@@ -164,8 +164,8 @@ class SCPClient:
         self.secret_key = self._credentials['secret_key']
         self.project_id = self._credentials['project_id']
         self.client_type = 'OpenApi'
-        self.timestamp = None
-        self.signature = None
+        self.timestamp = ''
+        self.signature = ''
 
         self.headers = {
             'X-Cmp-AccessKey': f'{self.access_key}',
