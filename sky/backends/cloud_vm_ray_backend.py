@@ -3578,7 +3578,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  f'path or may contain files from a previous'
                                  f' task. To fix, change the mount path'
                                  f' to an empty or non-existent path.')
-                    raise exceptions.StorageMountPathError(error_msg) from None
+                    raise RuntimeError(error_msg) from None
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')

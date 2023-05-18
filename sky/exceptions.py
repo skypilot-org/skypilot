@@ -10,7 +10,7 @@ if typing.TYPE_CHECKING:
 KEYBOARD_INTERRUPT_CODE = 130
 SIGTSTP_CODE = 146
 RSYNC_FILE_NOT_FOUND_CODE = 23
-MOUNT_PATH_NON_EMPTY_CODE = 42
+MOUNT_PATH_NON_EMPTY_CODE = 42  # Arbitrarily chosen.
 
 
 class ResourcesUnavailableError(Exception):
@@ -162,12 +162,6 @@ class StorageNameError(StorageSpecError):
 class StorageModeError(StorageSpecError):
     # Error raised when the storage mode is invalid or does not support the
     # requested operation (e.g., passing a file as source to MOUNT mode)
-    pass
-
-
-class StorageMountPathError(StorageSpecError):
-    # Error raised when bucket is successfully initialized, but mounting fails
-    # due to non-empty mount path
     pass
 
 

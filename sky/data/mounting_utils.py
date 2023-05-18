@@ -59,7 +59,7 @@ def get_mounting_command(
         else
           # Check if mount path contains files
           if [ "$(ls -A $MOUNT_PATH)" ]; then
-            echo "Mount path $MOUNT_PATH is not empty. Please make sure its empty."
+            echo "Mount path $MOUNT_PATH is not empty. Please mount to another path or remove it first."
             exit 42
           fi
         fi
