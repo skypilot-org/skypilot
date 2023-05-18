@@ -3,11 +3,12 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for SCP.
 """
+
 import typing
 from typing import Dict, List, Optional, Tuple
 
 from sky.clouds.service_catalog import common
-from sky.skylet.providers.scp.scp_utils import SCPClient
+from sky.skylet.providers.scp import scp_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -20,7 +21,7 @@ _DEFAULT_MEMORY_CPU_RATIO = 2
 
 
 def crop_available_region(df):
-    scp_client = SCPClient()
+    scp_client = scp_utils.SCPClient()
     service_zones = scp_client.list_service_zone_names()
     return df[df['Region'].isin(service_zones)]
 

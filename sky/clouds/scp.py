@@ -43,7 +43,7 @@ class SCP(clouds.Cloud):
         clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the SCP Cloud implementation yet.'
     }
 
-    _regions: List[clouds.Region] = []
+
 
     @classmethod
     def _cloud_unsupported_features(
@@ -55,15 +55,8 @@ class SCP(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions(cls) -> List[clouds.Region]:
-
-        if not cls._regions:
-            scp_client = scp_utils.SCPClient()
-            service_zones = scp_client.list_service_zone_names()
-            cls._regions = [
-                clouds.Region(zone_name) for zone_name in service_zones
-            ]
-        return cls._regions
+    def regions(cls) -> List['clouds.Region']:
+        return service_catalog.regions(clouds='scp')
 
     @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],
