@@ -3160,11 +3160,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             try:
                 if not os.path.exists(provider.metadata.path):
                     raise SCPError('SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
-                                       'Metadata file does not exist.')
+                                   'Metadata file does not exist.')
 
                 with open(provider.metadata.path, 'r') as f:
                     metadata = json.load(f)
-                    node_id = next(iter(metadata.values())).get('creation',{}).get('virtualServerId',None)
+                    node_id = next(iter(metadata.values())).get(
+                        'creation', {}).get('virtualServerId', None)
                     provider.terminate_node(node_id)
                 returncode = 0
             except SCPError as e:

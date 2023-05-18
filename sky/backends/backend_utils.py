@@ -1773,8 +1773,8 @@ def _query_status_lambda(
 
 
 def _query_status_scp(
-    cluster: str,
-    ray_config: Dict[str, Any],  # pylint: disable=unused-argument
+        cluster: str,
+        ray_config: Dict[str, Any],  # pylint: disable=unused-argument
 ) -> List[global_user_state.ClusterStatus]:
     status_map = {
         'CREATING': global_user_state.ClusterStatus.INIT,
