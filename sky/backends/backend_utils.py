@@ -1811,7 +1811,7 @@ _QUERY_STATUS_FUNCS = {
     'Azure': _query_status_azure,
     'Lambda': _query_status_lambda,
     'IBM': _query_status_ibm,
-    'oci': _query_status_oci,
+    'OCI': _query_status_oci,
 }
 
 
