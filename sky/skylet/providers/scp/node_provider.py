@@ -221,19 +221,22 @@ class SCPNodeProvider(NodeProvider):
     def node_tags(self, node_id: str) -> Dict[str, str]:
         """Returns the tags of the given node (string dict)."""
         cached_node = self._get_cached_node(node_id=node_id)
-        if cached_node is None: return {}
+        if cached_node is None:
+            return {}
         return cached_node['tags']
 
     def external_ip(self, node_id: str) -> Optional[str]:
         """Returns the external ip of the given node."""
         cached_node = self._get_cached_node(node_id=node_id)
-        if cached_node is None: return None
+        if cached_node is None:
+            return None
         return cached_node['external_ip']
 
-    def internal_ip(self, node_id: str) ->  Optional[str]:
+    def internal_ip(self, node_id: str) -> Optional[str]:
         """Returns the internal ip (Ray ip) of the given node."""
         cached_node = self._get_cached_node(node_id=node_id)
-        if cached_node is None: return None
+        if cached_node is None:
+            return None
         return cached_node['external_ip']
 
     def _config_security_group(self, zone_id, vpc, cluster_name):
