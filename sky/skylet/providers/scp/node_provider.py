@@ -95,7 +95,7 @@ class SCPNodeProvider(NodeProvider):
         self.lock = RLock()
         self.scp_client = scp_utils.SCPClient()
 
-        self.cached_nodes:Dict[str, Any] = {}
+        self.cached_nodes: Dict[str, Any] = {}
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes",
                                                        True)
         self.metadata = scp_utils.Metadata(TAG_PATH_PREFIX, cluster_name)
@@ -221,19 +221,22 @@ class SCPNodeProvider(NodeProvider):
     def node_tags(self, node_id: str) -> Dict[str, str]:
         """Returns the tags of the given node (string dict)."""
         cached_node = self._get_cached_node(node_id=node_id)
-        if cached_node is None: return {}
+        if cached_node is None:
+            return {}
         return cached_node['tags']
 
     def external_ip(self, node_id: str) -> Optional[str]:
         """Returns the external ip of the given node."""
         cached_node = self._get_cached_node(node_id=node_id)
-        if cached_node is None: return None
+        if cached_node is None:
+            return None
         return cached_node['external_ip']
 
-    def internal_ip(self, node_id: str) ->  Optional[str]:
+    def internal_ip(self, node_id: str) -> Optional[str]:
         """Returns the internal ip (Ray ip) of the given node."""
         cached_node = self._get_cached_node(node_id=node_id)
-        if cached_node is None: return None
+        if cached_node is None:
+            return None
         return cached_node['external_ip']
 
     def _config_security_group(self, zone_id, vpc, cluster_name):
@@ -496,7 +499,8 @@ class SCPNodeProvider(NodeProvider):
     def set_node_tags(self, node_id: str, tags: Dict[str, str]) -> None:
         """Sets the tag values (string dict) for the specified node."""
         node = self._get_node(node_id)
-        if node is None: return
+        if node is None:
+            return
 
         node['tags'].update(tags)
         # self.metadata[node_id] = {'tags': node['tags']}
