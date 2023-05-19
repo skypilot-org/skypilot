@@ -300,7 +300,8 @@ class SCP(clouds.Cloud):
             for filename in _CREDENTIAL_FILES
         }
 
-    def get_current_user_identity(self) -> Optional[List[str]]:
+    @classmethod
+    def get_current_user_identity(cls) -> Optional[List[str]]:
         # TODO(jgoo1): Implement get_current_user_identity for SCP
         return None
 
