@@ -95,7 +95,7 @@ class SCPNodeProvider(NodeProvider):
         self.lock = RLock()
         self.scp_client = scp_utils.SCPClient()
 
-        self.cached_nodes:Dict[str, Any] = {}
+        self.cached_nodes: Dict[str, Any] = {}
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes",
                                                        True)
         self.metadata : Optional[scp_utils.Metadata] =\
@@ -491,7 +491,8 @@ class SCPNodeProvider(NodeProvider):
     def set_node_tags(self, node_id: str, tags: Dict[str, str]) -> None:
         """Sets the tag values (string dict) for the specified node."""
         node = self._get_node(node_id)
-        if node is None: return
+        if node is None:
+            return
 
         node['tags'].update(tags)
         # self.metadata[node_id] = {'tags': node['tags']}

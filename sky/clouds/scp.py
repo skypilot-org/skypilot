@@ -228,14 +228,10 @@ class SCP(clouds.Cloud):
                                           resources: 'resources_lib.Resources'):
         if resources.use_spot:
             return ([], [])
-        if resources.disk_size and \
-               (resources.disk_size < _SCP_MIN_DISK_SIZE_GB or
-                resources.disk_size > _SCP_MAX_DISK_SIZE_GB):
-            logger.info(f'In SCP, the disk size must range between'
-                        f' {_SCP_MIN_DISK_SIZE_GB} GB '
-                        f'and {_SCP_MAX_DISK_SIZE_GB} GB. '
-                        f'Input: {resources.disk_size}')
+
+        if not self.is_disk_size_allowed(resources)[0]:
             return ([], [])
+
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Accelerators are part of the instance type in SCP Cloud
@@ -282,6 +278,7 @@ class SCP(clouds.Cloud):
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
 
+    @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         try:
             scp_utils.SCPClient().list_instances()
@@ -322,12 +319,13 @@ class SCP(clouds.Cloud):
             accelerator, acc_count, region, zone, 'scp')
 
     @staticmethod
-    def is_disk_size_allowed(disk_size):
-        if disk_size < _SCP_MIN_DISK_SIZE_GB \
-                or disk_size > _SCP_MAX_DISK_SIZE_GB:
+    def is_disk_size_allowed(resources):
+        if resources.disk_size and \
+               (resources.disk_size < _SCP_MIN_DISK_SIZE_GB or
+                resources.disk_size > _SCP_MAX_DISK_SIZE_GB):
             logger.info(f'In SCP, the disk size must range between'
                         f' {_SCP_MIN_DISK_SIZE_GB} GB '
                         f'and {_SCP_MAX_DISK_SIZE_GB} GB. '
-                        f'Input: {disk_size}')
-            return False
-        return True
+                        f'Input: {resources.disk_size}')
+            return False, []
+        return True, [resources]
