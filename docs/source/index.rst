@@ -40,7 +40,7 @@ SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code change
 
 **More information**
 
-* `Skypilot blog <https://blog.skypilot.co/>`_
+* `SkyPilot blog <https://blog.skypilot.co/>`_
 * `Introductory blog post <https://blog.skypilot.co/introducing-skypilot/>`_
 * `NSDI 2023 paper & talk <https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng>`_
 * `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutorial>`_
