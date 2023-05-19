@@ -237,7 +237,7 @@ class SCPNodeProvider(NodeProvider):
         cached_node = self._get_cached_node(node_id=node_id)
         if cached_node is None:
             return None
-        return cached_node['external_ip']
+        return cached_node['internal_ip']
 
     def _config_security_group(self, zone_id, vpc, cluster_name):
         sg_name = cluster_name.replace("-", "") + "sg"
