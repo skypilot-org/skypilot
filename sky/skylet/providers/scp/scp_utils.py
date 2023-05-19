@@ -12,7 +12,7 @@ import os
 import requests
 import time
 from functools import wraps
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from urllib import parse
 
 CREDENTIALS_PATH = '~/.scp/scp_credential'
@@ -52,7 +52,7 @@ class Metadata:
             metadata = json.load(f)
         return metadata.get(instance_id)
 
-    def __setitem__(self, instance_id: str, value: Dict[str, Any]) -> None:
+    def __setitem__(self, instance_id: str, value: Optional[Dict[str, Any]]) -> None:
         # Read from metadata file
         if os.path.exists(self.path):
             with open(self.path, 'r') as f:
