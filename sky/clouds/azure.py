@@ -245,6 +245,17 @@ class Azure(clouds.Cloud):
         }
 
     def get_feasible_launchable_resources(self, resources):
+
+        def failover_disk_tier(instance_type: str,
+                               disk_tier: Optional[str]) -> Optional[str]:
+            ok, _ = Azure.check_disk_tier(
+                instance_type, disk_tier or clouds.Cloud._DEFAULT_DISK_TIER)
+            if not ok and disk_tier is None:
+                # Auto failover to low disk tier when disk tier
+                # are not specified
+                return 'low'
+            return disk_tier
+
         if resources.use_spot:
             # TODO(zhwu): our azure subscription offer ID does not support spot.
             # Need to support it.
@@ -252,23 +263,21 @@ class Azure(clouds.Cloud):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
-            resources = resources.copy(accelerators=None)
+            resources = resources.copy(
+                accelerators=None,
+                disk_tier=failover_disk_tier(resources.instance_type,
+                                             resources.disk_tier),
+            )
             return ([resources], [])
 
         def _make(instance_list):
             resource_list = []
             for instance_type in instance_list:
-                disk_tier = resources.disk_tier
-                ok, _ = Azure.check_disk_tier(
-                    instance_type, disk_tier or clouds.Cloud._DEFAULT_DISK_TIER)
-                if not ok and resources.disk_tier is None:
-                    # Auto failover to low disk tier when disk tier
-                    # are not specified
-                    disk_tier = 'low'
                 r = resources.copy(
                     cloud=Azure(),
                     instance_type=instance_type,
-                    disk_tier=disk_tier,
+                    disk_tier=failover_disk_tier(instance_type,
+                                                 resources.disk_tier),
                     # Setting this to None as Azure doesn't separately bill /
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
