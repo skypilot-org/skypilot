@@ -2204,11 +2204,12 @@ class CosStore(AbstractStore):
                 if e.response['Error']['Code'] == '404':
                     logger.debug(f'bucket was not found in {region_scanned}')
                 elif e.response['Error']['Code'] == '403':
+                    command = f'rclone lsd {self.name}: '
                     with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageBucketCreateError(
-                            f'User doesn\'t have permission to access '
-                            f'"{bucket_name}". Bucket name might be taken '
-                            'by another user.') from e
+                        raise exceptions.StorageBucketGetError(
+                            _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                                name=self.name) +
+                            f' To debug, consider running `{command}`.') from e
                 else:
                     raise e
         return ''
