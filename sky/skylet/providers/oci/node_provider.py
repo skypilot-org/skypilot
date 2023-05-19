@@ -101,7 +101,7 @@ class OCINodeProvider(NodeProvider):
                 "lifecycle_state": inst.lifecycle_state,
                 "oci_tags": inst.freeform_tags,
             })
-            return_nodes[id] = item
+            return_nodes[inst_id] = item
             self.cached_nodes[inst_id] = item
 
         logger.debug(
@@ -172,7 +172,7 @@ class OCINodeProvider(NodeProvider):
         """Creates a number of nodes within the namespace."""
         start_time = round(time.time() * 1000)
         starting_insts = []
-        """ Check first if it neccessary to create new nodes / start stopped nodes """
+        # Check first if it neccessary to create new nodes / start stopped nodes
         VALIDITY_TAGS = [
             TAG_RAY_CLUSTER_NAME,
             TAG_RAY_NODE_KIND,
@@ -191,7 +191,7 @@ class OCINodeProvider(NodeProvider):
                 f"* No need to create new node since there are enough running nodes"
             )
             return
-        """ Starting stopped nodes if cache_stopped_nodes=True """
+        # Starting stopped nodes if cache_stopped_nodes=True
         if self.cache_stopped_nodes:
             logger.debug("* Checking and try reusing existing stopped nodes")
 
@@ -431,7 +431,7 @@ class OCINodeProvider(NodeProvider):
     def terminate_node(self, node_id):
         """Terminates the specified node."""
         logger.info(f"* terminate_node {node_id}...")
-        node = self._get_node(node_id)
+        node = self._get_cached_node(node_id)
         if node is None:
             logger.info(f"* The node is not existed: {node_id}..")
             return  # Node not exists yet.
