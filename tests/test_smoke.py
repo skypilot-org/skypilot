@@ -46,6 +46,7 @@ from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.clouds import AWS, GCP, Azure
+from sky.adaptors import ibm
 
 # For uniquefying users on shared-account cloud providers. Used as part of the
 # cluster names.
@@ -2202,6 +2203,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('nonexist_bucket_url', [
         's3://{random_name}', 'gs://{random_name}',
+        'cos://us-east/{random_name}',
         pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare)
     ])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
@@ -2220,6 +2222,19 @@ class TestStorageWithCredentials:
                 endpoint_url = cloudflare.create_endpoint()
                 command = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=r2'
                 expected_output = '404'
+            elif nonexist_bucket_url.startswith('cos'):
+                # Using API calls, since using rclone requires a profile's name
+                try:
+                    expected_output = command = "echo"  # avoid unrelated exception in case of failure.
+                    bucket_name = urllib.parse.urlsplit(
+                        nonexist_bucket_url.format(
+                            random_name=nonexist_bucket_name)).path.strip('/')
+                    client = ibm.get_cos_client('us-east')
+                    client.head_bucket(Bucket=bucket_name)
+                except ibm.ibm_botocore.exceptions.ClientError as e:
+                    if e.response['Error']['Code'] == '404':
+                        # success
+                        return
             else:
                 raise ValueError('Unsupported bucket type '
                                  f'{nonexist_bucket_url}')
@@ -2247,13 +2262,16 @@ class TestStorageWithCredentials:
             storage_obj = storage_lib.Storage(source=nonexist_bucket_url.format(
                 random_name=nonexist_bucket_name))
 
-    @pytest.mark.parametrize('private_bucket',
-                             [f's3://imagenet', f'gs://imagenet'])
+    @pytest.mark.parametrize(
+        'private_bucket',
+        [f's3://imagenet', f'gs://imagenet', 'cos://us-east/bucket1'])
     def test_private_bucket(self, private_bucket):
         # Attempts to access private buckets not belonging to the user.
         # These buckets are known to be private, but may need to be updated if
         # they are removed by their owners.
-        private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc
+        private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc if \
+              urllib.parse.urlsplit(private_bucket).scheme != 'cos' else \
+                  urllib.parse.urlsplit(private_bucket).path.strip('/')
         with pytest.raises(
                 sky.exceptions.StorageBucketGetError,
                 match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
