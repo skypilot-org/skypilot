@@ -10,7 +10,7 @@
 
 ## Installing Ray and SkyPilot 
 - Admin installs Ray==2.0.1 and SkyPilot globally on all machines. It is assumed that the admin regularly keeps SkyPilot updated on the cluster.
-- Python >= 3.6 for all users.
+- Python >= 3.7 for all users.
 - When a regular user runs `sky launch`, a local version of SkyPilot will be installed on the machine for each user. The local installation of Ray is specified in `sky/templates/local-ray.yml.j2`.
 
 ## Registering clusters as a regular user

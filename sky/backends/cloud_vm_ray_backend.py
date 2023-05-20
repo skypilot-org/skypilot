@@ -1206,10 +1206,11 @@ class RetryingVmProvisioner(object):
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
+        os.makedirs(self.log_dir, exist_ok=True)
+        os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
-        os.system(f'touch {log_abs_path}')
 
         # Get previous cluster status
         cluster_exists = prev_cluster_status is not None
@@ -2506,10 +2507,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{style.BRIGHT}{workdir}{style.RESET_ALL}'
             f' -> '
             f'{style.BRIGHT}{SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
+        os.makedirs(self.log_dir, exist_ok=True)
+        os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
-        os.system(f'touch {log_path}')
         with log_utils.safe_rich_status('[bold cyan]Syncing[/]'):
             subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
 
@@ -3525,10 +3527,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'{fore.YELLOW}Source path {src!r} is a symlink. '
                         f'Symlink contents are not uploaded.{style.RESET_ALL}')
 
+        os.makedirs(self.log_dir, exist_ok=True)
+        os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
-        os.system(f'touch {log_path}')
 
         for dst, src in file_mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
