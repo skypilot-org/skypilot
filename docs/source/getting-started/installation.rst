@@ -5,7 +5,7 @@ Install SkyPilot using pip:
 
 .. code-block:: console
 
-  $ # SkyPilot requires python >= 3.6. For Apple Silicon, use >= 3.8.
+  $ # SkyPilot requires python >= 3.7. For Apple Silicon, use >= 3.8.
   $ # Recommended: use a new conda env to avoid package conflicts.
   $ conda create -y -n sky python=3.8
   $ conda activate sky
