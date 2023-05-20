@@ -42,8 +42,6 @@ SourceType = Union[Path, List[Path]]
 # R2 to be an option as preferred store type
 STORE_ENABLED_CLOUDS = [clouds.AWS(), clouds.GCP()]
 
-STORE_TYPE_TO_CLOUD_TYPE = {'s3': 'AWS', 'gcs': 'GCP', 'r2': 'Cloudflare'}
-
 # Maximum number of concurrent rsync upload processes
 _MAX_CONCURRENT_UPLOADS = 32
 
@@ -914,6 +912,14 @@ class S3Store(AbstractStore):
         # Validate name
         self.name = self.validate_name(self.name)
 
+        # Check if the storage is enabled
+        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+        if str(clouds.AWS()) not in enabled_storage_clouds:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    'Storage \'store: s3\' specified, but ' \
+                    'AWS access is disabled. Enable AWS to fix.')
+
     @classmethod
     def validate_name(cls, name) -> str:
         """Validates the name of the S3 store.
@@ -1289,6 +1295,13 @@ class GcsStore(AbstractStore):
                         'R2 Bucket should exist.')
         # Validate name
         self.name = self.validate_name(self.name)
+        # Check if the storage is enabled
+        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+        if str(clouds.GCP()) not in enabled_storage_clouds:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    'Storage \'store: gs\' specified, but ' \
+                    'GCP access is disabled. Enable GCP to fix.')
 
     @classmethod
     def validate_name(cls, name) -> str:
@@ -1691,7 +1704,15 @@ class R2Store(AbstractStore):
                 assert self.name == data_utils.split_r2_path(self.source)[0], (
                     'R2 Bucket is specified as path, the name should be '
                     'the same as R2 bucket.')
+        # Validate name
         self.name = S3Store.validate_name(self.name)
+        # Check if the storage is enabled
+        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+        if 'Cloudflare' not in enabled_storage_clouds:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    'Storage \'store: r2\' specified, but ' \
+                    'Cloudflare access is disabled. Enable Cloudflare to fix.')
 
     def initialize(self):
         """Initializes the R2 store object on the cloud.
