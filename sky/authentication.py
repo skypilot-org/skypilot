@@ -246,9 +246,8 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                     'Failed to enable ssh port.', proc.stderr.decode('utf-8'))
 
         allow_ssh_port('22')
-        # pylint: disable=import-outside-toplevel
-        from sky.backends.docker_utils import DEFAULT_DOCKER_PORT
-        allow_ssh_port(DEFAULT_DOCKER_PORT)
+        # For docker host machine
+        allow_ssh_port('10022')
         return config
 
     # OS Login is not enabled for the project. Add the ssh key directly to the

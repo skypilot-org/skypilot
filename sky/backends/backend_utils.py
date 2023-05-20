@@ -371,8 +371,6 @@ class SSHConfigHelper(object):
             proxy = f'ProxyCommand {proxy_command}'
         else:
             proxy = ''
-        # pylint: disable=import-outside-toplevel
-        from sky.backends.docker_utils import DEFAULT_DOCKER_PORT
         # StrictHostKeyChecking=no skips the host key check for the first
         # time. UserKnownHostsFile=/dev/null and GlobalKnownHostsFile/dev/null
         # prevent the host key from being added to the known_hosts file and
@@ -390,11 +388,13 @@ class SSHConfigHelper(object):
               StrictHostKeyChecking no
               UserKnownHostsFile=/dev/null
               GlobalKnownHostsFile=/dev/null
-              Port {DEFAULT_DOCKER_PORT}
+              Port 22
               {proxy}
             """.rstrip())
         codegen = codegen + '\n'
         return codegen
+        # TODO(tian): add a host_name + '-host' option with Port=10022
+        # to enable ssh into host machine when we are running with docker
 
     @classmethod
     @timeline.FileLockEvent(ssh_conf_lock_path)
@@ -853,7 +853,7 @@ def write_cluster_config(
 
     # pylint: disable=import-outside-toplevel
     from sky.backends.docker_utils import \
-        DEFAULT_DOCKER_CONTAINER_NAME, DEFAULT_DOCKER_PORT
+        DEFAULT_DOCKER_CONTAINER_NAME
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
@@ -894,7 +894,6 @@ def write_cluster_config(
                 # Docker config
                 'docker_image': docker_image,
                 'docker_container_name': DEFAULT_DOCKER_CONTAINER_NAME,
-                'docker_port': DEFAULT_DOCKER_PORT,
 
                 # Azure only:
                 'azure_subscription_id': azure_subscription_id,
@@ -1091,9 +1090,7 @@ def wait_until_ray_cluster_ready(
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
     last_nodes_so_far = 0
     start = time.time()
-    runner = command_runner.SSHCommandRunner(head_ip,
-                                             **ssh_credentials,
-                                             ssh_port='22')
+    runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
     with log_utils.console.status(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:

@@ -1647,9 +1647,8 @@ class RetryingVmProvisioner(object):
                 # Get docker container user for later ssh login
                 ssh_credentials = backend_utils.ssh_credential_from_yaml(
                     cluster_config_file)
-                runner = command_runner.SSHCommandRunner(head_ip,
-                                                         **ssh_credentials,
-                                                         ssh_port='22')
+                runner = command_runner.SSHCommandRunner(
+                    head_ip, **ssh_credentials)
                 # pylint: disable=import-outside-toplevel
                 from sky.backends.docker_utils import \
                     DEFAULT_DOCKER_CONTAINER_NAME
@@ -1662,6 +1661,23 @@ class RetryingVmProvisioner(object):
                     f'code: {whoami_returncode}, Error: {whoami_stderr}')
                 docker_user = whoami_stdout.strip()
                 logger.debug(f'Docker container user: {docker_user}')
+                # Change host ssh port to 10022 to avoid conflict with docker.
+                # Docker is running with --net=host, which means the container
+                # will have the same IP address as the host machine. If both
+                # container and host sshd are running on the same port, the
+                # docker sshd will fail to start. So we change the host ssh
+                # port to 10022 to avoid conflict with docker, in the same time
+                # we restart the docker sshd service.
+                docker_host_ssh_setup_commands = [
+                    'sudo sed -i "s/#Port 22/Port 10022/" /etc/ssh/sshd_config',
+                    'sudo systemctl restart sshd',
+                    # Restart ssh service in docker here since previous default
+                    # ssh port is occupied by the host.
+                    f'sudo docker exec {DEFAULT_DOCKER_CONTAINER_NAME} '
+                    'bash --login -c -i "sudo service ssh restart"'
+                ]
+                runner.run('; '.join(docker_host_ssh_setup_commands),
+                           stream_logs=False)
             return (self.GangSchedulingStatus.CLUSTER_READY, stdout, stderr,
                     head_ip, docker_user)
 

@@ -31,7 +31,7 @@ FIREWALL_RULES_REQUIRED = [
         ],
         "sourceRanges": ["0.0.0.0/0"],
     },
-    # Allow ssh connection to tocker image from anywhere.
+    # Allow ssh connection to docker host from anywhere.
     {
         "direction": "INGRESS",
         "allowed": [
@@ -76,7 +76,7 @@ FIREWALL_RULES_TEMPLATE = [
     },
     {
         "name": "{VPC_NAME}-allow-docker-ssh",
-        "description": "Allows TCP connections from any source to docker inside any instance on the network using port 10022.",
+        "description": "Allows TCP connections from any source to docker host inside any instance on the network using port 10022.",
         "network": "projects/{PROJ_ID}/global/networks/{VPC_NAME}",
         "selfLink": "projects/{PROJ_ID}/global/firewalls/{VPC_NAME}-allow-docker-ssh",
         "direction": "INGRESS",

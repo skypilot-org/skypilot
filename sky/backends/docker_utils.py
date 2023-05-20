@@ -30,7 +30,6 @@ DOCKERFILE_RUNCMD = """CMD {run_command}"""
 # Docker default options
 DEFAULT_DOCKER_IMAGE = 'brymastr/ubuntu-rsync'
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
-DEFAULT_DOCKER_PORT = '10022'
 
 CONDA_SETUP_PREFIX = '. $(conda info --base)/etc/profile.d/conda.sh 2> ' \
                      '/dev/null || true '

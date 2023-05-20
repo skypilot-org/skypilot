@@ -398,7 +398,7 @@ def launch_ray_on_local_cluster(cluster_config: Dict[str, Dict[str, Any]],
     # JobSubmissionClient (in subprocess_daemon.py) for completed,
     # failed, or cancelled jobs.
     ssh_options = command_runner.ssh_options_list(
-        ssh_private_key=remote_ssh_key, ssh_control_name=None, ssh_port='22')
+        ssh_private_key=remote_ssh_key, ssh_control_name=None)
     ssh_options = ' '.join(ssh_options)
     port_cmd = (f'ssh -tt -L 8265:localhost:8265 '
                 f'{ssh_options} {ssh_user}@{head_ip} '
