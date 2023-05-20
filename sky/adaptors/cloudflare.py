@@ -13,6 +13,7 @@ _session_creation_lock = threading.RLock()
 ACCOUNT_ID_PATH = '~/.cloudflare/accountid'
 AWS_R2_PROFILE_PATH = '~/.aws/credentials'
 R2_PROFILE_NAME = 'r2'
+_INDENT_PREFIX = '    '
 
 
 def import_package(func):
@@ -135,19 +136,25 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
 
     hints = None
     accountid_path = os.path.expanduser(ACCOUNT_ID_PATH)
-    if not os.path.exists(accountid_path):
-        hints = 'Account ID from R2 dashboard is not set.'
     if not r2_profile_in_aws_cred():
+        hints = f'[{R2_PROFILE_NAME}] profile is not set in ~/.aws/credentials.'
+    if not os.path.exists(accountid_path):
         if hints:
             hints += ' Additionally, '
         else:
             hints = ''
-        hints += f'[{R2_PROFILE_NAME}] profile is not set in ~/.aws/credentials.'
+        hints += 'Account ID from R2 dashboard is not set.'
     if hints:
-        hints += (
-            '\n      Please follow the instructions in:'
-            '\n      https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#cloudflare-r2'
-        )
+        hints += ' Run the following commands:'
+        if not r2_profile_in_aws_cred():
+            hints += f'\n{_INDENT_PREFIX}  $ pip install boto3'
+            hints += f'\n{_INDENT_PREFIX}  $ aws configure --profile r2'
+        if not os.path.exists(accountid_path):
+            hints += f'\n{_INDENT_PREFIX}  $ mkdir -p ~/.cloudflare'
+            hints += f'\n{_INDENT_PREFIX}  $ echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid'  # pylint: disable=line-too-long
+        hints += f'\n{_INDENT_PREFIX}For more info: '
+        hints += 'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#cloudflare-r2'  # pylint: disable=line-too-long
+
     return (False, hints) if hints else (True, hints)
 
 
