@@ -51,6 +51,7 @@ from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import validator
 from sky.usage import usage_lib
+from sky.adaptors import ibm
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -126,8 +127,13 @@ _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
 #    it's possible to failover to 1b, which leaves a leaked instance in 1a. Here,
 #    we use the new yaml's zone field, which is guaranteed to be the existing zone
 #    '1a'.
+# - UserData: The UserData field of the old yaml may be outdated, and we want to
+#   use the new yaml's UserData field, which contains the authorized key setup as
+#   well as the disabling of the auto-update with apt-get.
 _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('provider', 'availability_zone'),
+    ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
+    ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
 
 
@@ -268,7 +274,7 @@ def path_size_megabytes(path: str) -> int:
             f'{git_exclude_filter} --dry-run {path!r}',
             shell=True).splitlines()[-1])
     total_bytes = rsync_output.split(' ')[3].replace(',', '')
-    return int(total_bytes) // 10**6
+    return int(float(total_bytes)) // 10**6
 
 
 class FileMountHelper(object):
@@ -991,6 +997,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_azure_authentication(config)
     elif isinstance(cloud, clouds.Lambda):
         config = auth.setup_lambda_authentication(config)
+    elif isinstance(cloud, clouds.IBM):
+        config = auth.setup_ibm_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
@@ -1702,6 +1710,48 @@ def _query_status_azure(
     return _process_cli_query('Azure', cluster, query_cmd, '\t', status_map)
 
 
+def _query_status_ibm(
+    cluster: str,
+    ray_config: Dict[str, Any],
+) -> List[global_user_state.ClusterStatus]:
+    """
+    returns a list of Statuses for each of the cluster's nodes.
+    this function gets called when running `sky status` with -r flag and the cluster's head node is either stopped or down.
+    """
+
+    status_map: Dict[str, Any] = {
+        'pending': global_user_state.ClusterStatus.INIT,
+        'starting': global_user_state.ClusterStatus.INIT,
+        'restarting': global_user_state.ClusterStatus.INIT,
+        'running': global_user_state.ClusterStatus.UP,
+        'stopping': global_user_state.ClusterStatus.STOPPED,
+        'stopped': global_user_state.ClusterStatus.STOPPED,
+        'deleting': None,
+        'failed': global_user_state.ClusterStatus.INIT,
+        'cluster_deleted': []
+    }
+
+    client = ibm.client(region=ray_config['provider']['region'])
+    search_client = ibm.search_client()
+    # pylint: disable=E1136
+    vpcs_filtered_by_tags_and_region = search_client.search(
+        query=
+        f'type:vpc AND tags:{cluster} AND region:{ray_config["provider"]["region"]}',
+        fields=['tags', 'region', 'type'],
+        limit=1000).get_result()['items']
+    if not vpcs_filtered_by_tags_and_region:
+        # a vpc could have been removed unkownlingly to skypilot, such as
+        # via `sky autostop --down`, or simply manually (e.g. via console).
+        logger.warning('No vpc exists in '
+                       f'{ray_config["provider"]["region"]} '
+                       f'with tag: {cluster}')
+        return status_map['cluster_deleted']
+    vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(':', 1)[-1]
+    instances = client.list_instances(vpc_id=vpc_id).get_result()['instances']
+
+    return [status_map[instance['status']] for instance in instances]
+
+
 def _query_status_lambda(
         cluster: str,
         ray_config: Dict[str, Any],  # pylint: disable=unused-argument
@@ -1729,6 +1779,7 @@ _QUERY_STATUS_FUNCS = {
     'GCP': _query_status_gcp,
     'Azure': _query_status_azure,
     'Lambda': _query_status_lambda,
+    'IBM': _query_status_ibm,
 }
 
 

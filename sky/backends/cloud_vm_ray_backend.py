@@ -70,6 +70,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.Azure: 90,
     clouds.GCP: 120,
     clouds.Lambda: 150,
+    clouds.IBM: 160,
     clouds.Local: 90,
 }
 
@@ -120,6 +121,7 @@ def _get_cluster_config_template(cloud):
         clouds.Azure: 'azure-ray.yml.j2',
         clouds.GCP: 'gcp-ray.yml.j2',
         clouds.Lambda: 'lambda-ray.yml.j2',
+        clouds.IBM: 'ibm-ray.yml.j2',
         clouds.Local: 'local-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
@@ -842,6 +844,37 @@ class RetryingVmProvisioner(object):
                         self._blocked_resources.add(
                             launchable_resources.copy(region=r.name, zone=None))
 
+    def _update_blocklist_on_ibm_error(
+            self, launchable_resources: 'resources_lib.Resources',
+            region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
+            stdout: str, stderr: str):
+
+        style = colorama.Style
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits + stderr_splits
+            if 'ERR' in s.strip() or 'PANIC' in s.strip()
+        ]
+        if not errors:
+            logger.info('====== stdout ======')
+            for s in stdout_splits:
+                print(s)
+            logger.info('====== stderr ======')
+            for s in stderr_splits:
+                print(s)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Errors occurred during provision; '
+                                   'check logs above.')
+        logger.warning(f'Got error(s) on IBM cluster, in {region.name}:')
+        messages = '\n\t'.join(errors)
+        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
+
+        for zone in zones:  # type: ignore[union-attr]
+            self._blocked_resources.add(
+                launchable_resources.copy(zone=zone.name))
+
     def _update_blocklist_on_local_error(
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
@@ -906,6 +939,7 @@ class RetryingVmProvisioner(object):
             clouds.Azure: self._update_blocklist_on_azure_error,
             clouds.GCP: self._update_blocklist_on_gcp_error,
             clouds.Lambda: self._update_blocklist_on_lambda_error,
+            clouds.IBM: self._update_blocklist_on_ibm_error,
             clouds.Local: self._update_blocklist_on_local_error,
         }
         cloud = launchable_resources.cloud
@@ -1162,6 +1196,8 @@ class RetryingVmProvisioner(object):
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
+        os.makedirs(self.log_dir, exist_ok=True)
+        os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
@@ -2453,6 +2489,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{style.BRIGHT}{workdir}{style.RESET_ALL}'
             f' -> '
             f'{style.BRIGHT}{SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
+        os.makedirs(self.log_dir, exist_ok=True)
+        os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
@@ -3041,6 +3079,42 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     shell=True,
                     stream_logs=False,
                     require_outputs=True)
+
+        elif (isinstance(cloud, clouds.IBM) and terminate and
+              prev_cluster_status == global_user_state.ClusterStatus.STOPPED):
+            # pylint: disable= W0622 W0703 C0415
+            from sky.adaptors import ibm
+            from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
+
+            config_provider = common_utils.read_yaml(
+                handle.cluster_yaml)['provider']
+            region = config_provider['region']
+            cluster_name = handle.cluster_name
+            search_client = ibm.search_client()
+            vpc_found = False
+            # pylint: disable=unsubscriptable-object
+            vpcs_filtered_by_tags_and_region = search_client.search(
+                query=f'type:vpc AND tags:{cluster_name} AND region:{region}',
+                fields=['tags', 'region', 'type'],
+                limit=1000).get_result()['items']
+            try:
+                # pylint: disable=line-too-long
+                vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(
+                    ':', 1)[-1]
+                vpc_found = True
+            except Exception:
+                logger.critical('failed to locate vpc for ibm cloud')
+                returncode = -1
+
+            if vpc_found:
+                # # pylint: disable=line-too-long E1136
+                # Delete VPC and it's associated resources
+                vpc_provider = IBMVPCProvider(
+                    config_provider['resource_group_id'], region, cluster_name)
+                vpc_provider.delete_vpc(vpc_id, region)
+                # successfully removed cluster as no exception was raised
+                returncode = 0
+
         elif (terminate and
               (prev_cluster_status == global_user_state.ClusterStatus.STOPPED or
                use_tpu_vm)):
@@ -3421,6 +3495,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'{fore.YELLOW}Source path {src!r} is a symlink. '
                         f'Symlink contents are not uploaded.{style.RESET_ALL}')
 
+        os.makedirs(self.log_dir, exist_ok=True)
+        os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
