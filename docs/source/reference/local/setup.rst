@@ -22,7 +22,7 @@ To install Ray and SkyPilot for all users, run the following commands on all loc
 
    $ pip3 install ray[default]==2.0.1
 
-   $ # SkyPilot requires python >= 3.6.
+   $ # SkyPilot requires python >= 3.7.
    $ pip3 install skypilot
 
 
