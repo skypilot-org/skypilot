@@ -325,10 +325,12 @@ class Task:
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
         resources = config.pop('resources', None)
-        if resources is not None and 'image_id' in resources:
-            if resources['image_id'].startswith('docker:'):
-                task.docker_image = resources['image_id'][len('docker:'):]
-                del resources['image_id']
+
+        # pylint: disable=import-outside-toplevel
+        from sky.backends.docker_utils import \
+            extract_docker_image_from_resources
+        task.docker_image = extract_docker_image_from_resources(resources)
+
         resources = sky.Resources.from_yaml_config(resources)
 
         task.set_resources({resources})

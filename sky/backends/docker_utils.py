@@ -4,7 +4,7 @@ import shutil
 import subprocess
 import tempfile
 import textwrap
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Any
 
 import colorama
 
@@ -146,6 +146,22 @@ def _execute_build(tag, context_path):
             if 'stream' in line:
                 logger.error(line['stream'].strip())
         raise
+
+
+def extract_docker_image_from_resources(resources: Optional[Dict[str, Any]]) -> Optional[str]:
+    """
+    Extracts the docker image from the resources dict.
+    """
+    if resources is None:
+        return None
+    if 'image_id' not in resources:
+        return None
+    if isinstance(resources['image_id'], str):
+        if resources['image_id'].startswith('docker:'):
+            image = resources['image_id'][len('docker:'):]
+            del resources['image_id']
+            return image
+    return None
 
 
 def build_dockerimage(task: task_mod.Task,
