@@ -179,6 +179,7 @@ setup_commands:
     sudo systemctl disable unattended-upgrades || true;
     sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
     {%- endif %}
+    p=$(mylsof "/var/lib/dpkg/lock-frontend"); echo "$p";
     sudo kill -9 `echo "$p" | tail -n 1` || true;
     sudo rm /var/lib/dpkg/lock-frontend;
     sudo pkill -9 dpkg;
