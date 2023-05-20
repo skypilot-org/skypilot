@@ -140,7 +140,6 @@ class JobStatus(enum.Enum):
 # to avoid race condition with `ray job` to make sure it job has been
 # correctly updated.
 # TODO(zhwu): This number should be tuned based on heuristics.
-_SUBMITTED_GAP_SECONDS = 60
 _PENDING_SUBMIT_TIMEOUT = 5
 
 _PRE_RESOURCE_STATUSES = [JobStatus.PENDING]
@@ -170,7 +169,7 @@ class JobScheduler:
         job_owner = getpass.getuser()
         jobs = self._get_jobs()
         if len(jobs) > 0:
-            update_status(job_owner, _SUBMITTED_GAP_SECONDS)
+            update_status(job_owner)
         for job_id, run_cmd, submit, _ in jobs:
             # TODO(mraheja): remove pylint disabling when filelock
             # version updated
@@ -423,9 +422,9 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
     return records
 
 
-def _get_jobs(username: Optional[str],
-              status_list: Optional[List[JobStatus]] = None,
-              submitted_gap_sec: int = 0) -> List[Dict[str, Any]]:
+def _get_jobs(
+        username: Optional[str],
+        status_list: Optional[List[JobStatus]] = None) -> List[Dict[str, Any]]:
     if status_list is None:
         status_list = list(JobStatus)
     status_str_list = [status.value for status in status_list]
@@ -436,7 +435,7 @@ def _get_jobs(username: Optional[str],
             WHERE status IN ({','.join(['?'] * len(status_list))})
             AND submitted_at <= (?)
             ORDER BY job_id DESC""",
-            (*status_str_list, time.time() - submitted_gap_sec),
+            (*status_str_list, time.time()),
         )
     else:
         rows = _CURSOR.execute(
@@ -445,7 +444,7 @@ def _get_jobs(username: Optional[str],
             WHERE status IN ({','.join(['?'] * len(status_list))})
             AND username=(?) AND submitted_at <= (?)
             ORDER BY job_id DESC""",
-            (*status_str_list, username, time.time() - submitted_gap_sec),
+            (*status_str_list, username, time.time()),
         )
 
     records = _get_records_from_rows(rows)
@@ -584,7 +583,7 @@ def fail_all_jobs_in_progress() -> None:
     _CONN.commit()
 
 
-def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
+def update_status(job_owner: str) -> None:
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
     # NOTE: there might be a INIT job in the database set to FAILED by this
@@ -592,8 +591,7 @@ def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
     # not submitted yet. It will be then reset to PENDING / RUNNING when the
     # app starts.
     nonterminal_jobs = _get_jobs(username=None,
-                                 status_list=JobStatus.nonterminal_statuses(),
-                                 submitted_gap_sec=submitted_gap_sec)
+                                 status_list=JobStatus.nonterminal_statuses())
     nonterminal_job_ids = [job['job_id'] for job in nonterminal_jobs]
 
     update_job_status(job_owner, nonterminal_job_ids)

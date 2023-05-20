@@ -325,6 +325,7 @@ class RayCodeGen:
                 # it is waiting for other task to finish. We should hide the
                 # error message.
                 ray.get(pg.ready())
+                job_lib.scheduler.schedule_step()
                 print('INFO: All task resources reserved.',
                       file=sys.stderr,
                       flush=True)
@@ -375,7 +376,6 @@ class RayCodeGen:
         self._code += [
             textwrap.dedent(f"""\
                 job_lib.set_job_started({self.job_id!r})
-                job_lib.scheduler.schedule_step()
                 """),
         ]
 
