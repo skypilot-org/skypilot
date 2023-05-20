@@ -375,6 +375,7 @@ class RayCodeGen:
 
         self._code += [
             textwrap.dedent(f"""\
+                job_lib.scheduler.schedule_step()
                 job_lib.set_job_started({self.job_id!r})
                 """),
         ]
