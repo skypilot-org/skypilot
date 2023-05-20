@@ -1016,6 +1016,10 @@ def _make_task_from_entrypoint_with_overrides(
     if workdir is not None:
         task.workdir = workdir
 
+    if image_id and image_id.startswith('docker:'):
+        task.docker_image = image_id[len('docker:'):]
+        image_id = None
+
     if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
         cloud = 'local'
 

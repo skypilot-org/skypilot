@@ -28,9 +28,6 @@ Available fields:
     # A task can set this to a smaller value than the size of a cluster.
     num_nodes: 4
 
-    # Docker image to use (optional), defaults to a modified version of Ubuntu 18.04.
-    docker_image: my-docker-image:latest
-
     # Per-node resource requirements (optional).
     resources:
       cloud: aws  # The cloud to use (optional).
@@ -105,8 +102,14 @@ Available fields:
         tpu_vm: False  # False to use TPU nodes (the default); True to use TPU VMs.
 
       # Custom image id (optional, advanced). The image id used to boot the
-      # instances. Only supported for AWS and GCP. If not specified, SkyPilot
-      # will use the default debian-based image suitable for machine learning tasks.
+      # instances. Only supported for AWS and GCP (for non-docker image). If not
+      # specified, SkyPilot will use the default debian-based image suitable for
+      # machine learning tasks.
+      #
+      # Docker support
+      # You can specify docker image to use by setting the image_id to
+      # `docker:<image name>` for Azure, AWS and GCP. For example,
+      #   image_id: docker:brymastr/ubuntu-rsync:latest
       #
       # AWS
       # To find AWS AMI ids: https://leaherb.com/how-to-find-an-aws-marketplace-ami-image-id

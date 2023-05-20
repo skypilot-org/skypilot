@@ -93,10 +93,16 @@ def _get_optimized_resources(
     optimized_resources = []
     for config in candidate_configs:
         with sky.Dag() as dag:
+            docker_image = None
             resources = config.get('resources', None)
+            if resources is not None and resources['image_id'].startswith(
+                    'docker:'):
+                docker_image = resources['image_id'][len('docker:'):]
+                del resources['image_id']
             resources = sky.Resources.from_yaml_config(resources)
             task = sky.Task()
             task.set_resources({resources})
+            task.docker_image = docker_image
 
         dag = sky.optimize(dag, quiet=True)
         task = dag.tasks[0]

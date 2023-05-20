@@ -770,7 +770,7 @@ def write_cluster_config(
         cluster_name: str,
         local_wheel_path: pathlib.Path,
         wheel_hash: str,
-        docker_image: str,
+        docker_image: Optional[str],
         region: Optional[clouds.Region] = None,
         zones: Optional[List[clouds.Zone]] = None,
         dryrun: bool = False,
@@ -892,6 +892,7 @@ def write_cluster_config(
                 'public_key': public_key,
 
                 # Docker config
+                'use_docker': docker_image is not None,
                 'docker_image': docker_image,
                 'docker_container_name': DEFAULT_DOCKER_CONTAINER_NAME,
 
@@ -1071,12 +1072,10 @@ def wait_until_ray_cluster_ready(
     num_nodes: int,
     log_path: str,
     is_local_cloud: bool = False,
+    use_docker: bool = False,
     nodes_launching_progress_timeout: Optional[int] = None,
-) -> bool:
+) -> Tuple[bool, Optional[str]]:
     """Returns whether the entire ray cluster is ready."""
-    if num_nodes <= 1:
-        return True
-
     # Manually fetching head ip instead of using `ray exec` to avoid the bug
     # that `ray exec` fails to connect to the head node after some workers
     # launched especially for Azure.
@@ -1085,7 +1084,10 @@ def wait_until_ray_cluster_ready(
             cluster_config_file, max_attempts=WAIT_HEAD_NODE_IP_MAX_ATTEMPTS)
     except RuntimeError as e:
         logger.error(e)
-        return False  # failed
+        return False, None  # failed
+
+    if num_nodes <= 1:
+        return True, head_ip
 
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
     last_nodes_so_far = 0
@@ -1096,13 +1098,14 @@ def wait_until_ray_cluster_ready(
         while True:
             # pylint: disable=import-outside-toplevel
             from sky.backends.docker_utils import DEFAULT_DOCKER_CONTAINER_NAME
-            rc, output, stderr = runner.run(
+            docker_prefix = (
                 f'sudo docker exec {DEFAULT_DOCKER_CONTAINER_NAME} '
-                '"ray status"',
-                log_path=log_path,
-                stream_logs=False,
-                require_outputs=True,
-                separate_stderr=True)
+                if use_docker else '')
+            rc, output, stderr = runner.run(docker_prefix + 'ray status',
+                                            log_path=log_path,
+                                            stream_logs=False,
+                                            require_outputs=True,
+                                            separate_stderr=True)
             subprocess_utils.handle_returncode(
                 rc, 'ray status', 'Failed to run ray status on head node.',
                 stderr)
@@ -1149,7 +1152,7 @@ def wait_until_ray_cluster_ready(
                     'Timed out: waited for more than '
                     f'{nodes_launching_progress_timeout} seconds for new '
                     'workers to be provisioned, but no progress.')
-                return False  # failed
+                return False, None  # failed
 
             if '(no pending nodes)' in output and '(no failures)' in output:
                 # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes
@@ -1159,9 +1162,9 @@ def wait_until_ray_cluster_ready(
                 logger.error(
                     'Failed to launch multiple nodes on '
                     'GCP due to a nondeterministic bug in ray autoscaler.')
-                return False  # failed
+                return False, None  # failed
             time.sleep(10)
-    return True  # success
+    return True, head_ip  # success
 
 
 def ssh_credential_from_yaml(cluster_yaml: str,

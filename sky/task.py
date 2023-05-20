@@ -134,7 +134,7 @@ class Task:
             nodes get the same command, or a lambda, with the semantics
             documented above.
           docker_image: The base docker image that this Task will be built on.
-            Defaults to `sky.backends.docker_utils.DEFAULT_DOCKER_IMAGE`.
+            If not specified, task won't run inside docker.
         """
         self.name = name
         self.run = run
@@ -144,10 +144,7 @@ class Task:
         self.setup = setup
         self._envs = envs or {}
         self.workdir = workdir
-        # pylint: disable=import-outside-toplevel
-        from sky.backends.docker_utils import DEFAULT_DOCKER_IMAGE
-        self.docker_image = (docker_image
-                             if docker_image else DEFAULT_DOCKER_IMAGE)
+        self.docker_image = docker_image
         # Ignore type error due to a mypy bug.
         # https://github.com/python/mypy/issues/3004
         self.num_nodes = num_nodes  # type: ignore
@@ -328,11 +325,13 @@ class Task:
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
         resources = config.pop('resources', None)
+        if resources is not None and 'image_id' in resources:
+            if resources['image_id'].startswith('docker:'):
+                task.docker_image = resources['image_id'][len('docker:'):]
+                del resources['image_id']
         resources = sky.Resources.from_yaml_config(resources)
 
         task.set_resources({resources})
-
-        task.docker_image = config.pop('docker_image', None)
 
         assert not config, f'Invalid task args: {config.keys()}'
         return task

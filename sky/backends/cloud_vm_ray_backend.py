@@ -1189,7 +1189,7 @@ class RetryingVmProvisioner(object):
         cluster_name: str,
         cloud_user_identity: Optional[List[str]],
         prev_cluster_status: Optional[global_user_state.ClusterStatus],
-        docker_image: str,
+        docker_image: Optional[str],
     ):
         """The provision retry loop."""
         style = colorama.Style
@@ -1312,7 +1312,8 @@ class RetryingVmProvisioner(object):
             status, stdout, stderr, head_ip, docker_user = \
                 self._gang_schedule_ray_up(
                 to_provision.cloud, cluster_config_file, handle, log_abs_path,
-                stream_logs, logging_info, to_provision.use_spot)
+                stream_logs, logging_info, to_provision.use_spot,
+                docker_image is not None)
 
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 if cluster_exists:
@@ -1462,7 +1463,7 @@ class RetryingVmProvisioner(object):
     def _gang_schedule_ray_up(
         self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
         cluster_handle: 'backends.CloudVmRayResourceHandle', log_abs_path: str,
-        stream_logs: bool, logging_info: dict, use_spot: bool
+        stream_logs: bool, logging_info: dict, use_spot: bool, use_docker: bool
     ) -> Tuple[GangSchedulingStatus, str, str, Optional[str], Optional[str]]:
         """Provisions a cluster via 'ray up' and wait until fully provisioned.
 
@@ -1629,6 +1630,41 @@ class RetryingVmProvisioner(object):
                         f'{style.RESET_ALL}')
             self._tpu_pod_setup(cluster_config_file, cluster_handle)
 
+        def docker_setup(head_ip) -> str:
+            # Get docker container user for later ssh login
+            ssh_credentials = backend_utils.ssh_credential_from_yaml(
+                cluster_config_file)
+            runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
+            # pylint: disable=import-outside-toplevel
+            from sky.backends.docker_utils import DEFAULT_DOCKER_CONTAINER_NAME
+            whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
+                f'sudo docker exec {DEFAULT_DOCKER_CONTAINER_NAME} whoami',
+                stream_logs=False,
+                require_outputs=True)
+            assert whoami_returncode == 0, (
+                f'Failed to get docker container user. Return '
+                f'code: {whoami_returncode}, Error: {whoami_stderr}')
+            docker_user = whoami_stdout.strip()
+            logger.debug(f'Docker container user: {docker_user}')
+            # Change host ssh port to 10022 to avoid conflict with docker.
+            # Docker is running with --net=host, which means the container
+            # will have the same IP address as the host machine. If both
+            # container and host sshd are running on the same port, the
+            # docker sshd will fail to start. So we change the host ssh
+            # port to 10022 to avoid conflict with docker, in the same time
+            # we restart the docker sshd service.
+            docker_host_ssh_setup_commands = [
+                'sudo sed -i "s/#Port 22/Port 10022/" /etc/ssh/sshd_config',
+                'sudo systemctl restart sshd',
+                # Restart ssh service in docker here since previous default
+                # ssh port is occupied by the host.
+                f'sudo docker exec {DEFAULT_DOCKER_CONTAINER_NAME} '
+                'bash --login -c -i "sudo service ssh restart"'
+            ]
+            runner.run('; '.join(docker_host_ssh_setup_commands),
+                       stream_logs=False)
+            return docker_user
+
         # Only 1 node or head node provisioning failure.
         if cluster_handle.launched_nodes == 1 and returncode == 0:
             # Optimization: Try parse head ip from 'ray up' stdout.
@@ -1643,41 +1679,8 @@ class RetryingVmProvisioner(object):
                 head_ip = ip_list[0]
             docker_user = None
             # TODO(tian): handle cases for head_ip is None and multi-node.
-            if head_ip:
-                # Get docker container user for later ssh login
-                ssh_credentials = backend_utils.ssh_credential_from_yaml(
-                    cluster_config_file)
-                runner = command_runner.SSHCommandRunner(
-                    head_ip, **ssh_credentials)
-                # pylint: disable=import-outside-toplevel
-                from sky.backends.docker_utils import \
-                    DEFAULT_DOCKER_CONTAINER_NAME
-                whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
-                    f'sudo docker exec {DEFAULT_DOCKER_CONTAINER_NAME} whoami',
-                    stream_logs=False,
-                    require_outputs=True)
-                assert whoami_returncode == 0, (
-                    f'Failed to get docker container user. Return '
-                    f'code: {whoami_returncode}, Error: {whoami_stderr}')
-                docker_user = whoami_stdout.strip()
-                logger.debug(f'Docker container user: {docker_user}')
-                # Change host ssh port to 10022 to avoid conflict with docker.
-                # Docker is running with --net=host, which means the container
-                # will have the same IP address as the host machine. If both
-                # container and host sshd are running on the same port, the
-                # docker sshd will fail to start. So we change the host ssh
-                # port to 10022 to avoid conflict with docker, in the same time
-                # we restart the docker sshd service.
-                docker_host_ssh_setup_commands = [
-                    'sudo sed -i "s/#Port 22/Port 10022/" /etc/ssh/sshd_config',
-                    'sudo systemctl restart sshd',
-                    # Restart ssh service in docker here since previous default
-                    # ssh port is occupied by the host.
-                    f'sudo docker exec {DEFAULT_DOCKER_CONTAINER_NAME} '
-                    'bash --login -c -i "sudo service ssh restart"'
-                ]
-                runner.run('; '.join(docker_host_ssh_setup_commands),
-                           stream_logs=False)
+            if use_docker and head_ip:
+                docker_user = docker_setup(head_ip)
             return (self.GangSchedulingStatus.CLUSTER_READY, stdout, stderr,
                     head_ip, docker_user)
 
@@ -1701,13 +1704,17 @@ class RetryingVmProvisioner(object):
         # FIXME(zongheng): the below requires ray processes are up on head. To
         # repro it failing: launch a 2-node cluster, log into head and ray
         # stop, then launch again.
-        cluster_ready = backend_utils.wait_until_ray_cluster_ready(
+        cluster_ready, head_ip = backend_utils.wait_until_ray_cluster_ready(
             cluster_config_file,
             cluster_handle.launched_nodes,
             log_path=log_abs_path,
             nodes_launching_progress_timeout=_NODES_LAUNCHING_PROGRESS_TIMEOUT[
                 type(to_provision_cloud)],
-            is_local_cloud=isinstance(to_provision_cloud, clouds.Local))
+            is_local_cloud=isinstance(to_provision_cloud, clouds.Local),
+            use_docker=use_docker)
+        docker_user = None
+        if use_docker and head_ip:
+            docker_user = docker_setup(head_ip)
         if cluster_ready:
             cluster_status = self.GangSchedulingStatus.CLUSTER_READY
             # ray up --no-restart again with upscaling_speed=0 after cluster is
@@ -1729,7 +1736,7 @@ class RetryingVmProvisioner(object):
 
         # Do not need stdout/stderr if gang scheduling failed.
         # gang_succeeded = False, if head OK, but workers failed.
-        return cluster_status, '', '', None, None
+        return cluster_status, '', '', None, docker_user
 
     def _ensure_cluster_ray_started(self, handle: 'CloudVmRayResourceHandle',
                                     log_abs_path) -> None:
@@ -2476,7 +2483,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             usage_lib.messages.usage.update_final_cluster_status(
                 global_user_state.ClusterStatus.UP)
             auth_config = common_utils.read_yaml(handle.cluster_yaml)['auth']
-            auth_config['ssh_user'] = handle.docker_user
+            if handle.docker_user:
+                auth_config['ssh_user'] = handle.docker_user
             backend_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
                                                       ip_list, auth_config)
 
@@ -3317,7 +3325,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # be removed after the cluster entry in the database is removed.
         config = common_utils.read_yaml(handle.cluster_yaml)
         auth_config = config['auth']
-        auth_config['ssh_user'] = handle.docker_user
+        if handle.docker_user:
+            auth_config['ssh_user'] = handle.docker_user
         backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name,
                                                      handle.head_ip,
                                                      auth_config)

@@ -165,6 +165,8 @@ def build_dockerimage(task: task_mod.Task,
     if callable(task.run):
         raise ValueError(
             'Cannot build docker image for a task.run with function.')
+    assert task.docker_image is not None, 'Docker image cannot be None - ' \
+                                            'have you specified a task name? '
     _, img_metadata = create_dockerfile(base_image=task.docker_image,
                                         setup_command=task.setup,
                                         copy_path=f'{SKY_DOCKER_WORKDIR}/',
