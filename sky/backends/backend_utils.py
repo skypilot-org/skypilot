@@ -1075,7 +1075,8 @@ def wait_until_ray_cluster_ready(
     use_docker: bool = False,
     nodes_launching_progress_timeout: Optional[int] = None,
 ) -> Tuple[bool, Optional[str]]:
-    """Returns whether the entire ray cluster is ready."""
+    """Returns whether the entire ray cluster is ready, and docker username
+    if launched with docker."""
     # Manually fetching head ip instead of using `ray exec` to avoid the bug
     # that `ray exec` fails to connect to the head node after some workers
     # launched especially for Azure.
@@ -1086,22 +1087,23 @@ def wait_until_ray_cluster_ready(
         logger.error(e)
         return False, None  # failed
 
-    if num_nodes <= 1:
-        return True, head_ip
+    docker_user = None
+    if use_docker:
+        # pylint: disable=import-outside-toplevel
+        from sky.backends.docker_utils import docker_host_setup
+        docker_user = docker_host_setup(head_ip, cluster_config_file)
 
-    ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
+    if num_nodes <= 1:
+        return True, docker_user
+
+    ssh_credentials = ssh_credential_from_yaml(cluster_config_file, docker_user)
     last_nodes_so_far = 0
     start = time.time()
     runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
     with log_utils.console.status(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
-            # pylint: disable=import-outside-toplevel
-            from sky.backends.docker_utils import DEFAULT_DOCKER_CONTAINER_NAME
-            docker_prefix = (
-                f'sudo docker exec {DEFAULT_DOCKER_CONTAINER_NAME} '
-                if use_docker else '')
-            rc, output, stderr = runner.run(docker_prefix + 'ray status',
+            rc, output, stderr = runner.run('ray status',
                                             log_path=log_path,
                                             stream_logs=False,
                                             require_outputs=True,
@@ -1164,7 +1166,7 @@ def wait_until_ray_cluster_ready(
                     'GCP due to a nondeterministic bug in ray autoscaler.')
                 return False, None  # failed
             time.sleep(10)
-    return True, head_ip  # success
+    return True, docker_user  # success
 
 
 def ssh_credential_from_yaml(cluster_yaml: str,

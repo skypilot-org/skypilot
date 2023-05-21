@@ -148,7 +148,8 @@ def _execute_build(tag, context_path):
         raise
 
 
-def extract_docker_image_from_resources(resources: Optional[Dict[str, Any]]) -> Optional[str]:
+def extract_docker_image_from_resources(
+        resources: Optional[Dict[str, Any]]) -> Optional[str]:
     """
     Extracts the docker image from the resources dict.
     """
@@ -162,6 +163,46 @@ def extract_docker_image_from_resources(resources: Optional[Dict[str, Any]]) -> 
             del resources['image_id']
             return image
     return None
+
+
+def docker_host_setup(ip: str, cluster_config_file: str) -> str:
+    """
+    Performs setup on the docker host. This setup do 2 things:
+      1. Find docker container username.
+      2. Change the host ssh port to 10022 and enable ssh login
+         to the docker container.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.backends.backend_utils import ssh_credential_from_yaml
+    from sky.utils import command_runner
+    ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
+    runner = command_runner.SSHCommandRunner(ip, **ssh_credentials)
+    whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
+        f'sudo docker exec {DEFAULT_DOCKER_CONTAINER_NAME} whoami',
+        stream_logs=False,
+        require_outputs=True)
+    assert whoami_returncode == 0, (
+        f'Failed to get docker container user. Return '
+        f'code: {whoami_returncode}, Error: {whoami_stderr}')
+    docker_user = whoami_stdout.strip()
+    logger.debug(f'Docker container user: {docker_user}')
+    # Change host ssh port to 10022 to avoid conflict with docker.
+    # Docker is running with --net=host, which means the container
+    # will have the same IP address as the host machine. If both
+    # container and host sshd are running on the same port, the
+    # docker sshd will fail to start. So we change the host ssh
+    # port to 10022 to avoid conflict with docker, in the same time
+    # we restart the docker sshd service.
+    docker_host_ssh_setup_commands = [
+        'sudo sed -i "s/#Port 22/Port 10022/" /etc/ssh/sshd_config',
+        'sudo systemctl restart sshd',
+        # Restart ssh service in docker here since previous default
+        # ssh port is occupied by the host.
+        f'sudo docker exec {DEFAULT_DOCKER_CONTAINER_NAME} '
+        'bash --login -c -i "sudo service ssh restart"'
+    ]
+    runner.run('; '.join(docker_host_ssh_setup_commands), stream_logs=False)
+    return docker_user
 
 
 def build_dockerimage(task: task_mod.Task,
