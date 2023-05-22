@@ -3064,10 +3064,10 @@ def show_gpus(
 
         # Show detailed accelerator information
 
-        name, quantity = accelerator_str.split(":")[0], None
-        has_quantity = accelerator_str.count(":") > 0
+        name, quantity = accelerator_str.split(':')[0], None
+        has_quantity = accelerator_str.count(':') > 0
         if has_quantity:
-            quantity = int(accelerator_str.split(":")[1])
+            quantity = int(accelerator_str.split(':')[1])
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=name,
                                                    quantity=quantity,
