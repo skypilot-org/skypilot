@@ -32,7 +32,6 @@ import datetime
 import functools
 import multiprocessing
 import os
-import re
 import shlex
 import subprocess
 import sys
@@ -2960,7 +2959,7 @@ def check():
 
 
 @cli.command()
-@click.argument('gpu_name', required=False)
+@click.argument('accelerator_str', required=False)
 @click.option('--all',
               '-a',
               is_flag=True,
@@ -2981,11 +2980,11 @@ def check():
 @service_catalog.use_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
-        gpu_name: Optional[str],
+        accelerator_str: Optional[str],
         all: bool,  # pylint: disable=redefined-builtin
         cloud: Optional[str],
         region: Optional[str]):
-    """Show supported GPU/TPU/accelerators and their prices.
+    """Show supported GPU/TPU/accelerators and their= prices.
 
     The names and counts shown can be set in the ``accelerators`` field in task
     YAMLs, or in the ``--gpus`` flag in CLI commands. For example, if this
@@ -3017,7 +3016,7 @@ def show_gpus(
     clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
-    if show_all and gpu_name is not None:
+    if show_all and accelerator_str is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
 
     def _list_to_str(lst):
@@ -3031,7 +3030,7 @@ def show_gpus(
         other_table = log_utils.create_table(
             ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
-        if gpu_name is None:
+        if accelerator_str is None:
             result = service_catalog.list_accelerator_counts(
                 gpus_only=True,
                 clouds=cloud,
@@ -3063,23 +3062,33 @@ def show_gpus(
                        '(including non-common ones) and pricing.')
                 return
 
-        new_gpu_name = gpu_name
-        gpu_name_and_count = new_gpu_name.count(':') > 0
-        total_table_len = 0
-
-        if gpu_name_and_count:
-            split_gpu_name = re.split(':', new_gpu_name)
-            new_gpu_name = split_gpu_name[0]
-
         # Show detailed accelerator information
+
+        name, quantity = accelerator_str.split(":")[0], None
+        has_quantity = accelerator_str.count(":") > 0
+        if has_quantity:
+            quantity = int(accelerator_str.split(":")[1])
         result = service_catalog.list_accelerators(gpus_only=True,
-                                                   name_filter=new_gpu_name,
+                                                   name_filter=name,
+                                                   quantity = quantity,
                                                    region_filter=region,
                                                    clouds=cloud)
         if len(result) == 0:
-            yield f'Resources \'{new_gpu_name}\' not found. '
+            yield f'Resources \'{name}\' not found. '
             yield 'Try \'sky show-gpus --all\' '
             yield 'to show available accelerators.'
+            return
+
+        num_accelerators_found = 0
+        num_unique_accelerators = len([1 for i in result if len(result[i]) > 0])
+        for i in result: num_accelerators_found += len(result[i])
+        if num_accelerators_found == 0:
+            yield f'Resource \'{name}\', with '
+            yield f'requested quantity {quantity}, '
+            yield 'not found. '
+            yield 'Try \'sky show-gpus --all\' '
+            yield 'to show available accelerators '
+            yield 'and their quantities.'
             return
 
         yield '*NOTE*: for most GCP accelerators, '
@@ -3123,40 +3132,24 @@ def show_gpus(
                     item.spot_price) else '-'
                 region_str = item.region if not pd.isna(item.region) else '-'
 
-                requested_accelerator_count = (item.accelerator_count
-                                               if not gpu_name_and_count else
-                                               int(split_gpu_name[1]))
-
-                if requested_accelerator_count == item.accelerator_count:
-                    accelerator_table_vals = [
-                        item.accelerator_name,
-                        item.accelerator_count,
-                        item.cloud,
-                        instance_type_str,
-                        device_memory_str,
-                        cpu_str,
-                        host_memory_str,
-                        price_str,
-                        spot_price_str,
-                    ]
-                    if not show_all:
-                        accelerator_table_vals.append(region_str)
-                    accelerator_table.add_row(accelerator_table_vals)
-            cur_table_vals_len = len(accelerator_table.get_string())
-            if i != 0 and cur_table_vals_len != 0:
+                accelerator_table_vals = [
+                    item.accelerator_name,
+                    item.accelerator_count,
+                    item.cloud,
+                    instance_type_str,
+                    device_memory_str,
+                    cpu_str,
+                    host_memory_str,
+                    price_str,
+                    spot_price_str,
+                ]
+                if not show_all:
+                    accelerator_table_vals.append(region_str)
+                accelerator_table.add_row(accelerator_table_vals)
+            if i != 0 and num_unique_accelerators > 0:
                 yield '\n\n'
             yield from accelerator_table.get_string()
-
-            total_table_len += cur_table_vals_len
-
-        if total_table_len == 0:
-            yield f'Quantity {requested_accelerator_count} of '
-            yield f'resource \'{new_gpu_name}\' '
-            yield 'not found. '
-            yield 'Try \'sky show-gpus --all\' '
-            yield 'to show available accelerators '
-            yield 'and their quantities.'
-            return
+            num_unique_accelerators -= 1
 
     if show_all:
         click.echo_via_pager(_output())

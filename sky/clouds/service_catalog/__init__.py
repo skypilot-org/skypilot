@@ -51,6 +51,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
 def list_accelerators(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
+    quantity: Optional[int] = None,
     region_filter: Optional[str] = None,
     clouds: CloudFilter = None,
     case_sensitive: bool = True,
@@ -63,6 +64,7 @@ def list_accelerators(
     Returns: A dictionary of canonical accelerator names mapped to a list
     of instance type offerings. See usage in cli.py.
     """
+    check_count = True if quantity else False
     results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
                                   name_filter, region_filter, case_sensitive)
     if not isinstance(results, list):
@@ -71,7 +73,14 @@ def list_accelerators(
               List['common.InstanceTypeInfo']] = collections.defaultdict(list)
     for result in results:
         for gpu, items in result.items():
-            ret[gpu] += items
+            if check_count:
+                new_items = []
+                for item in items:
+                    if item.accelerator_count == quantity:
+                        new_items.append(item)
+                ret[gpu] += new_items
+            else:
+                ret[gpu] += items
     return dict(ret)
 
 
@@ -97,7 +106,7 @@ def list_accelerator_counts(
                 accelerator_counts[gpu].add(item.accelerator_count)
     ret: Dict[str, List[int]] = {}
     for gpu, counts in accelerator_counts.items():
-        ret[gpu] = sorted(counts)
+        ret[gpu] = sorted(counts)   
     return ret
 
 
