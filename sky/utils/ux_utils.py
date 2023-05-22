@@ -24,6 +24,9 @@ def print_exception_no_traceback():
     Mainly for UX: user-facing errors, e.g., ValueError, should suppress long
     tracebacks.
 
+    If SKYPILOT_DEBUG environment variable is set, this context manager is a
+    no-op and the full traceback will be shown.
+
     Example usage:
 
         with print_exception_no_traceback():
