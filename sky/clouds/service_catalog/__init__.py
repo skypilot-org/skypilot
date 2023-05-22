@@ -64,7 +64,6 @@ def list_accelerators(
     Returns: A dictionary of canonical accelerator names mapped to a list
     of instance type offerings. See usage in cli.py.
     """
-    check_count = True if quantity else False
     results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
                                   name_filter, region_filter, case_sensitive)
     if not isinstance(results, list):
@@ -73,7 +72,7 @@ def list_accelerators(
               List['common.InstanceTypeInfo']] = collections.defaultdict(list)
     for result in results:
         for gpu, items in result.items():
-            if check_count:
+            if quantity:
                 new_items = []
                 for item in items:
                     if item.accelerator_count == quantity:
