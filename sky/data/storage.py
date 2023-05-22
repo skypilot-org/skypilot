@@ -1055,7 +1055,7 @@ class S3Store(AbstractStore):
         """
 
         def postprocess_list(list_to_format: List[str]):
-            # process '/' at the start and the end of the item
+            """Processes '/' at the start and the end of the item"""
             for idx, item in enumerate(list_to_format):
                 if item.endswith('/'):
                     list_to_format[idx] = item + '*'
@@ -1063,19 +1063,21 @@ class S3Store(AbstractStore):
                     list_to_format[idx] = item[1:]
 
         def process_double_asterisk(src_dir_path: str, item: str) -> List[str]:
-            # Need to check if any item with preceding '**' is
-            # a directory as --exclude filter fails to recognize it
+            """Checks if any ITEM with preceding '**' is
+            a directory as --exclude filter fails to recognize it
+            """
             parent_path = os.path.expanduser(src_dir_path)
             processed_list = []
             split_list = item.split('/')
             name_to_process = split_list[-1]
-            if len(split_list) <= 2:  # when ITEM is in a form of '**/file'
+            # when ITEM is a form of '**/file' which has one specified path
+            if len(split_list) <= 2:
                 for root, dirs, files in os.walk(parent_path):
                     for name in fnmatch.filter(dirs, name_to_process):
                         processed_list.append(f'**/{name}/')
                     for name in fnmatch.filter(files, name_to_process):
                         processed_list.append(f'**/{name}')
-            else:  # when ITEM is longer than '**/file'
+            else:  # when ITEM has more than one specified paths
                 # contains the consecutive directories after **
                 # and before the item to be excluded
                 # i.e. item is set to '**/dir1/dir2/dir3/*.txt'
@@ -1083,8 +1085,8 @@ class S3Store(AbstractStore):
                 seq_path_list = split_list[1:-1]
                 for root, dirs, files in os.walk(parent_path):
                     sequence_path_length = len(seq_path_list)
-                    # checks if the subdirectories match the read pattern
-                    # from .gitignore or .git/info/exclude
+                    # checks if the sub-directories match the pattern of
+                    # consecutive directory from .gitignore or .git/info/exclude
                     if seq_path_list == root.split('/')[-sequence_path_length:]:
                         sub_path = os.path.join('**', *seq_path_list)
                         for name in fnmatch.filter(dirs, name_to_process):
@@ -1095,7 +1097,7 @@ class S3Store(AbstractStore):
 
         def preprocess_list(src_dir_path: str, exclude_file_path: str,
                             excluded_list: List[str], included_list: List[str]):
-            # process prefixes of '#', '!' and '**'
+            """Processes prefixes of '#', '!' and '**'"""
             if os.path.isfile(exclude_file_path):
                 with open(exclude_file_path, 'r') as file:
                     for item in file:
@@ -1112,10 +1114,11 @@ class S3Store(AbstractStore):
 
         def format_gitignore_to_aws_cli(
                 src_dir_path: str) -> Tuple[List[str], List[str]]:
-            # returns a list of excluded files from .gitignore and
-            # .git/info/exclude after formatting in a way aws cli
-            # can comprehend. INCLUDED_LIST contains items preceding
-            # with '!'
+            """Returns a list of excluded files from .gitignore and
+            .git/info/exclude after formatting in a way aws cli
+            can comprehend. INCLUDED_LIST contains items preceding
+            with '!'
+            """
             expand_src_dir_path = os.path.expanduser(src_dir_path)
             gitignore_path = os.path.join(expand_src_dir_path, '.gitignore')
             git_exclude_path = os.path.join(expand_src_dir_path,
@@ -1896,7 +1899,7 @@ class R2Store(AbstractStore):
         """
 
         def postprocess_list(list_to_format: List[str]):
-            # process '/' at the start and the end of the item
+            """Processes '/' at the start and the end of the item"""
             for idx, item in enumerate(list_to_format):
                 if item.endswith('/'):
                     list_to_format[idx] = item + '*'
@@ -1904,19 +1907,21 @@ class R2Store(AbstractStore):
                     list_to_format[idx] = item[1:]
 
         def process_double_asterisk(src_dir_path: str, item: str) -> List[str]:
-            # Need to check if any item with preceding '**' is
-            # a directory as --exclude filter fails to recognize it
+            """Checks if any ITEM with preceding '**' is
+            a directory as --exclude filter fails to recognize it
+            """
             parent_path = os.path.expanduser(src_dir_path)
             processed_list = []
             split_list = item.split('/')
             name_to_process = split_list[-1]
-            if len(split_list) <= 2:  # when ITEM is in a form of '**/file'
+            # when ITEM is a form of '**/file' which has one specified path
+            if len(split_list) <= 2:
                 for root, dirs, files in os.walk(parent_path):
                     for name in fnmatch.filter(dirs, name_to_process):
                         processed_list.append(f'**/{name}/')
                     for name in fnmatch.filter(files, name_to_process):
                         processed_list.append(f'**/{name}')
-            else:  # when ITEM is longer than '**/file'
+            else:  # when ITEM has more than one specified paths
                 # contains the consecutive directories after **
                 # and before the item to be excluded
                 # i.e. item is set to '**/dir1/dir2/dir3/*.txt'
@@ -1924,8 +1929,8 @@ class R2Store(AbstractStore):
                 seq_path_list = split_list[1:-1]
                 for root, dirs, files in os.walk(parent_path):
                     sequence_path_length = len(seq_path_list)
-                    # checks if the subdirectories match the read pattern
-                    # from .gitignore or .git/info/exclude
+                    # checks if the sub-directories match the pattern of
+                    # consecutive directory from .gitignore or .git/info/exclude
                     if seq_path_list == root.split('/')[-sequence_path_length:]:
                         sub_path = os.path.join('**', *seq_path_list)
                         for name in fnmatch.filter(dirs, name_to_process):
@@ -1936,7 +1941,7 @@ class R2Store(AbstractStore):
 
         def preprocess_list(src_dir_path: str, exclude_file_path: str,
                             excluded_list: List[str], included_list: List[str]):
-            # process prefixes of '#', '!' and '**'
+            """Processes prefixes of '#', '!' and '**'"""
             if os.path.isfile(exclude_file_path):
                 with open(exclude_file_path, 'r') as file:
                     for item in file:
@@ -1953,10 +1958,11 @@ class R2Store(AbstractStore):
 
         def format_gitignore_to_aws_cli(
                 src_dir_path: str) -> Tuple[List[str], List[str]]:
-            # returns a list of excluded files from .gitignore and
-            # .git/info/exclude after formatting in a way aws cli
-            # can comprehend. INCLUDED_LIST contains items preceding
-            # with '!'
+            """Returns a list of excluded files from .gitignore and
+            .git/info/exclude after formatting in a way aws cli
+            can comprehend. INCLUDED_LIST contains items preceding
+            with '!'
+            """
             expand_src_dir_path = os.path.expanduser(src_dir_path)
             gitignore_path = os.path.join(expand_src_dir_path, '.gitignore')
             git_exclude_path = os.path.join(expand_src_dir_path,

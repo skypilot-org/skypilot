@@ -1910,6 +1910,97 @@ class TestStorageWithCredentials:
         'abc_',  # ends with an underscore
     ]
 
+    GITIGNORE_SYNC_TEST_DIR_STRUCTURE = {
+        'test-spot-exclusive': {
+            'double_asterisk': {
+                'double_asterisk_excluded': None,
+                'double_asterisk_excluded_dir': {
+                    'dir_excluded': None,
+                },
+            },
+            'double_asterisk_parent': {
+                'parent': {
+                    'also_excluded.txt': None,
+                    'child': {
+                        'double_asterisk_parent_child_excluded.txt': None,
+                    },
+                    'double_asterisk_parent_excluded.txt': None,
+                },
+            },
+            'excluded.log': None,
+            'excluded_dir': {
+                'excluded.txt': None,
+                'nested_excluded': {
+                    'excluded': None,
+                },
+            },
+            'exp-1': {
+                'not_included': None,
+            },
+            'exp-2': {
+                'not_included': None,
+            },
+            'front_slash_excluded': None,
+            'include.txt': None,
+            'included': {
+                'excluded.log': None,
+                'included.log': None,
+            },
+            'included.log': None,
+            'nested_double_asterisk': {
+                'one': {
+                    'also_exclude.txt': None,
+                },
+                'two': {
+                    'also_exclude.txt': None,
+                },
+            },
+            'nested_wildcard_dir': {
+                'monday': {
+                    'also_exclude.txt': None,
+                },
+                'tuesday': {
+                    'also_exclude.txt': None,
+                },
+            },
+            'no_slash_excluded': None,
+            'no_slash_tests': {
+                'no_slash_excluded': {
+                    'also_excluded.txt': None,
+                },
+            },
+            'question_mark': {
+                'excluded1.txt': None,
+                'excluded@.txt': None,
+            },
+            'square_bracket': {
+                'excluded1.txt': None,
+            },
+            'square_bracket_alpha': {
+                'excludedz.txt': None,
+            },
+            'square_bracket_excla': {
+                'excluded2.txt': None,
+                'excluded@.txt': None,
+            },
+            'square_bracket_single': {
+                'excluded0.txt': None,
+            },
+        },
+    }
+
+    @staticmethod
+    def create_dir_structure(base_path, structure):
+        for name, substructure in structure.items():
+            path = os.path.join(base_path, name)
+            if substructure is None:
+                # Create a file
+                open(path, 'a').close()
+            else:
+                # Create a subdirectory
+                os.mkdir(path)
+                create_dir_structure(path, substructure)
+
     @staticmethod
     def cli_delete_cmd(store_type, bucket_name):
         if store_type == storage_lib.StoreType.S3:
