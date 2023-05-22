@@ -106,7 +106,7 @@ def list_accelerator_counts(
                 accelerator_counts[gpu].add(item.accelerator_count)
     ret: Dict[str, List[int]] = {}
     for gpu, counts in accelerator_counts.items():
-        ret[gpu] = sorted(counts)   
+        ret[gpu] = sorted(counts)
     return ret
 
 

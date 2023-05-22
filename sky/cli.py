@@ -3070,7 +3070,7 @@ def show_gpus(
             quantity = int(accelerator_str.split(":")[1])
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=name,
-                                                   quantity = quantity,
+                                                   quantity=quantity,
                                                    region_filter=region,
                                                    clouds=cloud)
         if len(result) == 0:
@@ -3081,7 +3081,8 @@ def show_gpus(
 
         num_accelerators_found = 0
         num_unique_accelerators = len([1 for i in result if len(result[i]) > 0])
-        for i in result: num_accelerators_found += len(result[i])
+        for i in result:
+            num_accelerators_found += len(result[i])
         if num_accelerators_found == 0:
             yield f'Resource \'{name}\', with '
             yield f'requested quantity {quantity}, '
