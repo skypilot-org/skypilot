@@ -66,9 +66,7 @@ def parse_readme(readme: str) -> str:
 install_requires = [
     'wheel',
     # NOTE: ray requires click>=7.0
-    'click>=7.0;ray>=2.2.0',
-    # NOTE: ray<2.2.0 requires click<=8.0.4
-    'click>=7.0<=8.0.4;ray<2.2.0',
+    'click>=7.0',
     # NOTE: required by awscli. To avoid ray automatically installing
     # the latest version.
     'colorama<0.4.5',
@@ -85,22 +83,26 @@ install_requires = [
     # PrettyTable with version >=2.0.0 is required for the support of
     # `add_rows` method.
     'PrettyTable>=2.0.0',
-    # Lower local ray version is not fully supported, due to the
-    # autoscaler issues (also tracked in #537).
-    'ray[default]>=1.9.0,<=2.4.0',
+    # Lower version of ray will cause dependency conflict for
+    # click/grpcio/protobuf.
+    'ray[default]>=2.2.0,<=2.4.0',
     'rich',
     'tabulate',
-    'typing-extensions',
+    # Light weight requirement, can be replaced with "typing" once
+    # we deprecate Python 3.7 (this will take a while).
+    "typing_extensions; python_version < '3.8'",
     'filelock>=3.6.0',
-    # This is used by ray. The latest 1.44.0 will generate an error
-    # `Fork support is only compatible with the epoll1 and poll
-    # polling strategies`
-    'grpcio>=1.32.0,<=1.43.0',
+    # Adopted from ray's setup.py:
+    # Tracking issue: https://github.com/ray-project/ray/issues/30984
+    "grpcio >= 1.32.0, <= 1.49.1; python_version < '3.10' and sys_platform == 'darwin'",  # noqa:E501
+    "grpcio >= 1.42.0, <= 1.49.1; python_version >= '3.10' and sys_platform == 'darwin'",  # noqa:E501
+    # Original issue: https://github.com/ray-project/ray/issues/33833
+    "grpcio >= 1.32.0, <= 1.51.3; python_version < '3.10' and sys_platform != 'darwin'",  # noqa:E501
+    "grpcio >= 1.42.0, <= 1.51.3; python_version >= '3.10' and sys_platform != 'darwin'",  # noqa:E501
     'packaging',
-    # The latest 4.21.1 will break ray. Enforce < 4.0.0 until Ray releases the
-    # fix.
-    # https://github.com/ray-project/ray/pull/25211
-    'protobuf<4.0.0',
+    # Adopted from ray's setup.py:
+    # https://github.com/ray-project/ray/blob/86fab1764e618215d8131e8e5068f0d493c77023/python/setup.py#L326
+    'protobuf >= 3.15.3, != 3.19.5',
     'psutil',
     'pulp',
 ]
