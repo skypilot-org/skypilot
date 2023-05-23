@@ -690,8 +690,9 @@ class Task:
 
                 for cloud in storage_lib.STORE_ENABLED_CLOUDS:
                     for enabled_cloud in enabled_clouds:
-                        if cloud.is_same_cloud(enabled_cloud):
-                            storage_cloud = cloud
+                        str_enabled_cloud = str(enabled_cloud)
+                        if str_enabled_cloud == cloud:
+                            storage_cloud = enabled_cloud
                             break
         if storage_cloud is None:
             raise ValueError('No available cloud to mount storage.')

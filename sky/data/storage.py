@@ -40,7 +40,9 @@ SourceType = Union[Path, List[Path]]
 # Storage isn't supported yet (even though Azure is).
 # TODO(Doyoung): need to add clouds.CLOUDFLARE() to support
 # R2 to be an option as preferred store type
-STORE_ENABLED_CLOUDS = [clouds.AWS(), clouds.GCP()]
+STORE_ENABLED_CLOUDS: List[str] = [
+    str(clouds.AWS()), str(clouds.GCP()), cloudflare.NAME
+]
 
 # Maximum number of concurrent rsync upload processes
 _MAX_CONCURRENT_UPLOADS = 32

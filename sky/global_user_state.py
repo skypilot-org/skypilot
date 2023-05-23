@@ -21,6 +21,7 @@ import colorama
 
 from sky import clouds
 from sky.adaptors import cloudflare
+from sky.data import storage as storage_lib
 from sky.utils import common_utils
 from sky.utils import db_utils
 
@@ -668,16 +669,15 @@ def get_enabled_storage_clouds() -> List[str]:
     # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # pylint: disable=line-too-long
     # is resolved by implementing separate 'enabled_storage_clouds'
     enabled_clouds = get_enabled_clouds()
-    # TODO: Remove clouds.IBM from below condition as IBM COS gets integrated
+    enabled_clouds = [str(cloud) for cloud in enabled_clouds]
+
     enabled_storage_clouds = [
-        str(cloud)
-        for cloud in enabled_clouds
-        if not isinstance(cloud, clouds.Lambda) and
-        not isinstance(cloud, clouds.IBM)
+        cloud for cloud in enabled_clouds
+        if cloud in storage_lib.STORE_ENABLED_CLOUDS
     ]
     r2_is_enabled, _ = cloudflare.check_credentials()
     if r2_is_enabled:
-        enabled_storage_clouds.append('Cloudflare')
+        enabled_storage_clouds.append(cloudflare.NAME)
     return enabled_storage_clouds
 
 

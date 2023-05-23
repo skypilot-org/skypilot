@@ -13,6 +13,7 @@ _session_creation_lock = threading.RLock()
 ACCOUNT_ID_PATH = '~/.cloudflare/accountid'
 AWS_R2_PROFILE_PATH = '~/.aws/credentials'
 R2_PROFILE_NAME = 'r2'
+NAME = 'Cloudflare'
 
 
 def import_package(func):
