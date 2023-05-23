@@ -2872,7 +2872,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # ClusterOwnerIdentityMismatchError. The argument/flag
                     # `purge` should bypass such ID mismatch errors.
                     refresh_cluster_status=not is_identity_mismatch_and_purge)
-            if success and terminate:
+            if terminate:
                 common_utils.remove_file_if_exists(lock_path)
         except filelock.Timeout as e:
             raise RuntimeError(
