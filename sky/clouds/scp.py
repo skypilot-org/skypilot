@@ -18,7 +18,6 @@ if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
 
-
 _CREDENTIAL_FILES = [
     'scp_credential',
 ]
@@ -266,7 +265,7 @@ class SCP(clouds.Cloud):
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
         (instance_list, fuzzy_candidate_list
-         ) = service_catalog.get_instance_type_for_accelerator(
+        ) = service_catalog.get_instance_type_for_accelerator(
             acc,
             acc_count,
             use_spot=resources.use_spot,
