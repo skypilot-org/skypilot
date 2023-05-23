@@ -40,8 +40,9 @@ SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code change
 
 **More information**
 
-* `Project blog <https://blog.skypilot.co/>`_
+* `SkyPilot blog <https://blog.skypilot.co/>`_
 * `Introductory blog post <https://blog.skypilot.co/introducing-skypilot/>`_
+* `NSDI 2023 paper & talk <https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng>`_
 * `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutorial>`_
 * Framework examples: `PyTorch DDP <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml>`_,  `Distributed <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py>`_ `TensorFlow <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml>`_, `JAX/Flax on TPU <https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml>`_, `Stable Diffusion <https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion>`_, `Detectron2 <https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml>`_, `programmatic grid search <https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py>`_, `Docker <https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml>`_, and `many more <https://github.com/skypilot-org/skypilot/tree/master/examples>`_.
 

@@ -2833,7 +2833,25 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name = handle.cluster_name
         # Check if the cluster is owned by the current user. Raise
         # exceptions.ClusterOwnerIdentityMismatchError
-        backend_utils.check_owner_identity(cluster_name)
+        yellow = colorama.Fore.YELLOW
+        reset = colorama.Style.RESET_ALL
+        is_identity_mismatch_and_purge = False
+        try:
+            backend_utils.check_owner_identity(cluster_name)
+        except exceptions.ClusterOwnerIdentityMismatchError as e:
+            if purge:
+                logger.error(e)
+                verbed = 'terminated' if terminate else 'stopped'
+                logger.warning(
+                    f'{yellow}Purge (-p/--purge) is set, ignoring the '
+                    f'identity mismatch error and removing '
+                    f'the cluser record from cluster table.{reset}\n{yellow}It '
+                    'is the user\'s responsibility to ensure that this '
+                    f'cluster is actually {verbed} on the cloud.{reset}')
+                is_identity_mismatch_and_purge = True
+            else:
+                raise
+
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
 
@@ -2844,7 +2862,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             with filelock.FileLock(
                     lock_path,
                     backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
-                success = self.teardown_no_lock(handle, terminate, purge)
+                success = self.teardown_no_lock(
+                    handle,
+                    terminate,
+                    purge,
+                    # When --purge is set and we already see an ID mismatch
+                    # error, we skip the refresh codepath. This is because
+                    # refresh checks current user identity can throw
+                    # ClusterOwnerIdentityMismatchError. The argument/flag
+                    # `purge` should bypass such ID mismatch errors.
+                    refresh_cluster_status=not is_identity_mismatch_and_purge)
             if success and terminate:
                 common_utils.remove_file_if_exists(lock_path)
         except filelock.Timeout as e:
@@ -3634,15 +3661,28 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
                 src_print = ', '.join(src_print)
-            backend_utils.parallel_data_transfer_to_nodes(
-                runners,
-                source=src_print,
-                target=dst,
-                cmd=mount_cmd,
-                run_rsync=False,
-                action_message='Mounting',
-                log_path=log_path,
-            )
+            try:
+                backend_utils.parallel_data_transfer_to_nodes(
+                    runners,
+                    source=src_print,
+                    target=dst,
+                    cmd=mount_cmd,
+                    run_rsync=False,
+                    action_message='Mounting',
+                    log_path=log_path,
+                )
+            except exceptions.CommandError as e:
+                if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:
+                    mount_path = (f'{colorama.Fore.RED}'
+                                  f'{colorama.Style.BRIGHT}{dst}'
+                                  f'{colorama.Style.RESET_ALL}')
+                    error_msg = (f'Mount path {mount_path} is non-empty.'
+                                 f' {mount_path} may be a standard unix '
+                                 f'path or may contain files from a previous'
+                                 f' task. To fix, change the mount path'
+                                 f' to an empty or non-existent path.')
+                    raise RuntimeError(error_msg) from None
+
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
 
