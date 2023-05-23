@@ -18,7 +18,7 @@ if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
 
-# Minimum set of files under ~/.lambda_cloud that grant Lambda Cloud access.
+
 _CREDENTIAL_FILES = [
     'scp_credential',
 ]
@@ -226,12 +226,8 @@ class SCP(clouds.Cloud):
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
-        if resources.use_spot:
+        if resources.use_spot or resources.disk_tier is not None:
             return ([], [])
-
-        if not self.is_disk_size_allowed(resources)[0]:
-            return ([], [])
-
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Accelerators are part of the instance type in SCP Cloud
@@ -248,16 +244,20 @@ class SCP(clouds.Cloud):
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
                     cpus=None,
+                    memory=None,
                 )
                 resource_list.append(r)
             return resource_list
 
-        # Currently, handle a filter on accelerators only.
+            # Currently, handle a filter on accelerators only.
+
         accelerators = resources.accelerators
         if accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             default_instance_type = SCP.get_default_instance_type(
-                cpus=resources.cpus)
+                cpus=resources.cpus,
+                memory=resources.memory,
+                disk_tier=resources.disk_tier)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -266,11 +266,12 @@ class SCP(clouds.Cloud):
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
         (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
+         ) = service_catalog.get_instance_type_for_accelerator(
             acc,
             acc_count,
             use_spot=resources.use_spot,
             cpus=resources.cpus,
+            memory=resources.memory,
             region=resources.region,
             zone=resources.zone,
             clouds='scp')
