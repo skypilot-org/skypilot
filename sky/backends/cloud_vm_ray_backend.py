@@ -200,8 +200,7 @@ class RayCodeGen:
         self.job_id = job_id
         # Should use 'auto' or 'ray://<internal_head_ip>:10001' rather than
         # 'ray://localhost:10001', or 'ray://127.0.0.1:10001', for public cloud.
-        # Otherwise, it will a bug of ray job failed to get the placement group
-        # in ray <= 2.4.0.
+        # Otherwise, it will a bug of ray job failed to get the placement group.
         # TODO(mluo): Check why 'auto' not working with on-prem cluster and
         # whether the placement group issue also occurs in on-prem cluster.
         ray_address = 'ray://localhost:10001' if is_local else 'auto'
