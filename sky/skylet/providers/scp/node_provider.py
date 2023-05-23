@@ -463,7 +463,7 @@ class SCPNodeProvider(NodeProvider):
             count -= len(reuse_nodes)
 
         if count:
-            if(node_config['region'] not in self.my_service_zones):
+            if (node_config['region'] not in self.my_service_zones):
                 raise SCPError('This region/zone is not available for '\
                                 'this project.')
 

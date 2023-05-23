@@ -113,7 +113,7 @@ def get_region_zones_for_instance_type(instance_type: str,
     default_region_list = []
     other_region_list = []
     for region in region_list:
-        if "SCP" in region.name:
+        if 'SCP' in region.name:
             default_region_list.append(region)
         else:
             other_region_list.append(region)
