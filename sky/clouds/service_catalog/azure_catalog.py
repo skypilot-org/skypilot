@@ -166,4 +166,5 @@ def list_accelerators(
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Azure offering GPUs."""
     return common.list_accelerators_impl('Azure', _df, gpus_only, name_filter,
-                                         region_filter, quantity_filter, case_sensitive)
+                                         region_filter, quantity_filter,
+                                         case_sensitive)

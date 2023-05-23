@@ -92,7 +92,8 @@ def list_accelerators(
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in IBM offering accelerators."""
     return common.list_accelerators_impl('IBM', _df, gpus_only, name_filter,
-                                         region_filter, quantity_filter, case_sensitive)
+                                         region_filter, quantity_filter,
+                                         case_sensitive)
 
 
 def get_default_instance_type(cpus: Optional[str] = None,

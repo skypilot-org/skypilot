@@ -65,7 +65,8 @@ def list_accelerators(
     of instance type offerings. See usage in cli.py.
     """
     results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
-                                  name_filter, region_filter, quantity_filter, case_sensitive)
+                                  name_filter, region_filter, quantity_filter,
+                                  case_sensitive)
     if not isinstance(results, list):
         results = [results]
     ret: Dict[str,
