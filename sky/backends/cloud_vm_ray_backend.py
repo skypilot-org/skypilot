@@ -3634,15 +3634,28 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
                 src_print = ', '.join(src_print)
-            backend_utils.parallel_data_transfer_to_nodes(
-                runners,
-                source=src_print,
-                target=dst,
-                cmd=mount_cmd,
-                run_rsync=False,
-                action_message='Mounting',
-                log_path=log_path,
-            )
+            try:
+                backend_utils.parallel_data_transfer_to_nodes(
+                    runners,
+                    source=src_print,
+                    target=dst,
+                    cmd=mount_cmd,
+                    run_rsync=False,
+                    action_message='Mounting',
+                    log_path=log_path,
+                )
+            except exceptions.CommandError as e:
+                if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:
+                    mount_path = (f'{colorama.Fore.RED}'
+                                  f'{colorama.Style.BRIGHT}{dst}'
+                                  f'{colorama.Style.RESET_ALL}')
+                    error_msg = (f'Mount path {mount_path} is non-empty.'
+                                 f' {mount_path} may be a standard unix '
+                                 f'path or may contain files from a previous'
+                                 f' task. To fix, change the mount path'
+                                 f' to an empty or non-existent path.')
+                    raise RuntimeError(error_msg) from None
+
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
 

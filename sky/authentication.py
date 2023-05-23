@@ -6,7 +6,6 @@ import re
 import socket
 import subprocess
 import sys
-import textwrap
 import time
 from typing import Any, Dict, Tuple
 import uuid
@@ -15,6 +14,7 @@ import colorama
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
+import yaml
 
 from sky import clouds
 from sky import sky_logging
@@ -88,26 +88,22 @@ def get_or_generate_keys() -> Tuple[str, str]:
     return private_key_path, public_key_path
 
 
+def _replace_cloud_init_ssh_info_in_config(config: Dict[str, Any],
+                                           public_key: str) -> Dict[str, Any]:
+    config_str = common_utils.dump_yaml_str(config)
+    config_str = config_str.replace('skypilot:ssh_user',
+                                    config['auth']['ssh_user'])
+    config_str = config_str.replace('skypilot:ssh_public_key_content',
+                                    public_key)
+    config = yaml.safe_load(config_str)
+    return config
+
+
 def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r') as f:
         public_key = f.read()
-    # Use cloud init in UserData to set up the authorized_keys to get
-    # around the number of keys limit and permission issues with
-    # ec2.describe_key_pairs.
-    # Note that sudo and shell need to be specified to ensure setup works.
-    # Reference: https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups  # pylint: disable=line-too-long
-    for node_type in config['available_node_types']:
-        config['available_node_types'][node_type]['node_config']['UserData'] = (
-            textwrap.dedent(f"""\
-            #cloud-config
-            users:
-            - name: {config['auth']['ssh_user']}
-              shell: /bin/bash
-              sudo: ALL=(ALL) NOPASSWD:ALL
-              ssh-authorized-keys:
-                - {public_key}
-            """))
+    config = _replace_cloud_init_ssh_info_in_config(config, public_key)
     return config
 
 
