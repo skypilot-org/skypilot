@@ -3099,8 +3099,8 @@ def show_gpus(
                 cpu_count = item.cpu_count
                 if pd.isna(cpu_count):
                     cpu_str = '-'
-                elif isinstance(cpu_count, float):
-                    if cpu_count.is_integer():
+                elif isinstance(cpu_count, (float, int)):
+                    if int(cpu_count) == cpu_count:
                         cpu_str = str(int(cpu_count))
                     else:
                         cpu_str = f'{cpu_count:.1f}'
