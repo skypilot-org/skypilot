@@ -2984,7 +2984,7 @@ def show_gpus(
         all: bool,  # pylint: disable=redefined-builtin
         cloud: Optional[str],
         region: Optional[str]):
-    """Show supported GPU/TPU/accelerators and their= prices.
+    """Show supported GPU/TPU/accelerators and their prices.
 
     The names and counts shown can be set in the ``accelerators`` field in task
     YAMLs, or in the ``--gpus`` flag in CLI commands. For example, if this
@@ -3063,33 +3063,32 @@ def show_gpus(
                 return
 
         # Show detailed accelerator information
+        accelerator_split = accelerator_str.split(':')
+        if len(accelerator_split) > 2:
+            raise click.UsageError(
+                f'Invalid accelerator string {accelerator_str}. '
+                'Expected format: <accelerator_name>[:<quantity>].')
+        if len(accelerator_split) == 2:
+            name = accelerator_split[0]
+            # Check if quantity is valid
+            try:
+                quantity = int(accelerator_split[1])
+            except ValueError:
+                raise click.UsageError(
+                    f'Invalid accelerator quantity {accelerator_split[1]}. '
+                    'Expected an integer.')
+        else:
+            name, quantity = accelerator_str, None
 
-        name, quantity = accelerator_str.split(':')[0], None
-        has_quantity = accelerator_str.count(':') > 0
-        if has_quantity:
-            quantity = int(accelerator_str.split(':')[1])
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=name,
-                                                   quantity=quantity,
+                                                   quantity_filter=quantity,
                                                    region_filter=region,
                                                    clouds=cloud)
         if len(result) == 0:
-            yield f'Resources \'{name}\' not found. '
+            yield f'Resources \'{name}\', with requested quantity, not found. '
             yield 'Try \'sky show-gpus --all\' '
             yield 'to show available accelerators.'
-            return
-
-        num_accelerators_found = 0
-        num_unique_accelerators = len([1 for i in result if len(result[i]) > 0])
-        for i in result:
-            num_accelerators_found += len(result[i])
-        if num_accelerators_found == 0:
-            yield f'Resource \'{name}\', with '
-            yield f'requested quantity {quantity}, '
-            yield 'not found. '
-            yield 'Try \'sky show-gpus --all\' '
-            yield 'to show available accelerators '
-            yield 'and their quantities.'
             return
 
         yield '*NOTE*: for most GCP accelerators, '
@@ -3132,7 +3131,6 @@ def show_gpus(
                 spot_price_str = f'$ {item.spot_price:.3f}' if not pd.isna(
                     item.spot_price) else '-'
                 region_str = item.region if not pd.isna(item.region) else '-'
-
                 accelerator_table_vals = [
                     item.accelerator_name,
                     item.accelerator_count,
@@ -3147,10 +3145,10 @@ def show_gpus(
                 if not show_all:
                     accelerator_table_vals.append(region_str)
                 accelerator_table.add_row(accelerator_table_vals)
-            if i != 0 and num_unique_accelerators > 0:
+
+            if i != 0:
                 yield '\n\n'
             yield from accelerator_table.get_string()
-            num_unique_accelerators -= 1
 
     if show_all:
         click.echo_via_pager(_output())

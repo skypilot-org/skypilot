@@ -51,8 +51,8 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
 def list_accelerators(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
-    quantity: Optional[int] = None,
     region_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
     clouds: CloudFilter = None,
     case_sensitive: bool = True,
 ) -> 'Dict[str, List[common.InstanceTypeInfo]]':
@@ -65,21 +65,14 @@ def list_accelerators(
     of instance type offerings. See usage in cli.py.
     """
     results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
-                                  name_filter, region_filter, case_sensitive)
+                                  name_filter, region_filter, quantity_filter, case_sensitive)
     if not isinstance(results, list):
         results = [results]
     ret: Dict[str,
               List['common.InstanceTypeInfo']] = collections.defaultdict(list)
     for result in results:
         for gpu, items in result.items():
-            if quantity:
-                new_items = []
-                for item in items:
-                    if item.accelerator_count == quantity:
-                        new_items.append(item)
-                ret[gpu] += new_items
-            else:
-                ret[gpu] += items
+            ret[gpu] += items
     return dict(ret)
 
 
