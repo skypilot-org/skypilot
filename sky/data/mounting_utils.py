@@ -3,6 +3,8 @@ import random
 import textwrap
 from typing import Optional
 
+from sky import exceptions
+
 
 def get_mounting_command(
     mount_path: str,
@@ -59,8 +61,8 @@ def get_mounting_command(
         else
           # Check if mount path contains files
           if [ "$(ls -A $MOUNT_PATH)" ]; then
-            echo "Mount path $MOUNT_PATH is not empty. Please make sure its empty."
-            exit 1
+            echo "Mount path $MOUNT_PATH is not empty. Please mount to another path or remove it first."
+            exit {exceptions.MOUNT_PATH_NON_EMPTY_CODE}
           fi
         fi
         echo "Mounting $SOURCE_BUCKET to $MOUNT_PATH with $MOUNT_BINARY..."

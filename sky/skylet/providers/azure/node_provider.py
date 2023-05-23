@@ -68,7 +68,10 @@ class AzureNodeProvider(NodeProvider):
         subscription_id = provider_config["subscription_id"]
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
         # Sky only supports Azure CLI credential for now.
-        credential = AzureCliCredential()
+        # Increase the timeout to fix the Azure get-access-token (used by ray azure
+        # node_provider) timeout issue.
+        # Tracked in https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
+        credential = AzureCliCredential(process_timeout=30)
         self.compute_client = ComputeManagementClient(credential, subscription_id)
         self.network_client = NetworkManagementClient(credential, subscription_id)
         self.resource_client = ResourceManagementClient(credential, subscription_id)
