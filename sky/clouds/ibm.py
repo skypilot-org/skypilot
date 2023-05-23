@@ -1,6 +1,5 @@
 """IBM Web Services."""
 import os
-import yaml
 import json
 from sky import clouds
 from sky.clouds import service_catalog
@@ -375,7 +374,7 @@ class IBM(clouds.Cloud):
                     '      iam_api_key: <IAM_API_KEY>\n'
                     '      resource_group_id: <RESOURCE_GROUP_ID>')
 
-        base_config = _read_credential_file()
+        base_config = ibm.read_credential_file()
         if not base_config:
             return (False, 'Missing credential file at '
                     f'{os.path.expanduser(CREDENTIAL_FILE)}.\n' + help_str)
@@ -424,19 +423,10 @@ class IBM(clouds.Cloud):
             accelerator, acc_count, region, zone, 'ibm')
 
 
-def _read_credential_file():
-    try:
-        with open(os.path.expanduser(CREDENTIAL_FILE), 'r',
-                  encoding='utf-8') as f:
-            return yaml.safe_load(f)
-    except FileNotFoundError:
-        return False
-
-
 def get_cred_file_field(field, default_val=None) -> str:
     """returns a the value of a field from the user's
      credentials file if exists, else default_val"""
-    base_config = _read_credential_file()
+    base_config = ibm.read_credential_file()
     if not base_config:
         raise FileNotFoundError('Missing '
                                 f'credential file at {CREDENTIAL_FILE}')

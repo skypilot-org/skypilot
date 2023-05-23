@@ -47,8 +47,12 @@ def import_package(func):
 
 
 def read_credential_file():
-    with open(os.path.expanduser(CREDENTIAL_FILE), encoding='utf-8') as f:
-        return yaml.safe_load(f)
+    try:
+        with open(os.path.expanduser(CREDENTIAL_FILE), 'r',
+                  encoding='utf-8') as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        return False
 
 
 def get_api_key():
