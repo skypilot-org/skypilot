@@ -1952,6 +1952,10 @@ class TestStorageWithCredentials:
         'abc.',  # ends with a dot
         '-abc',  # starts with a hyphen
         'abc-',  # ends with a hyphen
+        'a.-bc',  # contains the sequence '.-'
+        'a-.bc',  # contains the sequence '-.'
+        'a&bc'  # contains special characters
+        'ab^c'  # contains special characters
     ]
 
     @staticmethod
@@ -2097,7 +2101,7 @@ class TestStorageWithCredentials:
     @pytest.fixture
     def tmp_cos_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using IBM cos API
-        storage_obj = storage_lib.CosStore(source="", name=tmp_bucket_name)
+        storage_obj = storage_lib.IBMCosStore(source="", name=tmp_bucket_name)
         yield tmp_bucket_name
         storage_obj.delete()
 
