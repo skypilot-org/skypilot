@@ -94,6 +94,7 @@ class SCPNodeProvider(NodeProvider):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
         self.scp_client = scp_utils.SCPClient()
+        self.my_service_zones = self.scp_client.list_service_zone_names()
 
         self.cached_nodes: Dict[str, Any] = {}
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes",
@@ -462,10 +463,14 @@ class SCPNodeProvider(NodeProvider):
             count -= len(reuse_nodes)
 
         if count:
+            if(node_config['region'] not in self.my_service_zones):
+                raise SCPError('This region/zone is not available for '\
+                                'this project.')
+
             zone_config = ZoneConfig(self.scp_client, node_config)
             vpc_subnets = zone_config.get_vcp_subnets()
             if (len(vpc_subnets) == 0):
-                raise SCPError("This region/zone does not have available VPCS.")
+                raise SCPError("This region/zone does not have available VPCs.")
 
             instance_config = zone_config.bootstrap_instance_config(node_config)
             instance_config['virtualServerName'] = self.cluster_name
