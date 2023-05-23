@@ -67,7 +67,7 @@ class StoreType(enum.Enum):
     GCS = 'GCS'
     AZURE = 'AZURE'
     R2 = 'R2'
-    IBM = 'COS'
+    IBM = 'IBM'
 
     @classmethod
     def from_cloud(cls, cloud: clouds.Cloud) -> 'StoreType':
@@ -90,7 +90,7 @@ class StoreType(enum.Enum):
             return StoreType.GCS
         elif isinstance(store, R2Store):
             return StoreType.R2
-        elif isinstance(store, CosStore):
+        elif isinstance(store, IBMCosStore):
             return StoreType.IBM
         else:
             with ux_utils.print_exception_no_traceback():
@@ -455,7 +455,7 @@ class Storage(object):
                         source=self.source,
                         sync_on_reconstruction=self.sync_on_reconstruction)
                 elif s_type == StoreType.IBM:
-                    store = CosStore.from_metadata(
+                    store = IBMCosStore.from_metadata(
                         s_metadata,
                         source=self.source,
                         sync_on_reconstruction=self.sync_on_reconstruction)
@@ -667,7 +667,7 @@ class Storage(object):
                 else:
                     assert isinstance(source, str)
                     # Set name to source bucket name and continue
-                    if 'cos://' in source:
+                    if source.startswith('cos://'):
                         # cos url requires custom parsing
                         name = data_utils.split_cos_path(source)[0]
                     else:
@@ -700,7 +700,7 @@ class Storage(object):
         add it to Storage.
 
         Args:
-          store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2, COS]
+          store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2, IBM]
         """
         if isinstance(store_type, str):
             store_type = StoreType(store_type)
@@ -717,7 +717,7 @@ class Storage(object):
         elif store_type == StoreType.R2:
             store_cls = R2Store
         elif store_type == StoreType.IBM:
-            store_cls = CosStore
+            store_cls = IBMCosStore
         else:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageSpecError(
@@ -2074,8 +2074,8 @@ class R2Store(AbstractStore):
         return True
 
 
-class CosStore(AbstractStore):
-    """CosStore inherits from Storage Object and represents the backend
+class IBMCosStore(AbstractStore):
+    """IBMCosStore inherits from Storage Object and represents the backend
     for COS buckets.
     """
     # keep imports isolated to class
@@ -2118,14 +2118,18 @@ class CosStore(AbstractStore):
                 assert data_utils.verify_r2_bucket(self.name), (
                     f'Source specified as {self.source}, a R2 bucket. ',
                     'R2 Bucket should exist.')
-        self.name = CosStore.validate_name(self.name)
+            elif self.source.startswith('cos://'):
+                assert self.name == data_utils.split_cos_path(self.source)[0], (
+                    'COS Bucket is specified as path, the name should be '
+                    'the same as COS bucket.')
+        # Validate name
+        self.name = IBMCosStore.validate_name(self.name)
 
     @classmethod
     def validate_name(cls, name) -> str:
         """Validates the name of a COS bucket.
 
-        Rules source: https://ibm.github.io/ibm-cos-sdk-java/com/
-        ibm/cloud/objectstorage/services/s3/model/Bucket.html
+        Rules source: https://ibm.github.io/ibm-cos-sdk-java/com/ibm/cloud/objectstorage/services/s3/model/Bucket.html  # pylint: disable=line-too-long
         """
 
         def _raise_no_traceback_name_error(err_str):
@@ -2135,29 +2139,34 @@ class CosStore(AbstractStore):
         if name is not None and isinstance(name, str):
             if not 3 <= len(name) <= 63:
                 _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} must be between 3 (min) '
+                    f'Invalid store name: {name} must be between 3 (min) '
                     'and 63 (max) characters long.')
 
             # Check for valid characters and start/end with a letter or number
             pattern = r'^[a-z0-9][-a-z0-9.]*[a-z0-9]$'
             if not re.match(pattern, name):
                 _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} can consist only of '
-                    'lowercase letters, numbers, dots (.), and hyphens (-). '
+                    f'Invalid store name: {name} can consist only of '
+                    'lowercase letters, numbers, dots (.), and dashes (-). '
                     'It must begin and end with a letter or number.')
 
             # Check for two adjacent periods or dashes
             if any(substring in name for substring in ['..', '--']):
                 _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} must not contain '
+                    f'Invalid store name: {name} must not contain '
                     'two adjacent periods/dashes')
 
             # Check for IP address format
             ip_pattern = r'^(?:\d{1,3}\.){3}\d{1,3}$'
             if re.match(ip_pattern, name):
                 _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} must not be formatted as '
+                    f'Invalid store name: {name} must not be formatted as '
                     'an IP address (for example, 192.168.5.4).')
+
+            if any(substring in name for substring in ['.-', '-.']):
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: {name} must '
+                    'not allow substrings: ".-", "-." .')
         else:
             _raise_no_traceback_name_error('Store name must be specified.')
         return name
@@ -2184,15 +2193,22 @@ class CosStore(AbstractStore):
             # If is_sky_managed is specified, then we take no action.
             self.is_sky_managed = is_new_bucket
 
-    def does_bucket_exist(self, bucket_name, region=None) -> str:
+    def get_bucket_region(self, bucket_name: str) -> str:
         """
         returns the region of the bucket if exists,
          otherwise returns empty string.
-        :param bucket_name: name of the bucket
-        :param region: if specified looks for the bucket in that region only,
-            otherwise, bucket is searched across all available regions.
+
+        Args:
+            bucket_name (str): name of IBM COS bucket
+
+        Returns:
+            str: region of bucket if bucket exists.
         """
-        for region_scanned in self.REGIONS if not region else [region]:
+        # optimize search time for existing buckets.
+        if self.region in self.REGIONS:
+            self.REGIONS.remove(self.region)
+            self.REGIONS.insert(0, self.region)
+        for region_scanned in self.REGIONS:
             try:
                 # only way to change searched region
                 # is to reinitialize a client with a new region
@@ -2315,19 +2331,29 @@ class CosStore(AbstractStore):
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """
-        returns bucket object if exists, otherwise creates it.
+        returns IBM COS bucket object if exists, otherwise creates it.
 
         returns:
         StorageHandle(str) - bucket name
         bool - indicates whether a new bucket was created.
         """
-        bucket_region = self.does_bucket_exist(self.name)
-        if bucket_region and bucket_region != self.region:
-            # bucket exists but not in the expected region!
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Bucket {self.name} exists in {bucket_region}. '
-                    f'Expected: {self.region}')
+        bucket_region = self.get_bucket_region(self.name)
+        if bucket_region and self.sync_on_reconstruction:
+            # check for a mismatch between bucket URI and actual region
+            # only if store object is not being reconstructed for deletion
+            try:
+                uri_region = data_utils.split_cos_path(
+                    self.source)[2]  # type: ignore
+                if uri_region != bucket_region:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageBucketGetError(
+                            f'Bucket {self.name} exists in '
+                            f'region {bucket_region}, '
+                            f'but URI specified region {uri_region}.')
+            except ValueError:
+                # source isn't a cos uri
+                pass
+
         data_utils.store_rclone_config(
             self.name,
             self.region,  # type: ignore
@@ -2366,7 +2392,7 @@ class CosStore(AbstractStore):
         # in rclone config file at the cluster's nodes.
         # pylint: disable=line-too-long
         configure_rclone_profile = (
-            f' mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> ~/.config/rclone/rclone.conf'
+            f' mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> {data_utils.RCLONE_CONFIG_PATH}'
         )
         install_cmd = 'rclone version >/dev/null 2>&1 || curl https://rclone.org/install.sh | sudo bash'
         # --daemon will keep the mounting process running in the background.

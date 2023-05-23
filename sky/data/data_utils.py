@@ -14,8 +14,8 @@ from sky.adaptors import aws, gcp, cloudflare, ibm
 from sky.utils import ux_utils
 
 Client = Any
-
 logger = sky_logging.init_logger(__name__)
+RCLONE_CONFIG_PATH = '~/.config/rclone/rclone.conf'
 
 
 def split_s3_path(s3_path: str) -> Tuple[str, str]:
@@ -57,21 +57,28 @@ def split_r2_path(r2_path: str) -> Tuple[str, str]:
 def split_cos_path(s3_path: str) -> Tuple[str, str, str]:
     """returns extracted region, bucket name and bucket path to data
         from the specified cos bucket's url.
-        url expected format: "cos://region/bucket_name/optional_data_path" """
+        url expected format: "cos://region/bucket_name/optional_data_path"
+
+        Raises:
+          ValueError if s3_path isn't a valid IBM COS bucket URI."""
 
     # regex pattern: 3rd group differs from 2nd by accepting '/'
     pattern_region_bucket_data = r'cos://([-\w]+)/([-\w]+)(.*)'
-    match = re.match(pattern_region_bucket_data, s3_path)
+    try:
+        match = re.match(pattern_region_bucket_data, s3_path)
+    except TypeError:
+        # URI provided isn't a string
+        raise ValueError(f'URI received: {s3_path} is not valid.')  # pylint: disable=raise-missing-from
     if match:
         region, bucket_name, data_path = match.group(1), match.group(
             2), match.group(3)
     else:
         raise ValueError(
-            f'Bucket url received: {s3_path} does not match expected pattern '
+            f'Bucket URI received: {s3_path} does not match expected pattern '
             'of "cos://region/bucket_name/optional_data_path"')
 
     if region not in get_cos_regions():
-        raise ValueError('region missing from IBM COS url.')
+        raise ValueError('region missing/invalid in IBM COS URI.')
 
     return bucket_name, data_path, region
 
@@ -331,7 +338,7 @@ def store_rclone_config(bucket_name: str,
     # pylint: disable=import-outside-toplevel
     import textwrap
 
-    rclone_file = os.path.expanduser('~/.config/rclone/rclone.conf')
+    rclone_file = os.path.expanduser(RCLONE_CONFIG_PATH)
     access_key_id, secret_access_key = ibm.get_hmac_keys()
 
     config_data = textwrap.dedent(f"""\
@@ -373,7 +380,7 @@ def store_rclone_config(bucket_name: str,
 
 def get_cos_region_from_rclone(bucket_name):
     """returns region field of the specified bucket in rclone.conf"""
-    with open(os.path.expanduser('~/.config/rclone/rclone.conf')) as file:
+    with open(os.path.expanduser(RCLONE_CONFIG_PATH)) as file:
         bucket_profile_found = False
         for line in file:
             if line.lstrip().startswith('#'):  # skip user's comments.
@@ -393,7 +400,7 @@ def get_cos_region_from_rclone(bucket_name):
 def delete_rclone_bucket_profile(bucket_name):
     """deletes specified bucket profile for rclone.conf"""
 
-    rclone_file = os.path.expanduser('~/.config/rclone/rclone.conf')
+    rclone_file = os.path.expanduser(RCLONE_CONFIG_PATH)
     if not os.path.isfile(rclone_file):
         logger.warning('rclone configuration file wasn\'t found')
         return
@@ -409,7 +416,7 @@ def delete_rclone_bucket_profile(bucket_name):
 def _remove_bucket_profile_rclone(bucket_name: str) -> List[str]:
     """returns rclone profiles without profiles matching [bucket_name]"""
 
-    rclone_file = os.path.expanduser('~/.config/rclone/rclone.conf')
+    rclone_file = os.path.expanduser(RCLONE_CONFIG_PATH)
 
     with open(f'{rclone_file}', 'r') as file:
         lines = file.readlines()  # returns a list of the file's lines

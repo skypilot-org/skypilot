@@ -219,9 +219,8 @@ def get_storage_from_path(url: str) -> CloudStorage:
     return _REGISTRY[result.scheme]
 
 
-class CosCloudStorage(CloudStorage):
+class IBMCosCloudStorage(CloudStorage):
     """IBM Cloud Storage."""
-    _REGIONS = data_utils.get_cos_regions()
     # install rclone if package isn't already installed
     # pylint: disable=line-too-long
     _GET_RCLONE = [
@@ -229,7 +228,7 @@ class CosCloudStorage(CloudStorage):
     ]
 
     def is_directory(self, url: str) -> bool:
-        """Returns whether cos 'url' is a directory.
+        """Returns whether IBM cos bucket's 'url' is a directory.
 
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
@@ -262,7 +261,7 @@ class CosCloudStorage(CloudStorage):
             bucket_name, bucket_region, False)
         # configure_rclone cmd stores bucket profile in rclone config file at the cluster's nodes.
         configure_rclone = (
-            f' mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> ~/.config/rclone/rclone.conf'
+            f' mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> {data_utils.RCLONE_CONFIG_PATH}'
         )
         # bucket_name also serves as a profile name in rclone.conf
         download_via_rclone = (
@@ -284,9 +283,10 @@ class CosCloudStorage(CloudStorage):
         return self.make_sync_dir_command(source, destination)
 
 
+# Maps bucket's URIs prefix(scheme) to its corresponding storage class
 _REGISTRY = {
     'gs': GcsCloudStorage(),
     's3': S3CloudStorage(),
     'r2': R2CloudStorage(),
-    'cos': CosCloudStorage(),
+    'cos': IBMCosCloudStorage(),
 }
