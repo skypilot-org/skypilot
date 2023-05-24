@@ -411,6 +411,6 @@ def setup_oci_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     for node_type in config['available_node_types']:
         config['available_node_types'][node_type]['node_config'][
-            'AuthorizedKey'] = (textwrap.dedent(f"""{public_key}"""))
+            'AuthorizedKey'] = public_key
 
     return config

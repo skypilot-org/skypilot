@@ -43,7 +43,7 @@ class oci_conf:
     RETRY_INTERVAL_BASE_SECONDS = 5
 
     @classmethod
-    def get_compartment(cls, region):
+    def default_compartment_ocid(cls, region):
         # Allow task(cluster)-specific compartment/VCN parameters.
         defval = skypilot_config.get_nested(
             ("oci", "default", "compartment_ocid"), None)
@@ -61,17 +61,15 @@ class oci_conf:
         # Get the default image tag (for gpu instances). Instead of hardcoding, we give a choice to set the
         # default image tag (for gpu instances) in the sky's user-config file (if not specified, use the hardcode
         # one at last)
-        return skypilot_config.get_nested(
-            ("oci", "default", "image_tag_gpu"),
-            "skypilot:oci-ubuntu-NVIDIA-VMI-20_04")
+        return skypilot_config.get_nested(("oci", "default", "image_tag_gpu"),
+                                          "skypilot:gpu-ubuntu-2004")
 
     @classmethod
     def get_default_image_tag(cls) -> str:
         # Get the default image tag. Instead of hardcoding, we give a choice to set the default image tag
         # in the sky's user-config file. (if not specified, use the hardcode one at last)
         return skypilot_config.get_nested(
-            ("oci", "default", "image_tag_general"),
-            "skypilot:oci-ubuntu-20_04")
+            ("oci", "default", "image_tag_general"), "skypilot:cpu-ubuntu-2004")
 
     @classmethod
     def get_sky_user_config_file(cls) -> str:

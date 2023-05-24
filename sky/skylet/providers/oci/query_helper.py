@@ -8,6 +8,7 @@ History:
 """
 
 import logging
+import traceback
 import time
 from datetime import datetime
 import pandas as pd
@@ -65,10 +66,9 @@ class oci_query_helper:
                 oci_adaptor.get_core_client(
                     region, oci_conf.get_profile()).terminate_instance(inst_id)
             except Exception as e:
-                logger.error(f"!!! Terminate instance failed: {inst_id}")
-                logger.error(f"!!! {str(e)}")
-                logger.error(inst)
                 fail_count += 1
+                logger.error(f"Terminate instance failed: {str(e)}\n: {inst}")
+                traceback.print_exc()
 
         if fail_count == 0:
             logger.info(f"* terminate_instances_by_tags success: {tag_filters}")
@@ -130,7 +130,7 @@ class oci_query_helper:
     def find_compartment(cls, region) -> str:
         """ If compartment is not configured, we use root compartment """
         # Try to use the configured one first
-        skypilot_compartment = oci_conf.get_compartment(region)
+        skypilot_compartment = oci_conf.default_compartment_ocid(region)
         if skypilot_compartment is not None:
             return skypilot_compartment
 

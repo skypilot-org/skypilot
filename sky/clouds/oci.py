@@ -331,6 +331,9 @@ class OCI(clouds.Cloud):
     def get_current_user_identity(cls) -> Optional[List[str]]:
         # NOTE: used for very advanced SkyPilot functionality
         # Can implement later if desired
+        # If the user switches the compartment_ocid, the existing clusters
+        # might be leaked, as `sky status -r` will fail to find the original
+        # clusters in the new compartment and the identity check is missing.
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:

@@ -19,7 +19,13 @@ from typing import List
 #
 # To only run tests for managed spot (without generic tests), use --managed-spot.
 all_clouds_in_smoke_tests = [
-    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm'
+    'aws',
+    'gcp',
+    'azure',
+    'lambda',
+    'cloudflare',
+    'ibm',
+    'oci',
 ]
 default_clouds_to_run = ['gcp', 'azure']
 
@@ -33,6 +39,7 @@ cloud_to_pytest_keyword = {
     'lambda': 'lambda_cloud',
     'cloudflare': 'cloudflare',
     'ibm': 'ibm',
+    'oci': 'oci'
 }
 
 
