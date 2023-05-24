@@ -3080,8 +3080,7 @@ def show_gpus(
             if quantity == 0:
                 raise click.UsageError(
                     f'Invalid accelerator quantity 0. '
-                    'Expected a non-zero integer.'
-                )
+                    'Expected a non-zero integer.')
         else:
             name, quantity = accelerator_str, None
 
