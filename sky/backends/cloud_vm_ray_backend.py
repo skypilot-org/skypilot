@@ -190,7 +190,7 @@ class RayCodeGen:
 
     def add_prologue(self,
                      job_id: int,
-                     spot_task: Optional['task_lib.Task'] = None,
+                     spot_dag: Optional['dag.Dag'] = None,
                      setup_cmd: Optional[str] = None,
                      envs: Optional[Dict[str, str]] = None,
                      setup_log_path: Optional[str] = None,
@@ -298,14 +298,26 @@ class RayCodeGen:
         self._code += [
             f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
         ]
-        if spot_task is not None:
+        if spot_dag is not None:
+            dag_name = spot_dag.tasks[0].name
+            resources_str = '-'
+            if len(spot_dag.tasks) == 1:
+                resources_str = backend_utils.get_task_resources_str(
+                    spot_dag.tasks[0])
             # Add the spot job to spot queue table.
-            resources_str = backend_utils.get_task_resources_str(spot_task)
             self._code += [
                 'from sky.spot import spot_state',
                 f'spot_state.set_pending('
-                f'{job_id}, {spot_task.name!r}, {resources_str!r})',
+                f'{job_id}, None, {dag_name!r}, {resources_str!r})',
             ]
+            if len(spot_dag.tasks) > 1:
+                for task_id, task in enumerate(spot_dag.tasks[1:]):
+                    resources_str = backend_utils.get_task_resources_str(task)
+                    self._code += [
+                        f'spot_state.set_pending('
+                        f'{job_id}, {task_id}, {task.name!r}, '
+                        f'{resources_str!r})',
+                    ]
 
     def add_gang_scheduling_placement_group(
         self,
@@ -3699,7 +3711,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id,
-                             spot_task=task.spot_task,
+                             spot_dag=task.spot_dag,
                              setup_cmd=self._setup_cmd,
                              envs=task.envs,
                              setup_log_path=os.path.join(log_dir, 'setup.log'),
@@ -3764,7 +3776,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id,
-                             spot_task=task.spot_task,
+                             spot_dag=task.spot_dag,
                              setup_cmd=self._setup_cmd,
                              envs=task.envs,
                              setup_log_path=os.path.join(log_dir, 'setup.log'),

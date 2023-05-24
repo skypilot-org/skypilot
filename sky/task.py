@@ -161,9 +161,9 @@ class Task:
                                                     int]] = None
         self.file_mounts: Optional[Dict[str, str]] = None
 
-        # Only set when 'self' is a spot controller task: 'self.spot_task' is
+        # Only set when 'self' is a spot controller task: 'self.spot_dag' is
         # the underlying managed spot task (Task object).
-        self.spot_task: Optional['Task'] = None
+        self.spot_dag: Optional['sky.Dag'] = None
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
@@ -231,35 +231,7 @@ class Task:
                         f'a symlink to a directory). {self.workdir} not found.')
 
     @staticmethod
-    def from_yaml(yaml_path: str) -> 'Task':
-        """Initializes a task from a task YAML.
-
-        Example:
-            .. code-block:: python
-
-                task = sky.Task.from_yaml('/path/to/task.yaml')
-
-        Args:
-          yaml_path: file path to a valid task yaml file.
-
-        Raises:
-          ValueError: if the path gets loaded into a str instead of a dict; or
-            if there are any other parsing errors.
-        """
-        with open(os.path.expanduser(yaml_path), 'r') as f:
-            # TODO(zongheng): use
-            #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
-            # to raise errors on duplicate keys.
-            config = yaml.safe_load(f)
-
-        if isinstance(config, str):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('YAML loaded as str, not as dict. '
-                                 f'Is it correct? Path: {yaml_path}')
-
-        if config is None:
-            config = {}
-
+    def from_yaml_config(config: Dict[str, Any]) -> 'Task':
         backend_utils.validate_schema(config, schemas.get_task_schema(),
                                       'Invalid task YAML: ')
 
@@ -332,6 +304,37 @@ class Task:
         task.set_resources({resources})
         assert not config, f'Invalid task args: {config.keys()}'
         return task
+
+    @staticmethod
+    def from_yaml(yaml_path: str) -> 'Task':
+        """Initializes a task from a task YAML.
+
+        Example:
+            .. code-block:: python
+
+                task = sky.Task.from_yaml('/path/to/task.yaml')
+
+        Args:
+          yaml_path: file path to a valid task yaml file.
+
+        Raises:
+          ValueError: if the path gets loaded into a str instead of a dict; or
+            if there are any other parsing errors.
+        """
+        with open(os.path.expanduser(yaml_path), 'r') as f:
+            # TODO(zongheng): use
+            #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
+            # to raise errors on duplicate keys.
+            config = yaml.safe_load(f)
+
+        if isinstance(config, str):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('YAML loaded as str, not as dict. '
+                                 f'Is it correct? Path: {yaml_path}')
+
+        if config is None:
+            config = {}
+        return Task.from_yaml_config(config)
 
     @property
     def num_nodes(self) -> int:

@@ -7,6 +7,7 @@ import traceback
 from typing import Tuple
 
 import filelock
+import yaml
 
 import sky
 from sky import exceptions
@@ -28,19 +29,23 @@ from sky.utils import subprocess_utils
 logger = sky_logging.init_logger('sky.spot.controller')
 
 
-def _get_task_and_name(task_yaml: str) -> Tuple['sky.Task', str]:
-    task = sky.Task.from_yaml(task_yaml)
-    assert task.name is not None, task
-    return task, task.name
+def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
+    task_configs = yaml.safe_load_all(dag_yaml)
+    with sky.Dag() as dag:
+        for task_config in task_configs:
+            sky.Task.from_yaml_config(task_config)
+    dag_name = dag.tasks[0].name
+    assert dag_name is not None, dag
+    return dag, dag_name
 
 
 class SpotController:
     """Each spot controller manages the life cycle of one spot cluster (job)."""
 
-    def __init__(self, job_id: int, task_yaml: str,
+    def __init__(self, job_id: int, dag_yaml: str,
                  retry_until_up: bool) -> None:
         self._job_id = job_id
-        self._task, self._task_name = _get_task_and_name(task_yaml)
+        self._dag, self._dag_name = _get_dag_and_name(dag_yaml)
 
         self._retry_until_up = retry_until_up
         # TODO(zhwu): this assumes the specific backend.
@@ -49,24 +54,14 @@ class SpotController:
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
         #   Example value: sky-2022-10-04-22-46-52-467694_id-17
-        task_envs = self._task.envs or {}
-        job_id_env_var = common_utils.get_global_job_id(
-            self._backend.run_timestamp, 'spot', str(self._job_id))
-        task_envs[constants.JOB_ID_ENV_VAR] = job_id_env_var
-        self._task.update_envs(task_envs)
+        for task in self._dag.tasks:
+            task_envs = task.envs or {}
+            job_id_env_var = common_utils.get_global_job_id(
+                self._backend.run_timestamp, 'spot', str(self._job_id))
+            task_envs[constants.JOB_ID_ENV_VAR] = job_id_env_var
+            task.update_envs(task_envs)
 
-        spot_state.set_submitted(
-            self._job_id,
-            self._task_name,
-            self._backend.run_timestamp,
-            resources_str=backend_utils.get_task_resources_str(self._task))
-        logger.info(f'Submitted spot job; SKYPILOT_JOB_ID: {job_id_env_var}')
-        self._cluster_name = spot_utils.generate_spot_cluster_name(
-            self._task_name, self._job_id)
-        self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            self._cluster_name, self._backend, self._task, retry_until_up)
-
-    def _run(self):
+    def _run_one_task(self, task_id: int, task: 'sky.Task') -> None:
         """Busy loop monitoring spot cluster status and handling recovery.
 
         Raises:
@@ -88,12 +83,28 @@ class SpotController:
                 3. Any unexpected error happens during the `sky.launch`.
         Other exceptions may be raised depending on the backend.
         """
-        logger.info(f'Started monitoring spot job {self._job_id}, '
-                    f'name: {self._task_name!r}.')
-        spot_state.set_starting(self._job_id)
-        job_submitted_at = self._strategy_executor.launch()
+        job_id_env_var = task.envs[constants.JOB_ID_ENV_VAR]
+        spot_state.set_submitted(
+            self._job_id,
+            task_id,
+            self._backend.run_timestamp,
+            resources_str=backend_utils.get_task_resources_str(task))
+        logger.info(f'Submitted spot job; SKYPILOT_JOB_ID: {job_id_env_var}')
+        assert task.name is not None, task
+        self._cluster_name = spot_utils.generate_spot_cluster_name(
+            task.name, self._job_id)
+        self._strategy_executor = recovery_strategy.StrategyExecutor.make(
+            self._cluster_name, self._backend, task, self._retry_until_up)
 
-        spot_state.set_started(self._job_id, start_time=job_submitted_at)
+        logger.info(f'Started monitoring spot job {self._job_id}, '
+                    f'name: {task.name!r}.')
+        spot_state.set_starting(self._job_id, task_id)
+        job_submitted_at = self._strategy_executor.launch()
+        assert job_submitted_at is not None, job_submitted_at
+
+        spot_state.set_started(self._job_id,
+                               task_id,
+                               start_time=job_submitted_at)
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
@@ -117,7 +128,9 @@ class SpotController:
                                                         self._cluster_name,
                                                         get_end_time=True)
                 # The job is done.
-                spot_state.set_succeeded(self._job_id, end_time=end_time)
+                spot_state.set_succeeded(self._job_id,
+                                         task_id,
+                                         end_time=end_time)
                 break
 
             # For single-node jobs, nonterminated job_status indicates a
@@ -126,7 +139,7 @@ class SpotController:
             # immediately (depending on user program) when only some of the
             # nodes are preempted, need to check the actual cluster status.
             if (job_status is not None and not job_status.is_terminal() and
-                    self._task.num_nodes == 1):
+                    task.num_nodes == 1):
                 continue
 
             if job_status in [
@@ -202,15 +215,20 @@ class SpotController:
 
             # Try to recover the spot jobs, when the cluster is preempted
             # or the job status is failed to be fetched.
-            spot_state.set_recovering(self._job_id)
+            spot_state.set_recovering(self._job_id, task_id)
             recovered_time = self._strategy_executor.recover()
             spot_state.set_recovered(self._job_id,
+                                     task_id,
                                      recovered_time=recovered_time)
 
     def run(self):
         """Run controller logic and handle exceptions."""
         try:
-            self._run()
+            start_idx = 0
+            if len(self._dag.tasks) > 1:
+                start_idx = 1
+            for task_id, task in enumerate(self._dag.tasks[start_idx:]):
+                self._run_one_task(task_id, task)
         except exceptions.ProvisionPrechecksError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
@@ -243,11 +261,11 @@ class SpotController:
                 failure_reason=msg)
 
 
-def _run_controller(job_id: int, task_yaml: str, retry_until_up: bool):
+def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):
     """Runs the controller in a remote process for interruption."""
     # The controller needs to be instantiated in the remote process, since
     # the controller is not serializable.
-    spot_controller = SpotController(job_id, task_yaml, retry_until_up)
+    spot_controller = SpotController(job_id, dag_yaml, retry_until_up)
     spot_controller.run()
 
 
@@ -281,19 +299,20 @@ def _handle_signal(job_id):
         f'User sent {user_signal.value} signal.')
 
 
-def _cleanup(job_id: int, task_yaml: str):
+def _cleanup(job_id: int, dag_yaml: str):
     # NOTE: The code to get cluster name is same as what we did in the spot
     # controller, we should keep it in sync with SpotController.__init__()
-    task, task_name = _get_task_and_name(task_yaml)
-    cluster_name = spot_utils.generate_spot_cluster_name(task_name, job_id)
-    recovery_strategy.terminate_cluster(cluster_name)
-    # Clean up Storages with persistent=False.
-    # TODO(zhwu): this assumes the specific backend.
-    backend = cloud_vm_ray_backend.CloudVmRayBackend()
-    backend.teardown_ephemeral_storage(task)
+    dag, _ = _get_dag_and_name(dag_yaml)
+    for task in dag.tasks:
+        cluster_name = spot_utils.generate_spot_cluster_name(task.name, job_id)
+        recovery_strategy.terminate_cluster(cluster_name)
+        # Clean up Storages with persistent=False.
+        # TODO(zhwu): this assumes the specific backend.
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        backend.teardown_ephemeral_storage(task)
 
 
-def start(job_id, task_yaml, retry_until_up):
+def start(job_id, dag_yaml, retry_until_up):
     """Start the controller."""
     controller_process = None
     cancelling = False
@@ -306,7 +325,7 @@ def start(job_id, task_yaml, retry_until_up):
         #  So we can only enable daemon after we no longer need to
         #  start daemon processes like Ray.
         controller_process = multiprocessing.Process(target=_run_controller,
-                                                     args=(job_id, task_yaml,
+                                                     args=(job_id, dag_yaml,
                                                            retry_until_up))
         controller_process.start()
         while controller_process.is_alive():
@@ -336,7 +355,7 @@ def start(job_id, task_yaml, retry_until_up):
         # https://unix.stackexchange.com/questions/356408/strange-problem-with-trap-and-sigint
         # But anyway, a clean solution is killing the controller process
         # directly, and then cleanup the cluster state.
-        _cleanup(job_id, task_yaml=task_yaml)
+        _cleanup(job_id, dag_yaml=dag_yaml)
         logger.info(f'Spot cluster of job {job_id} has been taken down.')
 
         if cancelling:
@@ -366,11 +385,11 @@ if __name__ == '__main__':
     parser.add_argument('--retry-until-up',
                         action='store_true',
                         help='Retry until the spot cluster is up.')
-    parser.add_argument('task_yaml',
+    parser.add_argument('dag_yaml',
                         type=str,
                         help='The path to the user spot task yaml file.')
     args = parser.parse_args()
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
-    start(args.job_id, args.task_yaml, args.retry_until_up)
+    start(args.job_id, args.dag_yaml, args.retry_until_up)

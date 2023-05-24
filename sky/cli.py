@@ -37,7 +37,7 @@ import subprocess
 import sys
 import textwrap
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import click
 import colorama
@@ -988,7 +988,7 @@ def _make_task_from_entrypoint_with_overrides(
     env: Optional[List[Tuple[str, str]]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
-) -> sky.Task:
+) -> Union[sky.Task, List[sky.Task]]:
     entrypoint = ' '.join(entrypoint)
     is_yaml, yaml_config = _check_yaml(entrypoint)
     entrypoint: Optional[str]
@@ -1004,18 +1004,6 @@ def _make_task_from_entrypoint_with_overrides(
             click.secho('Task from command: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
 
-    if is_yaml:
-        assert entrypoint is not None
-        usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-        task = sky.Task.from_yaml(entrypoint)
-    else:
-        task = sky.Task(name='sky-cmd', run=entrypoint)
-        task.set_resources({sky.Resources()})
-
-    # Override.
-    if workdir is not None:
-        task.workdir = workdir
-
     if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
         cloud = 'local'
 
@@ -1030,6 +1018,31 @@ def _make_task_from_entrypoint_with_overrides(
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier)
+
+    if is_yaml:
+        assert entrypoint is not None
+        usage_lib.messages.usage.update_user_task_yaml(entrypoint)
+        task_configs = yaml.safe_load_all(entrypoint)
+        if len(list(task_configs)) > 1:
+            if override_params:
+                click.secho(
+                    f'WARNING: override params {override_params} are ignored, '
+                    'since the yaml file contains multiple tasks.',
+                    fg='yellow')
+            tasks = []
+            for task_config in task_configs:
+                task = sky.Task.from_yaml_config(task_config)
+                tasks.append(task)
+            return tasks
+        task = sky.Task.from_yaml(entrypoint)
+    else:
+        task = sky.Task(name='sky-cmd', run=entrypoint)
+        task.set_resources({sky.Resources()})
+
+    # Override.
+    if workdir is not None:
+        task.workdir = workdir
+
     # Spot launch specific.
     if spot_recovery is not None:
         if spot_recovery.lower() == 'none':
@@ -1310,6 +1323,9 @@ def launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
     )
+    if isinstance(task, list):
+        raise click.UsageError('Multiple tasks are specified in the YAML file. '
+                               'Please specify a single task to launch.')
 
     backend: backends.Backend
     if backend_name == backends.LocalDockerBackend.NAME:
@@ -1456,6 +1472,10 @@ def exec(
         num_nodes=num_nodes,
         env=env,
     )
+
+    if isinstance(task, list):
+        raise click.UsageError(
+            'Multiple tasks are specified. Please specify only one task.')
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
@@ -3407,10 +3427,7 @@ def spot_launch(
 
       sky spot launch 'echo hello!'
     """
-    if name is None:
-        name = backend_utils.generate_cluster_name()
-
-    task = _make_task_from_entrypoint_with_overrides(
+    tasks = _make_task_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
         workdir=workdir,
@@ -3430,19 +3447,27 @@ def spot_launch(
         spot_recovery=spot_recovery,
     )
 
+    if not isinstance(tasks, list):
+        tasks = [tasks]
+    with sky.Dag() as dag:
+        for t in tasks:
+            dag.add(t)
+
     if not yes:
-        prompt = f'Launching a new spot task {name!r}. Proceed?'
+        prompt = f'Launching a new spot job {name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    # We try our best to validate the cluster name before we launch the task.
-    # If the cloud is not specified, this will only validate the cluster name
-    # against the regex, and the cloud-specific validation will be done by
-    # the spot controller when actually launching the spot cluster.
-    resources = list(task.resources)[0]
-    task_cloud = (resources.cloud
-                  if resources.cloud is not None else clouds.Cloud)
-    task_cloud.check_cluster_name_is_valid(name)
+    for task in dag.tasks:
+        # We try our best to validate the cluster name before we launch the
+        # task. If the cloud is not specified, this will only validate the
+        # cluster name against the regex, and the cloud-specific validation will
+        # be done by the spot controller when actually launching the spot
+        # cluster.
+        resources = list(task.resources)[0]
+        task_cloud = (resources.cloud
+                      if resources.cloud is not None else clouds.Cloud)
+        task_cloud.check_cluster_name_is_valid(name)
 
     # Deprecation.
     if not retry_until_up:
@@ -3452,7 +3477,7 @@ def spot_launch(
             'does not work for you.',
             fg='yellow')
 
-    sky.spot_launch(task,
+    sky.spot_launch(dag,
                     name,
                     detach_run=detach_run,
                     retry_until_up=retry_until_up)

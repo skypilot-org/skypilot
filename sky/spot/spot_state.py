@@ -38,6 +38,10 @@ _CURSOR.execute("""\
 
 db_utils.add_column_to_table(_CURSOR, _CONN, 'spot', 'failure_reason', 'TEXT')
 
+# If the spot job is a chain dag, then the task_id is the index of the sub-task
+# in the chain dag.
+db_utils.add_column_to_table(_CURSOR, _CONN, 'spot', 'task_id', 'INTEGER')
+
 # job_duration is the time a job actually runs (including the
 # setup duration) before last_recover, excluding the provision
 # and recovery time.
@@ -177,17 +181,19 @@ _SPOT_STATUS_TO_COLOR = {
 
 
 # === Status transition functions ===
-def set_pending(job_id: int, name: str, resources_str: str):
+def set_pending(job_id: int, task_id: Optional[int], name: str,
+                resources_str: str):
     """Set the job to pending state."""
     _CURSOR.execute(
         """\
         INSERT INTO spot
-        (job_id, job_name, resources, status) VALUES (?, ?, ?, ?)""",
-        (job_id, name, resources_str, SpotStatus.PENDING.value))
+        (job_id, task_id, job_name, resources, status)
+        VALUES (?, ?, ?, ?, ?)""",
+        (job_id, task_id, name, resources_str, SpotStatus.PENDING.value))
     _CONN.commit()
 
 
-def set_submitted(job_id: int, name: str, run_timestamp: str,
+def set_submitted(job_id: int, task_id: int, run_timestamp: str,
                   resources_str: str):
     """Set the job to submitted."""
     # Use the timestamp in the `run_timestamp` ('sky-2022-10...'), to make the
@@ -196,66 +202,69 @@ def set_submitted(job_id: int, name: str, run_timestamp: str,
     # Also, using the earlier timestamp should be closer to the term
     # `submit_at`, which represents the time the spot task is submitted.
     submit_time = backend_utils.get_timestamp_from_run_timestamp(run_timestamp)
+    update_dag_entry_cmd = ' OR task_id IS NULL' if task_id == 0 else ''
     _CURSOR.execute(
-        """\
+        f"""\
         UPDATE spot SET
-        job_name=(?),
         resources=(?),
         submitted_at=(?),
         status=(?),
         run_timestamp=(?)
-        WHERE job_id=(?)""",
-        (name, resources_str, submit_time, SpotStatus.SUBMITTED.value,
-         run_timestamp, job_id))
+        WHERE job_id=(?) AND (task_id=(?){update_dag_entry_cmd})""",
+        (resources_str, submit_time, SpotStatus.SUBMITTED.value, run_timestamp,
+         job_id, task_id))
     _CONN.commit()
 
 
-def set_starting(job_id: int):
+def set_starting(job_id: int, task_id: int):
     logger.info('Launching the spot cluster...')
-    _CURSOR.execute("""\
-        UPDATE spot SET status=(?) WHERE job_id=(?)""",
-                    (SpotStatus.STARTING.value, job_id))
+    _CURSOR.execute(
+        """\
+        UPDATE spot SET status=(?)
+        WHERE job_id=(?) AND (task_id=(?) OR task_id IS NULL))""",
+        (SpotStatus.STARTING.value, job_id, task_id))
     _CONN.commit()
 
 
-def set_started(job_id: int, start_time: float):
+def set_started(job_id: int, task_id: int, start_time: float):
     logger.info('Job started.')
     _CURSOR.execute(
         """\
         UPDATE spot SET status=(?), start_at=(?), last_recovered_at=(?)
-        WHERE job_id=(?)""",
-        (SpotStatus.RUNNING.value, start_time, start_time, job_id))
+        WHERE job_id=(?) AND (task_id=(?) OR task_id IS NULL))""",
+        (SpotStatus.RUNNING.value, start_time, start_time, job_id, task_id))
     _CONN.commit()
 
 
-def set_recovering(job_id: int):
+def set_recovering(job_id: int, task_id: int):
     logger.info('=== Recovering... ===')
     _CURSOR.execute(
         """\
             UPDATE spot SET
             status=(?), job_duration=job_duration+(?)-last_recovered_at
-            WHERE job_id=(?)""",
-        (SpotStatus.RECOVERING.value, time.time(), job_id))
+            WHERE job_id=(?) AND (task_id=(?) OR task_id IS NULL))""",
+        (SpotStatus.RECOVERING.value, time.time(), job_id, task_id))
     _CONN.commit()
 
 
-def set_recovered(job_id: int, recovered_time: float):
+def set_recovered(job_id: int, task_id: int, recovered_time: float):
     _CURSOR.execute(
         """\
         UPDATE spot SET
         status=(?), last_recovered_at=(?), recovery_count=recovery_count+1
-        WHERE job_id=(?)""", (SpotStatus.RUNNING.value, recovered_time, job_id))
+        WHERE job_id=(?) AND (task_id=(?) OR task_id IS NULL))""",
+        (SpotStatus.RUNNING.value, recovered_time, job_id, task_id))
     _CONN.commit()
     logger.info('==== Recovered. ====')
 
 
-def set_succeeded(job_id: int, end_time: float):
+def set_succeeded(job_id: int, task_id: Optional[int], end_time: float):
     _CURSOR.execute(
         """\
         UPDATE spot SET
         status=(?), end_at=(?)
-        WHERE job_id=(?) AND end_at IS null""",
-        (SpotStatus.SUCCEEDED.value, end_time, job_id))
+        WHERE job_id=(?) AND task_id=(?) AND end_at IS null""",
+        (SpotStatus.SUCCEEDED.value, end_time, job_id, task_id))
     _CONN.commit()
     logger.info('Job succeeded.')
 

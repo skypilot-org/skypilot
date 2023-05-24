@@ -548,42 +548,63 @@ def spot_launch(
     task_uuid = str(uuid.uuid4().hex[:4])
 
     dag = _convert_to_dag(entrypoint)
-    assert len(dag.tasks) == 1, ('Only one task is allowed in a spot launch.',
-                                 dag)
-    task = dag.tasks[0]
-    assert len(task.resources) == 1, task
-    resources = list(task.resources)[0]
+    assert dag.is_chain(), ('Only single-node or chain dag is '
+                            'allowed for spot_launch.', dag)
 
-    change_default_value: Dict[str, Any] = {}
-    if not resources.use_spot_specified:
-        change_default_value['use_spot'] = True
-    if resources.spot_recovery is None:
-        change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
+    task_id = 0
+    dag_name = name
+    if dag_name is None:
+        if dag.tasks[0].name is not None:
+            dag_name = dag.tasks[0].name
+        else:
+            dag_name = backend_utils.generate_cluster_name()
 
-    new_resources = resources.copy(**change_default_value)
-    task.set_resources({new_resources})
+    for task_node in dag.tasks:
+        if task_node.run is None:
+            continue
 
-    if task.run is None:
+        assert len(task_node.resources) == 1, task_node
+        resources = list(task_node.resources)[0]
+
+        change_default_value: Dict[str, Any] = {}
+        if not resources.use_spot_specified:
+            change_default_value['use_spot'] = True
+        if resources.spot_recovery is None:
+            change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
+
+        new_resources = resources.copy(**change_default_value)
+        task_node.set_resources({new_resources})
+
+        task_node = _maybe_translate_local_file_mounts_and_sync_up(task_node)
+
+        name = ''
+        if len(dag.tasks) > 1:
+            name += f'{task_id:2d}-'
+        name += dag_name
+        if task_node.name is not None:
+            name += f'-{task_node.name}'
+        task_id += 1
+        # Override the task name with the specified name or generated name, so
+        # that the controller process can retrieve the task name from the task
+        # config.
+        task_node.name = name
+
+    if task_id == 0:
         print(f'{colorama.Fore.GREEN}'
-              'Skipping the managed spot task as the run section is not set.'
+              'Skipping the job as the run section is not set.'
               f'{colorama.Style.RESET_ALL}')
         return
 
-    task = _maybe_translate_local_file_mounts_and_sync_up(task)
-
-    if name is None:
-        if task.name is not None:
-            name = task.name
-        else:
-            name = backend_utils.generate_cluster_name()
-    # Override the task name with the specified name or generated name, so that
-    # the controller process can retrieve the task name from the task config.
-    task.name = name
-
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
-        task_config = task.to_yaml_config()
-        common_utils.dump_yaml(f.name, task_config)
+        dag_config = []
+        if dag_name != dag.tasks[0].name:
+            dag_config.append({'name': dag_name})
+
+        for task_node in dag.tasks:
+            task_config = task_node.to_yaml_config()
+            dag_config.append(task_config)
+        common_utils.dump_yaml(f.name, dag_config)
 
         controller_name = spot.SPOT_CONTROLLER_NAME
         vars_to_fill = {
@@ -661,7 +682,7 @@ def spot_launch(
                                     vars_to_fill,
                                     output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
-        controller_task.spot_task = task
+        controller_task.spot_dag = dag
         assert len(controller_task.resources) == 1
 
         print(f'{colorama.Fore.YELLOW}'
