@@ -97,6 +97,23 @@ Azure
 
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
+IBM
+~~~~~~~~~
+
+To use IBM's services store the following fields in `~/.ibm/credentials.yaml`:
+
+.. code-block:: text
+
+  iam_api_key: <user_personal_api_key>
+  resource_group_id: <resource_group_user_is_a_member_of>
+
+- Create a new API key by following `this guide <https://www.ibm.com/docs/en/app-connect/container?topic=servers-creating-cloud-api-key>`_ .
+- Obtain a resource group's ID from the `web console <https://cloud.ibm.com/account/resource-groups>`_.
+
+.. note::
+  Stock images aren't currently providing ML tools out of the box.
+  Create private images with the necessary tools (e.g. CUDA), by following the IBM segment in `this documentation <https://github.com/skypilot-org/skypilot/blob/master/docs/source/reference/yaml-spec.rst>`_. 
+
 Lambda Cloud
 ~~~~~~~~~~~~~~~~~~
 
@@ -140,20 +157,6 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
-IBM
-~~~~~~~~~
-
-To use IBM's services store the following fields in `~/.ibm/credentials.yaml`:
-
-.. code-block:: text
-
-  iam_api_key: <user_personal_api_key>
-  resource_group_id: <resource_group_user_is_a_member_of>
-
-- Create a new API key by following `this <https://www.ibm.com/docs/en/app-connect/container?topic=servers-creating-cloud-api-key>`__ guide.
-- Obtain a resource group's ID from the `web console <https://cloud.ibm.com/account/resource-groups>`_.
-
-To create VPC instances with custom images, containing useful libraries and tools, e.g. CUDA, look for the IBM segment in `this  <https://github.com/skypilot-org/skypilot/blob/master/docs/source/reference/yaml-spec.rst>`__ documentation. 
 
 .. _verify-cloud-access:
 
