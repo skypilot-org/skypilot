@@ -3030,6 +3030,8 @@ def show_gpus(
         other_table = log_utils.create_table(
             ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
+        name, quantity = None, None
+
         if accelerator_str is None:
             result = service_catalog.list_accelerator_counts(
                 gpus_only=True,
@@ -3061,26 +3063,27 @@ def show_gpus(
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
                 return
-
-        # Show detailed accelerator information
-        accelerator_split = accelerator_str.split(':')
-        if len(accelerator_split) > 2:
-            raise click.UsageError(
-                f'Invalid accelerator string {accelerator_str}. '
-                'Expected format: <accelerator_name>[:<quantity>].')
-        if len(accelerator_split) == 2:
-            name = accelerator_split[0]
-            # Check if quantity is valid
-            try:
-                quantity = int(accelerator_split[1])
-                if quantity <= 0:
-                    raise ValueError('Quantity cannot be non-positive integer.')
-            except ValueError as invalid_quantity:
-                raise click.UsageError(
-                    f'Invalid accelerator quantity {accelerator_split[1]}. '
-                    'Expected a positive integer.') from invalid_quantity
         else:
-            name, quantity = accelerator_str, None
+            # Parse accelerator string
+            accelerator_split = accelerator_str.split(':')
+            if len(accelerator_split) > 2:
+                raise click.UsageError(
+                    f'Invalid accelerator string {accelerator_str}. '
+                    'Expected format: <accelerator_name>[:<quantity>].')
+            if len(accelerator_split) == 2:
+                name = accelerator_split[0]
+                # Check if quantity is valid
+                try:
+                    quantity = int(accelerator_split[1])
+                    if quantity <= 0:
+                        raise ValueError(
+                            'Quantity cannot be non-positive integer.')
+                except ValueError as invalid_quantity:
+                    raise click.UsageError(
+                        f'Invalid accelerator quantity {accelerator_split[1]}. '
+                        'Expected a positive integer.') from invalid_quantity
+            else:
+                name, quantity = accelerator_str, None
 
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=name,
