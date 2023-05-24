@@ -221,7 +221,7 @@ def set_starting(job_id: int, task_id: int):
     _CURSOR.execute(
         """\
         UPDATE spot SET status=(?)
-        WHERE job_id=(?) AND (task_id=(?) OR task_id IS NULL))""",
+        WHERE job_id=(?) AND (task_id=(?) OR task_id IS NULL)""",
         (SpotStatus.STARTING.value, job_id, task_id))
     _CONN.commit()
 
@@ -231,7 +231,7 @@ def set_started(job_id: int, task_id: int, start_time: float):
     _CURSOR.execute(
         """\
         UPDATE spot SET status=(?), start_at=(?), last_recovered_at=(?)
-        WHERE job_id=(?) AND (task_id=(?) OR task_id IS NULL))""",
+        WHERE job_id=(?) AND (task_id=(?) OR task_id IS NULL)""",
         (SpotStatus.RUNNING.value, start_time, start_time, job_id, task_id))
     _CONN.commit()
 
@@ -242,7 +242,7 @@ def set_recovering(job_id: int, task_id: int):
         """\
             UPDATE spot SET
             status=(?), job_duration=job_duration+(?)-last_recovered_at
-            WHERE job_id=(?) AND (task_id=(?) OR task_id IS NULL))""",
+            WHERE job_id=(?) AND (task_id=(?) OR task_id IS NULL)""",
         (SpotStatus.RECOVERING.value, time.time(), job_id, task_id))
     _CONN.commit()
 
@@ -252,7 +252,7 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float):
         """\
         UPDATE spot SET
         status=(?), last_recovered_at=(?), recovery_count=recovery_count+1
-        WHERE job_id=(?) AND (task_id=(?) OR task_id IS NULL))""",
+        WHERE job_id=(?) AND (task_id=(?) OR task_id IS NULL)""",
         (SpotStatus.RUNNING.value, recovered_time, job_id, task_id))
     _CONN.commit()
     logger.info('==== Recovered. ====')

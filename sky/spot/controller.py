@@ -30,7 +30,8 @@ logger = sky_logging.init_logger('sky.spot.controller')
 
 
 def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
-    task_configs = yaml.safe_load_all(dag_yaml)
+    with open(dag_yaml) as f:
+        task_configs = list(yaml.safe_load_all(f))
     with sky.Dag() as dag:
         for task_config in task_configs:
             sky.Task.from_yaml_config(task_config)

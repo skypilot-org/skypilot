@@ -551,15 +551,29 @@ def spot_launch(
     assert dag.is_chain(), ('Only single-node or chain dag is '
                             'allowed for spot_launch.', dag)
 
-    task_id = 0
-    dag_name = name
-    if dag_name is None:
-        if dag.tasks[0].name is not None:
+    def get_dag_name(dag):
+        if name is not None:
+            return name
+        if len(dag.tasks) == 1:
             dag_name = dag.tasks[0].name
         else:
+            task_0 = dag.tasks[0]
+            if task_0.setup is None and task_0.run is None:
+                # Only use the name of the first task if it
+                # is a dummy task.
+                dag_name = task_0.name
+        if dag_name is None:
             dag_name = backend_utils.generate_cluster_name()
+        return dag_name
+            
 
-    for task_node in dag.tasks:
+    task_id = 0
+    dag_name = get_dag_name(dag)
+    dag_tasks = dag.tasks
+    if len(dag_tasks) > 1 and dag_name == dag_tasks[0].name:
+        dag_tasks = dag_tasks[1:]
+
+    for task_node in dag_tasks:
         if task_node.run is None:
             continue
 
@@ -577,12 +591,9 @@ def spot_launch(
 
         task_node = _maybe_translate_local_file_mounts_and_sync_up(task_node)
 
-        name = ''
+        name = dag_name
         if len(dag.tasks) > 1:
-            name += f'{task_id:2d}-'
-        name += dag_name
-        if task_node.name is not None:
-            name += f'-{task_node.name}'
+            name += f'{task_id:2d}-{dag_name}-{task_node.name}'
         task_id += 1
         # Override the task name with the specified name or generated name, so
         # that the controller process can retrieve the task name from the task
@@ -596,15 +607,19 @@ def spot_launch(
         return
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
-                                     mode='w') as f:
-        dag_config = []
-        if dag_name != dag.tasks[0].name:
-            dag_config.append({'name': dag_name})
+                                     mode='w', delete=False) as f:
+        if len(dag.tasks) == 1:
+            dag_config = dag.tasks[0].to_yaml_config()
+        else:
+            dag_config = []
+            if dag_name != dag.tasks[0].name:
+                dag_config.append({'name': dag_name})
 
-        for task_node in dag.tasks:
-            task_config = task_node.to_yaml_config()
-            dag_config.append(task_config)
+            for task_node in dag.tasks:
+                task_config = task_node.to_yaml_config()
+                dag_config.append(task_config)
         common_utils.dump_yaml(f.name, dag_config)
+        print(f.name)
 
         controller_name = spot.SPOT_CONTROLLER_NAME
         vars_to_fill = {
