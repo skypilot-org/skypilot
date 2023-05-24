@@ -3,6 +3,7 @@ import enum
 import functools
 import json
 import os
+import re
 import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Any
@@ -44,14 +45,29 @@ DEFAULT_AMI_GB = 45
 class AWSIdentityType(enum.Enum):
     """AWS identity type.
 
-    The account type is determined by the current user identity,
-    based on `aws configure list`. We will check the existence of
-    the value in the output of `aws configure list` to determine
-    the account type.
+    The account type is determined by the current user identity, based on `aws
+    configure list`. We will check the existence of the value in the output of
+    `aws configure list` to determine the account type.
     """
+    #       Name                    Value             Type    Location
+    #       ----                    -----             ----    --------
+    #    profile                     1234              env    ...
+    # access_key     ****************abcd              sso
+    # secret_key     ****************abcd              sso
+    #     region                <not set>             None    None
     SSO = 'sso'
+
+    ENV = 'env'
+
     IAM_ROLE = 'iam-role'
-    STATIC = 'static'
+
+    #       Name                    Value             Type    Location
+    #       ----                    -----             ----    --------
+    #    profile                <not set>             None    None
+    # access_key     ****************abcd shared-credentials-file
+    # secret_key     ****************abcd shared-credentials-file
+    #     region                us-east-1      config-file    ~/.aws/config
+    SHARED_CREDENTIALS_FILE = 'shared-credentials-file'
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -461,18 +477,6 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _current_identity_type(cls) -> Optional[AWSIdentityType]:
-        credentials = aws.session().get_credentials()
-        if credentials is not None and credentials.token is not None:
-            # We have seen the following case: user is using an Okta wrapper
-            # which generates temporary env vars for AWS credentials (including
-            # AWS_SESSION_TOKEN). This technically is using SSO, but the `aws
-            # configure list` output check below would show `env` in the Type
-            # column, rather than `sso` that we expect; hence it would fail to
-            # detect it's using SSO, causing troubles when creating multinode
-            # clusters.
-            #
-            # Thus, do this check first. `.token` seems to be non-None iff SSO.
-            return AWSIdentityType.SSO
         proc = subprocess.run('aws configure list',
                               shell=True,
                               check=False,
@@ -480,6 +484,8 @@ class AWS(clouds.Cloud):
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
             return None
+        stdout = proc.stdout.decode()
+
         # We determine the identity type by looking at the output of
         # `aws configure list`. The output looks like:
         #   Name                   Value         Type    Location
@@ -490,12 +496,23 @@ class AWS(clouds.Cloud):
         #   region                 <not set>     None    None
         # We try to determine the identity type by looking for the
         # string "sso"/"iam-role" in the output, i.e. the "Type" column.
-        if AWSIdentityType.SSO.value in proc.stdout.decode():
+
+        def _is_access_key_of_type(type_str: str) -> bool:
+            # The dot (.) does not match line separators.
+            results = re.findall(fr'access_key.*{type_str}', stdout)
+            if len(results) > 1:
+                raise RuntimeError(
+                    f'Unexpected `aws configure list` output:\n{stdout}')
+            return len(results) == 1
+
+        if _is_access_key_of_type(AWSIdentityType.SSO.value):
             return AWSIdentityType.SSO
-        elif AWSIdentityType.IAM_ROLE.value in proc.stdout.decode():
+        elif _is_access_key_of_type(AWSIdentityType.IAM_ROLE.value):
             return AWSIdentityType.IAM_ROLE
+        elif _is_access_key_of_type(AWSIdentityType.ENV.value):
+            return AWSIdentityType.ENV
         else:
-            return AWSIdentityType.STATIC
+            return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
@@ -597,23 +614,29 @@ class AWS(clouds.Cloud):
         return user_ids
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        # TODO(skypilot): ~/.aws/credentials is required for users using multiple clouds.
-        # If this file does not exist, users can launch on AWS via AWS SSO or assumed IAM
-        # role (only when the user is on an AWS cluster) and assign IAM role to the cluster.
-        # However, if users launch clusters in a non-AWS cloud, those clusters do not
-        # understand AWS IAM role so will not be able to access private AWS EC2 resources
-        # and S3 buckets.
-
-        # The file should not be uploaded if the user is using SSO, as the credential
-        # file can be from a different account, and will make autopstop/autodown/spot
+        # The credentials file should not be uploaded if the user identity is
+        # not SHARED_CREDENTIALS_FILE, since we cannot be sure if the currently
+        # active user identity is the same as the one encoded in the credentials
+        # file.  If they are indeed different identities, then uploading the
+        # credential file to a launched node will make autostop/autodown/spot
         # controller misbehave.
-
-        # TODO(zhwu/zongheng): We can also avoid uploading the credential file for the
-        # cluster launched on AWS even if the user is using static credentials. We need
-        # to define a mechanism to find out the cloud provider of the cluster to be
-        # launched in this function and make sure the cluster will not be used for
-        # launching clusters in other clouds, e.g. spot controller.
-        if self._current_identity_type() != AWSIdentityType.STATIC:
+        #
+        # TODO(skypilot): ~/.aws/credentials is required for users using
+        # multiple clouds.  If this file does not exist, users can launch on AWS
+        # via AWS SSO or assumed IAM role (only when the user is on an AWS
+        # cluster) and assign IAM role to the cluster.  However, if users launch
+        # clusters in a non-AWS cloud, those clusters do not understand AWS IAM
+        # role so will not be able to access private AWS EC2 resources and S3
+        # buckets.
+        #
+        # TODO(zhwu/zongheng): We can also avoid uploading the credential file
+        # for the cluster launched on AWS even if the user is using static
+        # credentials. We need to define a mechanism to find out the cloud
+        # provider of the cluster to be launched in this function and make sure
+        # the cluster will not be used for launching clusters in other clouds,
+        # e.g. spot controller.
+        if self._current_identity_type(
+        ) != AWSIdentityType.SHARED_CREDENTIALS_FILE:
             return {}
         return {
             f'~/.aws/{filename}': f'~/.aws/{filename}'
