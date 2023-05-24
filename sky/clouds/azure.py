@@ -249,8 +249,8 @@ class Azure(clouds.Cloud):
         def failover_disk_tier(instance_type: str,
                                disk_tier: Optional[str]) -> Optional[str]:
             if disk_tier is None:
-                ok, _ = Azure.check_disk_tier(
-                    instance_type, clouds.Cloud._DEFAULT_DISK_TIER)
+                ok, _ = Azure.check_disk_tier(instance_type,
+                                              clouds.Cloud._DEFAULT_DISK_TIER)
                 if not ok:
                     # Auto failover to low disk tier when disk tier
                     # are not specified
