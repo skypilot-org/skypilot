@@ -3077,6 +3077,11 @@ def show_gpus(
                 raise click.UsageError(
                     f'Invalid accelerator quantity {accelerator_split[1]}. '
                     'Expected an integer.') from invalid_quantity
+            if quantity == 0:
+                raise click.UsageError(
+                    f'Invalid accelerator quantity 0. '
+                    'Expected a non-zero integer.'
+                )
         else:
             name, quantity = accelerator_str, None
 
@@ -3086,7 +3091,8 @@ def show_gpus(
                                                    region_filter=region,
                                                    clouds=cloud)
         if len(result) == 0:
-            yield f'Resources \'{name}\', with requested quantity, not found. '
+            quantity_str = f' with requested quantity {quantity}' if quantity else ''
+            yield f'Resources \'{name}\'{quantity_str} not found. '
             yield 'Try \'sky show-gpus --all\' '
             yield 'to show available accelerators.'
             return
