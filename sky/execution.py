@@ -619,7 +619,6 @@ def spot_launch(
                 task_config = task_node.to_yaml_config()
                 dag_config.append(task_config)
         common_utils.dump_yaml(f.name, dag_config)
-        print(f.name)
 
         controller_name = spot.SPOT_CONTROLLER_NAME
         vars_to_fill = {
