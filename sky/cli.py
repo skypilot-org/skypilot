@@ -3078,7 +3078,8 @@ def show_gpus(
                 try:
                     quantity = int(accelerator_split[1])
                     if quantity <= 0:
-                        raise ValueError('Quantity cannot be non-positive integer.')
+                        raise ValueError(
+                            'Quantity cannot be non-positive integer.')
                 except ValueError as invalid_quantity:
                     raise click.UsageError(
                         f'Invalid accelerator quantity {accelerator_split[1]}. '
