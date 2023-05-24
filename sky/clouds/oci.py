@@ -189,19 +189,26 @@ class OCI(clouds.Cloud):
             res_ver = None
 
         cpus = resources.cpus
-        if cpus is None:
-            cpu_mem = OCI.get_vcpus_mem_from_instance_type(
-                resources.instance_type)
-            cpus = cpu_mem[0]
-            mems = cpu_mem[1]
-            resources = resources.copy(
-                cpus=cpus,
-                memory=mems,
-            )
-
-        if cpus is None and resources.instance_type.startswith(
-                oci_conf.VM_PREFIX):
-            cpus = f'{oci_conf.DEFAULT_NUM_VCPUS}'
+        instance_type = resources.instance_type.split(
+            oci_conf.INSTANCE_TYPE_RES_SPERATOR)[0]
+        # Improvement:
+        # Fault-tolerant to the catalog file: special shapes does
+        # not need cpu/memory configuration, so ignore these info
+        # from the catalog file to avoid inconsistence (mainly due
+        # to the shape changed in future.)
+        if len(instance_type) > 1:
+            cpus = None
+        else:
+            if cpus is None:
+                cpus, mems = OCI.get_vcpus_mem_from_instance_type(
+                    resources.instance_type)
+                resources = resources.copy(
+                    cpus=cpus,
+                    memory=mems,
+                )
+            if cpus is None and resources.instance_type.startswith(
+                    oci_conf.VM_PREFIX):
+                cpus = f'{oci_conf.DEFAULT_NUM_VCPUS}'
 
         zone = resources.zone
         if zone is None:
@@ -216,9 +223,6 @@ class OCI(clouds.Cloud):
 
             if zones is not None:
                 zone = zones[0].name
-
-        instance_type = resources.instance_type.split(
-            oci_conf.INSTANCE_TYPE_RES_SPERATOR)[0]
 
         return {
             'instance_type': instance_type,
