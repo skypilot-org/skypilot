@@ -291,17 +291,20 @@ class OCI(clouds.Cloud):
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
-        help_str = (f'Missing credential file at {oci_adaptor.CONFIG_PATH}. '
+        conf_file = oci_adaptor.get_config_file()
+
+        help_str = (f'Missing credential file at {conf_file}. '
                     'To configure credentials, go to:\n'
                     '      https://docs.oracle.com/en-us/iaas/Content/API/'
                     'Concepts/apisigningkey.htm')
-        if not os.path.isfile(os.path.expanduser(oci_adaptor.CONFIG_PATH)):
+        if not os.path.isfile(os.path.expanduser(conf_file)):
             return (False, help_str)
         try:
             user = oci_adaptor.get_identity_client(
                 region=None, profile=oci_conf.get_profile()).get_user(
                     oci_adaptor.get_oci_config()['user']).data
             del user
+            # TODO[Hysun]: More privilege check can be added
             return True, None
         except oci_adaptor.service_exception():
             return False, 'OCI credential is not correctly set. ' + help_str
@@ -310,7 +313,8 @@ class OCI(clouds.Cloud):
         """Returns a dict of credential file paths to mount paths."""
         oci_cfg_file = oci_adaptor.get_config_file()
         oci_cfg = oci_adaptor.get_oci_config()
-        api_key_file = oci_cfg['key_file']
+        api_key_file = oci_cfg[
+            'key_file'] if 'key_file' in oci_cfg else 'BadConf'
         sky_cfg_file = oci_conf.get_sky_user_config_file()
 
         # OCI config and API key file are mandatory
