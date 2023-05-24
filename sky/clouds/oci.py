@@ -192,7 +192,7 @@ class OCI(clouds.Cloud):
         instance_type_arr = resources.instance_type.split(
             oci_conf.INSTANCE_TYPE_RES_SPERATOR)
         instance_type = instance_type_arr[0]
-        print(f'f*********************************************************** {len(instance_type_arr)}')
+
         # Improvement:
         # Fault-tolerant to the catalog file: special shapes does
         # not need cpu/memory configuration, so ignore these info
