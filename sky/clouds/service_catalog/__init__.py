@@ -52,6 +52,7 @@ def list_accelerators(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
     region_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
     clouds: CloudFilter = None,
     case_sensitive: bool = True,
 ) -> 'Dict[str, List[common.InstanceTypeInfo]]':
@@ -64,7 +65,8 @@ def list_accelerators(
     of instance type offerings. See usage in cli.py.
     """
     results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
-                                  name_filter, region_filter, case_sensitive)
+                                  name_filter, region_filter, quantity_filter,
+                                  case_sensitive)
     if not isinstance(results, list):
         results = [results]
     ret: Dict[str,
