@@ -80,6 +80,7 @@ def list_accelerators(
 def list_accelerator_counts(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
     region_filter: Optional[str] = None,
     clouds: CloudFilter = None,
 ) -> Dict[str, List[int]]:
@@ -89,7 +90,8 @@ def list_accelerator_counts(
     of available counts. See usage in cli.py.
     """
     results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
-                                  name_filter, region_filter, False)
+                                  name_filter, region_filter, quantity_filter,
+                                  False)
     if not isinstance(results, list):
         results = [results]
     accelerator_counts: Dict[str, Set[int]] = collections.defaultdict(set)
