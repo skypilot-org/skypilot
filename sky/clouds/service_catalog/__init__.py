@@ -80,8 +80,8 @@ def list_accelerators(
 def list_accelerator_counts(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
-    quantity_filter: Optional[int] = None,
     region_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
     clouds: CloudFilter = None,
 ) -> Dict[str, List[int]]:
     """List all accelerators offered by Sky and available counts.
