@@ -1309,11 +1309,10 @@ class RetryingVmProvisioner(object):
                 'region_name': region.name,
                 'zone_str': zone_str,
             }
-            status, stdout, stderr, head_ip, docker_user = \
-                self._gang_schedule_ray_up(
+            status, stdout, stderr, head_ip = self._gang_schedule_ray_up(
                 to_provision.cloud, cluster_config_file, handle, log_abs_path,
-                stream_logs, logging_info, to_provision.use_spot,
-                docker_image is not None)
+                stream_logs, logging_info, to_provision.use_spot, docker_image
+                is not None)
 
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 if cluster_exists:
@@ -1339,7 +1338,6 @@ class RetryingVmProvisioner(object):
                 config_dict['head_ip'] = head_ip
                 config_dict['zones'] = zones
                 plural = '' if num_nodes == 1 else 's'
-                config_dict['docker_user'] = docker_user
                 if not isinstance(to_provision.cloud, clouds.Local):
                     logger.info(f'{fore.GREEN}Successfully provisioned or found'
                                 f' existing VM{plural}.{style.RESET_ALL}')
@@ -1464,12 +1462,11 @@ class RetryingVmProvisioner(object):
         self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
         cluster_handle: 'backends.CloudVmRayResourceHandle', log_abs_path: str,
         stream_logs: bool, logging_info: dict, use_spot: bool, use_docker: bool
-    ) -> Tuple[GangSchedulingStatus, str, str, Optional[str], Optional[str]]:
+    ) -> Tuple[GangSchedulingStatus, str, str, Optional[str]]:
         """Provisions a cluster via 'ray up' and wait until fully provisioned.
 
         Returns:
-          (GangSchedulingStatus; stdout; stderr; optional head_ip; optional
-           container username).
+          (GangSchedulingStatus; stdout; stderr; optional head_ip).
         """
         # FIXME(zhwu,zongheng): ray up on multiple nodes ups the head node then
         # waits for all workers; turn it into real gang scheduling.
@@ -1621,8 +1618,7 @@ class RetryingVmProvisioner(object):
         logger.debug(f'`ray up` takes {time.time() - start:.1f} seconds with '
                      f'{retry_cnt} retries.')
         if returncode != 0:
-            return (self.GangSchedulingStatus.HEAD_FAILED, stdout, stderr, None,
-                    None)
+            return self.GangSchedulingStatus.HEAD_FAILED, stdout, stderr, None
 
         resources = cluster_handle.launched_resources
         if tpu_utils.is_tpu_vm_pod(resources):
@@ -1642,14 +1638,9 @@ class RetryingVmProvisioner(object):
             head_ip = None
             if len(ip_list) == 1:
                 head_ip = ip_list[0]
-            docker_user = None
-            # TODO(tian): handle cases for head_ip is None.
-            if use_docker and head_ip:
-                # pylint: disable=import-outside-toplevel
-                from sky.backends.docker_utils import docker_host_setup
-                docker_user = docker_host_setup(head_ip, cluster_config_file)
+            # If single node, docker_user is set up after handle is created.
             return (self.GangSchedulingStatus.CLUSTER_READY, stdout, stderr,
-                    head_ip, docker_user)
+                    head_ip)
 
         # All code below is handling num_nodes > 1.
 
@@ -1671,7 +1662,7 @@ class RetryingVmProvisioner(object):
         # FIXME(zongheng): the below requires ray processes are up on head. To
         # repro it failing: launch a 2-node cluster, log into head and ray
         # stop, then launch again.
-        cluster_ready, docker_user = backend_utils.wait_until_ray_cluster_ready(
+        cluster_ready = backend_utils.wait_until_ray_cluster_ready(
             cluster_config_file,
             cluster_handle.launched_nodes,
             log_path=log_abs_path,
@@ -1694,13 +1685,13 @@ class RetryingVmProvisioner(object):
                     f'Upscaling reset takes {time.time() - start} seconds.')
                 if returncode != 0:
                     return (self.GangSchedulingStatus.GANG_FAILED, stdout,
-                            stderr, None, None)
+                            stderr, None)
         else:
             cluster_status = self.GangSchedulingStatus.GANG_FAILED
 
         # Do not need stdout/stderr if gang scheduling failed.
         # gang_succeeded = False, if head OK, but workers failed.
-        return cluster_status, '', '', None, docker_user
+        return cluster_status, '', '', None
 
     def _ensure_cluster_ray_started(self, handle: 'CloudVmRayResourceHandle',
                                     log_abs_path) -> None:
@@ -1891,6 +1882,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         for all nodes in a cluster. Filled in after successful task execution.
     - (optional) Launched num nodes
     - (optional) Launched resources
+    - (optional) Docker user name
     - (optional) If TPU(s) are managed, a path to a deletion script.
     """
     _VERSION = 3
@@ -1903,7 +1895,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                  launched_resources: resources_lib.Resources,
                  stable_internal_external_ips: Optional[List[Tuple[
                      str, str]]] = None,
-                 docker_user: Optional[str] = None,
                  tpu_create_script: Optional[str] = None,
                  tpu_delete_script: Optional[str] = None) -> None:
         self._version = self._VERSION
@@ -1915,7 +1906,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.stable_internal_external_ips = stable_internal_external_ips
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
-        self.docker_user = docker_user
+        self.docker_user: Optional[str] = None
         self.tpu_create_script = tpu_create_script
         self.tpu_delete_script = tpu_delete_script
         self._maybe_make_local_handle()
@@ -2066,6 +2057,26 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         hourly_cost = (self.launched_resources.get_cost(3600) *
                        self.launched_nodes)
         return hourly_cost
+
+    def docker_setup(self, cluster_config_file: str):
+        ip_list = self.external_ips()
+        assert ip_list is not None
+        # pylint: disable=import-outside-toplevel
+        from sky.backends.docker_utils import docker_host_setup
+        if len(ip_list) == 1:
+            # Setup head node.
+            docker_user = docker_host_setup(ip_list[0], cluster_config_file)
+            self.docker_user = docker_user
+        else:
+            # Setup docker for all worker nodes. Head node setup is done
+            # in `backend_utils.wait_until_ray_cluster_ready`.
+            # Skip head ip here.
+            for worker_ip in ip_list[1:]:
+                docker_user = docker_host_setup(worker_ip, cluster_config_file)
+                if self.docker_user is not None:
+                    assert docker_user == self.docker_user
+                else:
+                    self.docker_user = docker_user
 
     @property
     def cluster_yaml(self):
@@ -2340,7 +2351,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 cluster_yaml=cluster_config_file,
                 launched_nodes=config_dict['launched_nodes'],
                 launched_resources=config_dict['launched_resources'],
-                docker_user=config_dict['docker_user'],
                 # TPU.
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
@@ -2349,15 +2359,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                           use_cached_ips=False)
             assert ip_list is not None, handle
 
-            # Setup docker for all worker nodes.
-            if task.docker_image is not None and len(ip_list) > 1:
-                # pylint: disable=import-outside-toplevel
-                from sky.backends.docker_utils import docker_host_setup
-                # Skip head ip here
-                for worker_ip in ip_list[1:]:
-                    docker_user = docker_host_setup(worker_ip,
-                                                    cluster_config_file)
-                    assert docker_user == handle.docker_user
+            if task.docker_image is not None:
+                handle.docker_setup(cluster_config_file)
 
             if 'tpu_name' in config_dict:
                 self._set_tpu_name(handle, config_dict['tpu_name'])
