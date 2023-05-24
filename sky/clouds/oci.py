@@ -189,14 +189,16 @@ class OCI(clouds.Cloud):
             res_ver = None
 
         cpus = resources.cpus
-        instance_type = resources.instance_type.split(
-            oci_conf.INSTANCE_TYPE_RES_SPERATOR)[0]
+        instance_type_arr = resources.instance_type.split(
+            oci_conf.INSTANCE_TYPE_RES_SPERATOR)
+        instance_type = instance_type_arr[0]
+        print(f'f*********************************************************** {len(instance_type_arr)}')
         # Improvement:
         # Fault-tolerant to the catalog file: special shapes does
         # not need cpu/memory configuration, so ignore these info
         # from the catalog file to avoid inconsistence (mainly due
         # to the shape changed in future.)
-        if len(instance_type) > 1:
+        if len(instance_type_arr) < 2:
             cpus = None
         else:
             if cpus is None:
