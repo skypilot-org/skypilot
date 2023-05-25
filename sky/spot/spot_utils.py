@@ -311,8 +311,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                             f'INFO: Log for the current sub job ({sub_job_id}) '
                             'is finished. Waiting for the next sub job\'s log '
                             'to be started.')
-                        status_display.update('Waiting for the next sub job '
-                                              f'({sub_job_id + 1})')
+                        status_display.update('Waiting for the next sub job: '
+                                              f'{sub_job_id + 1}.')
                         status_display.start()
                         while (sub_job_id == spot_state.
                                get_latest_sub_job_id_status(job_id)[0]):
