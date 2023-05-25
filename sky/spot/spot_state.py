@@ -41,6 +41,8 @@ _CURSOR.execute("""\
     failure_reason TEXT,
     new_job_id INTEGER,
     sub_job_id INTEGER DEFAULT 0)""")
+_CONN.commit()
+
 db_utils.add_column_to_table(_CURSOR, _CONN, 'spot', 'failure_reason', 'TEXT')
 # Create a new column for job_id, which can be duplicated for sub jobs of the
 # same job.
@@ -64,6 +66,7 @@ _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS job_names (
     new_job_id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT)""")
+_CONN.commit()
 
 # job_duration is the time a job actually runs (including the
 # setup duration) before last_recover, excluding the provision
@@ -72,8 +75,6 @@ _CURSOR.execute("""\
 # total_job_duration = now() - last_recovered_at + job_duration
 # If the job is not finished:
 # total_job_duration = end_at - last_recovered_at + job_duration
-
-_CONN.commit()
 columns = [
     'job_id', 'job_name', 'resources', 'submitted_at', 'status',
     'run_timestamp', 'start_at', 'end_at', 'last_recovered_at',

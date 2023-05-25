@@ -569,12 +569,14 @@ def spot_launch(
         new_resources = resources.copy(**change_default_value)
         sub_task.set_resources({new_resources})
 
-        sub_task = _maybe_translate_local_file_mounts_and_sync_up(sub_task)
+        _maybe_translate_local_file_mounts_and_sync_up(sub_task)
 
         name = dag.name
         if len(dag.tasks) > 1:
-            name = f'{task_id:2d}-{dag.name}-{sub_task.name}'
-        task_id += 1
+            name = f'{dag.name}'
+            if sub_task.name is not None:
+                name += f'-{sub_task.name}'
+            name += f'-{task_id}'
         # Override the task name with the specified name or generated name, so
         # that the controller process can retrieve the task name from the task
         # config.
@@ -677,8 +679,7 @@ def spot_launch(
         )
 
 
-def _maybe_translate_local_file_mounts_and_sync_up(
-        task: task_lib.Task) -> task_lib.Task:
+def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
     """Translates local->VM mounts into Storage->VM, then syncs up any Storage.
 
     Eagerly syncing up local->Storage ensures Storage->VM would work at task
@@ -691,7 +692,6 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     # ================================================================
     # Translate the workdir and local file mounts to cloud file mounts.
     # ================================================================
-    task = copy.deepcopy(task)
     run_id = common_utils.get_usage_run_id()[:8]
     original_file_mounts = task.file_mounts if task.file_mounts else {}
     original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
@@ -847,5 +847,3 @@ def _maybe_translate_local_file_mounts_and_sync_up(
                     raise exceptions.NotSupportedError(
                         f'Unsupported store type: {store_type}')
             storage_obj.force_delete = True
-
-    return task

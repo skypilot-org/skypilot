@@ -1,4 +1,4 @@
-name: dag-name
+name: pipeline
 
 ---
 name: simple-1
@@ -9,9 +9,11 @@ resources:
 
 setup: |
   echo setup for task 1
+  sleep 20
 
 run: |
   echo run for task 1
+  sleep 20
 
 ---
 
@@ -23,6 +25,8 @@ resources:
 
 setup: |
   echo setup for task 2
+  sleep 20
 
 run: |
   echo run for task 2
+  sleep 20
