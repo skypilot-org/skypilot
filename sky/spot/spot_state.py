@@ -5,7 +5,7 @@ import enum
 import pathlib
 import sqlite3
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
@@ -385,15 +385,25 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
     return job_ids
 
 
-def get_sub_job_id_status(job_id: int) -> Optional[Tuple[int, SpotStatus]]:
-    """Get the latest sub job id and status of a job."""
+def _get_all_sub_job_ids_statuses(job_id: int) -> List[Tuple[int, SpotStatus]]:
     id_statuses = _CURSOR.execute(
         """\
         SELECT sub_job_id, status FROM spot
         WHERE new_job_id=(?)
         ORDER BY sub_job_id ASC""", (job_id,)).fetchall()
+    return id_statuses
+
+
+def get_num_sub_jobs(job_id: int) -> int:
+    return len(_get_all_sub_job_ids_statuses(job_id))
+
+
+def get_latest_sub_job_id_status(
+        job_id: int) -> Union[Tuple[int, SpotStatus], Tuple[None, None]]:
+    """Get the latest sub job id and status of a job."""
+    id_statuses = _get_all_sub_job_ids_statuses(job_id)
     if len(id_statuses) == 0:
-        return None
+        return None, None
     sub_job_id, status = id_statuses[-1]
     for sub_job_id, status in id_statuses:
         status = SpotStatus(status)
@@ -403,10 +413,8 @@ def get_sub_job_id_status(job_id: int) -> Optional[Tuple[int, SpotStatus]]:
 
 
 def get_status(job_id: int) -> Optional[SpotStatus]:
-    id_status = get_sub_job_id_status(job_id)
-    if id_status is None:
-        return None
-    return id_status[1]
+    _, status = get_latest_sub_job_id_status(job_id)
+    return status
 
 
 def get_failure_reason(job_id: int) -> Optional[str]:

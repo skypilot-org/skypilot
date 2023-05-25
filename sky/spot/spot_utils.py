@@ -221,6 +221,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                   '{status_str}[/]. It may take a few minutes.')
     status_display = log_utils.safe_rich_status(
         status_msg.format(status_str=''))
+    num_sub_jobs = spot_state.get_num_sub_jobs(job_id)
+
     with status_display:
         prev_msg = None
         while (controller_status != job_lib.JobStatus.RUNNING and
@@ -257,7 +259,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         task_name = spot_state.get_latest_task_name_by_job_id(job_id)
         cluster_name = generate_spot_cluster_name(task_name, job_id)
         backend = backends.CloudVmRayBackend()
-        spot_status = spot_state.get_status(job_id)
+        sub_job_id, spot_status = spot_state.get_latest_sub_job_id_status(
+            job_id)
 
         # spot_status can be None if the controller process just started and has
         # not updated the spot status yet.
@@ -281,7 +284,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     status_display.update(msg)
                     prev_msg = msg
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                spot_status = spot_state.get_status(job_id)
+                sub_job_id, spot_status = (
+                    spot_state.get_latest_sub_job_id_status(job_id))
                 continue
             assert spot_status is not None
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
@@ -299,7 +303,23 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 job_status = list(job_statuses.values())[0]
                 assert job_status is not None, 'No job found.'
                 if job_status != job_lib.JobStatus.CANCELLED:
-                    break
+                    assert sub_job_id is not None, job_id
+                    if sub_job_id < num_sub_jobs - 1:
+                        # The log for the current job is finished. We need to
+                        # wait until next job to be started.
+                        logger.debug(
+                            f'INFO: Log for the current sub job ({sub_job_id}) '
+                            'is finished. Waiting for the next sub job\'s log '
+                            'to be started.')
+                        status_display.update('Waiting for the next sub job '
+                                              f'({sub_job_id + 1})')
+                        status_display.start()
+                        while (sub_job_id == spot_state.
+                               get_latest_sub_job_id_status(job_id)[0]):
+                            time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+                        continue
+                    else:
+                        break
                 # The job can be cancelled by the user or the controller (when
                 # the cluster is partially preempted).
                 logger.debug(
