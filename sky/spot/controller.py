@@ -4,11 +4,11 @@ import multiprocessing
 import pathlib
 import time
 import traceback
+import typing
 from typing import Tuple
 
 import filelock
 
-import sky
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -22,6 +22,9 @@ from sky.spot import spot_utils
 from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import subprocess_utils
+
+if typing.TYPE_CHECKING:
+    import sky
 
 # Use the explicit logger name so that the logger is under the
 # `sky.spot.controller` namespace when executed directly, so as

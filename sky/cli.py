@@ -3450,11 +3450,15 @@ def spot_launch(
         assert isinstance(task_or_dag, sky.Task), task_or_dag
         with sky.Dag() as dag:
             dag.add(task_or_dag)
+            dag.name = task_or_dag.name
     else:
         dag = task_or_dag
 
+    if name is not None:
+        dag.name = name
+
     if not yes:
-        prompt = f'Launching a new spot job {name!r}. Proceed?'
+        prompt = f'Launching a new spot job {dag.name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 

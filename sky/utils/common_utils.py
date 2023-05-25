@@ -194,7 +194,11 @@ def dump_yaml_str(config):
             if len(self.indents) == 1:
                 super().write_line_break()
 
-    return yaml.dump(config,
+    if isinstance(config, list):
+        dump_func = yaml.dump_all
+    else:
+        dump_func = yaml.dump
+    return dump_func(config,
                      Dumper=LineBreakDumper,
                      sort_keys=False,
                      default_flow_style=False)

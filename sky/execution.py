@@ -581,8 +581,7 @@ def spot_launch(
         sub_task.name = name
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
-                                     mode='w',
-                                     delete=False) as f:
+                                     mode='w') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller_name = spot.SPOT_CONTROLLER_NAME
         vars_to_fill = {

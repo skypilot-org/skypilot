@@ -1,3 +1,4 @@
+"""Utilities for loading and dumping DAGs from/to YAML files."""
 from sky import dag as dag_lib
 from sky import task as task_lib
 from sky.utils import common_utils
@@ -17,7 +18,7 @@ def load_chain_dag_from_yaml(path) -> dag_lib.Dag:
             task = task_lib.Task.from_yaml_config(task_config)
             dag.add(task)
             if current_task is not None:
-                current_task >> task
+                current_task >> task  # pylint: disable=pointless-statement
             current_task = task
     dag.name = dag_name
     return dag
@@ -28,4 +29,4 @@ def dump_chain_dag_to_yaml(dag: dag_lib.Dag, path: str):
     configs = [{'name': dag.name}]
     for task in dag.tasks:
         configs.append(task.to_yaml_config())
-    common_utils.dump_yaml(configs, path)
+    common_utils.dump_yaml(path, configs)

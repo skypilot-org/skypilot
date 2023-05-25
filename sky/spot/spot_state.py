@@ -63,8 +63,7 @@ db_utils.add_column_to_table(_CURSOR,
 _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS job_names (
     new_job_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_name TEXT,
-    )""")
+    name TEXT)""")
 
 # job_duration is the time a job actually runs (including the
 # setup duration) before last_recover, excluding the provision
@@ -213,7 +212,7 @@ def set_job_name(job_id: int, name: str):
     _CURSOR.execute(
         """\
         INSERT INTO job_names
-        (job_id, name)
+        (new_job_id, name)
         VALUES (?, ?)""", (job_id, name))
     _CONN.commit()
 
@@ -426,13 +425,15 @@ def get_spot_jobs() -> List[Dict[str, Any]]:
 def get_latest_task_name_by_job_id(job_id: int) -> str:
     """Get the task name of a job."""
     statuses = ', '.join(['?'] * len(SpotStatus.terminal_statuses()))
+    field_values = [job_id]
+    field_values.extend(
+        [status.value for status in SpotStatus.terminal_statuses()])
     task_name = _CURSOR.execute(
         f"""\
         SELECT job_name FROM spot
         WHERE new_job_id=(?)
-        AND status NOT IN {statuses}
-        ORDER BY sub_job_id ASC LIMIT 1""",
-        (job_id, *SpotStatus.terminal_statuses())).fetchone()
+        AND status NOT IN ({statuses})
+        ORDER BY sub_job_id ASC LIMIT 1""", field_values).fetchone()
     return task_name[0]
 
 
