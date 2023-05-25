@@ -16,7 +16,6 @@ def load_chain_dag_from_yaml(path) -> dag_lib.Dag:
     with dag_lib.Dag() as dag:
         for task_config in configs:
             task = task_lib.Task.from_yaml_config(task_config)
-            dag.add(task)
             if current_task is not None:
                 current_task >> task  # pylint: disable=pointless-statement
             current_task = task

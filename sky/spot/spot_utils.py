@@ -414,8 +414,8 @@ def format_job_table(jobs: List[Dict[str, Any]],
         max_jobs: The maximum number of jobs to show in the table.
     """
     columns = [
-        'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'JOB DURATION',
-        '#RECOVERIES', 'STATUS'
+        'ID', 'SUB ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
+        'JOB DURATION', '#RECOVERIES', 'STATUS'
     ]
     if show_all:
         columns += ['STARTED', 'CLUSTER', 'REGION', 'FAILURE']
@@ -437,6 +437,7 @@ def format_job_table(jobs: List[Dict[str, Any]],
         submitted = log_utils.readable_time_duration(job['submitted_at'])
         values = [
             job['job_id'],
+            job['sub_job_id'],
             job['job_name'],
             job['resources'],
             # SUBMITTED

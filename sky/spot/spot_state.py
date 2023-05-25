@@ -245,8 +245,9 @@ def set_submitted(job_id: int, sub_job_id: int, run_timestamp: str,
         status=(?),
         run_timestamp=(?)
         WHERE new_job_id=(?) AND
-        sub_job_id=(?)""", (resources_str, sub_job_id, submit_time,
-                            SpotStatus.SUBMITTED.value, run_timestamp, job_id))
+        sub_job_id=(?)""",
+        (resources_str, submit_time, SpotStatus.SUBMITTED.value, run_timestamp,
+         job_id, sub_job_id))
 
     _CONN.commit()
 
@@ -302,7 +303,6 @@ def set_succeeded(job_id: int, sub_job_id: int, end_time: float):
         status=(?), end_at=(?)
         WHERE new_job_id=(?) AND sub_job_id=(?)
         AND end_at IS null"""
-    logger.info(sqlite_cmd)
     _CURSOR.execute(sqlite_cmd,
                     (SpotStatus.SUCCEEDED.value, end_time, job_id, sub_job_id))
     _CONN.commit()

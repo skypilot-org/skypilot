@@ -46,6 +46,7 @@ class SpotController:
                  retry_until_up: bool) -> None:
         self._job_id = job_id
         self._dag, self._dag_name = _get_dag_and_name(dag_yaml)
+        logger.info(self._dag)
 
         self._retry_until_up = retry_until_up
         # TODO(zhwu): this assumes the specific backend.
@@ -61,7 +62,7 @@ class SpotController:
             task_envs[constants.JOB_ID_ENV_VAR] = job_id_env_var
             task.update_envs(task_envs)
 
-    def _run_one_task(self, task_id: int, task: 'sky.Task') -> None:
+    def _run_one_sub_job(self, sub_job_id: int, task: 'sky.Task') -> None:
         """Busy loop monitoring spot cluster status and handling recovery.
 
         Raises:
@@ -84,22 +85,24 @@ class SpotController:
         Other exceptions may be raised depending on the backend.
         """
         if task.run is None:
-            logger.info(f'Task {task_id} ({task.name}) is skipped '
+            logger.info(f'Sub job {sub_job_id} ({task.name}) is skipped '
                         'for empty run.')
             spot_state.set_started(self._job_id,
-                                   task_id,
+                                   sub_job_id,
                                    start_time=time.time())
             spot_state.set_succeeded(self._job_id,
-                                     task_id,
+                                     sub_job_id,
                                      end_time=time.time())
             return
         job_id_env_var = task.envs[constants.JOB_ID_ENV_VAR]
         spot_state.set_submitted(
             self._job_id,
-            task_id,
+            sub_job_id,
             self._backend.run_timestamp,
             resources_str=backend_utils.get_task_resources_str(task))
-        logger.info(f'Submitted spot job; SKYPILOT_JOB_ID: {job_id_env_var}')
+        logger.info(f'Submitted spot job (sub job: {sub_job_id}); '
+                    f'SKYPILOT_JOB_ID: {job_id_env_var}')
+        logger.info(str(task))
         assert task.name is not None, task
         self._cluster_name = spot_utils.generate_spot_cluster_name(
             task.name, self._job_id)
@@ -108,12 +111,12 @@ class SpotController:
 
         logger.info(f'Started monitoring spot job {self._job_id}, '
                     f'name: {task.name!r}.')
-        spot_state.set_starting(self._job_id, task_id)
+        spot_state.set_starting(self._job_id, sub_job_id)
         job_submitted_at = self._strategy_executor.launch()
         assert job_submitted_at is not None, job_submitted_at
 
         spot_state.set_started(self._job_id,
-                               task_id,
+                               sub_job_id,
                                start_time=job_submitted_at)
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
@@ -139,7 +142,7 @@ class SpotController:
                                                         get_end_time=True)
                 # The job is done.
                 spot_state.set_succeeded(self._job_id,
-                                         task_id,
+                                         sub_job_id,
                                          end_time=end_time)
                 break
 
@@ -225,17 +228,18 @@ class SpotController:
 
             # Try to recover the spot jobs, when the cluster is preempted
             # or the job status is failed to be fetched.
-            spot_state.set_recovering(self._job_id, task_id)
+            spot_state.set_recovering(self._job_id, sub_job_id)
             recovered_time = self._strategy_executor.recover()
             spot_state.set_recovered(self._job_id,
-                                     task_id,
+                                     sub_job_id,
                                      recovered_time=recovered_time)
 
     def run(self):
         """Run controller logic and handle exceptions."""
         try:
-            for task_id, task in enumerate(self._dag.tasks):
-                self._run_one_task(task_id, task)
+            logger.info(self._dag)
+            for sub_job_id, task in enumerate(self._dag.tasks):
+                self._run_one_sub_job(sub_job_id, task)
         except exceptions.ProvisionPrechecksError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
