@@ -920,7 +920,10 @@ class S3Store(AbstractStore):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     'Storage \'store: s3\' specified, but ' \
-                    'AWS access is disabled. Enable AWS to fix.')
+                    'AWS access is disabled. To fix, enable '\
+                    'AWS by running `sky check`. More info: '\
+                    'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
+                    )
 
     @classmethod
     def validate_name(cls, name) -> str:
@@ -1302,8 +1305,11 @@ class GcsStore(AbstractStore):
         if str(clouds.GCP()) not in enabled_storage_clouds:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
-                    'Storage \'store: gs\' specified, but ' \
-                    'GCP access is disabled. Enable GCP to fix.')
+                    'Storage \'store: gcs\' specified, but ' \
+                    'GCP access is disabled. To fix, enable '\
+                    'GCP by running `sky check`. '\
+                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
+                    )
 
     @classmethod
     def validate_name(cls, name) -> str:
@@ -1710,11 +1716,14 @@ class R2Store(AbstractStore):
         self.name = S3Store.validate_name(self.name)
         # Check if the storage is enabled
         enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
-        if 'Cloudflare' not in enabled_storage_clouds:
+        if cloudflare.NAME not in enabled_storage_clouds:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     'Storage \'store: r2\' specified, but ' \
-                    'Cloudflare access is disabled. Enable Cloudflare to fix.')
+                    'Cloudflare R2 access is disabled. To fix, '\
+                    'enable Cloudflare R2 by running `sky check`. '\
+                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
+                    )
 
     def initialize(self):
         """Initializes the R2 store object on the cloud.
