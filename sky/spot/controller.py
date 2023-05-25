@@ -62,9 +62,11 @@ class SpotController:
             task_envs[constants.JOB_ID_ENV_VAR] = job_id_env_var
             task.update_envs(task_envs)
 
-    def _run_one_sub_job(self, sub_job_id: int, task: 'sky.Task') -> None:
+    def _run_one_sub_job(self, sub_job_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring spot cluster status and handling recovery.
 
+        Returns:
+            True if the job is successfully completed; False otherwise.
         Raises:
             exceptions.ProvisionPrechecksError: This will be raised when the
                 underlying `sky.launch` fails due to precheck errors only.
@@ -93,7 +95,7 @@ class SpotController:
             spot_state.set_succeeded(self._job_id,
                                      sub_job_id,
                                      end_time=time.time())
-            return
+            return True
         job_id_env_var = task.envs[constants.JOB_ID_ENV_VAR]
         spot_state.set_submitted(
             self._job_id,
@@ -104,10 +106,10 @@ class SpotController:
                     f'SKYPILOT_JOB_ID: {job_id_env_var}')
         logger.info(str(task))
         assert task.name is not None, task
-        self._cluster_name = spot_utils.generate_spot_cluster_name(
+        cluster_name = spot_utils.generate_spot_cluster_name(
             task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            self._cluster_name, self._backend, task, self._retry_until_up)
+            cluster_name, self._backend, task, self._retry_until_up)
 
         logger.info(f'Started monitoring spot job {self._job_id}, '
                     f'name: {task.name!r}.')
@@ -133,18 +135,18 @@ class SpotController:
 
             # NOTE: we do not check cluster status first because race condition
             # can occur, i.e. cluster can be down during the job status check.
-            job_status = spot_utils.get_job_status(self._backend,
-                                                   self._cluster_name)
+            job_status = spot_utils.get_job_status(self._backend, cluster_name)
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 end_time = spot_utils.get_job_timestamp(self._backend,
-                                                        self._cluster_name,
+                                                        cluster_name,
                                                         get_end_time=True)
+                recovery_strategy.terminate_cluster(cluster_name=cluster_name)
                 # The job is done.
                 spot_state.set_succeeded(self._job_id,
                                          sub_job_id,
                                          end_time=end_time)
-                break
+                return True
 
             # For single-node jobs, nonterminated job_status indicates a
             # healthy cluster. We can safely continue monitoring.
@@ -165,7 +167,7 @@ class SpotController:
             # determine whether the cluster is preempted.
             (cluster_status,
              handle) = backend_utils.refresh_cluster_status_handle(
-                 self._cluster_name, force_refresh=True)
+                 cluster_name, force_refresh=True)
 
             if cluster_status != global_user_state.ClusterStatus.UP:
                 # The cluster is (partially) preempted. It can be down, INIT
@@ -184,7 +186,7 @@ class SpotController:
                 ]:
                     # The user code has probably crashed, fail immediately.
                     end_time = spot_utils.get_job_timestamp(self._backend,
-                                                            self._cluster_name,
+                                                            cluster_name,
                                                             get_end_time=True)
                     logger.info(
                         'The user job failed. Please check the logs below.\n'
@@ -204,10 +206,11 @@ class SpotController:
                         f'sky spot logs --controller {self._job_id}')
 
                     spot_state.set_failed(self._job_id,
+                                          sub_job_id,
                                           failure_type=spot_status_to_set,
                                           failure_reason=failure_reason,
                                           end_time=end_time)
-                    break
+                    return False
                 # Although the cluster is healthy, we fail to access the
                 # job status. Try to recover the job (will not restart the
                 # cluster, if the cluster is healthy).
@@ -224,7 +227,7 @@ class SpotController:
                     # Some spot resource (e.g., Spot TPU VM) may need to be
                     # cleaned up after preemption.
                     logger.info('Cleaning up the preempted spot cluster...')
-                    recovery_strategy.terminate_cluster(self._cluster_name)
+                    recovery_strategy.terminate_cluster(cluster_name)
 
             # Try to recover the spot jobs, when the cluster is preempted
             # or the job status is failed to be fetched.
@@ -236,10 +239,13 @@ class SpotController:
 
     def run(self):
         """Run controller logic and handle exceptions."""
+        sub_job_id = 0
         try:
-            logger.info(self._dag)
+            succeeded = True
             for sub_job_id, task in enumerate(self._dag.tasks):
-                self._run_one_sub_job(sub_job_id, task)
+                succeeded = self._run_one_sub_job(sub_job_id, task)
+                if not succeeded:
+                    break
         except exceptions.ProvisionPrechecksError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
@@ -249,6 +255,7 @@ class SpotController:
             logger.error(failure_reason)
             spot_state.set_failed(
                 self._job_id,
+                sub_job_id=sub_job_id,
                 failure_type=spot_state.SpotStatus.FAILED_PRECHECKS,
                 failure_reason=failure_reason)
         except exceptions.SpotJobReachedMaxRetriesError as e:
@@ -259,6 +266,7 @@ class SpotController:
             # spot job may be able to launch next time.
             spot_state.set_failed(
                 self._job_id,
+                sub_job_id=sub_job_id,
                 failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE,
                 failure_reason=common_utils.format_exception(e))
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
@@ -268,8 +276,16 @@ class SpotController:
             logger.error(msg)
             spot_state.set_failed(
                 self._job_id,
+                sub_job_id=sub_job_id,
                 failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
                 failure_reason=msg)
+        finally:
+            for sub_id in range(sub_job_id + 1, len(self._dag.tasks)):
+                spot_state.set_failed(
+                    self._job_id,
+                    sub_job_id=sub_id,
+                    failure_type=spot_state.SpotStatus.FAILED_PRECHECKS,
+                    failure_reason='Previous sub-job failed')
 
 
 def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):

@@ -580,7 +580,7 @@ def spot_launch(
         # config.
         sub_task.name = name
 
-    with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
+    with tempfile.NamedTemporaryFile(prefix=f'spot-task-{dag.name}-',
                                      mode='w') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller_name = spot.SPOT_CONTROLLER_NAME
@@ -589,8 +589,8 @@ def spot_launch(
             'user_yaml_path': f.name,
             'user_config_path': None,
             'spot_controller': controller_name,
-            # Note: actual spot cluster name will be <task_name>-<spot job ID>
-            'task_name': name,
+            # Note: actual spot cluster name will be <dag.name>-<spot job ID>
+            'task_name': dag.name,
             'uuid': task_uuid,
             'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
             'is_dev': env_options.Options.IS_DEVELOPER.get(),
@@ -663,7 +663,7 @@ def spot_launch(
         assert len(controller_task.resources) == 1
 
         print(f'{colorama.Fore.YELLOW}'
-              f'Launching managed spot job {name} from spot controller...'
+              f'Launching managed spot job {dag.name} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
         _execute(

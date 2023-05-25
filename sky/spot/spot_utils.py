@@ -121,7 +121,8 @@ def update_spot_job_status(job_id: Optional[int] = None):
             # FAILED_CONTROLLER.
             spot_state.set_failed(
                 job_id_,
-                spot_state.SpotStatus.FAILED_CONTROLLER,
+                sub_job_id=None,
+                failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
                 failure_reason=
                 'Controller process has exited abnormally. For more details,'
                 f' run: sky spot logs --controller {job_id_}')

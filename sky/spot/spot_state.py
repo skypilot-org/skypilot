@@ -310,6 +310,7 @@ def set_succeeded(job_id: int, sub_job_id: int, end_time: float):
 
 
 def set_failed(job_id: int,
+               sub_job_id: Optional[int],
                failure_type: SpotStatus,
                failure_reason: str,
                end_time: Optional[float] = None):
@@ -331,12 +332,14 @@ def set_failed(job_id: int,
         # calculation.
         fields_to_set['last_recovered_at'] = end_time
     set_str = ', '.join(f'{k}=(?)' for k in fields_to_set)
+    sub_job_str = '' if sub_job_id is None else f' AND sub_job_id={sub_job_id}'
+
     _CURSOR.execute(
         f"""\
         UPDATE spot SET
         {set_str}
-        WHERE new_job_id=(?) AND end_at IS null""",
-        (*list(fields_to_set.values()), job_id))
+        WHERE new_job_id=(?){sub_job_str} AND end_at IS null""",
+        (*list(fields_to_set.values()), job_id, sub_job_id))
     _CONN.commit()
     logger.info(failure_reason)
 
