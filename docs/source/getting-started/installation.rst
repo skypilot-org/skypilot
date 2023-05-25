@@ -118,7 +118,7 @@ SkyPilot can download/upload data to R2 buckets and mount them as local filesyst
   $ # Install boto
   $ pip install boto3
   $ # Configure your R2 credentials
-  $ AWS_SHARED_CREDENTIALS_FILE=~/.cloudflare/credentials aws configure --profile r2
+  $ AWS_SHARED_CREDENTIALS_FILE=~/.cloudflare/r2credentials aws configure --profile r2
 
 In the prompt, enter your R2 Access Key ID and Secret Access Key (see `instructions to generate R2 credentials <https://developers.cloudflare.com/r2/data-access/s3-api/tokens/>`_). Select :code:`auto` for the default region and :code:`json` for the default output format.
 
