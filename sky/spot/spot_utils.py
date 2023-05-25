@@ -319,8 +319,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                         status_display.start()
                         original_sub_job_id = sub_job_id
                         while True:
-                            sub_job_id, spot_status = spot_state.get_latest_sub_job_id_status(
-                                job_id)
+                            sub_job_id, spot_status = (
+                                spot_state.get_latest_sub_job_id_status(job_id))
                             if original_sub_job_id != sub_job_id:
                                 break
                             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)

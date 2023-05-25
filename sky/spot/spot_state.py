@@ -450,7 +450,7 @@ def get_spot_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
 def get_sub_job_name(job_id: int, sub_job_id: int) -> str:
     """Get the task name of a job."""
     task_name = _CURSOR.execute(
-        f"""\
+        """\
         SELECT job_name FROM spot
         WHERE new_job_id=(?)
         AND sub_job_id=(?)""", (job_id, sub_job_id)).fetchone()

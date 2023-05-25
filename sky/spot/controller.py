@@ -141,11 +141,11 @@ class SpotController:
                 end_time = spot_utils.get_job_timestamp(self._backend,
                                                         cluster_name,
                                                         get_end_time=True)
-                recovery_strategy.terminate_cluster(cluster_name=cluster_name)
                 # The job is done.
                 spot_state.set_succeeded(self._job_id,
                                          sub_job_id,
                                          end_time=end_time)
+                recovery_strategy.terminate_cluster(cluster_name=cluster_name)
                 return True
 
             # For single-node jobs, nonterminated job_status indicates a
