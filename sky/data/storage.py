@@ -1776,7 +1776,8 @@ class R2Store(AbstractStore):
             includes = ' '.join(
                 [f'--include "{file_name}"' for file_name in file_names])
             endpoint_url = cloudflare.create_endpoint()
-            sync_command = (f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} '
+            sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
+                            f'{cloudflare.AWS_R2_CREDENTIALS_PATH} '
                             'aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
                             f's3://{self.name} '
@@ -1788,7 +1789,8 @@ class R2Store(AbstractStore):
             # we exclude .git directory from the sync
             endpoint_url = cloudflare.create_endpoint()
             sync_command = (
-                f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} '
+                'AWS_SHARED_CREDENTIALS_FILE='
+                f'{cloudflare.AWS_R2_CREDENTIALS_PATH} '
                 'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
                 f'{src_dir_path} '
                 f's3://{self.name}/{dest_dir_name} '
@@ -1850,7 +1852,8 @@ class R2Store(AbstractStore):
             # AccessDenied error for buckets that are private and not owned by
             # user.
             if error_code == '403':
-                command = (f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} '
+                command = ('AWS_SHARED_CREDENTIALS_FILE='
+                           f'{cloudflare.AWS_R2_CREDENTIALS_PATH} '
                            f'aws s3 ls s3://{self.name} '
                            f'--endpoint {endpoint_url} '
                            f'--profile={cloudflare.R2_PROFILE_NAME}')
@@ -1863,7 +1866,9 @@ class R2Store(AbstractStore):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketGetError(
                     'Attempted to connect to a non-existent bucket: '
-                    f'{self.source}. Consider using `AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 ls '
+                    f'{self.source}. Consider using '
+                    '`AWS_SHARED_CREDENTIALS_FILE='
+                    f'{cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 ls '
                     f's3://{self.name} '
                     f'--endpoint {endpoint_url} '
                     f'--profile={cloudflare.R2_PROFILE_NAME}\' '
@@ -1955,9 +1960,11 @@ class R2Store(AbstractStore):
         # The fastest way to delete is to run `aws s3 rb --force`,
         # which removes the bucket by force.
         endpoint_url = cloudflare.create_endpoint()
-        remove_command = (f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 rb s3://{bucket_name} --force '
-                          f'--endpoint {endpoint_url} '
-                          f'--profile={cloudflare.R2_PROFILE_NAME}')
+        remove_command = (
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} '
+            f'aws s3 rb s3://{bucket_name} --force '
+            f'--endpoint {endpoint_url} '
+            f'--profile={cloudflare.R2_PROFILE_NAME}')
         try:
             with log_utils.safe_rich_status(
                     f'[bold cyan]Deleting R2 bucket {bucket_name}[/]'):

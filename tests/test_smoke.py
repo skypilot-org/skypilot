@@ -2040,9 +2040,13 @@ class TestStorageWithCredentials:
     def tmp_awscli_bucket_r2(self, tmp_bucket_name):
         # Creates a temporary bucket using awscli
         endpoint_url = cloudflare.create_endpoint()
-        subprocess.check_call(f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 mb s3://{tmp_bucket_name} --endpoint {endpoint_url} --profile=r2', shell=True)
+        subprocess.check_call(
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 mb s3://{tmp_bucket_name} --endpoint {endpoint_url} --profile=r2',
+            shell=True)
         yield tmp_bucket_name
-        subprocess.check_call(f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 rb s3://{tmp_bucket_name} --force --endpoint {endpoint_url} --profile=r2', shell=True)
+        subprocess.check_call(
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 rb s3://{tmp_bucket_name} --force --endpoint {endpoint_url} --profile=r2',
+            shell=True)
 
     @pytest.fixture
     def tmp_public_storage_obj(self, request):
@@ -2169,7 +2173,9 @@ class TestStorageWithCredentials:
 
             # Check if bucket exists using the cli:
             try:
-                out = subprocess.check_output(command, stderr=subprocess.STDOUT, shell=True)
+                out = subprocess.check_output(command,
+                                              stderr=subprocess.STDOUT,
+                                              shell=True)
             except subprocess.CalledProcessError as e:
                 out = e.output
             out = out.decode('utf-8')
@@ -2216,7 +2222,8 @@ class TestStorageWithCredentials:
         storage_obj.add_store(store_type)
 
         # Check if tmp_source/tmp-file exists in the bucket using aws cli
-        out = subprocess.check_output(self.cli_ls_cmd(store_type, bucket_name), shell=True)
+        out = subprocess.check_output(self.cli_ls_cmd(store_type, bucket_name),
+                                      shell=True)
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
@@ -2255,16 +2262,17 @@ class TestStorageWithCredentials:
         tmp_local_list_storage_obj.add_store(store_type)
 
         # Check if tmp-file exists in the bucket root using cli
-        out = subprocess.check_output(
-            self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name), shell=True)
+        out = subprocess.check_output(self.cli_ls_cmd(
+            store_type, tmp_local_list_storage_obj.name),
+                                      shell=True)
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
 
         # Check if tmp-file exists in the bucket/tmp-source using cli
-        out = subprocess.check_output(
-            self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name,
-                            'tmp-source/'), shell=True)
+        out = subprocess.check_output(self.cli_ls_cmd(
+            store_type, tmp_local_list_storage_obj.name, 'tmp-source/'),
+                                      shell=True)
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))

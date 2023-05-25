@@ -37,7 +37,7 @@ def import_package(func):
 
 @contextlib.contextmanager
 def _load_r2_credentials():
-    """Context manager to temporarily change the AWS shared credentials file path."""
+    """Context manager to temporarily change the AWS credentials file path."""
     prev_credentials_path = os.environ.get('AWS_SHARED_CREDENTIALS_FILE')
     os.environ['AWS_SHARED_CREDENTIALS_FILE'] = AWS_R2_CREDENTIALS_PATH
     try:
@@ -47,6 +47,7 @@ def _load_r2_credentials():
             del os.environ['AWS_SHARED_CREDENTIALS_FILE']
         else:
             os.environ['AWS_SHARED_CREDENTIALS_FILE'] = prev_credentials_path
+
 
 # lru_cache() is thread-safe and it will return the same session object
 # for different threads.
@@ -65,6 +66,7 @@ def session():
             session_ = boto3.session.Session(profile_name=R2_PROFILE_NAME)
         return session_
 
+
 @functools.lru_cache()
 @import_package
 def resource(resource_name: str, **kwargs):
@@ -81,7 +83,8 @@ def resource(resource_name: str, **kwargs):
 
     session_ = session()
     with _load_r2_credentials():
-        cloudflare_credentials = session_.get_credentials().get_frozen_credentials()
+        cloudflare_credentials = session_.get_credentials(
+        ).get_frozen_credentials()
     endpoint = create_endpoint()
 
     return session_.resource(
@@ -108,7 +111,8 @@ def client(service_name: str, region):
 
     session_ = session()
     with _load_r2_credentials():
-        cloudflare_credentials = session_.get_credentials().get_frozen_credentials()
+        cloudflare_credentials = session_.get_credentials(
+        ).get_frozen_credentials()
     endpoint = create_endpoint()
 
     return session_.client(
