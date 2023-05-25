@@ -98,7 +98,7 @@ def update_spot_job_status(job_id: Optional[int] = None):
         if controller_status is None or controller_status.is_terminal():
             logger.error(f'Controller for job {job_id_} has exited abnormally. '
                          'Setting the job status to FAILED_CONTROLLER.')
-            task_name = spot_state.get_task_name_by_job_id(job_id_)
+            task_name = spot_state.get_latest_task_name_by_job_id(job_id_)
 
             # Tear down the abnormal spot cluster to avoid resource leakage.
             cluster_name = generate_spot_cluster_name(task_name, job_id_)
@@ -253,7 +253,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     f'Job {job_id} is already in terminal state '
                     f'{spot_job_status.value}. Logs will not be shown.'
                     f'{colorama.Style.RESET_ALL}{job_msg}')
-        task_name = spot_state.get_task_name_by_job_id(job_id)
+        task_name = spot_state.get_latest_task_name_by_job_id(job_id)
         cluster_name = generate_spot_cluster_name(task_name, job_id)
         backend = backends.CloudVmRayBackend()
         spot_status = spot_state.get_status(job_id)

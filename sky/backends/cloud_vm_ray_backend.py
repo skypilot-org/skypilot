@@ -299,25 +299,20 @@ class RayCodeGen:
             f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
         ]
         if spot_dag is not None:
-            dag_name = spot_dag.tasks[0].name
-            resources_str = '-'
-            if len(spot_dag.tasks) == 1:
-                resources_str = backend_utils.get_task_resources_str(
-                    spot_dag.tasks[0])
+            dag_name = spot_dag.name
             # Add the spot job to spot queue table.
             self._code += [
                 'from sky.spot import spot_state',
-                f'spot_state.set_pending('
-                f'{job_id}, None, {dag_name!r}, {resources_str!r})',
+                f'spot_state.set_job_name('
+                f'{job_id}, {dag_name!r})',
             ]
-            if len(spot_dag.tasks) > 1:
-                for task_id, task in enumerate(spot_dag.tasks[1:]):
-                    resources_str = backend_utils.get_task_resources_str(task)
-                    self._code += [
-                        f'spot_state.set_pending('
-                        f'{job_id}, {task_id}, {task.name!r}, '
-                        f'{resources_str!r})',
-                    ]
+            for task_id, task in enumerate(spot_dag.tasks):
+                resources_str = backend_utils.get_task_resources_str(task)
+                self._code += [
+                    f'spot_state.set_pending('
+                    f'{job_id}, {task_id}, {task.name!r}, '
+                    f'{resources_str!r})',
+                ]
 
     def add_gang_scheduling_placement_group(
         self,

@@ -63,6 +63,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import log_utils
 from sky.utils import common_utils
+from sky.utils import dag_utils
 from sky.utils import command_runner
 from sky.utils import schemas
 from sky.utils import subprocess_utils
@@ -935,7 +936,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     try:
         with open(entrypoint, 'r') as f:
             try:
-                config = yaml.safe_load(f)
+                config = list(yaml.safe_load_all(f))[0]
                 if isinstance(config, str):
                     # 'sky exec cluster ./my_script.sh'
                     is_yaml = False
@@ -988,7 +989,7 @@ def _make_task_from_entrypoint_with_overrides(
     env: Optional[List[Tuple[str, str]]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
-) -> Union[sky.Task, List[sky.Task]]:
+) -> Union[sky.Task, sky.Dag]:
     entrypoint = ' '.join(entrypoint)
     is_yaml, yaml_config = _check_yaml(entrypoint)
     entrypoint: Optional[str]
@@ -1022,18 +1023,14 @@ def _make_task_from_entrypoint_with_overrides(
     if is_yaml:
         assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-        task_configs = yaml.safe_load_all(entrypoint)
-        if len(list(task_configs)) > 1:
+        dag = dag_utils.load_chain_dag_from_yaml(entrypoint)
+        if len(dag.tasks) > 1:
             if override_params:
                 click.secho(
                     f'WARNING: override params {override_params} are ignored, '
                     'since the yaml file contains multiple tasks.',
                     fg='yellow')
-            tasks = []
-            for task_config in task_configs:
-                task = sky.Task.from_yaml_config(task_config)
-                tasks.append(task)
-            return tasks
+            return dag
         task = sky.Task.from_yaml(entrypoint)
     else:
         task = sky.Task(name='sky-cmd', run=entrypoint)
@@ -1304,7 +1301,7 @@ def launch(
             'support for spot instances on Azure. Please file '
             'an issue if you need this feature.')
 
-    task = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         cluster=cluster,
@@ -1323,9 +1320,10 @@ def launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
     )
-    if isinstance(task, list):
+    if isinstance(task_or_dag, sky.Dag):
         raise click.UsageError('Multiple tasks are specified in the YAML file. '
                                'Please specify a single task to launch.')
+    task = task_or_dag
 
     backend: backends.Backend
     if backend_name == backends.LocalDockerBackend.NAME:
@@ -1455,7 +1453,7 @@ def exec(
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
 
-    task = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         cluster=cluster,
@@ -1473,9 +1471,10 @@ def exec(
         env=env,
     )
 
-    if isinstance(task, list):
+    if isinstance(task_or_dag, sky.Dag):
         raise click.UsageError(
             'Multiple tasks are specified. Please specify only one task.')
+    task = task_or_dag
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
@@ -3427,7 +3426,7 @@ def spot_launch(
 
       sky spot launch 'echo hello!'
     """
-    tasks = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
         workdir=workdir,
@@ -3447,11 +3446,12 @@ def spot_launch(
         spot_recovery=spot_recovery,
     )
 
-    if not isinstance(tasks, list):
-        tasks = [tasks]
-    with sky.Dag() as dag:
-        for t in tasks:
-            dag.add(t)
+    if not isinstance(task_or_dag, sky.Dag):
+        assert isinstance(task_or_dag, sky.Task), task_or_dag
+        with sky.Dag() as dag:
+            dag.add(task_or_dag)
+    else:
+        dag = task_or_dag
 
     if not yes:
         prompt = f'Launching a new spot job {name!r}. Proceed?'

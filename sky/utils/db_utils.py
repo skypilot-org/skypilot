@@ -1,7 +1,7 @@
 """Utils for sky databases."""
 import threading
 import sqlite3
-from typing import Callable
+from typing import Any, Callable, Optional
 
 
 def add_column_to_table(
@@ -10,6 +10,8 @@ def add_column_to_table(
     table_name: str,
     column_name: str,
     column_type: str,
+    copy_from: Optional[str] = None,
+    set_original_value: Optional[Any] = None,
 ):
     """Add a column to a table."""
     for row in cursor.execute(f'PRAGMA table_info({table_name})'):
@@ -17,8 +19,17 @@ def add_column_to_table(
             break
     else:
         try:
-            cursor.execute(f'ALTER TABLE {table_name} '
-                           f'ADD COLUMN {column_name} {column_type}')
+            add_column_cmd = (f'ALTER TABLE {table_name} '
+                              f'ADD COLUMN {column_name} {column_type}')
+            cursor.execute(add_column_cmd)
+            if copy_from is not None:
+                cursor.execute(f'UPDATE {table_name} '
+                               f'SET {column_name} = {copy_from}')
+            if set_original_value is not None:
+                cursor.execute(
+                    f'UPDATE {table_name} '
+                    f'SET {column_name} = (?) '
+                    f'WHERE {column_name} IS NULL', (set_original_value,))
         except sqlite3.OperationalError as e:
             if 'duplicate column name' in str(e):
                 # We may be trying to add the same column twice, when

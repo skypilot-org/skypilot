@@ -143,8 +143,10 @@ class UsageMessageToReport(MessageToReport):
         #: Requested number of nodes
         self.task_num_nodes: Optional[int] = None  # update_actual_task
         # YAMLs converted to JSON.
-        self.user_task_yaml: Optional[str] = None  # update_user_task_yaml
-        self.actual_task: Optional[Dict[str, Any]] = None  # update_actual_task
+        self.user_task_yaml: Optional[List[Dict[
+            str, Any]]] = None  # update_user_task_yaml
+        self.actual_task: Optional[List[Dict[str,
+                                             Any]]] = None  # update_actual_task
         self.ray_yamls: Optional[List[Dict[str, Any]]] = None
         #: Number of Ray YAML files.
         self.num_tried_regions: Optional[int] = None  # update_ray_yaml
@@ -194,7 +196,7 @@ class UsageMessageToReport(MessageToReport):
     def update_ray_yaml(self, yaml_config_or_path: Union[Dict, str]):
         if self.ray_yamls is None:
             self.ray_yamls = []
-        self.ray_yamls.append(
+        self.ray_yamls.extend(
             prepare_json_from_yaml_config(yaml_config_or_path))
         self.num_tried_regions = len(self.ray_yamls)
 
@@ -351,19 +353,21 @@ def _clean_yaml(yaml_info: Dict[str, Optional[str]]):
     return cleaned_yaml_info
 
 
-def prepare_json_from_yaml_config(yaml_config_or_path: Union[Dict, str]):
+def prepare_json_from_yaml_config(
+        yaml_config_or_path: Union[Dict, str]) -> List[Dict[str, Any]]:
     """Upload safe contents of YAML file to Loki."""
     if isinstance(yaml_config_or_path, dict):
-        yaml_info = yaml_config_or_path
+        yaml_info = [yaml_config_or_path]
         comment_lines = []
     else:
         with open(yaml_config_or_path, 'r') as f:
             lines = f.readlines()
             comment_lines = [line for line in lines if line.startswith('#')]
-        yaml_info = common_utils.read_yaml(yaml_config_or_path)
+        yaml_info = common_utils.read_yaml_all(yaml_config_or_path)
 
-    yaml_info = _clean_yaml(yaml_info)
-    yaml_info['__redacted_comment_lines'] = len(comment_lines)
+    for i in range(len(yaml_info)):
+        yaml_info[i] = _clean_yaml(yaml_info[i])
+        yaml_info[i]['__redacted_comment_lines'] = len(comment_lines)
     return yaml_info
 
 

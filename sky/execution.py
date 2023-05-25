@@ -39,6 +39,7 @@ from sky.data import storage as storage_lib
 from sky.usage import usage_lib
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import dag_utils
 from sky.utils import env_options, timeline
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -84,6 +85,7 @@ def _convert_to_dag(entrypoint: Any) -> 'sky.Dag':
         entrypoint = copy.deepcopy(entrypoint)
         with sky.Dag() as dag:
             dag.add(entrypoint)
+            dag.name = entrypoint.name
         return dag
     else:
         raise TypeError(
@@ -551,33 +553,12 @@ def spot_launch(
     assert dag.is_chain(), ('Only single-node or chain dag is '
                             'allowed for spot_launch.', dag)
 
-    def get_dag_name(dag):
-        if name is not None:
-            return name
-        if len(dag.tasks) == 1:
-            dag_name = dag.tasks[0].name
-        else:
-            task_0 = dag.tasks[0]
-            if task_0.setup is None and task_0.run is None:
-                # Only use the name of the first task if it
-                # is a dummy task.
-                dag_name = task_0.name
-        if dag_name is None:
-            dag_name = backend_utils.generate_cluster_name()
-        return dag_name
+    if dag.name is None:
+        dag.name = backend_utils.generate_cluster_name()
 
-    task_id = 0
-    dag_name = get_dag_name(dag)
-    dag_tasks = dag.tasks
-    if len(dag_tasks) > 1 and dag_name == dag_tasks[0].name:
-        dag_tasks = dag_tasks[1:]
-
-    for task_node in dag_tasks:
-        if task_node.run is None:
-            continue
-
-        assert len(task_node.resources) == 1, task_node
-        resources = list(task_node.resources)[0]
+    for task_id, sub_task in enumerate(dag.tasks):
+        assert len(sub_task.resources) == 1, sub_task
+        resources = list(sub_task.resources)[0]
 
         change_default_value: Dict[str, Any] = {}
         if not resources.use_spot_specified:
@@ -586,40 +567,23 @@ def spot_launch(
             change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
 
         new_resources = resources.copy(**change_default_value)
-        task_node.set_resources({new_resources})
+        sub_task.set_resources({new_resources})
 
-        task_node = _maybe_translate_local_file_mounts_and_sync_up(task_node)
+        sub_task = _maybe_translate_local_file_mounts_and_sync_up(sub_task)
 
-        name = dag_name
+        name = dag.name
         if len(dag.tasks) > 1:
-            name = f'{task_id:2d}-{dag_name}-{task_node.name}'
+            name = f'{task_id:2d}-{dag.name}-{sub_task.name}'
         task_id += 1
         # Override the task name with the specified name or generated name, so
         # that the controller process can retrieve the task name from the task
         # config.
-        task_node.name = name
-
-    if task_id == 0:
-        print(f'{colorama.Fore.GREEN}'
-              'Skipping the job as the run section is not set.'
-              f'{colorama.Style.RESET_ALL}')
-        return
+        sub_task.name = name
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w',
                                      delete=False) as f:
-        if len(dag.tasks) == 1:
-            dag_config = dag.tasks[0].to_yaml_config()
-        else:
-            dag_config = []
-            if dag_name != dag.tasks[0].name:
-                dag_config.append({'name': dag_name})
-
-            for task_node in dag.tasks:
-                task_config = task_node.to_yaml_config()
-                dag_config.append(task_config)
-        common_utils.dump_yaml(f.name, dag_config)
-
+        dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller_name = spot.SPOT_CONTROLLER_NAME
         vars_to_fill = {
             'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,

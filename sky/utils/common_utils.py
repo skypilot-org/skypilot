@@ -12,7 +12,7 @@ import re
 import socket
 import sys
 import time
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 import yaml
 
@@ -172,6 +172,12 @@ def read_yaml(path) -> Dict[str, Any]:
     with open(path, 'r') as f:
         config = yaml.safe_load(f)
     return config
+
+
+def read_yaml_all(path) -> List[Dict[str, Any]]:
+    with open(path, 'r') as f:
+        config = yaml.safe_load_all(f)
+        return list(config)
 
 
 def dump_yaml(path, config) -> None:

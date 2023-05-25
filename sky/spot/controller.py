@@ -4,10 +4,9 @@ import multiprocessing
 import pathlib
 import time
 import traceback
-from typing import Optional, Tuple
+from typing import Tuple
 
 import filelock
-import yaml
 
 import sky
 from sky import exceptions
@@ -21,6 +20,7 @@ from sky.spot import recovery_strategy
 from sky.spot import spot_state
 from sky.spot import spot_utils
 from sky.utils import common_utils
+from sky.utils import dag_utils
 from sky.utils import subprocess_utils
 
 # Use the explicit logger name so that the logger is under the
@@ -30,12 +30,8 @@ logger = sky_logging.init_logger('sky.spot.controller')
 
 
 def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
-    with open(dag_yaml) as f:
-        task_configs = list(yaml.safe_load_all(f))
-    with sky.Dag() as dag:
-        for task_config in task_configs:
-            sky.Task.from_yaml_config(task_config)
-    dag_name = dag.tasks[0].name
+    dag = dag_utils.load_chain_dag_from_yaml(dag_yaml)
+    dag_name = dag.name
     assert dag_name is not None, dag
     return dag, dag_name
 
@@ -62,11 +58,8 @@ class SpotController:
             task_envs[constants.JOB_ID_ENV_VAR] = job_id_env_var
             task.update_envs(task_envs)
 
-    def _run_one_task(self, task_id: Optional[int], task: 'sky.Task') -> None:
+    def _run_one_task(self, task_id: int, task: 'sky.Task') -> None:
         """Busy loop monitoring spot cluster status and handling recovery.
-
-        task_id is None for the root task, i.e. the entry for the entire job.
-        When the dag only has one task, task_id is None.
 
         Raises:
             exceptions.ProvisionPrechecksError: This will be raised when the
@@ -238,11 +231,8 @@ class SpotController:
     def run(self):
         """Run controller logic and handle exceptions."""
         try:
-            if len(self._dag.tasks) == 1:
-                self._run_one_task(None, self._dag.tasks[0])
-            else:
-                for task_id, task in enumerate(self._dag.tasks):
-                    self._run_one_task(task_id, task)
+            for task_id, task in enumerate(self._dag.tasks):
+                self._run_one_task(task_id, task)
         except exceptions.ProvisionPrechecksError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
