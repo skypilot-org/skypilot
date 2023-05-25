@@ -6,7 +6,6 @@
 *.log
 exp-*/
 !included.log
-!included/included.*
 excluded.*
 /front_slash_excluded
 no_slash_excluded
