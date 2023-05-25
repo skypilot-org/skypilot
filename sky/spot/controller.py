@@ -238,8 +238,8 @@ class SpotController:
     def run(self):
         """Run controller logic and handle exceptions."""
         try:
-            if len(self._dag.tasks) == 0:
-                self._run_one_task(None, task)
+            if len(self._dag.tasks) == 1:
+                self._run_one_task(None, self._dag.tasks[0])
             else:
                 for task_id, task in enumerate(self._dag.tasks):
                     self._run_one_task(task_id, task)
