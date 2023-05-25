@@ -7,6 +7,8 @@ import threading
 import os
 from typing import Dict, Optional, Tuple
 
+from sky.utils import ux_utils
+
 boto3 = None
 botocore = None
 _session_creation_lock = threading.RLock()
@@ -36,7 +38,7 @@ def import_package(func):
 
 
 @contextlib.contextmanager
-def _load_r2_credentials():
+def _load_r2_credentials_env():
     """Context manager to temporarily change the AWS credentials file path."""
     prev_credentials_path = os.environ.get('AWS_SHARED_CREDENTIALS_FILE')
     os.environ['AWS_SHARED_CREDENTIALS_FILE'] = AWS_R2_CREDENTIALS_PATH
@@ -48,6 +50,18 @@ def _load_r2_credentials():
         else:
             os.environ['AWS_SHARED_CREDENTIALS_FILE'] = prev_credentials_path
 
+
+def get_r2_credentials():
+    session_ = session()
+    with _load_r2_credentials_env():
+        cloudflare_credentials = session_.get_credentials()
+        if cloudflare_credentials is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cloudflare credentials not found. Run '
+                                 '`sky check` to verify credentials are '
+                                 'correctly setup.')
+        else:
+            return cloudflare_credentials.get_frozen_credentials()
 
 # lru_cache() is thread-safe and it will return the same session object
 # for different threads.
@@ -62,7 +76,7 @@ def session():
     # However, the session object itself is thread-safe, so we are
     # able to use lru_cache() to cache the session object.
     with _session_creation_lock:
-        with _load_r2_credentials():
+        with _load_r2_credentials_env():
             session_ = boto3.session.Session(profile_name=R2_PROFILE_NAME)
         return session_
 
@@ -82,9 +96,7 @@ def resource(resource_name: str, **kwargs):
     # Reference: https://stackoverflow.com/a/59635814
 
     session_ = session()
-    with _load_r2_credentials():
-        cloudflare_credentials = session_.get_credentials(
-        ).get_frozen_credentials()
+    cloudflare_credentials = get_r2_credentials()
     endpoint = create_endpoint()
 
     return session_.resource(
@@ -110,9 +122,7 @@ def client(service_name: str, region):
     # Reference: https://stackoverflow.com/a/59635814
 
     session_ = session()
-    with _load_r2_credentials():
-        cloudflare_credentials = session_.get_credentials(
-        ).get_frozen_credentials()
+    cloudflare_credentials = get_r2_credentials()
     endpoint = create_endpoint()
 
     return session_.client(
@@ -168,7 +178,7 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
         hints += ' Run the following commands:'
         if not r2_profile_in_aws_cred():
             hints += f'\n{_INDENT_PREFIX}  $ pip install boto3'
-            hints += f'\n{_INDENT_PREFIX}  $ AWS_SHARED_CREDENTIALS_FILE=~/.cloudflare/credentials aws configure --profile r2'
+            hints += f'\n{_INDENT_PREFIX}  $ AWS_SHARED_CREDENTIALS_FILE={AWS_R2_CREDENTIALS_PATH} aws configure --profile r2'
         if not os.path.exists(accountid_path):
             hints += f'\n{_INDENT_PREFIX}  $ mkdir -p ~/.cloudflare'
             hints += f'\n{_INDENT_PREFIX}  $ echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid'  # pylint: disable=line-too-long
