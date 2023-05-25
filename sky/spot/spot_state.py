@@ -181,6 +181,12 @@ _SPOT_STATUS_TO_COLOR = {
 
 
 # === Status transition functions ===
+def _parse_task_id_condition(task_id: Optional[int]) -> str:
+    if task_id is None:
+        return 'task_id IS NULL'
+    return f'task_id={task_id}'
+
+
 def set_pending(job_id: int, task_id: Optional[int], name: str,
                 resources_str: str):
     """Set the job to pending state."""
@@ -193,7 +199,7 @@ def set_pending(job_id: int, task_id: Optional[int], name: str,
     _CONN.commit()
 
 
-def set_submitted(job_id: int, task_id: int, run_timestamp: str,
+def set_submitted(job_id: int, task_id: Optional[int], run_timestamp: str,
                   resources_str: str):
     """Set the job to submitted."""
     # Use the timestamp in the `run_timestamp` ('sky-2022-10...'), to make the
@@ -210,61 +216,67 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
         submitted_at=(?),
         status=(?),
         run_timestamp=(?)
-        WHERE job_id=(?) AND (task_id=(?){update_dag_entry_cmd})""",
+        WHERE job_id=(?) AND
+        ({_parse_task_id_condition(task_id)}{update_dag_entry_cmd})""",
         (resources_str, submit_time, SpotStatus.SUBMITTED.value, run_timestamp,
-         job_id, task_id))
+         job_id))
     _CONN.commit()
 
 
-def set_starting(job_id: int, task_id: int):
+def set_starting(job_id: int, task_id: Optional[int]):
     logger.info('Launching the spot cluster...')
     _CURSOR.execute(
-        """\
+        f"""\
         UPDATE spot SET status=(?)
-        WHERE job_id=(?) AND (task_id=(?) OR task_id IS NULL)""",
-        (SpotStatus.STARTING.value, job_id, task_id))
+        WHERE job_id=(?) AND
+        ({_parse_task_id_condition(task_id)} OR task_id IS NULL)""",
+        (SpotStatus.STARTING.value, job_id))
     _CONN.commit()
 
 
 def set_started(job_id: int, task_id: int, start_time: float):
     logger.info('Job started.')
     _CURSOR.execute(
-        """\
+        f"""\
         UPDATE spot SET status=(?), start_at=(?), last_recovered_at=(?)
-        WHERE job_id=(?) AND (task_id=(?) OR task_id IS NULL)""",
-        (SpotStatus.RUNNING.value, start_time, start_time, job_id, task_id))
+        WHERE job_id=(?) AND
+        ({_parse_task_id_condition(task_id)} OR task_id IS NULL)""",
+        (SpotStatus.RUNNING.value, start_time, start_time, job_id))
     _CONN.commit()
 
 
 def set_recovering(job_id: int, task_id: int):
     logger.info('=== Recovering... ===')
     _CURSOR.execute(
-        """\
+        f"""\
             UPDATE spot SET
             status=(?), job_duration=job_duration+(?)-last_recovered_at
-            WHERE job_id=(?) AND (task_id=(?) OR task_id IS NULL)""",
-        (SpotStatus.RECOVERING.value, time.time(), job_id, task_id))
+            WHERE job_id=(?) AND
+            ({_parse_task_id_condition(task_id)} OR task_id IS NULL)""",
+        (SpotStatus.RECOVERING.value, time.time(), job_id))
     _CONN.commit()
 
 
 def set_recovered(job_id: int, task_id: int, recovered_time: float):
     _CURSOR.execute(
-        """\
+        f"""\
         UPDATE spot SET
         status=(?), last_recovered_at=(?), recovery_count=recovery_count+1
-        WHERE job_id=(?) AND (task_id=(?) OR task_id IS NULL)""",
-        (SpotStatus.RUNNING.value, recovered_time, job_id, task_id))
+        WHERE job_id=(?) AND
+        ({_parse_task_id_condition(task_id)} OR task_id IS NULL)""",
+        (SpotStatus.RUNNING.value, recovered_time, job_id))
     _CONN.commit()
     logger.info('==== Recovered. ====')
 
 
 def set_succeeded(job_id: int, task_id: Optional[int], end_time: float):
-    _CURSOR.execute(
-        """\
+    sqlite_cmd = f"""\
         UPDATE spot SET
         status=(?), end_at=(?)
-        WHERE job_id=(?) AND task_id=(?) AND end_at IS null""",
-        (SpotStatus.SUCCEEDED.value, end_time, job_id, task_id))
+        WHERE job_id=(?) AND {_parse_task_id_condition(task_id)}
+        AND end_at IS null"""
+    logger.info(sqlite_cmd)
+    _CURSOR.execute(sqlite_cmd, (SpotStatus.SUCCEEDED.value, end_time, job_id))
     _CONN.commit()
     logger.info('Job succeeded.')
 

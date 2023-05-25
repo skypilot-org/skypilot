@@ -565,7 +565,6 @@ def spot_launch(
         if dag_name is None:
             dag_name = backend_utils.generate_cluster_name()
         return dag_name
-            
 
     task_id = 0
     dag_name = get_dag_name(dag)
@@ -593,7 +592,7 @@ def spot_launch(
 
         name = dag_name
         if len(dag.tasks) > 1:
-            name += f'{task_id:2d}-{dag_name}-{task_node.name}'
+            name = f'{task_id:2d}-{dag_name}-{task_node.name}'
         task_id += 1
         # Override the task name with the specified name or generated name, so
         # that the controller process can retrieve the task name from the task
@@ -607,7 +606,8 @@ def spot_launch(
         return
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
-                                     mode='w', delete=False) as f:
+                                     mode='w',
+                                     delete=False) as f:
         if len(dag.tasks) == 1:
             dag_config = dag.tasks[0].to_yaml_config()
         else:
