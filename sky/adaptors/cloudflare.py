@@ -63,6 +63,7 @@ def get_r2_credentials():
         else:
             return cloudflare_credentials.get_frozen_credentials()
 
+
 # lru_cache() is thread-safe and it will return the same session object
 # for different threads.
 # Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache # pylint: disable=line-too-long
