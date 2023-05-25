@@ -18,7 +18,7 @@ class oci_conf:
     CPU_MEM_SPERATOR = "_"
 
     DEFAULT_NUM_VCPUS = 8
-    DEFAULT_MEMORY_CPU_RATIO = 6
+    DEFAULT_MEMORY_CPU_RATIO = 4
 
     VM_PREFIX = "VM.Standard"
     DEFAULT_INSTANCE_FAMILY = [
