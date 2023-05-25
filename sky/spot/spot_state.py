@@ -421,7 +421,7 @@ def get_failure_reason(job_id: int) -> Optional[str]:
 def get_spot_jobs() -> List[Dict[str, Any]]:
     """Get spot clusters' status."""
     rows = _CURSOR.execute("""\
-        SELECT * FROM spot ORDER BY new_job_id DESC""")
+        SELECT * FROM spot ORDER BY new_job_id DESC, sub_job_id DESC""")
     jobs = []
     for row in rows:
         job_dict = dict(zip(columns, row))

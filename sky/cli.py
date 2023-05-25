@@ -1024,7 +1024,12 @@ def _make_task_from_entrypoint_with_overrides(
         assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint)
-        if len(dag.tasks) > 1:
+        if len(dag.tasks) > 1 or dag.name != dag.tasks[0].name:
+            # When the dag has more than 1 task or the dag name is
+            # different from the task name (i.e. the yaml file
+            # contains a standalone dag name). It is unclear how to
+            # override the params for the dag. So we just ignore the
+            # override params.
             if override_params:
                 click.secho(
                     f'WARNING: override params {override_params} are ignored, '
