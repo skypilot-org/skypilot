@@ -1914,17 +1914,14 @@ class TestStorageWithCredentials:
     def cli_delete_cmd(store_type, bucket_name):
         if store_type == storage_lib.StoreType.S3:
             url = f's3://{bucket_name}'
-            return ['aws', 's3', 'rb', url, '--force']
+            return f'aws s3 rb {url} --force'
         if store_type == storage_lib.StoreType.GCS:
             url = f'gs://{bucket_name}'
-            return ['gsutil', '-m', 'rm', '-r', url]
+            return f'gsutil -m rm -r {url}'
         if store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             url = f's3://{bucket_name}'
-            return [
-                'aws', 's3', 'rb', url, '--force', '--endpoint', endpoint_url,
-                '--profile=r2'
-            ]
+            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
 
     @staticmethod
     def cli_ls_cmd(store_type, bucket_name, suffix=''):
@@ -1933,23 +1930,20 @@ class TestStorageWithCredentials:
                 url = f's3://{bucket_name}/{suffix}'
             else:
                 url = f's3://{bucket_name}'
-            return ['aws', 's3', 'ls', url]
+            return f'aws s3 ls {url}'
         if store_type == storage_lib.StoreType.GCS:
             if suffix:
                 url = f'gs://{bucket_name}/{suffix}'
             else:
                 url = f'gs://{bucket_name}'
-            return ['gsutil', 'ls', url]
+            return f'gsutil ls {url}'
         if store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             if suffix:
                 url = f's3://{bucket_name}/{suffix}'
             else:
                 url = f's3://{bucket_name}'
-            return [
-                'aws', 's3', 'ls', url, '--endpoint', endpoint_url,
-                '--profile=r2'
-            ]
+            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -2046,15 +2040,9 @@ class TestStorageWithCredentials:
     def tmp_awscli_bucket_r2(self, tmp_bucket_name):
         # Creates a temporary bucket using awscli
         endpoint_url = cloudflare.create_endpoint()
-        subprocess.check_call([
-            'aws', 's3', 'mb', f's3://{tmp_bucket_name}', '--endpoint',
-            endpoint_url, '--profile=r2'
-        ])
+        subprocess.check_call(f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 mb s3://{tmp_bucket_name} --endpoint {endpoint_url} --profile=r2', shell=True)
         yield tmp_bucket_name
-        subprocess.check_call([
-            'aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force',
-            '--endpoint', endpoint_url, '--profile=r2'
-        ])
+        subprocess.check_call(f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 rb s3://{tmp_bucket_name} --force --endpoint {endpoint_url} --profile=r2', shell=True)
 
     @pytest.fixture
     def tmp_public_storage_obj(self, request):
@@ -2102,7 +2090,7 @@ class TestStorageWithCredentials:
 
         # Delete bucket externally
         cmd = self.cli_delete_cmd(store_type, tmp_scratch_storage_obj.name)
-        subprocess.check_output(cmd)
+        subprocess.check_output(cmd, shell=True)
 
         # Run sky storage delete to delete the storage object
         out = subprocess.check_output(
@@ -2132,6 +2120,7 @@ class TestStorageWithCredentials:
             timestamp = str(time.time()).replace('.', '')
             store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
                                             source=tmpdir)
+            print(tmpdir)
             store_obj.add_store(store_type)
 
         subprocess.check_output(['sky', 'storage', 'delete', store_obj.name])
@@ -2165,24 +2154,14 @@ class TestStorageWithCredentials:
         while True:
             nonexist_bucket_name = str(uuid.uuid4())
             if nonexist_bucket_url.startswith('s3'):
-                command = [
-                    'aws', 's3api', 'head-bucket', '--bucket',
-                    nonexist_bucket_name
-                ]
+                command = f'aws s3api head-bucket --bucket {nonexist_bucket_name}'
                 expected_output = '404'
             elif nonexist_bucket_url.startswith('gs'):
-                command = [
-                    'gsutil', 'ls',
-                    nonexist_bucket_url.format(random_name=nonexist_bucket_name)
-                ]
+                command = f'gsutil ls {nonexist_bucket_url.format(random_name=nonexist_bucket_name)}'
                 expected_output = 'BucketNotFoundException'
             elif nonexist_bucket_url.startswith('r2'):
                 endpoint_url = cloudflare.create_endpoint()
-                command = [
-                    'aws', 's3api', 'head-bucket', '--bucket',
-                    nonexist_bucket_name, '--endpoint', endpoint_url,
-                    '--profile=r2'
-                ]
+                command = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=r2'
                 expected_output = '404'
             else:
                 raise ValueError('Unsupported bucket type '
@@ -2190,7 +2169,7 @@ class TestStorageWithCredentials:
 
             # Check if bucket exists using the cli:
             try:
-                out = subprocess.check_output(command, stderr=subprocess.STDOUT)
+                out = subprocess.check_output(command, stderr=subprocess.STDOUT, shell=True)
             except subprocess.CalledProcessError as e:
                 out = e.output
             out = out.decode('utf-8')
@@ -2237,7 +2216,7 @@ class TestStorageWithCredentials:
         storage_obj.add_store(store_type)
 
         # Check if tmp_source/tmp-file exists in the bucket using aws cli
-        out = subprocess.check_output(self.cli_ls_cmd(store_type, bucket_name))
+        out = subprocess.check_output(self.cli_ls_cmd(store_type, bucket_name), shell=True)
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
@@ -2277,7 +2256,7 @@ class TestStorageWithCredentials:
 
         # Check if tmp-file exists in the bucket root using cli
         out = subprocess.check_output(
-            self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name))
+            self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name), shell=True)
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
@@ -2285,7 +2264,7 @@ class TestStorageWithCredentials:
         # Check if tmp-file exists in the bucket/tmp-source using cli
         out = subprocess.check_output(
             self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name,
-                            'tmp-source/'))
+                            'tmp-source/'), shell=True)
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
