@@ -234,7 +234,7 @@ def set_starting(job_id: int, task_id: Optional[int]):
     _CONN.commit()
 
 
-def set_started(job_id: int, task_id: int, start_time: float):
+def set_started(job_id: int, task_id: Optional[int], start_time: float):
     logger.info('Job started.')
     _CURSOR.execute(
         f"""\
@@ -245,7 +245,7 @@ def set_started(job_id: int, task_id: int, start_time: float):
     _CONN.commit()
 
 
-def set_recovering(job_id: int, task_id: int):
+def set_recovering(job_id: int, task_id: Optional[int]):
     logger.info('=== Recovering... ===')
     _CURSOR.execute(
         f"""\
@@ -257,7 +257,7 @@ def set_recovering(job_id: int, task_id: int):
     _CONN.commit()
 
 
-def set_recovered(job_id: int, task_id: int, recovered_time: float):
+def set_recovered(job_id: int, task_id: Optional[int], recovered_time: float):
     _CURSOR.execute(
         f"""\
         UPDATE spot SET

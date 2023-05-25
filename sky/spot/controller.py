@@ -92,7 +92,7 @@ class SpotController:
                         'for empty run.')
             spot_state.set_started(self._job_id,
                                    task_id,
-                                   start_time=job_submitted_at)
+                                   start_time=time.time())
             spot_state.set_succeeded(self._job_id,
                                      task_id,
                                      end_time=time.time())
