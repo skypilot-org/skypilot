@@ -153,7 +153,7 @@ class AutostopEvent(SkyletEvent):
             # by the env vars).  See #1880 for details.
             env = dict(os.environ, RAY_USAGE_STATS_ENABLED='0')
             env.pop('AWS_ACCESS_KEY_ID', None)
-            env.pop('AWS_SECRETE_ACCESS_KEY', None)
+            env.pop('AWS_SECRET_ACCESS_KEY', None)
 
             # We do "initial ray up + ray down --workers-only" only for
             # multinode clusters as they are not needed for single-node.
