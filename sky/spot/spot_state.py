@@ -5,7 +5,7 @@ import enum
 import pathlib
 import sqlite3
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 
@@ -217,18 +217,18 @@ def set_job_name(job_id: int, name: str):
     _CONN.commit()
 
 
-def set_pending(job_id: int, task_id: int, name: str, resources_str: str):
+def set_pending(job_id: int, sub_job_id: int, name: str, resources_str: str):
     """Set the job to pending state."""
     _CURSOR.execute(
         """\
         INSERT INTO spot
-        (new_job_id, task_id, job_name, resources, status)
+        (new_job_id, sub_job_id, job_name, resources, status)
         VALUES (?, ?, ?, ?, ?)""",
-        (job_id, task_id, name, resources_str, SpotStatus.PENDING.value))
+        (job_id, sub_job_id, name, resources_str, SpotStatus.PENDING.value))
     _CONN.commit()
 
 
-def set_submitted(job_id: int, task_id: int, run_timestamp: str,
+def set_submitted(job_id: int, sub_job_id: int, run_timestamp: str,
                   resources_str: str):
     """Set the job to submitted."""
     # Use the timestamp in the `run_timestamp` ('sky-2022-10...'), to make the
@@ -237,76 +237,74 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
     # Also, using the earlier timestamp should be closer to the term
     # `submit_at`, which represents the time the spot task is submitted.
     submit_time = backend_utils.get_timestamp_from_run_timestamp(run_timestamp)
-    update_dag_entry_cmd = ' OR task_id IS NULL' if task_id == 0 else ''
     _CURSOR.execute(
-        f"""\
+        """\
         UPDATE spot SET
         resources=(?),
         submitted_at=(?),
         status=(?),
         run_timestamp=(?)
         WHERE new_job_id=(?) AND
-        (task_id=(?){update_dag_entry_cmd})""",
-        (resources_str, task_id, submit_time, SpotStatus.SUBMITTED.value,
-         run_timestamp, job_id))
+        sub_job_id=(?)""", (resources_str, sub_job_id, submit_time,
+                            SpotStatus.SUBMITTED.value, run_timestamp, job_id))
+
     _CONN.commit()
 
 
-def set_starting(job_id: int, task_id: int):
+def set_starting(job_id: int, sub_job_id: int):
     logger.info('Launching the spot cluster...')
     _CURSOR.execute(
         """\
         UPDATE spot SET status=(?)
         WHERE new_job_id=(?) AND
-        (task_id=(?) OR task_id IS NULL)""",
-        (SpotStatus.STARTING.value, job_id, task_id))
+        sub_job_id=(?)""", (SpotStatus.STARTING.value, job_id, sub_job_id))
     _CONN.commit()
 
 
-def set_started(job_id: int, task_id: int, start_time: float):
+def set_started(job_id: int, sub_job_id: int, start_time: float):
     logger.info('Job started.')
     _CURSOR.execute(
         """\
         UPDATE spot SET status=(?), start_at=(?), last_recovered_at=(?)
         WHERE new_job_id=(?) AND
-        (task_id=(?) OR task_id IS NULL)""",
-        (SpotStatus.RUNNING.value, start_time, start_time, job_id, task_id))
+        sub_job_id=(?)""",
+        (SpotStatus.RUNNING.value, start_time, start_time, job_id, sub_job_id))
     _CONN.commit()
 
 
-def set_recovering(job_id: int, task_id: int):
+def set_recovering(job_id: int, sub_job_id: int):
     logger.info('=== Recovering... ===')
     _CURSOR.execute(
         """\
             UPDATE spot SET
             status=(?), job_duration=job_duration+(?)-last_recovered_at
             WHERE new_job_id=(?) AND
-            (task_id=(?) OR task_id IS NULL)""",
-        (SpotStatus.RECOVERING.value, time.time(), job_id, task_id))
+            sub_job_id=(?)""",
+        (SpotStatus.RECOVERING.value, time.time(), job_id, sub_job_id))
     _CONN.commit()
 
 
-def set_recovered(job_id: int, task_id: int, recovered_time: float):
+def set_recovered(job_id: int, sub_job_id: int, recovered_time: float):
     _CURSOR.execute(
         """\
         UPDATE spot SET
         status=(?), last_recovered_at=(?), recovery_count=recovery_count+1
         WHERE new_job_id=(?) AND
-        (task_id=(?) OR task_id IS NULL)""",
-        (SpotStatus.RUNNING.value, recovered_time, job_id, task_id))
+        sub_job_id=(?)""",
+        (SpotStatus.RUNNING.value, recovered_time, job_id, sub_job_id))
     _CONN.commit()
     logger.info('==== Recovered. ====')
 
 
-def set_succeeded(job_id: int, task_id: int, end_time: float):
+def set_succeeded(job_id: int, sub_job_id: int, end_time: float):
     sqlite_cmd = """\
         UPDATE spot SET
         status=(?), end_at=(?)
-        WHERE new_job_id=(?) AND task_id=(?)
+        WHERE new_job_id=(?) AND sub_job_id=(?)
         AND end_at IS null"""
     logger.info(sqlite_cmd)
     _CURSOR.execute(sqlite_cmd,
-                    (SpotStatus.SUCCEEDED.value, end_time, job_id, task_id))
+                    (SpotStatus.SUCCEEDED.value, end_time, job_id, sub_job_id))
     _CONN.commit()
     logger.info('Job succeeded.')
 
@@ -384,17 +382,28 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
     return job_ids
 
 
-def get_status(job_id: int) -> Optional[SpotStatus]:
-    """Get the status of a job."""
-    statuses = _CURSOR.execute(
+def get_sub_job_id_status(job_id: int) -> Optional[Tuple[int, SpotStatus]]:
+    """Get the latest sub job id and status of a job."""
+    id_statuses = _CURSOR.execute(
         """\
-        SELECT status FROM spot
+        SELECT sub_job_id, status FROM spot
         WHERE new_job_id=(?)
         ORDER BY sub_job_id ASC""", (job_id,)).fetchall()
-    if len(statuses) == 0:
+    if len(id_statuses) == 0:
         return None
-    statuses = [SpotStatus(status[0]) for status in statuses]
-    return max([status for status in statuses if not status.is_terminal()])
+    sub_job_id, status = id_statuses[-1]
+    for sub_job_id, status in id_statuses:
+        status = SpotStatus(status)
+        if not status.is_terminal():
+            break
+    return sub_job_id, status
+
+
+def get_status(job_id: int) -> Optional[SpotStatus]:
+    id_status = get_sub_job_id_status(job_id)
+    if id_status is None:
+        return None
+    return id_status[1]
 
 
 def get_failure_reason(job_id: int) -> Optional[str]:

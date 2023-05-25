@@ -371,9 +371,9 @@ def start(job_id, dag_yaml, retry_until_up):
         # We should check job status after 'set_cancelled', otherwise
         # the job status is not terminal.
         job_status = spot_state.get_status(job_id)
+        assert job_status is not None
         # The job can be non-terminal if the controller exited abnormally,
         # e.g. failed to launch cluster after reaching the MAX_RETRY.
-        assert job_status is not None
         if not job_status.is_terminal():
             logger.info(f'Previous spot job status: {job_status.value}')
             spot_state.set_failed(
