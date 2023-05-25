@@ -398,6 +398,7 @@ def start(job_id, dag_yaml, retry_until_up):
             logger.info(f'Previous spot job status: {job_status.value}')
             spot_state.set_failed(
                 job_id,
+                sub_job_id=None,
                 failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
                 failure_reason=('Unexpected error occurred. For details, '
                                 f'run: sky spot logs --controller {job_id}'))
