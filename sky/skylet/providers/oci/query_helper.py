@@ -130,7 +130,7 @@ class oci_query_helper:
     def find_compartment(cls, region) -> str:
         """ If compartment is not configured, we use root compartment """
         # Try to use the configured one first
-        skypilot_compartment = oci_conf.default_compartment_ocid(region)
+        skypilot_compartment = oci_conf.get_compartment(region)
         if skypilot_compartment is not None:
             return skypilot_compartment
 

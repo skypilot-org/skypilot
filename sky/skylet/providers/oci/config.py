@@ -43,12 +43,12 @@ class oci_conf:
     RETRY_INTERVAL_BASE_SECONDS = 5
 
     @classmethod
-    def default_compartment_ocid(cls, region):
+    def get_compartment(cls, region):
         # Allow task(cluster)-specific compartment/VCN parameters.
-        defval = skypilot_config.get_nested(
+        default_compartment_ocid = skypilot_config.get_nested(
             ("oci", "default", "compartment_ocid"), None)
         compartment = skypilot_config.get_nested(
-            ("oci", region, "compartment_ocid"), defval)
+            ("oci", region, "compartment_ocid"), default_compartment_ocid)
         return compartment
 
     @classmethod

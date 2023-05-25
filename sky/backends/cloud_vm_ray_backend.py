@@ -3175,6 +3175,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             returncode = oci_query_helper.terminate_instances_by_tags(
                 {TAG_RAY_CLUSTER_NAME: cluster_name}, region)
 
+            # To avoid undefined local varaiables error.
+            stdout = stderr = ''
         elif (terminate and
               (prev_cluster_status == global_user_state.ClusterStatus.STOPPED or
                use_tpu_vm)):
