@@ -10,7 +10,7 @@ def load_chain_dag_from_yaml(path) -> dag_lib.Dag:
         dag_name = configs[0]['name']
         configs = configs[1:]
     elif len(configs) == 1:
-        dag_name = configs[0]['name']
+        dag_name = configs[0].get('name')
 
     current_task = None
     with dag_lib.Dag() as dag:
