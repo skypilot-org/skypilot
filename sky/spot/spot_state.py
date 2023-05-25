@@ -406,6 +406,7 @@ def get_latest_sub_job_id_status(
     if len(id_statuses) == 0:
         return None, None
     sub_job_id, status = id_statuses[-1]
+    status = SpotStatus(status)
     for sub_job_id, status in id_statuses:
         status = SpotStatus(status)
         if not status.is_terminal():
@@ -430,10 +431,13 @@ def get_failure_reason(job_id: int) -> Optional[str]:
     return reason[0]
 
 
-def get_spot_jobs() -> List[Dict[str, Any]]:
+def get_spot_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """Get spot clusters' status."""
-    rows = _CURSOR.execute("""\
-        SELECT * FROM spot ORDER BY new_job_id DESC, sub_job_id DESC""")
+    job_filter = '' if job_id is None else f'WHERE new_job_id={job_id}'
+
+    rows = _CURSOR.execute(f"""\
+        SELECT * FROM spot ORDER {job_filter}
+        BY new_job_id DESC, sub_job_id DESC""")
     jobs = []
     for row in rows:
         job_dict = dict(zip(columns, row))
@@ -443,18 +447,13 @@ def get_spot_jobs() -> List[Dict[str, Any]]:
     return jobs
 
 
-def get_latest_task_name_by_job_id(job_id: int) -> str:
+def get_sub_job_name(job_id: int, sub_job_id: int) -> str:
     """Get the task name of a job."""
-    statuses = ', '.join(['?'] * len(SpotStatus.terminal_statuses()))
-    field_values = [job_id]
-    field_values.extend(
-        [status.value for status in SpotStatus.terminal_statuses()])
     task_name = _CURSOR.execute(
         f"""\
         SELECT job_name FROM spot
         WHERE new_job_id=(?)
-        AND status NOT IN ({statuses})
-        ORDER BY sub_job_id ASC LIMIT 1""", field_values).fetchone()
+        AND sub_job_id=(?)""", (job_id, sub_job_id)).fetchone()
     return task_name[0]
 
 

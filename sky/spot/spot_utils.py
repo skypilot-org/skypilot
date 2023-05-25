@@ -98,23 +98,24 @@ def update_spot_job_status(job_id: Optional[int] = None):
         if controller_status is None or controller_status.is_terminal():
             logger.error(f'Controller for job {job_id_} has exited abnormally. '
                          'Setting the job status to FAILED_CONTROLLER.')
-            task_name = spot_state.get_latest_task_name_by_job_id(job_id_)
-
-            # Tear down the abnormal spot cluster to avoid resource leakage.
-            cluster_name = generate_spot_cluster_name(task_name, job_id_)
-            handle = global_user_state.get_handle_from_cluster_name(
-                cluster_name)
-            if handle is not None:
-                backend = backend_utils.get_backend_from_handle(handle)
-                max_retry = 3
-                for retry_cnt in range(max_retry):
-                    try:
-                        backend.teardown(handle, terminate=True)
-                        break
-                    except RuntimeError:
-                        logger.error('Failed to tear down the spot cluster '
-                                     f'{cluster_name!r}. Retrying '
-                                     f'[{retry_cnt}/{max_retry}].')
+            sub_jobs = spot_state.get_spot_jobs(job_id_)
+            for sub_job in sub_jobs:
+                task_name = sub_job['job_name']
+                # Tear down the abnormal spot cluster to avoid resource leakage.
+                cluster_name = generate_spot_cluster_name(task_name, job_id_)
+                handle = global_user_state.get_handle_from_cluster_name(
+                    cluster_name)
+                if handle is not None:
+                    backend = backend_utils.get_backend_from_handle(handle)
+                    max_retry = 3
+                    for retry_cnt in range(max_retry):
+                        try:
+                            backend.teardown(handle, terminate=True)
+                            break
+                        except RuntimeError:
+                            logger.error('Failed to tear down the spot cluster '
+                                         f'{cluster_name!r}. Retrying '
+                                         f'[{retry_cnt}/{max_retry}].')
 
             # The controller job for this spot job is not running: it must
             # have exited abnormally, and we should set the job status to
@@ -256,8 +257,6 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     f'Job {job_id} is already in terminal state '
                     f'{spot_job_status.value}. Logs will not be shown.'
                     f'{colorama.Style.RESET_ALL}{job_msg}')
-        task_name = spot_state.get_latest_task_name_by_job_id(job_id)
-        cluster_name = generate_spot_cluster_name(task_name, job_id)
         backend = backends.CloudVmRayBackend()
         sub_job_id, spot_status = spot_state.get_latest_sub_job_id_status(
             job_id)
@@ -265,8 +264,12 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         # spot_status can be None if the controller process just started and has
         # not updated the spot status yet.
         while spot_status is None or not spot_status.is_terminal():
-            handle = global_user_state.get_handle_from_cluster_name(
-                cluster_name)
+            handle = None
+            if sub_job_id is not None:
+                task_name = spot_state.get_sub_job_name(job_id, sub_job_id)
+                cluster_name = generate_spot_cluster_name(task_name, job_id)
+                handle = global_user_state.get_handle_from_cluster_name(
+                    cluster_name)
             # Check the handle: The cluster can be preempted and removed from
             # the table before the spot state is updated by the controller. In
             # this case, we should skip the logging, and wait for the next
@@ -314,8 +317,12 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                         status_display.update('Waiting for the next sub job: '
                                               f'{sub_job_id + 1}.')
                         status_display.start()
-                        while (sub_job_id == spot_state.
-                               get_latest_sub_job_id_status(job_id)[0]):
+                        original_sub_job_id = sub_job_id
+                        while True:
+                            sub_job_id, spot_status = spot_state.get_latest_sub_job_id_status(
+                                job_id)
+                            if original_sub_job_id != sub_job_id:
+                                break
                             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                         continue
                     else:
