@@ -11,7 +11,7 @@ boto3 = None
 botocore = None
 _session_creation_lock = threading.RLock()
 ACCOUNT_ID_PATH = '~/.cloudflare/accountid'
-AWS_R2_CREDENTIALS_PATH = '~/.cloudflare/credentials'
+AWS_R2_CREDENTIALS_PATH = '~/.cloudflare/r2credentials'
 R2_PROFILE_NAME = 'r2'
 _INDENT_PREFIX = '    '
 
