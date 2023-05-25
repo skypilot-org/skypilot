@@ -732,7 +732,7 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
             *storage_setup_commands,
             f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
         ]
 
         test = Test(
