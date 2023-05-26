@@ -2830,6 +2830,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   handle: CloudVmRayResourceHandle,
                   terminate: bool,
                   purge: bool = False):
+        """Tear down/ Stop the cluster.
+
+        Args:
+            handle: The handle to the cluster.
+            terminate: Terminate or stop the cluster.
+            purge: Purge the cluster record from the cluster table, even if
+                the teardown fails.
+        Raises:
+            exceptions.ClusterOwnerIdentityMismatchError: If the cluster is
+                owned by another user.
+            exceptions.CloudUserIdentityError: if we fail to get the current user
+                identity.
+            RuntimeError: If the cluster fails to be terminated/stopped.
+        """
         cluster_name = handle.cluster_name
         # Check if the cluster is owned by the current user. Raise
         # exceptions.ClusterOwnerIdentityMismatchError
@@ -3069,7 +3083,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         process, and should not be set to False in other cases.
 
         Raises:
-            RuntimeError: If the cluster fails to terminate.
+            RuntimeError: If the cluster fails to be terminated/stopped.
         """
         if refresh_cluster_status:
             prev_cluster_status, _ = (
