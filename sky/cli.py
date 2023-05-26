@@ -2664,7 +2664,7 @@ def _down_or_stop_clusters(
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
                     f'{colorama.Style.RESET_ALL}'
-                    f'\n\tReason: {common_utils.format_exception(e)}.')
+                    f'\nReason: {common_utils.format_exception(e)}.')
             except (exceptions.NotSupportedError,
                     exceptions.ClusterOwnerIdentityMismatchError) as e:
                 message = str(e)
