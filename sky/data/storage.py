@@ -2214,11 +2214,13 @@ class IBMCosStore(AbstractStore):
                 # is to reinitialize a client with a new region
                 tmp_client = ibm.get_cos_client(region_scanned)
                 tmp_client.head_bucket(Bucket=bucket_name)
-                logger.debug(f'bucket was found in {region_scanned}')
+                logger.debug(
+                    f'bucket {bucket_name} was found in {region_scanned}')
                 return region_scanned
             except self.ibm_botocore.exceptions.ClientError as e:
                 if e.response['Error']['Code'] == '404':
-                    logger.debug(f'bucket was not found in {region_scanned}')
+                    logger.debug(f'bucket {bucket_name} was not found '
+                                 f'in {region_scanned}')
                 elif e.response['Error']['Code'] == '403':
                     command = f'rclone lsd {self.name}: '
                     with ux_utils.print_exception_no_traceback():
@@ -2338,21 +2340,30 @@ class IBMCosStore(AbstractStore):
         bool - indicates whether a new bucket was created.
         """
         bucket_region = self.get_bucket_region(self.name)
-        if bucket_region and self.sync_on_reconstruction:
-            # check for a mismatch between bucket URI and actual region
-            # only if store object is not being reconstructed for deletion
-            try:
-                uri_region = data_utils.split_cos_path(
-                    self.source)[2]  # type: ignore
-                if uri_region != bucket_region:
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageBucketGetError(
-                            f'Bucket {self.name} exists in '
-                            f'region {bucket_region}, '
-                            f'but URI specified region {uri_region}.')
-            except ValueError:
-                # source isn't a cos uri
-                pass
+        try:
+            uri_region = data_utils.split_cos_path(
+                self.source)[2]  # type: ignore
+        except ValueError:
+            # source isn't a cos uri
+            uri_region = ''
+
+        # bucket's region doesn't match specified region in URI
+        if bucket_region and uri_region and uri_region != bucket_region\
+              and self.sync_on_reconstruction:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketGetError(
+                    f'Bucket {self.name} exists in '
+                    f'region {bucket_region}, '
+                    f'but URI specified region {uri_region}.')
+
+        if not bucket_region and uri_region:
+            # bucket doesn't exist but source is a bucket URI
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketGetError(
+                    'Attempted to connect to a non-existent bucket: '
+                    f'{self.name} by providing URI. Consider using '
+                    '`rclone lsd <remote>` on relevant remotes returned '
+                    'via `rclone listremotes` to debug.')
 
         data_utils.store_rclone_config(
             self.name,
