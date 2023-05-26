@@ -145,6 +145,12 @@ def readable_time_duration(start: Optional[float],
         diff = diff.replace(' minute', 'm')
         diff = diff.replace(' hours', 'h')
         diff = diff.replace(' hour', 'h')
+        diff = diff.replace(' days', 'd')
+        diff = diff.replace(' day', 'd')
+        diff = diff.replace(' weeks', 'w')
+        diff = diff.replace(' week', 'w')
+        diff = diff.replace(' months', 'mo')
+        diff = diff.replace(' month', 'mo')
     else:
         diff = start_time.diff_for_humans(end)
         if duration.in_seconds() < 1:
