@@ -2840,8 +2840,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Raises:
             exceptions.ClusterOwnerIdentityMismatchError: If the cluster is
                 owned by another user.
-            exceptions.CloudUserIdentityError: if we fail to get the current user
-                identity.
+            exceptions.CloudUserIdentityError: if we fail to get the current
+                user identity.
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
         cluster_name = handle.cluster_name
