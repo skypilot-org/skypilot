@@ -1,4 +1,5 @@
 import sky
+import click
 
 
 def test_list_accelerators():
@@ -31,3 +32,63 @@ def test_list_accelerators_region_filter():
         for instance in res:
             all_regions.append(instance.region)
     assert all([region == 'us-west-1' for region in all_regions])
+
+
+def test_list_accelerators_name_quantity_filter():
+    result = sky.list_accelerators(name_filter='V100', quantity_filter=4)
+    all_accelerators = []
+    for res in result.values():
+        for instance in res:
+            all_accelerators.append((instance.accelerator_name,
+                                     instance.accelerator_count))
+    assert all([item[0].__contains__('V100') and
+                item[1] == 4 for item in all_accelerators])
+
+
+def test_list_accelerators_positive_quantity_filter():
+    result = sky.list_accelerators(quantity_filter=4)
+    all_accelerators = []
+    for res in result.values():
+        for instance in res:
+            all_accelerators.append(instance.accelerator_count)
+    assert all(quantity == 4 for quantity in all_accelerators)
+
+
+# def test_list_accelerators_zero_quantity_filter():
+#     result = sky.list_accelerators(quantity_filter=0)
+#     assert isinstance(result, ValueError)
+
+
+def test_list_accelerators_name_Lambda_filter():
+    result = sky.list_accelerators(clouds='lambda', name_filter='V100')
+    all_accelerators = []
+    for res in result.values():
+        for instance in res:
+            print(instance.accelerator_name)
+            all_accelerators.append((instance.accelerator_name,
+                                     instance.cloud))
+    assert all([item[0].__contains__('V100') and
+               item[1] == 'Lambda' for item in all_accelerators])
+
+
+def test_list_accelerators_name_quantity_Lambda_filter():
+    result = sky.list_accelerators(clouds='lambda',
+                                   name_filter='A100',
+                                   quantity_filter=4)
+    all_accelerators = []
+    for res in result.values():
+        for instance in res:
+            all_accelerators.append((instance.accelerator_name,
+                                     instance.cloud,
+                                     instance.accelerator_count))
+    assert all([item[0].__contains__('A100') and
+                item[1] == 'Lambda' and
+                item[2] == 4 for item in all_accelerators])
+
+
+def test_list_accelerators_name_quantity_Lambda_all_fail():
+    result = sky.show_gpus(gpus_only = False,
+                            clouds='lambda',
+                            name_filter='A100',
+                            quantity_filter=4)
+    # assert isinstance(result, click.UsageError)
