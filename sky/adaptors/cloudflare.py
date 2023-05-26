@@ -13,7 +13,7 @@ boto3 = None
 botocore = None
 _session_creation_lock = threading.RLock()
 ACCOUNT_ID_PATH = '~/.cloudflare/accountid'
-AWS_R2_CREDENTIALS_PATH = '~/.cloudflare/r2credentials'
+AWS_R2_CREDENTIALS_PATH = '~/.cloudflare/r2.credentials'
 R2_PROFILE_NAME = 'r2'
 _INDENT_PREFIX = '    '
 
@@ -51,15 +51,21 @@ def _load_r2_credentials_env():
             os.environ['AWS_SHARED_CREDENTIALS_FILE'] = prev_credentials_path
 
 
-def get_r2_credentials():
-    session_ = session()
+def get_r2_credentials(boto3_session):
+    """Gets the R2 credentials from the boto3 session object.
+
+    Args:
+        boto3_session: The boto3 session object.
+    Returns:
+        botocore.credentials.ReadOnlyCredentials object with the R2 credentials.
+    """
     with _load_r2_credentials_env():
-        cloudflare_credentials = session_.get_credentials()
+        cloudflare_credentials = boto3_session.get_credentials()
         if cloudflare_credentials is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Cloudflare credentials not found. Run '
                                  '`sky check` to verify credentials are '
-                                 'correctly setup.')
+                                 'correctly set up.')
         else:
             return cloudflare_credentials.get_frozen_credentials()
 
@@ -97,7 +103,7 @@ def resource(resource_name: str, **kwargs):
     # Reference: https://stackoverflow.com/a/59635814
 
     session_ = session()
-    cloudflare_credentials = get_r2_credentials()
+    cloudflare_credentials = get_r2_credentials(session_)
     endpoint = create_endpoint()
 
     return session_.resource(
@@ -123,7 +129,7 @@ def client(service_name: str, region):
     # Reference: https://stackoverflow.com/a/59635814
 
     session_ = session()
-    cloudflare_credentials = get_r2_credentials()
+    cloudflare_credentials = get_r2_credentials(session_)
     endpoint = create_endpoint()
 
     return session_.client(
@@ -179,7 +185,7 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
         hints += ' Run the following commands:'
         if not r2_profile_in_aws_cred():
             hints += f'\n{_INDENT_PREFIX}  $ pip install boto3'
-            hints += f'\n{_INDENT_PREFIX}  $ AWS_SHARED_CREDENTIALS_FILE={AWS_R2_CREDENTIALS_PATH} aws configure --profile r2'
+            hints += f'\n{_INDENT_PREFIX}  $ AWS_SHARED_CREDENTIALS_FILE={AWS_R2_CREDENTIALS_PATH} aws configure --profile r2'  # pylint: disable=line-too-long
         if not os.path.exists(accountid_path):
             hints += f'\n{_INDENT_PREFIX}  $ mkdir -p ~/.cloudflare'
             hints += f'\n{_INDENT_PREFIX}  $ echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid'  # pylint: disable=line-too-long

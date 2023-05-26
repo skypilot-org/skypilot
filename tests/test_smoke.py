@@ -2124,7 +2124,6 @@ class TestStorageWithCredentials:
             timestamp = str(time.time()).replace('.', '')
             store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
                                             source=tmpdir)
-            print(tmpdir)
             store_obj.add_store(store_type)
 
         subprocess.check_output(['sky', 'storage', 'delete', store_obj.name])
