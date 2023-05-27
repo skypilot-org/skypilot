@@ -1,32 +1,34 @@
 name: pipeline
 
 ---
-name: simple-1
+name: train
 
 resources:
-  cpus: 2+
-  memory: 8+
+  accelerators: V100:1
+
+num_nodes: 2
 
 setup: |
-  echo setup for task 1
+  echo setup for train
   sleep 20
 
 run: |
-  echo run for task 1
+  echo train starts
   sleep 20
+  echo train ends
 
 ---
 
-name: simple-2
+name: eval
 
 resources:
-  cpus: 4+
-  memory: 2+
+  accelerators: T4:1
 
 setup: |
-  echo setup for task 2
+  echo setup for eval
   sleep 20
 
 run: |
-  echo run for task 2
+  echo eval starts
   sleep 20
+  echo eval ends
