@@ -234,6 +234,8 @@ class RayCodeGen:
             SKY_REMOTE_WORKDIR = {constants.SKY_REMOTE_WORKDIR!r}
 
             kwargs = dict()
+            # Only set the `_temp_dir` to SkyPilot's ray cluster directory when the directory
+            # exists for backward compatibility for the VM launched before #1790.
             if os.path.exists({constants.SKY_REMOTE_RAY_TEMPDIR!r}):
                 kwargs['_temp_dir'] = {constants.SKY_REMOTE_RAY_TEMPDIR!r}
             ray.init(
