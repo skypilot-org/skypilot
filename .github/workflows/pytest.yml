@@ -14,7 +14,7 @@ jobs:
   python-test:
     strategy:
       matrix:
-        python-version: [3.6]
+        python-version: [3.8]
         test-path:
           - tests/test_cli.py
           - tests/test_config.py
@@ -26,9 +26,7 @@ jobs:
           - tests/test_storage.py
           - tests/test_wheels.py
           - tests/test_spot.py
-    # Need to specify 20.04, because ubuntu-latest does not work with
-    # python 3.6: https://github.com/actions/setup-python/issues/355#issuecomment-1335042510
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2

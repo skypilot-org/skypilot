@@ -5,7 +5,7 @@ Install SkyPilot using pip:
 
 .. code-block:: console
 
-  $ # SkyPilot requires python >= 3.6. For Apple Silicon, use >= 3.8.
+  $ # SkyPilot requires python >= 3.7. For Apple Silicon, use >= 3.8.
   $ # Recommended: use a new conda env to avoid package conflicts.
   $ conda create -y -n sky python=3.8
   $ conda activate sky
@@ -17,7 +17,7 @@ Install SkyPilot using pip:
   $ # pip install "skypilot[lambda]"
   $ # pip install "skypilot[all]"
 
-SkyPilot currently supports five cloud providers: AWS, GCP, Azure, Lambda Cloud and Cloudflare (R2).
+SkyPilot currently supports five cloud providers: AWS, GCP, Azure, Lambda Cloud and Cloudflare (for R2 object store).
 If you only have access to certain clouds, use any combination of
 :code:`"[aws,azure,gcp,lambda,cloudflare]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
 dependencies installed.
@@ -107,6 +107,23 @@ Lambda Cloud
   $ mkdir -p ~/.lambda_cloud
   $ echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
 
+IBM
+~~~~~~~~~
+
+To access IBM's services, store the following fields in ``~/.ibm/credentials.yaml``:
+
+.. code-block:: text
+
+  iam_api_key: <user_personal_api_key>
+  resource_group_id: <resource_group_user_is_a_member_of>
+
+- Create a new API key by following `this guide <https://www.ibm.com/docs/en/app-connect/container?topic=servers-creating-cloud-api-key>`_.
+- Obtain a resource group's ID from the `web console <https://cloud.ibm.com/account/resource-groups>`_.
+
+.. note::
+  Stock images aren't currently providing ML tools out of the box.
+  Create private images with the necessary tools (e.g. CUDA), by following the IBM segment in `this documentation <https://github.com/skypilot-org/skypilot/blob/master/docs/source/reference/yaml-spec.rst>`_. 
+
 Cloudflare R2
 ~~~~~~~~~~~~~~~~~~
 
@@ -118,7 +135,7 @@ SkyPilot can download/upload data to R2 buckets and mount them as local filesyst
   $ # Install boto
   $ pip install boto3
   $ # Configure your R2 credentials
-  $ aws configure --profile r2
+  $ AWS_SHARED_CREDENTIALS_FILE=~/.cloudflare/r2.credentials aws configure --profile r2
 
 In the prompt, enter your R2 Access Key ID and Secret Access Key (see `instructions to generate R2 credentials <https://developers.cloudflare.com/r2/data-access/s3-api/tokens/>`_). Select :code:`auto` for the default region and :code:`json` for the default output format.
 
@@ -139,6 +156,7 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 .. note::
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
+
 
 .. _verify-cloud-access:
 
