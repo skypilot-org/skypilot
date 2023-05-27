@@ -185,7 +185,7 @@ class R2CloudStorage(CloudStorage):
         if 'r2://' in source:
             source = source.replace('r2://', 's3://')
         download_via_awscli = ('AWS_SHARED_CREDENTIALS_FILE='
-                               f'{cloudflare.AWS_R2_CREDENTIALS_PATH} '
+                               f'{cloudflare.R2_CREDENTIALS_PATH} '
                                'aws s3 sync --no-follow-symlinks '
                                f'{source} {destination} '
                                f'--endpoint {endpoint_url} '
@@ -199,7 +199,7 @@ class R2CloudStorage(CloudStorage):
         """Downloads a file using AWS CLI."""
         endpoint_url = cloudflare.create_endpoint()
         download_via_awscli = ('AWS_SHARED_CREDENTIALS_FILE='
-                               f'{cloudflare.AWS_R2_CREDENTIALS_PATH} '
+                               f'{cloudflare.R2_CREDENTIALS_PATH} '
                                f'aws s3 cp s3://{source} {destination} '
                                f'--endpoint {endpoint_url} '
                                f'--profile={cloudflare.R2_PROFILE_NAME}')

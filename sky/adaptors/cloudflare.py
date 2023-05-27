@@ -13,7 +13,7 @@ boto3 = None
 botocore = None
 _session_creation_lock = threading.RLock()
 ACCOUNT_ID_PATH = '~/.cloudflare/accountid'
-AWS_R2_CREDENTIALS_PATH = '~/.cloudflare/r2.credentials'
+R2_CREDENTIALS_PATH = '~/.cloudflare/r2.credentials'
 R2_PROFILE_NAME = 'r2'
 _INDENT_PREFIX = '    '
 
@@ -41,7 +41,7 @@ def import_package(func):
 def _load_r2_credentials_env():
     """Context manager to temporarily change the AWS credentials file path."""
     prev_credentials_path = os.environ.get('AWS_SHARED_CREDENTIALS_FILE')
-    os.environ['AWS_SHARED_CREDENTIALS_FILE'] = AWS_R2_CREDENTIALS_PATH
+    os.environ['AWS_SHARED_CREDENTIALS_FILE'] = R2_CREDENTIALS_PATH
     try:
         yield
     finally:
@@ -174,7 +174,7 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
     hints = None
     accountid_path = os.path.expanduser(ACCOUNT_ID_PATH)
     if not r2_profile_in_aws_cred():
-        hints = f'[{R2_PROFILE_NAME}] profile is not set in {AWS_R2_CREDENTIALS_PATH}'
+        hints = f'[{R2_PROFILE_NAME}] profile is not set in {R2_CREDENTIALS_PATH}'
     if not os.path.exists(accountid_path):
         if hints:
             hints += ' Additionally, '
@@ -185,7 +185,7 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
         hints += ' Run the following commands:'
         if not r2_profile_in_aws_cred():
             hints += f'\n{_INDENT_PREFIX}  $ pip install boto3'
-            hints += f'\n{_INDENT_PREFIX}  $ AWS_SHARED_CREDENTIALS_FILE={AWS_R2_CREDENTIALS_PATH} aws configure --profile r2'  # pylint: disable=line-too-long
+            hints += f'\n{_INDENT_PREFIX}  $ AWS_SHARED_CREDENTIALS_FILE={R2_CREDENTIALS_PATH} aws configure --profile r2'  # pylint: disable=line-too-long
         if not os.path.exists(accountid_path):
             hints += f'\n{_INDENT_PREFIX}  $ mkdir -p ~/.cloudflare'
             hints += f'\n{_INDENT_PREFIX}  $ echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid'  # pylint: disable=line-too-long
@@ -198,7 +198,7 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
 def r2_profile_in_aws_cred() -> bool:
     """Checks if Cloudflare R2 profile is set in aws credentials"""
 
-    profile_path = os.path.expanduser(AWS_R2_CREDENTIALS_PATH)
+    profile_path = os.path.expanduser(R2_CREDENTIALS_PATH)
     r2_profile_exists = False
     if os.path.isfile(profile_path):
         with open(profile_path, 'r') as file:
@@ -218,7 +218,7 @@ def get_credential_file_mounts() -> Dict[str, str]:
     """
 
     r2_credential_mounts = {
-        AWS_R2_CREDENTIALS_PATH: AWS_R2_CREDENTIALS_PATH,
+        R2_CREDENTIALS_PATH: R2_CREDENTIALS_PATH,
         ACCOUNT_ID_PATH: ACCOUNT_ID_PATH
     }
     return r2_credential_mounts

@@ -1777,7 +1777,7 @@ class R2Store(AbstractStore):
                 [f'--include "{file_name}"' for file_name in file_names])
             endpoint_url = cloudflare.create_endpoint()
             sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
-                            f'{cloudflare.AWS_R2_CREDENTIALS_PATH} '
+                            f'{cloudflare.R2_CREDENTIALS_PATH} '
                             'aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
                             f's3://{self.name} '
@@ -1790,7 +1790,7 @@ class R2Store(AbstractStore):
             endpoint_url = cloudflare.create_endpoint()
             sync_command = (
                 'AWS_SHARED_CREDENTIALS_FILE='
-                f'{cloudflare.AWS_R2_CREDENTIALS_PATH} '
+                f'{cloudflare.R2_CREDENTIALS_PATH} '
                 'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
                 f'{src_dir_path} '
                 f's3://{self.name}/{dest_dir_name} '
@@ -1853,7 +1853,7 @@ class R2Store(AbstractStore):
             # user.
             if error_code == '403':
                 command = ('AWS_SHARED_CREDENTIALS_FILE='
-                           f'{cloudflare.AWS_R2_CREDENTIALS_PATH} '
+                           f'{cloudflare.R2_CREDENTIALS_PATH} '
                            f'aws s3 ls s3://{self.name} '
                            f'--endpoint {endpoint_url} '
                            f'--profile={cloudflare.R2_PROFILE_NAME}')
@@ -1868,7 +1868,7 @@ class R2Store(AbstractStore):
                     'Attempted to connect to a non-existent bucket: '
                     f'{self.source}. Consider using '
                     '`AWS_SHARED_CREDENTIALS_FILE='
-                    f'{cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 ls '
+                    f'{cloudflare.R2_CREDENTIALS_PATH} aws s3 ls '
                     f's3://{self.name} '
                     f'--endpoint {endpoint_url} '
                     f'--profile={cloudflare.R2_PROFILE_NAME}\' '
@@ -1907,7 +1907,7 @@ class R2Store(AbstractStore):
                        'sudo chmod +x /usr/local/bin/goofys')
         endpoint_url = cloudflare.create_endpoint()
         mount_cmd = (
-            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} '
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} '
             f'AWS_PROFILE={cloudflare.R2_PROFILE_NAME} goofys -o allow_other '
             f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
             f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
@@ -1961,7 +1961,7 @@ class R2Store(AbstractStore):
         # which removes the bucket by force.
         endpoint_url = cloudflare.create_endpoint()
         remove_command = (
-            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} '
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} '
             f'aws s3 rb s3://{bucket_name} --force '
             f'--endpoint {endpoint_url} '
             f'--profile={cloudflare.R2_PROFILE_NAME}')

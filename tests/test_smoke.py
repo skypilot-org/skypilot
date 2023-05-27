@@ -732,7 +732,7 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
             *storage_setup_commands,
             f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
         ]
 
         test = Test(
@@ -1921,7 +1921,7 @@ class TestStorageWithCredentials:
         if store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             url = f's3://{bucket_name}'
-            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
+            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
 
     @staticmethod
     def cli_ls_cmd(store_type, bucket_name, suffix=''):
@@ -1943,7 +1943,7 @@ class TestStorageWithCredentials:
                 url = f's3://{bucket_name}/{suffix}'
             else:
                 url = f's3://{bucket_name}'
-            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
+            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -2041,11 +2041,11 @@ class TestStorageWithCredentials:
         # Creates a temporary bucket using awscli
         endpoint_url = cloudflare.create_endpoint()
         subprocess.check_call(
-            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 mb s3://{tmp_bucket_name} --endpoint {endpoint_url} --profile=r2',
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 mb s3://{tmp_bucket_name} --endpoint {endpoint_url} --profile=r2',
             shell=True)
         yield tmp_bucket_name
         subprocess.check_call(
-            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3 rb s3://{tmp_bucket_name} --force --endpoint {endpoint_url} --profile=r2',
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb s3://{tmp_bucket_name} --force --endpoint {endpoint_url} --profile=r2',
             shell=True)
 
     @pytest.fixture
@@ -2164,7 +2164,7 @@ class TestStorageWithCredentials:
                 expected_output = 'BucketNotFoundException'
             elif nonexist_bucket_url.startswith('r2'):
                 endpoint_url = cloudflare.create_endpoint()
-                command = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.AWS_R2_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=r2'
+                command = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=r2'
                 expected_output = '404'
             else:
                 raise ValueError('Unsupported bucket type '
