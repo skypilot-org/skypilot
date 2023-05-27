@@ -25,7 +25,7 @@ from ray.autoscaler.tags import (
 )
 
 VM_NAME_MAX_LEN = 64
-VM_NAME_UUID_LEN = 8
+UNIQUE_ID_LEN = 4
 
 logger = logging.getLogger(__name__)
 azure_logger = logging.getLogger("azure.core.pipeline.policies.http_logging_policy")
@@ -64,7 +64,9 @@ class AzureNodeProvider(NodeProvider):
         # to create/update it here, so the resource group always exists.
         from sky.skylet.providers.azure.config import _configure_resource_group
 
-        _configure_resource_group({"provider": provider_config})
+        _configure_resource_group(
+            {"cluster_name": cluster_name, "provider": provider_config}
+        )
         subscription_id = provider_config["subscription_id"]
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
         # Sky only supports Azure CLI credential for now.
@@ -83,8 +85,11 @@ class AzureNodeProvider(NodeProvider):
 
     @synchronized
     def _get_filtered_nodes(self, tag_filters):
+        # add cluster name filter to only get nodes from this cluster
+        cluster_tag_filters = {**tag_filters, TAG_RAY_CLUSTER_NAME: self.cluster_name}
+
         def match_tags(vm):
-            for k, v in tag_filters.items():
+            for k, v in cluster_tag_filters.items():
                 if vm.tags.get(k) != v:
                     return False
             return True
@@ -149,7 +154,10 @@ class AzureNodeProvider(NodeProvider):
         nodes() must be called again to refresh results.
 
         Examples:
-            >>> provider.non_terminated_nodes({TAG_RAY_NODE_KIND: "worker"})
+            >>> from ray.autoscaler.tags import TAG_RAY_NODE_KIND
+            >>> provider = ... # doctest: +SKIP
+            >>> provider.non_terminated_nodes( # doctest: +SKIP
+            ...     {TAG_RAY_NODE_KIND: "worker"})
             ["node-1", "node-2"]
         """
         nodes = self._get_filtered_nodes(tag_filters=tag_filters)
@@ -267,9 +275,11 @@ class AzureNodeProvider(NodeProvider):
         config_tags.update(tags)
         config_tags[TAG_RAY_CLUSTER_NAME] = self.cluster_name
 
-        name_tag = config_tags.get(TAG_RAY_NODE_NAME, "node")
-        unique_id = uuid4().hex[:VM_NAME_UUID_LEN]
-        vm_name = "{name}-{id}".format(name=name_tag, id=unique_id)
+        vm_name = "{node}-{unique_id}-{vm_id}".format(
+            node=config_tags.get(TAG_RAY_NODE_NAME, "node"),
+            unique_id=self.provider_config["unique_id"],
+            vm_id=uuid4().hex[:UNIQUE_ID_LEN],
+        )[:VM_NAME_MAX_LEN]
         use_internal_ips = self.provider_config.get("use_internal_ips", False)
 
         template_params = node_config["azure_arm_parameters"].copy()
@@ -277,6 +287,9 @@ class AzureNodeProvider(NodeProvider):
         template_params["provisionPublicIp"] = not use_internal_ips
         template_params["vmTags"] = config_tags
         template_params["vmCount"] = count
+        template_params["msi"] = self.provider_config["msi"]
+        template_params["nsg"] = self.provider_config["nsg"]
+        template_params["subnet"] = self.provider_config["subnet"]
 
         parameters = {
             "properties": {
@@ -294,7 +307,7 @@ class AzureNodeProvider(NodeProvider):
         )
         create_or_update(
             resource_group_name=resource_group,
-            deployment_name="ray-vm-{}".format(name_tag),
+            deployment_name=vm_name,
             parameters=parameters,
         ).wait()
 

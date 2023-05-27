@@ -105,6 +105,9 @@ _CTRL_C_TIP_MESSAGE = ('INFO: Tip: use Ctrl-C to exit log streaming '
 
 _MAX_RAY_UP_RETRY = 5
 
+# Number of retries for getting zones.
+_MAX_GET_ZONE_RETRY = 3
+
 _JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
 
 # Path to the monkey-patched ray up script.
@@ -200,8 +203,8 @@ class RayCodeGen:
         self.job_id = job_id
         # Should use 'auto' or 'ray://<internal_head_ip>:10001' rather than
         # 'ray://localhost:10001', or 'ray://127.0.0.1:10001', for public cloud.
-        # Otherwise, it will a bug of ray job failed to get the placement group
-        # in ray <= 2.0.1.
+        # Otherwise, ray will fail to get the placement group because of a bug
+        # in ray job.
         # TODO(mluo): Check why 'auto' not working with on-prem cluster and
         # whether the placement group issue also occurs in on-prem cluster.
         ray_address = 'ray://localhost:10001' if is_local else 'auto'
@@ -1488,7 +1491,7 @@ class RetryingVmProvisioner(object):
             # Downside is existing tasks on the cluster will keep running
             # (which may be ok with the semantics of 'sky launch' twice).
             # Tracked in https://github.com/ray-project/ray/issues/20402.
-            # Ref: https://github.com/ray-project/ray/blob/releases/2.2.0/python/ray/autoscaler/sdk/sdk.py#L16-L49  # pylint: disable=line-too-long
+            # Ref: https://github.com/ray-project/ray/blob/releases/2.4.0/python/ray/autoscaler/sdk/sdk.py#L16-L49  # pylint: disable=line-too-long
             script_path = write_ray_up_script_with_patched_launch_hash_fn(
                 cluster_config_file, ray_up_kwargs={'no_restart': True})
 
@@ -1723,7 +1726,7 @@ class RetryingVmProvisioner(object):
         if isinstance(launched_resources.cloud, clouds.Local):
             raise RuntimeError(
                 'The command `ray status` errored out on the head node '
-                'of the local cluster. Check if ray[default]==2.0.1 '
+                'of the local cluster. Check if ray[default]==2.4.0 '
                 'is installed or running correctly.')
         backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
 
@@ -2359,8 +2362,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         ip_list, **ssh_credentials)
 
                     def _get_zone(runner):
-                        returncode, stdout, stderr = runner.run(
-                            get_zone_cmd, require_outputs=True)
+                        retry_count = 0
+                        backoff = common_utils.Backoff(initial_backoff=1,
+                                                       max_backoff_factor=3)
+                        while True:
+                            returncode, stdout, stderr = runner.run(
+                                get_zone_cmd, require_outputs=True)
+                            if returncode == 0:
+                                break
+                            retry_count += 1
+                            if retry_count <= _MAX_GET_ZONE_RETRY:
+                                time.sleep(backoff.current_backoff())
+                                continue
                         subprocess_utils.handle_returncode(
                             returncode,
                             get_zone_cmd,
@@ -2841,10 +2854,42 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   handle: CloudVmRayResourceHandle,
                   terminate: bool,
                   purge: bool = False):
+        """Tear down/ Stop the cluster.
+
+        Args:
+            handle: The handle to the cluster.
+            terminate: Terminate or stop the cluster.
+            purge: Purge the cluster record from the cluster table, even if
+                the teardown fails.
+        Raises:
+            exceptions.ClusterOwnerIdentityMismatchError: If the cluster is
+                owned by another user.
+            exceptions.CloudUserIdentityError: if we fail to get the current
+                user identity.
+            RuntimeError: If the cluster fails to be terminated/stopped.
+        """
         cluster_name = handle.cluster_name
         # Check if the cluster is owned by the current user. Raise
         # exceptions.ClusterOwnerIdentityMismatchError
-        backend_utils.check_owner_identity(cluster_name)
+        yellow = colorama.Fore.YELLOW
+        reset = colorama.Style.RESET_ALL
+        is_identity_mismatch_and_purge = False
+        try:
+            backend_utils.check_owner_identity(cluster_name)
+        except exceptions.ClusterOwnerIdentityMismatchError as e:
+            if purge:
+                logger.error(e)
+                verbed = 'terminated' if terminate else 'stopped'
+                logger.warning(
+                    f'{yellow}Purge (-p/--purge) is set, ignoring the '
+                    f'identity mismatch error and removing '
+                    f'the cluser record from cluster table.{reset}\n{yellow}It '
+                    'is the user\'s responsibility to ensure that this '
+                    f'cluster is actually {verbed} on the cloud.{reset}')
+                is_identity_mismatch_and_purge = True
+            else:
+                raise
+
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
 
@@ -2855,8 +2900,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             with filelock.FileLock(
                     lock_path,
                     backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
-                success = self.teardown_no_lock(handle, terminate, purge)
-            if success and terminate:
+                self.teardown_no_lock(
+                    handle,
+                    terminate,
+                    purge,
+                    # When --purge is set and we already see an ID mismatch
+                    # error, we skip the refresh codepath. This is because
+                    # refresh checks current user identity can throw
+                    # ClusterOwnerIdentityMismatchError. The argument/flag
+                    # `purge` should bypass such ID mismatch errors.
+                    refresh_cluster_status=not is_identity_mismatch_and_purge)
+            if terminate:
                 common_utils.remove_file_if_exists(lock_path)
         except filelock.Timeout as e:
             raise RuntimeError(
@@ -3043,7 +3097,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          terminate: bool,
                          purge: bool = False,
                          post_teardown_cleanup: bool = True,
-                         refresh_cluster_status: bool = True) -> bool:
+                         refresh_cluster_status: bool = True) -> None:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
@@ -3051,6 +3105,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         refresh_cluster_status is only used internally in the status refresh
         process, and should not be set to False in other cases.
+
+        Raises:
+            RuntimeError: If the cluster fails to be terminated/stopped.
         """
         if refresh_cluster_status:
             prev_cluster_status, _ = (
@@ -3069,7 +3126,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.warning(
                 f'Cluster {handle.cluster_name!r} is already terminated. '
                 'Skipped.')
-            return True
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
@@ -3217,26 +3273,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             elif ('TPU must be specified.' not in stderr and
                   'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' not in stderr and
                   '(ResourceGroupNotFound)' not in stderr):
-                logger.error(
+                raise RuntimeError(
                     _TEARDOWN_FAILURE_MESSAGE.format(
                         extra_reason='',
                         cluster_name=handle.cluster_name,
                         stdout=stdout,
                         stderr=stderr))
-                return False
 
         # No need to clean up if the cluster is already terminated
         # (i.e., prev_status is None), as the cleanup has already been done
         # if the cluster is removed from the status table.
         if post_teardown_cleanup:
-            return self.post_teardown_cleanup(handle, terminate, purge)
-        else:
-            return True
+            self.post_teardown_cleanup(handle, terminate, purge)
 
     def post_teardown_cleanup(self,
                               handle: CloudVmRayResourceHandle,
                               terminate: bool,
-                              purge: bool = False) -> bool:
+                              purge: bool = False) -> None:
         """Cleanup local configs/caches and delete TPUs after teardown.
 
         This method will handle the following cleanup steps:
@@ -3244,6 +3297,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         * Removing ssh configs for the cluster;
         * Updating the local state of the cluster;
         * Removing the terminated cluster's scripts and ray yaml files.
+
+        Raises:
+            RuntimeError: If it fails to delete the TPU.
         """
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
@@ -3266,13 +3322,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         _TEARDOWN_PURGE_WARNING.format(
                             reason='stopping/terminating TPU'))
                 else:
-                    logger.error(
+                    raise RuntimeError(
                         _TEARDOWN_FAILURE_MESSAGE.format(
                             extra_reason='It is caused by TPU failure.',
                             cluster_name=handle.cluster_name,
                             stdout=tpu_stdout,
                             stderr=tpu_stderr))
-                    return False
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.
@@ -3296,7 +3351,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # No try-except is needed since Ray will fail to teardown the
             # cluster if the cluster_yaml is missing.
             common_utils.remove_file_if_exists(handle.cluster_yaml)
-        return True
 
     def set_autostop(self,
                      handle: CloudVmRayResourceHandle,
@@ -3645,15 +3699,28 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
                 src_print = ', '.join(src_print)
-            backend_utils.parallel_data_transfer_to_nodes(
-                runners,
-                source=src_print,
-                target=dst,
-                cmd=mount_cmd,
-                run_rsync=False,
-                action_message='Mounting',
-                log_path=log_path,
-            )
+            try:
+                backend_utils.parallel_data_transfer_to_nodes(
+                    runners,
+                    source=src_print,
+                    target=dst,
+                    cmd=mount_cmd,
+                    run_rsync=False,
+                    action_message='Mounting',
+                    log_path=log_path,
+                )
+            except exceptions.CommandError as e:
+                if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:
+                    mount_path = (f'{colorama.Fore.RED}'
+                                  f'{colorama.Style.BRIGHT}{dst}'
+                                  f'{colorama.Style.RESET_ALL}')
+                    error_msg = (f'Mount path {mount_path} is non-empty.'
+                                 f' {mount_path} may be a standard unix '
+                                 f'path or may contain files from a previous'
+                                 f' task. To fix, change the mount path'
+                                 f' to an empty or non-existent path.')
+                    raise RuntimeError(error_msg) from None
+
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
 

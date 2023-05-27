@@ -2664,7 +2664,7 @@ def _down_or_stop_clusters(
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
                     f'{colorama.Style.RESET_ALL}'
-                    f'\n\tReason: {common_utils.format_exception(e)}.')
+                    f'\nReason: {common_utils.format_exception(e)}.')
             except (exceptions.NotSupportedError,
                     exceptions.ClusterOwnerIdentityMismatchError) as e:
                 message = str(e)
@@ -2959,7 +2959,7 @@ def check():
 
 
 @cli.command()
-@click.argument('gpu_name', required=False)
+@click.argument('accelerator_str', required=False)
 @click.option('--all',
               '-a',
               is_flag=True,
@@ -2980,7 +2980,7 @@ def check():
 @service_catalog.use_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
-        gpu_name: Optional[str],
+        accelerator_str: Optional[str],
         all: bool,  # pylint: disable=redefined-builtin
         cloud: Optional[str],
         region: Optional[str]):
@@ -3016,7 +3016,7 @@ def show_gpus(
     clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
-    if show_all and gpu_name is not None:
+    if show_all and accelerator_str is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
 
     def _list_to_str(lst):
@@ -3030,7 +3030,9 @@ def show_gpus(
         other_table = log_utils.create_table(
             ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
-        if gpu_name is None:
+        name, quantity = None, None
+
+        if accelerator_str is None:
             result = service_catalog.list_accelerator_counts(
                 gpus_only=True,
                 clouds=cloud,
@@ -3061,21 +3063,46 @@ def show_gpus(
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
                 return
+        else:
+            # Parse accelerator string
+            accelerator_split = accelerator_str.split(':')
+            if len(accelerator_split) > 2:
+                raise click.UsageError(
+                    f'Invalid accelerator string {accelerator_str}. '
+                    'Expected format: <accelerator_name>[:<quantity>].')
+            if len(accelerator_split) == 2:
+                name = accelerator_split[0]
+                # Check if quantity is valid
+                try:
+                    quantity = int(accelerator_split[1])
+                    if quantity <= 0:
+                        raise ValueError(
+                            'Quantity cannot be non-positive integer.')
+                except ValueError as invalid_quantity:
+                    raise click.UsageError(
+                        f'Invalid accelerator quantity {accelerator_split[1]}. '
+                        'Expected a positive integer.') from invalid_quantity
+            else:
+                name, quantity = accelerator_str, None
 
-        # Show detailed accelerator information
         result = service_catalog.list_accelerators(gpus_only=True,
-                                                   name_filter=gpu_name,
+                                                   name_filter=name,
+                                                   quantity_filter=quantity,
                                                    region_filter=region,
                                                    clouds=cloud)
         if len(result) == 0:
-            yield f'Resources \'{gpu_name}\' not found. '
+            quantity_str = (f' with requested quantity {quantity}'
+                            if quantity else '')
+            yield f'Resources \'{name}\'{quantity_str} not found. '
             yield 'Try \'sky show-gpus --all\' '
             yield 'to show available accelerators.'
             return
 
-        yield '*NOTE*: for most GCP accelerators, '
-        yield 'INSTANCE_TYPE == (attachable) means '
-        yield 'the host VM\'s cost is not included.\n\n'
+        if cloud is None or cloud.lower() == 'gcp':
+            yield '*NOTE*: for most GCP accelerators, '
+            yield 'INSTANCE_TYPE == (attachable) means '
+            yield 'the host VM\'s cost is not included.\n\n'
+
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table_headers = [
@@ -3099,8 +3126,8 @@ def show_gpus(
                 cpu_count = item.cpu_count
                 if pd.isna(cpu_count):
                     cpu_str = '-'
-                elif isinstance(cpu_count, float):
-                    if cpu_count.is_integer():
+                elif isinstance(cpu_count, (float, int)):
+                    if int(cpu_count) == cpu_count:
                         cpu_str = str(int(cpu_count))
                     else:
                         cpu_str = f'{cpu_count:.1f}'
