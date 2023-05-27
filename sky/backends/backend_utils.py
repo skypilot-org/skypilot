@@ -1562,29 +1562,30 @@ def _process_cli_query(
                  f'{stdout}\n'
                  '**** STDERR ****\n'
                  f'{stderr}')
+
+    # Cloud-specific error handling.
     if (cloud == str(clouds.Azure()) and returncode == 2 and
             'argument --ids: expected at least one argument' in stderr):
         # Azure CLI has a returncode 2 when the cluster is not found, as
         # --ids <empty> is passed to the query command. In that case, the
         # cluster should be considered as DOWN.
         return []
+    if (cloud == str(clouds.AWS()) and returncode != 0 and
+            'Unable to locate credentials. You can configure credentials by '
+            'running "aws configure"' in stdout + stderr):
+        # AWS: has run into this rare error with spot controller (which has an
+        # assumed IAM role and is working fine most of the time).
+        #
+        # We do not know the root cause. For now, the hypothesis is instance
+        # metadata service is temporarily unavailable. So, we retry the query.
+        if max_retries > 0:
+            logger.info('Encountered AWS "Unable to locate credentials" '
+                        'error. Retrying.')
+            time.sleep(random.uniform(0, 1) * 2)
+            return _process_cli_query(cloud, cluster, query_cmd, deliminator,
+                                      status_map, max_retries - 1)
 
     if returncode != 0:
-        if ('Unable to locate credentials. You can configure credentials by '
-                'running "aws configure"' in stdout + stderr):
-            # AWS: has run into this rare error with spot controller (which has
-            # an assumed IAM role and is working fine most of the time).
-            #
-            # We do not know the root cause. For now, the hypothesis is instance
-            # metadata service is temporarily unavailable. So, we retry the
-            # query.
-            if max_retries > 0:
-                logger.info('Encountered AWS "Unable to locate credentials" '
-                            'error. Retrying.')
-                time.sleep(random.uniform(0, 1) * 2)
-                return _process_cli_query(cloud, cluster, query_cmd,
-                                          deliminator, status_map,
-                                          max_retries - 1)
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterStatusFetchingError(
                 f'Failed to query {cloud} cluster {cluster!r} status: '
