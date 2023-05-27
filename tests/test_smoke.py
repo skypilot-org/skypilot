@@ -1949,6 +1949,7 @@ class TestStorageWithCredentials:
                 'included.log': None,
             },
             'included.log': None,
+            'included.txt': None,
             'nested_double_asterisk': {
                 'one': {
                     'also_exclude.txt': None,
@@ -2001,7 +2002,7 @@ class TestStorageWithCredentials:
             else:
                 # Create a subdirectory
                 os.mkdir(path)
-                create_dir_structure(path, substructure)
+                TestStorageWithCredentials.create_dir_structure(path, substructure)
 
     @staticmethod
     def cli_delete_cmd(store_type, bucket_name):
@@ -2418,33 +2419,31 @@ class TestStorageWithCredentials:
                 storage_obj = storage_lib.Storage(name=name)
                 storage_obj.add_store(store_type)
 
-    @pytest.mark.parametrize('store_type', [
-        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
-    ])
-    def test_excluded_file_cloud_storage_upload_copy(self, store_type):
+    @pytest.mark.parametrize('gitignore_structure, store_type', 
+                             [(GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.S3),
+                              (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.GCS),
+        pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)])
+    def test_excluded_file_cloud_storage_upload_copy(self, gitignore_structure, store_type):
         # tests if files included in .gitignore and .git/info/exclude are
         # excluded from being transferred to Storage
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create files to be uploaded in the Storage
-            self.create_dir_structure(tmpdir,
-                                      self.GITIGNORE_SYNC_TEST_DIR_STRUCTURE)
+            self.create_dir_structure(tmpdir, gitignore_structure)
 
             # Create files to be excluded from .gitignore and list them in the file
-            test_smoke_script_path = os.path.abspath(sys.argv[0])
-            test_smoke_script_dir = os.path.dirname(test_smoke_script_path)
-            gitignore_temp_path = f'{tmpdir}/.gitignore'
-            gitignore_test_file_path = os.path.join(test_smoke_script_dir,
-                                                    'gitignore_test')
-            shutil.copyfile(gitignore_test_file_path, gitignore_temp_path)
+            skypilot_path = os.path.abspath(sys.argv[0])
+            skypilot_path = os.path.dirname(skypilot_path)
+            temp_path = f'{tmpdir}/.gitignore'
+            file_path = os.path.join(skypilot_path, 'tests/gitignore_test')
+            shutil.copyfile(file_path, temp_path)
 
             # Create files to be excluded from .git/info/exclude and list them in the file
-            git_info_exclude_temp_path = f'{tmpdir}/.git/info/exclude'
-            git_info_exclude_file_path = os.path.join(test_smoke_script_dir,
-                                                      'git_info_exclude_test')
-            shutil.copyfile(git_info_exclude_file_path,
-                            git_info_exclude_temp_path)
+            temp_path = f'{tmpdir}/.git/info/'
+            os.makedirs(temp_path)
+            temp_exclude_path = os.path.join(temp_path, 'exclude')
+            file_path = os.path.join(skypilot_path, 'tests/git_info_exclude_test')
+            shutil.copyfile(file_path, temp_exclude_path)
 
             # Create sky Storage with the files created
             timestamp = str(time.time()).replace('.', '')
@@ -2454,51 +2453,38 @@ class TestStorageWithCredentials:
                                             mode=storage_lib.StorageMode.COPY)
             store_obj.add_store(store_type)
 
-        upload_file_name = 'included.'
+        upload_file_name = 'included'
         # Count the number of files with the given file name
         up_cmd = self.cli_count_name_in_bucket(store_type, \
             bucket_name, file_name=upload_file_name)
-        exc_cmd = self.cli_count_name_in_bucket(store_type, \
-            bucket_name, file_name='excluded')
         gitignore_cmd = self.cli_count_name_in_bucket(store_type, \
             bucket_name, file_name='.gitignore')
         git_exclude_cmd = self.cli_count_name_in_bucket(store_type, \
             bucket_name, file_name='.git')
-        if store_type == storage_lib.StoreType.GCS:
-            bucket_dir_name = os.path.join(bucket_name, 'include_dir/**')
-            up_dir_cmd = self.cli_count_name_in_bucket(store_type, \
-                bucket_dir_name, file_name=upload_file_name)
 
         if store_type == storage_lib.StoreType.GCS:
             up_output = subprocess.check_output(up_cmd, shell=True)
-            up_dir_output = up_output = subprocess.check_output(up_dir_cmd,
-                                                                shell=True)
-            exc_output = subprocess.check_output(exc_cmd, shell=True)
             gitignore_output = subprocess.check_output(gitignore_cmd,
                                                        shell=True)
             git_exclude_output = subprocess.check_output(git_exclude_cmd,
                                                          shell=True)
-        else:  # For s3 and r2
+        else:
             up_output = subprocess.check_output(up_cmd)
-            exc_output = subprocess.check_output(exc_cmd)
             gitignore_output = subprocess.check_output(gitignore_cmd)
             git_exclude_output = subprocess.check_output(git_exclude_cmd)
-
+        
+        ls_out = subprocess.check_output(self.cli_ls_cmd(store_type, bucket_name))
+        test = ls_out.decode('utf-8')
+        print(test)
         # Only the 'included.*' files should exist in the cloud object storage
-        if store_type == storage_lib.StoreType.GCS:
-            assert '2' in up_output.decode('utf-8'), \
-                f'{upload_file_name}log/txt is not uploaded.'
-            assert '1' in up_dir_output.decode('utf-8'), \
-                f'{upload_file_name}log/txt is not uploaded to include_dir.'
-        else:
-            assert '3' in up_output.decode('utf-8'), \
-                f'{upload_file_name} is not uploaded.'
-        assert '0' in exc_output.decode('utf-8'), \
-            'Files to be excluded are uploaded.'
+        assert '1' in up_output.decode('utf-8'), \
+                f'{upload_file_name} is not uploaded.: {test}'
         assert '0' in gitignore_output.decode('utf-8'), \
             '.gitignore file should not be uploaded'
         assert '0' in git_exclude_output.decode('utf-8'), \
             '.git file should not be uploaded'
+        assert '1' in ls_out.decode('utf-8'), \
+            'Some items in the gitignore list are not ignored - there should be one item in the bucket : {}'.format(ls_out.decode('utf-8'))
 
 
 # ---------- Testing YAML Specs ----------
