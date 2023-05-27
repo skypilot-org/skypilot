@@ -6,13 +6,15 @@ import getpass
 import json
 import os
 import pathlib
+import random
 import re
 import subprocess
 import tempfile
 import textwrap
 import time
 import typing
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import (Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple,
+                    Union)
 from typing_extensions import Literal
 import uuid
 
@@ -1527,8 +1529,12 @@ def check_network_connection():
 
 
 def _process_cli_query(
-    cloud: str, cluster: str, query_cmd: str, deliminiator: str,
-    status_map: Mapping[str, Optional[global_user_state.ClusterStatus]]
+    cloud: str,
+    cluster: str,
+    query_cmd: str,
+    deliminator: str,
+    status_map: Mapping[str, Optional[global_user_state.ClusterStatus]],
+    max_retries: int = 3,
 ) -> List[global_user_state.ClusterStatus]:
     """Run the cloud CLI query and returns cluster status.
 
@@ -1536,10 +1542,12 @@ def _process_cli_query(
         cloud: The cloud provider name.
         cluster: The cluster name.
         query_cmd: The cloud CLI query command.
-        deliminiator: The deliminiator separating the status in the output
+        deliminator: The deliminator separating the status in the output
             of the query command.
         status_map: A map from the CLI status string to the corresponding
             global_user_state.ClusterStatus.
+        max_retries: Maximum number of retries before giving up. For AWS only.
+
     Returns:
         A list of global_user_state.ClusterStatus of all existing nodes in the
         cluster. The list can be empty if none of the nodes in the clusters are
@@ -1562,6 +1570,21 @@ def _process_cli_query(
         return []
 
     if returncode != 0:
+        if ('Unable to locate credentials. You can configure credentials by '
+                'running "aws configure"' in stdout + stderr):
+            # AWS: has run into this rare error with spot controller (which has
+            # an assumed IAM role and is working fine most of the time).
+            #
+            # We do not know the root cause. For now, the hypothesis is instance
+            # metadata service is temporarily unavailable. So, we retry the
+            # query.
+            if max_retries > 0:
+                logger.info('Encountered AWS "Unable to locate credentials" '
+                            'error. Retrying.')
+                time.sleep(random.uniform(0, 1) * 2)
+                return _process_cli_query(cloud, cluster, query_cmd,
+                                          deliminator, status_map,
+                                          max_retries - 1)
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterStatusFetchingError(
                 f'Failed to query {cloud} cluster {cluster!r} status: '
@@ -1572,7 +1595,7 @@ def _process_cli_query(
         return []
 
     statuses = []
-    for s in cluster_status.split(deliminiator):
+    for s in cluster_status.split(deliminator):
         node_status = status_map[s]
         if node_status is not None:
             statuses.append(node_status)
