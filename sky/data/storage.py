@@ -1810,7 +1810,9 @@ class R2Store(AbstractStore):
             includes = ' '.join(
                 [f'--include "{file_name}"' for file_name in file_names])
             endpoint_url = cloudflare.create_endpoint()
-            sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
+            sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
+                            f'{cloudflare.R2_CREDENTIALS_PATH} '
+                            'aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
                             f's3://{self.name} '
                             f'--endpoint {endpoint_url} '
@@ -1821,6 +1823,8 @@ class R2Store(AbstractStore):
             # we exclude .git directory from the sync
             endpoint_url = cloudflare.create_endpoint()
             sync_command = (
+                'AWS_SHARED_CREDENTIALS_FILE='
+                f'{cloudflare.R2_CREDENTIALS_PATH} '
                 'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
                 f'{src_dir_path} '
                 f's3://{self.name}/{dest_dir_name} '
@@ -1882,7 +1886,9 @@ class R2Store(AbstractStore):
             # AccessDenied error for buckets that are private and not owned by
             # user.
             if error_code == '403':
-                command = (f'aws s3 ls s3://{self.name} '
+                command = ('AWS_SHARED_CREDENTIALS_FILE='
+                           f'{cloudflare.R2_CREDENTIALS_PATH} '
+                           f'aws s3 ls s3://{self.name} '
                            f'--endpoint {endpoint_url} '
                            f'--profile={cloudflare.R2_PROFILE_NAME}')
                 with ux_utils.print_exception_no_traceback():
@@ -1894,7 +1900,9 @@ class R2Store(AbstractStore):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketGetError(
                     'Attempted to connect to a non-existent bucket: '
-                    f'{self.source}. Consider using `aws s3 ls '
+                    f'{self.source}. Consider using '
+                    '`AWS_SHARED_CREDENTIALS_FILE='
+                    f'{cloudflare.R2_CREDENTIALS_PATH} aws s3 ls '
                     f's3://{self.name} '
                     f'--endpoint {endpoint_url} '
                     f'--profile={cloudflare.R2_PROFILE_NAME}\' '
@@ -1933,6 +1941,7 @@ class R2Store(AbstractStore):
                        'sudo chmod +x /usr/local/bin/goofys')
         endpoint_url = cloudflare.create_endpoint()
         mount_cmd = (
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} '
             f'AWS_PROFILE={cloudflare.R2_PROFILE_NAME} goofys -o allow_other '
             f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
             f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
@@ -1985,14 +1994,17 @@ class R2Store(AbstractStore):
         # The fastest way to delete is to run `aws s3 rb --force`,
         # which removes the bucket by force.
         endpoint_url = cloudflare.create_endpoint()
-        remove_command = (f'aws s3 rb s3://{bucket_name} --force '
-                          f'--endpoint {endpoint_url} '
-                          f'--profile={cloudflare.R2_PROFILE_NAME}')
+        remove_command = (
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} '
+            f'aws s3 rb s3://{bucket_name} --force '
+            f'--endpoint {endpoint_url} '
+            f'--profile={cloudflare.R2_PROFILE_NAME}')
         try:
             with log_utils.safe_rich_status(
                     f'[bold cyan]Deleting R2 bucket {bucket_name}[/]'):
-                subprocess.check_output(remove_command.split(' '),
-                                        stderr=subprocess.STDOUT)
+                subprocess.check_output(remove_command,
+                                        stderr=subprocess.STDOUT,
+                                        shell=True)
         except subprocess.CalledProcessError as e:
             if 'NoSuchBucket' in e.output.decode('utf-8'):
                 logger.debug(
