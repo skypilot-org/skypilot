@@ -233,11 +233,14 @@ class RayCodeGen:
 
             SKY_REMOTE_WORKDIR = {constants.SKY_REMOTE_WORKDIR!r}
 
+            kwargs = dict()
+            if os.path.exists({constants.SKY_REMOTE_RAY_TEMPDIR!r}):
+                kwargs['_temp_dir'] = {constants.SKY_REMOTE_RAY_TEMPDIR!r}
             ray.init(
                 address={ray_address!r},
                 namespace='__sky__{job_id}__',
                 log_to_driver=True,
-                _temp_dir={constants.SKY_REMOTE_RAY_TEMPDIR!r}
+                **kwargs
             )
             run_fn = None
             futures = []
@@ -2666,9 +2669,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             ray_port_file = constants.SKY_REMOTE_RAY_PORT_FILE
             job_submit_cmd = (
-                'RAY_DASHBOARD_PORT=$(jq ".ray_dashboard_port // empty" '
-                f'{ray_port_file} 2> /dev/null); '
-                'RAY_DASHBOARD_PORT=${RAY_DASHBOARD_PORT:-8265};'
+                'RAY_DASHBOARD_PORT=$(python -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);' # pylint: disable=line-too-long
                 f'{cd} && mkdir -p {remote_log_dir} && ray job submit '
                 '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
                 f'--submission-id {ray_job_id} --no-wait '
