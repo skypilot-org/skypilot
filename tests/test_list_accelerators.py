@@ -42,7 +42,8 @@ def test_list_accelerators_name_quantity_filter():
                 (instance.accelerator_name, instance.accelerator_count))
     assert all([
         item[0].__contains__('V100') and item[1] == 4
-        for item in all_accelerators])
+        for item in all_accelerators
+    ])
 
 
 def test_list_accelerators_positive_quantity_filter():
@@ -62,7 +63,8 @@ def test_list_accelerators_name_Lambda_filter():
             all_accelerators.append((instance.accelerator_name, instance.cloud))
     assert all([
         item[0].__contains__('V100') and item[1] == 'Lambda'
-        for item in all_accelerators])
+        for item in all_accelerators
+    ])
 
 
 def test_list_accelerators_name_quantity_Lambda_filter():
@@ -75,4 +77,5 @@ def test_list_accelerators_name_quantity_Lambda_filter():
             all_accelerators.append((instance.accelerator_name, instance.cloud,
                                      instance.accelerator_count))
     assert all([item[0].__contains__('A100') and item[1] == 'Lambda' and item[2] == 4
-                for item in all_accelerators])
+                for item in all_accelerators
+    ])
