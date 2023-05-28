@@ -38,10 +38,11 @@ def test_list_accelerators_name_quantity_filter():
     all_accelerators = []
     for res in result.values():
         for instance in res:
-            all_accelerators.append((instance.accelerator_name,
-                                     instance.accelerator_count))
-    assert all([item[0].__contains__('V100') and
-                item[1] == 4 for item in all_accelerators])
+            all_accelerators.append(
+                (instance.accelerator_name, instance.accelerator_count))
+    assert all([
+        item[0].__contains__('V100') and item[1] == 4
+        for item in all_accelerators])
 
 
 def test_list_accelerators_positive_quantity_filter():
@@ -58,11 +59,10 @@ def test_list_accelerators_name_Lambda_filter():
     all_accelerators = []
     for res in result.values():
         for instance in res:
-            print(instance.accelerator_name)
-            all_accelerators.append((instance.accelerator_name,
-                                     instance.cloud))
-    assert all([item[0].__contains__('V100') and
-               item[1] == 'Lambda' for item in all_accelerators])
+            all_accelerators.append((instance.accelerator_name, instance.cloud))
+    assert all([
+        item[0].__contains__('V100') and item[1] == 'Lambda'
+        for item in all_accelerators])
 
 
 def test_list_accelerators_name_quantity_Lambda_filter():
@@ -72,9 +72,7 @@ def test_list_accelerators_name_quantity_Lambda_filter():
     all_accelerators = []
     for res in result.values():
         for instance in res:
-            all_accelerators.append((instance.accelerator_name,
-                                     instance.cloud,
+            all_accelerators.append((instance.accelerator_name, instance.cloud,
                                      instance.accelerator_count))
-    assert all([item[0].__contains__('A100') and
-                item[1] == 'Lambda' and
-                item[2] == 4 for item in all_accelerators])
+    assert all([item[0].__contains__('A100') and item[1] == 'Lambda' and item[2] == 4
+                for item in all_accelerators])

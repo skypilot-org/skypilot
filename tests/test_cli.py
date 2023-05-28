@@ -48,6 +48,7 @@ def test_accelerator_mismatch(enable_all_clouds):
           cloud: aws
           instance_type: p3.2xlarge""")
     cli_runner = cli_testing.CliRunner()
+
     def _capture_mismatch_gpus_spec(file_path, gpus: str):
         result = cli_runner.invoke(cli.launch,
                                    [file_path, '--gpus', gpus, '--dryrun'])
@@ -113,16 +114,13 @@ def test_show_gpus_gpu_name():
     result = cli_runner.invoke(cli.show_gpus, ['--cloud', 'lambda'])
     assert not result.exit_code
 
-    result = cli_runner.invoke(cli.show_gpus,
-                               ['--cloud', 'lambda', '--all'])
+    result = cli_runner.invoke(cli.show_gpus, ['--cloud', 'lambda', '--all'])
     assert not result.exit_code
 
-    result = cli_runner.invoke(cli.show_gpus,
-                               ['V100', '--cloud', 'lambda'])
+    result = cli_runner.invoke(cli.show_gpus, ['V100', '--cloud', 'lambda'])
     assert not result.exit_code
 
-    result = cli_runner.invoke(cli.show_gpus,
-                               ['V100:4', '--cloud', 'lambda'])
+    result = cli_runner.invoke(cli.show_gpus, ['V100:4', '--cloud', 'lambda'])
     assert not result.exit_code
 
     result = cli_runner.invoke(cli.show_gpus,
