@@ -97,7 +97,7 @@ Storage CLI
    :prog: sky storage delete
    :nested: full
 
-Utils: ``show-gpus``, ``check``, ``cost-report``
+Utils: ``show-gpus``/``check``/``cost-report``
 -------------------------------------------------
 
 
