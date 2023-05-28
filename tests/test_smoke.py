@@ -2059,30 +2059,6 @@ class TestStorageWithCredentials:
             endpoint_url = cloudflare.create_endpoint()
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile=r2 | wc -l'
 
-    """ 
-    @staticmethod
-    def cli_count_name_in_bucket(store_type, bucket_name, file_name):
-        if store_type == storage_lib.StoreType.S3:
-            return [
-                'aws', 's3api', 'list-objects', '--bucket', bucket_name,
-                '--query',
-                f'length(Contents[?contains(Key,\'{file_name}\')].Key)'
-            ]
-        elif store_type == storage_lib.StoreType.GCS:
-            return [
-                f'gsutil ls gs://{bucket_name} | grep "{file_name}" | wc -l'
-            ]
-        elif store_type == storage_lib.StoreType.R2:
-            endpoint_url = cloudflare.create_endpoint()
-            return [
-                f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH}',
-                'aws', 's3api', 'list-objects', '--bucket', bucket_name,
-                '--query',
-                f'length(Contents[?contains(Key,\'{file_name}\')].Key)',
-                '--endpoint', endpoint_url, '--profile=r2'
-            ]
-    """
-
     @pytest.fixture
     def tmp_source(self, tmp_path):
         # Creates a temporary directory with a file in it
@@ -2482,7 +2458,6 @@ class TestStorageWithCredentials:
         gitignore_output = subprocess.check_output(gitignore_cmd, shell=True)
         git_exclude_output = subprocess.check_output(git_exclude_cmd,
                                                      shell=True)
-
         cnt_output = subprocess.check_output(cnt_num_file_cmd, shell=True)
 
         # Only the 'included.*' files should exist in the cloud object storage
