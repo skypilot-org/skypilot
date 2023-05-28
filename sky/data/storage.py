@@ -884,11 +884,15 @@ def format_gitignore_to_exclude_list(
     git_exclude_path = os.path.join(expand_src_dir_path,
                         command_runner.GIT_EXCLUDE)
     with tempfile.TemporaryDirectory() as tmpdir:
-        cmd = f'rsync -avv --dry-run {command_runner.RSYNC_FILTER_OPTION} ' \
-              f'--exclude-from=\'{git_exclude_path}\' '\
-              f'{expand_src_dir_path} {tmpdir}'
-        rsync_output = subprocess.check_output(cmd, shell=True)
-        rsync_output_list = rsync_output.decode('utf-8').split('\n')
+        if os.path.exists(git_exclude_path):
+            cmd = f'rsync -avv --dry-run {command_runner.RSYNC_FILTER_OPTION} ' \
+                f'--exclude-from=\'{git_exclude_path}\' '\
+                f'{expand_src_dir_path} {tmpdir}'
+        else:
+            cmd = f'rsync -avv --dry-run {command_runner.RSYNC_FILTER_OPTION} ' \
+                f'{expand_src_dir_path} {tmpdir}'
+    rsync_output = subprocess.check_output(cmd, shell=True)
+    rsync_output_list = rsync_output.decode('utf-8').split('\n')
 
     excluded_list: List[str] = ['.git/*', '.gitignore']
     for item in rsync_output_list:
@@ -1869,7 +1873,7 @@ class R2Store(AbstractStore):
             sync_command = (
                 'AWS_SHARED_CREDENTIALS_FILE='
                 f'{cloudflare.R2_CREDENTIALS_PATH} '
-                'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
+                f'aws s3 sync --no-follow-symlinks {excludes} '
                 f'{src_dir_path} '
                 f's3://{self.name}/{dest_dir_name} '
                 f'--endpoint {endpoint_url} '

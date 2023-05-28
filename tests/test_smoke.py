@@ -1913,85 +1913,84 @@ class TestStorageWithCredentials:
     ]
 
     GITIGNORE_SYNC_TEST_DIR_STRUCTURE = {
-        'test-spot-exclusive': {
-            'double_asterisk': {
-                'double_asterisk_excluded': None,
-                'double_asterisk_excluded_dir': {
-                    'dir_excluded': None,
-                },
-            },
-            'double_asterisk_parent': {
-                'parent': {
-                    'also_excluded.txt': None,
-                    'child': {
-                        'double_asterisk_parent_child_excluded.txt': None,
-                    },
-                    'double_asterisk_parent_excluded.txt': None,
-                },
-            },
-            'excluded.log': None,
-            'excluded_dir': {
-                'excluded.txt': None,
-                'nested_excluded': {
-                    'excluded': None,
-                },
-            },
-            'exp-1': {
-                'be_excluded': None,
-            },
-            'exp-2': {
-                'be_excluded': None,
-            },
-            'front_slash_excluded': None,
-            'included.log': None,
-            'included.txt': None,
-            'include_dir': {
-                'excluded.log': None,
-                'included.log': None,
-            },
-            'included.log': None,
-            'included.txt': None,
-            'nested_double_asterisk': {
-                'one': {
-                    'also_exclude.txt': None,
-                },
-                'two': {
-                    'also_exclude.txt': None,
-                },
-            },
-            'nested_wildcard_dir': {
-                'monday': {
-                    'also_exclude.txt': None,
-                },
-                'tuesday': {
-                    'also_exclude.txt': None,
-                },
-            },
-            'no_slash_excluded': None,
-            'no_slash_tests': {
-                'no_slash_excluded': {
-                    'also_excluded.txt': None,
-                },
-            },
-            'question_mark': {
-                'excluded1.txt': None,
-                'excluded@.txt': None,
-            },
-            'square_bracket': {
-                'excluded1.txt': None,
-            },
-            'square_bracket_alpha': {
-                'excludedz.txt': None,
-            },
-            'square_bracket_excla': {
-                'excluded2.txt': None,
-                'excluded@.txt': None,
-            },
-            'square_bracket_single': {
-                'excluded0.txt': None,
+        'double_asterisk': {
+            'double_asterisk_excluded': None,
+            'double_asterisk_excluded_dir': {
+                'dir_excluded': None,
             },
         },
+        'double_asterisk_parent': {
+            'parent': {
+                'also_excluded.txt': None,
+                'child': {
+                    'double_asterisk_parent_child_excluded.txt': None,
+                },
+                'double_asterisk_parent_excluded.txt': None,
+            },
+        },
+        'excluded.log': None,
+        'excluded_dir': {
+            'excluded.txt': None,
+            'nested_excluded': {
+                'excluded': None,
+            },
+        },
+        'exp-1': {
+            'be_excluded': None,
+        },
+        'exp-2': {
+            'be_excluded': None,
+        },
+        'front_slash_excluded': None,
+        'included.log': None,
+        'included.txt': None,
+        'include_dir': {
+            'excluded.log': None,
+            'included.log': None,
+        },
+        'included.log': None,
+        'included.txt': None,
+        'nested_double_asterisk': {
+            'one': {
+                'also_exclude.txt': None,
+            },
+            'two': {
+                'also_exclude.txt': None,
+            },
+        },
+        'nested_wildcard_dir': {
+            'monday': {
+                'also_exclude.txt': None,
+            },
+            'tuesday': {
+                'also_exclude.txt': None,
+            },
+        },
+        'no_slash_excluded': None,
+        'no_slash_tests': {
+            'no_slash_excluded': {
+                'also_excluded.txt': None,
+            },
+        },
+        'question_mark': {
+            'excluded1.txt': None,
+            'excluded@.txt': None,
+        },
+        'square_bracket': {
+            'excluded1.txt': None,
+        },
+        'square_bracket_alpha': {
+            'excludedz.txt': None,
+        },
+        'square_bracket_excla': {
+            'excluded2.txt': None,
+            'excluded@.txt': None,
+        },
+        'square_bracket_single': {
+            'excluded0.txt': None,
+        },
     }
+    
 
     @staticmethod
     def create_dir_structure(base_path, structure):
@@ -2043,6 +2042,27 @@ class TestStorageWithCredentials:
     @staticmethod
     def cli_count_name_in_bucket(store_type, bucket_name, file_name):
         if store_type == storage_lib.StoreType.S3:
+            return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)"'
+        elif store_type == storage_lib.StoreType.GCS:
+            return f'gsutil ls gs://{bucket_name} | grep "{file_name}" | wc -l'
+        elif store_type == storage_lib.StoreType.R2:
+            endpoint_url = cloudflare.create_endpoint()
+            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=r2'
+
+    @staticmethod
+    def cli_count_file_in_bucket(store_type, bucket_name):
+        if store_type == storage_lib.StoreType.S3:
+            return f'aws s3 ls s3://{bucket_name} --recursive | wc -l'
+        elif store_type == storage_lib.StoreType.GCS:
+            return f'gsutil ls -r gs://{bucket_name}/** | wc -l'
+        elif store_type == storage_lib.StoreType.R2:
+            endpoint_url = cloudflare.create_endpoint()
+            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile=r2 | wc -l'
+
+    """ 
+    @staticmethod
+    def cli_count_name_in_bucket(store_type, bucket_name, file_name):
+        if store_type == storage_lib.StoreType.S3:
             return [
                 'aws', 's3api', 'list-objects', '--bucket', bucket_name,
                 '--query',
@@ -2055,11 +2075,13 @@ class TestStorageWithCredentials:
         elif store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             return [
+                f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH}',
                 'aws', 's3api', 'list-objects', '--bucket', bucket_name,
                 '--query',
                 f'length(Contents[?contains(Key,\'{file_name}\')].Key)',
                 '--endpoint', endpoint_url, '--profile=r2'
             ]
+    """
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -2448,30 +2470,25 @@ class TestStorageWithCredentials:
             bucket_name, file_name='.gitignore')
         git_exclude_cmd = self.cli_count_name_in_bucket(store_type, \
             bucket_name, file_name='.git')
+        cnt_num_file_cmd = self.cli_count_file_in_bucket(store_type, bucket_name)
 
-        if store_type == storage_lib.StoreType.GCS:
-            up_output = subprocess.check_output(up_cmd, shell=True)
-            gitignore_output = subprocess.check_output(gitignore_cmd,
-                                                       shell=True)
-            git_exclude_output = subprocess.check_output(git_exclude_cmd,
-                                                         shell=True)
-        else:
-            up_output = subprocess.check_output(up_cmd)
-            gitignore_output = subprocess.check_output(gitignore_cmd)
-            git_exclude_output = subprocess.check_output(git_exclude_cmd)
+
+        up_output = subprocess.check_output(up_cmd, shell=True)
+        gitignore_output = subprocess.check_output(gitignore_cmd, shell=True)
+        git_exclude_output = subprocess.check_output(git_exclude_cmd, shell=True)
         
-        ls_out = subprocess.check_output(self.cli_ls_cmd(store_type, bucket_name))
-        test = ls_out.decode('utf-8')
-        print(test)
+        cnt_output = subprocess.check_output(cnt_num_file_cmd, shell=True)
+
         # Only the 'included.*' files should exist in the cloud object storage
         assert '1' in up_output.decode('utf-8'), \
-                f'{upload_file_name} is not uploaded.: {test}'
+                f'{upload_file_name} is not uploaded.: {bucket_name}'
         assert '0' in gitignore_output.decode('utf-8'), \
-            '.gitignore file should not be uploaded'
+               '.gitignore file should not be uploaded'
         assert '0' in git_exclude_output.decode('utf-8'), \
-            '.git file should not be uploaded'
-        assert '1' in ls_out.decode('utf-8'), \
-            'Some items in the gitignore list are not ignored - there should be one item in the bucket : {}'.format(ls_out.decode('utf-8'))
+               '.git file should not be uploaded'
+        ls_cmd = self.cli_ls_cmd(store_type, bucket_name)
+        assert '1' in cnt_output.decode('utf-8'), \
+               f'Some items in the gitignore list are not ignored - there should be one item in the bucket. Check with {ls_cmd}'
 
 
 # ---------- Testing YAML Specs ----------
