@@ -5,22 +5,22 @@ Setting up Local Cluster
 
 Prerequisites
 -------------
-To ensure sky nodes can communicate with each other, SkyPilot On-prem requires the system admin to open up all ports from :code:`10001` to :code:`19999`, inclusive, on all nodes. This is how SkyPilot differentiates input/output for multiple worker processes on a single node. In addition, SkyPilot requires port :code:`8265` for Ray Dashboard on all nodes.
+To ensure sky nodes can communicate with each other, SkyPilot On-prem requires the system admin to open up all ports from :code:`10001` to :code:`19999`, inclusive, on all nodes. This is how SkyPilot differentiates input/output for multiple worker processes on a single node. In addition, SkyPilot requires port :code:`8266` for Ray Dashboard on all nodes.
 
-For the head node, SkyPilot requires port :code:`6379` for the GCS server on Ray.
+For the head node, SkyPilot requires port :code:`6380` for the GCS server on Ray.
 
 For further reference, `here <https://docs.ray.io/en/latest/ray-core/configure.html#ports-configurations>`_ are the required ports directly from the Ray docs.
 
 Installing SkyPilot dependencies
 -----------------------------------
 
-SkyPilot On-prem requires :code:`python3`, :code:`ray==2.0.1`, and :code:`sky` to be setup on all local nodes and globally available to all users.
+SkyPilot On-prem requires :code:`python3`, :code:`ray==2.4.0`, and :code:`sky` to be setup on all local nodes and globally available to all users.
 
 To install Ray and SkyPilot for all users, run the following commands on all local nodes:
 
 .. code-block:: console
 
-   $ pip3 install ray[default]==2.0.1
+   $ pip3 install ray[default]==2.4.0
 
    $ # SkyPilot requires python >= 3.7.
    $ pip3 install skypilot

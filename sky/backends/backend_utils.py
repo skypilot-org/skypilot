@@ -6,13 +6,15 @@ import getpass
 import json
 import os
 import pathlib
+import random
 import re
 import subprocess
 import tempfile
 import textwrap
 import time
 import typing
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import (Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple,
+                    Union)
 from typing_extensions import Literal
 import uuid
 
@@ -845,6 +847,14 @@ def write_cluster_config(
 
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
+    # Dump the Ray ports to a file for Ray job submission
+    ray_port = constants.SKY_REMOTE_RAY_PORT
+    ray_dashboard_port = constants.SKY_REMOTE_RAY_DASHBOARD_PORT
+    # Note we can not use json.dumps which will add a space between ":" and its value
+    # which causes the yaml parser to fail.
+    port_dict_str = f'{{"ray_port":{ray_port}, "ray_dashboard_port":{ray_dashboard_port}}}'
+    dump_port_command = f'python -c \'import json, os; json.dump({port_dict_str}, open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -885,6 +895,12 @@ def write_cluster_config(
                 # GCP only:
                 'gcp_project_id': gcp_project_id,
 
+                # Port of Ray (GCS server).
+                # Ray's default port 6379 is conflicted with Redis.
+                'ray_port': ray_port,
+                'ray_dashboard_port': ray_dashboard_port,
+                'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
+                'dump_port_command': dump_port_command,
                 # Ray version.
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
                 # Cloud credentials for cloud storage.
@@ -1527,8 +1543,12 @@ def check_network_connection():
 
 
 def _process_cli_query(
-    cloud: str, cluster: str, query_cmd: str, deliminiator: str,
-    status_map: Mapping[str, Optional[global_user_state.ClusterStatus]]
+    cloud: str,
+    cluster: str,
+    query_cmd: str,
+    deliminator: str,
+    status_map: Mapping[str, Optional[global_user_state.ClusterStatus]],
+    max_retries: int = 3,
 ) -> List[global_user_state.ClusterStatus]:
     """Run the cloud CLI query and returns cluster status.
 
@@ -1536,10 +1556,12 @@ def _process_cli_query(
         cloud: The cloud provider name.
         cluster: The cluster name.
         query_cmd: The cloud CLI query command.
-        deliminiator: The deliminiator separating the status in the output
+        deliminator: The deliminator separating the status in the output
             of the query command.
         status_map: A map from the CLI status string to the corresponding
             global_user_state.ClusterStatus.
+        max_retries: Maximum number of retries before giving up. For AWS only.
+
     Returns:
         A list of global_user_state.ClusterStatus of all existing nodes in the
         cluster. The list can be empty if none of the nodes in the clusters are
@@ -1554,12 +1576,28 @@ def _process_cli_query(
                  f'{stdout}\n'
                  '**** STDERR ****\n'
                  f'{stderr}')
+
+    # Cloud-specific error handling.
     if (cloud == str(clouds.Azure()) and returncode == 2 and
             'argument --ids: expected at least one argument' in stderr):
         # Azure CLI has a returncode 2 when the cluster is not found, as
         # --ids <empty> is passed to the query command. In that case, the
         # cluster should be considered as DOWN.
         return []
+    if (cloud == str(clouds.AWS()) and returncode != 0 and
+            'Unable to locate credentials. You can configure credentials by '
+            'running "aws configure"' in stdout + stderr):
+        # AWS: has run into this rare error with spot controller (which has an
+        # assumed IAM role and is working fine most of the time).
+        #
+        # We do not know the root cause. For now, the hypothesis is instance
+        # metadata service is temporarily unavailable. So, we retry the query.
+        if max_retries > 0:
+            logger.info('Encountered AWS "Unable to locate credentials" '
+                        'error. Retrying.')
+            time.sleep(random.uniform(0, 1) * 2)
+            return _process_cli_query(cloud, cluster, query_cmd, deliminator,
+                                      status_map, max_retries - 1)
 
     if returncode != 0:
         with ux_utils.print_exception_no_traceback():
@@ -1572,7 +1610,7 @@ def _process_cli_query(
         return []
 
     statuses = []
-    for s in cluster_status.split(deliminiator):
+    for s in cluster_status.split(deliminator):
         node_status = status_map[s]
         if node_status is not None:
             statuses.append(node_status)
