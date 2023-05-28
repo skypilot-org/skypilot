@@ -1,5 +1,4 @@
 import sky
-import click
 
 
 def test_list_accelerators():
@@ -54,11 +53,6 @@ def test_list_accelerators_positive_quantity_filter():
     assert all(quantity == 4 for quantity in all_accelerators)
 
 
-# def test_list_accelerators_zero_quantity_filter():
-#     result = sky.list_accelerators(quantity_filter=0)
-#     assert isinstance(result, ValueError)
-
-
 def test_list_accelerators_name_Lambda_filter():
     result = sky.list_accelerators(clouds='lambda', name_filter='V100')
     all_accelerators = []
@@ -84,11 +78,3 @@ def test_list_accelerators_name_quantity_Lambda_filter():
     assert all([item[0].__contains__('A100') and
                 item[1] == 'Lambda' and
                 item[2] == 4 for item in all_accelerators])
-
-
-def test_list_accelerators_name_quantity_Lambda_all_fail():
-    result = sky.show_gpus(gpus_only = False,
-                            clouds='lambda',
-                            name_filter='A100',
-                            quantity_filter=4)
-    # assert isinstance(result, click.UsageError)
