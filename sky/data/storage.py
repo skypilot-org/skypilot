@@ -2414,7 +2414,7 @@ class IBMCosStore(AbstractStore):
     def _create_cos_bucket(self,
                            bucket_name: str,
                            region='us-east') -> StorageHandle:
-        """Creates S3 bucket with specific name in specific region
+        """Creates IBM COS bucket with specific name in specific region
 
         Args:
           bucket_name: str; Name of bucket

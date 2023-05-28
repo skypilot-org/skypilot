@@ -6,6 +6,7 @@ import subprocess
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
 import re
+import textwrap
 from filelock import FileLock
 
 from sky import exceptions
@@ -335,10 +336,8 @@ def store_rclone_config(bucket_name: str,
                         apply_changes: bool = True):
     """creates a configuration files for rclone - used for
     bucket syncing and mounting """
-    # pylint: disable=import-outside-toplevel
-    import textwrap
 
-    rclone_file = os.path.expanduser(RCLONE_CONFIG_PATH)
+    rclone_config_path = os.path.expanduser(RCLONE_CONFIG_PATH)
     access_key_id, secret_access_key = ibm.get_hmac_keys()
 
     config_data = textwrap.dedent(f"""\
@@ -353,20 +352,19 @@ def store_rclone_config(bucket_name: str,
         acl = private
         """)
 
-    # create ~/.config/rclone if doesn't exist
-    if not os.path.isdir(os.path.dirname(rclone_file)):
-        os.makedirs(os.path.dirname(rclone_file), exist_ok=True)
+    # create ~/.config/rclone/ if doesn't exist
+    os.makedirs(os.path.dirname(rclone_config_path), exist_ok=True)
     # create rclone.conf if doesn't exist
-    if not os.path.isfile(rclone_file):
+    if not os.path.isfile(rclone_config_path):
         open('file', 'w').close()
 
-    with FileLock(rclone_file + '.lock'):
+    with FileLock(rclone_config_path + '.lock'):
         profiles_to_keep = _remove_bucket_profile_rclone(bucket_name)
 
         # write back file without profile: [bucket_name]
         # to which the new bucket profile is appended
         if apply_changes:
-            with open(f'{rclone_file}', 'w') as file:
+            with open(f'{rclone_config_path}', 'w') as file:
                 if profiles_to_keep:
                     file.writelines(profiles_to_keep)
                     if profiles_to_keep[-1].strip():
@@ -400,25 +398,25 @@ def get_cos_region_from_rclone(bucket_name):
 def delete_rclone_bucket_profile(bucket_name):
     """deletes specified bucket profile for rclone.conf"""
 
-    rclone_file = os.path.expanduser(RCLONE_CONFIG_PATH)
-    if not os.path.isfile(rclone_file):
+    rclone_config_path = os.path.expanduser(RCLONE_CONFIG_PATH)
+    if not os.path.isfile(rclone_config_path):
         logger.warning('rclone configuration file wasn\'t found')
         return
 
-    with FileLock(rclone_file + '.lock'):
+    with FileLock(rclone_config_path + '.lock'):
         profiles_to_keep = _remove_bucket_profile_rclone(bucket_name)
 
         # write back file without profile: [bucket_name]
-        with open(f'{rclone_file}', 'w') as file:
+        with open(f'{rclone_config_path}', 'w') as file:
             file.writelines(profiles_to_keep)
 
 
 def _remove_bucket_profile_rclone(bucket_name: str) -> List[str]:
     """returns rclone profiles without profiles matching [bucket_name]"""
 
-    rclone_file = os.path.expanduser(RCLONE_CONFIG_PATH)
+    rclone_config_path = os.path.expanduser(RCLONE_CONFIG_PATH)
 
-    with open(f'{rclone_file}', 'r') as file:
+    with open(f'{rclone_config_path}', 'r') as file:
         lines = file.readlines()  # returns a list of the file's lines
         # delete existing bucket profile that match: '[bucket_name]'
         lines_to_keep = []  # lines to write back to file

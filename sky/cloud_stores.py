@@ -253,7 +253,7 @@ class IBMCosCloudStorage(CloudStorage):
         # A directory with few or no items
         return True
 
-    def get_cmd(self, source: str, destination: str):
+    def _get_rclone_sync_command(self, source: str, destination: str):
         bucket_name, data_path, bucket_region = data_utils.split_cos_path(
             source)
         data_path_in_bucket = bucket_name + data_path
@@ -275,7 +275,7 @@ class IBMCosCloudStorage(CloudStorage):
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads a directory from 'source' bucket to remote vm
           at 'destination' using rclone."""
-        return self.get_cmd(source, destination)
+        return self._get_rclone_sync_command(source, destination)
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file from 'source' bucket to remote vm
