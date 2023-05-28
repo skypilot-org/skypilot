@@ -882,6 +882,8 @@ def format_gitignore_to_exclude_list(src_dir_path: str) -> List[str]:
     expand_src_dir_path = os.path.expanduser(src_dir_path)
     git_exclude_path = os.path.join(expand_src_dir_path,
                                     command_runner.GIT_EXCLUDE)
+    # Using empty tmpdir as destination for rsync command
+    # to get list of files/directories to be synced from the source
     with tempfile.TemporaryDirectory() as tmpdir:
         if os.path.exists(git_exclude_path):
             cmd = f'rsync -avv --dry-run ' \
