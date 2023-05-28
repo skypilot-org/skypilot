@@ -2466,7 +2466,7 @@ class TestStorageWithCredentials:
         assert '0' in gitignore_output.decode('utf-8'), \
                '.gitignore file should not be uploaded'
         assert '0' in git_exclude_output.decode('utf-8'), \
-               '.git file should not be uploaded'
+               '.git directory should not be uploaded'
         ls_cmd = self.cli_ls_cmd(store_type, bucket_name)
         assert '1' in cnt_output.decode('utf-8'), \
                f'Some items listed in .gitignore and .git/info/exclude are not ignored - there must be one item in the bucket. Check with {ls_cmd}'
