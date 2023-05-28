@@ -233,7 +233,17 @@ class RayCodeGen:
 
             SKY_REMOTE_WORKDIR = {constants.SKY_REMOTE_WORKDIR!r}
 
-            ray.init(address={ray_address!r}, namespace='__sky__{job_id}__', log_to_driver=True)
+            kwargs = dict()
+            # Only set the `_temp_dir` to SkyPilot's ray cluster directory when the directory
+            # exists for backward compatibility for the VM launched before #1790.
+            if os.path.exists({constants.SKY_REMOTE_RAY_TEMPDIR!r}):
+                kwargs['_temp_dir'] = {constants.SKY_REMOTE_RAY_TEMPDIR!r}
+            ray.init(
+                address={ray_address!r},
+                namespace='__sky__{job_id}__',
+                log_to_driver=True,
+                **kwargs
+            )
             run_fn = None
             futures = []
             """),
@@ -2362,7 +2372,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                        max_backoff_factor=3)
                         while True:
                             returncode, stdout, stderr = runner.run(
-                                get_zone_cmd, require_outputs=True)
+                                get_zone_cmd,
+                                require_outputs=True,
+                                stream_logs=False)
                             if returncode == 0:
                                 break
                             retry_count += 1
@@ -2660,9 +2672,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle, ray_command, ray_job_id)
         else:
             job_submit_cmd = (
+                'RAY_DASHBOARD_PORT=$(python -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
                 f'{cd} && mkdir -p {remote_log_dir} && ray job submit '
-                f'--address=http://127.0.0.1:8265 --submission-id {ray_job_id} '
-                '--no-wait '
+                '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
+                f'--submission-id {ray_job_id} --no-wait '
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
         returncode, stdout, stderr = self.run_on_head(handle,
@@ -2750,7 +2763,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         switch_user_cmd = ' '.join(switch_user_cmd)
         job_submit_cmd = (
             'ray job submit '
-            f'--address=http://127.0.0.1:8265 --submission-id {ray_job_id} '
+            '--address='
+            f'http://127.0.0.1:{constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
+            f'--submission-id {ray_job_id} '
             f'--no-wait -- {switch_user_cmd}')
         return job_submit_cmd
 

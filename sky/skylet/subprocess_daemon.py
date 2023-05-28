@@ -10,6 +10,8 @@ import sys
 import time
 
 import psutil
+
+from sky.skylet import job_lib
 from ray.dashboard.modules.job import common as job_common
 from ray.dashboard.modules.job import sdk as job_sdk
 
@@ -42,7 +44,8 @@ if __name__ == '__main__':
     else:
         try:
             # Polls the Job submission client to check job status.
-            client = job_sdk.JobSubmissionClient('http://127.0.0.1:8265')
+            port = job_lib.get_job_submission_port()
+            client = job_sdk.JobSubmissionClient(f'http://127.0.0.1:{port}')
             while True:
                 status_info = client.get_job_status(local_ray_job_id)
                 status = status_info.status
