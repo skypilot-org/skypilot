@@ -1,6 +1,5 @@
 """Storage and Store Classes for Sky Data."""
 import enum
-import fnmatch
 import os
 import re
 import subprocess
@@ -875,42 +874,47 @@ class Storage(object):
             config['_force_delete'] = True
         return config
 
-def format_gitignore_to_exclude_list(
-        src_dir_path: str) -> List[str]:
-    """Returns a list of excluded files from .gitignore and
-    .git/info/exclude after formatting.
+
+def format_gitignore_to_exclude_list(src_dir_path: str) -> List[str]:
+    """Returns a list of formatted excluded files from .gitignore and
+    .git/info/exclude using rsync.
     """
     expand_src_dir_path = os.path.expanduser(src_dir_path)
     git_exclude_path = os.path.join(expand_src_dir_path,
-                        command_runner.GIT_EXCLUDE)
+                                    command_runner.GIT_EXCLUDE)
     with tempfile.TemporaryDirectory() as tmpdir:
         if os.path.exists(git_exclude_path):
-            cmd = f'rsync -avv --dry-run {command_runner.RSYNC_FILTER_OPTION} ' \
-                f'--exclude-from=\'{git_exclude_path}\' '\
-                f'{expand_src_dir_path} {tmpdir}'
+            cmd = f'rsync -avv --dry-run ' \
+                  f'{command_runner.RSYNC_FILTER_OPTION} ' \
+                  f'--exclude-from=\'{git_exclude_path}\' '\
+                  f'{expand_src_dir_path} {tmpdir}'
         else:
-            cmd = f'rsync -avv --dry-run {command_runner.RSYNC_FILTER_OPTION} ' \
-                f'{expand_src_dir_path} {tmpdir}'
+            cmd = f'rsync -avv --dry-run ' \
+                  f'{command_runner.RSYNC_FILTER_OPTION} ' \
+                  f'{expand_src_dir_path} {tmpdir}'
     rsync_output = subprocess.check_output(cmd, shell=True)
     rsync_output_list = rsync_output.decode('utf-8').split('\n')
 
     excluded_list: List[str] = ['.git/*', '.gitignore']
+    # processing the outputs from rsync command to
+    # to get a list of files/directories to exclude from syncing
     for item in rsync_output_list:
         if item.startswith('[sender] hiding file '):
             to_be_excluded = item.split(' ')[3]
             slash_idx = to_be_excluded.find('/')
-            to_be_excluded = to_be_excluded[slash_idx+1:]
+            to_be_excluded = to_be_excluded[slash_idx + 1:]
             excluded_list.append(to_be_excluded)
         elif item.startswith('[sender] hiding directory '):
             to_be_excluded = item.split(' ')[3]
             slash_idx = to_be_excluded.find('/')
-            to_be_excluded = to_be_excluded[slash_idx+1:]
+            to_be_excluded = to_be_excluded[slash_idx + 1:]
             to_be_excluded += '/*'
             excluded_list.append(to_be_excluded)
         elif len(excluded_list) > 2:
             break
 
     return excluded_list
+
 
 class S3Store(AbstractStore):
     """S3Store inherits from Storage Object and represents the backend
@@ -1117,10 +1121,9 @@ class S3Store(AbstractStore):
             excluded_list = format_gitignore_to_exclude_list(src_dir_path)
             excludes = ' '.join(
                 [f'--exclude "{file_name}"' for file_name in excluded_list])
-            sync_command = (
-                f'aws s3 sync --no-follow-symlinks {excludes} '
-                f'{src_dir_path} '
-                f's3://{self.name}/{dest_dir_name}')
+            sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
+                            f'{src_dir_path} '
+                            f's3://{self.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
@@ -1870,14 +1873,13 @@ class R2Store(AbstractStore):
                 [f'--exclude "{file_name}"' for file_name in excluded_list])
             endpoint_url = cloudflare.create_endpoint()
 
-            sync_command = (
-                'AWS_SHARED_CREDENTIALS_FILE='
-                f'{cloudflare.R2_CREDENTIALS_PATH} '
-                f'aws s3 sync --no-follow-symlinks {excludes} '
-                f'{src_dir_path} '
-                f's3://{self.name}/{dest_dir_name} '
-                f'--endpoint {endpoint_url} '
-                f'--profile={cloudflare.R2_PROFILE_NAME}')
+            sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
+                            f'{cloudflare.R2_CREDENTIALS_PATH} '
+                            f'aws s3 sync --no-follow-symlinks {excludes} '
+                            f'{src_dir_path} '
+                            f's3://{self.name}/{dest_dir_name} '
+                            f'--endpoint {endpoint_url} '
+                            f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
 
         # Generate message for upload
