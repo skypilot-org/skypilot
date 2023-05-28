@@ -90,6 +90,11 @@ available_node_types:
           Tags:
             - Key: skypilot-user
               Value: {{ user }}
+{%- for tag_key, tag_value in instance_tags.items() %}
+            - Key: {{ tag_key }}
+              Value: {{ tag_value }}
+{%- endfor %}
+
 {% if num_nodes > 1 %}
   ray.worker.default:
     min_workers: {{num_nodes - 1}}
@@ -137,6 +142,11 @@ available_node_types:
           Tags:
             - Key: skypilot-user
               Value: {{ user }}
+{%- for tag_key, tag_value in instance_tags.items() %}
+            - Key: {{ tag_key }}
+              Value: {{ tag_value }}
+{%- endfor %}
+
 {%- endif %}
 
 head_node_type: ray.head.default

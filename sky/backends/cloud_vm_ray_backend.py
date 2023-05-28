@@ -2372,7 +2372,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                        max_backoff_factor=3)
                         while True:
                             returncode, stdout, stderr = runner.run(
-                                get_zone_cmd, require_outputs=True)
+                                get_zone_cmd,
+                                require_outputs=True,
+                                stream_logs=False)
                             if returncode == 0:
                                 break
                             retry_count += 1

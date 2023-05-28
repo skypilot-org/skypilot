@@ -782,19 +782,22 @@ def write_cluster_config(
         - 'tpu-create-script' (if TPU is requested)
         - 'tpu-delete-script' (if TPU is requested)
     Raises:
-        exceptions.ResourcesUnavailableError: if the region/zones requested does not appear
-            in the catalog, or an ssh_proxy_command is specified but not for the given region.
+        exceptions.ResourcesUnavailableError: if the region/zones requested does
+            not appear in the catalog, or an ssh_proxy_command is specified but
+            not for the given region.
     """
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
-    # This can raise a ResourcesUnavailableError, when the region/zones requested
-    # does not appear in the catalog. It can be triggered when the user changed
-    # the catalog file, while there is a cluster in the removed region/zone.
-    # TODO(zhwu): We should change the exception type to a more specific one,
-    # as the ResourcesUnavailableError is overly used. Also, it would be better
-    # to move the check out of this function, i.e. the caller should be
-    # responsible for the validation.
+    # This can raise a ResourcesUnavailableError, when the region/zones
+    # requested does not appear in the catalog. It can be triggered when the
+    # user changed the catalog file, while there is a cluster in the removed
+    # region/zone.
+    #
+    # TODO(zhwu): We should change the exception type to a more specific one, as
+    # the ResourcesUnavailableError is overly used. Also, it would be better to
+    # move the check out of this function, i.e. the caller should be responsible
+    # for the validation.
     resources_vars = cloud.make_deploy_resources_variables(
         to_provision, region, zones)
     config_dict = {}
@@ -844,8 +847,16 @@ def write_cluster_config(
             assert region_name in ssh_proxy_command_config, (
                 region_name, ssh_proxy_command_config)
             ssh_proxy_command = ssh_proxy_command_config[region_name]
-
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
+
+    # User-supplied instance tags.
+    instance_tags = {}
+    instance_tags = skypilot_config.get_nested(
+        (str(cloud).lower(), 'instance_tags'), {})
+    if not isinstance(instance_tags, dict):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Custom instance_tags in config.yaml should '
+                             f'be a dict, but received {type(instance_tags)}.')
 
     # Dump the Ray ports to a file for Ray job submission
     ray_port = constants.SKY_REMOTE_RAY_PORT
@@ -887,6 +898,8 @@ def write_cluster_config(
                 # Not exactly AWS only, but we only test it's supported on AWS
                 # for now:
                 'ssh_proxy_command': ssh_proxy_command,
+                # User-supplied instance tags.
+                'instance_tags': instance_tags,
 
                 # Azure only:
                 'azure_subscription_id': azure_subscription_id,
