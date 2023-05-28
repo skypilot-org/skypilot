@@ -1970,6 +1970,8 @@ class TestStorageWithCredentials:
             endpoint_url = cloudflare.create_endpoint()
             url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
+        if store_type == storage_lib.StoreType.IBM:
+            return f'rclone delete {bucket_name}:{bucket_name} && rclone config delete {bucket_name}'
 
     @staticmethod
     def cli_ls_cmd(store_type, bucket_name, suffix=''):
@@ -1993,7 +1995,7 @@ class TestStorageWithCredentials:
                 url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
         if store_type == storage_lib.StoreType.IBM:
-            return ['rclone', 'ls', f'{bucket_name}:{bucket_name}/{suffix}']
+            return f'rclone ls {bucket_name}:{bucket_name}/{suffix}'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -2138,6 +2140,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        storage_lib.StoreType.IBM,
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
     def test_bucket_external_deletion(self, tmp_scratch_storage_obj,
