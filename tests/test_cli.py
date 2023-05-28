@@ -83,6 +83,7 @@ def test_show_gpus_gpu_name():
     -> sky show-gpus
     -> sky show-gpus --all
     -> sky show-gpus V100:4
+    -> sky show-gpus :4
     -> sky show-gpus V100:0
     -> sky show-gpus V100:-2
     -> sky show-gpus --cloud lambda
