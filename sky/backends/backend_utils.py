@@ -847,6 +847,14 @@ def write_cluster_config(
 
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
+    # Dump the Ray ports to a file for Ray job submission
+    ray_port = constants.SKY_REMOTE_RAY_PORT
+    ray_dashboard_port = constants.SKY_REMOTE_RAY_DASHBOARD_PORT
+    # Note we can not use json.dumps which will add a space between ":" and its value
+    # which causes the yaml parser to fail.
+    port_dict_str = f'{{"ray_port":{ray_port}, "ray_dashboard_port":{ray_dashboard_port}}}'
+    dump_port_command = f'python -c \'import json, os; json.dump({port_dict_str}, open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -887,6 +895,12 @@ def write_cluster_config(
                 # GCP only:
                 'gcp_project_id': gcp_project_id,
 
+                # Port of Ray (GCS server).
+                # Ray's default port 6379 is conflicted with Redis.
+                'ray_port': ray_port,
+                'ray_dashboard_port': ray_dashboard_port,
+                'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
+                'dump_port_command': dump_port_command,
                 # Ray version.
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
                 # Cloud credentials for cloud storage.
