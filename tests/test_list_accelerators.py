@@ -76,6 +76,7 @@ def test_list_accelerators_name_quantity_Lambda_filter():
         for instance in res:
             all_accelerators.append((instance.accelerator_name, instance.cloud,
                                      instance.accelerator_count))
-    assert all([item[0].__contains__('A100') and item[1] == 'Lambda' and item[2] == 4
-                for item in all_accelerators
+    assert all([
+        item[0].__contains__('A100') and item[1] == 'Lambda' and item[2] == 4
+        for item in all_accelerators
     ])
