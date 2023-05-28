@@ -42,7 +42,9 @@ SourceType = Union[Path, List[Path]]
 # TODO(Doyoung): need to add clouds.CLOUDFLARE() to support
 # R2 to be an option as preferred store type
 STORE_ENABLED_CLOUDS: List[str] = [
-    str(clouds.AWS()), str(clouds.GCP()), str(clouds.IBM()), cloudflare.NAME
+    str(clouds.AWS()),
+    str(clouds.GCP()),
+    str(clouds.IBM()), cloudflare.NAME
 ]
 
 # Maximum number of concurrent rsync upload processes
