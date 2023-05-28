@@ -854,8 +854,9 @@ def write_cluster_config(
     instance_tags = skypilot_config.get_nested(
         (str(cloud).lower(), 'instance_tags'), {})
     if not isinstance(instance_tags, dict):
-        raise ValueError('Custom instance_tags in config.yaml should '
-                         f'be a dict, but received {type(instance_tags)}.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Custom instance_tags in config.yaml should '
+                             f'be a dict, but received {type(instance_tags)}.')
 
     # Dump the Ray ports to a file for Ray job submission
     ray_port = constants.SKY_REMOTE_RAY_PORT
