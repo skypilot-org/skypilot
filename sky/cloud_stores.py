@@ -256,16 +256,19 @@ class IBMCosCloudStorage(CloudStorage):
     def _get_rclone_sync_command(self, source: str, destination: str):
         bucket_name, data_path, bucket_region = data_utils.split_cos_path(
             source)
+        bucket_rclone_profile = data_utils.Rclone.get_rclone_bucket_profile(
+            bucket_name, 'IBM')
         data_path_in_bucket = bucket_name + data_path
-        rclone_config_data = data_utils.store_rclone_config(
-            bucket_name, bucket_region, False)
+        rclone_config_data = data_utils.Rclone.store_rclone_config(
+            bucket_name, 'IBM', bucket_region, False)
         # configure_rclone cmd stores bucket profile in rclone config file at the cluster's nodes.
         configure_rclone = (
-            f' mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> {data_utils.RCLONE_CONFIG_PATH}'
+            f' mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> {data_utils.Rclone.RCLONE_CONFIG_PATH}'
         )
         # bucket_name also serves as a profile name in rclone.conf
         download_via_rclone = (
-            f'rclone copy {bucket_name}:{data_path_in_bucket} {destination}')
+            f'rclone copy {bucket_rclone_profile}:{data_path_in_bucket} {destination}'
+        )
 
         all_commands = list(self._GET_RCLONE)
         all_commands.append(configure_rclone)

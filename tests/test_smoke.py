@@ -47,6 +47,7 @@ from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.clouds import AWS, GCP, Azure
 from sky.adaptors import ibm
+from sky.data.data_utils import Rclone
 
 # For uniquefying users on shared-account cloud providers. Used as part of the
 # cluster names.
@@ -749,8 +750,11 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
 def test_ibm_storage_mounts():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
+    bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
+        storage_name, 'IBM')
     template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml').read_text()
+        'tests/test_yamls/test_storage_mounting_cloud_specific.yaml').read_text(
+        )
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -761,7 +765,7 @@ def test_ibm_storage_mounts():
             *storage_setup_commands,
             f'sky launch -y -c {name} --cloud ibm {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'rclone ls {storage_name}:{storage_name}/hello.txt',
+            f'rclone ls {bucket_rclone_profile}:{storage_name}/hello.txt',
         ]
         test = Test(
             'ibm_storage_mounts',
@@ -1971,7 +1975,9 @@ class TestStorageWithCredentials:
             url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
         if store_type == storage_lib.StoreType.IBM:
-            return f'rclone delete {bucket_name}:{bucket_name} && rclone config delete {bucket_name}'
+            bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
+                bucket_name, 'IBM')
+            return f'rclone delete {bucket_rclone_profile}:{bucket_name} && rclone config delete {bucket_rclone_profile}'
 
     @staticmethod
     def cli_ls_cmd(store_type, bucket_name, suffix=''):
@@ -1995,7 +2001,9 @@ class TestStorageWithCredentials:
                 url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
         if store_type == storage_lib.StoreType.IBM:
-            return f'rclone ls {bucket_name}:{bucket_name}/{suffix}'
+            bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
+                bucket_name, 'IBM')
+            return f'rclone ls {bucket_rclone_profile}:{bucket_name}/{suffix}'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):

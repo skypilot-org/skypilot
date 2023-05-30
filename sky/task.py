@@ -758,8 +758,8 @@ class Task:
                         # source is a bucket name.
                         assert storage.name is not None, storage
                         # extract region from rclone.conf
-                        cos_region = data_utils.get_cos_region_from_rclone(
-                            storage.name)
+                        cos_region = data_utils.Rclone.get_region_from_rclone(
+                            storage.name, 'IBM')
                         blob_path = f'cos://{cos_region}/{storage.name}'
                     self.update_file_mounts({mnt_path: blob_path})
                 elif store_type is storage_lib.StoreType.AZURE:

@@ -2096,6 +2096,8 @@ class IBMCosStore(AbstractStore):
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
+        self.bucket_rclone_profile = \
+          data_utils.Rclone.get_rclone_bucket_profile(self.name, 'IBM')
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -2310,9 +2312,10 @@ class IBMCosStore(AbstractStore):
             # .git directory is excluded from the sync
             # wrapping src_dir_path with "" to support sources
             # containing spaces.
-            sync_command = ('rclone copy --exclude ".git/*" '
-                            f'"{src_dir_path}" '
-                            f'{self.name}:{self.name}/{dest_dir_name}')
+            sync_command = (
+                'rclone copy --exclude ".git/*" '
+                f'"{src_dir_path}" '
+                f'{self.bucket_rclone_profile}:{self.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
@@ -2367,8 +2370,9 @@ class IBMCosStore(AbstractStore):
                     '`rclone lsd <remote>` on relevant remotes returned '
                     'via `rclone listremotes` to debug.')
 
-        data_utils.store_rclone_config(
+        data_utils.Rclone.store_rclone_config(
             self.name,
+            'IBM',
             self.region,  # type: ignore
             True)
         if not bucket_region and self.sync_on_reconstruction:
@@ -2397,19 +2401,20 @@ class IBMCosStore(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        rclone_config_data = data_utils.store_rclone_config(
+        rclone_config_data = data_utils.Rclone.store_rclone_config(
             self.bucket.name,
+            'IBM',
             self.region,  # type: ignore
-            True)
+            False)
         # 'configure_rclone_profile' cmd stores bucket profile
         # in rclone config file at the cluster's nodes.
         # pylint: disable=line-too-long
         configure_rclone_profile = (
-            f' mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> {data_utils.RCLONE_CONFIG_PATH}'
+            f' mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> {data_utils.Rclone.RCLONE_CONFIG_PATH}'
         )
         install_cmd = 'rclone version >/dev/null 2>&1 || curl https://rclone.org/install.sh | sudo bash'
         # --daemon will keep the mounting process running in the background.
-        mount_cmd = f'{install_cmd} && {configure_rclone_profile} && rclone mount {self.bucket.name}:{self.bucket.name} {mount_path} --daemon'
+        mount_cmd = f'{install_cmd} && {configure_rclone_profile} && rclone mount {self.bucket_rclone_profile}:{self.bucket.name} {mount_path} --daemon'
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -2431,7 +2436,8 @@ class IBMCosStore(AbstractStore):
                     'LocationConstraint': f'{region}-smart'
                 },
                 IBMServiceInstanceId=self.instance_id)
-            logger.info(f'Bucket: "{bucket_name}" was created successfully')
+            logger.info(f'{colorama.Fore.GREEN}Bucket: "{bucket_name}" '
+                        f'was created in {region}. {colorama.Style.RESET_ALL}')
             self.bucket = self.s3_resource.Bucket(bucket_name)
 
         except self.ibm_botocore.exceptions.ClientError as e:
@@ -2459,4 +2465,4 @@ class IBMCosStore(AbstractStore):
         except self.ibm_botocore.exceptions.ClientError as e:
             if e.__class__.__name__ == 'NoSuchBucket':
                 logger.debug('bucket already removed')
-        data_utils.delete_rclone_bucket_profile(self.name)
+        data_utils.Rclone.delete_rclone_bucket_profile(self.name, 'IBM')
