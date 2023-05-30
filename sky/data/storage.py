@@ -1201,6 +1201,17 @@ class S3Store(AbstractStore):
         try:
             if region is None:
                 s3_client.create_bucket(Bucket=bucket_name)
+                s3_client.put_bucket_tagging(
+                    Bucket=bucket_name,
+                    Tagging={
+                        'TagSet': [
+                            {
+                                'Key': 'skymanaged',
+                                'Value': ''
+                            },
+                        ]
+                    }
+                )
             else:
                 location = {'LocationConstraint': region}
                 s3_client.create_bucket(Bucket=bucket_name,
@@ -1623,6 +1634,7 @@ class GcsStore(AbstractStore):
         try:
             bucket = self.client.bucket(bucket_name)
             bucket.storage_class = 'STANDARD'
+            bucket.labels = {"skymanaged" : ""}
             new_bucket = self.client.create_bucket(bucket, location=region)
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
@@ -1965,6 +1977,7 @@ class R2Store(AbstractStore):
         try:
             if region is None:
                 r2_client.create_bucket(Bucket=bucket_name)
+                r2_client.put_object(Bucket=bucket_name, Key='.skymanaged')
             else:
                 location = {'LocationConstraint': region}
                 r2_client.create_bucket(Bucket=bucket_name,
