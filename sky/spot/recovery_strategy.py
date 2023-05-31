@@ -132,11 +132,20 @@ class StrategyExecutor:
             usage_lib.messages.usage.set_internal()
             sky.cancel(cluster_name=self.cluster_name, all=True)
         except Exception as e:  # pylint: disable=broad-except
-            # Ignore the failure as the cluster can be totally stopped, and the
-            # job canceling can get connection error.
-            logger.info('Ignoring the job cancellation failure; '
-                        'the spot cluster is likely completely stopped.'
-                        f'\n  Detailed exception: {e}')
+            logger.info('Failed to cancel the job on the cluster. The cluster '
+                        'might be already down or the head node is preempted. '
+                        '\n  Detailed exception: '
+                        f'{common_utils.format_exception(e)}\n'
+                        'Stopping the cluster again to make sure there is no '
+                        'remaining job on the worker nodes.')
+            try:
+                usage_lib.messages.usage.set_internal()
+                sky.stop(cluster_name=self.cluster_name)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.info('  Ignoring the cluster stopping failure; '
+                            'the spot cluster is likely completely stopped.'
+                            '\n    Detailed exception: '
+                            f'{common_utils.format_exception(e)}')
 
     def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
         """Wait for MAX_JOB_CHECKING_RETRY times until job starts on the cluster
