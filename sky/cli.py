@@ -3456,7 +3456,6 @@ def spot_launch(
                   if resources.cloud is not None else clouds.Cloud)
     task_cloud.check_cluster_name_is_valid(name)
 
-
     sky.spot_launch(task,
                     name,
                     detach_run=detach_run,
