@@ -1773,8 +1773,8 @@ def _query_status_lambda(
 
 
 def _query_status_scp(
-        cluster: str,
-        ray_config: Dict[str, Any],
+    cluster: str,
+    ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
     del ray_config  # Unused.
     status_map = {
