@@ -1841,7 +1841,7 @@ def _query_status_scp(
         'RESTARTING': global_user_state.ClusterStatus.INIT,
         'STOPPING': global_user_state.ClusterStatus.STOPPED,
         'STOPPED': global_user_state.ClusterStatus.STOPPED,
-        'TERMINATING': global_user_state.ClusterStatus.STOPPED,
+        'TERMINATING': None,
         'TERMINATED': None,
     }
     status_list = []
