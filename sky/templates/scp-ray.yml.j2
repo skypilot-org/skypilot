@@ -16,14 +16,14 @@ auth:
   ssh_private_key: {{ssh_private_key}}
 
 available_node_types:
-  ray_head_default:
+  ray.head.default:
     resources: {}
     node_config:
       InstanceType: {{instance_type}}
       imageId: {{image_id}}
       diskSize: {{disk_size}}
 {% if num_nodes > 1 %}
-  ray_worker_default:
+  ray.worker.default:
     min_workers: {{num_nodes - 1}}
     max_workers: {{num_nodes - 1}}
     resources: {}
