@@ -321,9 +321,9 @@ class SCP(clouds.Cloud):
 
     @staticmethod
     def is_disk_size_allowed(resources):
-        if resources.disk_size and \
+        if (resources.disk_size and
                (resources.disk_size < _SCP_MIN_DISK_SIZE_GB or
-                resources.disk_size > _SCP_MAX_DISK_SIZE_GB):
+                resources.disk_size > _SCP_MAX_DISK_SIZE_GB)):
             logger.info(f'In SCP, the disk size must range between'
                         f' {_SCP_MIN_DISK_SIZE_GB} GB '
                         f'and {_SCP_MAX_DISK_SIZE_GB} GB. '
