@@ -426,6 +426,7 @@ def list_accelerators_impl(
     gpus_only: bool,
     name_filter: Optional[str],
     region_filter: Optional[str],
+    quantity_filter: Optional[int],
     case_sensitive: bool = True,
 ) -> Dict[str, List[InstanceTypeInfo]]:
     """Lists accelerators offered in a cloud service catalog.
@@ -470,6 +471,8 @@ def list_accelerators_impl(
                                           case=case_sensitive,
                                           regex=True)]
     df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
+    if quantity_filter is not None:
+        df = df[df['AcceleratorCount'] == quantity_filter]
     grouped = df.groupby('AcceleratorName')
 
     def make_list_from_df(rows):

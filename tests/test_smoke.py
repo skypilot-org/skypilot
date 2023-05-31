@@ -754,7 +754,7 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
             *storage_setup_commands,
             f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
         ]
 
         test = Test(
@@ -824,12 +824,12 @@ def test_job_queue(generic_cloud: str):
             f'sky exec {name} -n {name}-1 -d examples/job_queue/job.yaml',
             f'sky exec {name} -n {name}-2 -d examples/job_queue/job.yaml',
             f'sky exec {name} -n {name}-3 -d examples/job_queue/job.yaml',
-            f'sky queue {name} | grep {name}-1 | grep RUNNING',
-            f'sky queue {name} | grep {name}-2 | grep RUNNING',
-            f'sky queue {name} | grep {name}-3 | grep PENDING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep PENDING',
             f'sky cancel -y {name} 2',
             'sleep 5',
-            f'sky queue {name} | grep {name}-3 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep RUNNING',
             f'sky cancel -y {name} 3',
             f'sky exec {name} --gpus K80:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky exec {name} --gpus K80:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
@@ -931,7 +931,7 @@ def test_job_queue_multinode(generic_cloud: str):
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-3 | grep PENDING)',
             f'sky cancel -y {name} 1',
             'sleep 5',
-            f'sky queue {name} | grep {name}-3 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep RUNNING',
             f'sky cancel -y {name} 1 2 3',
             f'sky launch -c {name} -n {name}-4 --detach-setup -d examples/job_queue/job_multinode.yaml',
             # Test the job status is correctly set to SETTING_UP, during the setup is running,
@@ -963,7 +963,7 @@ def test_large_job_queue(generic_cloud: str):
             'sleep 20',
             # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.
             # The first 16 jobs are canceled, so there should be 75 - 32 = 43 jobs PENDING.
-            f'sky queue {name} | grep -v grep | grep PENDING | wc -l | grep 43',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep -v grep | grep PENDING | wc -l | grep 43',
         ],
         f'sky down -y {name}',
         timeout=20 * 60,
@@ -1019,7 +1019,7 @@ def test_multi_echo(generic_cloud: str):
         'multi_echo',
         [
             f'python examples/multi_echo.py {name} {generic_cloud}',
-            'sleep 70',
+            'sleep 90',
         ] +
         # Ensure jobs succeeded.
         [f'sky logs {name} {i + 1} --status' for i in range(32)] +
@@ -1420,6 +1420,7 @@ def test_cancel_pytorch(generic_cloud: str):
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -1484,7 +1485,7 @@ def test_spot(generic_cloud: str):
             _SPOT_CANCEL_WAIT.format(job_name=f'{name}-1'),
             'sleep 5',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep "CANCELLING\|CANCELLED"',
-            'sleep 120',
+            'sleep 200',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep CANCELLED',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
@@ -1509,7 +1510,7 @@ def test_spot_failed_setup(generic_cloud: str):
         'spot-failed-setup',
         [
             f'sky spot launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
-            'sleep 300',
+            'sleep 330',
             # Make sure the job failed quickly.
             f'{_SPOT_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED_SETUP"',
         ],
@@ -2051,17 +2052,14 @@ class TestStorageWithCredentials:
     def cli_delete_cmd(store_type, bucket_name):
         if store_type == storage_lib.StoreType.S3:
             url = f's3://{bucket_name}'
-            return ['aws', 's3', 'rb', url, '--force']
+            return f'aws s3 rb {url} --force'
         if store_type == storage_lib.StoreType.GCS:
             url = f'gs://{bucket_name}'
-            return ['gsutil', '-m', 'rm', '-r', url]
+            return f'gsutil -m rm -r {url}'
         if store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             url = f's3://{bucket_name}'
-            return [
-                'aws', 's3', 'rb', url, '--force', '--endpoint', endpoint_url,
-                '--profile=r2'
-            ]
+            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
 
     @staticmethod
     def cli_ls_cmd(store_type, bucket_name, suffix=''):
@@ -2070,23 +2068,20 @@ class TestStorageWithCredentials:
                 url = f's3://{bucket_name}/{suffix}'
             else:
                 url = f's3://{bucket_name}'
-            return ['aws', 's3', 'ls', url]
+            return f'aws s3 ls {url}'
         if store_type == storage_lib.StoreType.GCS:
             if suffix:
                 url = f'gs://{bucket_name}/{suffix}'
             else:
                 url = f'gs://{bucket_name}'
-            return ['gsutil', 'ls', url]
+            return f'gsutil ls {url}'
         if store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             if suffix:
                 url = f's3://{bucket_name}/{suffix}'
             else:
                 url = f's3://{bucket_name}'
-            return [
-                'aws', 's3', 'ls', url, '--endpoint', endpoint_url,
-                '--profile=r2'
-            ]
+            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -2183,15 +2178,13 @@ class TestStorageWithCredentials:
     def tmp_awscli_bucket_r2(self, tmp_bucket_name):
         # Creates a temporary bucket using awscli
         endpoint_url = cloudflare.create_endpoint()
-        subprocess.check_call([
-            'aws', 's3', 'mb', f's3://{tmp_bucket_name}', '--endpoint',
-            endpoint_url, '--profile=r2'
-        ])
+        subprocess.check_call(
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 mb s3://{tmp_bucket_name} --endpoint {endpoint_url} --profile=r2',
+            shell=True)
         yield tmp_bucket_name
-        subprocess.check_call([
-            'aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force',
-            '--endpoint', endpoint_url, '--profile=r2'
-        ])
+        subprocess.check_call(
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb s3://{tmp_bucket_name} --force --endpoint {endpoint_url} --profile=r2',
+            shell=True)
 
     @pytest.fixture
     def tmp_public_storage_obj(self, request):
@@ -2239,7 +2232,7 @@ class TestStorageWithCredentials:
 
         # Delete bucket externally
         cmd = self.cli_delete_cmd(store_type, tmp_scratch_storage_obj.name)
-        subprocess.check_output(cmd)
+        subprocess.check_output(cmd, shell=True)
 
         # Run sky storage delete to delete the storage object
         out = subprocess.check_output(
@@ -2302,24 +2295,14 @@ class TestStorageWithCredentials:
         while True:
             nonexist_bucket_name = str(uuid.uuid4())
             if nonexist_bucket_url.startswith('s3'):
-                command = [
-                    'aws', 's3api', 'head-bucket', '--bucket',
-                    nonexist_bucket_name
-                ]
+                command = f'aws s3api head-bucket --bucket {nonexist_bucket_name}'
                 expected_output = '404'
             elif nonexist_bucket_url.startswith('gs'):
-                command = [
-                    'gsutil', 'ls',
-                    nonexist_bucket_url.format(random_name=nonexist_bucket_name)
-                ]
+                command = f'gsutil ls {nonexist_bucket_url.format(random_name=nonexist_bucket_name)}'
                 expected_output = 'BucketNotFoundException'
             elif nonexist_bucket_url.startswith('r2'):
                 endpoint_url = cloudflare.create_endpoint()
-                command = [
-                    'aws', 's3api', 'head-bucket', '--bucket',
-                    nonexist_bucket_name, '--endpoint', endpoint_url,
-                    '--profile=r2'
-                ]
+                command = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=r2'
                 expected_output = '404'
             else:
                 raise ValueError('Unsupported bucket type '
@@ -2327,7 +2310,9 @@ class TestStorageWithCredentials:
 
             # Check if bucket exists using the cli:
             try:
-                out = subprocess.check_output(command, stderr=subprocess.STDOUT)
+                out = subprocess.check_output(command,
+                                              stderr=subprocess.STDOUT,
+                                              shell=True)
             except subprocess.CalledProcessError as e:
                 out = e.output
             out = out.decode('utf-8')
@@ -2374,7 +2359,8 @@ class TestStorageWithCredentials:
         storage_obj.add_store(store_type)
 
         # Check if tmp_source/tmp-file exists in the bucket using aws cli
-        out = subprocess.check_output(self.cli_ls_cmd(store_type, bucket_name))
+        out = subprocess.check_output(self.cli_ls_cmd(store_type, bucket_name),
+                                      shell=True)
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
@@ -2413,16 +2399,17 @@ class TestStorageWithCredentials:
         tmp_local_list_storage_obj.add_store(store_type)
 
         # Check if tmp-file exists in the bucket root using cli
-        out = subprocess.check_output(
-            self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name))
+        out = subprocess.check_output(self.cli_ls_cmd(
+            store_type, tmp_local_list_storage_obj.name),
+                                      shell=True)
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
 
         # Check if tmp-file exists in the bucket/tmp-source using cli
-        out = subprocess.check_output(
-            self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name,
-                            'tmp-source/'))
+        out = subprocess.check_output(self.cli_ls_cmd(
+            store_type, tmp_local_list_storage_obj.name, 'tmp-source/'),
+                                      shell=True)
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))

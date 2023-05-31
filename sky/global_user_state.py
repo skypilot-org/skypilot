@@ -20,8 +20,10 @@ import uuid
 import colorama
 
 from sky import clouds
-from sky.utils import db_utils
+from sky.adaptors import cloudflare
+from sky.data import storage as storage_lib
 from sky.utils import common_utils
+from sky.utils import db_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -661,6 +663,22 @@ def get_enabled_clouds() -> List[clouds.Cloud]:
         if cloud is not None:
             enabled_clouds.append(cloud)
     return enabled_clouds
+
+
+def get_enabled_storage_clouds() -> List[str]:
+    # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # pylint: disable=line-too-long
+    # is resolved by implementing separate 'enabled_storage_clouds'
+    enabled_clouds = get_enabled_clouds()
+    enabled_clouds = [str(cloud) for cloud in enabled_clouds]
+
+    enabled_storage_clouds = [
+        cloud for cloud in enabled_clouds
+        if cloud in storage_lib.STORE_ENABLED_CLOUDS
+    ]
+    r2_is_enabled, _ = cloudflare.check_credentials()
+    if r2_is_enabled:
+        enabled_storage_clouds.append(cloudflare.NAME)
+    return enabled_storage_clouds
 
 
 def set_enabled_clouds(enabled_clouds: List[str]) -> None:
