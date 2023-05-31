@@ -3170,8 +3170,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 returncode = 0
             except SCPError as e:
                 returncode = 1
-                stdout = f'{e}'
-                stderr = f'{e}'
+                stdout = ''
+                stderr = str(e)
 
         elif (terminate and
               (prev_cluster_status == global_user_state.ClusterStatus.STOPPED or
