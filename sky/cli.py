@@ -3354,7 +3354,7 @@ def spot():
           'and do not stream execution logs.'))
 @click.option(
     '--retry-until-up/--no-retry-until-up',
-    '-r',
+    '-r/-no-r',
     default=None,
     is_flag=True,
     required=False,
