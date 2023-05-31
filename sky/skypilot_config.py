@@ -120,7 +120,7 @@ def set_nested(keys: Iterable[str], value: Any) -> Dict[str, Any]:
 def to_dict() -> Dict[str, Any]:
     """Returns a deep-copied version of the current config."""
     global _dict
-    if loaded():
+    if _dict is not None:
         return copy.deepcopy(_dict)
     return {}
 
