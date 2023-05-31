@@ -50,6 +50,7 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
+from sky.skylet.providers.scp.node_provider import SCPNodeProvider, SCPError
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -126,6 +127,7 @@ def _get_cluster_config_template(cloud):
         clouds.Lambda: 'lambda-ray.yml.j2',
         clouds.IBM: 'ibm-ray.yml.j2',
         clouds.Local: 'local-ray.yml.j2',
+        clouds.SCP: 'scp-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
 
@@ -857,6 +859,42 @@ class RetryingVmProvisioner(object):
                         self._blocked_resources.add(
                             launchable_resources.copy(region=r.name, zone=None))
 
+    def _update_blocklist_on_scp_error(
+            self, launchable_resources: 'resources_lib.Resources', region,
+            zones, stdout, stderr):
+        del zones  # Unused.
+        style = colorama.Style
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits + stderr_splits
+            if 'SCPError:' in s.strip()
+        ]
+        if not errors:
+            logger.info('====== stdout ======')
+            for s in stdout_splits:
+                print(s)
+            logger.info('====== stderr ======')
+            for s in stderr_splits:
+                print(s)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Errors occurred during provision; '
+                                   'check logs above.')
+
+        logger.warning(f'Got error(s) in {region.name}:')
+        messages = '\n\t'.join(errors)
+        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
+        self._blocked_resources.add(launchable_resources.copy(zone=None))
+
+        # Sometimes, SCPError will list available regions.
+        for e in errors:
+            if e.find('Regions with capacity available:') != -1:
+                for r in clouds.SCP.regions():
+                    if e.find(r.name) == -1:
+                        self._blocked_resources.add(
+                            launchable_resources.copy(region=r.name, zone=None))
+
     def _update_blocklist_on_ibm_error(
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
@@ -953,6 +991,7 @@ class RetryingVmProvisioner(object):
             clouds.GCP: self._update_blocklist_on_gcp_error,
             clouds.Lambda: self._update_blocklist_on_lambda_error,
             clouds.IBM: self._update_blocklist_on_ibm_error,
+            clouds.SCP: self._update_blocklist_on_scp_error,
             clouds.Local: self._update_blocklist_on_local_error,
         }
         cloud = launchable_resources.cloud
@@ -3185,6 +3224,25 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 vpc_provider.delete_vpc(vpc_id, region)
                 # successfully removed cluster as no exception was raised
                 returncode = 0
+
+        elif terminate and isinstance(cloud, clouds.SCP):
+            config['provider']['cache_stopped_nodes'] = not terminate
+            provider = SCPNodeProvider(config['provider'], handle.cluster_name)
+            try:
+                if not os.path.exists(provider.metadata.path):
+                    raise SCPError('SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
+                                   'Metadata file does not exist.')
+
+                with open(provider.metadata.path, 'r') as f:
+                    metadata = json.load(f)
+                    node_id = next(iter(metadata.values())).get(
+                        'creation', {}).get('virtualServerId', None)
+                    provider.terminate_node(node_id)
+                returncode = 0
+            except SCPError as e:
+                returncode = 1
+                stdout = ''
+                stderr = str(e)
 
         elif (terminate and
               (prev_cluster_status == global_user_state.ClusterStatus.STOPPED or

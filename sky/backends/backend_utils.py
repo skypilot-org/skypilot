@@ -43,6 +43,7 @@ from sky.backends import onprem_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.skylet.providers.lambda_cloud import lambda_utils
+from sky.skylet.providers.scp import scp_utils
 from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import env_options
@@ -1028,6 +1029,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_lambda_authentication(config)
     elif isinstance(cloud, clouds.IBM):
         config = auth.setup_ibm_authentication(config)
+    elif isinstance(cloud, clouds.SCP):
+        config = auth.setup_scp_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
@@ -1825,12 +1828,39 @@ def _query_status_lambda(
     return status_list
 
 
+def _query_status_scp(
+    cluster: str,
+    ray_config: Dict[str, Any],
+) -> List[global_user_state.ClusterStatus]:
+    del ray_config  # Unused.
+    status_map = {
+        'CREATING': global_user_state.ClusterStatus.INIT,
+        'EDITING': global_user_state.ClusterStatus.INIT,
+        'RUNNING': global_user_state.ClusterStatus.UP,
+        'STARTING': global_user_state.ClusterStatus.INIT,
+        'RESTARTING': global_user_state.ClusterStatus.INIT,
+        'STOPPING': global_user_state.ClusterStatus.STOPPED,
+        'STOPPED': global_user_state.ClusterStatus.STOPPED,
+        'TERMINATING': None,
+        'TERMINATED': None,
+    }
+    status_list = []
+    vms = scp_utils.SCPClient().list_instances()
+    for node in vms:
+        if node['virtualServerName'] == cluster:
+            node_status = status_map[node['virtualServerState']]
+            if node_status is not None:
+                status_list.append(node_status)
+    return status_list
+
+
 _QUERY_STATUS_FUNCS = {
     'AWS': _query_status_aws,
     'GCP': _query_status_gcp,
     'Azure': _query_status_azure,
     'Lambda': _query_status_lambda,
     'IBM': _query_status_ibm,
+    'SCP': _query_status_scp,
 }
 
 
