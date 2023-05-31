@@ -129,7 +129,8 @@ def list_accelerators(
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in SCP offering GPUs."""
     return common.list_accelerators_impl('scp', _df, gpus_only, name_filter,
-                                         region_filter, quantity_filter, case_sensitive)
+                                         region_filter, quantity_filter,
+                                         case_sensitive)
 
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
