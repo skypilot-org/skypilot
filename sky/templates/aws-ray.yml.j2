@@ -174,6 +174,7 @@ initialization_commands: []
 # Increment the following for catching performance bugs easier:
 #   current num items (num SSH connections): 1
 setup_commands:
+  # Line echo 'export DEBIAN_FRONTEND=noninteractive': Disable apt-get from asking user input during installation. https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Create ~/.ssh/config file in case the file does not exist in the custom image.
   # Make sure python3 & pip3 are available on this image.
@@ -185,6 +186,7 @@ setup_commands:
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   {%- if use_docker %}
   - echo '[ "$(whoami)" == "root" ] && alias sudo=""' >> ~/.bashrc;
+    echo 'export DEBIAN_FRONTEND=noninteractive' >> ~/.bashrc;
   {%- endif %}
   - mkdir -p ~/.ssh; touch ~/.ssh/config;
     {%- if use_docker %}

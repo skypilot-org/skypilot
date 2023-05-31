@@ -12,6 +12,7 @@ from sky.skylet.providers.gcp.config import (
     construct_clients_from_provider_config,
     get_node_type,
 )
+from sky.backends.docker_utils import SkyDockerCommandRunner
 
 from ray.autoscaler.tags import (
     TAG_RAY_LAUNCH_CONFIG,
@@ -19,6 +20,7 @@ from ray.autoscaler.tags import (
     TAG_RAY_USER_NODE_TYPE,
 )
 from ray.autoscaler._private.cli_logger import cf, cli_logger
+from ray.autoscaler._private.command_runner import SSHCommandRunner
 
 
 # The logic has been abstracted away here to allow for different GCP resources
@@ -362,3 +364,27 @@ class GCPNodeProvider(NodeProvider):
     @staticmethod
     def bootstrap_config(cluster_config):
         return bootstrap_gcp(cluster_config)
+
+    def get_command_runner(
+        self,
+        log_prefix,
+        node_id,
+        auth_config,
+        cluster_name,
+        process_runner,
+        use_internal_ip,
+        docker_config=None,
+    ):
+        common_args = {
+            "log_prefix": log_prefix,
+            "node_id": node_id,
+            "provider": self,
+            "auth_config": auth_config,
+            "cluster_name": cluster_name,
+            "process_runner": process_runner,
+            "use_internal_ip": use_internal_ip,
+        }
+        if docker_config and docker_config["container_name"] != "":
+            return SkyDockerCommandRunner(docker_config, **common_args)
+        else:
+            return SSHCommandRunner(**common_args)

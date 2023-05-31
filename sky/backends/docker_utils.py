@@ -1,4 +1,5 @@
 """Utilities for docker image generation."""
+import json
 import os
 import shutil
 import subprocess
@@ -11,6 +12,10 @@ import colorama
 from sky.adaptors import docker
 from sky import sky_logging
 from sky import task as task_mod
+
+from ray.autoscaler._private.cli_logger import cli_logger
+from ray.autoscaler._private.command_runner import DockerCommandRunner
+from ray.autoscaler._private.docker import docker_start_cmds
 
 logger = sky_logging.init_logger(__name__)
 
@@ -294,3 +299,142 @@ def bash_codegen(workdir_name: str,
         with open(out_path, 'w') as fp:
             fp.write(script_contents)
     return script_contents
+
+
+class SkyDockerCommandRunner(DockerCommandRunner):
+    """A DockerCommandRunner that install rsync before running init.
+
+    The code is borowed from
+    `ray.autoscaler._private.command_runner.DockerCommandRunner`."""
+
+    def run_init(self, *, as_head: bool, file_mounts: Dict[str, str],
+                 sync_run_yet: bool):
+        bootstrap_mounts = [
+            '~/ray_bootstrap_config.yaml', '~/ray_bootstrap_key.pem'
+        ]
+
+        specific_image = self.docker_config.get(
+            f'{"head" if as_head else "worker"}_image',
+            self.docker_config.get('image'))
+
+        self._check_docker_installed()
+        if self.docker_config.get('pull_before_run', True):
+            assert specific_image, ('Image must be included in config if ' +
+                                    'pull_before_run is specified')
+            self.run('{} pull {}'.format(self.docker_cmd, specific_image),
+                     run_env='host')
+        else:
+
+            self.run(f'{self.docker_cmd} image inspect {specific_image} '
+                     '1> /dev/null  2>&1 || '
+                     f'{self.docker_cmd} pull {specific_image}')
+
+        # Bootstrap files cannot be bind mounted because docker opens the
+        # underlying inode. When the file is switched, docker becomes outdated.
+        cleaned_bind_mounts = file_mounts.copy()
+        for mnt in bootstrap_mounts:
+            cleaned_bind_mounts.pop(mnt, None)
+
+        docker_run_executed = False
+
+        container_running = self._check_container_status()
+        requires_re_init = False
+        if container_running:
+            requires_re_init = self._check_if_container_restart_is_needed(
+                specific_image, cleaned_bind_mounts)
+            if requires_re_init:
+                self.run(f'{self.docker_cmd} stop {self.container_name}',
+                         run_env='host')
+
+        if (not container_running) or requires_re_init:
+            if not sync_run_yet:
+                # Do not start the actual image as we need to run file_sync
+                # first to ensure that all folders are created with the
+                # correct ownership. Docker will create the folders with
+                # `root` as the owner.
+                return True
+            # Get home directory
+            image_env = (self.ssh_command_runner.run(
+                f'{self.docker_cmd} ' + 'inspect -f "{{json .Config.Env}}" ' +
+                specific_image,
+                with_output=True,
+            ).decode().strip())
+            home_directory = '/root'
+            try:
+                for env_var in json.loads(image_env):
+                    if env_var.startswith('HOME='):
+                        home_directory = env_var.split('HOME=')[1]
+                        break
+            except json.JSONDecodeError as e:
+                cli_logger.error(
+                    'Unable to deserialize `image_env` to Python object. '
+                    f'The `image_env` is:\n{image_env}')
+                raise e
+
+            user_docker_run_options = self.docker_config.get(
+                'run_options', []) + self.docker_config.get(
+                    f'{"head" if as_head else "worker"}_run_options', [])
+            start_command = docker_start_cmds(
+                self.ssh_command_runner.ssh_user,
+                specific_image,
+                cleaned_bind_mounts,
+                self.container_name,
+                self._configure_runtime(
+                    self._auto_configure_shm(user_docker_run_options)),
+                self.ssh_command_runner.cluster_name,
+                home_directory,
+                self.docker_cmd,
+            )
+            self.run(start_command, run_env='host')
+            docker_run_executed = True
+
+        self.run('apt-get update; apt-get install -y rsync')
+
+        # Explicitly copy in ray bootstrap files.
+        for mount in bootstrap_mounts:
+            if mount in file_mounts:
+                if not sync_run_yet:
+                    # NOTE(ilr) This rsync is needed because when starting from
+                    #  a stopped instance,  /tmp may be deleted and `run_init`
+                    # is called before the first `file_sync` happens
+                    self.run_rsync_up(file_mounts[mount], mount)
+                self.ssh_command_runner.run(
+                    'rsync -e "{cmd} exec -i" -avz {src} {container}:{dst}'.
+                    format(
+                        cmd=self.docker_cmd,
+                        src=os.path.join(
+                            self._get_docker_host_mount_location(
+                                self.ssh_command_runner.cluster_name),
+                            mount,
+                        ),
+                        container=self.container_name,
+                        dst=self._docker_expand_user(mount),
+                    ))
+                try:
+                    # Check if the current user has read permission.
+                    # If they do not, try to change ownership!
+                    self.run(f'cat {mount} >/dev/null 2>&1 || '
+                             f'sudo chown $(id -u):$(id -g) {mount}')
+                # pylint: disable=broad-except
+                except Exception:
+                    lsl_string = (self.run(
+                        f'ls -l {mount}',
+                        with_output=True).decode('utf-8').strip())
+                    # The string is of format <Permission> <Links>
+                    # <Owner> <Group> <Size> <Date> <Name>
+                    permissions = lsl_string.split(' ')[0]
+                    owner = lsl_string.split(' ')[2]
+                    group = lsl_string.split(' ')[3]
+                    current_user = (self.run(
+                        'whoami', with_output=True).decode('utf-8').strip())
+                    cli_logger.warning(
+                        f'File ({mount}) is owned by user:{owner} and group:'
+                        f'{group} with permissions ({permissions}). The '
+                        f'current user ({current_user}) does not have '
+                        'permission to read these files, and Ray may not be '
+                        'able to autoscale. This can be resolved by '
+                        'installing `sudo` in your container, or adding a '
+                        f'command like "chown {current_user} {mount}" to '
+                        'your `setup_commands`.')
+        self.initialized = True
+        return docker_run_executed

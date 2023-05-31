@@ -152,6 +152,7 @@ initialization_commands: []
 # Increment the following for catching performance bugs easier:
 #   current num items (num SSH connections): 1  (+1 if tpu_vm)
 setup_commands:
+  # Line echo 'export DEBIAN_FRONTEND=noninteractive': Disable apt-get from asking user input during installation. https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Line 'mkdir -p ..': Create ~/.ssh/config file in case the file does not exist in the custom image.
   # Line 'pip3 --v ..': Make sure python3 & pip3 are available on this image.
@@ -166,6 +167,7 @@ setup_commands:
   # Line 'sudo sed -i .. ~/.profile': to eliminate the error `mesg: ttyname failed: inappropriate ioctl for device`. https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device
   {%- if use_docker %}
   - echo '[ "$(whoami)" == "root" ] && alias sudo=""' >> ~/.bashrc;
+    echo 'export DEBIAN_FRONTEND=noninteractive' >> ~/.bashrc;
   {%- endif %}
   - function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
     p=$(mylsof "/var/lib/dpkg/lock-frontend"); echo "$p";
