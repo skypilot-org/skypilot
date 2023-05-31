@@ -1842,14 +1842,16 @@ def _query_status_scp(
         'STOPPING': global_user_state.ClusterStatus.STOPPED,
         'STOPPED': global_user_state.ClusterStatus.STOPPED,
         'TERMINATING': global_user_state.ClusterStatus.STOPPED,
-        'TERMINATED': global_user_state.ClusterStatus.STOPPED,
+        'TERMINATED': None,
     }
-    # TODO(ewzeng): filter by hash_filter_string to be safe
+    status_list = []
     vms = scp_utils.SCPClient().list_instances()
     for node in vms:
         if node['virtualServerName'] == cluster:
-            return [status_map[node['virtualServerState']]]
-    return []
+            node_status = status_map[node['virtualServerState']]
+            if node_status is not None:
+                status_list.append(node_status)
+    return status_list
 
 
 _QUERY_STATUS_FUNCS = {
