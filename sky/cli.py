@@ -3436,7 +3436,7 @@ def spot_launch(
             flag_str = '--no-retry-until-up'
         click.secho(
             f'Flag {flag_str} is deprecated and will be removed in a '
-            'future release (defaults to True). Please file an issue if this '
+            'future release (managed spot jobs will always be retried). Please file an issue if this '
             'does not work for you.',
             fg='yellow')
     else:
