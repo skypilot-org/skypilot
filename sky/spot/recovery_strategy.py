@@ -134,12 +134,13 @@ class StrategyExecutor:
                        all=True,
                        _ignore_server_aliveness=True)
         except Exception as e:  # pylint: disable=broad-except
-            logger.info('Failed to cancel the job on the cluster. The cluster '
-                        'might be already down or the head node is preempted. '
-                        '\n  Detailed exception: '
-                        f'{common_utils.format_exception(e)}\n'
-                        'Terminating the cluster again to make sure there is no '
-                        'remaining job on the worker nodes.')
+            logger.info(
+                'Failed to cancel the job on the cluster. The cluster '
+                'might be already down or the head node is preempted. '
+                '\n  Detailed exception: '
+                f'{common_utils.format_exception(e)}\n'
+                'Terminating the cluster again to make sure there is no '
+                'remaining job on the worker nodes.')
             terminate_cluster(self.cluster_name)
 
     def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
