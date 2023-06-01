@@ -3353,9 +3353,9 @@ def spot():
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
 @click.option(
-    '--retry-until-up',
-    '-r',
-    default=True,
+    '--retry-until-up/--no-retry-until-up',
+    '-r/-no-r',
+    default=None,
     is_flag=True,
     required=False,
     help=('(Default: True; this flag is deprecated and will be removed in a '
@@ -3429,6 +3429,18 @@ def spot_launch(
         disk_tier=disk_tier,
         spot_recovery=spot_recovery,
     )
+    # Deprecation.
+    if retry_until_up is not None:
+        flag_str = '--retry-until-up'
+        if not retry_until_up:
+            flag_str = '--no-retry-until-up'
+        click.secho(
+            f'Flag {flag_str} is deprecated and will be removed in a '
+            'future release (managed spot jobs will always be retried). '
+            'Please file an issue if this does not work for you.',
+            fg='yellow')
+    else:
+        retry_until_up = True
 
     if not yes:
         prompt = f'Launching a new spot task {name!r}. Proceed?'
@@ -3443,14 +3455,6 @@ def spot_launch(
     task_cloud = (resources.cloud
                   if resources.cloud is not None else clouds.Cloud)
     task_cloud.check_cluster_name_is_valid(name)
-
-    # Deprecation.
-    if not retry_until_up:
-        click.secho(
-            'Flag --retry-until-up is deprecated and will be removed in a '
-            'future release (defaults to True). Please file an issue if this '
-            'does not work for you.',
-            fg='yellow')
 
     sky.spot_launch(task,
                     name,
