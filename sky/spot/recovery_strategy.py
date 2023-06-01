@@ -138,16 +138,9 @@ class StrategyExecutor:
                         'might be already down or the head node is preempted. '
                         '\n  Detailed exception: '
                         f'{common_utils.format_exception(e)}\n'
-                        'Stopping the cluster again to make sure there is no '
+                        'Terminating the cluster again to make sure there is no '
                         'remaining job on the worker nodes.')
-            try:
-                usage_lib.messages.usage.set_internal()
-                sky.stop(cluster_name=self.cluster_name)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.info('  Ignoring the cluster stopping failure; '
-                            'the spot cluster is likely completely stopped.'
-                            '\n    Detailed exception: '
-                            f'{common_utils.format_exception(e)}')
+            terminate_cluster(self.cluster_name)
 
     def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
         """Wait for MAX_JOB_CHECKING_RETRY times until job starts on the cluster
