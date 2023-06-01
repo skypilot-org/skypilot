@@ -2750,8 +2750,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # necessicating calling `sky launch`
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
-                    f'{colorama.Fore.RED}SkyPilot runtime is stale on the remote cluster. To update '
-                    f'run: sky launch -c {handle.cluster_name}{colorama.Style.RESET_ALL}')
+                    f'{colorama.Fore.RED}SkyPilot runtime is stale on the '
+                    'remote cluster. To update run: sky launch -c '
+                    f'{handle.cluster_name}{colorama.Style.RESET_ALL}')
 
         subprocess_utils.handle_returncode(returncode,
                                            job_submit_cmd,

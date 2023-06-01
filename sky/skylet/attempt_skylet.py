@@ -7,6 +7,7 @@ from sky.skylet import constants
 
 VERSION_FILE = os.path.expanduser(constants.SKYLET_VERSION_FILE)
 
+
 def restart_skylet():
     with open(VERSION_FILE, 'w+') as v_f:
         v_f.write(constants.SKYLET_VERSION)
@@ -16,14 +17,14 @@ def restart_skylet():
         'ps aux | grep "sky.skylet.skylet" | grep "python3 -m"'
         '| awk \'{print $2}\' | xargs kill',
         shell=True,
-        check=False
-    )
+        check=False)
     subprocess.run(
         'nohup python3 -m sky.skylet.skylet'
         ' >> ~/.sky/skylet.log 2>&1 &',
         shell=True,
         check=True)
-    
+
+
 proc = subprocess.run(
     'ps aux | grep "sky.skylet.skylet" | grep "python3 -m"'
     '| grep -v "grep" || true',
