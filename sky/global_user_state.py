@@ -706,9 +706,12 @@ def add_or_update_storage(storage_name: str,
     _DB.conn.commit()
 
 
-def remove_storage(storage_name: str):
+def remove_storage(storage_name: str, cloud_type: str = None):
     """Removes Storage from Database"""
-    _DB.cursor.execute('DELETE FROM storage WHERE name=(?)', (storage_name,))
+    if cloud_type:
+        _DB.cursor.execute('DELETE FROM storage WHERE name=(?) AND handle=(?)', (storage_name,cloud_type))
+    else:
+        _DB.cursor.execute('DELETE FROM storage WHERE name=(?)', (storage_name,))
     _DB.conn.commit()
 
 
