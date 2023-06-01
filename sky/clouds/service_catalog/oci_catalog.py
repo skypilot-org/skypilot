@@ -110,11 +110,13 @@ def list_accelerators(
         gpus_only: bool,
         name_filter: Optional[str],
         region_filter: Optional[str],
+        quantity_filter: Optional[int],
         case_sensitive: bool = True
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in OCI offering GPUs."""
     return common.list_accelerators_impl('OCI', _df, gpus_only, name_filter,
-                                         region_filter, case_sensitive)
+                                         region_filter, quantity_filter,
+                                         case_sensitive)
 
 
 def get_vcpus_mem_from_instance_type(

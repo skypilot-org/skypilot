@@ -409,6 +409,8 @@ def setup_oci_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         config['available_node_types'][node_type]['node_config'][
             'AuthorizedKey'] = public_key
 
+    return config
+
 
 def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     private_key_path, public_key_path = get_or_generate_keys()
