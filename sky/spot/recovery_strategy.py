@@ -132,7 +132,7 @@ class StrategyExecutor:
             usage_lib.messages.usage.set_internal()
             sky.cancel(cluster_name=self.cluster_name,
                        all=True,
-                       _ignore_server_aliveness=True)
+                       _ignore_cluster_aliveness=True)
         except Exception as e:  # pylint: disable=broad-except
             logger.info(
                 'Failed to cancel the job on the cluster. The cluster '

@@ -529,7 +529,7 @@ def cancel(
     all: bool = False,
     job_ids: Optional[List[int]] = None,
     # pylint: disable=invalid-name
-    _ignore_server_aliveness: bool = False,
+    _ignore_cluster_aliveness: bool = False,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel jobs on a cluster.
@@ -555,7 +555,7 @@ def cancel(
         cluster_name, operation_str='Cancelling jobs')
 
     # Check the status of the cluster.
-    if not _ignore_server_aliveness:
+    if not _ignore_cluster_aliveness:
         handle = backend_utils.check_cluster_available(
             cluster_name,
             operation='cancelling jobs',
