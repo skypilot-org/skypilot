@@ -325,7 +325,6 @@ class RayCodeGen:
                 # it is waiting for other task to finish. We should hide the
                 # error message.
                 ray.get(pg.ready())
-                job_lib.scheduler.schedule_step()
                 print('INFO: All task resources reserved.',
                       file=sys.stderr,
                       flush=True)
@@ -343,6 +342,7 @@ class RayCodeGen:
                 # We unset it so that user setup command may properly use this env var.
                 setup_cmd = 'unset CUDA_VISIBLE_DEVICES; ' + setup_cmd
                 job_lib.set_status({job_id!r}, job_lib.JobStatus.SETTING_UP)
+                job_lib.scheduler.schedule_step()
                 total_num_nodes = len(ray.nodes())
                 setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
                 setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
@@ -375,7 +375,6 @@ class RayCodeGen:
 
         self._code += [
             textwrap.dedent(f"""\
-                job_lib.scheduler.schedule_step()
                 job_lib.set_job_started({self.job_id!r})
                 """),
         ]
@@ -1714,7 +1713,6 @@ class RetryingVmProvisioner(object):
             return
         backend = CloudVmRayBackend()
 
-        # For backward compatability and robustness of skylet, it is restarted
         returncode = backend.run_on_head(
             handle,
             'ray status',
@@ -2400,6 +2398,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             global_user_state.ClusterStatus.UP)
 
+        # For backward compatability and robustness of skylet, it is restarted
         with log_utils.safe_rich_status('Updating remote skylet'):
             self.run_on_head(
                 handle,

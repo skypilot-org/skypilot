@@ -433,18 +433,17 @@ def _get_jobs(
             f"""\
             SELECT * FROM jobs
             WHERE status IN ({','.join(['?'] * len(status_list))})
-            AND submitted_at <= (?)
             ORDER BY job_id DESC""",
-            (*status_str_list, time.time()),
+            (*status_str_list,),
         )
     else:
         rows = _CURSOR.execute(
             f"""\
             SELECT * FROM jobs
             WHERE status IN ({','.join(['?'] * len(status_list))})
-            AND username=(?) AND submitted_at <= (?)
+            AND username=(?)
             ORDER BY job_id DESC""",
-            (*status_str_list, username, time.time()),
+            (*status_str_list, username),
         )
 
     records = _get_records_from_rows(rows)
