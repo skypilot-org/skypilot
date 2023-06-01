@@ -524,10 +524,13 @@ def queue(cluster_name: str,
 
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def cancel(cluster_name: str,
-           all: bool = False,
-           job_ids: Optional[List[int]] = None,
-           _ignore_server_aliveness: bool = False) -> None:
+def cancel(
+    cluster_name: str,
+    all: bool = False,
+    job_ids: Optional[List[int]] = None,
+    # pylint: disable=invalid-name
+    _ignore_server_aliveness: bool = False,
+) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel jobs on a cluster.
 
@@ -547,7 +550,7 @@ def cancel(cluster_name: str,
         raise ValueError(
             'sky cancel requires either a job id '
             f'(see `sky queue {cluster_name} -s`) or the --all flag.')
-    
+
     backend_utils.check_cluster_name_not_reserved(
         cluster_name, operation_str='Cancelling jobs')
 
@@ -558,7 +561,7 @@ def cancel(cluster_name: str,
             operation='cancelling jobs',
         )
     else:
-        handle = backend_utils.refresh_cluster_status_handle(cluster_name)
+        _, handle = backend_utils.refresh_cluster_status_handle(cluster_name)
     backend = backend_utils.get_backend_from_handle(handle)
 
     if all:
