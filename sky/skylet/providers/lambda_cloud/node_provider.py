@@ -26,7 +26,7 @@ _TAG_PATH_PREFIX = '~/.sky/generated/lambda_cloud/metadata'
 _REMOTE_SSH_KEY_NAME = '~/.lambda_cloud/ssh_key_name'
 _REMOTE_RAY_SSH_KEY = '~/ray_bootstrap_key.pem'
 _REMOTE_RAY_YAML = '~/ray_bootstrap_config.yaml'
-_GET_INTERNAL_IP_CMD = 'ip -4 -br addr show | grep -Eo "10\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"'
+_GET_INTERNAL_IP_CMD = 'ip -4 -br addr show | grep UP | grep -Eo "(10\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)|172\.(1[6-9]|2[0-9]|3[0-1]))\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"'
 
 logger = logging.getLogger(__name__)
 

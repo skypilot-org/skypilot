@@ -40,7 +40,9 @@ SourceType = Union[Path, List[Path]]
 # Storage isn't supported yet (even though Azure is).
 # TODO(Doyoung): need to add clouds.CLOUDFLARE() to support
 # R2 to be an option as preferred store type
-STORE_ENABLED_CLOUDS = [clouds.AWS(), clouds.GCP()]
+STORE_ENABLED_CLOUDS: List[str] = [
+    str(clouds.AWS()), str(clouds.GCP()), cloudflare.NAME
+]
 
 # Maximum number of concurrent rsync upload processes
 _MAX_CONCURRENT_UPLOADS = 32
@@ -105,6 +107,9 @@ def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
     elif isinstance(cloud, clouds.Lambda):
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Lambda Cloud does not provide cloud storage.')
+    elif isinstance(cloud, clouds.SCP):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('SCP does not provide cloud storage.')
     else:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Unknown cloud type: {cloud}')
@@ -912,6 +917,17 @@ class S3Store(AbstractStore):
         # Validate name
         self.name = self.validate_name(self.name)
 
+        # Check if the storage is enabled
+        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+        if str(clouds.AWS()) not in enabled_storage_clouds:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    'Storage \'store: s3\' specified, but ' \
+                    'AWS access is disabled. To fix, enable '\
+                    'AWS by running `sky check`. More info: '\
+                    'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
+                    )
+
     @classmethod
     def validate_name(cls, name) -> str:
         """Validates the name of the S3 store.
@@ -1287,6 +1303,16 @@ class GcsStore(AbstractStore):
                         'R2 Bucket should exist.')
         # Validate name
         self.name = self.validate_name(self.name)
+        # Check if the storage is enabled
+        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+        if str(clouds.GCP()) not in enabled_storage_clouds:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    'Storage \'store: gcs\' specified, but ' \
+                    'GCP access is disabled. To fix, enable '\
+                    'GCP by running `sky check`. '\
+                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
+                    )
 
     @classmethod
     def validate_name(cls, name) -> str:
@@ -1689,7 +1715,18 @@ class R2Store(AbstractStore):
                 assert self.name == data_utils.split_r2_path(self.source)[0], (
                     'R2 Bucket is specified as path, the name should be '
                     'the same as R2 bucket.')
+        # Validate name
         self.name = S3Store.validate_name(self.name)
+        # Check if the storage is enabled
+        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+        if cloudflare.NAME not in enabled_storage_clouds:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    'Storage \'store: r2\' specified, but ' \
+                    'Cloudflare R2 access is disabled. To fix, '\
+                    'enable Cloudflare R2 by running `sky check`. '\
+                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
+                    )
 
     def initialize(self):
         """Initializes the R2 store object on the cloud.
@@ -1776,7 +1813,9 @@ class R2Store(AbstractStore):
             includes = ' '.join(
                 [f'--include "{file_name}"' for file_name in file_names])
             endpoint_url = cloudflare.create_endpoint()
-            sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
+            sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
+                            f'{cloudflare.R2_CREDENTIALS_PATH} '
+                            'aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
                             f's3://{self.name} '
                             f'--endpoint {endpoint_url} '
@@ -1787,6 +1826,8 @@ class R2Store(AbstractStore):
             # we exclude .git directory from the sync
             endpoint_url = cloudflare.create_endpoint()
             sync_command = (
+                'AWS_SHARED_CREDENTIALS_FILE='
+                f'{cloudflare.R2_CREDENTIALS_PATH} '
                 'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
                 f'{src_dir_path} '
                 f's3://{self.name}/{dest_dir_name} '
@@ -1848,7 +1889,9 @@ class R2Store(AbstractStore):
             # AccessDenied error for buckets that are private and not owned by
             # user.
             if error_code == '403':
-                command = (f'aws s3 ls s3://{self.name} '
+                command = ('AWS_SHARED_CREDENTIALS_FILE='
+                           f'{cloudflare.R2_CREDENTIALS_PATH} '
+                           f'aws s3 ls s3://{self.name} '
                            f'--endpoint {endpoint_url} '
                            f'--profile={cloudflare.R2_PROFILE_NAME}')
                 with ux_utils.print_exception_no_traceback():
@@ -1860,7 +1903,9 @@ class R2Store(AbstractStore):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketGetError(
                     'Attempted to connect to a non-existent bucket: '
-                    f'{self.source}. Consider using `aws s3 ls '
+                    f'{self.source}. Consider using '
+                    '`AWS_SHARED_CREDENTIALS_FILE='
+                    f'{cloudflare.R2_CREDENTIALS_PATH} aws s3 ls '
                     f's3://{self.name} '
                     f'--endpoint {endpoint_url} '
                     f'--profile={cloudflare.R2_PROFILE_NAME}\' '
@@ -1899,6 +1944,7 @@ class R2Store(AbstractStore):
                        'sudo chmod +x /usr/local/bin/goofys')
         endpoint_url = cloudflare.create_endpoint()
         mount_cmd = (
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} '
             f'AWS_PROFILE={cloudflare.R2_PROFILE_NAME} goofys -o allow_other '
             f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
             f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
@@ -1951,14 +1997,17 @@ class R2Store(AbstractStore):
         # The fastest way to delete is to run `aws s3 rb --force`,
         # which removes the bucket by force.
         endpoint_url = cloudflare.create_endpoint()
-        remove_command = (f'aws s3 rb s3://{bucket_name} --force '
-                          f'--endpoint {endpoint_url} '
-                          f'--profile={cloudflare.R2_PROFILE_NAME}')
+        remove_command = (
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} '
+            f'aws s3 rb s3://{bucket_name} --force '
+            f'--endpoint {endpoint_url} '
+            f'--profile={cloudflare.R2_PROFILE_NAME}')
         try:
             with log_utils.safe_rich_status(
                     f'[bold cyan]Deleting R2 bucket {bucket_name}[/]'):
-                subprocess.check_output(remove_command.split(' '),
-                                        stderr=subprocess.STDOUT)
+                subprocess.check_output(remove_command,
+                                        stderr=subprocess.STDOUT,
+                                        shell=True)
         except subprocess.CalledProcessError as e:
             if 'NoSuchBucket' in e.output.decode('utf-8'):
                 logger.debug(

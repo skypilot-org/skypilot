@@ -636,6 +636,7 @@ def spot_launch(
             proxy_command_key = ('aws', 'ssh_proxy_command')
             ssh_proxy_command = skypilot_config.get_nested(
                 proxy_command_key, None)
+            config_dict = skypilot_config.to_dict()
             if isinstance(ssh_proxy_command, str):
                 config_dict = skypilot_config.set_nested(
                     proxy_command_key, None)

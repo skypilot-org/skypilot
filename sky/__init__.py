@@ -30,6 +30,7 @@ AWS = clouds.AWS
 Azure = clouds.Azure
 GCP = clouds.GCP
 Lambda = clouds.Lambda
+SCP = clouds.SCP
 Local = clouds.Local
 OCI = clouds.OCI
 optimize = Optimizer.optimize
@@ -41,6 +42,7 @@ __all__ = [
     'Azure',
     'GCP',
     'Lambda',
+    'SCP',
     'Local',
     'OCI',
     'Optimizer',
