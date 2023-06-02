@@ -16,8 +16,7 @@ import requests
 ENDPOINT = 'https://cloud.lambdalabs.com/api/v1/instance-types'
 DEFAULT_LAMBDA_KEYS_PATH = os.path.expanduser('~/.lambda_cloud/lambda_keys')
 
-# List of all possible regions. The best way to obtain this list is to ask
-# Lambda. Could not find this list online.
+# List of all possible regions.
 REGIONS = [
     'australia-southeast-1',
     'europe-central-1',
@@ -31,6 +30,7 @@ REGIONS = [
     'us-west-1',
     'us-south-1',
     'us-west-3',
+    'us-midwest-1',
 ]
 
 # Source: https://lambdalabs.com/service/gpu-cloud
