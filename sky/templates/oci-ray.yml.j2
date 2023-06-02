@@ -126,7 +126,9 @@ head_node: {}
 worker_nodes: {}
 
 # These fields are required for external cloud providers.
-head_setup_commands: []
+head_setup_commands:
+  # Allow ray worker nodes can connect to the head node
+  - sudo iptables -I INPUT -p tcp --dport 6379 -j ACCEPT
 worker_setup_commands: []
 cluster_synced_files: []
 file_mounts_sync_continuously: False
