@@ -146,16 +146,16 @@ class StrategyExecutor:
             # remaining nodes first.
             #
             # In the case where the worker node is preempted, the `sky.cancel()`
-            # should be functional with the `_ignore_cluster_aliveness` flag,
+            # should be functional with the `_try_cancel_if_cluster_is_init` flag,
             # i.e. it sends the cancel signal to the head node, which will then
             # kill the user process on remaining worker nodes.
             sky.cancel(cluster_name=self.cluster_name,
                        all=True,
-                       _ignore_cluster_aliveness=True)
+                       _try_cancel_if_cluster_is_init=True)
         except Exception as e:  # pylint: disable=broad-except
             logger.info(
                 'Failed to cancel the job on the cluster. The cluster '
-                'might be already down or the head node is preempted. '
+                'might be already down or the head node is preempted.'
                 '\n  Detailed exception: '
                 f'{common_utils.format_exception(e)}\n'
                 'Terminating the cluster again to make sure there is no '
