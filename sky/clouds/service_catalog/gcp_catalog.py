@@ -333,12 +333,13 @@ def list_accelerators(
                                             case_sensitive)
 
     # Remove GPUs that are unsupported by SkyPilot.
-    results = {
-        k: v
-        for k, v in results.items()
-        if (k in list(_NUM_ACC_TO_MAX_CPU_AND_MEMORY.keys()) +
-            list(_A100_INSTANCE_TYPE_DICTS.keys()) or 'tpu' in k.lower())
-    }
+    new_results = {}
+    for acc_name, acc_info in results.items():
+        if (acc_name in list(_NUM_ACC_TO_MAX_CPU_AND_MEMORY.keys()) +
+                list(_A100_INSTANCE_TYPE_DICTS.keys()) or
+                'tpu' in acc_name.lower()):
+            new_results[acc_name] = acc_info
+    results = new_results
 
     a100_infos = results.get('A100', []) + results.get('A100-80GB', [])
     if not a100_infos:
