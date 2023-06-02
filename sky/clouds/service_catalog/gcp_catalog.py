@@ -337,7 +337,7 @@ def list_accelerators(
         k: v
         for k, v in results.items()
         if (k in list(_NUM_ACC_TO_MAX_CPU_AND_MEMORY.keys()) +
-        list(_A100_INSTANCE_TYPE_DICTS.keys()) or 'tpu' in k.lower())
+            list(_A100_INSTANCE_TYPE_DICTS.keys()) or 'tpu' in k.lower())
     }
 
     a100_infos = results.get('A100', []) + results.get('A100-80GB', [])
