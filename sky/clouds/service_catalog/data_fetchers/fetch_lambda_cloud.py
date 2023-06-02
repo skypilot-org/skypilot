@@ -29,6 +29,8 @@ REGIONS = [
     'us-west-2',
     'us-west-1',
     'us-south-1',
+    # New regions (not part of the original list)
+    'us-west-3',
 ]
 
 # Source: https://lambdalabs.com/service/gpu-cloud
@@ -39,6 +41,7 @@ GPU_TO_MEMORY = {
     'A10': 24576,
     'RTX6000': 24576,
     'V100': 16384,
+    'H100': 81920,
 }
 
 
