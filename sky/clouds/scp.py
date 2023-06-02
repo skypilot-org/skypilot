@@ -289,7 +289,8 @@ class SCP(clouds.Cloud):
                 'Failed to access SCP with credentials. '
                 'To configure credentials, see: '
                 'https://cloud.samsungsds.com/openapiguide\n'
-                f'{cls._INDENT_PREFIX}Generate API key and add the following line to ~/.scp/scp_credential:\n'
+                f'{cls._INDENT_PREFIX}Generate API key and add the '
+                'following line to ~/.scp/scp_credential:\n'
                 f'{cls._INDENT_PREFIX}  access_key = [YOUR API ACCESS KEY]\n'
                 f'{cls._INDENT_PREFIX}  secret_key = [YOUR API SECRET KEY]\n'
                 f'{cls._INDENT_PREFIX}  project_id = [YOUR PROJECT ID]')
