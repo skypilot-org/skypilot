@@ -1292,7 +1292,7 @@ class RetryingVmProvisioner(object):
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
-        os.makedirs(self.log_dir, exist_ok=True)
+        os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
         os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
@@ -2201,6 +2201,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def __init__(self):
         self.run_timestamp = backend_utils.get_run_timestamp()
+        # NOTE: do not expanduser() here, as this '~/...' path is used for
+        # remote as well to be expanded on the remote side.
         self.log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                     self.run_timestamp)
         # Do not make directories to avoid create folder for commands that
@@ -2597,7 +2599,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{style.BRIGHT}{workdir}{style.RESET_ALL}'
             f' -> '
             f'{style.BRIGHT}{SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
-        os.makedirs(self.log_dir, exist_ok=True)
+        os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
         os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
@@ -3647,8 +3649,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _execute_file_mounts(self, handle: CloudVmRayResourceHandle,
                              file_mounts: Dict[Path, Path]):
-        """Executes file mounts - rsyncing local files and
-        copying from remote stores."""
+        """Executes file mounts.
+
+        Rsyncing local files and copying from remote stores.
+        """
         # File mounts handling for remote paths possibly without write access:
         #  (1) in 'file_mounts' sections, add <prefix> to these target paths.
         #  (2) then, create symlinks from '/.../file' to '<prefix>/.../file'.
@@ -3685,7 +3689,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'{fore.YELLOW}Source path {src!r} is a symlink. '
                         f'Symlink contents are not uploaded.{style.RESET_ALL}')
 
-        os.makedirs(self.log_dir, exist_ok=True)
+        os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
         os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '

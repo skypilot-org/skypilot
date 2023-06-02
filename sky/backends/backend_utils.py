@@ -2354,7 +2354,8 @@ def check_cluster_available(
             raise exceptions.ClusterNotUpError(
                 constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
                     cluster_name),
-                cluster_status=cluster_status)
+                cluster_status=cluster_status,
+                handle=handle)
         with ux_utils.print_exception_no_traceback():
             hint_for_init = ''
             if cluster_status == global_user_state.ClusterStatus.INIT:
@@ -2369,14 +2370,16 @@ def check_cluster_available(
                 f'{global_user_state.ClusterStatus.UP.value} clusters.'
                 f'{hint_for_init}'
                 f'{reset}',
-                cluster_status=cluster_status)
+                cluster_status=cluster_status,
+                handle=handle)
 
     if handle.head_ip is None:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
                 f'Cluster {cluster_name!r} has been stopped or not properly '
                 'set up. Please re-launch it with `sky start`.',
-                cluster_status=cluster_status)
+                cluster_status=cluster_status,
+                handle=handle)
     return handle
 
 
