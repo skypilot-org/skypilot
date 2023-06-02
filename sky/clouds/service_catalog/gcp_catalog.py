@@ -332,6 +332,16 @@ def list_accelerators(
                                             region_filter, quantity_filter,
                                             case_sensitive)
 
+    # Remove GPUs that are unsupported by SkyPilot.
+    new_results = {}
+    for acc_name, acc_info in results.items():
+        if (acc_name.startswith('tpu') or
+                acc_name in _NUM_ACC_TO_MAX_CPU_AND_MEMORY or
+                acc_name in _A100_INSTANCE_TYPE_DICTS):
+            new_results[acc_name] = acc_info
+            new_results[acc_name] = acc_info
+    results = new_results
+
     a100_infos = results.get('A100', []) + results.get('A100-80GB', [])
     if not a100_infos:
         return results
@@ -462,6 +472,7 @@ def check_accelerator_attachable_to_host(instance_type: str,
     if acc_name in _A100_INSTANCE_TYPE_DICTS:
         valid_counts = list(_A100_INSTANCE_TYPE_DICTS[acc_name].keys())
     else:
+        assert acc_name in _NUM_ACC_TO_MAX_CPU_AND_MEMORY, acc_name
         valid_counts = list(_NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name].keys())
     if acc_count not in valid_counts:
         with ux_utils.print_exception_no_traceback():
