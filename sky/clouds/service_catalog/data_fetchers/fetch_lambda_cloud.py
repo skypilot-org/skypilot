@@ -16,7 +16,7 @@ import requests
 ENDPOINT = 'https://cloud.lambdalabs.com/api/v1/instance-types'
 DEFAULT_LAMBDA_KEYS_PATH = os.path.expanduser('~/.lambda_cloud/lambda_keys')
 
-# This is the list that Lambda Labs gave us.
+# List of all regions
 REGIONS = [
     'australia-southeast-1',
     'europe-central-1',
@@ -29,7 +29,6 @@ REGIONS = [
     'us-west-2',
     'us-west-1',
     'us-south-1',
-    # New regions (not part of the original list)
     'us-west-3',
 ]
 
