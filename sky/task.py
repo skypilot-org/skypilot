@@ -759,7 +759,7 @@ class Task:
                         assert storage.name is not None, storage
                         # extract region from rclone.conf
                         cos_region = data_utils.Rclone.get_region_from_rclone(
-                            storage.name, 'IBM')
+                            storage.name, data_utils.Rclone.RcloneClouds.IBM)
                         blob_path = f'cos://{cos_region}/{storage.name}'
                     self.update_file_mounts({mnt_path: blob_path})
                 elif store_type is storage_lib.StoreType.AZURE:

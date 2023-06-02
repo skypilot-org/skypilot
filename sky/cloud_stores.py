@@ -13,6 +13,7 @@ import urllib.parse
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.adaptors import aws, cloudflare, ibm
+from sky.data.data_utils import Rclone
 
 
 class CloudStorage:
@@ -228,7 +229,7 @@ class IBMCosCloudStorage(CloudStorage):
     ]
 
     def is_directory(self, url: str) -> bool:
-        """Returns whether IBM cos bucket's 'url' is a directory.
+        """Returns whether IBM COS bucket's 'url' is a directory.
 
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
@@ -241,8 +242,6 @@ class IBMCosCloudStorage(CloudStorage):
 
         num_objects = 0
         for obj in bucket.objects.filter(Prefix=path):
-            print(obj)
-
             num_objects += 1
             if obj.key == path:
                 return False
@@ -256,14 +255,15 @@ class IBMCosCloudStorage(CloudStorage):
     def _get_rclone_sync_command(self, source: str, destination: str):
         bucket_name, data_path, bucket_region = data_utils.split_cos_path(
             source)
-        bucket_rclone_profile = data_utils.Rclone.get_rclone_bucket_profile(
-            bucket_name, 'IBM')
+        bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
+            bucket_name, Rclone.RcloneClouds.IBM)
         data_path_in_bucket = bucket_name + data_path
-        rclone_config_data = data_utils.Rclone.store_rclone_config(
-            bucket_name, 'IBM', bucket_region, False)
+        rclone_config_data = Rclone.get_rclone_config(bucket_name,
+                                                      Rclone.RcloneClouds.IBM,
+                                                      bucket_region)
         # configure_rclone cmd stores bucket profile in rclone config file at the cluster's nodes.
         configure_rclone = (
-            f' mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> {data_utils.Rclone.RCLONE_CONFIG_PATH}'
+            f' mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> {Rclone.RCLONE_CONFIG_PATH}'
         )
         # bucket_name also serves as a profile name in rclone.conf
         download_via_rclone = (

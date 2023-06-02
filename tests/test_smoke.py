@@ -751,10 +751,9 @@ def test_ibm_storage_mounts():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
-        storage_name, 'IBM')
+        storage_name, Rclone.RcloneClouds.IBM)
     template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting_cloud_specific.yaml').read_text(
-        )
+        'tests/test_yamls/test_storage_mounting.yaml').read_text()
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -1976,7 +1975,7 @@ class TestStorageWithCredentials:
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
         if store_type == storage_lib.StoreType.IBM:
             bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
-                bucket_name, 'IBM')
+                bucket_name, Rclone.RcloneClouds.IBM)
             return f'rclone delete {bucket_rclone_profile}:{bucket_name} && rclone config delete {bucket_rclone_profile}'
 
     @staticmethod
@@ -2002,7 +2001,7 @@ class TestStorageWithCredentials:
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
         if store_type == storage_lib.StoreType.IBM:
             bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
-                bucket_name, 'IBM')
+                bucket_name, Rclone.RcloneClouds.IBM)
             return f'rclone ls {bucket_rclone_profile}:{bucket_name}/{suffix}'
 
     @pytest.fixture
