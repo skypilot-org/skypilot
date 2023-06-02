@@ -535,6 +535,11 @@ def cancel(
     """Cancel jobs on a cluster.
 
     Please refer to the sky.cli.cancel for the document.
+    Additional arguments:
+        _ignore_cluster_aliveness: (bool) whether to try cancelling the job
+            even if the cluster is not UP, but the head node is still alive.
+            This is used by the spot controller to cancel the job when the
+            worker node is preempted in the spot cluster.
 
     Raises:
         ValueError: if arguments are invalid, or the cluster does not exist.
@@ -555,13 +560,22 @@ def cancel(
         cluster_name, operation_str='Cancelling jobs')
 
     # Check the status of the cluster.
-    if not _ignore_cluster_aliveness:
+    try:
         handle = backend_utils.check_cluster_available(
             cluster_name,
             operation='cancelling jobs',
         )
-    else:
-        _, handle = backend_utils.refresh_cluster_status_handle(cluster_name)
+    except exceptions.ClusterNotUpError as e:
+        if not _ignore_cluster_aliveness:
+            raise
+        if (not isinstance(e.handle, backends.CloudVmRayResourceHandle) or
+                e.handle.head_ip is None):
+            raise
+        # Even if the cluster is not UP, we can still try to cancel the job if
+        # the head node is still alive. This is useful when a spot cluster's
+        # worker node is preempted, but we can still cancel the job on the head
+        # node.
+
     backend = backend_utils.get_backend_from_handle(handle)
 
     if all:

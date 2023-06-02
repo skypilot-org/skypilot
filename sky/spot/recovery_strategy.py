@@ -130,6 +130,25 @@ class StrategyExecutor:
             return
         try:
             usage_lib.messages.usage.set_internal()
+            # Note that `sky.cancel()` may not go through for a variety of
+            # reasons:
+            # (1) head node is preempted; or
+            # (2) somehow user programs escape the cancel codepath's kill.
+            # The latter is silent and is a TODO.
+            #
+            # For the former, an exception will be thrown, in which case we
+            # fallback to terminate_cluster() in the except block below. This
+            # is because in the event of recovery on the same set of remaining
+            # worker nodes, we don't want to leave some old job processes
+            # running.
+            # TODO(zhwu): This is non-ideal and we should figure out another way
+            # to reliably cancel those processes and not have to down the
+            # remaining nodes first.
+            #
+            # In the case where the worker node is preempted, the `sky.cancel()`
+            # should be functional with the `_ignore_cluster_aliveness` flag,
+            # i.e. it sends the cancel signal to the head node, which will then
+            # kill the user process on remaining worker nodes.
             sky.cancel(cluster_name=self.cluster_name,
                        all=True,
                        _ignore_cluster_aliveness=True)
