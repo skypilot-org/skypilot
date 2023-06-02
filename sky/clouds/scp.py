@@ -44,6 +44,8 @@ class SCP(clouds.Cloud):
         clouds.CloudImplementationFeatures.MULTI_NODE: _MULTI_NODE
     }
 
+    _INDENT_PREFIX = '    '
+
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
@@ -283,14 +285,14 @@ class SCP(clouds.Cloud):
         try:
             scp_utils.SCPClient().list_instances()
         except (AssertionError, KeyError, scp_utils.SCPClientError):
-            return False, ('Failed to access SCP with credentials. '
-                           'To configure credentials, go to:\n'
-                           ' https://cloud.samsungsds.com/openapiguide\n'
-                           ' to generate API key and add the line\n'
-                           ' access_key = [YOUR API ACCESS KEY]\n'
-                           ' secret_key = [YOUR API SECRET KEY]\n'
-                           ' project_id = [YOUR PROJECT ID]\n'
-                           ' to ~/.scp/scp_credential')
+            return False, (
+                'Failed to access SCP with credentials. '
+                'To configure credentials, see: '
+                'https://cloud.samsungsds.com/openapiguide\n'
+                f'{cls._INDENT_PREFIX}Generate API key and add the following line to ~/.scp/scp_credential:\n'
+                f'{cls._INDENT_PREFIX}  access_key = [YOUR API ACCESS KEY]\n'
+                f'{cls._INDENT_PREFIX}  secret_key = [YOUR API SECRET KEY]\n'
+                f'{cls._INDENT_PREFIX}  project_id = [YOUR PROJECT ID]')
 
         return True, None
 
