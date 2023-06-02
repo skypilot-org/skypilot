@@ -568,6 +568,8 @@ def cancel(
     except exceptions.ClusterNotUpError as e:
         if not _try_cancel_if_cluster_is_init:
             raise
+        assert (e.handle is None or
+                isinstance(e.handle, backends.CloudVmRayResourceHandle)), e
         if (e.handle is None or e.handle.head_ip is None):
             raise
         # Even if the cluster is not UP, we can still try to cancel the job if

@@ -146,9 +146,9 @@ class StrategyExecutor:
             # remaining nodes first.
             #
             # In the case where the worker node is preempted, the `sky.cancel()`
-            # should be functional with the `_try_cancel_if_cluster_is_init` flag,
-            # i.e. it sends the cancel signal to the head node, which will then
-            # kill the user process on remaining worker nodes.
+            # should be functional with the `_try_cancel_if_cluster_is_init`
+            # flag, i.e. it sends the cancel signal to the head node, which will
+            # then kill the user process on remaining worker nodes.
             sky.cancel(cluster_name=self.cluster_name,
                        all=True,
                        _try_cancel_if_cluster_is_init=True)
