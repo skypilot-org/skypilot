@@ -335,9 +335,10 @@ def list_accelerators(
     # Remove GPUs that are unsupported by SkyPilot.
     new_results = {}
     for acc_name, acc_info in results.items():
-        if (acc_name in list(_NUM_ACC_TO_MAX_CPU_AND_MEMORY.keys()) +
-                list(_A100_INSTANCE_TYPE_DICTS.keys()) or
-                'tpu' in acc_name.lower()):
+        if (acc_name.starts_with('tpu') or acc_name in
+            _NUM_ACC_TO_MAX_CPU_AND_MEMORY or acc_name in
+            _A100_INSTANCE_TYPE_DICTS):
+            new_results[acc_name] = acc_info
             new_results[acc_name] = acc_info
     results = new_results
 
