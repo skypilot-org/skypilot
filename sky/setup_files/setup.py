@@ -65,8 +65,11 @@ def parse_readme(readme: str) -> str:
 
 install_requires = [
     'wheel',
-    # NOTE: ray requires click>=7.0
-    'click>=7.0',
+    # NOTE: ray requires click>=7.0. Also, click 8.1.x makes our rendered CLI
+    # docs display weird blockquotes.
+    # TODO(zongheng): investigate how to make click 8.1.x display nicely and
+    # remove the upper bound.
+    'click<=8.0.4,>=7.0',
     # NOTE: required by awscli. To avoid ray automatically installing
     # the latest version.
     'colorama<0.4.5',
