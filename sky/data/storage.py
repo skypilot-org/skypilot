@@ -10,6 +10,7 @@ import urllib.parse
 
 import colorama
 
+from sky import check
 from sky import clouds
 from sky.adaptors import aws
 from sky.adaptors import gcp
@@ -58,6 +59,19 @@ _BUCKET_FAIL_TO_CONNECT_MESSAGE = (
 _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
     'Bucket {bucket_name!r} does not exist. '
     'It may have been deleted externally.')
+
+
+def _is_storage_cloud_enabled(cloud_name: str,
+                              try_fix_with_sky_check: bool = True) -> bool:
+    enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+    if cloud_name in enabled_storage_clouds:
+        return True
+    if try_fix_with_sky_check:
+        # TODO(zhwu): Only check the specified cloud to speed up.
+        check.check(quiet=True)
+        return _is_storage_cloud_enabled(cloud_name,
+                                         try_fix_with_sky_check=False)
+    return False
 
 
 class StoreType(enum.Enum):
@@ -915,8 +929,7 @@ class S3Store(AbstractStore):
         self.name = self.validate_name(self.name)
 
         # Check if the storage is enabled
-        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
-        if str(clouds.AWS()) not in enabled_storage_clouds:
+        if not _is_storage_cloud_enabled(str(clouds.AWS())):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     'Storage \'store: s3\' specified, but ' \
@@ -1301,8 +1314,7 @@ class GcsStore(AbstractStore):
         # Validate name
         self.name = self.validate_name(self.name)
         # Check if the storage is enabled
-        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
-        if str(clouds.GCP()) not in enabled_storage_clouds:
+        if not _is_storage_cloud_enabled(str(clouds.GCP())):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     'Storage \'store: gcs\' specified, but ' \
@@ -1715,8 +1727,7 @@ class R2Store(AbstractStore):
         # Validate name
         self.name = S3Store.validate_name(self.name)
         # Check if the storage is enabled
-        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
-        if cloudflare.NAME not in enabled_storage_clouds:
+        if not _is_storage_cloud_enabled(cloudflare.NAME):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     'Storage \'store: r2\' specified, but ' \
