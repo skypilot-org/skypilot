@@ -97,7 +97,7 @@ setup_commands:
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
-
+    sudo iptables -I INPUT -i ens3 -m state --state ESTABLISHED,RELATED,NEW -j ACCEPT;
 
 # Command to start ray on the head node. You don't need to change this.
 # NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
@@ -107,16 +107,18 @@ setup_commands:
 # Increment the following for catching performance bugs easier:
 #   current num items (num SSH connections): 2
 head_start_ray_commands:
-  # Start skylet daemon. (Should not place it in the head_setup_commands, otherwise it will run before skypilot is installed.)
+  # Start skylet daemon. (Should not place it in the head_setup_commands, otherwise it will run before sky is installed.)
+  # NOTE: --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
+  # Line "which prlimit ..": increase the limit of the number of open files for the raylet process, as the `ulimit` may not take effect at this point, because it requires
+  # all the sessions to be reloaded. This is a workaround.
   - ((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.skylet.skylet") || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);
-    export SKYPILOT_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l);    
-    ray stop; RAY_SCHEDULER_EVENTS=0 ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --num-gpus=$SKYPILOT_NUM_GPUS || exit 1;
+    ray stop; RAY_SCHEDULER_EVENTS=0 ray start --disable-usage-stats --head --port={{ray_port}} --dashboard-port={{ray_dashboard_port}} --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
+    {{dump_port_command}};
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
-  - SKYPILOT_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l);
-    ray stop; RAY_SCHEDULER_EVENTS=0 ray start --disable-usage-stats --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --num-gpus=$SKYPILOT_NUM_GPUS || exit 1;
+  - ray stop; RAY_SCHEDULER_EVENTS=0 ray start --disable-usage-stats --address=$RAY_HEAD_IP:{{ray_port}} --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
 {%- else %}
 worker_start_ray_commands: []
@@ -126,9 +128,7 @@ head_node: {}
 worker_nodes: {}
 
 # These fields are required for external cloud providers.
-head_setup_commands:
-  # Allow ray worker nodes can connect to the head node
-  - sudo iptables -I INPUT -p tcp --dport 6379 -j ACCEPT
+head_setup_commands: []
 worker_setup_commands: []
 cluster_synced_files: []
 file_mounts_sync_continuously: False

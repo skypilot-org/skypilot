@@ -1863,6 +1863,8 @@ def _query_status_oci(
 ) -> List[global_user_state.ClusterStatus]:
     region = ray_config['provider']['region']
 
+    # Check the lifecycleState definition from the page
+    # https://docs.oracle.com/en-us/iaas/api/#/en/iaas/latest/Instance/
     status_map = {
         'PROVISIONING': global_user_state.ClusterStatus.INIT,
         'STARTING': global_user_state.ClusterStatus.INIT,
@@ -1870,6 +1872,7 @@ def _query_status_oci(
         'STOPPING': global_user_state.ClusterStatus.STOPPED,
         'STOPPED': global_user_state.ClusterStatus.STOPPED,
         'TERMINATED': None,
+        'TERMINATING': None,
     }
 
     # pylint: disable=import-outside-toplevel

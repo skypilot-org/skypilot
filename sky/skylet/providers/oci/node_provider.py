@@ -11,7 +11,6 @@ History:
 """
 
 import logging
-import oci
 import time
 import threading
 import copy
@@ -229,7 +228,7 @@ class OCINodeProvider(NodeProvider):
                     get_instance_response = oci_adaptor.get_core_client(
                         self.region, oci_conf.get_profile()).get_instance(
                             instance_id=reuse_node["id"])
-                    oci.wait_until(
+                    oci_adaptor.get_oci().wait_until(
                         oci_adaptor.get_core_client(self.region,
                                                     oci_conf.get_profile()),
                         get_instance_response,
@@ -284,19 +283,21 @@ class OCINodeProvider(NodeProvider):
             if ocpu_count > 0:
                 mem = node_config["MemoryInGbs"]
                 if mem is not None and mem != "None":
-                    machine_shape_config = (
-                        oci.core.models.LaunchInstanceShapeConfigDetails(
-                            ocpus=ocpu_count, memory_in_gbs=mem))
+                    machine_shape_config = (oci_adaptor.get_oci().core.models.
+                                            LaunchInstanceShapeConfigDetails(
+                                                ocpus=ocpu_count,
+                                                memory_in_gbs=mem))
                 else:
-                    machine_shape_config = (
-                        oci.core.models.LaunchInstanceShapeConfigDetails(
-                            ocpus=ocpu_count))
+                    machine_shape_config = (oci_adaptor.get_oci().core.models.
+                                            LaunchInstanceShapeConfigDetails(
+                                                ocpus=ocpu_count))
 
-            preempitible_config = (
-                oci.core.models.PreemptibleInstanceConfigDetails(
-                    preemption_action=oci.core.models.TerminatePreemptionAction(
-                        type="TERMINATE", preserve_boot_volume=False))
-                if node_config["Preemptible"] else None)
+            preempitible_config = (oci_adaptor.get_oci(
+            ).core.models.PreemptibleInstanceConfigDetails(
+                preemption_action=oci_adaptor.get_oci().core.models.
+                TerminatePreemptionAction(type="TERMINATE",
+                                          preserve_boot_volume=False))
+                                   if node_config["Preemptible"] else None)
 
             logger.debug(f"* Shape: {instance_type_str}, ocpu: {ocpu_count}")
             logger.debug(f"* Shape config is {machine_shape_config}")
@@ -319,23 +320,22 @@ class OCINodeProvider(NodeProvider):
             for seq in range(1, count + 1):
                 launch_instance_response = oci_adaptor.get_core_client(
                     self.region, oci_conf.get_profile()
-                ).launch_instance(
-                    launch_instance_details=oci.core.models.
-                    LaunchInstanceDetails(
-                        availability_domain=node_config["AvailabilityDomain"],
-                        compartment_id=compartment,
-                        shape=instance_type_str,
-                        display_name=
-                        f"{self.cluster_name}_{node_type}_{batch_id}_{seq}",
-                        freeform_tags=vm_tags,
-                        image_id=node_config["ImageId"],
-                        metadata={
-                            "ssh_authorized_keys": node_config["AuthorizedKey"]
-                        },
-                        subnet_id=vcn,
-                        shape_config=machine_shape_config,
-                        preemptible_instance_config=preempitible_config,
-                    ))
+                ).launch_instance(launch_instance_details=oci_adaptor.get_oci(
+                ).core.models.LaunchInstanceDetails(
+                    availability_domain=node_config["AvailabilityDomain"],
+                    compartment_id=compartment,
+                    shape=instance_type_str,
+                    display_name=
+                    f"{self.cluster_name}_{node_type}_{batch_id}_{seq}",
+                    freeform_tags=vm_tags,
+                    image_id=node_config["ImageId"],
+                    metadata={
+                        "ssh_authorized_keys": node_config["AuthorizedKey"]
+                    },
+                    subnet_id=vcn,
+                    shape_config=machine_shape_config,
+                    preemptible_instance_config=preempitible_config,
+                ))
 
                 new_inst = launch_instance_response.data
                 starting_insts.append({
@@ -357,7 +357,7 @@ class OCINodeProvider(NodeProvider):
             get_instance_response = oci_adaptor.get_core_client(
                 self.region, oci_conf.get_profile()).get_instance(
                     instance_id=ninst["inst_id"])
-            oci.wait_until(
+            oci_adaptor.get_oci().wait_until(
                 oci_adaptor.get_core_client(self.region,
                                             oci_conf.get_profile()),
                 get_instance_response,
@@ -412,8 +412,9 @@ class OCINodeProvider(NodeProvider):
                 update_instance_response = oci_adaptor.get_core_client(
                     self.region, oci_conf.get_profile()).update_instance(
                         instance_id=node_id,
-                        update_instance_details=oci.core.models.
-                        UpdateInstanceDetails(freeform_tags=combined_tags),
+                        update_instance_details=oci_adaptor.get_oci().core.
+                        models.UpdateInstanceDetails(
+                            freeform_tags=combined_tags),
                     )
                 logger.debug(
                     f"* Response details: {update_instance_response.data}")

@@ -963,7 +963,6 @@ class RetryingVmProvisioner(object):
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
             stdout: str, stderr: str):
-        logger.debug('*  _update_blocklist_on_oci_error...')
 
         style = colorama.Style
         stdout_splits = stdout.split('\n')
@@ -996,8 +995,6 @@ class RetryingVmProvisioner(object):
             for zone in zones:
                 self._blocked_resources.add(
                     launchable_resources.copy(zone=zone.name))
-
-        logger.debug('* _update_blocklist_on_oci_error...[Done]')
 
     def _update_blocklist_on_error(
             self, launchable_resources: 'resources_lib.Resources',

@@ -36,6 +36,11 @@ def get_config_file() -> str:
 
 
 @import_package
+def get_oci():
+    return oci
+
+
+@import_package
 def get_oci_config(region=None, profile='DEFAULT'):
     conf_file_path = get_config_file()
     oci_config = oci.config.from_file(file_location=conf_file_path,
