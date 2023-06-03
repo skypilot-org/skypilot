@@ -65,10 +65,6 @@ GOOGLE_SDK_INSTALLATION_COMMAND = f'pushd /tmp &>/dev/null && \
     echo "source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1" >> ~/.bashrc && \
     source ~/google-cloud-sdk/path.bash.inc >> {_GCLOUD_INSTALLATION_LOG} 2>&1; }}; }} && \
     {{ cp {GCP_CONFIG_SKY_BACKUP_PATH} {GCP_CONFIG_PATH} > /dev/null 2>&1 || true; }} && \
-    {{ pip list | grep google-api-python-client > /dev/null 2>&1 || \
-    pip install google-api-python-client >> {_GCLOUD_INSTALLATION_LOG} 2>&1; }} && \
-    {{ pip list | grep google-cloud-storage > /dev/null 2>&1 || \
-    pip install google-cloud-storage >> {_GCLOUD_INSTALLATION_LOG} 2>&1; }} && \
     popd &>/dev/null'
 
 # TODO(zhwu): Move the default AMI size to the catalog instead.
