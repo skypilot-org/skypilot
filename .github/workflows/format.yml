@@ -13,9 +13,7 @@ on:
       - 'releases/**'
 jobs:
   format:
-    # Need to specify 20.04, because ubuntu-latest does not work with
-    # python 3.6: https://github.com/actions/setup-python/issues/355#issuecomment-1335042510
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.8"]
@@ -36,9 +34,11 @@ jobs:
         yapf --diff --recursive ./ --exclude 'sky/skylet/ray_patches/**' \
             --exclude 'sky/skylet/providers/aws/**' \
             --exclude 'sky/skylet/providers/gcp/**' \
-            --exclude 'sky/skylet/providers/azure/**'
+            --exclude 'sky/skylet/providers/azure/**' \
+            --exclude 'sky/skylet/providers/ibm/**'
     - name: Running black
       run: |
         black --diff --check sky/skylet/providers/aws/ \
             sky/skylet/providers/gcp/ \
-            sky/skylet/providers/azure/
+            sky/skylet/providers/azure/ \
+            sky/skylet/providers/ibm/
