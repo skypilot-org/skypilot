@@ -594,7 +594,8 @@ def spot_launch(
             # Note: actual spot cluster name will be <task_name>-<spot job ID>
             'task_name': name,
             'uuid': task_uuid,
-            'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
+            'google_sdk_installation_commands':
+                gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'is_dev': env_options.Options.IS_DEVELOPER.get(),
             'is_debug': env_options.Options.SHOW_DEBUG_INFO.get(),
             'disable_logging': env_options.Options.DISABLE_LOGGING.get(),

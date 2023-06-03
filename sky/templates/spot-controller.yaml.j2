@@ -28,7 +28,7 @@ setup: |
   # pip list | grep azure-cli > /dev/null 2>&1 || \
   #  pip3 install azure-cli==2.31.0 azure-core
 
-  {{gcloud_installation_commands}}
+  {{google_sdk_installation_commands}}
 
   # Internal: disable logging for manually logging into the spot controller for debugging.
   {% if is_dev %}
