@@ -330,6 +330,14 @@ def get_job_submission_port():
     return port
 
 
+def get_ray_port():
+    port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
+    if not os.path.exists(port_path):
+        return 6379
+    port = json.load(open(port_path))['ray_port']
+    return port
+
+
 def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
     records = []
     for row in rows:
