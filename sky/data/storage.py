@@ -3,7 +3,6 @@ import enum
 import os
 import re
 import subprocess
-import tempfile
 import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
@@ -25,7 +24,6 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.utils import log_utils
 from sky.utils import ux_utils
-from sky.utils import command_runner
 
 if typing.TYPE_CHECKING:
     import boto3  # type: ignore
@@ -876,45 +874,71 @@ class Storage(object):
 
 
 def format_gitignore_to_exclude_list(src_dir_path: str) -> List[str]:
-    """Returns a list of formatted excluded files from .gitignore and
-    .git/info/exclude using rsync.
+    """Returns a list of formatted excluded files read from .gitignore and
+    .git/info/exclude using git. 'git init' is ran when SRC_DIR_PATH
+    is not a git repository and removed after obtaining excluded list
     """
     expand_src_dir_path = os.path.expanduser(src_dir_path)
-    git_exclude_path = os.path.join(expand_src_dir_path,
-                                    command_runner.GIT_EXCLUDE)
-    # Using empty tmpdir as destination for rsync command
-    # to get list of files/directories to be synced from the source
-    with tempfile.TemporaryDirectory() as tmpdir:
-        if os.path.exists(git_exclude_path):
-            cmd = f'rsync -avv --dry-run ' \
-                  f'{command_runner.RSYNC_FILTER_OPTION} ' \
-                  f'--exclude-from=\'{git_exclude_path}\' '\
-                  f'{expand_src_dir_path} {tmpdir}'
-        else:
-            cmd = f'rsync -avv --dry-run ' \
-                  f'{command_runner.RSYNC_FILTER_OPTION} ' \
-                  f'{expand_src_dir_path} {tmpdir}'
-    rsync_output = subprocess.check_output(cmd, shell=True)
-    rsync_output_list = rsync_output.decode('utf-8').split('\n')
 
+    git_exclude_path = os.path.join(expand_src_dir_path, '.git/info/exclude')
+    gitignore_path = os.path.join(expand_src_dir_path, '.gitignore')
+
+    git_exclude_exists = os.path.isfile(git_exclude_path)
+    gitignore_exists = os.path.isfile(gitignore_path)
+
+    # This command outputs a list to be excluded according to .gitignore
+    # and .git/info/exclude
+    filter_cmd = f'git -C {expand_src_dir_path} status --ignored -s'
     excluded_list: List[str] = ['.git/*', '.gitignore']
-    # processing the outputs from rsync command to
-    # to get a list of files/directories to exclude from syncing
-    for item in rsync_output_list:
-        if item.startswith('[sender] hiding file '):
-            to_be_excluded = item.split(' ')[3]
-            slash_idx = to_be_excluded.find('/')
-            to_be_excluded = to_be_excluded[slash_idx + 1:]
-            excluded_list.append(to_be_excluded)
-        elif item.startswith('[sender] hiding directory '):
-            to_be_excluded = item.split(' ')[3]
-            slash_idx = to_be_excluded.find('/')
-            to_be_excluded = to_be_excluded[slash_idx + 1:]
-            to_be_excluded += '/*'
-            excluded_list.append(to_be_excluded)
-        elif len(excluded_list) > 2:
-            break
 
+    # pylint: disable=W1510
+    if git_exclude_exists or gitignore_exists:
+        try:
+            output = subprocess.run(filter_cmd,
+                                    shell=True,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    check=True,
+                                    text=True)
+        except subprocess.CalledProcessError as e:
+            # when the SRC_DIR_PATH is not a git repo
+            if e.returncode == exceptions.GIT_UNINITIALIZED_CODE:
+                init_cmd = f'git -C {expand_src_dir_path} init'
+                subprocess.run(init_cmd,
+                               shell=True,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE)
+                output = subprocess.run(filter_cmd,
+                                        shell=True,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE,
+                                        text=True)
+                if git_exclude_exists:
+                    # removes all the files/dirs created with 'git init'
+                    # under .git/ except .git/info/exclude
+                    remove_files_cmd = (f'find {expand_src_dir_path}/.git ' \
+                                        f'-path {git_exclude_path} -prune -o ' \
+                                        '-type f -exec rm -f {} +')
+                    remove_dirs_cmd = (f'find {expand_src_dir_path}/.git ' \
+                                       f'-path {git_exclude_path} -prune -o' \
+                                       ' -type d -empty -delete')
+                    subprocess.run(remove_files_cmd,
+                                   shell=True,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE)
+                    subprocess.run(remove_dirs_cmd,
+                                   shell=True,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE)
+
+        output_list = output.stdout.split('\n')
+        for line in output_list:
+            if line.startswith('!!'):
+                to_be_excluded = line[3:]
+                if line.endswith('/'):
+                    to_be_excluded += '*'
+                excluded_list.append(to_be_excluded)
+    # pylint: enable=W1510
     return excluded_list
 
 

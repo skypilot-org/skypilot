@@ -1948,8 +1948,6 @@ class TestStorageWithCredentials:
             'excluded.log': None,
             'included.log': None,
         },
-        'included.log': None,
-        'included.txt': None,
         'nested_double_asterisk': {
             'one': {
                 'also_exclude.txt': None,
@@ -2040,14 +2038,23 @@ class TestStorageWithCredentials:
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
 
     @staticmethod
-    def cli_count_name_in_bucket(store_type, bucket_name, file_name):
+    def cli_count_name_in_bucket(store_type, bucket_name, file_name, suffix=''):
         if store_type == storage_lib.StoreType.S3:
-            return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)"'
+            if suffix:
+                return f'aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)"'
+            else:
+                return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)"'
         elif store_type == storage_lib.StoreType.GCS:
-            return f'gsutil ls gs://{bucket_name} | grep "{file_name}" | wc -l'
+            if suffix:
+                return f'gsutil ls gs://{bucket_name}/{suffix} | grep "{file_name}" | wc -l'
+            else:
+                return f'gsutil ls gs://{bucket_name} | grep "{file_name}" | wc -l'
         elif store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
-            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=r2'
+            if suffix:
+                return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=r2'
+            else:
+                return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=r2'
 
     @staticmethod
     def cli_count_file_in_bucket(store_type, bucket_name):
@@ -2460,15 +2467,27 @@ class TestStorageWithCredentials:
                                                      shell=True)
         cnt_output = subprocess.check_output(cnt_num_file_cmd, shell=True)
 
-        # Only the 'included.*' files should exist in the cloud object storage
-        assert '1' in up_output.decode('utf-8'), \
-                f'{upload_file_name} is not uploaded.: {bucket_name}'
+        if store_type == storage_lib.StoreType.GCS:
+            up_dir_cmd = up_cmd = self.cli_count_name_in_bucket(store_type, \
+                bucket_name, file_name=upload_file_name, suffix='include_dir')
+            up_dir_output = subprocess.check_output(up_dir_cmd, shell=True)
+
+        # GCS ls and aws s3 list-objects outputs in a different way
+        # Only 'included.*' files should exist in the cloud object storage
+        if store_type == storage_lib.StoreType.GCS:
+            assert '2' in up_output.decode('utf-8'), \
+                    f'Filese to be uploaded are not uploaded.: {bucket_name}'
+            assert '1' in up_dir_output.decode('utf-8'), \
+                    f'File to be uploaded in include_dir is not uploaded.: {bucket_name}'
+        else:
+            assert '3' in up_output.decode('utf-8'), \
+                    f'{upload_file_name} is not uploaded.: {bucket_name}'
         assert '0' in gitignore_output.decode('utf-8'), \
                '.gitignore file should not be uploaded'
         assert '0' in git_exclude_output.decode('utf-8'), \
                '.git directory should not be uploaded'
         ls_cmd = self.cli_ls_cmd(store_type, bucket_name)
-        assert '1' in cnt_output.decode('utf-8'), \
+        assert '3' in cnt_output.decode('utf-8'), \
                f'Some items listed in .gitignore and .git/info/exclude are not ignored - there must be one item in the bucket. Check with {ls_cmd}'
 
 
