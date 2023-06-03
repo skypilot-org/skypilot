@@ -1954,6 +1954,7 @@ def test_aws_disk_tier():
         )
         run_one_test(test)
 
+
 @pytest.mark.gcp
 def test_gcp_disk_tier():
     for disk_tier in ['low', 'medium', 'high']:
@@ -1975,6 +1976,7 @@ def test_gcp_disk_tier():
         )
         run_one_test(test)
 
+
 @pytest.mark.azure
 def test_azure_disk_tier():
     for disk_tier in ['low', 'medium']:
@@ -1995,6 +1997,7 @@ def test_azure_disk_tier():
         )
         run_one_test(test)
 
+
 # ------- Testing user ray cluster --------
 def test_user_ray_cluster():
     name = _get_cluster_name()
@@ -2011,6 +2014,7 @@ def test_user_ray_cluster():
         f'sky down -y {name}',
     )
     run_one_test(test)
+
 
 # ------- Testing the core API --------
 # Most of the core APIs have been tested in the CLI tests.
