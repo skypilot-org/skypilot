@@ -60,13 +60,17 @@ _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
     'Bucket {bucket_name!r} does not exist. '
     'It may have been deleted externally.')
 
-def _is_storage_cloud_enabled(cloud_name: str, try_fix_with_sky_check: bool) -> bool:
+
+def _is_storage_cloud_enabled(cloud_name: str,
+                              try_fix_with_sky_check: bool = True) -> bool:
     enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
     if cloud_name in enabled_storage_clouds:
         return True
     if try_fix_with_sky_check:
+        # TODO(zhwu): Only check the specified cloud to speed up.
         check.check(quiet=True)
-        return _is_storage_cloud_enabled(cloud_name, try_fix_with_sky_check=False)
+        return _is_storage_cloud_enabled(cloud_name,
+                                         try_fix_with_sky_check=False)
     return False
 
 
