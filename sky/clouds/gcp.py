@@ -54,7 +54,7 @@ _GCLOUD_VERSION = '424.0.0'
 # Need to be run with /bin/bash
 # We factor out the installation logic to keep it align in both spot
 # controller and cloud stores.
-GCLOUD_INSTALLATION_COMMAND = f'pushd /tmp &>/dev/null && \
+GOOGLE_SDK_INSTALLATION_COMMAND = f'pushd /tmp &>/dev/null && \
     gcloud --help > /dev/null 2>&1 || \
     {{ mkdir -p {os.path.dirname(_GCLOUD_INSTALLATION_LOG)} && \
     wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-{_GCLOUD_VERSION}-linux-x86_64.tar.gz > {_GCLOUD_INSTALLATION_LOG} && \
@@ -65,6 +65,10 @@ GCLOUD_INSTALLATION_COMMAND = f'pushd /tmp &>/dev/null && \
     echo "source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1" >> ~/.bashrc && \
     source ~/google-cloud-sdk/path.bash.inc >> {_GCLOUD_INSTALLATION_LOG} 2>&1; }} && \
     {{ cp {GCP_CONFIG_SKY_BACKUP_PATH} {GCP_CONFIG_PATH} > /dev/null 2>&1 || true; }} && \
+    pip list | grep google-api-python-client > /dev/null 2>&1 || \
+    pip install google-api-python-client >> {_GCLOUD_INSTALLATION_LOG} 2>&1 && \
+    pip list | grep google-cloud-storage > /dev/null 2>&1 || \
+    pip install google-cloud-storage >> {_GCLOUD_INSTALLATION_LOG} 2>&1 && \
     popd &>/dev/null'
 
 # TODO(zhwu): Move the default AMI size to the catalog instead.
