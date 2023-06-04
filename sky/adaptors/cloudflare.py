@@ -175,7 +175,7 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
     hints = None
     accountid_path = os.path.expanduser(ACCOUNT_ID_PATH)
     if not r2_profile_in_aws_cred():
-        hints = f'[{R2_PROFILE_NAME}] profile is not set in {R2_CREDENTIALS_PATH}'
+        hints = f'[{R2_PROFILE_NAME}] profile is not set in {R2_CREDENTIALS_PATH}.'
     if not os.path.exists(accountid_path):
         if hints:
             hints += ' Additionally, '
