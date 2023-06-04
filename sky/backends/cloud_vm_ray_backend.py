@@ -1757,7 +1757,7 @@ class RetryingVmProvisioner(object):
 
         returncode = backend.run_on_head(
             handle,
-            'ray status',
+            backend_utils.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
             # At this state, an erroneous cluster may not have cached
             # handle.head_ip (global_user_state.add_or_update_cluster(...,
             # ready=True)).
