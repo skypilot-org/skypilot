@@ -1785,6 +1785,7 @@ def test_azure_start_stop_two_nodes():
 
 
 # ---------- Testing env for disk tier ----------
+@pytest.mark.aws
 def test_aws_disk_tier():
 
     def _get_aws_query_command(region, instance_id, field, expected):
@@ -1818,6 +1819,7 @@ def test_aws_disk_tier():
         run_one_test(test)
 
 
+@pytest.mark.gcp
 def test_gcp_disk_tier():
     for disk_tier in ['low', 'medium', 'high']:
         type = GCP._get_disk_type(disk_tier)
@@ -1839,6 +1841,7 @@ def test_gcp_disk_tier():
         run_one_test(test)
 
 
+@pytest.mark.azure
 def test_azure_disk_tier():
     for disk_tier in ['low', 'medium']:
         type = Azure._get_disk_type(disk_tier)
@@ -1857,6 +1860,24 @@ def test_azure_disk_tier():
             timeout=20 * 60,  # 20 mins  (it takes around ~12 mins)
         )
         run_one_test(test)
+
+
+# ------- Testing user ray cluster --------
+def test_user_ray_cluster():
+    name = _get_cluster_name()
+    test = Test(
+        'user-ray-cluster',
+        [
+            f'sky launch -y -c {name} "ray start --head"',
+            f'sky exec {name} "echo hi"',
+            f'sky logs {name} 1 --status',
+            f'sky status -r | grep {name} | grep UP',
+            f'sky exec {name} "echo bye"',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
 
 
 # ------- Testing the core API --------
