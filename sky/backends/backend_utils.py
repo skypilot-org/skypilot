@@ -867,7 +867,7 @@ def write_cluster_config(
 
     # Dump the Ray ports to a file for Ray job submission
     dump_port_command = (
-        f'python -c \'import json, os; json.dump({constants.PORT_DICT_STR}, '
+        f'python -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
     )
 
@@ -1113,7 +1113,7 @@ def wait_until_ray_cluster_ready(
     with log_utils.console.status(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
-            rc, output, stderr = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_CMD,
+            rc, output, stderr = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                                             log_path=log_path,
                                             stream_logs=False,
                                             require_outputs=True,
@@ -1972,7 +1972,7 @@ def _update_cluster_status_no_lock(
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
         runner = command_runner.SSHCommandRunner(external_ips[0],
                                                  **ssh_credentials)
-        rc, output, _ = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_CMD,
+        rc, output, _ = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                                    stream_logs=False,
                                    require_outputs=True,
                                    separate_stderr=True)
