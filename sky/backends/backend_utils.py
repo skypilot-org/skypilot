@@ -139,7 +139,8 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
 
-RAY_STATUS_WITH_SKY_RAY_PORT_CMD = (
+# Command that calls `ray status` with SkyPilot's Ray port set.
+RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
     'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
     'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
     'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
