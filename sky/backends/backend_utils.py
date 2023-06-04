@@ -139,7 +139,7 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
 
-RAY_STATUS_WITH_SKY_RAY_PORT = (
+RAY_STATUS_WITH_SKY_RAY_PORT_CMD = (
     'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
     'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
     'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
@@ -1112,7 +1112,7 @@ def wait_until_ray_cluster_ready(
     with log_utils.console.status(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
-            rc, output, stderr = runner.run(f'{RAY_STATUS_WITH_SKY_RAY_PORT}',
+            rc, output, stderr = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_CMD,
                                             log_path=log_path,
                                             stream_logs=False,
                                             require_outputs=True,
@@ -1971,7 +1971,7 @@ def _update_cluster_status_no_lock(
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
         runner = command_runner.SSHCommandRunner(external_ips[0],
                                                  **ssh_credentials)
-        rc, output, _ = runner.run(f'{RAY_STATUS_WITH_SKY_RAY_PORT}',
+        rc, output, _ = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_CMD,
                                    stream_logs=False,
                                    require_outputs=True,
                                    separate_stderr=True)
