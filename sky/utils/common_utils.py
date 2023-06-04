@@ -86,13 +86,18 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
     return user_hash
 
 
-def get_global_job_id(job_timestamp: str, cluster_name: Optional[str],
-                      job_id: str) -> str:
+def get_global_job_id(job_timestamp: str,
+                      cluster_name: Optional[str],
+                      job_id: str,
+                      sub_id: Optional[int] = None) -> str:
     """Returns a unique job run id for each job run.
 
     A job run is defined as the lifetime of a job that has been launched.
     """
-    return f'{job_timestamp}_{cluster_name}_id-{job_id}'
+    global_job_id = f'{job_timestamp}_{cluster_name}_id-{job_id}'
+    if sub_id is not None:
+        global_job_id += f'-{sub_id}'
+    return global_job_id
 
 
 class Backoff:

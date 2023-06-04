@@ -19,3 +19,4 @@ UNINITIALIZED_ONPREM_CLUSTER_MESSAGE = (
     'command to initialize it locally: sky launch -c {cluster} \'\'')
 
 JOB_ID_ENV_VAR = 'SKYPILOT_JOB_ID'
+JOB_ID_LIST_ENV_VAR = 'SKYPILOT_JOB_IDS'

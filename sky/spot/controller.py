@@ -54,12 +54,22 @@ class SpotController:
 
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
-        #   Example value: sky-2022-10-04-22-46-52-467694_id-17
-        for task in self._dag.tasks:
-            task_envs = task.envs or {}
+        #   Example value: sky-2022-10-04-22-46-52-467694_spot-_id-17-1
+        #   Example value (multi-job): sky-2022-10-04-22-46-52-467694_spot_id-17-2
+        job_id_env_vars = []
+        for i in range(len(self._dag.tasks)):
             job_id_env_var = common_utils.get_global_job_id(
-                self._backend.run_timestamp, 'spot', str(self._job_id))
-            task_envs[constants.JOB_ID_ENV_VAR] = job_id_env_var
+                self._backend.run_timestamp,
+                'spot',
+                str(self._job_id),
+                sub_id=i)
+            job_id_env_vars.append(job_id_env_var)
+
+        for i, task in enumerate(self._dag.tasks):
+            task_envs = task.envs or {}
+            task_envs[constants.JOB_ID_ENV_VAR] = job_id_env_vars[i]
+            task_envs[constants.JOB_ID_LIST_ENV_VAR] = '\n'.join(
+                job_id_env_vars)
             task.update_envs(task_envs)
 
     def _run_one_sub_job(self, sub_job_id: int, task: 'sky.Task') -> bool:
