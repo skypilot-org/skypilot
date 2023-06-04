@@ -297,6 +297,13 @@ class OCI(clouds.Cloud):
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
+        try:
+            # pylint: disable=import-outside-toplevel,unused-import
+            import oci
+        except ImportError:
+            return False, ('oci is not installed. Install it with: '
+                           'pip install oci')
+
         conf_file = oci_adaptor.get_config_file()
 
         help_str = (f'Missing credential file at {conf_file}. '
@@ -305,6 +312,7 @@ class OCI(clouds.Cloud):
                     'Concepts/apisigningkey.htm')
         if not os.path.isfile(os.path.expanduser(conf_file)):
             return (False, help_str)
+
         try:
             user = oci_adaptor.get_identity_client(
                 region=None, profile=oci_conf.get_profile()).get_user(
@@ -313,7 +321,8 @@ class OCI(clouds.Cloud):
             # TODO[Hysun]: More privilege check can be added
             return True, None
         except oci_adaptor.service_exception():
-            return False, 'OCI credential is not correctly set. ' + help_str
+            return False, (f'OCI credential is not correctly set. '
+                           f'Check the credential file at {conf_file}')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""

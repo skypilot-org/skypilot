@@ -31,6 +31,9 @@ setup: |
   echo Check and install Google SDK
   {{google_sdk_installation_commands}}
 
+  echo Check and install OCI SDK
+  pip list | grep oci  > /dev/null 2>&1 || pip install oci 
+
   # Internal: disable logging for manually logging into the spot controller for debugging.
   {% if is_dev %}
   echo 'export SKYPILOT_DEV=1' >> ~/.bashrc

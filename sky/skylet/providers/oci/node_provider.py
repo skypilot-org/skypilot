@@ -62,7 +62,6 @@ class OCINodeProvider(NodeProvider):
     def _get_filtered_nodes(self, tag_filters, force=False):
         # Make sure the cluster_name is always an criterion
         tag_filters = {**tag_filters, TAG_RAY_CLUSTER_NAME: self.cluster_name}
-        logger.debug(f"* _get_filtered_nodes {tag_filters}")
 
         return_nodes = {}
         if not force:
@@ -79,16 +78,11 @@ class OCINodeProvider(NodeProvider):
                     cache_hit |= True
 
             if cache_hit:
-                logger.debug(
-                    f"*  _get_filtered_nodes...[Done: Cache Hit] {return_nodes}"
-                )
                 return return_nodes
 
         insts = oci_query_helper.query_instances_by_tags(
             tag_filters, self.region)
         for inst in insts:
-            logger.debug(f"* Got instance: {inst}")
-
             inst_id = inst.identifier
             if inst_id in self.cached_nodes:
                 del self.cached_nodes[inst_id]
@@ -103,8 +97,6 @@ class OCINodeProvider(NodeProvider):
             return_nodes[inst_id] = item
             self.cached_nodes[inst_id] = item
 
-        logger.debug(
-            f"* _get_filtered_nodes...[Done], return_nodes = {return_nodes}")
         return return_nodes
 
     @utils.debug_enabled(logger=logger)
