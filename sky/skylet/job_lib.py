@@ -322,19 +322,29 @@ def get_job_submitted_or_ended_timestamp_payload(job_id: int,
     return common_utils.encode_payload(None)
 
 
-def get_job_submission_port():
-    port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
-    if not os.path.exists(port_path):
-        return 8265
-    port = json.load(open(port_path))['ray_dashboard_port']
-    return port
-
-
 def get_ray_port():
+    """Get the port Skypilot-internal Ray cluster uses.
+
+    If the port file does not exist, the cluster was launched before #1790,
+    return the default port.
+    """
     port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 6379
     port = json.load(open(port_path))['ray_port']
+    return port
+
+
+def get_job_submission_port():
+    """Get the dashboard port Skypilot-internal Ray cluster uses.
+
+    If the port file does not exist, the cluster was launched before #1790,
+    return the default port.
+    """
+    port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
+    if not os.path.exists(port_path):
+        return 8265
+    port = json.load(open(port_path))['ray_dashboard_port']
     return port
 
 

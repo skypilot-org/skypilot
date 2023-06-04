@@ -139,9 +139,10 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
 
-_SET_RAY_ADDRESS = ('RAY_PORT=$(python -c "from sky.skylet import job_lib; '
-                    'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
-                    'RAY_ADDRESS=127.0.0.1:$RAY_PORT ')
+RAY_STATUS_WITH_SKY_RAY_PORT = (
+    'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
+    'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
+    'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
 
 
 def is_ip(s: str) -> bool:
@@ -864,12 +865,10 @@ def write_cluster_config(
                              f'be a dict, but received {type(instance_tags)}.')
 
     # Dump the Ray ports to a file for Ray job submission
-    ray_port = constants.SKY_REMOTE_RAY_PORT
-    ray_dashboard_port = constants.SKY_REMOTE_RAY_DASHBOARD_PORT
-    # Note we can not use json.dumps which will add a space between ":" and its value
-    # which causes the yaml parser to fail.
-    port_dict_str = f'{{"ray_port":{ray_port}, "ray_dashboard_port":{ray_dashboard_port}}}'
-    dump_port_command = f'python -c \'import json, os; json.dump({port_dict_str}, open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
+    dump_port_command = (
+        f'python -c \'import json, os; json.dump({constants.PORT_DICT_STR}, '
+        f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
+    )
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
@@ -915,8 +914,8 @@ def write_cluster_config(
 
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
-                'ray_port': ray_port,
-                'ray_dashboard_port': ray_dashboard_port,
+                'ray_port': constants.SKY_REMOTE_RAY_PORT,
+                'ray_dashboard_port': constants.SKY_REMOTE_RAY_DASHBOARD_PORT,
                 'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
                 'dump_port_command': dump_port_command,
                 # Ray version.
@@ -1113,7 +1112,7 @@ def wait_until_ray_cluster_ready(
     with log_utils.console.status(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
-            rc, output, stderr = runner.run(f'{_SET_RAY_ADDRESS}ray status',
+            rc, output, stderr = runner.run(f'{RAY_STATUS_WITH_SKY_RAY_PORT}',
                                             log_path=log_path,
                                             stream_logs=False,
                                             require_outputs=True,
@@ -1972,7 +1971,7 @@ def _update_cluster_status_no_lock(
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
         runner = command_runner.SSHCommandRunner(external_ips[0],
                                                  **ssh_credentials)
-        rc, output, _ = runner.run(f'{_SET_RAY_ADDRESS}ray status',
+        rc, output, _ = runner.run(f'{RAY_STATUS_WITH_SKY_RAY_PORT}',
                                    stream_logs=False,
                                    require_outputs=True,
                                    separate_stderr=True)

@@ -9,6 +9,12 @@ SKY_REMOTE_WORKDIR = '~/sky_workdir'
 # We note down the ports in ~/.sky/ray_port.json for backward compatibility.
 SKY_REMOTE_RAY_PORT = 6380
 SKY_REMOTE_RAY_DASHBOARD_PORT = 8266
+# Note we can not use json.dumps which will add a space between ":" and its
+# value which causes the yaml parser to fail.
+PORT_DICT_STR = (f'{{"ray_port":{SKY_REMOTE_RAY_PORT}, '
+                 f'"ray_dashboard_port":{SKY_REMOTE_RAY_DASHBOARD_PORT}}}')
+# The file contains the ports of the Ray cluster that SkyPilot launched,
+# i.e. the PORT_DICT_STR above.
 SKY_REMOTE_RAY_PORT_FILE = '~/.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.4.0'
