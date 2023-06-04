@@ -674,7 +674,7 @@ class Task:
         #  order:
         #  1. cloud decided in best_resources.
         #  2. cloud specified in the task resources.
-        #  3. if not specified or the specified cloud does not support storage,
+        #  3. if not specified or the task's cloud does not support storage,
         #     use the first enabled storage cloud.
         # This should be refactored and moved to the optimizer.
         assert len(self.resources) == 1, self.resources
