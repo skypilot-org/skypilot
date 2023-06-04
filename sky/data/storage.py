@@ -1,11 +1,13 @@
 """Storage and Store Classes for Sky Data."""
+import botocore
 import enum
+from google.cloud import storage as google_storage
 import os
 import re
 import subprocess
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Tuple, Type, Union, Set
 import urllib.parse
 
 import colorama
@@ -915,7 +917,7 @@ class S3Store(AbstractStore):
         self.name = self.validate_name(self.name)
 
         # Check if the storage is enabled
-        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+        enabled_storage_clouds = global_user_state.get_storage_enabled_clouds()
         if str(clouds.AWS()) not in enabled_storage_clouds:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
@@ -1262,7 +1264,30 @@ class S3Store(AbstractStore):
         while data_utils.verify_s3_bucket(bucket_name):
             time.sleep(0.1)
         return True
+    
+    @staticmethod
+    def get_sky_managed_bucket_names() -> Set[str]:
+        """Gets a list of sky managed buckets from AWS S3
 
+        Returns:
+         List[str]: List of bucket names that are sky managed
+        """
+        s3_client = data_utils.create_s3_client()
+        buckets = s3_client.list_buckets()
+        sky_managed_s3_buckets = set()
+        # Get a list of all bucket names from the response
+        bucket_names = [bucket['Name'] for bucket in buckets['Buckets']]
+        for bucket_name in bucket_names:
+            try:
+                response = s3_client.get_bucket_tagging(Bucket=bucket_name)
+                tagset = response['TagSet'] # list of dictionaries
+                for tag in tagset:
+                    if tag['Key'] == 'skymanaged':
+                        sky_managed_s3_buckets.add(bucket_name)
+            except botocore.exceptions.ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchTagSet':
+                    continue
+        return sky_managed_s3_buckets
 
 class GcsStore(AbstractStore):
     """GcsStore inherits from Storage Object and represents the backend
@@ -1312,7 +1337,7 @@ class GcsStore(AbstractStore):
         # Validate name
         self.name = self.validate_name(self.name)
         # Check if the storage is enabled
-        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+        enabled_storage_clouds = global_user_state.get_storage_enabled_clouds()
         if str(clouds.GCP()) not in enabled_storage_clouds:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
@@ -1685,6 +1710,21 @@ class GcsStore(AbstractStore):
                     raise exceptions.StorageBucketDeleteError(
                         f'Failed to delete GCS bucket {bucket_name}.')
 
+    @staticmethod
+    def get_sky_managed_bucket_names() -> Set[str]:
+        """Gets a list of sky managed buckets from GCP GCS
+
+        Returns:
+         List[str]: List of bucket names that are sky managed
+        """
+        storage_client = google_storage.Client()
+        buckets = storage_client.list_buckets()
+        sky_managed_gcs_buckets = set()
+        for bucket in buckets:
+            labels: Dict[str,str] = bucket.labels
+            if 'skymanaged' in labels:
+                sky_managed_gcs_buckets.add(bucket.name)
+        return sky_managed_gcs_buckets
 
 class R2Store(AbstractStore):
     """R2Store inherits from S3Store Object and represents the backend
@@ -1727,7 +1767,7 @@ class R2Store(AbstractStore):
         # Validate name
         self.name = S3Store.validate_name(self.name)
         # Check if the storage is enabled
-        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+        enabled_storage_clouds = global_user_state.get_storage_enabled_clouds()
         if cloudflare.NAME not in enabled_storage_clouds:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
@@ -2034,3 +2074,25 @@ class R2Store(AbstractStore):
         while data_utils.verify_r2_bucket(bucket_name):
             time.sleep(0.1)
         return True
+
+    @staticmethod
+    def get_sky_managed_bucket_names() -> Set[str]:
+        """Gets a list of sky managed buckets from Cloudflare R2
+
+        Returns:
+         List[str]: List of bucket names that are sky managed
+        """
+        r2_resource = cloudflare.resource('s3')
+        sky_managed_r2_buckets = set()
+        buckets = r2_resource.buckets.all()
+        for bucket in buckets:
+            try:
+                r2_resource.Object(bucket.name, '.skymanaged').load()
+            except Exception as e:
+                # The file does not exist in this bucket
+                continue
+            else:
+                # The file exists in this bucket
+                sky_managed_r2_buckets.add(bucket.name)
+
+        return sky_managed_r2_buckets

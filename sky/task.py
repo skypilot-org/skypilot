@@ -687,7 +687,7 @@ class Task:
                 # Get the first enabled cloud.
                 backend_utils.check_public_cloud_enabled()
                 enabled_storage_clouds = \
-                    global_user_state.get_enabled_storage_clouds()
+                    global_user_state.get_storage_enabled_clouds()
                 if enabled_storage_clouds:
                     storage_cloud = enabled_storage_clouds[0]
         if storage_cloud is None:

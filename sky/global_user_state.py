@@ -665,7 +665,7 @@ def get_enabled_clouds() -> List[clouds.Cloud]:
     return enabled_clouds
 
 
-def get_enabled_storage_clouds() -> List[str]:
+def get_storage_enabled_clouds() -> List[str]:
     # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # pylint: disable=line-too-long
     # is resolved by implementing separate 'enabled_storage_clouds'
     enabled_clouds = get_enabled_clouds()
