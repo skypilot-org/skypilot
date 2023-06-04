@@ -674,24 +674,30 @@ class Task:
         #  order:
         #  1. cloud decided in best_resources.
         #  2. cloud specified in the task resources.
-        #  3. the first enabled cloud.
+        #  3. if not specified or the task's cloud does not support storage,
+        #     use the first enabled storage cloud.
         # This should be refactored and moved to the optimizer.
         assert len(self.resources) == 1, self.resources
         storage_cloud = None
+
+        backend_utils.check_public_cloud_enabled()
+        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+        if not enabled_storage_clouds:
+            raise ValueError('No enabled cloud for storage, run: sky check')
+
         if self.best_resources is not None:
             storage_cloud = self.best_resources.cloud
         else:
             resources = list(self.resources)[0]
             storage_cloud = resources.cloud
-            if storage_cloud is None:
-                # Get the first enabled cloud.
-                backend_utils.check_public_cloud_enabled()
-                enabled_storage_clouds = \
-                    global_user_state.get_enabled_storage_clouds()
-                if enabled_storage_clouds:
-                    storage_cloud = enabled_storage_clouds[0]
+        if storage_cloud is not None:
+            if str(storage_cloud) not in enabled_storage_clouds:
+                storage_cloud = None
+
         if storage_cloud is None:
-            raise ValueError('No available cloud to mount storage.')
+            storage_cloud = clouds.CLOUD_REGISTRY.from_str(
+                enabled_storage_clouds[0])
+
         store_type = storage_lib.get_storetype_from_cloud(storage_cloud)
         return store_type
 
