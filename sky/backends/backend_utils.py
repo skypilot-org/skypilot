@@ -6,13 +6,15 @@ import getpass
 import json
 import os
 import pathlib
+import random
 import re
 import subprocess
 import tempfile
 import textwrap
 import time
 import typing
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import (Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple,
+                    Union)
 from typing_extensions import Literal
 import uuid
 
@@ -41,6 +43,7 @@ from sky.backends import onprem_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.skylet.providers.lambda_cloud import lambda_utils
+from sky.skylet.providers.scp import scp_utils
 from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import env_options
@@ -780,19 +783,22 @@ def write_cluster_config(
         - 'tpu-create-script' (if TPU is requested)
         - 'tpu-delete-script' (if TPU is requested)
     Raises:
-        exceptions.ResourcesUnavailableError: if the region/zones requested does not appear
-            in the catalog, or an ssh_proxy_command is specified but not for the given region.
+        exceptions.ResourcesUnavailableError: if the region/zones requested does
+            not appear in the catalog, or an ssh_proxy_command is specified but
+            not for the given region.
     """
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
-    # This can raise a ResourcesUnavailableError, when the region/zones requested
-    # does not appear in the catalog. It can be triggered when the user changed
-    # the catalog file, while there is a cluster in the removed region/zone.
-    # TODO(zhwu): We should change the exception type to a more specific one,
-    # as the ResourcesUnavailableError is overly used. Also, it would be better
-    # to move the check out of this function, i.e. the caller should be
-    # responsible for the validation.
+    # This can raise a ResourcesUnavailableError, when the region/zones
+    # requested does not appear in the catalog. It can be triggered when the
+    # user changed the catalog file, while there is a cluster in the removed
+    # region/zone.
+    #
+    # TODO(zhwu): We should change the exception type to a more specific one, as
+    # the ResourcesUnavailableError is overly used. Also, it would be better to
+    # move the check out of this function, i.e. the caller should be responsible
+    # for the validation.
     resources_vars = cloud.make_deploy_resources_variables(
         to_provision, region, zones)
     config_dict = {}
@@ -842,8 +848,24 @@ def write_cluster_config(
             assert region_name in ssh_proxy_command_config, (
                 region_name, ssh_proxy_command_config)
             ssh_proxy_command = ssh_proxy_command_config[region_name]
-
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
+
+    # User-supplied instance tags.
+    instance_tags = {}
+    instance_tags = skypilot_config.get_nested(
+        (str(cloud).lower(), 'instance_tags'), {})
+    if not isinstance(instance_tags, dict):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Custom instance_tags in config.yaml should '
+                             f'be a dict, but received {type(instance_tags)}.')
+
+    # Dump the Ray ports to a file for Ray job submission
+    ray_port = constants.SKY_REMOTE_RAY_PORT
+    ray_dashboard_port = constants.SKY_REMOTE_RAY_DASHBOARD_PORT
+    # Note we can not use json.dumps which will add a space between ":" and its value
+    # which causes the yaml parser to fail.
+    port_dict_str = f'{{"ray_port":{ray_port}, "ray_dashboard_port":{ray_dashboard_port}}}'
+    dump_port_command = f'python -c \'import json, os; json.dump({port_dict_str}, open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
@@ -877,6 +899,8 @@ def write_cluster_config(
                 # Not exactly AWS only, but we only test it's supported on AWS
                 # for now:
                 'ssh_proxy_command': ssh_proxy_command,
+                # User-supplied instance tags.
+                'instance_tags': instance_tags,
 
                 # Azure only:
                 'azure_subscription_id': azure_subscription_id,
@@ -885,6 +909,12 @@ def write_cluster_config(
                 # GCP only:
                 'gcp_project_id': gcp_project_id,
 
+                # Port of Ray (GCS server).
+                # Ray's default port 6379 is conflicted with Redis.
+                'ray_port': ray_port,
+                'ray_dashboard_port': ray_dashboard_port,
+                'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
+                'dump_port_command': dump_port_command,
                 # Ray version.
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
                 # Cloud credentials for cloud storage.
@@ -999,6 +1029,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_lambda_authentication(config)
     elif isinstance(cloud, clouds.IBM):
         config = auth.setup_ibm_authentication(config)
+    elif isinstance(cloud, clouds.SCP):
+        config = auth.setup_scp_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
@@ -1527,8 +1559,12 @@ def check_network_connection():
 
 
 def _process_cli_query(
-    cloud: str, cluster: str, query_cmd: str, deliminiator: str,
-    status_map: Mapping[str, Optional[global_user_state.ClusterStatus]]
+    cloud: str,
+    cluster: str,
+    query_cmd: str,
+    deliminator: str,
+    status_map: Mapping[str, Optional[global_user_state.ClusterStatus]],
+    max_retries: int = 3,
 ) -> List[global_user_state.ClusterStatus]:
     """Run the cloud CLI query and returns cluster status.
 
@@ -1536,10 +1572,12 @@ def _process_cli_query(
         cloud: The cloud provider name.
         cluster: The cluster name.
         query_cmd: The cloud CLI query command.
-        deliminiator: The deliminiator separating the status in the output
+        deliminator: The deliminator separating the status in the output
             of the query command.
         status_map: A map from the CLI status string to the corresponding
             global_user_state.ClusterStatus.
+        max_retries: Maximum number of retries before giving up. For AWS only.
+
     Returns:
         A list of global_user_state.ClusterStatus of all existing nodes in the
         cluster. The list can be empty if none of the nodes in the clusters are
@@ -1554,12 +1592,28 @@ def _process_cli_query(
                  f'{stdout}\n'
                  '**** STDERR ****\n'
                  f'{stderr}')
+
+    # Cloud-specific error handling.
     if (cloud == str(clouds.Azure()) and returncode == 2 and
             'argument --ids: expected at least one argument' in stderr):
         # Azure CLI has a returncode 2 when the cluster is not found, as
         # --ids <empty> is passed to the query command. In that case, the
         # cluster should be considered as DOWN.
         return []
+    if (cloud == str(clouds.AWS()) and returncode != 0 and
+            'Unable to locate credentials. You can configure credentials by '
+            'running "aws configure"' in stdout + stderr):
+        # AWS: has run into this rare error with spot controller (which has an
+        # assumed IAM role and is working fine most of the time).
+        #
+        # We do not know the root cause. For now, the hypothesis is instance
+        # metadata service is temporarily unavailable. So, we retry the query.
+        if max_retries > 0:
+            logger.info('Encountered AWS "Unable to locate credentials" '
+                        'error. Retrying.')
+            time.sleep(random.uniform(0, 1) * 2)
+            return _process_cli_query(cloud, cluster, query_cmd, deliminator,
+                                      status_map, max_retries - 1)
 
     if returncode != 0:
         with ux_utils.print_exception_no_traceback():
@@ -1572,7 +1626,7 @@ def _process_cli_query(
         return []
 
     statuses = []
-    for s in cluster_status.split(deliminiator):
+    for s in cluster_status.split(deliminator):
         node_status = status_map[s]
         if node_status is not None:
             statuses.append(node_status)
@@ -1774,12 +1828,39 @@ def _query_status_lambda(
     return status_list
 
 
+def _query_status_scp(
+    cluster: str,
+    ray_config: Dict[str, Any],
+) -> List[global_user_state.ClusterStatus]:
+    del ray_config  # Unused.
+    status_map = {
+        'CREATING': global_user_state.ClusterStatus.INIT,
+        'EDITING': global_user_state.ClusterStatus.INIT,
+        'RUNNING': global_user_state.ClusterStatus.UP,
+        'STARTING': global_user_state.ClusterStatus.INIT,
+        'RESTARTING': global_user_state.ClusterStatus.INIT,
+        'STOPPING': global_user_state.ClusterStatus.STOPPED,
+        'STOPPED': global_user_state.ClusterStatus.STOPPED,
+        'TERMINATING': None,
+        'TERMINATED': None,
+    }
+    status_list = []
+    vms = scp_utils.SCPClient().list_instances()
+    for node in vms:
+        if node['virtualServerName'] == cluster:
+            node_status = status_map[node['virtualServerState']]
+            if node_status is not None:
+                status_list.append(node_status)
+    return status_list
+
+
 _QUERY_STATUS_FUNCS = {
     'AWS': _query_status_aws,
     'GCP': _query_status_gcp,
     'Azure': _query_status_azure,
     'Lambda': _query_status_lambda,
     'IBM': _query_status_ibm,
+    'SCP': _query_status_scp,
 }
 
 
@@ -2236,7 +2317,8 @@ def check_cluster_available(
             raise exceptions.ClusterNotUpError(
                 constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
                     cluster_name),
-                cluster_status=cluster_status)
+                cluster_status=cluster_status,
+                handle=handle)
         with ux_utils.print_exception_no_traceback():
             hint_for_init = ''
             if cluster_status == global_user_state.ClusterStatus.INIT:
@@ -2251,14 +2333,16 @@ def check_cluster_available(
                 f'{global_user_state.ClusterStatus.UP.value} clusters.'
                 f'{hint_for_init}'
                 f'{reset}',
-                cluster_status=cluster_status)
+                cluster_status=cluster_status,
+                handle=handle)
 
     if handle.head_ip is None:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
                 f'Cluster {cluster_name!r} has been stopped or not properly '
                 'set up. Please re-launch it with `sky start`.',
-                cluster_status=cluster_status)
+                cluster_status=cluster_status,
+                handle=handle)
     return handle
 
 

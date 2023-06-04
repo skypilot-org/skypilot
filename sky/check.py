@@ -8,6 +8,7 @@ from sky import global_user_state
 from sky.adaptors import cloudflare
 
 
+# TODO(zhwu): add check for a single cloud to improve performance
 def check(quiet: bool = False) -> None:
     echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
     echo('Checking credentials to enable clouds for SkyPilot.')

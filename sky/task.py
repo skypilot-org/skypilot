@@ -689,13 +689,10 @@ class Task:
             if storage_cloud is None:
                 # Get the first enabled cloud.
                 backend_utils.check_public_cloud_enabled()
-                enabled_clouds = global_user_state.get_enabled_clouds()
-
-                for cloud in storage_lib.STORE_ENABLED_CLOUDS:
-                    for enabled_cloud in enabled_clouds:
-                        if cloud.is_same_cloud(enabled_cloud):
-                            storage_cloud = cloud
-                            break
+                enabled_storage_clouds = \
+                    global_user_state.get_enabled_storage_clouds()
+                if enabled_storage_clouds:
+                    storage_cloud = enabled_storage_clouds[0]
         if storage_cloud is None:
             raise ValueError('No available cloud to mount storage.')
         store_type = storage_lib.get_storetype_from_cloud(storage_cloud)

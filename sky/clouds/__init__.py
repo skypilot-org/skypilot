@@ -10,6 +10,7 @@ from sky.clouds.gcp import GCP
 from sky.clouds.lambda_cloud import Lambda
 from sky.clouds.local import Local
 from sky.clouds.ibm import IBM
+from sky.clouds.scp import SCP
 
 __all__ = [
     'IBM',
@@ -19,6 +20,7 @@ __all__ = [
     'GCP',
     'Lambda',
     'Local',
+    'SCP',
     'CloudImplementationFeatures',
     'Region',
     'Zone',

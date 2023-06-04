@@ -3,6 +3,7 @@
 This is a remote utility module that provides job queue functionality.
 """
 import enum
+import json
 import os
 import pathlib
 import shlex
@@ -173,7 +174,9 @@ def _create_ray_job_submission_client():
         logger.error(
             f'Failed to import job_submission with ray=={ray.__version__}')
         raise
-    return job_submission.JobSubmissionClient(address='http://127.0.0.1:8265')
+    port = get_job_submission_port()
+    return job_submission.JobSubmissionClient(
+        address=f'http://127.0.0.1:{port}')
 
 
 def make_ray_job_id(sky_job_id: int, job_owner: str) -> str:
@@ -319,6 +322,14 @@ def get_job_submitted_or_ended_timestamp_payload(job_id: int,
     return common_utils.encode_payload(None)
 
 
+def get_job_submission_port():
+    port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
+    if not os.path.exists(port_path):
+        return 8265
+    port = json.load(open(port_path))['ray_dashboard_port']
+    return port
+
+
 def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
     records = []
     for row in rows:
@@ -392,7 +403,7 @@ def update_job_status(job_owner: str,
     during job cancelling, we still need this to handle the staleness problem,
     caused by instance restarting and other corner cases (if any).
 
-    This function should only be run on the remote instance with ray==2.0.1.
+    This function should only be run on the remote instance with ray==2.4.0.
     """
     if len(job_ids) == 0:
         return []
@@ -402,7 +413,7 @@ def update_job_status(job_owner: str,
 
     job_client = _create_ray_job_submission_client()
 
-    # In ray 2.0.1, job_client.list_jobs returns a list of JobDetails,
+    # In ray 2.4.0, job_client.list_jobs returns a list of JobDetails,
     # which contains the job status (str) and submission_id (str).
     job_detail_lists: List['ray_pydantic.JobDetails'] = job_client.list_jobs()
 

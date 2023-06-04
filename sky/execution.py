@@ -594,13 +594,16 @@ def spot_launch(
             # Note: actual spot cluster name will be <dag.name>-<spot job ID>
             'task_name': dag.name,
             'uuid': task_uuid,
-            'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
+            'google_sdk_installation_commands':
+                gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'is_dev': env_options.Options.IS_DEVELOPER.get(),
             'is_debug': env_options.Options.SHOW_DEBUG_INFO.get(),
             'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
             'logging_user_hash': common_utils.get_user_hash(),
             'retry_until_up': retry_until_up,
-            'user': os.environ.get('USER', None),
+            # Should not use $USER here, as that env var can be empty when
+            # running in a container.
+            'user': getpass.getuser(),
         }
         if skypilot_config.loaded():
             # Look up the contents of the already loaded configs via the
@@ -636,6 +639,7 @@ def spot_launch(
             proxy_command_key = ('aws', 'ssh_proxy_command')
             ssh_proxy_command = skypilot_config.get_nested(
                 proxy_command_key, None)
+            config_dict = skypilot_config.to_dict()
             if isinstance(ssh_proxy_command, str):
                 config_dict = skypilot_config.set_nested(
                     proxy_command_key, None)

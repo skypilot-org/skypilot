@@ -1738,12 +1738,12 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     means if the cluster is UP, successive calls to cost-report will show
     increasing price.
 
-    The estimated cost is calculated based on the local cache of the cluster
-    status, and may not be accurate for:
+    This CLI is experimental. The estimated cost is calculated based on the
+    local cache of the cluster status, and may not be accurate for:
 
-      - clusters with autostop/use_spot set; or
+    - Clusters with autostop/use_spot set; or
 
-      - clusters that were terminated/stopped on the cloud console.
+    - Clusters that were terminated/stopped on the cloud console.
     """
     cluster_records = core.cost_report()
 
@@ -2688,7 +2688,7 @@ def _down_or_stop_clusters(
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
                     f'{colorama.Style.RESET_ALL}'
-                    f'\n\tReason: {common_utils.format_exception(e)}.')
+                    f'\nReason: {common_utils.format_exception(e)}.')
             except (exceptions.NotSupportedError,
                     exceptions.ClusterOwnerIdentityMismatchError) as e:
                 message = str(e)
@@ -3377,9 +3377,9 @@ def spot():
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
 @click.option(
-    '--retry-until-up',
-    '-r',
-    default=True,
+    '--retry-until-up/--no-retry-until-up',
+    '-r/-no-r',
+    default=None,
     is_flag=True,
     required=False,
     help=('(Default: True; this flag is deprecated and will be removed in a '
@@ -3450,6 +3450,18 @@ def spot_launch(
         disk_tier=disk_tier,
         spot_recovery=spot_recovery,
     )
+    # Deprecation.
+    if retry_until_up is not None:
+        flag_str = '--retry-until-up'
+        if not retry_until_up:
+            flag_str = '--no-retry-until-up'
+        click.secho(
+            f'Flag {flag_str} is deprecated and will be removed in a '
+            'future release (managed spot jobs will always be retried). '
+            'Please file an issue if this does not work for you.',
+            fg='yellow')
+    else:
+        retry_until_up = True
 
     if not isinstance(task_or_dag, sky.Dag):
         assert isinstance(task_or_dag, sky.Task), task_or_dag
@@ -3477,14 +3489,6 @@ def spot_launch(
         task_cloud = (resources.cloud
                       if resources.cloud is not None else clouds.Cloud)
         task_cloud.check_cluster_name_is_valid(name)
-
-    # Deprecation.
-    if not retry_until_up:
-        click.secho(
-            'Flag --retry-until-up is deprecated and will be removed in a '
-            'future release (defaults to True). Please file an issue if this '
-            'does not work for you.',
-            fg='yellow')
 
     sky.spot_launch(dag,
                     name,

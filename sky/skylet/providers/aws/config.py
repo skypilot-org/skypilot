@@ -40,6 +40,8 @@ DEFAULT_SKYPILOT_IAM_ROLE = SKYPILOT + "-v1"
 DEFAULT_AMI_NAME = "AWS Deep Learning AMI (Ubuntu 18.04) V61.0"
 
 # Obtained from https://aws.amazon.com/marketplace/pp/B07Y43P7X5 on 6/10/2022.
+# TODO(alex) : write a unit test to make sure we update AMI version used in
+# ray/autoscaler/aws/example-full.yaml whenever we update this dict.
 # NOTE(skypilot): these are not used; skypilot instead uses the default AMIs in aws.py.
 DEFAULT_AMI = {
     "us-east-1": "ami-0dd6adfad4ad37eec",  # US East (N. Virginia)
@@ -52,6 +54,11 @@ DEFAULT_AMI = {
     "eu-west-2": "ami-094ba2b4651f761ca",  # EU (London)
     "eu-west-3": "ami-031da10fbf225bf5f",  # EU (Paris)
     "sa-east-1": "ami-0be7c1f1dd96d7337",  # SA (Sao Paulo)
+    "ap-northeast-1": "ami-0d69b2fd9641af433",  # Asia Pacific (Tokyo)
+    "ap-northeast-2": "ami-0d6d00bd58046ff91",  # Asia Pacific (Seoul)
+    "ap-northeast-3": "ami-068feab7122f7558d",  # Asia Pacific (Osaka)
+    "ap-southeast-1": "ami-05006b266c1be4e8f",  # Asia Pacific (Singapore)
+    "ap-southeast-2": "ami-066aa744514f9f95c",  # Asia Pacific (Sydney)
 }
 
 # todo: cli_logger should handle this assert properly
@@ -428,7 +435,7 @@ def _configure_key_pair(config):
     os.makedirs(os.path.expanduser("~/.ssh"), exist_ok=True)
 
     # Try a few times to get or create a good key pair.
-    MAX_NUM_KEYS = 30
+    MAX_NUM_KEYS = 60
     for i in range(MAX_NUM_KEYS):
 
         key_name = config["provider"].get("key_pair", {}).get("key_name")
