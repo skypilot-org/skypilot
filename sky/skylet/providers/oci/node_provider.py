@@ -126,9 +126,7 @@ class OCINodeProvider(NodeProvider):
     def is_running(self, node_id):
         """Return whether the specified node is running."""
         node = self._get_cached_node(node_id=node_id)
-
         check_result = node is None or node["status"] == "RUNNING"
-        logger.debug(f"* is_running: {node_id} - {check_result}")
 
         return check_result
 
@@ -138,8 +136,6 @@ class OCINodeProvider(NodeProvider):
         node = self._get_cached_node(node_id=node_id)
         check_result = ((node is None) or (node["status"] == "TERMINATED") or
                         (node["status"] == "TERMINATING"))
-
-        logger.debug(f"* is_terminated: {node_id} - {check_result}")
 
         return check_result
 
@@ -173,18 +169,19 @@ class OCINodeProvider(NodeProvider):
         running_nodes = self.running_nodes(filters)
         if len(running_nodes) > 0:
             logger.info(
-                f"* Running nodes found {len(running_nodes)}: {list(running_nodes)}. "
+                f"Running nodes found {len(running_nodes)}: {list(running_nodes)}. "
                 " Reuse existing running nodes. ")
             count -= len(running_nodes)
 
         if count <= 0:
             logger.info(
-                f"* No need to create new node since there are enough running nodes"
+                f"No need to create new node since there are enough running nodes"
             )
             return
+
         # Starting stopped nodes if cache_stopped_nodes=True
         if self.cache_stopped_nodes:
-            logger.debug("* Checking and try reusing existing stopped nodes")
+            logger.debug("Checking existing stopped nodes.")
 
             filters_with_launch_config = copy.copy(filters)
             if TAG_RAY_LAUNCH_CONFIG in tags:
@@ -193,12 +190,16 @@ class OCINodeProvider(NodeProvider):
 
             nodes_matching_launch_config = self.stopped_nodes(
                 filters_with_launch_config)
+            logger.debug(f"Found stopped nodes (with same launch config): "
+                         f"{len(nodes_matching_launch_config)}")
 
             reuse_nodes = []
             if len(nodes_matching_launch_config) >= count:
                 reuse_nodes = nodes_matching_launch_config[:count]
             else:
                 nodes_all = self.stopped_nodes(filters)
+                logger.debug(f"Found stopped nodes (regardless launch config): "
+                             f"{len(nodes_all)}")
                 nodes_matching_launch_config_ids = [
                     n["id"] for n in nodes_matching_launch_config
                 ]
@@ -211,7 +212,7 @@ class OCINodeProvider(NodeProvider):
                 reuse_nodes = reuse_nodes[:count]
 
             logger.info(
-                f"* Reusing nodes {len(reuse_nodes)}: {list(reuse_nodes)}. "
+                f"Reusing nodes {len(reuse_nodes)}: {list(reuse_nodes)}. "
                 "To disable reuse, set `cache_stopped_nodes: False` "
                 "under `provider` in the cluster configuration.",)
 
@@ -228,6 +229,7 @@ class OCINodeProvider(NodeProvider):
                         "STOPPED",
                     )
 
+            start_time1 = round(time.time() * 1000)
             for matched_node in reuse_nodes:
                 matched_node_id = matched_node["id"]
                 instance_action_response = oci_adaptor.get_core_client(
@@ -244,10 +246,10 @@ class OCINodeProvider(NodeProvider):
                 })
             count -= len(reuse_nodes)
 
-            total_time = round(time.time() * 1000) - start_time
+            launch_stopped_time = round(time.time() * 1000) - start_time1
             logger.debug(
-                "* Time elapsed(Starting stopped): {0} milli-seconds.".format(
-                    total_time))
+                "Time elapsed(Launch stopped): {0} milli-seconds.".format(
+                    launch_stopped_time))
         # end if self.cache_stopped_nodes:...
 
         # Let's create additional new nodes (if neccessary)
@@ -291,9 +293,9 @@ class OCINodeProvider(NodeProvider):
                                           preserve_boot_volume=False))
                                    if node_config["Preemptible"] else None)
 
-            logger.debug(f"* Shape: {instance_type_str}, ocpu: {ocpu_count}")
-            logger.debug(f"* Shape config is {machine_shape_config}")
-            logger.debug(f"* Spot config is {preempitible_config}")
+            logger.debug(f"Shape: {instance_type_str}, ocpu: {ocpu_count}")
+            logger.debug(f"Shape config is {machine_shape_config}")
+            logger.debug(f"Spot config is {preempitible_config}")
 
             vm_tags = {
                 **tags,
@@ -309,6 +311,8 @@ class OCINodeProvider(NodeProvider):
                 resource_version=node_config["ResourceVersion"],
                 region=self.region,
             )
+
+            start_time1 = round(time.time() * 1000)
             for seq in range(1, count + 1):
                 launch_instance_response = oci_adaptor.get_core_client(
                     self.region, oci_conf.get_profile()
@@ -339,9 +343,9 @@ class OCINodeProvider(NodeProvider):
                 })
             # end for loop
 
-            total_time = round(time.time() * 1000) - start_time
-            logger.debug(
-                "* Time elapsed(Launch): {0} milli-seconds.".format(total_time))
+            launch_new_time = round(time.time() * 1000) - start_time1
+            logger.debug("Time elapsed(Launch): {0} milli-seconds.".format(
+                launch_new_time))
         # end if count > 0:...
 
         for ninst in starting_insts:
@@ -361,8 +365,7 @@ class OCINodeProvider(NodeProvider):
 
         total_time = round(time.time() * 1000) - start_time
         logger.debug(
-            "* create_node done. Time elapsed(Total): {0} milli-seconds.".
-            format(total_time))
+            "Total time elapsed: {0} milli-seconds.".format(total_time))
 
     def get_inst_obj(self, inst_info):
         list_vnic_attachments_response = oci_adaptor.get_core_client(
@@ -395,47 +398,44 @@ class OCINodeProvider(NodeProvider):
     def set_node_tags(self, node_id, tags):
         existing_tags = self._get_cached_node(node_id)["tags"]
         combined_tags = dict(existing_tags, **tags)
-        logger.debug(f"* node={node_id}, combined_tags={combined_tags}")
 
         self.cached_nodes[node_id]["tags"] = combined_tags
         retry_count = 0
         while retry_count < oci_conf.MAX_RETRY_COUNT:
             try:
-                update_instance_response = oci_adaptor.get_core_client(
+                oci_adaptor.get_core_client(
                     self.region, oci_conf.get_profile()).update_instance(
                         instance_id=node_id,
                         update_instance_details=oci_adaptor.get_oci().core.
                         models.UpdateInstanceDetails(
                             freeform_tags=combined_tags),
                     )
-                logger.debug(
-                    f"* Response details: {update_instance_response.data}")
-                logger.info(f"* Tags are well set for node {node_id}")
+                logger.info(f"Tags are well set for node {node_id}")
                 break
             except Exception as e:
                 retry_count = retry_count + 1
                 wait_seconds = oci_conf.RETRY_INTERVAL_BASE_SECONDS * retry_count
                 logger.warn(
-                    f"! Not ready yet, wait {wait_seconds} seconds & retry!")
-                logger.warn(f"! Exception message is {str(e)}")
+                    f"Not ready yet, wait {wait_seconds} seconds & retry!")
+                logger.warn(f"Exception message is {str(e)}")
                 time.sleep(wait_seconds)
 
     @synchronized
     def terminate_node(self, node_id):
         """Terminates the specified node."""
-        logger.info(f"* terminate_node {node_id}...")
+        logger.info(f"terminate_node {node_id}...")
         node = self._get_cached_node(node_id)
         if node is None:
-            logger.info(f"* The node is not existed: {node_id}..")
+            logger.info(f"The node is not existed: {node_id}..")
             return  # Node not exists yet.
 
-        logger.debug(f"* sky_spot_flag: {node['tags']['sky_spot_flag']}")
+        logger.debug(f"sky_spot_flag: {node['tags']['sky_spot_flag']}")
         preemptibleFlag = (True if node and
                            (str(node["tags"]["sky_spot_flag"]) == "true") else
                            False)
 
         if self.cache_stopped_nodes and not preemptibleFlag:
-            logger.info(f"* Stopping instance {node_id}"
+            logger.info(f"Stopping instance {node_id}"
                         "(to fully terminate instead, "
                         "set `cache_stopped_nodes: False` "
                         "under `provider` in the cluster configuration)")
@@ -444,7 +444,7 @@ class OCINodeProvider(NodeProvider):
                 oci_conf.get_profile()).instance_action(instance_id=node_id,
                                                         action="STOP")
             logger.info(
-                f"* Stopping the instance {instance_action_response.data.id}")
+                f"Stopped the instance {instance_action_response.data.id}")
             if node_id in self.cached_nodes:
                 self.cached_nodes[node_id]["status"] = "STOPPED"
             state_word = "Stopped"
@@ -457,7 +457,7 @@ class OCINodeProvider(NodeProvider):
             state_word = "Terminated"
 
         logger.info(
-            f"* {state_word} {node_id} w/ sky_spot_flag: {preemptibleFlag}.")
+            f"{state_word} {node_id} w/ sky_spot_flag: {preemptibleFlag}.")
 
     def _get_node(self, node_id):
         self._get_filtered_nodes({},

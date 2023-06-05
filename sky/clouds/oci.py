@@ -17,7 +17,6 @@ from sky.clouds import service_catalog
 from sky import exceptions
 from sky.adaptors import oci as oci_adaptor
 from sky.skylet.providers.oci.config import oci_conf
-from sky.skylet.providers.oci import utils as oci_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -405,10 +404,9 @@ class OCI(clouds.Cloud):
                     '! ERR: No image found in catalog for region '
                     f'{region_name}. Try setting a valid image_id.')
 
-        logger.debug(f'* Got real image_id {image_id_str}')
+        logger.debug(f'Got real image_id {image_id_str}')
         return image_id_str
 
-    @oci_utils.debug_enabled(logger=logger)
     def _get_default_image(self, region_name: str, instance_type: str) -> str:
         acc = self.get_accelerators_from_instance_type(instance_type)
 
@@ -426,7 +424,7 @@ class OCI(clouds.Cloud):
 
         if image_id_str is not None:
             logger.debug(
-                f'* Got default image_id {image_id_str} from tag {image_tag}')
+                f'Got default image_id {image_id_str} from tag {image_tag}')
             return image_id_str
 
         # Raise ResourcesUnavailableError to make sure the failover in
@@ -434,5 +432,5 @@ class OCI(clouds.Cloud):
         # TODO(zhwu): This is a information leakage to the cloud implementor,
         # we need to find a better way to handle this.
         raise exceptions.ResourcesUnavailableError(
-            '! ERR: No image found in catalog for region '
+            'ERR: No image found in catalog for region '
             f'{region_name}. Try update your default image_id settings.')

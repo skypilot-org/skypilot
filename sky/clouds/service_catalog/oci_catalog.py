@@ -126,7 +126,6 @@ def get_vcpus_mem_from_instance_type(
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     """Returns the image id from the tag."""
-    logger.debug(f'* get_image_id_from_tag: {tag}-{region}')
     image_str = common.get_image_id_from_tag_impl(_image_df, tag, region)
     df = _image_df[_image_df['Tag'].str.fullmatch(tag)]
     app_catalog_listing_id = df['AppCatalogListingId'].iloc[0]
