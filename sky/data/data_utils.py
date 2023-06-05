@@ -411,6 +411,10 @@ class Rclone():
         # create rclone.conf if doesn't exist
         if not os.path.isfile(rclone_config_path):
             open(rclone_config_path, 'w').close()
+        # install rclone locally if isn't installed
+        os.system('rclone version >/dev/null 2>&1 || '
+                  'curl https://rclone.org/install.sh | '
+                  'sudo bash > /dev/null')
 
         # write back file without profile: [bucket_name]
         # to which the new bucket profile is appended
