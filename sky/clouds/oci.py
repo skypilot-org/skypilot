@@ -310,8 +310,8 @@ class OCI(clouds.Cloud):
             'following format:\n'
             f'{cls._INDENT_PREFIX}  [DEFAULT]\n'
             f'{cls._INDENT_PREFIX}  user=ocid1.user.oc1..aaaaaaaa\n'
-            f'{cls._INDENT_PREFIX}  fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:'
-            'll:mm:nn:oo:pp\n'
+            f'{cls._INDENT_PREFIX}  '
+            'fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp\n'
             f'{cls._INDENT_PREFIX}  tenancy=ocid1.tenancy.oc1..aaaaaaaa\n'
             f'{cls._INDENT_PREFIX}  region=us-sanjose-1\n'
             f'{cls._INDENT_PREFIX}  key_file=~/.oci/oci_api_key.pem')
