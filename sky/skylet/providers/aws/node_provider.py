@@ -499,6 +499,11 @@ class AWSNodeProvider(NodeProvider):
                 break
             except botocore.exceptions.ClientError as exc:
                 if attempt == max_tries:
+                    # SkyPilot: do not adopt the changes from upstream in
+                    # https://github.com/ray-project/ray/commit/c2abfdb2f7eee7f3e4320cb0d9e8e3bd639d5680#diff-eeb7bc1d8342583cf12c40536240dbcc67f089466a18a37bd60f187265a2dc94
+                    # which replaces the exception to NodeLaunchException. As we directly
+                    # handle the exception output in
+                    # cloud_vm_ray_backend._update_blocklist_on_aws_error
                     cli_logger.abort(
                         "Failed to launch instances. Max attempts exceeded.",
                         exc=exc,

@@ -221,6 +221,12 @@ def _interactive_node_cli_command(cli_func):
                              type=int,
                              required=False,
                              help=('OS disk size in GBs.'))
+    disk_tier = click.option('--disk-tier',
+                             default=None,
+                             type=str,
+                             required=False,
+                             help=('OS disk tier. Could be one of "low", '
+                                   '"medium", "high". Default: medium'))
     no_confirm = click.option('--yes',
                               '-y',
                               is_flag=True,
@@ -299,6 +305,7 @@ def _interactive_node_cli_command(cli_func):
         screen_option,
         tmux_option,
         disk_size,
+        disk_tier,
     ]
     decorator = functools.reduce(lambda res, f: f(res),
                                  reversed(click_decorators), cli_func)
@@ -588,7 +595,8 @@ def _parse_override_params(cloud: Optional[str] = None,
                            instance_type: Optional[str] = None,
                            use_spot: Optional[bool] = None,
                            image_id: Optional[str] = None,
-                           disk_size: Optional[int] = None) -> Dict[str, Any]:
+                           disk_size: Optional[int] = None,
+                           disk_tier: Optional[str] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -635,6 +643,8 @@ def _parse_override_params(cloud: Optional[str] = None,
             override_params['image_id'] = image_id
     if disk_size is not None:
         override_params['disk_size'] = disk_size
+    if disk_tier is not None:
+        override_params['disk_tier'] = disk_tier
     return override_params
 
 
@@ -974,6 +984,7 @@ def _make_task_from_entrypoint_with_overrides(
     use_spot: Optional[bool] = None,
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
+    disk_tier: Optional[str] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
@@ -1017,7 +1028,8 @@ def _make_task_from_entrypoint_with_overrides(
                                              instance_type=instance_type,
                                              use_spot=use_spot,
                                              image_id=image_id,
-                                             disk_size=disk_size)
+                                             disk_size=disk_size,
+                                             disk_tier=disk_tier)
     # Spot launch specific.
     if spot_recovery is not None:
         if spot_recovery.lower() == 'none':
@@ -1175,6 +1187,14 @@ def cli():
               required=False,
               help=('OS disk size in GBs.'))
 @click.option(
+    '--disk-tier',
+    default=None,
+    type=str,
+    required=False,
+    help=(
+        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
+    ))
+@click.option(
     '--idle-minutes-to-autostop',
     '-i',
     default=None,
@@ -1241,6 +1261,7 @@ def launch(
     image_id: Optional[str],
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
+    disk_tier: Optional[str],
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
@@ -1287,6 +1308,7 @@ def launch(
         image_id=image_id,
         env=env,
         disk_size=disk_size,
+        disk_tier=disk_tier,
     )
 
     backend: backends.Backend
@@ -1443,7 +1465,8 @@ def _get_spot_jobs(
         refresh: bool,
         skip_finished: bool,
         show_all: bool,
-        limit_num_jobs_to_show: bool = False) -> Tuple[Optional[int], str]:
+        limit_num_jobs_to_show: bool = False,
+        is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
     """Get the in-progress spot jobs.
 
     Args:
@@ -1454,6 +1477,8 @@ def _get_spot_jobs(
         limit_num_jobs_to_show: If True, limit the number of jobs to show to
             _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS, which is mainly used by
             `sky status`.
+        is_called_by_user: If this function is called by user directly, or an
+            internal call.
 
     Returns:
         A tuple of (num_in_progress_jobs, msg). If num_in_progress_jobs is None,
@@ -1463,6 +1488,8 @@ def _get_spot_jobs(
     """
     num_in_progress_jobs = None
     try:
+        if not is_called_by_user:
+            usage_lib.messages.usage.set_internal()
         with sky_logging.silent():
             # Make the call silent
             spot_jobs = core.spot_queue(refresh=refresh,
@@ -1584,7 +1611,8 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                 kwds=dict(refresh=False,
                           skip_finished=True,
                           show_all=False,
-                          limit_num_jobs_to_show=not all))
+                          limit_num_jobs_to_show=not all,
+                          is_called_by_user=False))
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                    f'{colorama.Style.RESET_ALL}')
         query_clusters: Optional[List[str]] = None
@@ -1686,14 +1714,15 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     means if the cluster is UP, successive calls to cost-report will show
     increasing price.
 
-    The estimated cost is calculated based on the local cache of the cluster
-    status, and may not be accurate for:
+    This CLI is experimental. The estimated cost is calculated based on the
+    local cache of the cluster status, and may not be accurate for:
 
-      - clusters with autostop/use_spot set; or
+    - Clusters with autostop/use_spot set; or
 
-      - clusters that were terminated/stopped on the cloud console.
+    - Clusters that were terminated/stopped on the cloud console.
     """
     cluster_records = core.cost_report()
+
     nonreserved_cluster_records = []
     reserved_clusters = dict()
     for cluster_record in cluster_records:
@@ -1701,17 +1730,35 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
         if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
             cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
                 cluster_name]
-            reserved_clusters[cluster_group_name] = cluster_record
+            # to display most recent entry for each reserved cluster
+            # TODO(sgurram): fix assumption of sorted order of clusters
+            if cluster_group_name not in reserved_clusters:
+                reserved_clusters[cluster_group_name] = cluster_record
         else:
             nonreserved_cluster_records.append(cluster_record)
 
-    status_utils.show_cost_report_table(nonreserved_cluster_records, all)
+    total_cost = status_utils.get_total_cost_of_displayed_records(
+        nonreserved_cluster_records, all)
 
+    status_utils.show_cost_report_table(nonreserved_cluster_records, all)
     for cluster_group_name, cluster_record in reserved_clusters.items():
         status_utils.show_cost_report_table(
             [cluster_record], all, reserved_group_name=cluster_group_name)
+        total_cost += cluster_record['total_cost']
+
+    click.echo(f'\n{colorama.Style.BRIGHT}'
+               f'Total Cost: ${total_cost:.2f}{colorama.Style.RESET_ALL}')
+
+    if not all:
+        click.secho(
+            f'Showing up to {status_utils.NUM_COST_REPORT_LINES} '
+            'most recent clusters. '
+            'To see all clusters in history, '
+            'pass the --all flag.',
+            fg='yellow')
+
     click.secho(
-        'NOTE: This feature is experimental. '
+        'This feature is experimental. '
         'Costs for clusters with auto{stop,down} '
         'scheduled may not be accurate.',
         fg='yellow')
@@ -2617,7 +2664,7 @@ def _down_or_stop_clusters(
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
                     f'{colorama.Style.RESET_ALL}'
-                    f'\n\tReason: {common_utils.format_exception(e)}.')
+                    f'\nReason: {common_utils.format_exception(e)}.')
             except (exceptions.NotSupportedError,
                     exceptions.ClusterOwnerIdentityMismatchError) as e:
                 message = str(e)
@@ -2653,8 +2700,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             memory: Optional[str], gpus: Optional[str],
             use_spot: Optional[bool], screen: Optional[bool],
             tmux: Optional[bool], disk_size: Optional[int],
-            idle_minutes_to_autostop: Optional[int], down: bool,
-            retry_until_up: bool):
+            disk_tier: Optional[str], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
 
     Examples:
@@ -2711,7 +2758,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               memory=memory,
                               accelerators=gpus,
                               use_spot=use_spot,
-                              disk_size=disk_size)
+                              disk_size=disk_size,
+                              disk_tier=disk_tier)
 
     _create_and_ssh_into_node(
         'gpunode',
@@ -2735,8 +2783,9 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             instance_type: Optional[str], cpus: Optional[str],
             memory: Optional[str], use_spot: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
-            down: bool, retry_until_up: bool):
+            disk_size: Optional[int], disk_tier: Optional[str],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
 
     Examples:
@@ -2789,7 +2838,8 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               cpus=cpus,
                               memory=memory,
                               use_spot=use_spot,
-                              disk_size=disk_size)
+                              disk_size=disk_size,
+                              disk_tier=disk_tier)
 
     _create_and_ssh_into_node(
         'cpunode',
@@ -2814,8 +2864,9 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             memory: Optional[str], tpus: Optional[str],
             use_spot: Optional[bool], tpu_vm: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
-            down: bool, retry_until_up: bool):
+            disk_size: Optional[int], disk_tier: Optional[str],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
 
     Examples:
@@ -2875,7 +2926,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               accelerators=tpus,
                               accelerator_args=accelerator_args,
                               use_spot=use_spot,
-                              disk_size=disk_size)
+                              disk_size=disk_size,
+                              disk_tier=disk_tier)
 
     _create_and_ssh_into_node(
         'tpunode',
@@ -2907,7 +2959,7 @@ def check():
 
 
 @cli.command()
-@click.argument('gpu_name', required=False)
+@click.argument('accelerator_str', required=False)
 @click.option('--all',
               '-a',
               is_flag=True,
@@ -2928,7 +2980,7 @@ def check():
 @service_catalog.use_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
-        gpu_name: Optional[str],
+        accelerator_str: Optional[str],
         all: bool,  # pylint: disable=redefined-builtin
         cloud: Optional[str],
         region: Optional[str]):
@@ -2964,7 +3016,7 @@ def show_gpus(
     clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
-    if show_all and gpu_name is not None:
+    if show_all and accelerator_str is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
 
     def _list_to_str(lst):
@@ -2978,7 +3030,9 @@ def show_gpus(
         other_table = log_utils.create_table(
             ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
-        if gpu_name is None:
+        name, quantity = None, None
+
+        if accelerator_str is None:
             result = service_catalog.list_accelerator_counts(
                 gpus_only=True,
                 clouds=cloud,
@@ -3009,21 +3063,46 @@ def show_gpus(
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
                 return
+        else:
+            # Parse accelerator string
+            accelerator_split = accelerator_str.split(':')
+            if len(accelerator_split) > 2:
+                raise click.UsageError(
+                    f'Invalid accelerator string {accelerator_str}. '
+                    'Expected format: <accelerator_name>[:<quantity>].')
+            if len(accelerator_split) == 2:
+                name = accelerator_split[0]
+                # Check if quantity is valid
+                try:
+                    quantity = int(accelerator_split[1])
+                    if quantity <= 0:
+                        raise ValueError(
+                            'Quantity cannot be non-positive integer.')
+                except ValueError as invalid_quantity:
+                    raise click.UsageError(
+                        f'Invalid accelerator quantity {accelerator_split[1]}. '
+                        'Expected a positive integer.') from invalid_quantity
+            else:
+                name, quantity = accelerator_str, None
 
-        # Show detailed accelerator information
         result = service_catalog.list_accelerators(gpus_only=True,
-                                                   name_filter=gpu_name,
+                                                   name_filter=name,
+                                                   quantity_filter=quantity,
                                                    region_filter=region,
                                                    clouds=cloud)
         if len(result) == 0:
-            yield f'Resources \'{gpu_name}\' not found. '
+            quantity_str = (f' with requested quantity {quantity}'
+                            if quantity else '')
+            yield f'Resources \'{name}\'{quantity_str} not found. '
             yield 'Try \'sky show-gpus --all\' '
             yield 'to show available accelerators.'
             return
 
-        yield '*NOTE*: for most GCP accelerators, '
-        yield 'INSTANCE_TYPE == (attachable) means '
-        yield 'the host VM\'s cost is not included.\n\n'
+        if cloud is None or cloud.lower() == 'gcp':
+            yield '*NOTE*: for most GCP accelerators, '
+            yield 'INSTANCE_TYPE == (attachable) means '
+            yield 'the host VM\'s cost is not included.\n\n'
+
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table_headers = [
@@ -3047,8 +3126,8 @@ def show_gpus(
                 cpu_count = item.cpu_count
                 if pd.isna(cpu_count):
                     cpu_str = '-'
-                elif isinstance(cpu_count, float):
-                    if cpu_count.is_integer():
+                elif isinstance(cpu_count, (float, int)):
+                    if int(cpu_count) == cpu_count:
                         cpu_str = str(int(cpu_count))
                     else:
                         cpu_str = f'{cpu_count:.1f}'
@@ -3259,6 +3338,14 @@ def spot():
               required=False,
               help=('OS disk size in GBs.'))
 @click.option(
+    '--disk-tier',
+    default=None,
+    type=str,
+    required=False,
+    help=(
+        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
+    ))
+@click.option(
     '--detach-run',
     '-d',
     default=False,
@@ -3266,9 +3353,9 @@ def spot():
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
 @click.option(
-    '--retry-until-up',
-    '-r',
-    default=True,
+    '--retry-until-up/--no-retry-until-up',
+    '-r/-no-r',
+    default=None,
     is_flag=True,
     required=False,
     help=('(Default: True; this flag is deprecated and will be removed in a '
@@ -3301,6 +3388,7 @@ def spot_launch(
     spot_recovery: Optional[str],
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
+    disk_tier: Optional[str],
     detach_run: bool,
     retry_until_up: bool,
     yes: bool,
@@ -3338,8 +3426,21 @@ def spot_launch(
         image_id=image_id,
         env=env,
         disk_size=disk_size,
+        disk_tier=disk_tier,
         spot_recovery=spot_recovery,
     )
+    # Deprecation.
+    if retry_until_up is not None:
+        flag_str = '--retry-until-up'
+        if not retry_until_up:
+            flag_str = '--no-retry-until-up'
+        click.secho(
+            f'Flag {flag_str} is deprecated and will be removed in a '
+            'future release (managed spot jobs will always be retried). '
+            'Please file an issue if this does not work for you.',
+            fg='yellow')
+    else:
+        retry_until_up = True
 
     if not yes:
         prompt = f'Launching a new spot task {name!r}. Proceed?'
@@ -3354,14 +3455,6 @@ def spot_launch(
     task_cloud = (resources.cloud
                   if resources.cloud is not None else clouds.Cloud)
     task_cloud.check_cluster_name_is_valid(name)
-
-    # Deprecation.
-    if not retry_until_up:
-        click.secho(
-            'Flag --retry-until-up is deprecated and will be removed in a '
-            'future release (defaults to True). Please file an issue if this '
-            'does not work for you.',
-            fg='yellow')
 
     sky.spot_launch(task,
                     name,
@@ -3450,7 +3543,8 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
     with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
         _, msg = _get_spot_jobs(refresh=refresh,
                                 skip_finished=skip_finished,
-                                show_all=all)
+                                show_all=all,
+                                is_called_by_user=True)
     if not skip_finished:
         in_progress_only_hint = ''
     else:
@@ -3635,6 +3729,14 @@ def bench():
               required=False,
               help=('OS disk size in GBs.'))
 @click.option(
+    '--disk-tier',
+    default=None,
+    type=str,
+    required=False,
+    help=(
+        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
+    ))
+@click.option(
     '--idle-minutes-to-autostop',
     '-i',
     default=None,
@@ -3665,6 +3767,7 @@ def benchmark_launch(
     image_id: Optional[str],
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
+    disk_tier: Optional[str],
     idle_minutes_to_autostop: Optional[int],
     yes: bool,
 ) -> None:
@@ -3721,6 +3824,9 @@ def benchmark_launch(
         if disk_size is not None:
             if any('disk_size' in candidate for candidate in candidates):
                 raise click.BadParameter(f'disk_size {message}')
+        if disk_tier is not None:
+            if any('disk_tier' in candidate for candidate in candidates):
+                raise click.BadParameter(f'disk_tier {message}')
 
     # The user can specify the benchmark candidates in either of the two ways:
     # 1. By specifying resources.candidates in the YAML.
@@ -3763,7 +3869,8 @@ def benchmark_launch(
                                              gpus=override_gpu,
                                              use_spot=use_spot,
                                              image_id=image_id,
-                                             disk_size=disk_size)
+                                             disk_size=disk_size,
+                                             disk_tier=disk_tier)
     resources_config.update(override_params)
     if 'cloud' in resources_config:
         cloud = resources_config.pop('cloud')

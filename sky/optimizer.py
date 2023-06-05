@@ -260,20 +260,22 @@ class Optimizer:
             num_resources = len(node.get_resources())
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
-                    specified_resources_str = ''
+                    location_hint = ''
                     if node.get_resources():
                         specified_resources = list(node.get_resources())[0]
-                        specified_resources_str = f' ({specified_resources})'
-                        if specified_resources.region:
-                            specified_resources_str = (
-                                f' ({specified_resources} '
-                                f'in {specified_resources.region})')
+                        if specified_resources.zone is not None:
+                            location_hint = (
+                                f' Zone: {specified_resources.zone}.')
+                        elif specified_resources.region:
+                            location_hint = (
+                                f' Region: {specified_resources.region}.')
+
                     error_msg = (
                         'No launchable resource found for task '
-                        f'{node}{specified_resources_str}. This means the '
-                        'catalog does not contain any instance types to satisfy'
-                        ' the request. '
-                        'To fix: relax/change its resource requirements.\n'
+                        f'{node}.{location_hint}\nThis means the '
+                        'catalog does not contain any instance types that '
+                        'satisfy this request.\n'
+                        'To fix: relax or change the resource requirements.\n'
                         'Hint: \'sky show-gpus --all\' '
                         'to list available accelerators.\n'
                         '      \'sky check\' to check the enabled clouds.')
@@ -967,6 +969,13 @@ def _fill_in_launchable_resources(
             # launch the instance, and fail over to other zones. We find this
             # behavior acceptable because this will happen only when the user
             # requested GCP 4:P100 or 8:K80 with a very large host VM.
+            elif isinstance(resources.cloud, clouds.SCP):
+                # Check if the host VM satisfies the min/max disk size limits.
+                is_allowed, launchable[resources] = \
+                    clouds.SCP.is_disk_size_allowed(resources)
+                if not is_allowed:
+                    continue
+
             launchable[resources] = _make_launchables_for_valid_region_zones(
                 resources)
         else:
@@ -995,8 +1004,10 @@ def _fill_in_launchable_resources(
                 else:
                     all_fuzzy_candidates.update(fuzzy_candidate_list)
             if len(launchable[resources]) == 0:
+                clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
+                    clouds_list[0])
                 logger.info(f'No resource satisfying {resources} '
-                            f'on {clouds_list}.')
+                            f'on {clouds_str}.')
                 if len(all_fuzzy_candidates) > 0:
                     logger.info('Did you mean: '
                                 f'{colorama.Fore.CYAN}'

@@ -686,13 +686,10 @@ class Task:
             if storage_cloud is None:
                 # Get the first enabled cloud.
                 backend_utils.check_public_cloud_enabled()
-                enabled_clouds = global_user_state.get_enabled_clouds()
-
-                for cloud in storage_lib.STORE_ENABLED_CLOUDS:
-                    for enabled_cloud in enabled_clouds:
-                        if cloud.is_same_cloud(enabled_cloud):
-                            storage_cloud = cloud
-                            break
+                enabled_storage_clouds = \
+                    global_user_state.get_enabled_storage_clouds()
+                if enabled_storage_clouds:
+                    storage_cloud = enabled_storage_clouds[0]
         if storage_cloud is None:
             raise ValueError('No available cloud to mount storage.')
         store_type = storage_lib.get_storetype_from_cloud(storage_cloud)
@@ -842,7 +839,7 @@ class Task:
         sky.dag.get_current_dag().add_edge(self, b)
 
     def __repr__(self):
-        if self.name:
+        if self.name and self.name != 'sky-cmd':  # CLI launch with a command
             return self.name
         if isinstance(self.run, str):
             run_msg = self.run.replace('\n', '\\n')
@@ -851,7 +848,7 @@ class Task:
             else:
                 run_msg = f'run=\'{run_msg}\''
         elif self.run is None:
-            run_msg = 'run=None'
+            run_msg = 'run=<empty>'
         else:
             run_msg = 'run=<fn>'
 
@@ -862,8 +859,11 @@ class Task:
             s += f'\n  outputs: {self.outputs}'
         if self.num_nodes > 1:
             s += f'\n  nodes: {self.num_nodes}'
-        if len(self.resources) > 1 or not list(self.resources)[0].is_empty():
+        if len(self.resources) > 1:
             s += f'\n  resources: {self.resources}'
+        elif len(
+                self.resources) == 1 and not list(self.resources)[0].is_empty():
+            s += f'\n  resources: {list(self.resources)[0]}'
         else:
             s += '\n  resources: default instances'
         return s

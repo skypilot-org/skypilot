@@ -123,7 +123,7 @@ def _execute(
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
 ) -> None:
-    """Execute a entrypoint.
+    """Execute an entrypoint.
 
     If sky.Task is given or DAG has not been optimized yet, this will call
     sky.optimize() for the caller.
@@ -636,6 +636,7 @@ def spot_launch(
             proxy_command_key = ('aws', 'ssh_proxy_command')
             ssh_proxy_command = skypilot_config.get_nested(
                 proxy_command_key, None)
+            config_dict = skypilot_config.to_dict()
             if isinstance(ssh_proxy_command, str):
                 config_dict = skypilot_config.set_nested(
                     proxy_command_key, None)
@@ -702,11 +703,19 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     if copy_mounts is None:
         copy_mounts = {}
 
-    has_local_source_paths = (task.workdir is not None) or copy_mounts
-    if has_local_source_paths:
-        logger.info(
-            f'{colorama.Fore.YELLOW}Translating file_mounts with local '
-            f'source paths to SkyPilot Storage...{colorama.Style.RESET_ALL}')
+    has_local_source_paths_file_mounts = bool(copy_mounts)
+    has_local_source_paths_workdir = task.workdir is not None
+
+    msg = None
+    if has_local_source_paths_workdir and has_local_source_paths_file_mounts:
+        msg = 'workdir and file_mounts with local source paths'
+    elif has_local_source_paths_file_mounts:
+        msg = 'file_mounts with local source paths'
+    elif has_local_source_paths_workdir:
+        msg = 'workdir'
+    if msg:
+        logger.info(f'{colorama.Fore.YELLOW}Translating {msg} to SkyPilot '
+                    f'Storage...{colorama.Style.RESET_ALL}')
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}

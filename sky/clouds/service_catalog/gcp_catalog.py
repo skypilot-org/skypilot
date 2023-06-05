@@ -186,7 +186,9 @@ def get_vcpus_mem_from_instance_type(
 
 
 def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None) -> Optional[str]:
+                              memory: Optional[str] = None,
+                              disk_tier: Optional[str] = None) -> Optional[str]:
+    del disk_tier  # unused
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
     if memory is None:
@@ -322,11 +324,13 @@ def list_accelerators(
     gpus_only: bool,
     name_filter: Optional[str] = None,
     region_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
     case_sensitive: bool = True,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in GCP offering GPUs."""
     results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter,
-                                            region_filter, case_sensitive)
+                                            region_filter, quantity_filter,
+                                            case_sensitive)
 
     a100_infos = results.get('A100', []) + results.get('A100-80GB', [])
     if not a100_infos:

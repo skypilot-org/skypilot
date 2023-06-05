@@ -27,15 +27,15 @@
 
 ----
 :fire: :dromedary_camel: *News* :dromedary_camel: :fire: 
-- [April, 2023] **[**SkyPilot YAMLs released**](./llm/vicuna/) for finetuning and serving the Vicuna model with a single command** !
-- [March, 2023] **[Vicuna LLM chatbot](https://vicuna.lmsys.org/) trained** [**using SkyPilot**](./llm/vicuna/) **for $300 on spot instances!** 
+- [April, 2023] **[**SkyPilot YAMLs released**](./llm/vicuna/) for finetuning & serving the Vicuna model with a single command**!
+- [March, 2023] **[Vicuna LLM chatbot](https://lmsys.org/blog/2023-03-30-vicuna/) trained** [**using SkyPilot**](./llm/vicuna/) **for $300 on spot instances!** 
 - [March, 2023] *Serve* your own LLaMA LLM chatbot (not finetuned) on any cloud: [**example**](./llm/llama-chatbots/), [**repo**](https://github.com/skypilot-org/sky-llama)
 ----
 
 SkyPilot is a framework for easily and cost effectively running ML workloads[^1] on any cloud. 
 
 SkyPilot abstracts away the cloud infra burden:
-- Launch jobs & clusters on any cloud (AWS, Azure, GCP, Lambda Cloud)
+- Launch jobs & clusters on any cloud (AWS, Azure, GCP, Lambda Cloud, IBM, Samsung)
 - Find scarce resources across zones/regions/clouds
 - Queue jobs & use cloud object stores
 
@@ -47,9 +47,9 @@ SkyPilot cuts your cloud costs:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes. 
 
-Install with pip (choose your clouds) or [from source](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html):
+Install with pip or [from source](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html):
 ```
-pip install "skypilot[aws,gcp,azure,lambda]"
+pip install "skypilot[aws,gcp,azure,lambda,ibm,scp]"  # choose your clouds
 ```
 
 ## Getting Started
@@ -121,8 +121,9 @@ Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/
 - Framework examples: [PyTorch DDP](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml),  [Distributed](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py) [TensorFlow](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml), [JAX/Flax on TPU](https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml), [Stable Diffusion](https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion), [Detectron2](https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml), [programmatic grid search](https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py), [Docker](https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml), and [many more](./examples).
 
 More information:
-- [Project blog](https://blog.skypilot.co/)
-- [Introductory blog post](https://blog.skypilot.co/introducing-skypilot/)
+- [SkyPilot Blog](https://blog.skypilot.co/)
+  - [Introductory blog post](https://blog.skypilot.co/introducing-skypilot/)
+- [NSDI 2023 paper & talk](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng)
 
 ## Issues, feature requests, and questions
 We are excited to hear your feedback! 
