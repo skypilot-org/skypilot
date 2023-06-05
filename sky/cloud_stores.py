@@ -223,9 +223,9 @@ def get_storage_from_path(url: str) -> CloudStorage:
 class IBMCosCloudStorage(CloudStorage):
     """IBM Cloud Storage."""
     # install rclone if package isn't already installed
-    # pylint: disable=line-too-long
     _GET_RCLONE = [
-        'rclone version >/dev/null 2>&1 || curl https://rclone.org/install.sh | sudo bash',
+        'rclone version >/dev/null 2>&1 || '
+        'curl https://rclone.org/install.sh | sudo bash',
     ]
 
     def is_directory(self, url: str) -> bool:
@@ -235,9 +235,8 @@ class IBMCosCloudStorage(CloudStorage):
         name is a prefix of other objects.
         """
 
-        region = url.split('//')[1].split('/')[0]
+        bucket_name, path, region = data_utils.split_cos_path(url)
         s3 = ibm.get_cos_resource(region)
-        bucket_name, path, _ = data_utils.split_cos_path(url)
         bucket = s3.Bucket(bucket_name)
 
         num_objects = 0
@@ -261,14 +260,13 @@ class IBMCosCloudStorage(CloudStorage):
         rclone_config_data = Rclone.get_rclone_config(bucket_name,
                                                       Rclone.RcloneClouds.IBM,
                                                       bucket_region)
-        # configure_rclone cmd stores bucket profile in rclone config file at the cluster's nodes.
+        # configure_rclone stores bucket profile in remote cluster's rclone.conf
         configure_rclone = (
-            f' mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> {Rclone.RCLONE_CONFIG_PATH}'
-        )
-        # bucket_name also serves as a profile name in rclone.conf
+            f' mkdir -p ~/.config/rclone/ &&'
+            f' echo "{rclone_config_data}">> {Rclone.RCLONE_CONFIG_PATH}')
         download_via_rclone = (
-            f'rclone copy {bucket_rclone_profile}:{data_path_in_bucket} {destination}'
-        )
+            'rclone copy '
+            f'{bucket_rclone_profile}:{data_path_in_bucket} {destination}')
 
         all_commands = list(self._GET_RCLONE)
         all_commands.append(configure_rclone)
