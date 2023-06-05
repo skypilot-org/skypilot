@@ -94,7 +94,7 @@ class GcsCloudStorage(CloudStorage):
     # parellel workers on our end.
     # The gsutil command is part of the Google Cloud SDK, and we reuse
     # the installation logic here.
-    _GET_GSUTIL = gcp.GCLOUD_INSTALLATION_COMMAND
+    _GET_GSUTIL = gcp.GOOGLE_SDK_INSTALLATION_COMMAND
 
     _GSUTIL = ('GOOGLE_APPLICATION_CREDENTIALS='
                f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH} gsutil')
