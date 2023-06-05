@@ -27,16 +27,19 @@ class oci_query_helper:
     @classmethod
     @utils.debug_enabled(logger=logger)
     def query_instances_by_tags(cls, tag_filters, region):
+
         where_clause_tags = ""
         for tag_key in tag_filters:
             if where_clause_tags != "":
                 where_clause_tags += " && "
-            tag_value = tag_filters[tag_key]
-            where_clause_tags += f"""(freeformTags.key = '{tag_key}' && freeformTags.value = '{tag_value}')"""
 
-        qv_str = f"""query instance resources where {where_clause_tags} && (lifecycleState != 'TERMINATED' 
-                && lifecycleState != 'TERMINATING')"""
-        logger.debug(f"* qv_str is {qv_str}")
+            tag_value = tag_filters[tag_key]
+            where_clause_tags += (f"(freeformTags.key = '{tag_key}'"
+                                  f" && freeformTags.value = '{tag_value}')")
+
+        qv_str = (f"query instance resources where {where_clause_tags}"
+                  f" && (lifecycleState != 'TERMINATED'"
+                  f" && lifecycleState != 'TERMINATING')")
 
         qv = oci_adaptor.get_oci(
         ).resource_search.models.StructuredSearchDetails(
@@ -49,18 +52,17 @@ class oci_query_helper:
         list_instances_response = oci_adaptor.get_search_client(
             region, oci_conf.get_profile()).search_resources(qv)
         result_set = list_instances_response.data.items
-        logger.debug(f"* Query result: {result_set}")
 
         return result_set
 
     @classmethod
     def terminate_instances_by_tags(cls, tag_filters, region) -> int:
-        logger.info(f"* terminate_instances_by_tags: {tag_filters}")
+        logger.info(f"Terminate instance by tags: {tag_filters}")
         insts = cls.query_instances_by_tags(tag_filters, region)
         fail_count = 0
         for inst in insts:
             inst_id = inst.identifier
-            logger.debug(f"* Got instance(to be terminated): {inst_id}")
+            logger.debug(f"Got instance(to be terminated): {inst_id}")
 
             try:
                 oci_adaptor.get_core_client(
@@ -71,11 +73,9 @@ class oci_query_helper:
                 traceback.print_exc()
 
         if fail_count == 0:
-            logger.info(f"* terminate_instances_by_tags success: {tag_filters}")
+            logger.info(f"Instance teardown result: OK")
         else:
-            logger.warn(
-                f"! Attention: {fail_count} instances in the cluster failed to be terminate!"
-            )
+            logger.warn(f"Instance teardown result: {fail_count} failed!")
 
         return fail_count
 
@@ -85,7 +85,6 @@ class oci_query_helper:
                         region):
         if (pd.isna(listing_id) or listing_id.strip() == "None" or
                 listing_id.strip() == "nan"):
-            logger.debug("* listing_id not specified.")
             return
 
         core_client = oci_adaptor.get_core_client(region,
@@ -118,12 +117,9 @@ class oci_query_helper:
                 ))
         except Exception as e:
             logger.critical(
-                f"! subscribe_image: {listing_id} - {resource_version} ... [Failed]"
-                f"! Error message: {str(e)}")
+                f"subscribe_image: {listing_id} - {resource_version} ... [Failed]"
+                f"Error message: {str(e)}")
             raise RuntimeError("ERR: Image subscription error!")
-
-        logger.debug(
-            f"* subscribe_image: {listing_id} - {resource_version} ... [Done]")
 
     @classmethod
     @utils.debug_enabled(logger=logger)
