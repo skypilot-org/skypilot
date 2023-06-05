@@ -619,6 +619,7 @@ class GCP(clouds.Cloud):
         try:
             account = _run_output('gcloud auth list --filter=status:ACTIVE '
                                   '--format="value(account)"')
+            account = account.strip()
         except subprocess.CalledProcessError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
