@@ -35,6 +35,8 @@ class OCI(clouds.Cloud):
 
     _regions: List[clouds.Region] = []
 
+    _INDENT_PREFIX = '    '
+
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
@@ -296,19 +298,32 @@ class OCI(clouds.Cloud):
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
+        credential_help_str = (
+            'To configure credentials, go to:'
+            'https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm\n'
+            f'{cls._INDENT_PREFIX}Please make sure the API keys and the config files are placed under ~/.oci:\n'
+            f'{cls._INDENT_PREFIX}  ~/.oci/config\n'
+            f'{cls._INDENT_PREFIX}  ~/.oci/oci_api_key.pem\n'
+            f'{cls._INDENT_PREFIX}The ~/.oci/config file should have the following format:\n'
+            f'{cls._INDENT_PREFIX}  [DEFAULT]\n'
+            f'{cls._INDENT_PREFIX}  user=ocid1.user.oc1..aaaaaaaa\n'
+            f'{cls._INDENT_PREFIX}  fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp\n'
+            f'{cls._INDENT_PREFIX}  tenancy=ocid1.tenancy.oc1..aaaaaaaa\n'
+            f'{cls._INDENT_PREFIX}  region=us-sanjose-1\n'
+            f'{cls._INDENT_PREFIX}  key_file=~/.oci/oci_api_key.pem')
+
         try:
             # pylint: disable=import-outside-toplevel,unused-import
             import oci
         except ImportError:
-            return False, ('oci is not installed. Install it with: '
-                           'pip install oci')
+            return False, ('`oci` is not installed. Install it with: '
+                           'pip install oci\n'
+                           f'{cls._INDENT_PREFIX}{credential_help_str}')
 
         conf_file = oci_adaptor.get_config_file()
 
         help_str = (f'Missing credential file at {conf_file}. '
-                    'To configure credentials, go to:\n'
-                    '      https://docs.oracle.com/en-us/iaas/Content/API/'
-                    'Concepts/apisigningkey.htm')
+                    f'{credential_help_str}')
         if not os.path.isfile(os.path.expanduser(conf_file)):
             return (False, help_str)
 
@@ -321,7 +336,8 @@ class OCI(clouds.Cloud):
             return True, None
         except oci_adaptor.service_exception():
             return False, (f'OCI credential is not correctly set. '
-                           f'Check the credential file at {conf_file}')
+                           f'Check the credential file at {conf_file}\n'
+                           f'{cls._INDENT_PREFIX}{credential_help_str}')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
