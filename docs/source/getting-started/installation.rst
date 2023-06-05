@@ -127,6 +127,28 @@ To access IBM's services, store the following fields in ``~/.ibm/credentials.yam
   Stock images aren't currently providing ML tools out of the box.
   Create private images with the necessary tools (e.g. CUDA), by following the IBM segment in `this documentation <https://github.com/skypilot-org/skypilot/blob/master/docs/source/reference/yaml-spec.rst>`_.
 
+
+OCI
+~~~~~~~~~
+
+To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`_. The :code:`~/.oci` folder should contain the following files:
+
+.. code-block:: text
+
+  ~/.oci/config
+  ~/.oci/oci_api_key.pem
+
+The :code:`~/.oci/config` file should contain the following fields:
+
+.. code-block:: text
+
+  [DEFAULT]
+  user=ocid1.user.oc1..aaaaaaaa
+  fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp
+  tenancy=ocid1.tenancy.oc1..aaaaaaaa
+  region=us-sanjose-1
+  key_file=~/.oci/oci_api_key.pem
+
 Cloudflare R2
 ~~~~~~~~~~~~~~~~~~
 
