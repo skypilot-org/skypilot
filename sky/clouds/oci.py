@@ -299,15 +299,19 @@ class OCI(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
 
         credential_help_str = (
-            'To configure credentials, go to:'
-            'https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm\n'
-            f'{cls._INDENT_PREFIX}Please make sure the API keys and the config files are placed under ~/.oci:\n'
+            'To configure credentials, go to: '
+            'https://docs.oracle.com/en-us/iaas/Content/API/Concepts/'
+            'apisigningkey.htm\n'
+            f'{cls._INDENT_PREFIX}Please make sure the API keys and the config '
+            'files are placed under ~/.oci:\n'
             f'{cls._INDENT_PREFIX}  ~/.oci/config\n'
             f'{cls._INDENT_PREFIX}  ~/.oci/oci_api_key.pem\n'
-            f'{cls._INDENT_PREFIX}The ~/.oci/config file should have the following format:\n'
+            f'{cls._INDENT_PREFIX}The ~/.oci/config file should have the '
+            'following format:\n'
             f'{cls._INDENT_PREFIX}  [DEFAULT]\n'
             f'{cls._INDENT_PREFIX}  user=ocid1.user.oc1..aaaaaaaa\n'
-            f'{cls._INDENT_PREFIX}  fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp\n'
+            f'{cls._INDENT_PREFIX}  fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:'
+            'll:mm:nn:oo:pp\n'
             f'{cls._INDENT_PREFIX}  tenancy=ocid1.tenancy.oc1..aaaaaaaa\n'
             f'{cls._INDENT_PREFIX}  region=us-sanjose-1\n'
             f'{cls._INDENT_PREFIX}  key_file=~/.oci/oci_api_key.pem')
