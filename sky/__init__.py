@@ -32,6 +32,7 @@ GCP = clouds.GCP
 Lambda = clouds.Lambda
 SCP = clouds.SCP
 Local = clouds.Local
+OCI = clouds.OCI
 optimize = Optimizer.optimize
 
 __all__ = [
@@ -43,6 +44,7 @@ __all__ = [
     'Lambda',
     'SCP',
     'Local',
+    'OCI',
     'Optimizer',
     'OptimizeTarget',
     'backends',

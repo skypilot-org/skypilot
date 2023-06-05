@@ -73,6 +73,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.Lambda: 150,
     clouds.IBM: 160,
     clouds.Local: 90,
+    clouds.OCI: 300,
 }
 
 # Time gap between retries after failing to provision in all possible places.
@@ -128,6 +129,7 @@ def _get_cluster_config_template(cloud):
         clouds.IBM: 'ibm-ray.yml.j2',
         clouds.Local: 'local-ray.yml.j2',
         clouds.SCP: 'scp-ray.yml.j2',
+        clouds.OCI: 'oci-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
 
@@ -956,6 +958,44 @@ class RetryingVmProvisioner(object):
         self._blocked_resources.add(
             launchable_resources.copy(region=region.name, zone=None))
 
+    # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
+    def _update_blocklist_on_oci_error(
+            self, launchable_resources: 'resources_lib.Resources',
+            region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
+            stdout: str, stderr: str):
+
+        style = colorama.Style
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits + stderr_splits
+            if ('VcnSubnetNotFound' in s.strip()) or
+            ('oci.exceptions.ServiceError' in s.strip() and
+             ('NotAuthorizedOrNotFound' in s.strip() or 'CannotParseRequest' in
+              s.strip() or 'InternalError' in s.strip() or
+              'LimitExceeded' in s.strip() or 'NotAuthenticated' in s.strip()))
+        ]
+        if not errors:
+            logger.info('====== stdout ======')
+            for s in stdout_splits:
+                print(s)
+            logger.info('====== stderr ======')
+            for s in stderr_splits:
+                print(s)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Errors occurred during provision; '
+                                   'check logs above.')
+
+        logger.warning(f'Got error(s) in {region.name}:')
+        messages = '\n\t'.join(errors)
+        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
+
+        if zones is not None:
+            for zone in zones:
+                self._blocked_resources.add(
+                    launchable_resources.copy(zone=zone.name))
+
     def _update_blocklist_on_error(
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
@@ -993,6 +1033,7 @@ class RetryingVmProvisioner(object):
             clouds.IBM: self._update_blocklist_on_ibm_error,
             clouds.SCP: self._update_blocklist_on_scp_error,
             clouds.Local: self._update_blocklist_on_local_error,
+            clouds.OCI: self._update_blocklist_on_oci_error,
         }
         cloud = launchable_resources.cloud
         cloud_type = type(cloud)
@@ -3247,6 +3288,24 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 stdout = ''
                 stderr = str(e)
 
+        # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
+        # May, 2023 by Hysun: Allow terminate INIT cluster which may have
+        # some instances provisioning in backgroud but not completed.
+        elif (isinstance(cloud, clouds.OCI) and terminate and
+              prev_cluster_status in (global_user_state.ClusterStatus.STOPPED,
+                                      global_user_state.ClusterStatus.INIT)):
+            region = config['provider']['region']
+
+            # pylint: disable=import-outside-toplevel
+            from sky.skylet.providers.oci.query_helper import oci_query_helper
+            from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
+
+            # 0: All terminated successfully, failed count otherwise
+            returncode = oci_query_helper.terminate_instances_by_tags(
+                {TAG_RAY_CLUSTER_NAME: cluster_name}, region)
+
+            # To avoid undefined local varaiables error.
+            stdout = stderr = ''
         elif (terminate and
               (prev_cluster_status == global_user_state.ClusterStatus.STOPPED or
                use_tpu_vm)):

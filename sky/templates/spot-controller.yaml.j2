@@ -29,6 +29,9 @@ setup: |
   #  pip3 install azure-cli==2.31.0 azure-core
   {{google_sdk_installation_commands}}
 
+  echo Check and install OCI SDK
+  pip list | grep oci  > /dev/null 2>&1 || pip install oci 
+
   # Internal: disable logging for manually logging into the spot controller for debugging.
   {% if is_dev %}
   echo 'export SKYPILOT_DEV=1' >> ~/.bashrc

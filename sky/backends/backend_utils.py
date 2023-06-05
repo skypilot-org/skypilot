@@ -1035,6 +1035,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_ibm_authentication(config)
     elif isinstance(cloud, clouds.SCP):
         config = auth.setup_scp_authentication(config)
+    elif isinstance(cloud, clouds.OCI):
+        config = auth.setup_oci_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
@@ -1859,6 +1861,43 @@ def _query_status_scp(
     return status_list
 
 
+#Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
+def _query_status_oci(
+        cluster: str,
+        ray_config: Dict[str, Any],  # pylint: disable=unused-argument
+) -> List[global_user_state.ClusterStatus]:
+    region = ray_config['provider']['region']
+
+    # Check the lifecycleState definition from the page
+    # https://docs.oracle.com/en-us/iaas/api/#/en/iaas/latest/Instance/
+    status_map = {
+        'PROVISIONING': global_user_state.ClusterStatus.INIT,
+        'STARTING': global_user_state.ClusterStatus.INIT,
+        'RUNNING': global_user_state.ClusterStatus.UP,
+        'STOPPING': global_user_state.ClusterStatus.STOPPED,
+        'STOPPED': global_user_state.ClusterStatus.STOPPED,
+        'TERMINATED': None,
+        'TERMINATING': None,
+    }
+
+    # pylint: disable=import-outside-toplevel
+    from sky.skylet.providers.oci.query_helper import oci_query_helper
+    from ray.autoscaler.tags import (
+        TAG_RAY_CLUSTER_NAME,)
+
+    status_list = []
+    vms = oci_query_helper.query_instances_by_tags(
+        tag_filters={TAG_RAY_CLUSTER_NAME: cluster}, region=region)
+    for node in vms:
+        vm_status = node.lifecycle_state
+        if vm_status in status_map:
+            sky_status = status_map[vm_status]
+            if sky_status is not None:
+                status_list.append(sky_status)
+
+    return status_list
+
+
 _QUERY_STATUS_FUNCS = {
     'AWS': _query_status_aws,
     'GCP': _query_status_gcp,
@@ -1866,6 +1905,7 @@ _QUERY_STATUS_FUNCS = {
     'Lambda': _query_status_lambda,
     'IBM': _query_status_ibm,
     'SCP': _query_status_scp,
+    'OCI': _query_status_oci,
 }
 
 
