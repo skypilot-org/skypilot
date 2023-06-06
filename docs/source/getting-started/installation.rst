@@ -184,7 +184,7 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
 
 Samsung Cloud Platform (SCP)
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Samsung Cloud Platform(SCP) provides cloud services optimized for enterprise customers. You can learn more about SCP `here <https://cloud.samsungsds.com/>`__.
 
