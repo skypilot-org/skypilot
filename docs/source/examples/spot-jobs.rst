@@ -245,7 +245,7 @@ you can still tear it down manually with
 Customize spot controller resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Although the default setting works for most of people, you may want to customize the resources of the spot controller for the following reasons:
+You may customize the resources of the spot controller for the following reasons:
 
 1. Enforcing the spot controller to run on a specific location. (Default: cheapest location)
 2. Changing the maximum number of spot jobs that can be run concurrently. (Default: 16)
