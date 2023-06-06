@@ -721,20 +721,15 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
         job_id = make_ray_job_id(job['job_id'], job_owner)
         # Job is locked to ensure that pending queue does not start it while
         # it is being cancelled
-        # TODO(mraheja): remove pylint disabling when filelock
-        # version updated
-        # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(_get_lock_path(job['job_id'])):
             try:
-                # TODO(mraheja): remove pylint disabling when filelock
-                # version updated
-                # pylint: disable=abstract-class-instantiated
                 job_client.stop_job(job_id)
             except RuntimeError as e:
-                # If the job does not exist or if the request to the
-                # job server fails.
-                logger.warning(str(e))
-                continue
+                # If the request to the job server fails, we should not
+                # set the job to CANCELLED.
+                if 'does not exist' not in str(e):
+                    logger.warning(str(e))
+                    continue
 
             if job['status'] in [
                     JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING
