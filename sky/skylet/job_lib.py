@@ -551,6 +551,9 @@ def update_job_status(job_owner: str,
                 # is booted, e.g. the instance is rebooted.
                 job_statuses[i] = JobStatus.FAILED
             else:
+                # Set the job status to PENDING even though the job can be
+                # in any later status, because the code will take the max
+                # of this status and the status in the jobs table.
                 job_statuses[i] = JobStatus.PENDING
 
     assert len(job_statuses) == len(job_ids), (job_statuses, job_ids)
