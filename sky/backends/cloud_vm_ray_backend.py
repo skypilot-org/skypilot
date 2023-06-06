@@ -3911,9 +3911,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
-        codegen.add_prologue(job_id,
-                             spot_task=task.spot_dag,
-                             is_local=is_local)
+        codegen.add_prologue(job_id, spot_dag=task.spot_dag, is_local=is_local)
         codegen.add_gang_scheduling_placement_group_and_setup(
             1,
             accelerator_dict,
@@ -3979,9 +3977,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
-        codegen.add_prologue(job_id,
-                             spot_task=task.spot_dag,
-                             is_local=is_local)
+        codegen.add_prologue(job_id, spot_dag=task.spot_dag, is_local=is_local)
         codegen.add_gang_scheduling_placement_group_and_setup(
             num_actual_nodes,
             accelerator_dict,
