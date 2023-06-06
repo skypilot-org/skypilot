@@ -711,7 +711,7 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
     # jobs to CANCELLED.
     if jobs is None:
         job_records = _get_jobs(
-            None, [JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING])
+            None, [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING])
     else:
         job_records = _get_jobs_by_ids(jobs)
 
@@ -736,11 +736,11 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
                     continue
 
             if job['status'] in [
-                    JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING
+                    JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING
             ]:
                 _set_status_no_lock(job['job_id'], JobStatus.CANCELLED)
 
-    scheduler.schedule_step()
+        scheduler.schedule_step()
 
 
 def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
