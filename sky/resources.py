@@ -799,6 +799,9 @@ class Resources:
         # self <= other
         return True
 
+    def is_same_resources(self, other: 'Resources') -> bool:
+        return self.to_yaml_config() == other.to_yaml_config()
+
     def should_be_blocked_by(self, blocked: 'Resources') -> bool:
         """Whether this Resources matches the blocked Resources.
 

@@ -606,6 +606,8 @@ def spot_launch(
             # running in a container.
             'user': getpass.getuser(),
         }
+        controller_resources_config = copy.copy(
+            spot.constants.CONTROLLER_RESOURCES)
         if skypilot_config.loaded():
             # Look up the contents of the already loaded configs via the
             # 'skypilot_config' module. Don't simply read the on-disk file as
@@ -660,12 +662,37 @@ def spot_launch(
                         skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
                 })
 
+            # Override the controller resources with the ones specified in the
+            # config.
+            custom_controller_resources_config = skypilot_config.get_nested(
+                ('spot', 'controller', 'resources'), None)
+            if custom_controller_resources_config is not None:
+                controller_resources_config.update(
+                    custom_controller_resources_config)
+        try:
+            controller_resources = sky.Resources.from_yaml_config(
+                controller_resources_config)
+        except ValueError as e:
+            raise ValueError(
+                'Spot controller resources is not valid, please check '
+                '~/.sky/skypilot_config.yaml file. Details:\n'
+                f'  {common_utils.format_exception(e, use_bracket=True)}'
+            ) from e
+
         yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
                                  f'{name}-{task_uuid}.yaml')
         backend_utils.fill_template(spot.SPOT_CONTROLLER_TEMPLATE,
                                     vars_to_fill,
                                     output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
+        assert len(controller_task.resources) == 1, controller_task
+        # Backward compatibility: if the user changed the spot-controller.yaml.j2
+        # to customize the controller resources, we should use it.
+        controller_task_resources = list(controller_task.resources)[0]
+        if not controller_task_resources.is_same_resources(sky.Resources()):
+            controller_resources = controller_task_resources
+        controller_task.set_resources(controller_resources)
+
         controller_task.spot_task = task
         assert len(controller_task.resources) == 1
 
