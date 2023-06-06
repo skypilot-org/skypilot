@@ -61,6 +61,9 @@ test_id = str(uuid.uuid4())[-2:]
 
 LAMBDA_TYPE = '--cloud lambda --gpus A10'
 
+SCP_TYPE = '--cloud scp'
+SCP_GPU_V100 = '--gpus V100-32GB'
+
 storage_setup_commands = [
     'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
     'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/tmp\ file2',
@@ -592,7 +595,7 @@ def test_aws_stale_job_manual_restart():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
-            f'sleep {events.JobUpdateEvent.EVENT_INTERVAL_SECONDS}',
+            f'sleep {events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS}',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
         ],
         f'sky down -y {name}',
@@ -621,7 +624,7 @@ def test_gcp_stale_job_manual_restart():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
-            f'sleep {events.JobUpdateEvent.EVENT_INTERVAL_SECONDS}',
+            f'sleep {events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS}',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
         ],
         f'sky down -y {name}',
@@ -630,6 +633,7 @@ def test_gcp_stale_job_manual_restart():
 
 
 # ---------- Check Sky's environment variables; workdir. ----------
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_env_check(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -644,6 +648,7 @@ def test_env_check(generic_cloud: str):
 
 
 # ---------- file_mounts ----------
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_file_mounts instead.
 def test_file_mounts(generic_cloud: str):
     name = _get_cluster_name()
     test_commands = [
@@ -653,6 +658,23 @@ def test_file_mounts(generic_cloud: str):
     ]
     test = Test(
         'using_file_mounts',
+        test_commands,
+        f'sky down -y {name}',
+        timeout=20 * 60,  # 20 mins
+    )
+    run_one_test(test)
+
+
+@pytest.mark.scp
+def test_scp_file_mounts():
+    name = _get_cluster_name()
+    test_commands = [
+        *storage_setup_commands,
+        f'sky launch -y -c {name} {SCP_TYPE} --num-nodes 1 examples/using_file_mounts.yaml',
+        f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+    ]
+    test = Test(
+        'SCP_using_file_mounts',
         test_commands,
         f'sky down -y {name}',
         timeout=20 * 60,  # 20 mins
@@ -732,7 +754,7 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
             *storage_setup_commands,
             f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
         ]
 
         test = Test(
@@ -745,6 +767,7 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
 
 
 # ---------- CLI logs ----------
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_logs instead.
 def test_cli_logs(generic_cloud: str):
     name = _get_cluster_name()
     timestamp = time.time()
@@ -766,9 +789,33 @@ def test_cli_logs(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.scp
+def test_scp_logs():
+    name = _get_cluster_name()
+    timestamp = time.time()
+    test = Test(
+        'SCP_cli_logs',
+        [
+            f'sky launch -y -c {name} {SCP_TYPE} "echo {timestamp} 1"',
+            f'sky exec {name} "echo {timestamp} 2"',
+            f'sky exec {name} "echo {timestamp} 3"',
+            f'sky exec {name} "echo {timestamp} 4"',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} 3 4 --sync-down',
+            f'sky logs {name} * --sync-down',
+            f'sky logs {name} 1 | grep "{timestamp} 1"',
+            f'sky logs {name} | grep "{timestamp} 4"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Job Queue. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus. run test_ibm_job_queue instead
+@pytest.mark.no_scp  # SCP does not have K80 gpus. Run test_scp_job_queue instead
+@pytest.mark.no_oci  # OCI does not have K80 gpus
 def test_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -778,12 +825,12 @@ def test_job_queue(generic_cloud: str):
             f'sky exec {name} -n {name}-1 -d examples/job_queue/job.yaml',
             f'sky exec {name} -n {name}-2 -d examples/job_queue/job.yaml',
             f'sky exec {name} -n {name}-3 -d examples/job_queue/job.yaml',
-            f'sky queue {name} | grep {name}-1 | grep RUNNING',
-            f'sky queue {name} | grep {name}-2 | grep RUNNING',
-            f'sky queue {name} | grep {name}-3 | grep PENDING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep PENDING',
             f'sky cancel -y {name} 2',
             'sleep 5',
-            f'sky queue {name} | grep {name}-3 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep RUNNING',
             f'sky cancel -y {name} 3',
             f'sky exec {name} --gpus K80:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky exec {name} --gpus K80:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
@@ -841,8 +888,35 @@ def test_ibm_job_queue():
     run_one_test(test)
 
 
+@pytest.mark.scp
+def test_scp_job_queue():
+    name = _get_cluster_name()
+    num_of_gpu_launch = 1
+    num_of_gpu_exec = 0.5
+    test = Test(
+        'SCP_job_queue',
+        [
+            f'sky launch -y -c {name} {SCP_TYPE} {SCP_GPU_V100}:{num_of_gpu_launch} examples/job_queue/cluster.yaml',
+            f'sky exec {name} -n {name}-1 {SCP_GPU_V100}:{num_of_gpu_exec} -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-2 {SCP_GPU_V100}:{num_of_gpu_exec} -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-3 {SCP_GPU_V100}:{num_of_gpu_exec} -d examples/job_queue/job.yaml',
+            f'sky queue {name} | grep {name}-1 | grep RUNNING',
+            f'sky queue {name} | grep {name}-2 | grep RUNNING',
+            f'sky queue {name} | grep {name}-3 | grep PENDING',
+            f'sky cancel -y {name} 2',
+            'sleep 5',
+            f'sky queue {name} | grep {name}-3 | grep RUNNING',
+            f'sky cancel -y {name} 3',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue_multinode instead
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
 def test_job_queue_multinode(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -854,16 +928,16 @@ def test_job_queue_multinode(generic_cloud: str):
             f'sky launch -c {name} -n {name}-3 --detach-setup -d examples/job_queue/job_multinode.yaml',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-1 | grep RUNNING)',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-2 | grep RUNNING)',
-            f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-3 | grep SETTING_UP)',
-            'sleep 90',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-3 | grep PENDING)',
+            'sleep 90',
             f'sky cancel -y {name} 1',
             'sleep 5',
-            f'sky queue {name} | grep {name}-3 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep SETTING_UP',
             f'sky cancel -y {name} 1 2 3',
             f'sky launch -c {name} -n {name}-4 --detach-setup -d examples/job_queue/job_multinode.yaml',
             # Test the job status is correctly set to SETTING_UP, during the setup is running,
             # and the job can be cancelled during the setup.
+            'sleep 5',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-4 | grep SETTING_UP)',
             f'sky cancel -y {name} 4',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-4 | grep CANCELLED)',
@@ -886,12 +960,53 @@ def test_large_job_queue(generic_cloud: str):
         'large_job_queue',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud}',
-            f'for i in `seq 1 75`; do sky exec {name} -d "echo $i; sleep 100000000"; done',
+            f'for i in `seq 1 75`; do sky exec {name} -n {name}-$i -d "echo $i; sleep 100000000"; done',
             f'sky cancel -y {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
-            'sleep 20',
+            'sleep 70',
             # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.
             # The first 16 jobs are canceled, so there should be 75 - 32 = 43 jobs PENDING.
-            f'sky queue {name} | grep -v grep | grep PENDING | wc -l | grep 43',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep -v grep | grep PENDING | wc -l | grep 43',
+            # Make sure the jobs are scheduled in FIFO order
+            *[
+                f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-{i} | grep CANCELLED'
+                for i in range(1, 17)
+            ],
+            *[
+                f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-{i} | grep RUNNING'
+                for i in range(17, 33)
+            ],
+            *[
+                f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-{i} | grep PENDING'
+                for i in range(33, 75)
+            ],
+            f'sky cancel -y {name} 33 35 37 39 17 18 19',
+            *[
+                f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-{i} | grep CANCELLED'
+                for i in range(33, 40, 2)
+            ],
+            'sleep 10',
+            *[
+                f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-{i} | grep RUNNING'
+                for i in [34, 36, 38]
+            ],
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
+def test_fast_large_job_queue(generic_cloud: str):
+    # This is to test the jobs can be scheduled quickly when there are many jobs in the queue.
+    name = _get_cluster_name()
+    test = Test(
+        'fast_large_job_queue',
+        [
+            f'sky launch -y -c {name} --cloud {generic_cloud}',
+            f'for i in `seq 1 32`; do sky exec {name} -n {name}-$i -d "echo $i"; done',
+            'sleep 60',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep -v grep | grep SUCCEEDED | wc -l | grep 32',
         ],
         f'sky down -y {name}',
         timeout=20 * 60,
@@ -940,13 +1055,15 @@ def test_ibm_job_queue_multinode():
 # ---------- Submitting multiple tasks to the same cluster. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_oci  # OCI Cloud does not have K80 gpus
 def test_multi_echo(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
         'multi_echo',
         [
             f'python examples/multi_echo.py {name} {generic_cloud}',
-            'sleep 70',
+            'sleep 90',
         ] +
         # Ensure jobs succeeded.
         [f'sky logs {name} {i + 1} --status' for i in range(32)] +
@@ -962,6 +1079,7 @@ def test_multi_echo(generic_cloud: str):
 # ---------- Task: 1 node training. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
+@pytest.mark.no_scp  # SCP does not have V100 (16GB) GPUs. Run test_scp_huggingface instead.
 def test_huggingface(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -986,6 +1104,23 @@ def test_lambda_huggingface(generic_cloud: str):
             f'sky launch -y -c {name} {LAMBDA_TYPE} examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky exec {name} {LAMBDA_TYPE} examples/huggingface_glue_imdb_app.yaml',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.scp
+def test_scp_huggingface(generic_cloud: str):
+    name = _get_cluster_name()
+    num_of_gpu_launch = 1
+    test = Test(
+        'SCP_huggingface_glue_imdb_app',
+        [
+            f'sky launch -y -c {name} {SCP_TYPE} {SCP_GPU_V100}:{num_of_gpu_launch} examples/huggingface_glue_imdb_app.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} {SCP_TYPE} {SCP_GPU_V100}:{num_of_gpu_launch} examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -1054,6 +1189,7 @@ def test_tpu_vm_pod():
 
 
 # ---------- Simple apps. ----------
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_multi_hostname(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1061,6 +1197,7 @@ def test_multi_hostname(generic_cloud: str):
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} examples/multi_hostname.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky logs {name} 1 | grep "My hostname:" | wc -l | grep 2',  # Ensure there are 2 hosts.
             f'sky exec {name} examples/multi_hostname.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
@@ -1072,6 +1209,7 @@ def test_multi_hostname(generic_cloud: str):
 # ---------- Task: n=2 nodes with setups. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_distributed_tf(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1137,6 +1275,7 @@ def test_azure_start_stop():
 # ---------- Testing Autostopping ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_autostop(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1192,6 +1331,7 @@ def test_autostop(generic_cloud: str):
 
 
 # ---------- Testing Autodowning ----------
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
 def test_autodown(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1222,6 +1362,41 @@ def test_autodown(generic_cloud: str):
         ],
         f'sky down -y {name}',
         timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.scp
+def test_scp_autodown():
+    name = _get_cluster_name()
+    test = Test(
+        'SCP_autodown',
+        [
+            f'sky launch -y -d -c {name} {SCP_TYPE} tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} --down -i 1',
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "1m (down)"',
+            # Ensure the cluster is not terminated early.
+            'sleep 45',
+            f'sky status --refresh | grep {name} | grep UP',
+            # Ensure the cluster is terminated.
+            'sleep 200',
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} {SCP_TYPE} --down tests/test_yamls/minimal.yaml',
+            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
+            f'sky exec {name} {SCP_TYPE} tests/test_yamls/minimal.yaml',
+            f'sky status | grep {name} | grep "1m (down)"',
+            'sleep 200',
+            # Ensure the cluster is terminated.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} {SCP_TYPE} --down tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} --cancel',
+            'sleep 200',
+            # Ensure the cluster is still UP.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && echo "$s" | grep {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=25 * 60,
     )
     run_one_test(test)
 
@@ -1271,6 +1446,7 @@ def test_cancel_azure():
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_cancel_pytorch(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1289,6 +1465,7 @@ def test_cancel_pytorch(generic_cloud: str):
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -1317,6 +1494,7 @@ def test_cancel_ibm():
 # ---------- Testing use-spot option ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
+@pytest.mark.no_scp  # SCP does not support spot instances
 def test_use_spot(generic_cloud: str):
     """Test use-spot and sky exec."""
     name = _get_cluster_name()
@@ -1336,6 +1514,7 @@ def test_use_spot(generic_cloud: str):
 # ---------- Testing managed spot ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
+@pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.managed_spot
 def test_spot(generic_cloud: str):
     """Test the spot yaml."""
@@ -1351,7 +1530,7 @@ def test_spot(generic_cloud: str):
             _SPOT_CANCEL_WAIT.format(job_name=f'{name}-1'),
             'sleep 5',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep "CANCELLING\|CANCELLED"',
-            'sleep 120',
+            'sleep 200',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep CANCELLED',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
@@ -1367,6 +1546,7 @@ def test_spot(generic_cloud: str):
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
+@pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_failed_setup(generic_cloud: str):
     """Test managed spot job with failed setup."""
@@ -1452,6 +1632,7 @@ def test_spot_recovery_gcp():
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
+@pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_recovery_default_resources(generic_cloud: str):
     """Test managed spot recovery for default resources."""
@@ -1657,6 +1838,7 @@ def test_spot_cancellation_gcp():
 # ---------- Testing storage for managed spot ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
+@pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_storage(generic_cloud: str):
     """Test storage with managed spot"""
@@ -1710,6 +1892,7 @@ def test_spot_tpu():
 # ---------- Testing env for spot ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
+@pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_inline_env(generic_cloud: str):
     """Test spot env"""
@@ -1783,6 +1966,7 @@ def test_azure_start_stop_two_nodes():
 
 
 # ---------- Testing env for disk tier ----------
+@pytest.mark.aws
 def test_aws_disk_tier():
 
     def _get_aws_query_command(region, instance_id, field, expected):
@@ -1816,6 +2000,7 @@ def test_aws_disk_tier():
         run_one_test(test)
 
 
+@pytest.mark.gcp
 def test_gcp_disk_tier():
     for disk_tier in ['low', 'medium', 'high']:
         type = GCP._get_disk_type(disk_tier)
@@ -1837,6 +2022,7 @@ def test_gcp_disk_tier():
         run_one_test(test)
 
 
+@pytest.mark.azure
 def test_azure_disk_tier():
     for disk_tier in ['low', 'medium']:
         type = Azure._get_disk_type(disk_tier)
@@ -1855,6 +2041,24 @@ def test_azure_disk_tier():
             timeout=20 * 60,  # 20 mins  (it takes around ~12 mins)
         )
         run_one_test(test)
+
+
+# ------- Testing user ray cluster --------
+def test_user_ray_cluster():
+    name = _get_cluster_name()
+    test = Test(
+        'user-ray-cluster',
+        [
+            f'sky launch -y -c {name} "ray start --head"',
+            f'sky exec {name} "echo hi"',
+            f'sky logs {name} 1 --status',
+            f'sky status -r | grep {name} | grep UP',
+            f'sky exec {name} "echo bye"',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
 
 
 # ------- Testing the core API --------
@@ -1914,17 +2118,14 @@ class TestStorageWithCredentials:
     def cli_delete_cmd(store_type, bucket_name):
         if store_type == storage_lib.StoreType.S3:
             url = f's3://{bucket_name}'
-            return ['aws', 's3', 'rb', url, '--force']
+            return f'aws s3 rb {url} --force'
         if store_type == storage_lib.StoreType.GCS:
             url = f'gs://{bucket_name}'
-            return ['gsutil', '-m', 'rm', '-r', url]
+            return f'gsutil -m rm -r {url}'
         if store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             url = f's3://{bucket_name}'
-            return [
-                'aws', 's3', 'rb', url, '--force', '--endpoint', endpoint_url,
-                '--profile=r2'
-            ]
+            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
 
     @staticmethod
     def cli_ls_cmd(store_type, bucket_name, suffix=''):
@@ -1933,23 +2134,20 @@ class TestStorageWithCredentials:
                 url = f's3://{bucket_name}/{suffix}'
             else:
                 url = f's3://{bucket_name}'
-            return ['aws', 's3', 'ls', url]
+            return f'aws s3 ls {url}'
         if store_type == storage_lib.StoreType.GCS:
             if suffix:
                 url = f'gs://{bucket_name}/{suffix}'
             else:
                 url = f'gs://{bucket_name}'
-            return ['gsutil', 'ls', url]
+            return f'gsutil ls {url}'
         if store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             if suffix:
                 url = f's3://{bucket_name}/{suffix}'
             else:
                 url = f's3://{bucket_name}'
-            return [
-                'aws', 's3', 'ls', url, '--endpoint', endpoint_url,
-                '--profile=r2'
-            ]
+            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -2046,15 +2244,13 @@ class TestStorageWithCredentials:
     def tmp_awscli_bucket_r2(self, tmp_bucket_name):
         # Creates a temporary bucket using awscli
         endpoint_url = cloudflare.create_endpoint()
-        subprocess.check_call([
-            'aws', 's3', 'mb', f's3://{tmp_bucket_name}', '--endpoint',
-            endpoint_url, '--profile=r2'
-        ])
+        subprocess.check_call(
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 mb s3://{tmp_bucket_name} --endpoint {endpoint_url} --profile=r2',
+            shell=True)
         yield tmp_bucket_name
-        subprocess.check_call([
-            'aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force',
-            '--endpoint', endpoint_url, '--profile=r2'
-        ])
+        subprocess.check_call(
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb s3://{tmp_bucket_name} --force --endpoint {endpoint_url} --profile=r2',
+            shell=True)
 
     @pytest.fixture
     def tmp_public_storage_obj(self, request):
@@ -2102,7 +2298,7 @@ class TestStorageWithCredentials:
 
         # Delete bucket externally
         cmd = self.cli_delete_cmd(store_type, tmp_scratch_storage_obj.name)
-        subprocess.check_output(cmd)
+        subprocess.check_output(cmd, shell=True)
 
         # Run sky storage delete to delete the storage object
         out = subprocess.check_output(
@@ -2165,24 +2361,14 @@ class TestStorageWithCredentials:
         while True:
             nonexist_bucket_name = str(uuid.uuid4())
             if nonexist_bucket_url.startswith('s3'):
-                command = [
-                    'aws', 's3api', 'head-bucket', '--bucket',
-                    nonexist_bucket_name
-                ]
+                command = f'aws s3api head-bucket --bucket {nonexist_bucket_name}'
                 expected_output = '404'
             elif nonexist_bucket_url.startswith('gs'):
-                command = [
-                    'gsutil', 'ls',
-                    nonexist_bucket_url.format(random_name=nonexist_bucket_name)
-                ]
+                command = f'gsutil ls {nonexist_bucket_url.format(random_name=nonexist_bucket_name)}'
                 expected_output = 'BucketNotFoundException'
             elif nonexist_bucket_url.startswith('r2'):
                 endpoint_url = cloudflare.create_endpoint()
-                command = [
-                    'aws', 's3api', 'head-bucket', '--bucket',
-                    nonexist_bucket_name, '--endpoint', endpoint_url,
-                    '--profile=r2'
-                ]
+                command = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=r2'
                 expected_output = '404'
             else:
                 raise ValueError('Unsupported bucket type '
@@ -2190,7 +2376,9 @@ class TestStorageWithCredentials:
 
             # Check if bucket exists using the cli:
             try:
-                out = subprocess.check_output(command, stderr=subprocess.STDOUT)
+                out = subprocess.check_output(command,
+                                              stderr=subprocess.STDOUT,
+                                              shell=True)
             except subprocess.CalledProcessError as e:
                 out = e.output
             out = out.decode('utf-8')
@@ -2237,7 +2425,8 @@ class TestStorageWithCredentials:
         storage_obj.add_store(store_type)
 
         # Check if tmp_source/tmp-file exists in the bucket using aws cli
-        out = subprocess.check_output(self.cli_ls_cmd(store_type, bucket_name))
+        out = subprocess.check_output(self.cli_ls_cmd(store_type, bucket_name),
+                                      shell=True)
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
@@ -2276,16 +2465,17 @@ class TestStorageWithCredentials:
         tmp_local_list_storage_obj.add_store(store_type)
 
         # Check if tmp-file exists in the bucket root using cli
-        out = subprocess.check_output(
-            self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name))
+        out = subprocess.check_output(self.cli_ls_cmd(
+            store_type, tmp_local_list_storage_obj.name),
+                                      shell=True)
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
 
         # Check if tmp-file exists in the bucket/tmp-source using cli
-        out = subprocess.check_output(
-            self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name,
-                            'tmp-source/'))
+        out = subprocess.check_output(self.cli_ls_cmd(
+            store_type, tmp_local_list_storage_obj.name, 'tmp-source/'),
+                                      shell=True)
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))

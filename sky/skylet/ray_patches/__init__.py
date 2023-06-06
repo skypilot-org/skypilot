@@ -14,7 +14,7 @@ To get original versions, go to the Ray branch with version:
 
 Example workflow:
 
-  >> wget https://raw.githubusercontent.com/ray-project/ray/releases/2.0.1/python/ray/autoscaler/_private/command_runner.py
+  >> wget https://raw.githubusercontent.com/ray-project/ray/releases/2.4.0/python/ray/autoscaler/_private/command_runner.py
   >> cp command_runner.py command_runner.py.1
 
   >> # Make some edits to command_runner.py.1...
@@ -68,9 +68,6 @@ def patch() -> None:
 
     from ray.dashboard.modules.job import cli
     _run_patch(cli.__file__, _to_absolute('cli.py.patch'))
-
-    from ray.dashboard.modules.job import job_manager
-    _run_patch(job_manager.__file__, _to_absolute('job_manager.py.patch'))
 
     from ray.autoscaler._private import autoscaler
     _run_patch(autoscaler.__file__, _to_absolute('autoscaler.py.patch'))

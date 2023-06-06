@@ -260,6 +260,20 @@ class Azure(clouds.Cloud):
         }
 
     def get_feasible_launchable_resources(self, resources):
+
+        def failover_disk_tier(instance_type: str,
+                               disk_tier: Optional[str]) -> Optional[str]:
+            if disk_tier is None:
+                ok, _ = Azure.check_disk_tier(instance_type,
+                                              clouds.Cloud._DEFAULT_DISK_TIER)
+                if not ok:
+                    # Auto failover to low disk tier when disk tier
+                    # are not specified
+                    return 'low'
+            # The disk_tier specified by the user will be checked in the
+            # initialization of the Resources.
+            return disk_tier
+
         if resources.use_spot:
             # TODO(zhwu): our azure subscription offer ID does not support spot.
             # Need to support it.
@@ -267,23 +281,28 @@ class Azure(clouds.Cloud):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
-            resources = resources.copy(accelerators=None)
+            resources = resources.copy(
+                accelerators=None,
+                disk_tier=failover_disk_tier(resources.instance_type,
+                                             resources.disk_tier),
+            )
             return ([resources], [])
 
         def _make(instance_list):
             resource_list = []
             for instance_type in instance_list:
-                if Azure.check_disk_tier(instance_type, resources.disk_tier)[0]:
-                    r = resources.copy(
-                        cloud=Azure(),
-                        instance_type=instance_type,
-                        # Setting this to None as Azure doesn't separately bill /
-                        # attach the accelerators.  Billed as part of the VM type.
-                        accelerators=None,
-                        cpus=None,
-                        memory=None,
-                    )
-                    resource_list.append(r)
+                r = resources.copy(
+                    cloud=Azure(),
+                    instance_type=instance_type,
+                    disk_tier=failover_disk_tier(instance_type,
+                                                 resources.disk_tier),
+                    # Setting this to None as Azure doesn't separately bill /
+                    # attach the accelerators.  Billed as part of the VM type.
+                    accelerators=None,
+                    cpus=None,
+                    memory=None,
+                )
+                resource_list.append(r)
             return resource_list
 
         # Currently, handle a filter on accelerators only.

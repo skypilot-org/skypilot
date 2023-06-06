@@ -351,6 +351,7 @@ def down(cluster_name: str, purge: bool = False) -> None:
 
     Raises:
         ValueError: the specified cluster does not exist.
+        RuntimeError: failed to tear down the cluster.
         sky.exceptions.NotSupportedError: the specified cluster is the managed
           spot controller.
     """
@@ -523,13 +524,22 @@ def queue(cluster_name: str,
 
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def cancel(cluster_name: str,
-           all: bool = False,
-           job_ids: Optional[List[int]] = None) -> None:
+def cancel(
+    cluster_name: str,
+    all: bool = False,
+    job_ids: Optional[List[int]] = None,
+    # pylint: disable=invalid-name
+    _try_cancel_if_cluster_is_init: bool = False,
+) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel jobs on a cluster.
 
     Please refer to the sky.cli.cancel for the document.
+    Additional arguments:
+        _try_cancel_if_cluster_is_init: (bool) whether to try cancelling the job
+            even if the cluster is not UP, but the head node is still alive.
+            This is used by the spot controller to cancel the job when the
+            worker node is preempted in the spot cluster.
 
     Raises:
         ValueError: if arguments are invalid, or the cluster does not exist.
@@ -550,10 +560,23 @@ def cancel(cluster_name: str,
         cluster_name, operation_str='Cancelling jobs')
 
     # Check the status of the cluster.
-    handle = backend_utils.check_cluster_available(
-        cluster_name,
-        operation='cancelling jobs',
-    )
+    try:
+        handle = backend_utils.check_cluster_available(
+            cluster_name,
+            operation='cancelling jobs',
+        )
+    except exceptions.ClusterNotUpError as e:
+        if not _try_cancel_if_cluster_is_init:
+            raise
+        assert (e.handle is None or
+                isinstance(e.handle, backends.CloudVmRayResourceHandle)), e
+        if (e.handle is None or e.handle.head_ip is None):
+            raise
+        # Even if the cluster is not UP, we can still try to cancel the job if
+        # the head node is still alive. This is useful when a spot cluster's
+        # worker node is preempted, but we can still cancel the job on the head
+        # node.
+
     backend = backend_utils.get_backend_from_handle(handle)
 
     if all:

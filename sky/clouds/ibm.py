@@ -46,8 +46,8 @@ class IBM(clouds.Cloud):
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         del accelerators  # unused
-        assert use_spot is False, (
-            'current IBM implementation doesn\'t support spot instances')
+        if use_spot:
+            return []
         regions = service_catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'ibm')
 
