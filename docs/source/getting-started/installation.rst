@@ -22,7 +22,7 @@ Install SkyPilot using pip:
 
 SkyPilot currently supports these cloud providers: AWS, GCP, Azure, Lambda Cloud, IBM, SCP, OCI, and Cloudflare (for R2 object store).
 If you only have access to certain clouds, use any combination of
-:code:`"[aws,azure,gcp,lambda,cloudflare,scp]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
+the pip extras above (e.g., :code:`"[aws,gcp]"`) to reduce the
 dependencies installed.
 
 You may also install SkyPilot from source.
