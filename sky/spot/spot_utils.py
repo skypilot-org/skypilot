@@ -531,6 +531,15 @@ class SpotCodeGen:
         return cls._build(code)
 
     @classmethod
+    def set_pending_state(cls, job_id: int, name: str,
+                          resources_str: str) -> str:
+        code = [
+            f'spot_state.set_pending('
+            f'{job_id}, {name!r}, {resources_str!r})',
+        ]
+        return cls._build(code)
+
+    @classmethod
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)

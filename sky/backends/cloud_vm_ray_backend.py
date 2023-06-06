@@ -198,10 +198,7 @@ class RayCodeGen:
         #   job_id = get_output(run_on_cluster(code))
         self.job_id = None
 
-    def add_prologue(self,
-                     job_id: int,
-                     spot_task: Optional['task_lib.Task'] = None,
-                     is_local: bool = False) -> None:
+    def add_prologue(self, job_id: int, is_local: bool = False) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
@@ -275,14 +272,6 @@ class RayCodeGen:
         self._code += [
             f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
         ]
-        if spot_task is not None:
-            # Add the spot job to spot queue table.
-            resources_str = backend_utils.get_task_resources_str(spot_task)
-            self._code += [
-                'from sky.spot import spot_state',
-                f'spot_state.set_pending('
-                f'{job_id}, {spot_task.name!r}, {resources_str!r})',
-            ]
 
     def add_gang_scheduling_placement_group_and_setup(
         self,
@@ -2742,6 +2731,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_id: int,
         executable: str,
         detach_run: bool = False,
+        extra_cmd: Optional[str] = None,
     ) -> None:
         """Executes generated code on the head node."""
         style = colorama.Style
@@ -2790,6 +2780,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                           f'touch {remote_log_path}')
             code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
+            if extra_cmd is not None:
+                code = f'{code} && {extra_cmd}'
+
             job_submit_cmd = mkdir_code + ' && ' + code
 
         returncode, stdout, stderr = self.run_on_head(handle,
@@ -3892,6 +3885,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
 
+    @classmethod
+    def _maybe_set_spot_state_code(cls, job_id: int,
+                                   task: task_lib.Task) -> Optional[str]:
+        if task.spot_task is not None:
+            # Add the spot job to spot queue table.
+            resources_str = backend_utils.get_task_resources_str(task.spot_task)
+            codegen = spot_lib.SpotCodeGen()
+            code = codegen.set_spot_state(job_id, task.spot_task.name,
+                                          resources_str)
+            return code
+        return None
+
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
                                detach_run: bool) -> None:
@@ -3904,9 +3909,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
-        codegen.add_prologue(job_id,
-                             spot_task=task.spot_task,
-                             is_local=is_local)
+        codegen.add_prologue(job_id, is_local=is_local)
         codegen.add_gang_scheduling_placement_group_and_setup(
             1,
             accelerator_dict,
@@ -3946,7 +3949,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 executable='python3',
-                                detach_run=detach_run)
+                                detach_run=detach_run,
+                                extra_cmd=self._set_spot_state_code(
+                                    job_id, task))
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
@@ -3972,9 +3977,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
-        codegen.add_prologue(job_id,
-                             spot_task=task.spot_task,
-                             is_local=is_local)
+        codegen.add_prologue(job_id, is_local=is_local)
         codegen.add_gang_scheduling_placement_group_and_setup(
             num_actual_nodes,
             accelerator_dict,
@@ -4021,4 +4024,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 executable='python3',
-                                detach_run=detach_run)
+                                detach_run=detach_run,
+                                extra_cmd=self._set_spot_state_code(
+                                    job_id, task))
