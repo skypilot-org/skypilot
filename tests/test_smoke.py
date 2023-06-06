@@ -977,6 +977,16 @@ def test_large_job_queue(generic_cloud: str):
                 f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-{i} | grep PENDING'
                 for i in range(33, 75)
             ],
+            f'sky cancel -y {name} 33 35 37 39 17 18 19',
+            *[
+                f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-{i} | grep CANCELLED'
+                for i in range(33, 40, 2)
+            ],
+            'sleep 10',
+            *[
+                f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-{i} | grep RUNNING'
+                for i in [34, 36, 38]
+            ],
         ],
         f'sky down -y {name}',
         timeout=20 * 60,

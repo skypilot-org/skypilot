@@ -2746,8 +2746,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f'--submission-id {ray_job_id} --no-wait '
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
-            mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} &&'
-                          f'echo START > {remote_log_path} 2>&1')
+            mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
+                          f'touch {remote_log_path}')
             code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
             job_submit_cmd = mkdir_code + ' && ' + code
 
@@ -2762,7 +2762,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'{colorama.Fore.RED}SkyPilot runtime is stale on the '
-                    'remote cluster. To update run: sky launch -c '
+                    'remote cluster. To update, run: sky launch -c '
                     f'{handle.cluster_name}{colorama.Style.RESET_ALL}')
 
         subprocess_utils.handle_returncode(returncode,
