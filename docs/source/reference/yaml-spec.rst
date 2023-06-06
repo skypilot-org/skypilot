@@ -109,7 +109,8 @@ Available fields:
       # Docker support
       # You can specify docker image to use by setting the image_id to
       # `docker:<image name>` for Azure, AWS and GCP. For example,
-      #   image_id: docker:brymastr/ubuntu-rsync:latest
+      #   image_id: docker:ubuntu:latest
+      # Currently, only debian and ubuntu images are supported.
       #
       # AWS
       # To find AWS AMI ids: https://leaherb.com/how-to-find-an-aws-marketplace-ami-image-id
