@@ -140,7 +140,7 @@ class JobStatus(enum.Enum):
 # to avoid race condition with `ray job` to make sure it job has been
 # correctly updated.
 # TODO(zhwu): This number should be tuned based on heuristics.
-_PENDING_SUBMIT_TIMEOUT = 5
+_PENDING_SUBMIT_GRACE_PERIOD = 60
 
 _PRE_RESOURCE_STATUSES = [JobStatus.PENDING]
 
@@ -541,19 +541,21 @@ def update_job_status(job_owner: str,
             ray_status = job_details[ray_job_id].status
             job_statuses[i] = _RAY_TO_JOB_STATUS_MAP[ray_status]
         if job_id in pending_jobs:
-            # Gives a 5 second timeout between job being submit from the
-            # pending queue until appearing in ray jobs
-            if pending_jobs[job_id]['submit'] > 0 and pending_jobs[job_id][
-                    'submit'] < time.time() - _PENDING_SUBMIT_TIMEOUT:
-                continue
             if pending_jobs[job_id]['created_time'] < psutil.boot_time():
                 # The job is stale as it is created before the instance
                 # is booted, e.g. the instance is rebooted.
                 job_statuses[i] = JobStatus.FAILED
+            # Gives a 60 second grace period between job being submit from
+            # the pending table until appearing in ray jobs.
+            if (pending_jobs[job_id]['submit'] > 0 and
+                    pending_jobs[job_id]['submit'] <
+                    time.time() - _PENDING_SUBMIT_GRACE_PERIOD):
+                # For jobs submitted outside of the grace period, we will
+                # consider the ray job status.
+                continue
             else:
-                # Set the job status to PENDING even though the job can be
-                # in any later status, because the code will take the max
-                # of this status and the status in the jobs table.
+                # Reset the job status to PENDING even though it may not appear
+                # in the ray jobs, so that it will not be considered as stale.
                 job_statuses[i] = JobStatus.PENDING
 
     assert len(job_statuses) == len(job_ids), (job_statuses, job_ids)
