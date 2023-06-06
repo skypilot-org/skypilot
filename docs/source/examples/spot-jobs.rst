@@ -242,8 +242,8 @@ you can still tear it down manually with
 .. note::
   Tearing down the spot controller will lose all logs and status information for the spot jobs and can cause resource leakage when there are still in-progress spot jobs.
 
-Customize spot controller resources
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Customizing spot controller resources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Although the default setting works for most of people, you may want to customize the resources of the spot controller for the following reasons:
 

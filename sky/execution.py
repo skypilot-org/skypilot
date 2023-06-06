@@ -686,8 +686,9 @@ def spot_launch(
                                     output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
         assert len(controller_task.resources) == 1, controller_task
-        # Backward compatibility: if the user changed the spot-controller.yaml.j2
-        # to customize the controller resources, we should use it.
+        # Backward compatibility: if the user changed the
+        # spot-controller.yaml.j2 to customize the controller resources,
+        # we should use it.
         controller_task_resources = list(controller_task.resources)[0]
         if not controller_task_resources.is_same_resources(sky.Resources()):
             controller_resources = controller_task_resources
