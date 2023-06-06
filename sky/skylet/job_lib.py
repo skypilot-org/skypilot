@@ -170,10 +170,10 @@ class JobScheduler:
         jobs = self._get_jobs()
         if len(jobs) > 0:
             update_status(job_owner)
+        # TODO(zhwu, mraheja): One optimization can be allowing more than one
+        # job staying in the pending state after ray job submit, so that to be
+        # faster to schedule a large amount of jobs.
         for job_id, run_cmd, submit, _ in jobs:
-            # TODO(mraheja): remove pylint disabling when filelock
-            # version updated
-            # pylint: disable=abstract-class-instantiated
             with filelock.FileLock(_get_lock_path(job_id)):
                 status = get_status_no_lock(job_id)
                 if status not in _PRE_RESOURCE_STATUSES:

@@ -961,7 +961,7 @@ def test_large_job_queue(generic_cloud: str):
             f'sky launch -y -c {name} --cloud {generic_cloud}',
             f'for i in `seq 1 75`; do sky exec {name} -n {name}-$i -d "echo $i; sleep 100000000"; done',
             f'sky cancel -y {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
-            'sleep 60',
+            'sleep 70',
             # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.
             # The first 16 jobs are canceled, so there should be 75 - 32 = 43 jobs PENDING.
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep -v grep | grep PENDING | wc -l | grep 43',
@@ -983,6 +983,24 @@ def test_large_job_queue(generic_cloud: str):
         timeout=20 * 60,
     )
     run_one_test(test)
+
+@pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
+def test_fast_large_job_queue(generic_cloud: str):
+    # This is to test the jobs can be scheduled quickly when there are many jobs in the queue.
+    name = _get_cluster_name()
+    test = Test(
+        'fast_large_job_queue',
+        [
+            f'sky launch -y -c {name} --cloud {generic_cloud}',
+            f'for i in `seq 1 32`; do sky exec {name} -n {name}-$i -d "echo $i"; done',
+            'sleep 60',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep -v grep | grep SUCCEEDED | wc -l | grep 32',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
 
 
 @pytest.mark.ibm

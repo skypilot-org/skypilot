@@ -564,7 +564,8 @@ class RayCodeGen:
             if sum(returncodes) != 0:
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 # This waits for all streaming logs to finish.
-                time.sleep(1)
+                job_lib.scheduler.schedule_step()
+                time.sleep(0.5)
                 print('ERROR: {colorama.Fore.RED}Job {self.job_id} failed with '
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
@@ -577,7 +578,8 @@ class RayCodeGen:
                 sys.stderr.flush()
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
                 # This waits for all streaming logs to finish.
-                time.sleep(1)
+                job_lib.scheduler.schedule_step()
+                time.sleep(0.5)
             """)
         ]
 
