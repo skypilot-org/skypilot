@@ -298,6 +298,9 @@ class OCI(clouds.Cloud):
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
+        short_credential_help_str = (f'For more details, refer to: '
+                # pylint: disable=line-too-long
+                'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci')
         credential_help_str = (
             'To configure credentials, go to: '
             'https://docs.oracle.com/en-us/iaas/Content/API/Concepts/'
@@ -320,14 +323,15 @@ class OCI(clouds.Cloud):
             # pylint: disable=import-outside-toplevel,unused-import
             import oci
         except ImportError:
-            return False, ('`oci` is not installed. Install it with: '
-                           'pip install oci\n'
-                           f'{cls._INDENT_PREFIX}{credential_help_str}')
+            return False, (
+                '`oci` is not installed. Install it with: '
+                'pip install oci\n'
+                f'{cls._INDENT_PREFIX}{short_credential_help_str}')
 
         conf_file = oci_adaptor.get_config_file()
 
         help_str = (f'Missing credential file at {conf_file}. '
-                    f'{credential_help_str}')
+                    f'{short_credential_help_str}')
         if not os.path.isfile(os.path.expanduser(conf_file)):
             return (False, help_str)
 
