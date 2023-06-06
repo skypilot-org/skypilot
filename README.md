@@ -55,7 +55,7 @@ pip install "skypilot[aws,gcp,azure,ibm,oci,scp,lambda]"  # choose your clouds
 <p align="center">
   <picture>
     <a href="https://skypilot.readthedocs.io/en/latest/getting-started/installation.html">
-    <img alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/readme-cloud-logo/docs/source/images/cloud-logos.svg" width=80%></a>
+    <img alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos.svg" width=80%></a>
   </picture>
 </p>
 
