@@ -73,6 +73,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.Lambda: 150,
     clouds.IBM: 160,
     clouds.Local: 90,
+    clouds.OCI: 300,
 }
 
 # Time gap between retries after failing to provision in all possible places.
@@ -118,6 +119,9 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
     pathlib.Path(sky.__file__).resolve().parent / 'backends' /
     'monkey_patches' / 'monkey_patch_ray_up.py')
 
+# Restart skylet when the version does not match to keep the skylet up-to-date.
+_MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
+
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
@@ -128,6 +132,7 @@ def _get_cluster_config_template(cloud):
         clouds.IBM: 'ibm-ray.yml.j2',
         clouds.Local: 'local-ray.yml.j2',
         clouds.SCP: 'scp-ray.yml.j2',
+        clouds.OCI: 'oci-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
 
@@ -196,13 +201,11 @@ class RayCodeGen:
     def add_prologue(self,
                      job_id: int,
                      spot_dag: Optional['dag.Dag'] = None,
-                     setup_cmd: Optional[str] = None,
-                     envs: Optional[Dict[str, str]] = None,
-                     setup_log_path: Optional[str] = None,
                      is_local: bool = False) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
+        self.is_local = is_local
         # Should use 'auto' or 'ray://<internal_head_ip>:10001' rather than
         # 'ray://localhost:10001', or 'ray://127.0.0.1:10001', for public cloud.
         # Otherwise, ray will fail to get the placement group because of a bug
@@ -258,7 +261,6 @@ class RayCodeGen:
             inspect.getsource(log_lib.add_ray_env_vars),
             inspect.getsource(log_lib.run_bash_command_with_log),
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
-            f'setup_cmd = {setup_cmd!r}',
         ]
         # Currently, the codegen program is/can only be submitted to the head
         # node, due to using job_lib for updating job statuses, and using
@@ -270,46 +272,6 @@ class RayCodeGen:
               if hasattr(autostop_lib, 'set_last_active_time_to_now'):
                   autostop_lib.set_last_active_time_to_now()
             """))
-        if setup_cmd is not None:
-            self._code += [
-                textwrap.dedent(f"""\
-                _SETUP_CPUS = 0.0001
-                # The setup command will be run as a ray task with num_cpus=_SETUP_CPUS as the
-                # requirement; this means Ray will set CUDA_VISIBLE_DEVICES to an empty string.
-                # We unset it so that user setup command may properly use this env var.
-                setup_cmd = 'unset CUDA_VISIBLE_DEVICES; ' + setup_cmd
-                job_lib.set_status({job_id!r}, job_lib.JobStatus.SETTING_UP)
-                print({_CTRL_C_TIP_MESSAGE!r}, file=sys.stderr, flush=True)
-                total_num_nodes = len(ray.nodes())
-                setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
-                setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
-                ray.get(setup_pg.ready())
-                setup_workers = [run_bash_command_with_log \\
-                    .options(name='setup', num_cpus=_SETUP_CPUS, placement_group=setup_pg, placement_group_bundle_index=i) \\
-                    .remote(
-                        setup_cmd,
-                        os.path.expanduser({setup_log_path!r}),
-                        getpass.getuser(),
-                        job_id={self.job_id},
-                        env_vars={envs!r},
-                        stream_logs=True,
-                        with_ray=True,
-                        use_sudo={is_local},
-                    ) for i in range(total_num_nodes)]
-                setup_returncodes = ray.get(setup_workers)
-                if sum(setup_returncodes) != 0:
-                    job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
-                    # This waits for all streaming logs to finish.
-                    time.sleep(1)
-                    print('ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with '
-                        'return code list:{colorama.Style.RESET_ALL}',
-                        setup_returncodes,
-                        file=sys.stderr,
-                        flush=True)
-                    # Need this to set the job status in ray job to be FAILED.
-                    sys.exit(1)
-                """)
-            ]
         self._code += [
             f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
         ]
@@ -329,11 +291,14 @@ class RayCodeGen:
                     f'{resources_str!r})',
                 ]
 
-    def add_gang_scheduling_placement_group(
+    def add_gang_scheduling_placement_group_and_setup(
         self,
         num_nodes: int,
         accelerator_dict: Optional[Dict[str, float]],
         stable_cluster_internal_ips: List[str],
+        setup_cmd: Optional[str] = None,
+        setup_log_path: Optional[str] = None,
+        envs: Optional[Dict[str, str]] = None,
     ) -> None:
         """Create the gang scheduling placement group for a Task.
 
@@ -341,8 +306,9 @@ class RayCodeGen:
         variable is assigned in a deterministic order whenever a new task is
         added.
         """
-        assert self._has_prologue, ('Call add_prologue() before '
-                                    'add_gang_scheduling_placement_group().')
+        assert self._has_prologue, (
+            'Call add_prologue() before '
+            'add_gang_scheduling_placement_group_and_setup().')
         self._has_gang_scheduling = True
         self._num_nodes = num_nodes
 
@@ -375,7 +341,7 @@ class RayCodeGen:
                 plural = 's' if {num_nodes} > 1 else ''
                 node_str = f'{num_nodes} node{{plural}}'
 
-                message = '' if setup_cmd is not None else {_CTRL_C_TIP_MESSAGE!r} + '\\n'
+                message = {_CTRL_C_TIP_MESSAGE!r} + '\\n'
                 message += f'INFO: Waiting for task resources on {{node_str}}. This will block if the cluster is full.'
                 print(message,
                       file=sys.stderr,
@@ -387,9 +353,61 @@ class RayCodeGen:
                 print('INFO: All task resources reserved.',
                       file=sys.stderr,
                       flush=True)
-                job_lib.set_job_started({self.job_id!r})
                 """)
         ]
+
+        job_id = self.job_id
+        if setup_cmd is not None:
+            self._code += [
+                textwrap.dedent(f"""\
+                setup_cmd = {setup_cmd!r}
+                _SETUP_CPUS = 0.0001
+                # The setup command will be run as a ray task with num_cpus=_SETUP_CPUS as the
+                # requirement; this means Ray will set CUDA_VISIBLE_DEVICES to an empty string.
+                # We unset it so that user setup command may properly use this env var.
+                setup_cmd = 'unset CUDA_VISIBLE_DEVICES; ' + setup_cmd
+                job_lib.set_status({job_id!r}, job_lib.JobStatus.SETTING_UP)
+
+                # The schedule_step should be called after the job status is set to non-PENDING,
+                # otherwise, the scheduler will think the current job is not submitted yet, and
+                # skip the scheduling step.
+                job_lib.scheduler.schedule_step()
+
+                total_num_nodes = len(ray.nodes())
+                setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
+                setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
+                setup_workers = [run_bash_command_with_log \\
+                    .options(name='setup', num_cpus=_SETUP_CPUS, placement_group=setup_pg, placement_group_bundle_index=i) \\
+                    .remote(
+                        setup_cmd,
+                        os.path.expanduser({setup_log_path!r}),
+                        getpass.getuser(),
+                        job_id={self.job_id},
+                        env_vars={envs!r},
+                        stream_logs=True,
+                        with_ray=True,
+                        use_sudo={self.is_local},
+                    ) for i in range(total_num_nodes)]
+                setup_returncodes = ray.get(setup_workers)
+                if sum(setup_returncodes) != 0:
+                    job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
+                    # This waits for all streaming logs to finish.
+                    time.sleep(1)
+                    print('ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with '
+                        'return code list:{colorama.Style.RESET_ALL}',
+                        setup_returncodes,
+                        file=sys.stderr,
+                        flush=True)
+                    # Need this to set the job status in ray job to be FAILED.
+                    sys.exit(1)
+                """)
+            ]
+
+        self._code.append(f'job_lib.set_job_started({self.job_id!r})')
+        if setup_cmd is None:
+            # Need to call schedule_step() to make sure the scheduler
+            # schedule the next pending job.
+            self._code.append('job_lib.scheduler.schedule_step()')
 
         # Export IP and node rank to the environment variables.
         self._code += [
@@ -419,7 +437,7 @@ class RayCodeGen:
             run_fn: The run function to be run on the remote cluster.
         """
         assert self._has_gang_scheduling, (
-            'Call add_gang_scheduling_placement_group() '
+            'Call add_gang_scheduling_placement_group_and_setup() '
             'before register_run_fn().')
         assert not self._has_register_run_fn, (
             'register_run_fn() called twice?')
@@ -441,7 +459,8 @@ class RayCodeGen:
                      use_sudo: bool = False) -> None:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_gang_scheduling, (
-            'Call add_gang_scheduling_placement_group() before add_ray_task().')
+            'Call add_gang_scheduling_placement_group_and_setup() before '
+            'add_ray_task().')
         assert (not self._has_register_run_fn or
                 bash_script is None), ('bash_script should '
                                        'be None when run_fn is registered.')
@@ -554,7 +573,8 @@ class RayCodeGen:
             if sum(returncodes) != 0:
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 # This waits for all streaming logs to finish.
-                time.sleep(1)
+                job_lib.scheduler.schedule_step()
+                time.sleep(0.5)
                 print('ERROR: {colorama.Fore.RED}Job {self.job_id} failed with '
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
@@ -567,7 +587,8 @@ class RayCodeGen:
                 sys.stderr.flush()
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
                 # This waits for all streaming logs to finish.
-                time.sleep(1)
+                job_lib.scheduler.schedule_step()
+                time.sleep(0.5)
             """)
         ]
 
@@ -963,6 +984,44 @@ class RetryingVmProvisioner(object):
         self._blocked_resources.add(
             launchable_resources.copy(region=region.name, zone=None))
 
+    # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
+    def _update_blocklist_on_oci_error(
+            self, launchable_resources: 'resources_lib.Resources',
+            region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
+            stdout: str, stderr: str):
+
+        style = colorama.Style
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits + stderr_splits
+            if ('VcnSubnetNotFound' in s.strip()) or
+            ('oci.exceptions.ServiceError' in s.strip() and
+             ('NotAuthorizedOrNotFound' in s.strip() or 'CannotParseRequest' in
+              s.strip() or 'InternalError' in s.strip() or
+              'LimitExceeded' in s.strip() or 'NotAuthenticated' in s.strip()))
+        ]
+        if not errors:
+            logger.info('====== stdout ======')
+            for s in stdout_splits:
+                print(s)
+            logger.info('====== stderr ======')
+            for s in stderr_splits:
+                print(s)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Errors occurred during provision; '
+                                   'check logs above.')
+
+        logger.warning(f'Got error(s) in {region.name}:')
+        messages = '\n\t'.join(errors)
+        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
+
+        if zones is not None:
+            for zone in zones:
+                self._blocked_resources.add(
+                    launchable_resources.copy(zone=zone.name))
+
     def _update_blocklist_on_error(
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
@@ -1000,6 +1059,7 @@ class RetryingVmProvisioner(object):
             clouds.IBM: self._update_blocklist_on_ibm_error,
             clouds.SCP: self._update_blocklist_on_scp_error,
             clouds.Local: self._update_blocklist_on_local_error,
+            clouds.OCI: self._update_blocklist_on_oci_error,
         }
         cloud = launchable_resources.cloud
         cloud_type = type(cloud)
@@ -1764,7 +1824,7 @@ class RetryingVmProvisioner(object):
 
         returncode = backend.run_on_head(
             handle,
-            'ray status',
+            backend_utils.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
             # At this state, an erroneous cluster may not have cached
             # handle.head_ip (global_user_state.add_or_update_cluster(...,
             # ready=True)).
@@ -2461,6 +2521,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             global_user_state.ClusterStatus.UP)
 
+        # For backward compatability and robustness of skylet, it is restarted
+        with log_utils.safe_rich_status('Updating remote skylet'):
+            self.run_on_head(
+                handle,
+                _MAYBE_SKYLET_RESTART_CMD,
+                use_cached_head_ip=False,
+            )
+
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.
         if prev_cluster_status == global_user_state.ClusterStatus.INIT:
@@ -2721,15 +2789,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             job_submit_cmd = (
                 'RAY_DASHBOARD_PORT=$(python -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
-                f'{cd} && mkdir -p {remote_log_dir} && ray job submit '
+                f'{cd} && ray job submit '
                 '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
                 f'--submission-id {ray_job_id} --no-wait '
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
+
+            mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
+                          f'touch {remote_log_path}')
+            code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
+            job_submit_cmd = mkdir_code + ' && ' + code
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
                                                       stream_logs=False,
                                                       require_outputs=True)
+
+        if 'has no attribute' in stdout:
+            # Happens when someone calls `sky exec` but remote is outdated
+            # necessicating calling `sky launch`
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'{colorama.Fore.RED}SkyPilot runtime is stale on the '
+                    'remote cluster. To update, run: sky launch -c '
+                    f'{handle.cluster_name}{colorama.Style.RESET_ALL}')
+
         subprocess_utils.handle_returncode(returncode,
                                            job_submit_cmd,
                                            f'Failed to submit job {job_id}.',
@@ -3254,6 +3337,24 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 stdout = ''
                 stderr = str(e)
 
+        # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
+        # May, 2023 by Hysun: Allow terminate INIT cluster which may have
+        # some instances provisioning in backgroud but not completed.
+        elif (isinstance(cloud, clouds.OCI) and terminate and
+              prev_cluster_status in (global_user_state.ClusterStatus.STOPPED,
+                                      global_user_state.ClusterStatus.INIT)):
+            region = config['provider']['region']
+
+            # pylint: disable=import-outside-toplevel
+            from sky.skylet.providers.oci.query_helper import oci_query_helper
+            from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
+
+            # 0: All terminated successfully, failed count otherwise
+            returncode = oci_query_helper.terminate_instances_by_tags(
+                {TAG_RAY_CLUSTER_NAME: cluster_name}, region)
+
+            # To avoid undefined local varaiables error.
+            stdout = stderr = ''
         elif (terminate and
               (prev_cluster_status == global_user_state.ClusterStatus.STOPPED or
                use_tpu_vm)):
@@ -3811,13 +3912,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id,
-                             spot_dag=task.spot_dag,
-                             setup_cmd=self._setup_cmd,
-                             envs=task.envs,
-                             setup_log_path=os.path.join(log_dir, 'setup.log'),
+                             spot_task=task.spot_dag,
                              is_local=is_local)
-        codegen.add_gang_scheduling_placement_group(
-            1, accelerator_dict, stable_cluster_internal_ips=internal_ips)
+        codegen.add_gang_scheduling_placement_group_and_setup(
+            1,
+            accelerator_dict,
+            stable_cluster_internal_ips=internal_ips,
+            setup_cmd=self._setup_cmd,
+            setup_log_path=os.path.join(log_dir, 'setup.log'),
+            envs=task.envs,
+        )
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
@@ -3876,15 +3980,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id,
-                             spot_dag=task.spot_dag,
-                             setup_cmd=self._setup_cmd,
-                             envs=task.envs,
-                             setup_log_path=os.path.join(log_dir, 'setup.log'),
+                             spot_task=task.spot_dag,
                              is_local=is_local)
-        codegen.add_gang_scheduling_placement_group(
+        codegen.add_gang_scheduling_placement_group_and_setup(
             num_actual_nodes,
             accelerator_dict,
-            stable_cluster_internal_ips=internal_ips)
+            stable_cluster_internal_ips=internal_ips,
+            setup_cmd=self._setup_cmd,
+            setup_log_path=os.path.join(log_dir, 'setup.log'),
+            envs=task.envs)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))

@@ -139,6 +139,12 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
 
+# Command that calls `ray status` with SkyPilot's Ray port set.
+RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
+    'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
+    'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
+    'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
+
 
 def is_ip(s: str) -> bool:
     """Returns whether this string matches IP_ADDR_REGEX."""
@@ -860,12 +866,10 @@ def write_cluster_config(
                              f'be a dict, but received {type(instance_tags)}.')
 
     # Dump the Ray ports to a file for Ray job submission
-    ray_port = constants.SKY_REMOTE_RAY_PORT
-    ray_dashboard_port = constants.SKY_REMOTE_RAY_DASHBOARD_PORT
-    # Note we can not use json.dumps which will add a space between ":" and its value
-    # which causes the yaml parser to fail.
-    port_dict_str = f'{{"ray_port":{ray_port}, "ray_dashboard_port":{ray_dashboard_port}}}'
-    dump_port_command = f'python -c \'import json, os; json.dump({port_dict_str}, open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
+    dump_port_command = (
+        f'python -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
+        f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
+    )
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
@@ -911,8 +915,8 @@ def write_cluster_config(
 
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
-                'ray_port': ray_port,
-                'ray_dashboard_port': ray_dashboard_port,
+                'ray_port': constants.SKY_REMOTE_RAY_PORT,
+                'ray_dashboard_port': constants.SKY_REMOTE_RAY_DASHBOARD_PORT,
                 'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
                 'dump_port_command': dump_port_command,
                 # Ray version.
@@ -1031,6 +1035,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_ibm_authentication(config)
     elif isinstance(cloud, clouds.SCP):
         config = auth.setup_scp_authentication(config)
+    elif isinstance(cloud, clouds.OCI):
+        config = auth.setup_oci_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
@@ -1109,11 +1115,12 @@ def wait_until_ray_cluster_ready(
     with log_utils.console.status(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
-            rc, output, stderr = runner.run('ray status',
-                                            log_path=log_path,
-                                            stream_logs=False,
-                                            require_outputs=True,
-                                            separate_stderr=True)
+            rc, output, stderr = runner.run(
+                RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                log_path=log_path,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
             subprocess_utils.handle_returncode(
                 rc, 'ray status', 'Failed to run ray status on head node.',
                 stderr)
@@ -1854,6 +1861,43 @@ def _query_status_scp(
     return status_list
 
 
+#Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
+def _query_status_oci(
+        cluster: str,
+        ray_config: Dict[str, Any],  # pylint: disable=unused-argument
+) -> List[global_user_state.ClusterStatus]:
+    region = ray_config['provider']['region']
+
+    # Check the lifecycleState definition from the page
+    # https://docs.oracle.com/en-us/iaas/api/#/en/iaas/latest/Instance/
+    status_map = {
+        'PROVISIONING': global_user_state.ClusterStatus.INIT,
+        'STARTING': global_user_state.ClusterStatus.INIT,
+        'RUNNING': global_user_state.ClusterStatus.UP,
+        'STOPPING': global_user_state.ClusterStatus.STOPPED,
+        'STOPPED': global_user_state.ClusterStatus.STOPPED,
+        'TERMINATED': None,
+        'TERMINATING': None,
+    }
+
+    # pylint: disable=import-outside-toplevel
+    from sky.skylet.providers.oci.query_helper import oci_query_helper
+    from ray.autoscaler.tags import (
+        TAG_RAY_CLUSTER_NAME,)
+
+    status_list = []
+    vms = oci_query_helper.query_instances_by_tags(
+        tag_filters={TAG_RAY_CLUSTER_NAME: cluster}, region=region)
+    for node in vms:
+        vm_status = node.lifecycle_state
+        if vm_status in status_map:
+            sky_status = status_map[vm_status]
+            if sky_status is not None:
+                status_list.append(sky_status)
+
+    return status_list
+
+
 _QUERY_STATUS_FUNCS = {
     'AWS': _query_status_aws,
     'GCP': _query_status_gcp,
@@ -1861,6 +1905,7 @@ _QUERY_STATUS_FUNCS = {
     'Lambda': _query_status_lambda,
     'IBM': _query_status_ibm,
     'SCP': _query_status_scp,
+    'OCI': _query_status_oci,
 }
 
 
@@ -1968,7 +2013,7 @@ def _update_cluster_status_no_lock(
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
         runner = command_runner.SSHCommandRunner(external_ips[0],
                                                  **ssh_credentials)
-        rc, output, _ = runner.run('ray status',
+        rc, output, _ = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                                    stream_logs=False,
                                    require_outputs=True,
                                    separate_stderr=True)

@@ -263,6 +263,7 @@ def _execute(
         task.sync_storage_mounts()
 
     try:
+
         if Stage.PROVISION in stages:
             if handle is None:
                 handle = backend.provision(task,

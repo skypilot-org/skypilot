@@ -595,7 +595,7 @@ def test_aws_stale_job_manual_restart():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
-            f'sleep {events.JobUpdateEvent.EVENT_INTERVAL_SECONDS}',
+            f'sleep {events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS}',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
         ],
         f'sky down -y {name}',
@@ -624,7 +624,7 @@ def test_gcp_stale_job_manual_restart():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
-            f'sleep {events.JobUpdateEvent.EVENT_INTERVAL_SECONDS}',
+            f'sleep {events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS}',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
         ],
         f'sky down -y {name}',
@@ -815,6 +815,7 @@ def test_scp_logs():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus. run test_ibm_job_queue instead
 @pytest.mark.no_scp  # SCP does not have K80 gpus. Run test_scp_job_queue instead
+@pytest.mark.no_oci  # OCI does not have K80 gpus
 def test_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -915,6 +916,7 @@ def test_scp_job_queue():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue_multinode instead
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
 def test_job_queue_multinode(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -926,16 +928,16 @@ def test_job_queue_multinode(generic_cloud: str):
             f'sky launch -c {name} -n {name}-3 --detach-setup -d examples/job_queue/job_multinode.yaml',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-1 | grep RUNNING)',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-2 | grep RUNNING)',
-            f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-3 | grep SETTING_UP)',
-            'sleep 90',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-3 | grep PENDING)',
+            'sleep 90',
             f'sky cancel -y {name} 1',
             'sleep 5',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep SETTING_UP',
             f'sky cancel -y {name} 1 2 3',
             f'sky launch -c {name} -n {name}-4 --detach-setup -d examples/job_queue/job_multinode.yaml',
             # Test the job status is correctly set to SETTING_UP, during the setup is running,
             # and the job can be cancelled during the setup.
+            'sleep 5',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-4 | grep SETTING_UP)',
             f'sky cancel -y {name} 4',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-4 | grep CANCELLED)',
@@ -958,12 +960,53 @@ def test_large_job_queue(generic_cloud: str):
         'large_job_queue',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud}',
-            f'for i in `seq 1 75`; do sky exec {name} -d "echo $i; sleep 100000000"; done',
+            f'for i in `seq 1 75`; do sky exec {name} -n {name}-$i -d "echo $i; sleep 100000000"; done',
             f'sky cancel -y {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
-            'sleep 20',
+            'sleep 70',
             # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.
             # The first 16 jobs are canceled, so there should be 75 - 32 = 43 jobs PENDING.
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep -v grep | grep PENDING | wc -l | grep 43',
+            # Make sure the jobs are scheduled in FIFO order
+            *[
+                f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-{i} | grep CANCELLED'
+                for i in range(1, 17)
+            ],
+            *[
+                f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-{i} | grep RUNNING'
+                for i in range(17, 33)
+            ],
+            *[
+                f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-{i} | grep PENDING'
+                for i in range(33, 75)
+            ],
+            f'sky cancel -y {name} 33 35 37 39 17 18 19',
+            *[
+                f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-{i} | grep CANCELLED'
+                for i in range(33, 40, 2)
+            ],
+            'sleep 10',
+            *[
+                f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-{i} | grep RUNNING'
+                for i in [34, 36, 38]
+            ],
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
+def test_fast_large_job_queue(generic_cloud: str):
+    # This is to test the jobs can be scheduled quickly when there are many jobs in the queue.
+    name = _get_cluster_name()
+    test = Test(
+        'fast_large_job_queue',
+        [
+            f'sky launch -y -c {name} --cloud {generic_cloud}',
+            f'for i in `seq 1 32`; do sky exec {name} -n {name}-$i -d "echo $i"; done',
+            'sleep 60',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep -v grep | grep SUCCEEDED | wc -l | grep 32',
         ],
         f'sky down -y {name}',
         timeout=20 * 60,
@@ -1013,6 +1056,7 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_oci  # OCI Cloud does not have K80 gpus
 def test_multi_echo(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1153,6 +1197,7 @@ def test_multi_hostname(generic_cloud: str):
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} examples/multi_hostname.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky logs {name} 1 | grep "My hostname:" | wc -l | grep 2',  # Ensure there are 2 hosts.
             f'sky exec {name} examples/multi_hostname.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
@@ -1921,6 +1966,7 @@ def test_azure_start_stop_two_nodes():
 
 
 # ---------- Testing env for disk tier ----------
+@pytest.mark.aws
 def test_aws_disk_tier():
 
     def _get_aws_query_command(region, instance_id, field, expected):
@@ -1954,6 +2000,7 @@ def test_aws_disk_tier():
         run_one_test(test)
 
 
+@pytest.mark.gcp
 def test_gcp_disk_tier():
     for disk_tier in ['low', 'medium', 'high']:
         type = GCP._get_disk_type(disk_tier)
@@ -1975,6 +2022,7 @@ def test_gcp_disk_tier():
         run_one_test(test)
 
 
+@pytest.mark.azure
 def test_azure_disk_tier():
     for disk_tier in ['low', 'medium']:
         type = Azure._get_disk_type(disk_tier)
@@ -1993,6 +2041,24 @@ def test_azure_disk_tier():
             timeout=20 * 60,  # 20 mins  (it takes around ~12 mins)
         )
         run_one_test(test)
+
+
+# ------- Testing user ray cluster --------
+def test_user_ray_cluster():
+    name = _get_cluster_name()
+    test = Test(
+        'user-ray-cluster',
+        [
+            f'sky launch -y -c {name} "ray start --head"',
+            f'sky exec {name} "echo hi"',
+            f'sky logs {name} 1 --status',
+            f'sky status -r | grep {name} | grep UP',
+            f'sky exec {name} "echo bye"',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
 
 
 # ------- Testing the core API --------

@@ -61,6 +61,7 @@ def _make_resources(
         prefix='tmp_backup_config_default', delete=False)
     monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
                         config_file_backup.name)
+    monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
 
     # Should create Resources here, since it uses the enabled clouds.
     return sky.Resources(*resources_args, **resources_kwargs)
@@ -437,7 +438,7 @@ def test_invalid_image(monkeypatch):
 
     with pytest.raises(ValueError) as e:
         _test_resources(monkeypatch, cloud=sky.Azure(), image_id='some-image')
-    assert 'only supported for AWS, GCP and IBM' in str(e.value)
+    assert 'only supported for AWS/GCP/IBM/OCI' in str(e.value)
 
 
 def test_valid_image(monkeypatch):

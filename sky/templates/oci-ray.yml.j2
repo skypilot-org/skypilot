@@ -5,65 +5,49 @@ max_workers: {{num_nodes - 1}}
 upscaling_speed: {{num_nodes - 1}}
 idle_timeout_minutes: 60
 
-
 provider:
   type: external
-  module: sky.skylet.providers.ibm.IBMVPCNodeProvider
+  module: sky.skylet.providers.oci.OCINodeProvider
   region: {{region}}
-  availability_zone: {{zones}}
-  # Keep (otherwise cannot reuse when re-provisioning).
-  # teardown(terminate=True) will override this.
   cache_stopped_nodes: True
-  iam_api_key: {{iam_api_key}}
-  resource_group_id: {{resource_group_id}}
-  # Disable launch config check for worker nodes as it can cause resource
-  # leakage.
-  # Reference: https://github.com/ray-project/ray/blob/cd1ba65e239360c8a7b130f991ed414eccc063ce/python/ray/autoscaler/_private/autoscaler.py#L1115
-  # The upper-level SkyPilot code has make sure there will not be resource
-  # leakage.
-  disable_launch_config_check: true
 
 auth:
   ssh_user: ubuntu
   ssh_private_key: {{ssh_private_key}}
 
-
 available_node_types:
   ray_head_default:
-    resources: {{instance_resources}}
+    resources: {}
     node_config:
-      image_id: {{image_id}}  
-      boot_volume_capacity: {{disk_capacity}}
-      volume_tier_name: general-purpose
-      instance_profile_name: {{instance_type}}
-
-      {% if use_spot %}
-      InstanceMarketOptions:
-          MarketType: spot
-
-      {% endif %}
+      InstanceType: {{instance_type}}
+      VCPUs: {{cpus}}
+      MemoryInGbs: {{memory}}
+      AvailabilityDomain: {{zone}}
+      ImageId: {{image}}
+      AppCatalogListingId: {{app_catalog_listing_id}}
+      ResourceVersion: {{resource_version}}
+      Preemptible: {{use_spot}}
+      AuthorizedKey: {{ssh_public_key}}
 {% if num_nodes > 1 %}
   ray_worker_default:
     min_workers: {{num_nodes - 1}}
     max_workers: {{num_nodes - 1}}
-    resources: {{worker_instance_resources}}
+    resources: {}
     node_config:
-      image_id: {{image_id}} 
-      boot_volume_capacity: {{disk_capacity}}
-      volume_tier_name: general-purpose
-      instance_profile_name: {{worker_instance_type}}
-
-      {% if use_spot %}
-      InstanceMarketOptions:
-          MarketType: spot
-
-      {% endif %}
+      InstanceType: {{instance_type}}
+      VCPUs: {{cpus}}
+      MemoryInGbs: {{memory}}
+      AvailabilityDomain: {{zone}}
+      ImageId: {{image}}
+      AppCatalogListingId: {{app_catalog_listing_id}}
+      ResourceVersion: {{resource_version}}
+      Preemptible: {{use_spot}}
+      AuthorizedKey: {{ssh_public_key}}
 {%- endif %}
 
 head_node_type: ray_head_default
 
-
-{# Format: `REMOTE_PATH : LOCAL_PATH` #}
+# Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
   "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
   "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
@@ -84,10 +68,9 @@ initialization_commands: []
 # Increment the following for catching performance bugs easier:
 #   current num items (num SSH connections): 1
 setup_commands:
-  # Create ~/.ssh/config file in case the file does not exist in the custom image.
-  # Make sure python3 & pip3 are available on this image.
-  # We set auto_activate_base to be false for pre-installed conda.
-  # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
+  # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
+  # Create ~/.ssh/config file in case the file does not exist in the image.
+  # Line 'rm ..': there is another installation of pip.
   # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
@@ -99,20 +82,22 @@ setup_commands:
     sudo pkill -9 apt-get;
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
+    ([ `sudo lshw -class display | grep "NVIDIA Corporation" | wc -l` -gt 0 ]) && (sudo which nvidia-smi > /dev/null || ( sudo apt-get install nvidia-driver-530-open -y && sudo apt-get install nvidia-driver-525-server -y ) || true);
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
-    (which conda > /dev/null 2>&1 && conda init > /dev/null && conda config --set auto_activate_base false) || (wget -nc https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b && eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true);
+    which conda > /dev/null 2>&1 || (wget -nc https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b && eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true);
     source ~/.bashrc;
-    (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
-    (pip3 list | grep skypilot && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[ibm]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
+    pip3 install oci;
+    (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful;
+    (pip3 list | grep skypilot && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
-    [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
-
+    [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
+    sudo iptables -I INPUT -i ens3 -m state --state ESTABLISHED,RELATED,NEW -j ACCEPT;
 
 # Command to start ray on the head node. You don't need to change this.
 # NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
@@ -120,7 +105,7 @@ setup_commands:
 # items! The same comment applies for worker_start_ray_commands.
 #
 # Increment the following for catching performance bugs easier:
-#   current num items (num SSH connections): 1
+#   current num items (num SSH connections): 2
 head_start_ray_commands:
   # Start skylet daemon. (Should not place it in the head_setup_commands, otherwise it will run before sky is installed.)
   # NOTE: --disable-usage-stats in `ray start` saves 10 seconds of idle wait.

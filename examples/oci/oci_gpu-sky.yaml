@@ -1,0 +1,29 @@
+name: cpu-task
+
+resources:
+  # Optional; if left out, automatically pick the cheapest cloud.
+  cloud: oci
+
+  region: ap-seoul-1
+  
+  zone: bxtG:AP-SEOUL-1-AD-1
+  
+  instance_type: VM.GPU.A10.1
+
+  image_id: skypilot:oci-ubuntu-NVIDIA-VMI-20_04
+
+# Working directory (optional) containing the project codebase.
+# Its contents are synced to ~/sky_workdir/ on the cluster.
+workdir: .
+
+num_nodes: 1
+
+# Typical use: pip install -r requirements.txt
+# Invoked under the workdir (i.e., can use its files).
+setup: |
+  echo "*** Running setup. ***"
+
+# Typical use: make use of resources, such as running training.
+# Invoked under the workdir (i.e., can use its files).
+run: |
+  echo "*** Hello, SkyPilot for OCI ***"
