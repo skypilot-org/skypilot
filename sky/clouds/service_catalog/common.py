@@ -353,8 +353,8 @@ def get_instance_type_for_cpus_mem_impl(
     df = _filter_with_mem(df, memory_gb_or_ratio)
     if df.empty:
         return None
-    # Sort by the number of vCPUs and then by the price.
-    df = df.sort_values(by=['vCPUs', 'Price'], ascending=True)
+    # Sort by the price.
+    df = df.sort_values(by=['Price'], ascending=True)
     return df['InstanceType'].iloc[0]
 
 
