@@ -252,7 +252,7 @@ You may customize the resources of the spot controller for the following reasons
 3. Changing the disk_size of the spot controller to store more logs. (Default: 50GB)
 4. Using a specific instance type for the spot controller. (Default: choose automatically)
 
-To achieve the above goals, you can specify the configs in the :code:`~/.sky/skypilot_config.yaml` with the following fields (the :code:`resources` field has the same spec as a normal SkyPilot job, see `here <https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html>`_):
+To achieve the above, you can specify custom configs in :code:`~/.sky/skypilot_config.yaml` with the following fields (the :code:`resources` field has the same spec as a normal SkyPilot job; see `here <https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html>`_):
 
 .. code-block:: yaml
 
