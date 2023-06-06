@@ -131,7 +131,7 @@ To access IBM's services, store the following fields in ``~/.ibm/credentials.yam
 Oracle Cloud Infrastructure (OCI)
 ~~~~~~~~~
 
-To access OCI, setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`_. The :code:`~/.oci` folder should contain the following files:
+To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`_. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
 
 .. code-block:: text
 
