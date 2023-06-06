@@ -173,11 +173,13 @@ class JobScheduler:
         # TODO(zhwu, mraheja): One optimization can be allowing more than one
         # job staying in the pending state after ray job submit, so that to be
         # faster to schedule a large amount of jobs.
-        for job_id, run_cmd, submit, _ in jobs:
+        for job_id, run_cmd, submit, created_time in jobs:
             with filelock.FileLock(_get_lock_path(job_id)):
                 status = get_status_no_lock(job_id)
-                if status not in _PRE_RESOURCE_STATUSES:
-                    # Job doesn't exist or is running/cancelled
+                if (status not in _PRE_RESOURCE_STATUSES or
+                        created_time < psutil.boot_time()):
+                    # Job doesn't exist, is running/cancelled, or created
+                    # before the last reboot.
                     self.remove_job_no_lock(job_id)
                     continue
                 if submit:
@@ -546,7 +548,7 @@ def update_job_status(job_owner: str,
                 continue
             if pending_jobs[job_id]['created_time'] < psutil.boot_time():
                 # The job is stale as it is created before the instance
-                # is created.
+                # is booted, e.g. the instance is rebooted.
                 job_statuses[i] = JobStatus.FAILED
             else:
                 job_statuses[i] = JobStatus.PENDING
@@ -558,9 +560,6 @@ def update_job_status(job_owner: str,
         # Per-job status lock is required because between the job status
         # query and the job status update, the job status in the databse
         # can be modified by the generated ray program.
-        # TODO(mraheja): remove pylint disabling when filelock version
-        # updated
-        # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(_get_lock_path(job_id)):
             original_status = get_status_no_lock(job_id)
             assert original_status is not None, (job_id, status)
