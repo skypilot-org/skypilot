@@ -9,13 +9,10 @@ VERSION_FILE = os.path.expanduser(constants.SKYLET_VERSION_FILE)
 
 
 def restart_skylet():
-    with open(VERSION_FILE, 'w+') as v_f:
-        v_f.write(constants.SKYLET_VERSION)
-
     # Kills old skylet if it is running
     subprocess.run(
         'ps aux | grep "sky.skylet.skylet" | grep "python3 -m"'
-        '| awk \'{print $2}\' | xargs kill',
+        '| awk \'{print $2}\' | xargs kill >> ~/.sky/skylet.log 2>&1',
         shell=True,
         check=False)
     subprocess.run(
@@ -23,21 +20,21 @@ def restart_skylet():
         ' >> ~/.sky/skylet.log 2>&1 &',
         shell=True,
         check=True)
+    with open(VERSION_FILE, 'w') as v_f:
+        v_f.write(constants.SKYLET_VERSION)
 
 
 proc = subprocess.run(
-    'ps aux | grep "sky.skylet.skylet" | grep "python3 -m"'
-    '| grep -v "grep" || true',
+    'ps aux | grep -v "grep" | grep "sky.skylet.skylet" | grep "python3 -m"',
     shell=True,
-    capture_output=True,
-    check=True)
+    check=False)
 
-running = proc.stdout.decode().strip().replace('\n', '')
+running = (proc.returncode == 0)
 
 version_match = False
 if os.path.exists(VERSION_FILE):
     with open(VERSION_FILE) as f:
-        if f.read() == constants.SKYLET_VERSION:
+        if f.read().strip() == constants.SKYLET_VERSION:
             version_match = True
 
 if not running or not version_match:

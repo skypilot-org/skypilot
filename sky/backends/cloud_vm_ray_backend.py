@@ -282,7 +282,7 @@ class RayCodeGen:
                 f'{job_id}, {spot_task.name!r}, {resources_str!r})',
             ]
 
-    def add_gang_scheduling_placement_group(
+    def add_gang_scheduling_placement_group_and_setup(
         self,
         num_nodes: int,
         accelerator_dict: Optional[Dict[str, float]],
@@ -297,8 +297,9 @@ class RayCodeGen:
         variable is assigned in a deterministic order whenever a new task is
         added.
         """
-        assert self._has_prologue, ('Call add_prologue() before '
-                                    'add_gang_scheduling_placement_group().')
+        assert self._has_prologue, (
+            'Call add_prologue() before '
+            'add_gang_scheduling_placement_group_and_setup().')
         self._has_gang_scheduling = True
         self._num_nodes = num_nodes
 
@@ -357,7 +358,12 @@ class RayCodeGen:
                 # We unset it so that user setup command may properly use this env var.
                 setup_cmd = 'unset CUDA_VISIBLE_DEVICES; ' + setup_cmd
                 job_lib.set_status({job_id!r}, job_lib.JobStatus.SETTING_UP)
+
+                # The schedule_step should be called after the job status is set to non-PENDING,
+                # otherwise, the scheduler will think the current job is not submitted yet, and
+                # skip the scheduling step.
                 job_lib.scheduler.schedule_step()
+
                 total_num_nodes = len(ray.nodes())
                 setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
                 setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
@@ -388,11 +394,11 @@ class RayCodeGen:
                 """)
             ]
 
-        self._code += [
-            textwrap.dedent(f"""\
-                job_lib.set_job_started({self.job_id!r})
-                """),
-        ]
+        self._code.append(f'job_lib.set_job_started({self.job_id!r})')
+        if setup_cmd is None:
+            # Need to call schedule_step() to make sure the scheduler
+            # schedule the next pending job.
+            self._code.append('job_lib.scheduler.schedule_step()')
 
         # Export IP and node rank to the environment variables.
         self._code += [
@@ -422,7 +428,7 @@ class RayCodeGen:
             run_fn: The run function to be run on the remote cluster.
         """
         assert self._has_gang_scheduling, (
-            'Call add_gang_scheduling_placement_group() '
+            'Call add_gang_scheduling_placement_group_and_setup() '
             'before register_run_fn().')
         assert not self._has_register_run_fn, (
             'register_run_fn() called twice?')
@@ -444,7 +450,8 @@ class RayCodeGen:
                      use_sudo: bool = False) -> None:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_gang_scheduling, (
-            'Call add_gang_scheduling_placement_group() before add_ray_task().')
+            'Call add_gang_scheduling_placement_group_and_setup() before '
+            'add_ray_task().')
         assert (not self._has_register_run_fn or
                 bash_script is None), ('bash_script should '
                                        'be None when run_fn is registered.')
@@ -3839,7 +3846,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         codegen.add_prologue(job_id,
                              spot_task=task.spot_task,
                              is_local=is_local)
-        codegen.add_gang_scheduling_placement_group(
+        codegen.add_gang_scheduling_placement_group_and_setup(
             1,
             accelerator_dict,
             stable_cluster_internal_ips=internal_ips,
@@ -3907,7 +3914,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         codegen.add_prologue(job_id,
                              spot_task=task.spot_task,
                              is_local=is_local)
-        codegen.add_gang_scheduling_placement_group(
+        codegen.add_gang_scheduling_placement_group_and_setup(
             num_actual_nodes,
             accelerator_dict,
             stable_cluster_internal_ips=internal_ips,

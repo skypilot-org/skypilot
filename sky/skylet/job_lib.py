@@ -4,7 +4,6 @@ This is a remote utility module that provides job queue functionality.
 """
 import enum
 import json
-import multiprocessing
 import os
 import pathlib
 import psutil
@@ -187,14 +186,12 @@ class JobScheduler:
                 self._run_job(job_id, run_cmd)
                 return
 
-    def async_schedule_step(self) -> None:
-        #TODO(mraheja): Integrate into mid-job scheduling
-        p = multiprocessing.Process(target=self.schedule_step)
-        p.start()
-
     def _get_jobs(self) -> List[Tuple[int, str, int, int]]:
-        """Returns the metadata for jobs the pending jobs table
-        with job_id, run command, submit time, creation time"""
+        """Returns the metadata for jobs in the pending jobs table
+
+        The information contains job_id, run command, submit time,
+        creation time.
+        """
         raise NotImplementedError
 
 
