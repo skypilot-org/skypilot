@@ -299,7 +299,7 @@ class OCI(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
 
         short_credential_help_str = (
-            f'For more details, refer to: '
+            'For more details, refer to: '
             # pylint: disable=line-too-long
             'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci'
         )
