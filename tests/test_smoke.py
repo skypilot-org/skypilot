@@ -984,6 +984,7 @@ def test_large_job_queue(generic_cloud: str):
     )
     run_one_test(test)
 
+
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 def test_fast_large_job_queue(generic_cloud: str):
     # This is to test the jobs can be scheduled quickly when there are many jobs in the queue.
@@ -1000,7 +1001,6 @@ def test_fast_large_job_queue(generic_cloud: str):
         timeout=20 * 60,
     )
     run_one_test(test)
-
 
 
 @pytest.mark.ibm
