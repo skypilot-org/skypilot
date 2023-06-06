@@ -20,9 +20,9 @@ Install SkyPilot using pip:
   $ # pip install "skypilot[oci]"
   $ # pip install "skypilot[all]"
 
-SkyPilot currently supports eight cloud providers: AWS, GCP, Azure, IBM, OCI, SCP, Lambda Cloud, and Cloudflare (for R2 object store).
+SkyPilot currently supports these cloud providers: AWS, GCP, Azure, IBM, OCI, SCP, Lambda Cloud, and Cloudflare (for R2 object store).
 If you only have access to certain clouds, use any combination of
-:code:`"[aws,azure,gcp,lambda,cloudflare,scp]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
+the pip extras above (e.g., :code:`"[aws,gcp]"`) to reduce the
 dependencies installed.
 
 You may also install SkyPilot from source.
@@ -51,8 +51,8 @@ If you already have cloud access set up on your local machine, run ``sky check``
 
 Otherwise, configure access to at least one cloud, then run ``sky check``:
 
-AWS
-~~~~~~~~~
+Amazon Web Services (AWS)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To get the **AWS access key** required by :code:`aws configure`, please go to the `AWS IAM Management Console <https://us-east-1.console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials>`_ and click on the "Access keys" dropdown (detailed instructions `here <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_). The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
 
@@ -66,8 +66,8 @@ To get the **AWS access key** required by :code:`aws configure`, please go to th
 
 Note: If you are using AWS IAM Identity Center (AWS SSO), you will need :code:`pip install awscli>=1.27.10`. See `here <https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html>`_ for instructions on how to configure AWS SSO.
 
-GCP
-~~~~~~~~~
+Google Cloud Platform (GCP)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: console
 
@@ -128,10 +128,10 @@ To access IBM's services, store the following fields in ``~/.ibm/credentials.yam
   Create private images with the necessary tools (e.g. CUDA), by following the IBM segment in `this documentation <https://github.com/skypilot-org/skypilot/blob/master/docs/source/reference/yaml-spec.rst>`_.
 
 
-OCI
-~~~~~~~~~
+Oracle Cloud Infrastructure (OCI)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`_. The :code:`~/.oci` folder should contain the following files:
+To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`_. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
 
 .. code-block:: text
 
@@ -183,8 +183,8 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
 
-SCP
-~~~~~~~~~~~~~~~~~~
+Samsung Cloud Platform (SCP)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Samsung Cloud Platform(SCP) provides cloud services optimized for enterprise customers. You can learn more about SCP `here <https://cloud.samsungsds.com/>`__.
 
@@ -224,7 +224,10 @@ This will produce a summary like:
     GCP: enabled
     Azure: enabled
     Lambda: enabled
+    IBM: enabled
     SCP: enabled
+    OCI: enabled
+    Cloudflare (for R2 object store): enabled
 
   SkyPilot will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
 

@@ -298,6 +298,11 @@ class OCI(clouds.Cloud):
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
+        short_credential_help_str = (
+            'For more details, refer to: '
+            # pylint: disable=line-too-long
+            'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci'
+        )
         credential_help_str = (
             'To configure credentials, go to: '
             'https://docs.oracle.com/en-us/iaas/Content/API/Concepts/'
@@ -310,8 +315,8 @@ class OCI(clouds.Cloud):
             'following format:\n'
             f'{cls._INDENT_PREFIX}  [DEFAULT]\n'
             f'{cls._INDENT_PREFIX}  user=ocid1.user.oc1..aaaaaaaa\n'
-            f'{cls._INDENT_PREFIX}  fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:'
-            'll:mm:nn:oo:pp\n'
+            f'{cls._INDENT_PREFIX}  '
+            'fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp\n'
             f'{cls._INDENT_PREFIX}  tenancy=ocid1.tenancy.oc1..aaaaaaaa\n'
             f'{cls._INDENT_PREFIX}  region=us-sanjose-1\n'
             f'{cls._INDENT_PREFIX}  key_file=~/.oci/oci_api_key.pem')
@@ -322,12 +327,12 @@ class OCI(clouds.Cloud):
         except ImportError:
             return False, ('`oci` is not installed. Install it with: '
                            'pip install oci\n'
-                           f'{cls._INDENT_PREFIX}{credential_help_str}')
+                           f'{cls._INDENT_PREFIX}{short_credential_help_str}')
 
         conf_file = oci_adaptor.get_config_file()
 
         help_str = (f'Missing credential file at {conf_file}. '
-                    f'{credential_help_str}')
+                    f'{short_credential_help_str}')
         if not os.path.isfile(os.path.expanduser(conf_file)):
             return (False, help_str)
 
