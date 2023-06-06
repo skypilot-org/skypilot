@@ -673,11 +673,13 @@ def spot_launch(
             controller_resources = sky.Resources.from_yaml_config(
                 controller_resources_config)
         except ValueError as e:
-            raise ValueError(
-                'Spot controller resources is not valid, please check '
-                '~/.sky/skypilot_config.yaml file. Details:\n'
-                f'  {common_utils.format_exception(e, use_bracket=True)}'
-            ) from e
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Spot controller resources is not valid, please check '
+                    '~/.sky/skypilot_config.yaml file and make sure it\'s a '
+                    'valid resources spec. Details:\n'
+                    f'  {common_utils.format_exception(e, use_bracket=True)}'
+                ) from e
 
         yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
                                  f'{name}-{task_uuid}.yaml')
@@ -690,7 +692,7 @@ def spot_launch(
         # spot-controller.yaml.j2 to customize the controller resources,
         # we should use it.
         controller_task_resources = list(controller_task.resources)[0]
-        if not controller_task_resources.is_same_resources(sky.Resources()):
+        if not controller_task_resources.is_empty():
             controller_resources = controller_task_resources
         controller_task.set_resources(controller_resources)
 

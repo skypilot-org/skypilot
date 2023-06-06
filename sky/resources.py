@@ -799,9 +799,6 @@ class Resources:
         # self <= other
         return True
 
-    def is_same_resources(self, other: 'Resources') -> bool:
-        return self.to_yaml_config() == other.to_yaml_config()
-
     def should_be_blocked_by(self, blocked: 'Resources') -> bool:
         """Whether this Resources matches the blocked Resources.
 
@@ -834,6 +831,8 @@ class Resources:
             self.accelerators is None,
             self.accelerator_args is None,
             not self._use_spot_specified,
+            self.disk_size == _DEFAULT_DISK_SIZE_GB,
+            self._image_id is None,
         ])
 
     def copy(self, **override) -> 'Resources':
