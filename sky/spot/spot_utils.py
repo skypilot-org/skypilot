@@ -531,8 +531,7 @@ class SpotCodeGen:
         return cls._build(code)
 
     @classmethod
-    def set_pending_state(cls, job_id: int, name: str,
-                          resources_str: str) -> str:
+    def set_pending(cls, job_id: int, name: str, resources_str: str) -> str:
         code = [
             f'spot_state.set_pending('
             f'{job_id}, {name!r}, {resources_str!r})',

@@ -1543,9 +1543,15 @@ def get_head_ip(
 ) -> str:
     """Returns the ip of the head node.
 
-    use_cached_head_ip: If True, use the cached head ip if it exists. If False,
-        query the head ip from the cloud provider. If None, use the cached head
-        ip if it exists, otherwise query the head ip from the cloud provider.
+    Args:
+        handle: The ResourceHandle of the cluster.
+        use_cached_head_ip: If True, use the cached head ip if it exists.
+            If False, query the head ip from the cloud provider. If None,
+            use the cached head ip if it exists, otherwise query the head
+            ip from the cloud provider.
+        max_attempts: The maximum number of attempts to query the head ip.
+    Returns:
+        The ip of the head node.
     """
     head_ip = handle.head_ip
     if use_cached_head_ip:
