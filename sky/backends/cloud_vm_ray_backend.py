@@ -2789,8 +2789,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 spot_codegen = spot_lib.SpotCodeGen()
                 spot_name = spot_task.name
                 assert spot_name is not None, spot_task
-                spot_code = spot_codegen.set_pending(
-                    job_id, spot_name, resources_str)
+                spot_code = spot_codegen.set_pending(job_id, spot_name,
+                                                     resources_str)
                 # Set the spot job to PENDING state to make sure that this spot
                 # job appears in the `sky spot queue`, when there are already 16
                 # controller process jobs running on the controller VM with 8
