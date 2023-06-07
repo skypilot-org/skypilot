@@ -1542,7 +1542,7 @@ def get_head_ip(
     max_attempts: int = 1,
 ) -> str:
     """Returns the ip of the head node.
-    
+
     use_cached_head_ip: If True, use the cached head ip if it exists. If False,
         query the head ip from the cloud provider. If None, use the cached head
         ip if it exists, otherwise query the head ip from the cloud provider.

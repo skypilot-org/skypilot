@@ -3577,7 +3577,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node.
-        
+
         use_cached_head_ip: If True, use the cached head IP address. If False,
             fetch the head IP address from the cloud provider. If None, use
             the cached head IP address if it exists, otherwise fetch the head
