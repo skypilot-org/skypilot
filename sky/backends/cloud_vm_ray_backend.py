@@ -2795,7 +2795,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # job appears in the `sky spot queue`, when there are already 16
                 # controller process jobs running on the controller VM with 8
                 # CPU cores.
-                # The spot job should be set to PENDING state after the
+                # The spot job should be set to PENDING state *after* the
                 # controller process job has been queued, as our skylet on spot
                 # controller will set the spot job in FAILED state if the
                 # controller process job does not exist.
