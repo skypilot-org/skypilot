@@ -446,7 +446,7 @@ def get_failure_reason(job_id: int) -> Optional[str]:
 
 def get_spot_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """Get spot clusters' status."""
-    job_filter = '' if job_id is None else f'WHERE new_job_id={job_id}'
+    job_filter = '' if job_id is None else f'WHERE spot.new_job_id={job_id}'
 
     rows = _CURSOR.execute(f"""\
         SELECT *
@@ -454,7 +454,7 @@ def get_spot_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
         LEFT OUTER JOIN job_names
         ON spot.new_job_id=job_names.new_job_id
         {job_filter}
-        ORDER BY new_job_id DESC, sub_job_id ASC""").fetchall()
+        ORDER BY spot.new_job_id DESC, spot.sub_job_id ASC""").fetchall()
     jobs = []
     for row in rows:
         job_dict = dict(zip(columns, row))
