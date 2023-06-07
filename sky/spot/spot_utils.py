@@ -484,7 +484,8 @@ def format_job_table(jobs: List[Dict[str, Any]],
                 else:
                     end_at = None
                 recovery_cnt += job['recovery_count']
-                if spot_status.is_terminal():
+                if spot_status == spot_state.SpotStatus.SUCCEEDED:
+                    # Use the first non-succeeded status.
                     spot_status = job['status']
 
                 if (failure_reason is None and
