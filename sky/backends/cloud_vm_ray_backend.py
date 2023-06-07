@@ -1810,7 +1810,7 @@ class RetryingVmProvisioner(object):
             # At this state, an erroneous cluster may not have cached
             # handle.head_ip (global_user_state.add_or_update_cluster(...,
             # ready=True)).
-            use_cached_head_ip=False)
+            use_cached_head_ip=None)
         if returncode == 0:
             return
         launched_resources = handle.launched_resources
@@ -1821,7 +1821,7 @@ class RetryingVmProvisioner(object):
                 'The command `ray status` errored out on the head node '
                 'of the local cluster. Check if ray[default]==2.4.0 '
                 'is installed or running correctly.')
-        backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
+        backend.run_on_head(handle, 'ray stop', use_cached_head_ip=None)
 
         # Runs `ray up <kwargs>` with our monkey-patched launch hash
         # calculation. See the monkey patch file for why.
@@ -2508,7 +2508,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self.run_on_head(
                 handle,
                 _MAYBE_SKYLET_RESTART_CMD,
-                use_cached_head_ip=False,
+                use_cached_head_ip=None,
             )
 
         # Update job queue to avoid stale jobs (when restarted), before
@@ -3568,7 +3568,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         log_path: str = '/dev/null',
         process_stream: bool = True,
         stream_logs: bool = False,
-        use_cached_head_ip: bool = True,
+        use_cached_head_ip: Optional[bool] = True,
         ssh_mode: command_runner.SshMode = command_runner.SshMode.
         NON_INTERACTIVE,
         under_remote_workdir: bool = False,
@@ -3576,7 +3576,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         separate_stderr: bool = False,
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
-        """Runs 'cmd' on the cluster's head node."""
+        """Runs 'cmd' on the cluster's head node.
+        
+        use_cached_head_ip: If True, use the cached head IP address. If False,
+            fetch the head IP address from the cloud provider. If None, use
+            the cached head IP address if it exists, otherwise fetch the head
+            IP address from the cloud provider.
+        """
         head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip,
                                             _FETCH_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
