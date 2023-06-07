@@ -256,11 +256,6 @@ def _handle_signal(job_id):
     signal_file = pathlib.Path(spot_utils.SIGNAL_FILE_PREFIX.format(job_id))
     user_signal = None
     if signal_file.exists():
-        # Filelock is needed to prevent race condition with concurrent
-        # signal writing.
-        # TODO(mraheja): remove pylint disabling when filelock version
-        # updated
-        # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(str(signal_file) + '.lock'):
             with signal_file.open(mode='r') as f:
                 user_signal = f.read().strip()

@@ -180,14 +180,11 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
 
         # Send the signal to the spot job controller.
         signal_file = pathlib.Path(SIGNAL_FILE_PREFIX.format(job_id))
-        # Filelock is needed to prevent race condition between signal
-        # check/removal and signal writing.
-        # TODO(mraheja): remove pylint disabling when filelock version updated
-        # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(str(signal_file) + '.lock'):
             with signal_file.open('w') as f:
                 f.write(UserSignal.CANCEL.value)
                 f.flush()
+        spot_state.set_cancelling(job_id)
         cancelled_job_ids.append(job_id)
 
     if len(cancelled_job_ids) == 0:
