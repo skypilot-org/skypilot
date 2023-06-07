@@ -43,7 +43,7 @@ SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code change
    <p align="center">
    <picture>
       <a href="https://skypilot.readthedocs.io/en/latest/getting-started/installation.html">
-      <img alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos.svg" width=80%></a>
+      <img alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/docs_cloudlogos/docs/source/images/cloud-logos-light.png" width=80%></a>
    </picture>
    </p>
 
