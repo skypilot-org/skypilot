@@ -489,7 +489,7 @@ def format_job_table(jobs: List[Dict[str, Any]],
 
                 if (failure_reason is None and
                         job['status'] > spot_state.SpotStatus.SUCCEEDED):
-                    failure_reason = job['status'].value
+                    failure_reason = job['failure_reason']
 
             job_duration = log_utils.readable_time_duration(0,
                                                             job_duration,
