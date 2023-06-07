@@ -1805,8 +1805,7 @@ class RetryingVmProvisioner(object):
         backend = CloudVmRayBackend()
 
         returncode = backend.run_on_head(
-            handle,
-            backend_utils.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND)
+            handle, backend_utils.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND)
         if returncode == 0:
             return
         launched_resources = handle.launched_resources
@@ -2501,10 +2500,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # For backward compatability and robustness of skylet, it is restarted
         with log_utils.safe_rich_status('Updating remote skylet'):
-            self.run_on_head(
-                handle,
-                _MAYBE_SKYLET_RESTART_CMD
-            )
+            self.run_on_head(handle, _MAYBE_SKYLET_RESTART_CMD)
 
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.
@@ -3611,8 +3607,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 command, such as replacing or skipping lines on the fly. If
                 enabled, lines are printed only when '\r' or '\n' is found.
         """
-        head_ip = backend_utils.get_head_ip(handle,
-                                            _FETCH_IP_MAX_ATTEMPTS)
+        head_ip = backend_utils.get_head_ip(handle, _FETCH_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
