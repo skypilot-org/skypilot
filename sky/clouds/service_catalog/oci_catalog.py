@@ -5,39 +5,67 @@ instance types and pricing information for OCI.
 
 History:
  - Hysun He (hysun.he@oracle.com) @ Apr, 2023: Initial implementation
+ - Hysun He (hysun.he@oracle.com) @ Jun, 2023: Reduce retry times by
+   excluding those unsubscribed regions.
 """
 
 import typing
 import logging
+import threading
 from typing import Dict, List, Optional, Tuple
+
+from pandas import DataFrame
 from sky.clouds.service_catalog import common
 from sky.skylet.providers.oci.config import oci_conf
+from sky.adaptors import oci as oci_adaptor
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
 logger = logging.getLogger(__name__)
 
-_df = common.read_catalog('oci/vms.csv')
+_df = None
 _image_df = common.read_catalog('oci/images.csv')
+
+__lock = threading.RLock()
+
+
+def _get_df() -> DataFrame:
+    with __lock:
+        global _df
+        if _df is not None:
+            return _df
+
+        config_profile = oci_conf.get_profile()
+        client = oci_adaptor.get_identity_client(profile=config_profile)
+
+        subscriptions = client.list_region_subscriptions(
+            tenancy_id=oci_adaptor.get_oci_config(
+                profile=config_profile)['tenancy']).data
+        subscribed_regions = [r.region_name for r in subscriptions]
+
+        df = common.read_catalog('oci/vms.csv')
+        _df = df[df['Region'].isin(subscribed_regions)]
+
+        return _df
 
 
 def instance_type_exists(instance_type: str) -> bool:
-    return common.instance_type_exists_impl(_df, instance_type)
+    return common.instance_type_exists_impl(_get_df(), instance_type)
 
 
 def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    return common.validate_region_zone_impl('oci', _df, region, zone)
+    return common.validate_region_zone_impl('oci', _get_df(), region, zone)
 
 
 def accelerator_in_region_or_zone(acc_name: str,
                                   acc_count: int,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> bool:
-    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
-                                                     region, zone)
+    return common.accelerator_in_region_or_zone_impl(_get_df(), acc_name,
+                                                     acc_count, region, zone)
 
 
 def get_hourly_cost(instance_type: str,
@@ -45,8 +73,8 @@ def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
-    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
-                                       zone)
+    return common.get_hourly_cost_impl(_get_df(), instance_type, use_spot,
+                                       region, zone)
 
 
 def get_default_instance_type(cpus: Optional[str] = None,
@@ -64,7 +92,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
     instance_type_prefix = tuple(
         f'{family}' for family in oci_conf.DEFAULT_INSTANCE_FAMILY)
 
-    df = _df[_df['InstanceType'].notna()]
+    df = _get_df()[_get_df()['InstanceType'].notna()]
     df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
 
     logger.debug(f'# get_default_instance_type: {df}')
@@ -74,7 +102,8 @@ def get_default_instance_type(cpus: Optional[str] = None,
 
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, int]]:
-    return common.get_accelerators_from_instance_type_impl(_df, instance_type)
+    return common.get_accelerators_from_instance_type_impl(
+        _get_df(), instance_type)
 
 
 def get_instance_type_for_accelerator(
@@ -90,7 +119,7 @@ def get_instance_type_for_accelerator(
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
-    return common.get_instance_type_for_accelerator_impl(df=_df,
+    return common.get_instance_type_for_accelerator_impl(df=_get_df(),
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
                                                          cpus=cpus,
@@ -102,7 +131,7 @@ def get_instance_type_for_accelerator(
 
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
-    df = _df[_df['InstanceType'] == instance_type]
+    df = _get_df()[_get_df()['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
 
 
@@ -114,14 +143,15 @@ def list_accelerators(
         case_sensitive: bool = True
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in OCI offering GPUs."""
-    return common.list_accelerators_impl('OCI', _df, gpus_only, name_filter,
-                                         region_filter, quantity_filter,
-                                         case_sensitive)
+    return common.list_accelerators_impl('OCI', _get_df(), gpus_only,
+                                         name_filter, region_filter,
+                                         quantity_filter, case_sensitive)
 
 
 def get_vcpus_mem_from_instance_type(
         instance_type: str) -> Tuple[Optional[float], Optional[float]]:
-    return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
+    return common.get_vcpus_mem_from_instance_type_impl(_get_df(),
+                                                        instance_type)
 
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
