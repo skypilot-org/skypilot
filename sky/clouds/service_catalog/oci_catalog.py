@@ -36,16 +36,26 @@ def _get_df() -> DataFrame:
         if _df is not None:
             return _df
 
-        config_profile = oci_conf.get_profile()
-        client = oci_adaptor.get_identity_client(profile=config_profile)
+        try:
+            config_profile = oci_conf.get_profile()
+            client = oci_adaptor.get_identity_client(profile=config_profile)
 
-        subscriptions = client.list_region_subscriptions(
-            tenancy_id=oci_adaptor.get_oci_config(
-                profile=config_profile)['tenancy']).data
-        subscribed_regions = [r.region_name for r in subscriptions]
+            subscriptions = client.list_region_subscriptions(
+                tenancy_id=oci_adaptor.get_oci_config(
+                    profile=config_profile)['tenancy']).data
+            subscribed_regions = [r.region_name for r in subscriptions]
+        except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
+                oci_adaptor.get_oci().exceptions.InvalidConfig) as e:
+            # This should only happen in testing where oci config is missing.
+            logger.debug(f'It is OK goes here when testing: {str(e)}')
+            subscribed_regions = []
 
         df = common.read_catalog('oci/vms.csv')
-        _df = df[df['Region'].isin(subscribed_regions)]
+
+        if subscribed_regions:
+            _df = df[df['Region'].isin(subscribed_regions)]
+        else:
+            _df = df
 
         return _df
 
