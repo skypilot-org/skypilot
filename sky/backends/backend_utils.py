@@ -198,13 +198,19 @@ def _optimize_file_mounts(yaml_path: str) -> None:
 
     # Putting these in file_mounts hurts provisioning speed, as each file
     # opens/closes an SSH connection.  Instead, we:
-    #  - cp locally them into a directory
+    #  - cp them locally into a directory, each with a unique name to avoid
+    #    basename conflicts
     #  - upload that directory as a file mount (1 connection)
     #  - use a remote command to move all runtime files to their right places.
 
     # Local tmp dir holding runtime files.
     local_runtime_files_dir = tempfile.mkdtemp()
     new_file_mounts = {_REMOTE_RUNTIME_FILES_DIR: local_runtime_files_dir}
+
+    # Generate local_src -> unique_name.
+    local_source_to_unique_name = {}
+    for local_src in file_mounts.values():
+        local_source_to_unique_name[local_src] = str(uuid.uuid4())
 
     # (For remote) Build a command that copies runtime files to their right
     # destinations.
@@ -216,7 +222,7 @@ def _optimize_file_mounts(yaml_path: str) -> None:
     commands = []
     basenames = set()
     for dst, src in file_mounts.items():
-        src_basename = os.path.basename(src)
+        src_basename = local_source_to_unique_name[src]
         dst_basename = os.path.basename(dst)
         dst_parent_dir = os.path.dirname(dst)
 
@@ -253,17 +259,18 @@ def _optimize_file_mounts(yaml_path: str) -> None:
     yaml_config['file_mounts'] = new_file_mounts
     yaml_config['setup_commands'] = setup_commands
 
-    # (For local) Move all runtime files, including the just-written yaml, to
+    # (For local) Copy all runtime files, including the just-written yaml, to
     # local_runtime_files_dir/.
-    all_local_sources = ''
+    # < 0.3s to cp 6 clouds' credentials.
     for local_src in file_mounts.values():
+        # cp <local_src> <local_runtime_files_dir>/<unique name of local_src>.
         full_local_src = str(pathlib.Path(local_src).expanduser())
-        # Add quotes for paths containing spaces.
-        all_local_sources += f'{full_local_src!r} '
-    # Takes 10-20 ms on laptop incl. 3 clouds' credentials.
-    subprocess.run(f'cp -r {all_local_sources} {local_runtime_files_dir}/',
-                   shell=True,
-                   check=True)
+        unique_name = local_source_to_unique_name[local_src]
+        # !r to add quotes for paths containing spaces.
+        subprocess.run(
+            f'cp -r {full_local_src!r} {local_runtime_files_dir}/{unique_name}',
+            shell=True,
+            check=True)
 
     common_utils.dump_yaml(yaml_path, yaml_config)
 
@@ -2652,6 +2659,11 @@ def stop_handler(signum, frame):
 
 
 def validate_schema(obj, schema, err_msg_prefix=''):
+    """Validates an object against a JSON schema.
+
+    Raises:
+        ValueError: if the object does not match the schema.
+    """
     err_msg = None
     try:
         validator.SchemaValidator(schema).validate(obj)
