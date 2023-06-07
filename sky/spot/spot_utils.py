@@ -525,7 +525,7 @@ def format_job_table(jobs: List[Dict[str, Any]],
                                                             absolute=True)
             submitted = log_utils.readable_time_duration(job['submitted_at'])
             values = [
-                job['job_id'] if len(sub_jobs) == 1 else '\u21B3',
+                job['job_id'] if len(sub_jobs) == 1 else ' \u21B3',
                 job['sub_job_id'] if len(sub_jobs) > 1 else '-',
                 job['job_name'],
                 job['resources'],
