@@ -3894,8 +3894,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             codegen = spot_lib.SpotCodeGen()
             spot_name = task.spot_task.name
             assert spot_name is not None, task
-            code = codegen.set_pending_state(job_id, spot_name,
-                                             resources_str)
+            code = codegen.set_pending_state(job_id, spot_name, resources_str)
             return code
         return None
 
