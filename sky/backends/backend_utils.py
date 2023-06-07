@@ -2659,6 +2659,11 @@ def stop_handler(signum, frame):
 
 
 def validate_schema(obj, schema, err_msg_prefix=''):
+    """Validates an object against a JSON schema.
+
+    Raises:
+        ValueError: if the object does not match the schema.
+    """
     err_msg = None
     try:
         validator.SchemaValidator(schema).validate(obj)

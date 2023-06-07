@@ -241,3 +241,31 @@ you can still tear it down manually with
 
 .. note::
   Tearing down the spot controller will lose all logs and status information for the spot jobs and can cause resource leakage when there are still in-progress spot jobs.
+
+Customizing spot controller resources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You may customize the resources of the spot controller for the following reasons:
+
+1. Enforcing the spot controller to run on a specific location. (Default: cheapest location)
+2. Changing the maximum number of spot jobs that can be run concurrently. (Default: 16)
+3. Changing the disk_size of the spot controller to store more logs. (Default: 50GB)
+
+To achieve the above, you can specify custom configs in :code:`~/.sky/config.yaml` with the following fields (the :code:`resources` field has the same spec as a normal SkyPilot job; see `here <https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html>`_):
+
+.. code-block:: yaml
+
+    spot:
+      controller:
+        resources:
+          # All the configs below are optional
+          # 1. Specify the location of the spot controller.
+          cloud: gcp
+          region: us-central1
+          # 2. Specify the maximum number of spot jobs that can be run concurrently.
+          cpus: 4+ # number of vCPUs, max # spot jobs = 2 * cpus
+          # 3. Specify the disk_size of the spot controller.
+          disk_size: 100
+
+
+
