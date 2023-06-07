@@ -676,8 +676,9 @@ def spot_launch(
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Spot controller resources is not valid, please check '
-                    '~/.sky/config.yaml file and make sure spot.controller.resources is a '
-                    'valid resources spec. Details:\n'
+                    '~/.sky/config.yaml file and make sure '
+                    'spot.controller.resources is a valid resources spec. '
+                    'Details:\n'
                     f'  {common_utils.format_exception(e, use_bracket=True)}'
                 ) from e
 
