@@ -406,15 +406,25 @@ class Rclone():
         rclone_config_path = Rclone._RCLONE_ABS_CONFIG_PATH
         config_data = Rclone.get_rclone_config(bucket_name, cloud, region)
 
+        # Raise exception if rclone isn't installed
+        try:
+            subprocess.run('rclone version',
+                           shell=True,
+                           check=True,
+                           stdout=subprocess.PIPE)
+        except subprocess.CalledProcessError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageError(
+                    'rclone wasn\'t detected. '
+                    'Consider installing via: '
+                    '"curl https://rclone.org/install.sh '
+                    '| sudo bash" ') from e
+
         # create ~/.config/rclone/ if doesn't exist
         os.makedirs(os.path.dirname(rclone_config_path), exist_ok=True)
         # create rclone.conf if doesn't exist
         if not os.path.isfile(rclone_config_path):
             open(rclone_config_path, 'w').close()
-        # install rclone locally if isn't installed
-        os.system('rclone version >/dev/null 2>&1 || '
-                  'curl https://rclone.org/install.sh | '
-                  'sudo bash > /dev/null')
 
         # write back file without profile: [bucket_name]
         # to which the new bucket profile is appended
