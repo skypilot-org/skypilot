@@ -110,7 +110,7 @@ An end-to-end example
 Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a BERT model on a question-answering task with HuggingFace.
 
 .. code-block:: yaml
-  :emphasize-lines: 12-15,42-45
+  :emphasize-lines: 12-15,41-44
 
   # bert_qa.yaml
   name: bert_qa
@@ -228,16 +228,45 @@ Real-world examples
 * PyTorch DDP, ResNet: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/resnet.yaml>`_
 * PyTorch Lightning DDP, CIFAR-10: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/lightning_cifar10.yaml>`_
 
-Spot controller (Advanced)
+Spot controller
 -------------------------------
 
-There will be a single spot controller VM (a small on-demand CPU VM) running in the background to manage all the spot jobs.
-It will be autostopped after all spot jobs finished and no new spot job is submitted for 10 minutes. Typically **no user intervention** is needed. 
-You can find the controller with :code:`sky status`, and refresh the status with :code:`sky status -r`.
+The spot controller is a small on-demand CPU VM running in the cloud that manages all spot jobs of a user.
+It is automatically launched when the first managed spot job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all spot jobs finish and no new spot job is submitted in that duration). 
+Thus, **no user action is needed** to manage its lifecycle. 
 
-Although, the cost of the spot controller is negligible (~$0.4/hour when running and less than $0.004/hour when stopped), 
+You can see the controller with :code:`sky status` and refresh its status by using the :code:`-r/--refresh` flag.
+
+While the cost of the spot controller is negligible (~$0.4/hour when running and less than $0.004/hour when stopped), 
 you can still tear it down manually with 
 :code:`sky down <spot-controller-name>`, where the ``<spot-controller-name>`` can be found in the output of :code:`sky status`.
 
 .. note::
-  Tearing down the spot controller will lose all logs and status information for the spot jobs and can cause resource leakage when there are still in-progress spot jobs.
+  Tearing down the spot controller loses all logs and status information for the finished spot jobs. It is only allowed when there are no in-progress spot jobs to ensure no resource leakage.
+
+Customizing spot controller resources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You may customize the resources of the spot controller for the following reasons:
+
+1. Enforcing the spot controller to run on a specific location. (Default: cheapest location)
+2. Changing the maximum number of spot jobs that can be run concurrently. (Default: 16)
+3. Changing the disk_size of the spot controller to store more logs. (Default: 50GB)
+
+To achieve the above, you can specify custom configs in :code:`~/.sky/config.yaml` with the following fields:
+
+.. code-block:: yaml
+
+    spot:
+      controller:
+        resources:
+          # All configs below are optional
+          # 1. Specify the location of the spot controller.
+          cloud: gcp
+          region: us-central1
+          # 2. Specify the maximum number of spot jobs that can be run concurrently.
+          cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
+          # 3. Specify the disk_size of the spot controller.
+          disk_size: 100
+
+The :code:`resources` field has the same spec as a normal SkyPilot job; see `here <https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html>`_.

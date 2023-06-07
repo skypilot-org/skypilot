@@ -831,6 +831,8 @@ class Resources:
             self.accelerators is None,
             self.accelerator_args is None,
             not self._use_spot_specified,
+            self.disk_size == _DEFAULT_DISK_SIZE_GB,
+            self._image_id is None,
         ])
 
     def copy(self, **override) -> 'Resources':

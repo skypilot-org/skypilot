@@ -38,6 +38,16 @@ SkyPilot cuts your cloud costs:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
+.. raw:: html
+
+   <p align="center">
+   <picture>
+      <a href="https://skypilot.readthedocs.io/en/latest/getting-started/installation.html">
+      <img alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos.svg" width=80%></a>
+   </picture>
+   </p>
+
+
 **More information**
 
 * `SkyPilot blog <https://blog.skypilot.co/>`_
