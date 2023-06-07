@@ -1806,11 +1806,7 @@ class RetryingVmProvisioner(object):
 
         returncode = backend.run_on_head(
             handle,
-            backend_utils.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-            # At this state, an erroneous cluster may not have cached
-            # handle.head_ip (global_user_state.add_or_update_cluster(...,
-            # ready=True)).
-            use_cached_head_ip=None)
+            backend_utils.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND)
         if returncode == 0:
             return
         launched_resources = handle.launched_resources
@@ -1821,7 +1817,7 @@ class RetryingVmProvisioner(object):
                 'The command `ray status` errored out on the head node '
                 'of the local cluster. Check if ray[default]==2.4.0 '
                 'is installed or running correctly.')
-        backend.run_on_head(handle, 'ray stop', use_cached_head_ip=None)
+        backend.run_on_head(handle, 'ray stop')
 
         # Runs `ray up <kwargs>` with our monkey-patched launch hash
         # calculation. See the monkey patch file for why.
@@ -2507,8 +2503,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         with log_utils.safe_rich_status('Updating remote skylet'):
             self.run_on_head(
                 handle,
-                _MAYBE_SKYLET_RESTART_CMD,
-                use_cached_head_ip=None,
+                _MAYBE_SKYLET_RESTART_CMD
             )
 
         # Update job queue to avoid stale jobs (when restarted), before
@@ -3586,7 +3581,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         port_forward: Optional[List[int]] = None,
         log_path: str = '/dev/null',
         stream_logs: bool = False,
-        use_cached_head_ip: Optional[bool] = True,
         ssh_mode: command_runner.SshMode = command_runner.SshMode.
         NON_INTERACTIVE,
         under_remote_workdir: bool = False,
@@ -3606,10 +3600,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             port_forward: A list of ports to forward.
             log_path: The path to the log file.
             stream_logs: Whether to stream the logs to stdout/stderr.
-            use_cached_head_ip: If True, use the cached head IP address. If
-                False, fetch the head IP address from the cloud provider. If
-                None, use the cached head IP address if it exists, otherwise
-                fetch the head IP address from the cloud provider.
             ssh_mode: The mode to use for ssh.
                 See command_runner.SSHCommandRunner.SSHMode for more details.
             under_remote_workdir: Whether to run the command under the remote
@@ -3621,7 +3611,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 command, such as replacing or skipping lines on the fly. If
                 enabled, lines are printed only when '\r' or '\n' is found.
         """
-        head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip,
+        head_ip = backend_utils.get_head_ip(handle,
                                             _FETCH_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
