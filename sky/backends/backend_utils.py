@@ -1550,7 +1550,7 @@ def get_head_ip(
             use the cached head ip if it exists, otherwise query the head
             ip from the cloud provider.
         max_attempts: The maximum number of attempts to query the head ip.
-        
+
     Returns:
         The ip of the head node.
     """
