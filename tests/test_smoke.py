@@ -1548,6 +1548,40 @@ def test_spot(generic_cloud: str):
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.managed_spot
+def test_spot_pipeline(generic_cloud: str):
+    """Test the spot yaml."""
+    name = _get_cluster_name()
+    test = Test(
+        'spot-pipeline',
+        [
+            f'sky spot launch -n {name} --cloud {generic_cloud} examples/spot_pipeline/multi_jobs.yaml -y -d',
+            'sleep 5',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING\|RUNNING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-*-0 | head -n1 | grep "STARTING\|RUNNING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-*-1 | head -n1 | grep "PENDING"',
+            _SPOT_CANCEL_WAIT.format(job_name=f'{name}'),
+            'sleep 5',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-*-0 | head -n1 | grep "CANCELLING\|CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-*-1 | head -n1 | grep "CANCELLING\|CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-*-2 | head -n1 | grep "CANCELLING\|CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-*-3 | head -n1 | grep "CANCELLING\|CANCELLED"',
+            'sleep 200',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-*-0 | head -n1 | grep "CANCELLED',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-*-1 | head -n1 | grep "CANCELLED',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-*-2 | head -n1 | grep "CANCELLED',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-*-3 | head -n1 | grep "CANCELLED',
+        ],
+        _SPOT_CANCEL_WAIT.format(job_name=f'{name}'),
+        # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+        timeout=30 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
+@pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.managed_spot
 def test_spot_failed_setup(generic_cloud: str):
     """Test managed spot job with failed setup."""
     name = _get_cluster_name()
@@ -1566,7 +1600,66 @@ def test_spot_failed_setup(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
+@pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.managed_spot
+def test_spot_pipeline_failed_setup(generic_cloud: str):
+    """Test managed spot job with failed setup."""
+    name = _get_cluster_name()
+    test = Test(
+        'spot-pipeline-failed-setup',
+        [
+            f'sky spot launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup_pipeline.yaml',
+            'sleep 900',
+            # Make sure the job failed quickly.
+            f'{_SPOT_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED_SETUP"',
+            # Sub job 0 should be SUCCEEDED.
+            f'{_SPOT_QUEUE_WAIT} | grep {name} | sed -n 2p | grep {name}-*-0 | grep "SUCCEEDED"',
+            # Sub job 1 should be FAILED_SETUP.
+            f'{_SPOT_QUEUE_WAIT} | grep {name} | sed -n 3p | grep {name}-*-1 | grep "FAILED_SETUP"',
+            # Sub job 2 should be FAILED_PRECHECKS.
+            f'{_SPOT_QUEUE_WAIT} | grep {name} | sed -n 4p | grep {name}-*-2 | grep "FAILED_PRECHECKS"',
+            # Sub job 3 should be FAILED_PRECHECKS.
+            f'{_SPOT_QUEUE_WAIT} | grep {name} | sed -n 5p | grep {name}-*-3 | grep "FAILED_PRECHECKS"',
+        ],
+        _SPOT_CANCEL_WAIT.format(job_name=name),
+        # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+        timeout=30 * 60,
+    )
+    run_one_test(test)
+
+
 # ---------- Testing managed spot recovery ----------
+@pytest.mark.aws
+@pytest.mark.managed_spot
+def test_spot_recovery_aws(aws_config_region):
+    """Test managed spot recovery."""
+    name = _get_cluster_name()
+    region = aws_config_region
+    test = Test(
+        'spot_recovery_aws',
+        [
+            f'sky spot launch --cloud aws --region {region} -n {name} examples/spot_pipeline/multi_jobs.yaml  -y -d',
+            'sleep 360',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            # Terminate the cluster manually.
+            (f'aws ec2 terminate-instances --region {region} --instance-ids $('
+             f'aws ec2 describe-instances --region {region} '
+             f'--filters Name=tag:ray-cluster-name,Values={name}* '
+             f'--query Reservations[].Instances[].InstanceId '
+             '--output text)'),
+            'sleep 100',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
+            'sleep 200',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+        ],
+        _SPOT_CANCEL_WAIT.format(job_name=name),
+        timeout=25 * 60,
+    )
+    run_one_test(test)
+
+
 @pytest.mark.aws
 @pytest.mark.managed_spot
 def test_spot_recovery_aws(aws_config_region):
@@ -1623,6 +1716,36 @@ def test_spot_recovery_gcp():
             'sleep 200',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
+        ],
+        _SPOT_CANCEL_WAIT.format(job_name=name),
+        timeout=25 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.managed_spot
+def test_spot_pipeline_recovery_gcp():
+    """Test managed spot pipeline recovery."""
+    name = _get_cluster_name()
+    zone = 'us-east4-b'
+    query_cmd = (f'gcloud compute instances list --filter='
+                 f'"(labels.ray-cluster-name:{name})" '
+                 f'--zones={zone} --format="value(name)"')
+    terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
+                     f' --quiet $({query_cmd})')
+    test = Test(
+        'spot_pipeline_recovery_gcp',
+        [
+            f'sky spot launch --cloud gcp --zone {zone} -n {name} examples/spot_pipeline/multi_jobs.yaml  -y -d',
+            'sleep 360',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            # Terminate the cluster manually.
+            terminate_cmd,
+            'sleep 100',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
+            'sleep 200',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
         ],
         _SPOT_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,

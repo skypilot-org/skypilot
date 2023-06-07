@@ -161,6 +161,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
     """
     if job_ids is None:
         job_ids = spot_state.get_nonterminal_job_ids_by_name(None)
+    job_ids = list(set(job_ids))
     if len(job_ids) == 0:
         return 'No job to cancel.'
     job_id_str = ', '.join(map(str, job_ids))

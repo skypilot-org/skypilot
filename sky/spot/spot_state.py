@@ -391,7 +391,7 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
     statuses = ', '.join(['?'] * len(SpotStatus.terminal_statuses()))
     rows = _CURSOR.execute(
         f"""\
-        SELECT new_job_id FROM spot
+        SELECT DISTINCT new_job_id FROM spot
         WHERE status NOT IN
         ({statuses})
         {name_filter}""", field_values)
