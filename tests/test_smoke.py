@@ -2108,8 +2108,8 @@ class TestStorageWithCredentials:
             shell=True)
 
     @pytest.fixture
-    def tmp_cos_bucket(self, tmp_bucket_name):
-        # Creates a temporary bucket using IBM cos API
+    def tmp_ibm_cos_bucket(self, tmp_bucket_name):
+        # Creates a temporary bucket using IBM COS API
         storage_obj = storage_lib.IBMCosStore(source="", name=tmp_bucket_name)
         yield tmp_bucket_name
         storage_obj.delete()
@@ -2295,7 +2295,7 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
-                              ('tmp_cos_bucket', storage_lib.StoreType.IBM),
+                              ('tmp_ibm_cos_bucket', storage_lib.StoreType.IBM),
                               pytest.param('tmp_awscli_bucket_r2',
                                            storage_lib.StoreType.R2,
                                            marks=pytest.mark.cloudflare)])
