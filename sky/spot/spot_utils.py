@@ -456,38 +456,99 @@ def format_job_table(jobs: List[Dict[str, Any]],
 
     if max_jobs is not None:
         jobs = jobs[:max_jobs]
+    aggregated_jobs = collections.defaultdict(list)
     for job in jobs:
-        # The job['job_duration'] is already calculated in
-        # dump_spot_job_queue().
-        job_duration = log_utils.readable_time_duration(0,
-                                                        job['job_duration'],
-                                                        absolute=True)
-        submitted = log_utils.readable_time_duration(job['submitted_at'])
-        values = [
-            job['job_id'],
-            job['sub_job_id'],
-            job['job_name'],
-            job['resources'],
-            # SUBMITTED
-            submitted if submitted != '-' else submitted,
-            # TOT. DURATION
-            log_utils.readable_time_duration(job['submitted_at'],
-                                             job['end_at'],
-                                             absolute=True),
-            job_duration,
-            job['recovery_count'],
-            job['status'].colored_str(),
-        ]
-        if show_all:
-            values.extend([
-                # STARTED
-                log_utils.readable_time_duration(job['start_at']),
-                job['cluster_resources'],
-                job['region'],
-                job['failure_reason']
-                if job['failure_reason'] is not None else '-',
-            ])
-        job_table.add_row(values)
+        # The job within the same job_id is already sorted
+        # by the sub_job_id.
+        aggregated_jobs[job['job_id']].append(job)
+
+    for job_id, sub_jobs in aggregated_jobs.items():
+        if len(sub_jobs) > 1:
+            # Aggregate the sub jobs into a new row in the table.
+            job_name = sub_jobs[0]['aggregated_job_name']
+            job_duration = 0
+            submitted_at = None
+            end_at: Optional[int] = 0
+            recovery_cnt = 0
+            spot_status = spot_state.SpotStatus.SUCCEEDED
+            failure_reason = None
+            for job in sub_jobs:
+                job_duration += job['job_duration']
+                if job['submitted_at'] is not None:
+                    if (submitted_at is None or
+                            submitted_at > job['submitted_at']):
+                        submitted_at = job['submitted_at']
+                if job['end_at'] is not None:
+                    if end_at is not None and end_at < job['end_at']:
+                        end_at = job['end_at']
+                else:
+                    end_at = None
+                recovery_cnt += job['recovery_count']
+                if spot_status.is_terminal():
+                    spot_status = job['status']
+
+                if (failure_reason is None and
+                        job['status'] > spot_state.SpotStatus.SUCCEEDED):
+                    failure_reason = job['status'].value
+
+            job_duration = log_utils.readable_time_duration(0,
+                                                            job_duration,
+                                                            absolute=True)
+            submitted = log_utils.readable_time_duration(submitted_at)
+            aggregated_values = [
+                job_id,
+                '',
+                job_name,
+                '-',
+                submitted,
+                log_utils.readable_time_duration(submitted_at,
+                                                 end_at,
+                                                 absolute=True),
+                job_duration,
+                recovery_cnt,
+                spot_status.colored_str(),
+            ]
+            if show_all:
+                aggregated_values.extend([
+                    '-',
+                    '-',
+                    '-',
+                    failure_reason if failure_reason is not None else '-',
+                ])
+            job_table.add_row(aggregated_values)
+
+        for job in sub_jobs:
+            # The job['job_duration'] is already calculated in
+            # dump_spot_job_queue().
+            job_duration = log_utils.readable_time_duration(0,
+                                                            job['job_duration'],
+                                                            absolute=True)
+            submitted = log_utils.readable_time_duration(job['submitted_at'])
+            values = [
+                job['job_id'] if len(sub_jobs) == 1 else '\u21B3',
+                job['sub_job_id'] if len(sub_jobs) > 1 else '-',
+                job['job_name'],
+                job['resources'],
+                # SUBMITTED
+                submitted if submitted != '-' else submitted,
+                # TOT. DURATION
+                log_utils.readable_time_duration(job['submitted_at'],
+                                                 job['end_at'],
+                                                 absolute=True),
+                job_duration,
+                job['recovery_count'],
+                job['status'].colored_str(),
+            ]
+            if show_all:
+                values.extend([
+                    # STARTED
+                    log_utils.readable_time_duration(job['start_at']),
+                    job['cluster_resources'],
+                    job['region'],
+                    job['failure_reason']
+                    if job['failure_reason'] is not None else '-',
+                ])
+            job_table.add_row(values)
 
     status_str = ', '.join([
         f'{count} {status}' for status, count in sorted(status_counts.items())

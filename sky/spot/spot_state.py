@@ -76,10 +76,23 @@ _CONN.commit()
 # If the job is not finished:
 # total_job_duration = end_at - last_recovered_at + job_duration
 columns = [
-    'job_id', 'job_name', 'resources', 'submitted_at', 'status',
-    'run_timestamp', 'start_at', 'end_at', 'last_recovered_at',
-    'recovery_count', 'job_duration', 'failure_reason', 'new_job_id',
-    'sub_job_id'
+    '_job_id',
+    'job_name',
+    'resources',
+    'submitted_at',
+    'status',
+    'run_timestamp',
+    'start_at',
+    'end_at',
+    'last_recovered_at',
+    'recovery_count',
+    'job_duration',
+    'failure_reason',
+    'job_id',
+    'sub_job_id',
+    # columns from the job_names table
+    'aggregated_job_id',
+    'aggregated_job_name'
 ]
 
 
@@ -436,13 +449,18 @@ def get_spot_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
     job_filter = '' if job_id is None else f'WHERE new_job_id={job_id}'
 
     rows = _CURSOR.execute(f"""\
-        SELECT * FROM spot ORDER {job_filter}
-        BY new_job_id DESC, sub_job_id DESC""")
+        SELECT *
+        FROM spot
+        LEFT OUTER JOIN job_names
+        ON spot.new_job_id=job_names.new_job_id
+        {job_filter}
+        ORDER BY new_job_id DESC, sub_job_id ASC""").fetchall()
     jobs = []
     for row in rows:
         job_dict = dict(zip(columns, row))
         job_dict['status'] = SpotStatus(job_dict['status'])
-        job_dict['job_id'] = job_dict.pop('new_job_id')
+        if job_dict['aggregated_job_name'] is None:
+            job_dict['aggregated_job_name'] = job_dict['job_name']
         jobs.append(job_dict)
     return jobs
 
