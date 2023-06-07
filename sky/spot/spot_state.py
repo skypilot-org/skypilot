@@ -353,7 +353,7 @@ def set_failed(job_id: int,
         UPDATE spot SET
         {set_str}
         WHERE new_job_id=(?){sub_job_str} AND end_at IS null""",
-        (*list(fields_to_set.values()), job_id, sub_job_id))
+        (*list(fields_to_set.values()), job_id))
     _CONN.commit()
     logger.info(failure_reason)
 
