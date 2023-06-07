@@ -550,6 +550,9 @@ def format_job_table(jobs: List[Dict[str, Any]],
                 ])
             job_table.add_row(values)
 
+        if len(sub_jobs) > 1:
+            # Add a row to separate the aggregated job from the next job.
+            job_table.add_row([''] * len(columns))
     status_str = ', '.join([
         f'{count} {status}' for status, count in sorted(status_counts.items())
     ])
