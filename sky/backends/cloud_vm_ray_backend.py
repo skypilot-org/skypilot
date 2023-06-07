@@ -3892,8 +3892,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Add the spot job to spot queue table.
             resources_str = backend_utils.get_task_resources_str(task.spot_task)
             codegen = spot_lib.SpotCodeGen()
-            code = codegen.set_spot_state(job_id, task.spot_task.name,
-                                          resources_str)
+            spot_name = task.spot_task.name
+            assert spot_name is not None, task
+            code = codegen.set_pending_state(job_id, spot_name,
+                                             resources_str)
             return code
         return None
 
@@ -3950,7 +3952,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 job_id,
                                 executable='python3',
                                 detach_run=detach_run,
-                                extra_cmd=self._set_spot_state_code(
+                                extra_cmd=self._maybe_set_spot_state_code(
                                     job_id, task))
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
@@ -4025,5 +4027,5 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 job_id,
                                 executable='python3',
                                 detach_run=detach_run,
-                                extra_cmd=self._set_spot_state_code(
+                                extra_cmd=self._maybe_set_spot_state_code(
                                     job_id, task))
