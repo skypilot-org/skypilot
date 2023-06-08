@@ -9,7 +9,7 @@ setup: |
 
 run: |
   echo train starts
-  sleep 400
+  sleep 600
   echo train ends
 
 ---
