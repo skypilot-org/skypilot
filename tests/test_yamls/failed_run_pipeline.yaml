@@ -1,7 +1,7 @@
 name: pipeline
 
 ---
-name: train1
+name: a
 
 num_nodes: 2
 
@@ -15,7 +15,7 @@ run: |
   echo train ends
 
 ---
-name: train2
+name: b
 
 setup: |
   echo setup for train
