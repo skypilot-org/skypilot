@@ -21,13 +21,13 @@ import colorama
 
 from sky import clouds
 from sky.adaptors import cloudflare
-from sky.data import storage as storage_lib
 from sky.utils import common_utils
 from sky.utils import db_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
     from sky.data import Storage
+    from sky.data import StoreType
 
 _ENABLED_CLOUDS_KEY = 'enabled_clouds'
 
@@ -706,16 +706,14 @@ def add_or_update_storage(storage_name: str,
     _DB.conn.commit()
 
 
-def remove_storage(storage_name: str, store_type: storage_lib.StoreType = None):
+def remove_storage(storage_name: str, storetype: 'StoreType' = None):
     """Removes Storage from Database"""
-    if store_type:
+    if storetype:
         handle = get_handle_from_storage_name(storage_name)
-        del handle.sky_stores[store_type]
+        del handle.sky_stores[storetype]
         # if the storage is not empty
         if len(handle.sky_stores) != 0:
-            updated_handle = pickle.dumps(handle)
-            _DB.cursor.execute('UPDATE storage SET handle = (?) WHERE name = (?)', (updated_handle, storage_name))
-            _DB.conn.commit()
+            add_or_update_storage(storage_name, handle, StorageStatus.READY)
             return
     _DB.cursor.execute('DELETE FROM storage WHERE name=(?)', (storage_name,))
     _DB.conn.commit()

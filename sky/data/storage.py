@@ -114,6 +114,18 @@ def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
             raise ValueError(f'Unknown cloud type: {cloud}')
 
 
+def get_abstract_store_from_storetype(storetype: 'StoreType') -> 'AbstractStore':
+    if isinstance(storetype, StoreType.S3):
+        return S3Store
+    elif isinstance(storetype, StoreType.GCS):
+        return GcsStore
+    elif isinstance(storetype, StoreType.R2):
+        return R2Store
+    else:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Unknown store type: {storetype}')
+
+
 def get_store_prefix(storetype: StoreType) -> str:
     if storetype == StoreType.S3:
         return 's3://'
@@ -128,6 +140,21 @@ def get_store_prefix(storetype: StoreType) -> str:
     else:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Unknown store type: {storetype}')
+
+
+def get_bucket_region(bucket_name: str, storetype: StoreType) -> str:
+    if isinstance(storetype, StoreType.S3):
+        s3 = aws.client('s3')
+        bucket_location = s3.get_bucket_location(Bucket=bucket_name)
+        region = bucket_location['LocationConstraint']
+    elif isinstance(storetype, StoreType.GCS):
+        client = google_storage.Client()
+        bucket = client.get_bucket(bucket_name)
+        region = bucket.location
+    elif isinstance(storetype, StoreType.R2):
+        # Cloudflare only supports 'auto' region for R2
+        region = 'auto'
+    return region
 
 
 class AbstractStore:
@@ -282,6 +309,15 @@ class AbstractStore:
 
         Args:
           mount_path: str; Mount path on remote server
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def get_sky_managed_bucket_names() -> Set[str]:
+        """Returns a set of sky managed buckets
+
+        Returns:
+         List[str]: List of bucket names that are sky managed
         """
         raise NotImplementedError
 
@@ -1267,7 +1303,7 @@ class S3Store(AbstractStore):
     
     @staticmethod
     def get_sky_managed_bucket_names() -> Set[str]:
-        """Gets a list of sky managed buckets from AWS S3
+        """Gets a set of sky managed buckets from AWS S3
 
         Returns:
          List[str]: List of bucket names that are sky managed
@@ -1712,7 +1748,7 @@ class GcsStore(AbstractStore):
 
     @staticmethod
     def get_sky_managed_bucket_names() -> Set[str]:
-        """Gets a list of sky managed buckets from GCP GCS
+        """Gets a set of sky managed buckets from GCP GCS
 
         Returns:
          List[str]: List of bucket names that are sky managed
@@ -2077,7 +2113,7 @@ class R2Store(AbstractStore):
 
     @staticmethod
     def get_sky_managed_bucket_names() -> Set[str]:
-        """Gets a list of sky managed buckets from Cloudflare R2
+        """Gets a set of sky managed buckets from Cloudflare R2
 
         Returns:
          List[str]: List of bucket names that are sky managed

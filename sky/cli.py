@@ -3174,11 +3174,23 @@ def storage():
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
+@click.option('--refresh',
+              '-r',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Syncs the internal state, state.db, and external state, console, of storages.')
 @usage_lib.entrypoint
-def storage_ls():
+def storage_ls(refresh: bool):
     """List storage objects created."""
+    # call for storage_refresh from core.py
+    removed, added = None, None
+    if refresh:
+        removed, added = sky.storage_refresh()
     storages = sky.storage_ls()
     storage_table = storage_utils.format_storage_table(storages)
+    #if removed or added:
+        # use click.echo to print the items deleted and added        
     click.echo(storage_table)
 
 
