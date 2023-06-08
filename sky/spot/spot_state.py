@@ -386,7 +386,7 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get non-terminal job ids by name."""
     name_filter = ''
     if name is not None:
-        name_filter = f'AND (spot.job_name=(?) OR job_names.job_name=(?))'
+        name_filter = 'AND (spot.job_name=(?) OR job_names.job_name=(?))'
         field_values = [name, name]
     field_values = [status.value for status in SpotStatus.terminal_statuses()]
     statuses = ', '.join(['?'] * len(SpotStatus.terminal_statuses()))
