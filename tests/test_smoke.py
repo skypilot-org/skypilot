@@ -1566,10 +1566,10 @@ def test_spot_pipeline(generic_cloud: str):
             f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-2 | head -n1 | grep "CANCELLING\|CANCELLED"',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-3 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 200',
-            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-0 | head -n1 | grep "CANCELLED',
-            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-1 | head -n1 | grep "CANCELLED',
-            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-2 | head -n1 | grep "CANCELLED',
-            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-3 | head -n1 | grep "CANCELLED',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-0 | head -n1 | grep "CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-1 | head -n1 | grep "CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-2 | head -n1 | grep "CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-3 | head -n1 | grep "CANCELLED"',
         ],
         _SPOT_CANCEL_WAIT.format(job_name=f'{name}'),
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.
@@ -1586,7 +1586,7 @@ def test_spot_failed_setup(generic_cloud: str):
     """Test managed spot job with failed setup."""
     name = _get_cluster_name()
     test = Test(
-        'spot-failed-setup',
+        'spot_failed_setup',
         [
             f'sky spot launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
             'sleep 330',
@@ -1608,7 +1608,7 @@ def test_spot_pipeline_failed_setup(generic_cloud: str):
     """Test managed spot job with failed setup."""
     name = _get_cluster_name()
     test = Test(
-        'spot-pipeline-failed-setup',
+        'spot_pipeline_failed_setup',
         [
             f'sky spot launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup_pipeline.yaml',
             'sleep 900',
@@ -1633,12 +1633,12 @@ def test_spot_pipeline_failed_setup(generic_cloud: str):
 # ---------- Testing managed spot recovery ----------
 @pytest.mark.aws
 @pytest.mark.managed_spot
-def test_spot_recovery_aws(aws_config_region):
+def test_spot_pipeline_recovery_aws(aws_config_region):
     """Test managed spot recovery."""
     name = _get_cluster_name()
     region = aws_config_region
     test = Test(
-        'spot_recovery_aws',
+        'spot_pipeline_recovery_aws',
         [
             f'sky spot launch --cloud aws --region {region} -n {name} tests/test_yamls/pipeline.yaml  -y -d',
             'sleep 360',
@@ -1730,7 +1730,7 @@ def test_spot_pipeline_recovery_gcp():
     name = _get_cluster_name()
     zone = 'us-east4-b'
     query_cmd = (f'gcloud compute instances list --filter='
-                 f'"(labels.ray-cluster-name:{name})" '
+                 f'"(labels.ray-cluster-name:{name}*)" '
                  f'--zones={zone} --format="value(name)"')
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
