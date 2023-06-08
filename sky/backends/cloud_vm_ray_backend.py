@@ -488,6 +488,8 @@ class RayCodeGen:
         if job_run_id is not None:
             sky_env_vars_dict_str += [
                 f'sky_env_vars_dict[{constants.JOB_ID_ENV_VAR!r}]'
+                f' = {job_run_id!r}',
+                f'sky_env_vars_dict[{constants.JOB_ID_ENV_VAR_DEPRECATED!r}]'
                 f' = {job_run_id!r}'
             ]
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)

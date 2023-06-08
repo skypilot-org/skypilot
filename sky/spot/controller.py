@@ -68,6 +68,7 @@ class SpotController:
 
         for i, task in enumerate(self._dag.tasks):
             task_envs = task.envs or {}
+            task_envs[constants.JOB_ID_ENV_VAR_DEPRECATED] = job_id_env_vars[i]
             task_envs[constants.JOB_ID_ENV_VAR] = job_id_env_vars[i]
             task_envs[constants.JOB_ID_LIST_ENV_VAR] = '\n'.join(
                 job_id_env_vars)
@@ -114,7 +115,7 @@ class SpotController:
             self._backend.run_timestamp,
             resources_str=backend_utils.get_task_resources_str(task))
         logger.info(f'Submitted spot job (sub job: {sub_job_id}); '
-                    f'SKYPILOT_JOB_ID: {job_id_env_var}')
+                    f'{constants.JOB_ID_ENV_VAR}: {job_id_env_var}')
         logger.info(str(task))
         assert task.name is not None, task
         cluster_name = spot_utils.generate_spot_cluster_name(

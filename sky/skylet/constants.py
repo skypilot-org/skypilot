@@ -25,8 +25,9 @@ UNINITIALIZED_ONPREM_CLUSTER_MESSAGE = (
     'Found uninitialized local cluster {cluster}. Run this '
     'command to initialize it locally: sky launch -c {cluster} \'\'')
 
-JOB_ID_ENV_VAR = 'SKYPILOT_JOB_ID'
-JOB_ID_LIST_ENV_VAR = 'SKYPILOT_JOB_IDS'
+JOB_ID_ENV_VAR_DEPRECATED = 'SKYPILOT_JOB_ID'
+JOB_ID_ENV_VAR = 'SKYPILOT_TASK_ID'
+JOB_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 
 SKYLET_VERSION = '1'
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
