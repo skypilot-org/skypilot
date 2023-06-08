@@ -2215,6 +2215,20 @@ class TestStorageWithCredentials:
                                              source=list_source)
 
     @pytest.fixture
+    def tmp_bulk_del_storage_obj(self, tmp_bucket_name, tmp_source):
+        # Creates a temporary storage object for testing bulk deletion.
+        # Stores must be added in the test.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subprocess.check_output(f'mkdir -p {tmpdir}/folder{{000..255}}',
+                                    shell=True)
+            subprocess.check_output(f'touch {tmpdir}/test{{000..255}}.txt',
+                                    shell=True)
+            subprocess.check_output(
+                f'touch {tmpdir}/folder{{000..255}}/test.txt', shell=True)
+            yield from self.yield_storage_object(name=tmp_bucket_name,
+                                                 source=tmp_source)
+
+    @pytest.fixture
     def tmp_copy_mnt_existing_storage_obj(self, tmp_scratch_storage_obj):
         # Creates a copy mount storage which reuses an existing storage object.
         tmp_scratch_storage_obj.add_store(storage_lib.StoreType.S3)
@@ -2314,26 +2328,16 @@ class TestStorageWithCredentials:
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
-    def test_bucket_bulk_deletion(self, store_type):
-        # Create a temp folder with over 256 files and folders, upload
+    def test_bucket_bulk_deletion(self, store_type, tmp_bulk_del_storage_obj):
+        # Creates a temp folder with over 256 files and folders, upload
         # files and folders to a new bucket, then delete bucket.
-        with tempfile.TemporaryDirectory() as tmpdir:
-            subprocess.check_output(f'mkdir -p {tmpdir}/folder{{000..255}}',
-                                    shell=True)
-            subprocess.check_output(f'touch {tmpdir}/test{{000..255}}.txt',
-                                    shell=True)
-            subprocess.check_output(
-                f'touch {tmpdir}/folder{{000..255}}/test.txt', shell=True)
+        tmp_bulk_del_storage_obj.add_store(store_type)
 
-            timestamp = str(time.time()).replace('.', '')
-            store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
-                                            source=tmpdir)
-            store_obj.add_store(store_type)
-
-        subprocess.check_output(['sky', 'storage', 'delete', store_obj.name])
+        subprocess.check_output(['sky', 'storage', 'delete',
+                                 tmp_bulk_del_storage_obj.name])
 
         output = subprocess.check_output(['sky', 'storage', 'ls'])
-        assert store_obj.name not in output.decode('utf-8')
+        assert tmp_bulk_del_storage_obj.name not in output.decode('utf-8')
 
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
