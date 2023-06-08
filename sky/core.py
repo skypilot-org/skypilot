@@ -902,7 +902,7 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
 # = Storage Management =
 # ======================
 @usage_lib.entrypoint
-def storage_ls(refresh: bool) -> List[Dict[str, Any]]:
+def storage_ls() -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get the storages.
 
