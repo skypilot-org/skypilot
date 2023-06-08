@@ -263,8 +263,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     f'{spot_job_status.value}. Logs will not be shown.'
                     f'{colorama.Style.RESET_ALL}{job_msg}')
         backend = backends.CloudVmRayBackend()
-        task_id, spot_status = spot_state.get_latest_task_id_status(
-            job_id)
+        task_id, spot_status = spot_state.get_latest_task_id_status(job_id)
 
         # spot_status can be None if the controller process just started and has
         # not updated the spot status yet.
@@ -526,9 +525,8 @@ def format_job_table(jobs: List[Dict[str, Any]],
         for task in tasks:
             # The job['job_duration'] is already calculated in
             # dump_spot_job_queue().
-            job_duration = log_utils.readable_time_duration(0,
-                                                            task['job_duration'],
-                                                            absolute=True)
+            job_duration = log_utils.readable_time_duration(
+                0, task['job_duration'], absolute=True)
             submitted = log_utils.readable_time_duration(task['submitted_at'])
             values = [
                 task['job_id'] if len(tasks) == 1 else ' \u21B3',

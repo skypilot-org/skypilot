@@ -242,15 +242,19 @@ def set_pending(job_id: int, task_id: int, name: str, resources_str: str):
     _CONN.commit()
 
 
-def set_submitted(job_id: int, task_id: int, run_timestamp: str,
+def set_submitted(job_id: int, task_id: int, run_timestamp: Union[float, str],
                   resources_str: str):
     """Set the job to submitted."""
-    # Use the timestamp in the `run_timestamp` ('sky-2022-10...'), to make the
-    # log directory and submission time align with each other, so as to make
-    # it easier to find them based on one of the values.
-    # Also, using the earlier timestamp should be closer to the term
-    # `submit_at`, which represents the time the spot task is submitted.
-    submit_time = backend_utils.get_timestamp_from_run_timestamp(run_timestamp)
+    if isinstance(run_timestamp, float):
+        submit_time = run_timestamp
+    else:
+        # Use the timestamp in the `run_timestamp` ('sky-2022-10...'), to make
+        # the log directory and submission time align with each other, so as to
+        # make it easier to find them based on one of the values.
+        # Also, using the earlier timestamp should be closer to the term
+        # `submit_at`, which represents the time the spot task is submitted.
+        submit_time = backend_utils.get_timestamp_from_run_timestamp(
+            run_timestamp)
     _CURSOR.execute(
         """\
         UPDATE spot SET
@@ -259,9 +263,8 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
         status=(?),
         run_timestamp=(?)
         WHERE new_job_id=(?) AND
-        task_id=(?)""",
-        (resources_str, submit_time, SpotStatus.SUBMITTED.value, run_timestamp,
-         job_id, task_id))
+        task_id=(?)""", (resources_str, submit_time, SpotStatus.SUBMITTED.value,
+                         run_timestamp, job_id, task_id))
 
     _CONN.commit()
 

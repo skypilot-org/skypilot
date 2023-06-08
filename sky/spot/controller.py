@@ -109,10 +109,13 @@ class SpotController:
                                      end_time=time.time())
             return True
         job_id_env_var = task.envs[constants.JOB_ID_ENV_VAR]
+        submitted_at = time.time()
+        if task_id == 0:
+            submitted_at = self._backend.run_timestamp
         spot_state.set_submitted(
             self._job_id,
             task_id,
-            self._backend.run_timestamp,
+            submitted_at,
             resources_str=backend_utils.get_task_resources_str(task))
         logger.info(f'Submitted spot job (sub job: {task_id}); '
                     f'{constants.JOB_ID_ENV_VAR}: {job_id_env_var}')
