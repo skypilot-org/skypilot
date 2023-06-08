@@ -40,7 +40,7 @@ _CURSOR.execute("""\
     job_duration FLOAT DEFAULT 0,
     failure_reason TEXT,
     new_job_id INTEGER,
-    sub_job_id INTEGER DEFAULT 0)""")
+    task_id INTEGER DEFAULT 0)""")
 _CONN.commit()
 
 db_utils.add_column_to_table(_CURSOR, _CONN, 'spot', 'failure_reason', 'TEXT')
@@ -57,7 +57,7 @@ db_utils.add_column_to_table(_CURSOR,
 db_utils.add_column_to_table(_CURSOR,
                              _CONN,
                              'spot',
-                             'sub_job_id',
+                             'task_id',
                              'INTEGER DEFAULT 0',
                              set_original_value=0)
 
@@ -89,7 +89,7 @@ columns = [
     'job_duration',
     'failure_reason',
     'job_id',
-    'sub_job_id',
+    'task_id',
     # columns from the job_names table
     'aggregated_job_id',
     'aggregated_job_name'
@@ -231,18 +231,18 @@ def set_job_name(job_id: int, name: str):
     _CONN.commit()
 
 
-def set_pending(job_id: int, sub_job_id: int, name: str, resources_str: str):
+def set_pending(job_id: int, task_id: int, name: str, resources_str: str):
     """Set the job to pending state."""
     _CURSOR.execute(
         """\
         INSERT INTO spot
-        (new_job_id, sub_job_id, job_name, resources, status)
+        (new_job_id, task_id, job_name, resources, status)
         VALUES (?, ?, ?, ?, ?)""",
-        (job_id, sub_job_id, name, resources_str, SpotStatus.PENDING.value))
+        (job_id, task_id, name, resources_str, SpotStatus.PENDING.value))
     _CONN.commit()
 
 
-def set_submitted(job_id: int, sub_job_id: int, run_timestamp: str,
+def set_submitted(job_id: int, task_id: int, run_timestamp: str,
                   resources_str: str):
     """Set the job to submitted."""
     # Use the timestamp in the `run_timestamp` ('sky-2022-10...'), to make the
@@ -259,72 +259,72 @@ def set_submitted(job_id: int, sub_job_id: int, run_timestamp: str,
         status=(?),
         run_timestamp=(?)
         WHERE new_job_id=(?) AND
-        sub_job_id=(?)""",
+        task_id=(?)""",
         (resources_str, submit_time, SpotStatus.SUBMITTED.value, run_timestamp,
-         job_id, sub_job_id))
+         job_id, task_id))
 
     _CONN.commit()
 
 
-def set_starting(job_id: int, sub_job_id: int):
+def set_starting(job_id: int, task_id: int):
     logger.info('Launching the spot cluster...')
     _CURSOR.execute(
         """\
         UPDATE spot SET status=(?)
         WHERE new_job_id=(?) AND
-        sub_job_id=(?)""", (SpotStatus.STARTING.value, job_id, sub_job_id))
+        task_id=(?)""", (SpotStatus.STARTING.value, job_id, task_id))
     _CONN.commit()
 
 
-def set_started(job_id: int, sub_job_id: int, start_time: float):
+def set_started(job_id: int, task_id: int, start_time: float):
     logger.info('Job started.')
     _CURSOR.execute(
         """\
         UPDATE spot SET status=(?), start_at=(?), last_recovered_at=(?)
         WHERE new_job_id=(?) AND
-        sub_job_id=(?)""",
-        (SpotStatus.RUNNING.value, start_time, start_time, job_id, sub_job_id))
+        task_id=(?)""",
+        (SpotStatus.RUNNING.value, start_time, start_time, job_id, task_id))
     _CONN.commit()
 
 
-def set_recovering(job_id: int, sub_job_id: int):
+def set_recovering(job_id: int, task_id: int):
     logger.info('=== Recovering... ===')
     _CURSOR.execute(
         """\
             UPDATE spot SET
             status=(?), job_duration=job_duration+(?)-last_recovered_at
             WHERE new_job_id=(?) AND
-            sub_job_id=(?)""",
-        (SpotStatus.RECOVERING.value, time.time(), job_id, sub_job_id))
+            task_id=(?)""",
+        (SpotStatus.RECOVERING.value, time.time(), job_id, task_id))
     _CONN.commit()
 
 
-def set_recovered(job_id: int, sub_job_id: int, recovered_time: float):
+def set_recovered(job_id: int, task_id: int, recovered_time: float):
     _CURSOR.execute(
         """\
         UPDATE spot SET
         status=(?), last_recovered_at=(?), recovery_count=recovery_count+1
         WHERE new_job_id=(?) AND
-        sub_job_id=(?)""",
-        (SpotStatus.RUNNING.value, recovered_time, job_id, sub_job_id))
+        task_id=(?)""",
+        (SpotStatus.RUNNING.value, recovered_time, job_id, task_id))
     _CONN.commit()
     logger.info('==== Recovered. ====')
 
 
-def set_succeeded(job_id: int, sub_job_id: int, end_time: float):
+def set_succeeded(job_id: int, task_id: int, end_time: float):
     sqlite_cmd = """\
         UPDATE spot SET
         status=(?), end_at=(?)
-        WHERE new_job_id=(?) AND sub_job_id=(?)
+        WHERE new_job_id=(?) AND task_id=(?)
         AND end_at IS null"""
     _CURSOR.execute(sqlite_cmd,
-                    (SpotStatus.SUCCEEDED.value, end_time, job_id, sub_job_id))
+                    (SpotStatus.SUCCEEDED.value, end_time, job_id, task_id))
     _CONN.commit()
     logger.info('Job succeeded.')
 
 
 def set_failed(job_id: int,
-               sub_job_id: Optional[int],
+               task_id: Optional[int],
                failure_type: SpotStatus,
                failure_reason: str,
                end_time: Optional[float] = None):
@@ -346,13 +346,13 @@ def set_failed(job_id: int,
         # calculation.
         fields_to_set['last_recovered_at'] = end_time
     set_str = ', '.join(f'{k}=(?)' for k in fields_to_set)
-    sub_job_str = '' if sub_job_id is None else f' AND sub_job_id={sub_job_id}'
+    task_str = '' if task_id is None else f' AND task_id={task_id}'
 
     _CURSOR.execute(
         f"""\
         UPDATE spot SET
         {set_str}
-        WHERE new_job_id=(?){sub_job_str} AND end_at IS null""",
+        WHERE new_job_id=(?){task_str} AND end_at IS null""",
         (*list(fields_to_set.values()), job_id))
     _CONN.commit()
     logger.info(failure_reason)
@@ -405,36 +405,36 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
     return job_ids
 
 
-def _get_all_sub_job_ids_statuses(job_id: int) -> List[Tuple[int, SpotStatus]]:
+def _get_all_task_ids_statuses(job_id: int) -> List[Tuple[int, SpotStatus]]:
     id_statuses = _CURSOR.execute(
         """\
-        SELECT sub_job_id, status FROM spot
+        SELECT task_id, status FROM spot
         WHERE new_job_id=(?)
-        ORDER BY sub_job_id ASC""", (job_id,)).fetchall()
+        ORDER BY task_id ASC""", (job_id,)).fetchall()
     return id_statuses
 
 
-def get_num_sub_jobs(job_id: int) -> int:
-    return len(_get_all_sub_job_ids_statuses(job_id))
+def get_num_tasks(job_id: int) -> int:
+    return len(_get_all_task_ids_statuses(job_id))
 
 
-def get_latest_sub_job_id_status(
+def get_latest_task_id_status(
         job_id: int) -> Union[Tuple[int, SpotStatus], Tuple[None, None]]:
     """Get the latest sub job id and status of a job."""
-    id_statuses = _get_all_sub_job_ids_statuses(job_id)
+    id_statuses = _get_all_task_ids_statuses(job_id)
     if len(id_statuses) == 0:
         return None, None
-    sub_job_id, status = id_statuses[-1]
+    task_id, status = id_statuses[-1]
     status = SpotStatus(status)
-    for sub_job_id, status in id_statuses:
+    for task_id, status in id_statuses:
         status = SpotStatus(status)
         if not status.is_terminal():
             break
-    return sub_job_id, status
+    return task_id, status
 
 
 def get_status(job_id: int) -> Optional[SpotStatus]:
-    _, status = get_latest_sub_job_id_status(job_id)
+    _, status = get_latest_task_id_status(job_id)
     return status
 
 
@@ -460,7 +460,7 @@ def get_spot_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
         LEFT OUTER JOIN job_names
         ON spot.new_job_id=job_names.new_job_id
         {job_filter}
-        ORDER BY spot.new_job_id DESC, spot.sub_job_id ASC""").fetchall()
+        ORDER BY spot.new_job_id DESC, spot.task_id ASC""").fetchall()
     jobs = []
     for row in rows:
         job_dict = dict(zip(columns, row))
@@ -471,13 +471,13 @@ def get_spot_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
     return jobs
 
 
-def get_sub_job_name(job_id: int, sub_job_id: int) -> str:
+def get_task_name(job_id: int, task_id: int) -> str:
     """Get the task name of a job."""
     task_name = _CURSOR.execute(
         """\
         SELECT job_name FROM spot
         WHERE new_job_id=(?)
-        AND sub_job_id=(?)""", (job_id, sub_job_id)).fetchone()
+        AND task_id=(?)""", (job_id, task_id)).fetchone()
     return task_name[0]
 
 
@@ -485,7 +485,7 @@ def get_latest_job_id() -> Optional[int]:
     """Get the latest job id."""
     rows = _CURSOR.execute("""\
         SELECT new_job_id FROM spot
-        WHERE sub_job_id=0
+        WHERE task_id=0
         ORDER BY submitted_at DESC LIMIT 1""")
     for (job_id,) in rows:
         return job_id

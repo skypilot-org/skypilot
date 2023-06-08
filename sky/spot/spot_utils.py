@@ -102,9 +102,9 @@ def update_spot_job_status(job_id: Optional[int] = None):
         if controller_status is None or controller_status.is_terminal():
             logger.error(f'Controller for job {job_id_} has exited abnormally. '
                          'Setting the job status to FAILED_CONTROLLER.')
-            sub_jobs = spot_state.get_spot_jobs(job_id_)
-            for sub_job in sub_jobs:
-                task_name = sub_job['job_name']
+            tasks = spot_state.get_spot_jobs(job_id_)
+            for task in tasks:
+                task_name = task['job_name']
                 # Tear down the abnormal spot cluster to avoid resource leakage.
                 cluster_name = generate_spot_cluster_name(task_name, job_id_)
                 handle = global_user_state.get_handle_from_cluster_name(
@@ -126,7 +126,7 @@ def update_spot_job_status(job_id: Optional[int] = None):
             # FAILED_CONTROLLER.
             spot_state.set_failed(
                 job_id_,
-                sub_job_id=None,
+                task_id=None,
                 failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
                 failure_reason=
                 'Controller process has exited abnormally. For more details,'
@@ -227,7 +227,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                   '{status_str}[/].')
     status_display = log_utils.safe_rich_status(
         status_msg.format(status_str=''))
-    num_sub_jobs = spot_state.get_num_sub_jobs(job_id)
+    num_tasks = spot_state.get_num_tasks(job_id)
 
     with status_display:
         prev_msg = None
@@ -263,15 +263,15 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     f'{spot_job_status.value}. Logs will not be shown.'
                     f'{colorama.Style.RESET_ALL}{job_msg}')
         backend = backends.CloudVmRayBackend()
-        sub_job_id, spot_status = spot_state.get_latest_sub_job_id_status(
+        task_id, spot_status = spot_state.get_latest_task_id_status(
             job_id)
 
         # spot_status can be None if the controller process just started and has
         # not updated the spot status yet.
         while spot_status is None or not spot_status.is_terminal():
             handle = None
-            if sub_job_id is not None:
-                task_name = spot_state.get_sub_job_name(job_id, sub_job_id)
+            if task_id is not None:
+                task_name = spot_state.get_task_name(job_id, task_id)
                 cluster_name = generate_spot_cluster_name(task_name, job_id)
                 handle = global_user_state.get_handle_from_cluster_name(
                     cluster_name)
@@ -292,8 +292,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     status_display.update(msg)
                     prev_msg = msg
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                sub_job_id, spot_status = (
-                    spot_state.get_latest_sub_job_id_status(job_id))
+                task_id, spot_status = (
+                    spot_state.get_latest_task_id_status(job_id))
                 continue
             assert spot_status is not None
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
@@ -311,22 +311,22 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 job_status = list(job_statuses.values())[0]
                 assert job_status is not None, 'No job found.'
                 if job_status != job_lib.JobStatus.CANCELLED:
-                    assert sub_job_id is not None, job_id
-                    if sub_job_id < num_sub_jobs - 1:
+                    assert task_id is not None, job_id
+                    if task_id < num_tasks - 1:
                         # The log for the current job is finished. We need to
                         # wait until next job to be started.
                         logger.debug(
-                            f'INFO: Log for the current sub job ({sub_job_id}) '
+                            f'INFO: Log for the current sub job ({task_id}) '
                             'is finished. Waiting for the next sub job\'s log '
                             'to be started.')
                         status_display.update('Waiting for the next sub job: '
-                                              f'{sub_job_id + 1}.')
+                                              f'{task_id + 1}.')
                         status_display.start()
-                        original_sub_job_id = sub_job_id
+                        original_task_id = task_id
                         while True:
-                            sub_job_id, spot_status = (
-                                spot_state.get_latest_sub_job_id_status(job_id))
-                            if original_sub_job_id != sub_job_id:
+                            task_id, spot_status = (
+                                spot_state.get_latest_task_id_status(job_id))
+                            if original_task_id != task_id:
                                 break
                             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                         continue
@@ -447,7 +447,7 @@ def format_job_table(jobs: List[Dict[str, Any]],
         max_jobs: The maximum number of jobs to show in the table.
     """
     columns = [
-        'ID', 'SUB ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
+        'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
         'JOB DURATION', '#RECOVERIES', 'STATUS'
     ]
     if show_all:
@@ -455,47 +455,47 @@ def format_job_table(jobs: List[Dict[str, Any]],
     job_table = log_utils.create_table(columns)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
-    for job in jobs:
-        if not job['status'].is_terminal():
-            status_counts[job['status'].value] += 1
+    for task in jobs:
+        if not task['status'].is_terminal():
+            status_counts[task['status'].value] += 1
 
     if max_jobs is not None:
         jobs = jobs[:max_jobs]
     aggregated_jobs = collections.defaultdict(list)
-    for job in jobs:
+    for task in jobs:
         # The job within the same job_id is already sorted
-        # by the sub_job_id.
-        aggregated_jobs[job['job_id']].append(job)
+        # by the task_id.
+        aggregated_jobs[task['job_id']].append(task)
 
-    for job_id, sub_jobs in aggregated_jobs.items():
-        if len(sub_jobs) > 1:
+    for job_id, tasks in aggregated_jobs.items():
+        if len(tasks) > 1:
             # Aggregate the sub jobs into a new row in the table.
-            job_name = sub_jobs[0]['aggregated_job_name']
+            job_name = tasks[0]['aggregated_job_name']
             job_duration = 0
             submitted_at = None
             end_at: Optional[int] = 0
             recovery_cnt = 0
             spot_status = spot_state.SpotStatus.SUCCEEDED
             failure_reason = None
-            for job in sub_jobs:
-                job_duration += job['job_duration']
-                if job['submitted_at'] is not None:
+            for task in tasks:
+                job_duration += task['job_duration']
+                if task['submitted_at'] is not None:
                     if (submitted_at is None or
-                            submitted_at > job['submitted_at']):
-                        submitted_at = job['submitted_at']
-                if job['end_at'] is not None:
-                    if end_at is not None and end_at < job['end_at']:
-                        end_at = job['end_at']
+                            submitted_at > task['submitted_at']):
+                        submitted_at = task['submitted_at']
+                if task['end_at'] is not None:
+                    if end_at is not None and end_at < task['end_at']:
+                        end_at = task['end_at']
                 else:
                     end_at = None
-                recovery_cnt += job['recovery_count']
+                recovery_cnt += task['recovery_count']
                 if spot_status == spot_state.SpotStatus.SUCCEEDED:
                     # Use the first non-succeeded status.
-                    spot_status = job['status']
+                    spot_status = task['status']
 
                 if (failure_reason is None and
-                        job['status'] > spot_state.SpotStatus.SUCCEEDED):
-                    failure_reason = job['failure_reason']
+                        task['status'] > spot_state.SpotStatus.SUCCEEDED):
+                    failure_reason = task['failure_reason']
 
             job_duration = log_utils.readable_time_duration(0,
                                                             job_duration,
@@ -523,40 +523,40 @@ def format_job_table(jobs: List[Dict[str, Any]],
                 ])
             job_table.add_row(aggregated_values)
 
-        for job in sub_jobs:
+        for task in tasks:
             # The job['job_duration'] is already calculated in
             # dump_spot_job_queue().
             job_duration = log_utils.readable_time_duration(0,
-                                                            job['job_duration'],
+                                                            task['job_duration'],
                                                             absolute=True)
-            submitted = log_utils.readable_time_duration(job['submitted_at'])
+            submitted = log_utils.readable_time_duration(task['submitted_at'])
             values = [
-                job['job_id'] if len(sub_jobs) == 1 else ' \u21B3',
-                job['sub_job_id'] if len(sub_jobs) > 1 else '-',
-                job['job_name'],
-                job['resources'],
+                task['job_id'] if len(tasks) == 1 else ' \u21B3',
+                task['task_id'] if len(tasks) > 1 else '-',
+                task['job_name'],
+                task['resources'],
                 # SUBMITTED
                 submitted if submitted != '-' else submitted,
                 # TOT. DURATION
-                log_utils.readable_time_duration(job['submitted_at'],
-                                                 job['end_at'],
+                log_utils.readable_time_duration(task['submitted_at'],
+                                                 task['end_at'],
                                                  absolute=True),
                 job_duration,
-                job['recovery_count'],
-                job['status'].colored_str(),
+                task['recovery_count'],
+                task['status'].colored_str(),
             ]
             if show_all:
                 values.extend([
                     # STARTED
-                    log_utils.readable_time_duration(job['start_at']),
-                    job['cluster_resources'],
-                    job['region'],
-                    job['failure_reason']
-                    if job['failure_reason'] is not None else '-',
+                    log_utils.readable_time_duration(task['start_at']),
+                    task['cluster_resources'],
+                    task['region'],
+                    task['failure_reason']
+                    if task['failure_reason'] is not None else '-',
                 ])
             job_table.add_row(values)
 
-        if len(sub_jobs) > 1:
+        if len(tasks) > 1:
             # Add a row to separate the aggregated job from the next job.
             job_table.add_row([''] * len(columns))
     status_str = ', '.join([

@@ -74,7 +74,7 @@ class SpotController:
                 job_id_env_vars)
             task.update_envs(task_envs)
 
-    def _run_one_sub_job(self, sub_job_id: int, task: 'sky.Task') -> bool:
+    def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring spot cluster status and handling recovery.
 
         Returns:
@@ -99,22 +99,22 @@ class SpotController:
         Other exceptions may be raised depending on the backend.
         """
         if task.run is None:
-            logger.info(f'Sub job {sub_job_id} ({task.name}) is skipped '
+            logger.info(f'Sub job {task_id} ({task.name}) is skipped '
                         'for empty run.')
             spot_state.set_started(self._job_id,
-                                   sub_job_id,
+                                   task_id,
                                    start_time=time.time())
             spot_state.set_succeeded(self._job_id,
-                                     sub_job_id,
+                                     task_id,
                                      end_time=time.time())
             return True
         job_id_env_var = task.envs[constants.JOB_ID_ENV_VAR]
         spot_state.set_submitted(
             self._job_id,
-            sub_job_id,
+            task_id,
             self._backend.run_timestamp,
             resources_str=backend_utils.get_task_resources_str(task))
-        logger.info(f'Submitted spot job (sub job: {sub_job_id}); '
+        logger.info(f'Submitted spot job (sub job: {task_id}); '
                     f'{constants.JOB_ID_ENV_VAR}: {job_id_env_var}')
         logger.info(str(task))
         assert task.name is not None, task
@@ -123,14 +123,14 @@ class SpotController:
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             cluster_name, self._backend, task, self._retry_until_up)
 
-        logger.info(f'Started monitoring spot job {self._job_id}, '
-                    f'name: {task.name!r}.')
-        spot_state.set_starting(self._job_id, sub_job_id)
+        logger.info(f'Started monitoring spot job {self._job_id} (task: '
+                    f'{task_id}, name: {task.name!r}).')
+        spot_state.set_starting(self._job_id, task_id)
         job_submitted_at = self._strategy_executor.launch()
         assert job_submitted_at is not None, job_submitted_at
 
         spot_state.set_started(self._job_id,
-                               sub_job_id,
+                               task_id,
                                start_time=job_submitted_at)
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
@@ -155,8 +155,11 @@ class SpotController:
                                                         get_end_time=True)
                 # The job is done.
                 spot_state.set_succeeded(self._job_id,
-                                         sub_job_id,
+                                         task_id,
                                          end_time=end_time)
+                logger.info(
+                    f'Spot job {self._job_id} (task: {task_id}) SUCCEEDED. '
+                    f'Cleaning up the spot cluster {cluster_name}.')
                 recovery_strategy.terminate_cluster(cluster_name=cluster_name)
                 return True
 
@@ -218,7 +221,7 @@ class SpotController:
                         f'sky spot logs --controller {self._job_id}')
 
                     spot_state.set_failed(self._job_id,
-                                          sub_job_id,
+                                          task_id,
                                           failure_type=spot_status_to_set,
                                           failure_reason=failure_reason,
                                           end_time=end_time)
@@ -243,19 +246,19 @@ class SpotController:
 
             # Try to recover the spot jobs, when the cluster is preempted
             # or the job status is failed to be fetched.
-            spot_state.set_recovering(self._job_id, sub_job_id)
+            spot_state.set_recovering(self._job_id, task_id)
             recovered_time = self._strategy_executor.recover()
             spot_state.set_recovered(self._job_id,
-                                     sub_job_id,
+                                     task_id,
                                      recovered_time=recovered_time)
 
     def run(self):
         """Run controller logic and handle exceptions."""
-        sub_job_id = 0
+        task_id = 0
         try:
             succeeded = True
-            for sub_job_id, task in enumerate(self._dag.tasks):
-                succeeded = self._run_one_sub_job(sub_job_id, task)
+            for task_id, task in enumerate(self._dag.tasks):
+                succeeded = self._run_one_task(task_id, task)
                 if not succeeded:
                     break
         except exceptions.ProvisionPrechecksError as e:
@@ -267,7 +270,7 @@ class SpotController:
             logger.error(failure_reason)
             spot_state.set_failed(
                 self._job_id,
-                sub_job_id=sub_job_id,
+                task_id=task_id,
                 failure_type=spot_state.SpotStatus.FAILED_PRECHECKS,
                 failure_reason=failure_reason)
         except exceptions.SpotJobReachedMaxRetriesError as e:
@@ -278,7 +281,7 @@ class SpotController:
             # spot job may be able to launch next time.
             spot_state.set_failed(
                 self._job_id,
-                sub_job_id=sub_job_id,
+                task_id=task_id,
                 failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE,
                 failure_reason=common_utils.format_exception(e))
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
@@ -288,14 +291,14 @@ class SpotController:
             logger.error(msg)
             spot_state.set_failed(
                 self._job_id,
-                sub_job_id=sub_job_id,
+                task_id=task_id,
                 failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
                 failure_reason=msg)
         finally:
-            for sub_id in range(sub_job_id + 1, len(self._dag.tasks)):
+            for sub_id in range(task_id + 1, len(self._dag.tasks)):
                 spot_state.set_failed(
                     self._job_id,
-                    sub_job_id=sub_id,
+                    task_id=sub_id,
                     failure_type=spot_state.SpotStatus.FAILED_PRECHECKS,
                     failure_reason='Previous sub-job failed')
 
@@ -386,7 +389,7 @@ def start(job_id, dag_yaml, retry_until_up):
             controller_process.join()
             logger.info(f'Controller process {controller_process.pid} killed.')
 
-        logger.info(f'Cleaning up spot cluster of job {job_id}.')
+        logger.info(f'Cleaning up resources for job {job_id}.')
         # NOTE: Originally, we send an interruption signal to the controller
         # process and the controller process handles cleanup. However, we
         # figure out the behavior differs from cloud to cloud
@@ -395,7 +398,7 @@ def start(job_id, dag_yaml, retry_until_up):
         # But anyway, a clean solution is killing the controller process
         # directly, and then cleanup the cluster state.
         _cleanup(job_id, dag_yaml=dag_yaml)
-        logger.info(f'Spot cluster of job {job_id} has been taken down.')
+        logger.info(f'Resources of job {job_id} has been cleaned up.')
 
         if cancelling:
             spot_state.set_cancelled(job_id)
@@ -410,7 +413,7 @@ def start(job_id, dag_yaml, retry_until_up):
             logger.info(f'Previous spot job status: {job_status.value}')
             spot_state.set_failed(
                 job_id,
-                sub_job_id=None,
+                task_id=None,
                 failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
                 failure_reason=('Unexpected error occurred. For details, '
                                 f'run: sky spot logs --controller {job_id}'))

@@ -557,9 +557,16 @@ def spot_launch(
     if dag.name is None:
         dag.name = backend_utils.generate_cluster_name()
 
-    for task_id, sub_task in enumerate(dag.tasks):
-        assert len(sub_task.resources) == 1, sub_task
-        resources = list(sub_task.resources)[0]
+    task_names = set()
+    for task_ in dag.tasks:
+        if task_.name is not None:
+            if task_.name in task_names:
+                raise ValueError(
+                    f'Task name {task_.name} is duplicated in the dag.')
+            task_names.add(task_.name)
+    for task_id, task_ in enumerate(dag.tasks):
+        assert len(task_.resources) == 1, task_
+        resources = list(task_.resources)[0]
 
         change_default_value: Dict[str, Any] = {}
         if not resources.use_spot_specified:
@@ -568,20 +575,21 @@ def spot_launch(
             change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
 
         new_resources = resources.copy(**change_default_value)
-        sub_task.set_resources({new_resources})
+        task_.set_resources({new_resources})
 
-        _maybe_translate_local_file_mounts_and_sync_up(sub_task)
+        _maybe_translate_local_file_mounts_and_sync_up(task_)
 
         name = dag.name
         if len(dag.tasks) > 1:
             name = f'{dag.name}'
-            if sub_task.name is not None:
-                name += f'-{sub_task.name}'
-            name += f'-{task_id}'
+            if task_.name is not None:
+                name += f'-{task_.name}'
+            else:
+                name += f'-{task_id}'
         # Override the task name with the specified name or generated name, so
         # that the controller process can retrieve the task name from the task
         # config.
-        sub_task.name = name
+        task_.name = name
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{dag.name}-',
                                      mode='w') as f:
