@@ -198,10 +198,7 @@ class RayCodeGen:
         #   job_id = get_output(run_on_cluster(code))
         self.job_id = None
 
-    def add_prologue(self,
-                     job_id: int,
-                     spot_task: Optional['task_lib.Task'] = None,
-                     is_local: bool = False) -> None:
+    def add_prologue(self, job_id: int, is_local: bool = False) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
@@ -275,14 +272,6 @@ class RayCodeGen:
         self._code += [
             f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
         ]
-        if spot_task is not None:
-            # Add the spot job to spot queue table.
-            resources_str = backend_utils.get_task_resources_str(spot_task)
-            self._code += [
-                'from sky.spot import spot_state',
-                f'spot_state.set_pending('
-                f'{job_id}, {spot_task.name!r}, {resources_str!r})',
-            ]
 
     def add_gang_scheduling_placement_group_and_setup(
         self,
@@ -1816,12 +1805,7 @@ class RetryingVmProvisioner(object):
         backend = CloudVmRayBackend()
 
         returncode = backend.run_on_head(
-            handle,
-            backend_utils.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-            # At this state, an erroneous cluster may not have cached
-            # handle.head_ip (global_user_state.add_or_update_cluster(...,
-            # ready=True)).
-            use_cached_head_ip=False)
+            handle, backend_utils.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND)
         if returncode == 0:
             return
         launched_resources = handle.launched_resources
@@ -1832,7 +1816,7 @@ class RetryingVmProvisioner(object):
                 'The command `ray status` errored out on the head node '
                 'of the local cluster. Check if ray[default]==2.4.0 '
                 'is installed or running correctly.')
-        backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
+        backend.run_on_head(handle, 'ray stop')
 
         # Runs `ray up <kwargs>` with our monkey-patched launch hash
         # calculation. See the monkey patch file for why.
@@ -2516,11 +2500,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # For backward compatability and robustness of skylet, it is restarted
         with log_utils.safe_rich_status('Updating remote skylet'):
-            self.run_on_head(
-                handle,
-                _MAYBE_SKYLET_RESTART_CMD,
-                use_cached_head_ip=False,
-            )
+            self.run_on_head(handle, _MAYBE_SKYLET_RESTART_CMD)
 
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.
@@ -2742,6 +2722,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_id: int,
         executable: str,
         detach_run: bool = False,
+        spot_task: Optional[task_lib.Task] = None,
     ) -> None:
         """Executes generated code on the head node."""
         style = colorama.Style
@@ -2790,7 +2771,29 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                           f'touch {remote_log_path}')
             code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
+
             job_submit_cmd = mkdir_code + ' && ' + code
+
+            if spot_task is not None:
+                # Add the spot job to spot queue table.
+                resources_str = backend_utils.get_task_resources_str(spot_task)
+                spot_codegen = spot_lib.SpotCodeGen()
+                spot_name = spot_task.name
+                assert spot_name is not None, spot_task
+                spot_code = spot_codegen.set_pending(job_id, spot_name,
+                                                     resources_str)
+                # Set the spot job to PENDING state to make sure that this spot
+                # job appears in the `sky spot queue`, when there are already 16
+                # controller process jobs running on the controller VM with 8
+                # CPU cores.
+                # The spot job should be set to PENDING state *after* the
+                # controller process job has been queued, as our skylet on spot
+                # controller will set the spot job in FAILED state if the
+                # controller process job does not exist.
+                # We cannot set the spot job to PENDING state in the codegen for
+                # the controller process job, as it will stay in the job pending
+                # table and not be executed until there is an empty slot.
+                job_submit_cmd = job_submit_cmd + ' && ' + spot_code
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
@@ -3573,19 +3576,38 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         *,
         port_forward: Optional[List[int]] = None,
         log_path: str = '/dev/null',
-        process_stream: bool = True,
         stream_logs: bool = False,
-        use_cached_head_ip: bool = True,
         ssh_mode: command_runner.SshMode = command_runner.SshMode.
         NON_INTERACTIVE,
         under_remote_workdir: bool = False,
         require_outputs: bool = False,
         separate_stderr: bool = False,
+        process_stream: bool = True,
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
-        """Runs 'cmd' on the cluster's head node."""
-        head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip,
-                                            _FETCH_IP_MAX_ATTEMPTS)
+        """Runs 'cmd' on the cluster's head node.
+
+        Args:
+            handle: The ResourceHandle to the cluster.
+            cmd: The command to run.
+
+            Advanced options:
+
+            port_forward: A list of ports to forward.
+            log_path: The path to the log file.
+            stream_logs: Whether to stream the logs to stdout/stderr.
+            ssh_mode: The mode to use for ssh.
+                See command_runner.SSHCommandRunner.SSHMode for more details.
+            under_remote_workdir: Whether to run the command under the remote
+                workdir ~/sky_workdir.
+            require_outputs: Whether to return the stdout and stderr of the
+                command.
+            separate_stderr: Whether to separate stderr from stdout.
+            process_stream: Whether to post-process the stdout/stderr of the
+                command, such as replacing or skipping lines on the fly. If
+                enabled, lines are printed only when '\r' or '\n' is found.
+        """
+        head_ip = backend_utils.get_head_ip(handle, _FETCH_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
@@ -3904,9 +3926,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
-        codegen.add_prologue(job_id,
-                             spot_task=task.spot_task,
-                             is_local=is_local)
+        codegen.add_prologue(job_id, is_local=is_local)
         codegen.add_gang_scheduling_placement_group_and_setup(
             1,
             accelerator_dict,
@@ -3946,7 +3966,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 executable='python3',
-                                detach_run=detach_run)
+                                detach_run=detach_run,
+                                spot_task=task.spot_task)
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
@@ -3972,9 +3993,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
-        codegen.add_prologue(job_id,
-                             spot_task=task.spot_task,
-                             is_local=is_local)
+        codegen.add_prologue(job_id, is_local=is_local)
         codegen.add_gang_scheduling_placement_group_and_setup(
             num_actual_nodes,
             accelerator_dict,
@@ -4021,4 +4040,5 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 executable='python3',
-                                detach_run=detach_run)
+                                detach_run=detach_run,
+                                spot_task=task.spot_task)

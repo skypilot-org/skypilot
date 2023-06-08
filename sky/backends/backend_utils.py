@@ -1538,21 +1538,24 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
 @timeline.event
 def get_head_ip(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-    use_cached_head_ip: bool = True,
     max_attempts: int = 1,
 ) -> str:
-    """Returns the ip of the head node."""
-    if use_cached_head_ip:
-        if handle.head_ip is None:
-            # This happens for INIT clusters (e.g., exit 1 in setup).
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cluster\'s head IP not found; is it up? To fix: '
-                    'run a successful launch first (`sky launch`) to ensure'
-                    ' the cluster status is UP (`sky status`).')
-        head_ip = handle.head_ip
-    else:
-        head_ip = _query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
+    """Returns the ip of the head node.
+
+    First try to use the cached head ip. If it is not available, query
+    the head ip from the cluster.
+
+    Args:
+        handle: The ResourceHandle of the cluster.
+        max_attempts: The maximum number of attempts to query the head ip.
+
+    Returns:
+        The ip of the head node.
+    """
+    head_ip = handle.head_ip
+    if head_ip is not None:
+        return head_ip
+    head_ip = _query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
     return head_ip
 
 
