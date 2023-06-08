@@ -5,6 +5,7 @@ import json
 import pathlib
 import shlex
 import time
+import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
@@ -20,6 +21,9 @@ from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.spot import spot_state
 from sky.utils import subprocess_utils
+
+if typing.TYPE_CHECKING:
+    from sky import dag as dag_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -626,11 +630,20 @@ class SpotCodeGen:
         return cls._build(code)
 
     @classmethod
-    def set_pending(cls, job_id: int, name: str, resources_str: str) -> str:
+    def set_pending(cls, job_id: int, spot_dag: 'dag_lib.Dag') -> str:
+        dag_name = spot_dag.name
+        # Add the spot job to spot queue table.
         code = [
-            f'spot_state.set_pending('
-            f'{job_id}, {name!r}, {resources_str!r})',
+            f'spot_state.set_job_name('
+            f'{job_id}, {dag_name!r})',
         ]
+        for task_id, task in enumerate(spot_dag.tasks):
+            resources_str = backend_utils.get_task_resources_str(task)
+            code += [
+                f'spot_state.set_pending('
+                f'{job_id}, {task_id}, {task.name!r}, '
+                f'{resources_str!r})',
+            ]
         return cls._build(code)
 
     @classmethod
