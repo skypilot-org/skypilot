@@ -158,8 +158,8 @@ available_node_types:
             name: dshm
           resources:
             requests:
-              cpu: 1
-              memory: 2048Mi
+              cpu: {{cpus}}
+              memory: {{memory}}G
             limits:
               # The maximum memory that this pod is allowed to use. The
               # limit will be detected by ray and split to use 10% for
@@ -168,7 +168,8 @@ available_node_types:
               # the object store size is not set manually, ray will
               # allocate a very large object store in each pod that may
               # cause problems for other pods.
-              memory: 2048Mi
+              cpu: {{cpus}}
+              memory: {{memory}}G
   head_node:
     node_config:
       apiVersion: v1
@@ -227,8 +228,8 @@ available_node_types:
                 command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && sudo service ssh restart"]
           resources:
             requests:
-              cpu: 1000m
-              memory: 2048Mi
+              cpu: {{cpus}}
+              memory: {{memory}}G
             limits:
               # The maximum memory that this pod is allowed to use. The
               # limit will be detected by ray and split to use 10% for
@@ -237,7 +238,8 @@ available_node_types:
               # the object store size is not set manually, ray will
               # allocate a very large object store in each pod that may
               # cause problems for other pods.
-              memory: 2048Mi
+              cpu: {{cpus}}
+              memory: {{memory}}G
 
 setup_commands:
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)

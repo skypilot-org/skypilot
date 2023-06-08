@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -177,11 +178,18 @@ class Kubernetes(clouds.Cloud):
         else:
             custom_resources = None
 
-        # TODO: return number of CPUs and memory here
+        # TODO: Resources.memory and resources.cpus are None if they are not explicitly set.
+        #      We fetch the default values for the instance type in that case.
+        cpus, mem = service_catalog.get_vcpus_mem_from_instance_type(resources.instance_type, clouds='kubernetes')
+        # Convert to int
+        cpus = int(cpus)
+        mem = int(mem)
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
+            'cpus': cpus,
+            'memory': mem
         }
 
     def get_feasible_launchable_resources(self,
