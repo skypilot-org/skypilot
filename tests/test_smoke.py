@@ -1554,7 +1554,7 @@ def test_spot_pipeline(generic_cloud: str):
     test = Test(
         'spot-pipeline',
         [
-            f'sky spot launch -n {name} --cloud {generic_cloud} examples/spot_pipeline/multi_jobs.yaml -y -d',
+            f'sky spot launch -n {name} --cloud {generic_cloud} tests/test_yamls/pipeline.yaml -y -d',
             'sleep 5',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING\|RUNNING"',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-0 | head -n1 | grep "STARTING\|RUNNING"',
@@ -1640,7 +1640,7 @@ def test_spot_recovery_aws(aws_config_region):
     test = Test(
         'spot_recovery_aws',
         [
-            f'sky spot launch --cloud aws --region {region} -n {name} examples/spot_pipeline/multi_jobs.yaml  -y -d',
+            f'sky spot launch --cloud aws --region {region} -n {name} tests/test_yamls/pipeline.yaml  -y -d',
             'sleep 360',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
@@ -1737,7 +1737,7 @@ def test_spot_pipeline_recovery_gcp():
     test = Test(
         'spot_pipeline_recovery_gcp',
         [
-            f'sky spot launch --cloud gcp --zone {zone} -n {name} examples/spot_pipeline/multi_jobs.yaml  -y -d',
+            f'sky spot launch --cloud gcp --zone {zone} -n {name} tests/test_yamls/pipeline.yaml  -y -d',
             'sleep 360',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
