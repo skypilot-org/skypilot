@@ -4,7 +4,6 @@ import textwrap
 from click import testing as cli_testing
 
 import sky
-from sky import clouds
 import sky.cli as cli
 
 

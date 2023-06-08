@@ -47,6 +47,7 @@ YAPF_FLAGS=(
 )
 
 YAPF_EXCLUDES=(
+    '--exclude' 'build/**'
     '--exclude' 'sky/skylet/providers/aws/**'
     '--exclude' 'sky/skylet/providers/gcp/**'
     '--exclude' 'sky/skylet/providers/azure/**'

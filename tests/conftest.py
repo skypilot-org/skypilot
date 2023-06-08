@@ -19,7 +19,7 @@ from typing import List
 #
 # To only run tests for managed spot (without generic tests), use --managed-spot.
 all_clouds_in_smoke_tests = [
-    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm'
+    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci'
 ]
 default_clouds_to_run = ['gcp', 'azure']
 
@@ -33,6 +33,8 @@ cloud_to_pytest_keyword = {
     'lambda': 'lambda_cloud',
     'cloudflare': 'cloudflare',
     'ibm': 'ibm',
+    'scp': 'scp',
+    'oci': 'oci',
 }
 
 
@@ -182,6 +184,7 @@ def enable_all_clouds(monkeypatch):
         prefix='tmp_backup_config_default', delete=False)
     monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
                         config_file_backup.name)
+    monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
 
 
 @pytest.fixture

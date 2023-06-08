@@ -15,11 +15,14 @@ Install SkyPilot using pip:
   $ # pip install "skypilot[gcp]"
   $ # pip install "skypilot[azure]"
   $ # pip install "skypilot[lambda]"
+  $ # pip install "skypilot[ibm]"
+  $ # pip install "skypilot[scp]"
+  $ # pip install "skypilot[oci]"
   $ # pip install "skypilot[all]"
 
-SkyPilot currently supports five cloud providers: AWS, GCP, Azure, Lambda Cloud and Cloudflare (R2).
+SkyPilot currently supports these cloud providers: AWS, GCP, Azure, IBM, OCI, SCP, Lambda Cloud, and Cloudflare (for R2 object store).
 If you only have access to certain clouds, use any combination of
-:code:`"[aws,azure,gcp,lambda,cloudflare]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
+the pip extras above (e.g., :code:`"[aws,gcp]"`) to reduce the
 dependencies installed.
 
 You may also install SkyPilot from source.
@@ -48,8 +51,8 @@ If you already have cloud access set up on your local machine, run ``sky check``
 
 Otherwise, configure access to at least one cloud, then run ``sky check``:
 
-AWS
-~~~~~~~~~
+Amazon Web Services (AWS)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To get the **AWS access key** required by :code:`aws configure`, please go to the `AWS IAM Management Console <https://us-east-1.console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials>`_ and click on the "Access keys" dropdown (detailed instructions `here <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_). The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
 
@@ -61,10 +64,10 @@ To get the **AWS access key** required by :code:`aws configure`, please go to th
   $ # Configure your AWS credentials
   $ aws configure
 
-Note: If you are using AWS IAM Identity Center (AWS SSO), you will need :code:`pip install awscli>=1.27.10`. See `here <https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html>`_ for instructions on how to configure AWS SSO.
+To use AWS IAM Identity Center (AWS SSO), see :ref:`here<aws-sso>` for instructions.
 
-GCP
-~~~~~~~~~
+Google Cloud Platform (GCP)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: console
 
@@ -107,6 +110,45 @@ Lambda Cloud
   $ mkdir -p ~/.lambda_cloud
   $ echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
 
+IBM
+~~~~~~~~~
+
+To access IBM's services, store the following fields in ``~/.ibm/credentials.yaml``:
+
+.. code-block:: text
+
+  iam_api_key: <user_personal_api_key>
+  resource_group_id: <resource_group_user_is_a_member_of>
+
+- Create a new API key by following `this guide <https://www.ibm.com/docs/en/app-connect/container?topic=servers-creating-cloud-api-key>`_.
+- Obtain a resource group's ID from the `web console <https://cloud.ibm.com/account/resource-groups>`_.
+
+.. note::
+  Stock images aren't currently providing ML tools out of the box.
+  Create private images with the necessary tools (e.g. CUDA), by following the IBM segment in `this documentation <https://github.com/skypilot-org/skypilot/blob/master/docs/source/reference/yaml-spec.rst>`_.
+
+
+Oracle Cloud Infrastructure (OCI)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`_. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
+
+.. code-block:: text
+
+  ~/.oci/config
+  ~/.oci/oci_api_key.pem
+
+The :code:`~/.oci/config` file should contain the following fields:
+
+.. code-block:: text
+
+  [DEFAULT]
+  user=ocid1.user.oc1..aaaaaaaa
+  fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp
+  tenancy=ocid1.tenancy.oc1..aaaaaaaa
+  region=us-sanjose-1
+  key_file=~/.oci/oci_api_key.pem
+
 Cloudflare R2
 ~~~~~~~~~~~~~~~~~~
 
@@ -118,7 +160,7 @@ SkyPilot can download/upload data to R2 buckets and mount them as local filesyst
   $ # Install boto
   $ pip install boto3
   $ # Configure your R2 credentials
-  $ aws configure --profile r2
+  $ AWS_SHARED_CREDENTIALS_FILE=~/.cloudflare/r2.credentials aws configure --profile r2
 
 In the prompt, enter your R2 Access Key ID and Secret Access Key (see `instructions to generate R2 credentials <https://developers.cloudflare.com/r2/data-access/s3-api/tokens/>`_). Select :code:`auto` for the default region and :code:`json` for the default output format.
 
@@ -140,6 +182,28 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
+
+Samsung Cloud Platform (SCP)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Samsung Cloud Platform(SCP) provides cloud services optimized for enterprise customers. You can learn more about SCP `here <https://cloud.samsungsds.com/>`__.
+
+To configure SCP access, you need access keys and the ID of the project your tasks will run. Go to the `Access Key Management <https://cloud.samsungsds.com/console/#/common/access-key-manage/list?popup=true>`_ page on your SCP console to generate the access keys, and the Project Overview page for the project ID. Then, add them to :code:`~/.scp/scp_credential` by running:
+
+.. code-block:: console
+
+  $ # Create directory if required
+  $ mkdir -p ~/.scp
+  $ # Add the lines for "access_key", "secret_key", and "project_id" to scp_credential file
+  $ echo "access_key = <your_access_key>" >> ~/.scp/scp_credential
+  $ echo "secret_key = <your_secret_key>" >> ~/.scp/scp_credential
+  $ echo "project_id = <your_project_id>" >> ~/.scp/scp_credential
+
+.. note::
+
+  Multi-node clusters are currently not supported on SCP.
+
+
 .. _verify-cloud-access:
 
 Verifying cloud access
@@ -160,6 +224,10 @@ This will produce a summary like:
     GCP: enabled
     Azure: enabled
     Lambda: enabled
+    IBM: enabled
+    SCP: enabled
+    OCI: enabled
+    Cloudflare (for R2 object store): enabled
 
   SkyPilot will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
 

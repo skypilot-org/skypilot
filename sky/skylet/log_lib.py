@@ -133,8 +133,8 @@ def run_with_log(
         stream_logs: Whether to stream the logs to stdout/stderr.
         require_outputs: Whether to return the stdout/stderr of the command.
         process_stream: Whether to post-process the stdout/stderr of the
-          command. If enabled, lines are printed only when '\r' or '\n' is
-          found.
+            command, such as replacing or skipping lines on the fly. If
+            enabled, lines are printed only when '\r' or '\n' is found.
         ray_job_id: The id for a ray job.
         use_sudo: Whether to use sudo to create log_path.
 

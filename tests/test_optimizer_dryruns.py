@@ -61,6 +61,7 @@ def _make_resources(
         prefix='tmp_backup_config_default', delete=False)
     monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
                         config_file_backup.name)
+    monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
 
     # Should create Resources here, since it uses the enabled clouds.
     return sky.Resources(*resources_args, **resources_kwargs)
@@ -270,7 +271,7 @@ def test_instance_type_from_cpu_memory(monkeypatch, capfd):
     assert 'r6i.2xlarge' in stdout  # AWS, 8 vCPUs, 64 GB memory
     assert 'Standard_E8s_v5' in stdout  # Azure, 8 vCPUs, 64 GB memory
     assert 'n2-highmem-8' in stdout  # GCP, 8 vCPUs, 64 GB memory
-    assert 'gpu_1x_a6000' in stdout  # Lambda, 14 vCPUs, 100 GB memory
+    assert 'gpu_1x_a10' in stdout  # Lambda, 30 vCPUs, 200 GB memory
 
     _test_resources_launch(monkeypatch, cpus='4+', memory='4+')
     stdout, _ = capfd.readouterr()
@@ -437,7 +438,7 @@ def test_invalid_image(monkeypatch):
 
     with pytest.raises(ValueError) as e:
         _test_resources(monkeypatch, cloud=sky.Azure(), image_id='some-image')
-    assert 'only supported for AWS, GCP and IBM' in str(e.value)
+    assert 'only supported for AWS/GCP/IBM/OCI' in str(e.value)
 
 
 def test_valid_image(monkeypatch):
