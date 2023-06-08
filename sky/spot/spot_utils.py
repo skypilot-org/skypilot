@@ -220,7 +220,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     """Stream logs by job id."""
     controller_status = job_lib.get_status(job_id)
     status_msg = ('[bold cyan]Waiting for controller process to be RUNNING '
-                  '{status_str}[/]. It may take a few minutes.')
+                  '{status_str}[/].')
     status_display = log_utils.safe_rich_status(
         status_msg.format(status_str=''))
     num_sub_jobs = spot_state.get_num_sub_jobs(job_id)
@@ -622,6 +622,14 @@ class SpotCodeGen:
             'else spot_state.get_latest_job_id()',
             f'msg = spot_utils.stream_logs_by_id(job_id, follow={follow})',
             'print(msg, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def set_pending(cls, job_id: int, name: str, resources_str: str) -> str:
+        code = [
+            f'spot_state.set_pending('
+            f'{job_id}, {name!r}, {resources_str!r})',
         ]
         return cls._build(code)
 
