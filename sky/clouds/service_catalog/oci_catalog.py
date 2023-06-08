@@ -102,7 +102,8 @@ def get_default_instance_type(cpus: Optional[str] = None,
     instance_type_prefix = tuple(
         f'{family}' for family in oci_conf.DEFAULT_INSTANCE_FAMILY)
 
-    df = _get_df()[_get_df()['InstanceType'].notna()]
+    df = _get_df()
+    df = df[df['InstanceType'].notna()]
     df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
 
     logger.debug(f'# get_default_instance_type: {df}')
