@@ -106,8 +106,15 @@ class Kubernetes(clouds.Cloud):
         return get_port(svc_name, namespace)
 
     @classmethod
-    def get_default_instance_type(cls) -> str:
-        return 'cpu1'
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None,
+            disk_tier: Optional[str] = None) -> Optional[str]:
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
+                                                         disk_tier=disk_tier,
+                                                         clouds='kubernetes')
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -201,9 +208,15 @@ class Kubernetes(clouds.Cloud):
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
         if accelerators is None:
-            # No requirements to filter, so just return a default VM type.
-            return (_make([Kubernetes.get_default_instance_type()]),
-                    fuzzy_candidate_list)
+            # Return a default instance type with the given number of vCPUs.
+            default_instance_type = Kubernetes.get_default_instance_type(
+                cpus=resources.cpus,
+                memory=resources.memory,
+                disk_tier=resources.disk_tier)
+            if default_instance_type is None:
+                return ([], [])
+            else:
+                return (_make([default_instance_type]), [])
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]

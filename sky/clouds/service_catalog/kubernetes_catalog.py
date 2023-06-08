@@ -23,6 +23,7 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 _DEFAULT_NUM_VCPUS = 1
+_DEFAULT_MEMORY_CPU_RATIO = 1
 _DEFAULT_INSTANCE_TYPE = 'cpu1'
 
 _df = common.read_catalog('kubernetes/vms.csv')
@@ -73,15 +74,20 @@ def get_vcpus_mem_from_instance_type(
     return common.get_vcpus_mem_from_instance_type_impl(_df,
                                                         instance_type)
 
-def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
-    if cpus is None:
-        cpus = str(_DEFAULT_NUM_VCPUS)
-    df = _df[_df['InstanceType'].eq(_DEFAULT_INSTANCE_TYPE)]
-    instance = common.get_instance_type_for_cpus_impl(df, cpus)
-    if not instance:
-        instance = common.get_instance_type_for_cpus_impl(_df, cpus)
-    return instance
 
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory: Optional[str] = None,
+                              disk_tier: Optional[str] = None) -> Optional[str]:
+    del disk_tier  # unused
+    if cpus is None and memory is None:
+        cpus = f'{_DEFAULT_NUM_VCPUS}+'
+
+    if memory is None:
+        memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
+    else:
+        memory_gb_or_ratio = memory
+    return common.get_instance_type_for_cpus_mem_impl(_df, cpus,
+                                                      memory_gb_or_ratio)
 
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, int]]:

@@ -1608,7 +1608,7 @@ def get_head_ssh_port(
             # This happens for INIT clusters (e.g., exit 1 in setup).
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'Cluster\'s head SSH oirt not found; is it up? To fix: '
+                    'Cluster\'s head SSH port not found; is it up? To fix: '
                     'run a successful launch first (`sky launch`) to ensure'
                     ' the cluster status is UP (`sky status`).')
         head_ssh_port = handle.head_ssh_port

@@ -2839,29 +2839,7 @@ ssh_port_list,
             mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                           f'touch {remote_log_path}')
             code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
-
             job_submit_cmd = mkdir_code + ' && ' + code
-
-            if spot_task is not None:
-                # Add the spot job to spot queue table.
-                resources_str = backend_utils.get_task_resources_str(spot_task)
-                spot_codegen = spot_lib.SpotCodeGen()
-                spot_name = spot_task.name
-                assert spot_name is not None, spot_task
-                spot_code = spot_codegen.set_pending(job_id, spot_name,
-                                                     resources_str)
-                # Set the spot job to PENDING state to make sure that this spot
-                # job appears in the `sky spot queue`, when there are already 16
-                # controller process jobs running on the controller VM with 8
-                # CPU cores.
-                # The spot job should be set to PENDING state *after* the
-                # controller process job has been queued, as our skylet on spot
-                # controller will set the spot job in FAILED state if the
-                # controller process job does not exist.
-                # We cannot set the spot job to PENDING state in the codegen for
-                # the controller process job, as it will stay in the job pending
-                # table and not be executed until there is an empty slot.
-                job_submit_cmd = job_submit_cmd + ' && ' + spot_code
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
@@ -3644,38 +3622,19 @@ ssh_port_list,
         *,
         port_forward: Optional[List[int]] = None,
         log_path: str = '/dev/null',
+        process_stream: bool = True,
         stream_logs: bool = False,
+        use_cached_head_ip: bool = True,
         ssh_mode: command_runner.SshMode = command_runner.SshMode.
         NON_INTERACTIVE,
         under_remote_workdir: bool = False,
         require_outputs: bool = False,
         separate_stderr: bool = False,
-        process_stream: bool = True,
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
-        """Runs 'cmd' on the cluster's head node.
-
-        Args:
-            handle: The ResourceHandle to the cluster.
-            cmd: The command to run.
-
-            Advanced options:
-
-            port_forward: A list of ports to forward.
-            log_path: The path to the log file.
-            stream_logs: Whether to stream the logs to stdout/stderr.
-            ssh_mode: The mode to use for ssh.
-                See command_runner.SSHCommandRunner.SSHMode for more details.
-            under_remote_workdir: Whether to run the command under the remote
-                workdir ~/sky_workdir.
-            require_outputs: Whether to return the stdout and stderr of the
-                command.
-            separate_stderr: Whether to separate stderr from stdout.
-            process_stream: Whether to post-process the stdout/stderr of the
-                command, such as replacing or skipping lines on the fly. If
-                enabled, lines are printed only when '\r' or '\n' is found.
-        """
-        head_ip = backend_utils.get_head_ip(handle, _FETCH_IP_MAX_ATTEMPTS)
+        """Runs 'cmd' on the cluster's head node."""
+        head_ip = backend_utils.get_head_ip(handle,
+                                            _FETCH_IP_MAX_ATTEMPTS)
         head_ssh_port = backend_utils.get_head_ssh_port(handle, use_cached_head_ip,
                                             _FETCH_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
