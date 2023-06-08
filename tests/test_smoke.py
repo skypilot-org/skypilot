@@ -1646,6 +1646,7 @@ def test_spot_pipeline_recovery_aws(aws_config_region):
             'sleep 360',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
+            f'RUN_IDS=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_IDS | cut -d: -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids',
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
              f'aws ec2 describe-instances --region {region} '
@@ -1657,6 +1658,9 @@ def test_spot_pipeline_recovery_aws(aws_config_region):
             'sleep 200',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | grep "$RUN_ID"',
+            f'RUN_IDS=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_IDS | cut -d: -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids-new',
+            f'diff /tmp/{name}-run-ids /tmp/{name}-run-ids-new',
+            f'cat /tmp/{name}-run-ids | sed -n 1p | grep `cat /tmp/{name}-run-id`',
         ],
         _SPOT_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
@@ -1752,6 +1756,9 @@ def test_spot_pipeline_recovery_gcp():
             'sleep 200',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | grep "$RUN_ID"',
+            f'RUN_IDS=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_IDS | cut -d: -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids-new',
+            f'diff /tmp/{name}-run-ids /tmp/{name}-run-ids-new',
+            f'cat /tmp/{name}-run-ids | sed -n 1p | grep `cat /tmp/{name}-run-id`',
         ],
         _SPOT_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
