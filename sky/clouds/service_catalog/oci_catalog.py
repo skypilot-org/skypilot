@@ -13,25 +13,24 @@ import typing
 import logging
 import threading
 from typing import Dict, List, Optional, Tuple
-
-from pandas import DataFrame
 from sky.clouds.service_catalog import common
 from sky.skylet.providers.oci.config import oci_conf
 from sky.adaptors import oci as oci_adaptor
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
+    import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 _df = None
 _image_df = common.read_catalog('oci/images.csv')
 
-__lock = threading.RLock()
+_lock = threading.RLock()
 
 
 def _get_df() -> 'pd.DataFrame':
-    with __lock:
+    with _lock:
         global _df
         if _df is not None:
             return _df
@@ -43,11 +42,22 @@ def _get_df() -> 'pd.DataFrame':
             subscriptions = client.list_region_subscriptions(
                 tenancy_id=oci_adaptor.get_oci_config(
                     profile=config_profile)['tenancy']).data
+
             subscribed_regions = [r.region_name for r in subscriptions]
+
         except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
                 oci_adaptor.get_oci().exceptions.InvalidConfig) as e:
+
             # This should only happen in testing where oci config is missing.
             logger.debug(f'It is OK goes here when testing: {str(e)}')
+            subscribed_regions = []
+
+        except oci_adaptor.service_exception() as e:
+            # Should never expect going here. However, we still catch
+            # it so that if any OCI call failed, the program can still
+            # proceed with try-and-error way.
+            logger.warning(
+                f'Unexpected exception when handle catalog: {str(e)}')
             subscribed_regions = []
 
         df = common.read_catalog('oci/vms.csv')
