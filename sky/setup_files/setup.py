@@ -110,10 +110,12 @@ install_requires = [
     'pulp',
 ]
 
-# NOTE: Change the templates/spot-controller.yaml.j2 file if any of the following
-# packages dependencies are changed.
+# NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
+# following packages dependencies are changed.
 aws_dependencies = [
-    # awscli>=1.27.10 is required for SSO support.
+    # NOTE: this installs CLI V1. To use AWS SSO (e.g., `aws sso login`), users
+    # should instead use CLI V2 which is not pip-installable. See
+    # https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html.
     'awscli',
     'boto3',
     # 'Crypto' module used in authentication.py for AWS.
