@@ -77,14 +77,43 @@ def handle_returncode(returncode: int,
             raise exceptions.CommandError(returncode, command, format_err_msg)
 
 
-def kill_children_processes():
-    # We need to kill the children, so that the underlying subprocess
-    # will not print the logs to the terminal, after this program
-    # exits.
+def kill_children_processes(first_pid_to_kill: Optional[int] = None,
+                            force: bool = False):
+    """Kill children processes recursively.
+
+    We need to kill the children, so that
+    1. The underlying subprocess will not print the logs to the terminal,
+       after this program exits.
+    2. The underlying subprocess will not continue with starting a cluster
+       etc. while we are cleaning up the clusters.
+
+    Args:
+        first_pid_to_kill: Optional PID of a process to be killed first.
+         This is for guaranteeing the order of cleaning up and suppress
+         flaky errors.
+    """
     parent_process = psutil.Process()
+    child_processes = []
     for child in parent_process.children(recursive=True):
+        if child.pid == first_pid_to_kill:
+            try:
+                if force:
+                    child.kill()
+                else:
+                    child.terminate()
+                child.wait()
+            except psutil.NoSuchProcess:
+                # The child process may have already been terminated.
+                pass
+        else:
+            child_processes.append(child)
+
+    for child in child_processes:
         try:
-            child.terminate()
+            if force:
+                child.kill()
+            else:
+                child.terminate()
         except psutil.NoSuchProcess:
             # The child process may have already been terminated.
             pass

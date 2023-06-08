@@ -17,6 +17,7 @@ import enum
 import getpass
 import tempfile
 import os
+import uuid
 from typing import Any, Dict, List, Optional, Union
 
 import colorama
@@ -122,7 +123,7 @@ def _execute(
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
 ) -> None:
-    """Execute a entrypoint.
+    """Execute an entrypoint.
 
     If sky.Task is given or DAG has not been optimized yet, this will call
     sky.optimize() for the caller.
@@ -260,6 +261,7 @@ def _execute(
         task.sync_storage_mounts()
 
     try:
+
         if Stage.PROVISION in stages:
             if handle is None:
                 handle = backend.provision(task,
@@ -414,6 +416,7 @@ def launch(
                 our pre-checks (e.g., cluster name invalid) or a region/zone
                 throwing resource unavailability.
         exceptions.CommandError: any ssh command error.
+        exceptions.NoCloudAccessError: if all clouds are disabled.
     Other exceptions may be raised depending on the backend.
     """
     entrypoint = task
@@ -543,8 +546,7 @@ def spot_launch(
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
     entrypoint = task
-    if name is None:
-        name = backend_utils.generate_cluster_name()
+    task_uuid = str(uuid.uuid4().hex[:4])
 
     dag = _convert_to_dag(entrypoint)
     assert len(dag.tasks) == 1, ('Only one task is allowed in a spot launch.',
@@ -570,6 +572,15 @@ def spot_launch(
 
     task = _maybe_translate_local_file_mounts_and_sync_up(task)
 
+    if name is None:
+        if task.name is not None:
+            name = task.name
+        else:
+            name = backend_utils.generate_cluster_name()
+    # Override the task name with the specified name or generated name, so that
+    # the controller process can retrieve the task name from the task config.
+    task.name = name
+
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
@@ -581,24 +592,32 @@ def spot_launch(
             'user_yaml_path': f.name,
             'user_config_path': None,
             'spot_controller': controller_name,
-            'cluster_name': name,
-            'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
+            # Note: actual spot cluster name will be <task_name>-<spot job ID>
+            'task_name': name,
+            'uuid': task_uuid,
+            'google_sdk_installation_commands':
+                gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'is_dev': env_options.Options.IS_DEVELOPER.get(),
+            'is_debug': env_options.Options.SHOW_DEBUG_INFO.get(),
             'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
             'logging_user_hash': common_utils.get_user_hash(),
             'retry_until_up': retry_until_up,
-            'user': os.environ.get('USER', None),
+            # Should not use $USER here, as that env var can be empty when
+            # running in a container.
+            'user': getpass.getuser(),
         }
+        controller_resources_config = copy.copy(
+            spot.constants.CONTROLLER_RESOURCES)
         if skypilot_config.loaded():
             # Look up the contents of the already loaded configs via the
             # 'skypilot_config' module. Don't simply read the on-disk file as
             # it may have changed since this process started.
             #
-            # Pop any proxy command, because the controller would've been
-            # launched behind the proxy, and in general any nodes we launch may
-            # not have or need the proxy setup. (If the controller needs to
-            # launch spot clusters in another region/VPC, the user should
-            # properly set up VPC peering, which will allow the
+            # Set any proxy command to None, because the controller would've
+            # been launched behind the proxy, and in general any nodes we
+            # launch may not have or need the proxy setup. (If the controller
+            # needs to launch spot clusters in another region/VPC, the user
+            # should properly set up VPC peering, which will allow the
             # cross-region/VPC communication. The proxy command is orthogonal
             # to this scenario.)
             #
@@ -617,11 +636,24 @@ def spot_launch(
             # controller VPC (or name) == the spot job's VPC (or name). It may
             # not be a sufficient check (as it's always possible that peering
             # is not set up), but it may catch some obvious errors.
-            # TODO(zhwu): hacky. We should pop the proxy command of the cloud
-            # where the controller is launched (currently, only aws user uses
-            # proxy_command).
-            config_dict = skypilot_config.pop_nested(
-                ('aws', 'ssh_proxy_command'))
+            # TODO(zhwu): hacky. We should only set the proxy command of the
+            # cloud where the controller is launched (currently, only aws user
+            # uses proxy_command).
+            proxy_command_key = ('aws', 'ssh_proxy_command')
+            ssh_proxy_command = skypilot_config.get_nested(
+                proxy_command_key, None)
+            config_dict = skypilot_config.to_dict()
+            if isinstance(ssh_proxy_command, str):
+                config_dict = skypilot_config.set_nested(
+                    proxy_command_key, None)
+            elif isinstance(ssh_proxy_command, dict):
+                # Instead of removing the key, we set the value to empty string
+                # so that the controller will only try the regions specified by
+                # the keys.
+                ssh_proxy_command = {k: None for k in ssh_proxy_command}
+                config_dict = skypilot_config.set_nested(
+                    proxy_command_key, ssh_proxy_command)
+
             with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
                 common_utils.dump_yaml(tmpfile.name, config_dict)
                 vars_to_fill.update({
@@ -630,11 +662,41 @@ def spot_launch(
                         skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
                 })
 
-        yaml_path = backend_utils.fill_template(
-            spot.SPOT_CONTROLLER_TEMPLATE,
-            vars_to_fill,
-            output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
+            # Override the controller resources with the ones specified in the
+            # config.
+            custom_controller_resources_config = skypilot_config.get_nested(
+                ('spot', 'controller', 'resources'), None)
+            if custom_controller_resources_config is not None:
+                controller_resources_config.update(
+                    custom_controller_resources_config)
+        try:
+            controller_resources = sky.Resources.from_yaml_config(
+                controller_resources_config)
+        except ValueError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Spot controller resources is not valid, please check '
+                    '~/.sky/config.yaml file and make sure '
+                    'spot.controller.resources is a valid resources spec. '
+                    'Details:\n'
+                    f'  {common_utils.format_exception(e, use_bracket=True)}'
+                ) from e
+
+        yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
+                                 f'{name}-{task_uuid}.yaml')
+        backend_utils.fill_template(spot.SPOT_CONTROLLER_TEMPLATE,
+                                    vars_to_fill,
+                                    output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
+        assert len(controller_task.resources) == 1, controller_task
+        # Backward compatibility: if the user changed the
+        # spot-controller.yaml.j2 to customize the controller resources,
+        # we should use it.
+        controller_task_resources = list(controller_task.resources)[0]
+        if not controller_task_resources.is_empty():
+            controller_resources = controller_task_resources
+        controller_task.set_resources(controller_resources)
+
         controller_task.spot_task = task
         assert len(controller_task.resources) == 1
 
@@ -676,11 +738,19 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     if copy_mounts is None:
         copy_mounts = {}
 
-    has_local_source_paths = (task.workdir is not None) or copy_mounts
-    if has_local_source_paths:
-        logger.info(
-            f'{colorama.Fore.YELLOW}Translating file_mounts with local '
-            f'source paths to SkyPilot Storage...{colorama.Style.RESET_ALL}')
+    has_local_source_paths_file_mounts = bool(copy_mounts)
+    has_local_source_paths_workdir = task.workdir is not None
+
+    msg = None
+    if has_local_source_paths_workdir and has_local_source_paths_file_mounts:
+        msg = 'workdir and file_mounts with local source paths'
+    elif has_local_source_paths_file_mounts:
+        msg = 'file_mounts with local source paths'
+    elif has_local_source_paths_workdir:
+        msg = 'workdir'
+    if msg:
+        logger.info(f'{colorama.Fore.YELLOW}Translating {msg} to SkyPilot '
+                    f'Storage...{colorama.Style.RESET_ALL}')
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
@@ -714,6 +784,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     # 2. When the src is the same, use the same bucket.
     copy_mounts_with_file_in_src = {}
     for i, (dst, src) in enumerate(copy_mounts.items()):
+        assert task.file_mounts is not None
         task.file_mounts.pop(dst)
         if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
             copy_mounts_with_file_in_src[dst] = src
@@ -807,11 +878,12 @@ def _maybe_translate_local_file_mounts_and_sync_up(
                 storage_obj.source = f's3://{storage_obj.name}'
             elif store_type == storage_lib.StoreType.GCS:
                 storage_obj.source = f'gs://{storage_obj.name}'
+            elif store_type == storage_lib.StoreType.R2:
+                storage_obj.source = f'r2://{storage_obj.name}'
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
                         f'Unsupported store type: {store_type}')
-            storage_obj.name = None
             storage_obj.force_delete = True
 
     return task

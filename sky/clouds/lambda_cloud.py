@@ -4,6 +4,7 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import exceptions
 from sky.clouds import service_catalog
 from sky.skylet.providers.lambda_cloud import lambda_utils
 
@@ -25,15 +26,14 @@ class Lambda(clouds.Cloud):
 
     # Lamdba has a 64 char limit for cluster name.
     # Reference: https://cloud.lambdalabs.com/api/v1/docs#operation/launchInstance # pylint: disable=line-too-long
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 64
+    # However, we need to account for the suffixes '-head' and '-worker'
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 57
     # Currently, none of clouds.CloudImplementationFeatures are implemented
     # for Lambda Cloud.
     # STOP/AUTOSTOP: The Lambda cloud provider does not support stopping VMs.
-    # MULTI_NODE: Multi-node is not supported by the implementation yet.
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the Lambda Cloud implementation yet.',
     }
 
     @classmethod
@@ -115,9 +115,11 @@ class Lambda(clouds.Cloud):
     def get_default_instance_type(
             cls,
             cpus: Optional[str] = None,
-            memory: Optional[str] = None) -> Optional[str]:
+            memory: Optional[str] = None,
+            disk_tier: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
+                                                         disk_tier=disk_tier,
                                                          clouds='lambda')
 
     @classmethod
@@ -160,7 +162,7 @@ class Lambda(clouds.Cloud):
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
-        if resources.use_spot:
+        if resources.use_spot or resources.disk_tier is not None:
             return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
@@ -188,7 +190,9 @@ class Lambda(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             default_instance_type = Lambda.get_default_instance_type(
-                cpus=resources.cpus, memory=resources.memory)
+                cpus=resources.cpus,
+                memory=resources.memory,
+                disk_tier=resources.disk_tier)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -230,7 +234,7 @@ class Lambda(clouds.Cloud):
         }
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[str]:
+    def get_current_user_identity(cls) -> Optional[List[str]]:
         # TODO(ewzeng): Implement get_current_user_identity for Lambda
         return None
 
@@ -253,3 +257,9 @@ class Lambda(clouds.Cloud):
     @classmethod
     def regions(cls) -> List['clouds.Region']:
         return service_catalog.regions(clouds='lambda')
+
+    @classmethod
+    def check_disk_tier_enabled(cls, instance_type: str,
+                                disk_tier: str) -> None:
+        raise exceptions.NotSupportedError(
+            'Lambda does not support disk tiers.')
