@@ -30,7 +30,7 @@ _image_df = common.read_catalog('oci/images.csv')
 __lock = threading.RLock()
 
 
-def _get_df() -> DataFrame:
+def _get_df() -> 'pd.DataFrame':
     with __lock:
         global _df
         if _df is not None:
