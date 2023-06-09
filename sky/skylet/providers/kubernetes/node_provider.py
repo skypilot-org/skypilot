@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from kubernetes.client.rest import ApiException
 
-from sky.skylet.providers.kubernetes import core_api, log_prefix, networking_api, get_head_ssh_port
+from sky.skylet.providers.kubernetes import core_api, log_prefix, networking_api, get_head_ssh_port, KubernetesError
 from sky.skylet.providers.kubernetes.config import (
     bootstrap_kubernetes,
     fillout_resources_kubernetes,
@@ -237,6 +237,31 @@ class KubernetesNodeProvider(NodeProvider):
                     ingress_spec, new_svc.metadata.name
                 )
                 networking_api().create_namespaced_ingress(self.namespace, ingress_spec)
+
+        # Wait for all pods to be ready, and if it exceeds the timeout, raise an
+        # exception.
+
+        # TODO(romilb): Figure out a way to make this timeout configurable.
+        TIMEOUT = 30
+        start = time.time()
+        while True:
+            if time.time() - start > TIMEOUT:
+                raise KubernetesError(
+                    "Timed out while waiting for nodes to start. Cluster may be out of resources or may be too slow to autoscale."
+                )
+            all_ready = True
+            for pod in new_nodes:
+                pod = core_api().read_namespaced_pod(pod.metadata.name, self.namespace)
+                if pod.status.phase != "Running":
+                    all_ready = False
+                    break
+            if all_ready:
+                break
+            else:
+                time.sleep(1)
+
+
+
 
     def terminate_node(self, node_id):
         logger.info(log_prefix + "calling delete_namespaced_pod")

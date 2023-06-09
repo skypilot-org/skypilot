@@ -64,3 +64,7 @@ def get_port(svc_name, namespace):
     return head_service.spec.ports[0].node_port
 
 log_prefix = "KubernetesNodeProvider: "
+
+
+class KubernetesError(Exception):
+    pass
