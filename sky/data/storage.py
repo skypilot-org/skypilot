@@ -19,6 +19,7 @@ from sky.utils import schemas
 from sky.data import data_transfer
 from sky.data import data_utils
 from sky.data import mounting_utils
+from sky.data import storage_utils
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -873,79 +874,6 @@ class Storage(object):
         return config
 
 
-def format_gitignore_to_exclude_list(src_dir_path: str) -> List[str]:
-    """ Lists files and patterns ignored by git in the source directory
-    
-    Runs `git status --ignored` which returns a list of excluded files and patterns 
-    read from .gitignore and .git/info/exclude using git. `git init` is run if SRC_DIR_PATH
-    is not a git repository and removed after obtaining excluded list.
-    
-    Returns: List[str] containing files and patterns to be ignored. <Describe the kinds of patterns, e.g., /*>
-    """
-    expand_src_dir_path = os.path.expanduser(src_dir_path)
-
-    git_exclude_path = os.path.join(expand_src_dir_path, '.git/info/exclude')
-    gitignore_path = os.path.join(expand_src_dir_path, '.gitignore')
-
-    git_exclude_exists = os.path.isfile(git_exclude_path)
-    gitignore_exists = os.path.isfile(gitignore_path)
-
-    # This command outputs a list to be excluded according to .gitignore
-    # and .git/info/exclude
-    filter_cmd = f'git -C {expand_src_dir_path} status --ignored -s'
-    excluded_list: List[str] = ['.git/*', '.gitignore']
-
-    # pylint: disable=W1510
-    if git_exclude_exists or gitignore_exists:
-        try:
-            output = subprocess.run(filter_cmd,
-                                    shell=True,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    check=True,
-                                    text=True)
-        except subprocess.CalledProcessError as e:
-            # when the SRC_DIR_PATH is not a git repo
-            if e.returncode == exceptions.GIT_UNINITIALIZED_CODE:
-                init_cmd = f'git -C {expand_src_dir_path} init'
-                subprocess.run(init_cmd,
-                               shell=True,
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE)
-                output = subprocess.run(filter_cmd,
-                                        shell=True,
-                                        stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE,
-                                        text=True)
-                if git_exclude_exists:
-                    # removes all the files/dirs created with 'git init'
-                    # under .git/ except .git/info/exclude
-                    remove_files_cmd = (f'find {expand_src_dir_path}/.git ' \
-                                        f'-path {git_exclude_path} -prune -o ' \
-                                        '-type f -exec rm -f {} +')
-                    remove_dirs_cmd = (f'find {expand_src_dir_path}/.git ' \
-                                       f'-path {git_exclude_path} -prune -o' \
-                                       ' -type d -empty -delete')
-                    subprocess.run(remove_files_cmd,
-                                   shell=True,
-                                   stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE)
-                    subprocess.run(remove_dirs_cmd,
-                                   shell=True,
-                                   stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE)
-
-        output_list = output.stdout.split('\n')
-        for line in output_list:
-            if line.startswith('!!'):
-                to_be_excluded = line[3:]
-                if line.endswith('/'):
-                    to_be_excluded += '*'
-                excluded_list.append(to_be_excluded)
-    # pylint: enable=W1510
-    return excluded_list
-
-
 class S3Store(AbstractStore):
     """S3Store inherits from Storage Object and represents the backend
     for S3 buckets.
@@ -1148,7 +1076,8 @@ class S3Store(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            excluded_list = format_gitignore_to_exclude_list(src_dir_path)
+            excluded_list = storage_utils.get_excluded_files_from_gitignore(
+                src_dir_path)
             excludes = ' '.join(
                 [f'--exclude "{file_name}"' for file_name in excluded_list])
             sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
@@ -1573,7 +1502,8 @@ class GcsStore(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            excluded_list = format_gitignore_to_exclude_list(src_dir_path)
+            excluded_list = storage_utils.get_excluded_files_from_gitignore(
+                src_dir_path)
             excludes = '\'(' + '|'.join(excluded_list) + ')\''
             sync_command = (f'gsutil -m rsync -r -x {excludes} {src_dir_path}'
                             f' gs://{self.name}/{dest_dir_name}')
@@ -1898,7 +1828,8 @@ class R2Store(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            excluded_list = format_gitignore_to_exclude_list(src_dir_path)
+            excluded_list = storage_utils.get_excluded_files_from_gitignore(
+                src_dir_path)
             excludes = ' '.join(
                 [f'--exclude "{file_name}"' for file_name in excluded_list])
             endpoint_url = cloudflare.create_endpoint()

@@ -2467,16 +2467,15 @@ class TestStorageWithCredentials:
                                                      shell=True)
         cnt_output = subprocess.check_output(cnt_num_file_cmd, shell=True)
 
-        if store_type == storage_lib.StoreType.GCS:
-            up_dir_cmd = up_cmd = self.cli_count_name_in_bucket(store_type, \
-                bucket_name, file_name=upload_file_name, suffix='include_dir')
-            up_dir_output = subprocess.check_output(up_dir_cmd, shell=True)
-
         # GCS ls and aws s3 list-objects outputs in a different way
         # Only 'included.*' files should exist in the cloud object storage
         if store_type == storage_lib.StoreType.GCS:
+            up_dir_output = subprocess.check_output(up_dir_cmd, shell=True)
+            up_dir_cmd = up_cmd = self.cli_count_name_in_bucket(store_type, \
+                bucket_name, file_name=upload_file_name, suffix='include_dir')
+
             assert '2' in up_output.decode('utf-8'), \
-                    f'Filese to be uploaded are not uploaded.: {bucket_name}'
+                    f'Files to be uploaded are not uploaded.: {bucket_name}'
             assert '1' in up_dir_output.decode('utf-8'), \
                     f'File to be uploaded in include_dir is not uploaded.: {bucket_name}'
         else:
