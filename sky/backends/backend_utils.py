@@ -276,21 +276,42 @@ def _optimize_file_mounts(yaml_path: str) -> None:
 
 
 def path_size_megabytes(path: str) -> int:
-    """Returns the size of 'path' (directory or file) in megabytes."""
+    """Returns the size of 'path' (directory or file) in megabytes.
+
+    Returns:
+        If successful: the size of 'path' in megabytes, rounded down. Otherwise,
+        -1.
+    """
     resolved_path = pathlib.Path(path).expanduser().resolve()
     git_exclude_filter = ''
     if (resolved_path / command_runner.GIT_EXCLUDE).exists():
         # Ensure file exists; otherwise, rsync will error out.
         git_exclude_filter = command_runner.RSYNC_EXCLUDE_OPTION.format(
             str(resolved_path / command_runner.GIT_EXCLUDE))
-    rsync_output = str(
-        subprocess.check_output(
-            f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
-            f'{command_runner.RSYNC_FILTER_OPTION} '
-            f'{git_exclude_filter} --dry-run {path!r}',
-            shell=True).splitlines()[-1])
-    total_bytes = rsync_output.split(' ')[3].replace(',', '')
-    return int(float(total_bytes)) // 10**6
+    rsync_command = (f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
+                     f'{command_runner.RSYNC_FILTER_OPTION} '
+                     f'{git_exclude_filter} --dry-run {path!r}')
+    rsync_output = ''
+    try:
+        rsync_output = str(subprocess.check_output(rsync_command, shell=True))
+    except subprocess.CalledProcessError:
+        logger.debug('Command failed, proceeding without estimating size: '
+                     f'{rsync_command}')
+        return -1
+    # 3.2.3:
+    #  total size is 250,957,728  speedup is 330.19 (DRY RUN)
+    # 2.6.9:
+    #  total size is 212627556  speedup is 2437.41
+    match = re.search(r'total size is ([\d,]+)', rsync_output)
+    if match is not None:
+        try:
+            total_bytes = int(float(match.group(1).replace(',', '')))
+            return total_bytes // (1024**2)
+        except ValueError:
+            logger.debug('Failed to find "total size" in rsync output. Inspect '
+                         f'output of the following command: {rsync_command}')
+            pass  # Maybe different rsync versions have different output.
+    return -1
 
 
 class FileMountHelper(object):
