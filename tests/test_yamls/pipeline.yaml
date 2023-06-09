@@ -3,6 +3,9 @@ name: pipeline
 ---
 name: a
 
+resources:
+  cpus: 2+
+
 setup: |
   echo setup for train
   sleep 20
@@ -15,6 +18,8 @@ run: |
 ---
 name: b
 
+resources:
+  cpus: 2+
 
 setup: |
   echo setup for train
@@ -29,6 +34,9 @@ run: |
 
 name: eval1
 
+resources:
+  cpus: 2+
+
 setup: |
   echo setup for eval
   sleep 20
@@ -41,6 +49,9 @@ run: |
 ---
 
 name: eval2
+
+resources:
+  cpus: 2+
 
 setup: |
   echo setup for eval

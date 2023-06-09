@@ -6,6 +6,7 @@ name: a
 resources:
   cloud: gcp
   zone: us-east4-b
+  cpus: 2+
 
 setup: |
   echo setup for train
@@ -19,7 +20,6 @@ run: |
 
 ---
 name: b
-
 
 setup: |
   echo setup for train
