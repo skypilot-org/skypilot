@@ -135,6 +135,9 @@ available_node_types:
         - name: dshm
           emptyDir:
             medium: Memory
+        - name: dev-fuse    # Required for fuse mounting
+          hostPath:
+            path: /dev/fuse
         containers:
         - name: ray-node
           imagePullPolicy: Always
@@ -156,6 +159,10 @@ available_node_types:
             mountPath: "/etc/secret-volume"
           - mountPath: /dev/shm
             name: dshm
+          - mountPath: /dev/fuse    # Required for fuse mounting
+            name: dev-fuse
+          securityContext:          # Required for FUSE mounting, but may be a security risk
+            privileged: true
           resources:
             requests:
               cpu: {{cpus}}
@@ -199,6 +206,9 @@ available_node_types:
         - name: dshm
           emptyDir:
             medium: Memory
+        - name: dev-fuse    # Required for fuse mounting
+          hostPath:
+            path: /dev/fuse
         containers:
         - name: ray-node
           imagePullPolicy: Always
@@ -222,6 +232,10 @@ available_node_types:
             mountPath: "/etc/secret-volume"
           - mountPath: /dev/shm
             name: dshm
+          - mountPath: /dev/fuse    # Required for fuse mounting
+            name: dev-fuse
+          securityContext:          # Required for FUSE mounting, but may be a security risk
+            privileged: true
           lifecycle:
             postStart:
               exec:
@@ -251,8 +265,6 @@ setup_commands:
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   - sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;
-    sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
-    sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
     sudo pkill -9 apt-get;
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;

@@ -242,7 +242,7 @@ class KubernetesNodeProvider(NodeProvider):
         # exception.
 
         # TODO(romilb): Figure out a way to make this timeout configurable.
-        TIMEOUT = 30
+        TIMEOUT = 60
         start = time.time()
         while True:
             if time.time() - start > TIMEOUT:

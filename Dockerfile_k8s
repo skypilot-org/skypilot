@@ -16,7 +16,7 @@ FROM continuumio/miniconda3:22.11.1
 
 # Initialize conda for root user, install ssh and other local dependencies
 RUN apt update -y && \
-    apt install gcc rsync sudo patch openssh-server pciutils nano -y && \
+    apt install gcc rsync sudo patch openssh-server pciutils nano fuse -y && \
     rm -rf /var/lib/apt/lists/* && \
     apt remove -y python3 && \
     conda init

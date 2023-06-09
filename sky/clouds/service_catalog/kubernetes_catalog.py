@@ -22,9 +22,9 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-_DEFAULT_NUM_VCPUS = 1
+_DEFAULT_NUM_VCPUS = 4
 _DEFAULT_MEMORY_CPU_RATIO = 1
-_DEFAULT_INSTANCE_TYPE = 'cpu1'
+_DEFAULT_INSTANCE_TYPE = 'cpu4'
 
 _df = common.read_catalog('kubernetes/vms.csv')
 
