@@ -133,12 +133,12 @@ class SpotController:
         logger.info(f'Started monitoring spot job {self._job_id} (task: '
                     f'{task_id}, name: {task.name!r}).')
         spot_state.set_starting(self._job_id, task_id)
-        job_submitted_at = self._strategy_executor.launch()
-        assert job_submitted_at is not None, job_submitted_at
+        remote_job_started_at = self._strategy_executor.launch()
+        assert remote_job_started_at is not None, remote_job_started_at
 
         spot_state.set_started(self._job_id,
                                task_id,
-                               start_time=job_submitted_at)
+                               start_time=remote_job_started_at)
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
@@ -302,12 +302,11 @@ class SpotController:
                 failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
                 failure_reason=msg)
         finally:
-            for sub_id in range(task_id + 1, len(self._dag.tasks)):
-                spot_state.set_failed(
-                    self._job_id,
-                    task_id=sub_id,
-                    failure_type=spot_state.SpotStatus.FAILED_PRECHECKS,
-                    failure_reason='Previous sub-job failed')
+            # This will set all unfinished tasks to CANCELLING.
+            # We need to call set_cancelling before set_cancelled to make sure
+            # the table entries are correctly set.
+            spot_state.set_cancelling(self._job_id)
+            spot_state.set_cancelled(self._job_id)
 
 
 def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):

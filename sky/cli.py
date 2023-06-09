@@ -1326,8 +1326,10 @@ def launch(
         disk_tier=disk_tier,
     )
     if isinstance(task_or_dag, sky.Dag):
-        raise click.UsageError('YAML specifies a DAG, while `sky launch` '
-                               'supports a single task only.')
+        raise click.UsageError(
+            'YAML specifies a DAG which is only supported by '
+            '`sky spot launch`. `sky launch` supports a '
+            'single task only.')
     task = task_or_dag
 
     backend: backends.Backend

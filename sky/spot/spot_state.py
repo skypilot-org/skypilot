@@ -347,10 +347,10 @@ def set_failed(job_id: int,
         'status': failure_type.value,
         'failure_reason': failure_reason,
     }
-    previsou_status = _CURSOR.execute(
+    previous_status = _CURSOR.execute(
         'SELECT status FROM spot WHERE spot_job_id=(?)', (job_id,)).fetchone()
-    previsou_status = SpotStatus(previsou_status[0])
-    if previsou_status in [SpotStatus.RECOVERING]:
+    previous_status = SpotStatus(previous_status[0])
+    if previous_status in [SpotStatus.RECOVERING]:
         # If the job is recovering, we should set the
         # last_recovered_at to the end_time, so that the
         # end_at - last_recovered_at will not be affect the job duration
@@ -370,6 +370,11 @@ def set_failed(job_id: int,
 
 
 def set_cancelling(job_id: int):
+    """Set the job as cancelling.
+
+    task_id is not needed, because we expect the job should be cancelled
+    as a whole, and we should not cancel a single task.
+    """
     _CURSOR.execute(
         """\
         UPDATE spot SET
@@ -381,6 +386,10 @@ def set_cancelling(job_id: int):
 
 
 def set_cancelled(job_id: int):
+    """Set the job as cancelled.
+
+    The set_cancelling should be called before this function.
+    """
     _CURSOR.execute(
         """\
         UPDATE spot SET
@@ -431,7 +440,13 @@ def get_num_tasks(job_id: int) -> int:
 
 def get_latest_task_id_status(
         job_id: int) -> Union[Tuple[int, SpotStatus], Tuple[None, None]]:
-    """Get the latest task id and status of a job."""
+    """Returns the (task id, status) of the latest task of a job.
+
+    The latest means the task that is currently being executed by the
+    controller process. For example, in a spot job with 3 tasks, the first
+    task is succeeded, and the second task is being executed. This will
+    return (1, SpotStatus.RUNNING).
+    """
     id_statuses = _get_all_task_ids_statuses(job_id)
     if len(id_statuses) == 0:
         return None, None
