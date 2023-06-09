@@ -22,11 +22,13 @@ _CONN = sqlite3.connect(str(_DB_PATH))
 _CURSOR = _CONN.cursor()
 
 # `spot` table contains all the finest-grained tasks, including all the
-# tasks of a spot job. All tasks will have the same `spot_job_id`.
+# tasks of a spot job. All tasks of the same job will have the same
+# `spot_job_id`.
 # The `job_name` is the name of the task (naming of that column is
 # legacy issue and should be changed to `task_name`).
-# The `job_id` is now not really a job id, but a only a unique identifier
-# for all the tasks. We will use `spot_job_id` to identify the spot job.
+# The `job_id` is now not really a job id, but a only a unique
+# identifier/primary key for all the tasks. We will use `spot_job_id`
+# to identify the spot job.
 _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS spot (
     job_id INTEGER PRIMARY KEY AUTOINCREMENT,
