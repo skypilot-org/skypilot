@@ -371,7 +371,9 @@ class OCI(clouds.Cloud):
                 oci_adaptor.service_exception()):
             return False, (f'OCI credential is not correctly set. '
                            f'Check the credential file at {conf_file}\n'
-                           f'{cls._INDENT_PREFIX}{credential_help_str}')
+                           f'{cls._INDENT_PREFIX}{credential_help_str}\n'
+                           f'{cls._INDENT_PREFIX}Error details: '
+                           f'{common_utils.format_exception(e, use_bracket=True)}')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
