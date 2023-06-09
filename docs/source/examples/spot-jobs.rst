@@ -164,7 +164,7 @@ the output directory and frequency of checkpointing (see more
 on `Huggingface API <https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments.save_steps>`_).
 You may also refer to another example `here <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`_ for periodically checkpointing with PyTorch.
 
-We also set :code:`--run_name` to :code:`$SKYPILOT_TASK_ID` so that the loggings will be saved
+We also set :code:`--run_name` to :code:`$SKYPILOT_TASK_ID` so that the logs for all recoveries of the same job will be saved
 to the same run in Weights & Biases.
 
 .. note::

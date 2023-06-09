@@ -489,6 +489,8 @@ class RayCodeGen:
             sky_env_vars_dict_str += [
                 f'sky_env_vars_dict[{constants.JOB_ID_ENV_VAR!r}]'
                 f' = {job_run_id!r}',
+                # TODO(zhwu): remove this deprecated env var in later release
+                # (after 0.5).
                 f'sky_env_vars_dict[{constants.JOB_ID_ENV_VAR_DEPRECATED!r}]'
                 f' = {job_run_id!r}'
             ]

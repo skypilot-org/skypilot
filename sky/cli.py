@@ -968,7 +968,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     return is_yaml, config
 
 
-def _make_task_from_entrypoint_with_overrides(
+def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: List[str],
     *,
     name: Optional[str] = None,
@@ -1024,7 +1024,7 @@ def _make_task_from_entrypoint_with_overrides(
         assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint)
-        if len(dag.tasks) > 1 or dag.name != dag.tasks[0].name:
+        if len(dag.tasks) > 1:
             # When the dag has more than 1 task or the dag name is
             # different from the task name (i.e. the yaml file
             # contains a standalone dag name). It is unclear how to
@@ -1306,7 +1306,7 @@ def launch(
             'support for spot instances on Azure. Please file '
             'an issue if you need this feature.')
 
-    task_or_dag = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         cluster=cluster,
@@ -1326,8 +1326,8 @@ def launch(
         disk_tier=disk_tier,
     )
     if isinstance(task_or_dag, sky.Dag):
-        raise click.UsageError('Multiple tasks are specified in the YAML file. '
-                               'Please specify a single task to launch.')
+        raise click.UsageError('YAML specifies a DAG, while `sky launch` '
+                               'supports a single task only.')
     task = task_or_dag
 
     backend: backends.Backend
@@ -1458,7 +1458,7 @@ def exec(
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
 
-    task_or_dag = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         cluster=cluster,
@@ -1477,8 +1477,8 @@ def exec(
     )
 
     if isinstance(task_or_dag, sky.Dag):
-        raise click.UsageError(
-            'Multiple tasks are specified. Please specify only one task.')
+        raise click.UsageError('YAML specifies a DAG, while `sky exec` '
+                               'supports a single task only.')
     task = task_or_dag
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
@@ -3431,7 +3431,7 @@ def spot_launch(
 
       sky spot launch 'echo hello!'
     """
-    task_or_dag = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
         workdir=workdir,

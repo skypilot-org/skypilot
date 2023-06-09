@@ -548,11 +548,20 @@ def spot_launch(
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
     entrypoint = task
-    task_uuid = str(uuid.uuid4().hex[:4])
+    dag_uuid = str(uuid.uuid4().hex[:4])
 
     dag = _convert_to_dag(entrypoint)
-    assert dag.is_chain(), ('Only single-node or chain dag is '
+    assert dag.is_chain(), ('Only single-task or chain DAG is '
                             'allowed for spot_launch.', dag)
+
+    if len(dag.tasks) == 1:
+        # For a singleton task, override the dag name with task name, if it is
+        # not None. Otherwise, use the dag name.
+        task_ = dag.tasks[0]
+        if task_.name is not None:
+            dag.name = task_.name
+        else:
+            task_.name = dag.name
 
     if dag.name is None:
         dag.name = backend_utils.generate_cluster_name()
@@ -590,7 +599,7 @@ def spot_launch(
         # config.
         task_.name = name
 
-    with tempfile.NamedTemporaryFile(prefix=f'spot-task-{dag.name}-',
+    with tempfile.NamedTemporaryFile(prefix=f'spot-dag-{dag.name}-',
                                      mode='w') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller_name = spot.SPOT_CONTROLLER_NAME
@@ -599,9 +608,9 @@ def spot_launch(
             'user_yaml_path': f.name,
             'user_config_path': None,
             'spot_controller': controller_name,
-            # Note: actual spot cluster name will be <dag.name>-<spot job ID>
-            'task_name': dag.name,
-            'uuid': task_uuid,
+            # Note: actual spot cluster name will be <task.name>-<spot job ID>
+            'dag_name': dag.name,
+            'uuid': dag_uuid,
             'google_sdk_installation_commands':
                 gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'is_dev': env_options.Options.IS_DEVELOPER.get(),
@@ -690,7 +699,7 @@ def spot_launch(
                 ) from e
 
         yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
-                                 f'{name}-{task_uuid}.yaml')
+                                 f'{name}-{dag_uuid}.yaml')
         backend_utils.fill_template(spot.SPOT_CONTROLLER_TEMPLATE,
                                     vars_to_fill,
                                     output_path=yaml_path)
