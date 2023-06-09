@@ -97,7 +97,7 @@ install_requires = [
     'filelock>=3.6.0',
     # Adopted from ray's setup.py: https://github.com/ray-project/ray/blob/ray-2.4.0/python/setup.py
     # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard fails to start when
-    # ray start is called.
+    # ray start is called (#2054).
     # Tracking issue: https://github.com/ray-project/ray/issues/30984
     "grpcio >= 1.32.0, <= 1.49.1, != 1.48.0; python_version < '3.10' and sys_platform == 'darwin'",  # noqa:E501
     "grpcio >= 1.42.0, <= 1.49.1, != 1.48.0; python_version >= '3.10' and sys_platform == 'darwin'",  # noqa:E501
