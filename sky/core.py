@@ -971,7 +971,7 @@ def storage_refresh() -> Tuple[List[str], List[str]]:
         only_in_internal_state = internal_buckets_status[storetype].difference(external_buckets_status[storetype])
         for s_name in only_in_internal_state:
             global_user_state.remove_storage(s_name, storetype)
-            removed_storages.append(f'Removed {storetype}: {s_name}')
+            removed_storages.append(f'Removed {storetype.value}: {s_name}')
             
         # check if anything in external state doesn't exist in state.db
         # add storage that exist in external state but not in state.db
@@ -989,10 +989,11 @@ def storage_refresh() -> Tuple[List[str], List[str]]:
                     # create StoreMetadata
                     handle.sky_stores[storetype] = store_class.StoreMetadata(name=s_name, source=None, region=region, is_sky_managed=True)
                     break
-            # 1-2. Storage is created for the first time
+            # 1-2. Storage was created for the first time
             else:
                 store_class = storage_lib.get_abstract_store_from_storetype(storetype)
                 # create StoreMetadata
+                region = storage_lib.get_bucket_region(s_name, storetype)
                 store_metadata = store_class.StoreMetadata(name=s_name, source=None, region=region, is_sky_managed=True)
                 handle = storage_lib.Storage.StorageMetadata(storage_name=s_name,source=None,sky_stores={storetype : store_metadata})
             # 2. run add_or_update_storage to update the externally created storage

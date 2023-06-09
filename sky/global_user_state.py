@@ -21,6 +21,7 @@ import colorama
 
 from sky import clouds
 from sky.adaptors import cloudflare
+from sky.data import storage as storage_lib 
 from sky.utils import common_utils
 from sky.utils import db_utils
 

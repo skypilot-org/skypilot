@@ -115,11 +115,11 @@ def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
 
 
 def get_abstract_store_from_storetype(storetype: 'StoreType') -> 'AbstractStore':
-    if isinstance(storetype, StoreType.S3):
+    if storetype == StoreType.S3:
         return S3Store
-    elif isinstance(storetype, StoreType.GCS):
+    elif storetype == StoreType.GCS:
         return GcsStore
-    elif isinstance(storetype, StoreType.R2):
+    elif storetype == StoreType.R2:
         return R2Store
     else:
         with ux_utils.print_exception_no_traceback():
@@ -143,15 +143,15 @@ def get_store_prefix(storetype: StoreType) -> str:
 
 
 def get_bucket_region(bucket_name: str, storetype: StoreType) -> str:
-    if isinstance(storetype, StoreType.S3):
+    if storetype == StoreType.S3:
         s3 = aws.client('s3')
         bucket_location = s3.get_bucket_location(Bucket=bucket_name)
         region = bucket_location['LocationConstraint']
-    elif isinstance(storetype, StoreType.GCS):
+    elif storetype == StoreType.GCS:
         client = google_storage.Client()
         bucket = client.get_bucket(bucket_name)
         region = bucket.location
-    elif isinstance(storetype, StoreType.R2):
+    elif storetype == StoreType.R2:
         # Cloudflare only supports 'auto' region for R2
         region = 'auto'
     return region
