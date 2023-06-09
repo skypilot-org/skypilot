@@ -245,7 +245,7 @@ class OCI(clouds.Cloud):
                     oci_adaptor.get_oci().exceptions.InvalidConfig) as e:
                 # This should only happen in testing where oci config is
                 # monkeypatched. In real use, if the OCI config is not
-                # valid, the 'sky check' would fail(OCI disabled).
+                # valid, the 'sky check' would fail (OCI disabled).
                 logger.debug(f'It is OK goes here when testing: {str(e)}')
                 pass
 
@@ -368,8 +368,7 @@ class OCI(clouds.Cloud):
             return True, None
         except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
                 oci_adaptor.get_oci().exceptions.InvalidConfig,
-                oci_adaptor.service_exception()) as e:
-            logger.warning(f'OCI config error: {str(e)}')
+                oci_adaptor.service_exception()):
             return False, (f'OCI credential is not correctly set. '
                            f'Check the credential file at {conf_file}\n'
                            f'{cls._INDENT_PREFIX}{credential_help_str}')
