@@ -6,6 +6,7 @@ from sky.utils import common_utils
 
 def load_chain_dag_from_yaml(path) -> dag_lib.Dag:
     configs = common_utils.read_yaml_all(path)
+    dag_name = None
     if set(configs[0].keys()) == {'name'}:
         dag_name = configs[0]['name']
         configs = configs[1:]
