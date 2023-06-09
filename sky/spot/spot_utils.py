@@ -124,6 +124,8 @@ def update_spot_job_status(job_id: Optional[int] = None):
             # The controller job for this spot job is not running: it must
             # have exited abnormally, and we should set the job status to
             # FAILED_CONTROLLER.
+            # The `set_failed` will only update the task's status if the
+            # status is non-terminal.
             spot_state.set_failed(
                 job_id_,
                 task_id=None,
@@ -458,26 +460,26 @@ def format_job_table(tasks: List[Dict[str, Any]],
         if not task['status'].is_terminal():
             status_counts[task['status'].value] += 1
 
+    all_tasks = tasks
     if max_jobs is not None:
-        # pylint: disable=redefined-argument-from-local
-        tasks = tasks[:max_jobs]
+        all_tasks = tasks[:max_jobs]
     jobs = collections.defaultdict(list)
-    for task in tasks:
+    for task in all_tasks:
         # The job within the same job_id is already sorted
         # by the task_id.
         jobs[task['job_id']].append(task)
 
-    for job_id, tasks in jobs.items():
-        if len(tasks) > 1:
+    for job_id, job_tasks in jobs.items():
+        if len(job_tasks) > 1:
             # Aggregate the tasks into a new row in the table.
-            job_name = tasks[0]['aggregated_job_name']
+            job_name = job_tasks[0]['job_name']
             job_duration = 0
             submitted_at = None
             end_at: Optional[int] = 0
             recovery_cnt = 0
             spot_status = spot_state.SpotStatus.SUCCEEDED
             failure_reason = None
-            for task in tasks:
+            for task in job_tasks:
                 job_duration += task['job_duration']
                 if task['submitted_at'] is not None:
                     if (submitted_at is None or
@@ -529,16 +531,16 @@ def format_job_table(tasks: List[Dict[str, Any]],
                 ])
             job_table.add_row(job_values)
 
-        for task in tasks:
+        for task in job_tasks:
             # The job['job_duration'] is already calculated in
             # dump_spot_job_queue().
             job_duration = log_utils.readable_time_duration(
                 0, task['job_duration'], absolute=True)
             submitted = log_utils.readable_time_duration(task['submitted_at'])
             values = [
-                task['job_id'] if len(tasks) == 1 else ' \u21B3',
-                task['task_id'] if len(tasks) > 1 else '-',
-                task['job_name'],
+                task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
+                task['task_id'] if len(job_tasks) > 1 else '-',
+                task['task_name'],
                 task['resources'],
                 # SUBMITTED
                 submitted if submitted != '-' else submitted,
@@ -561,7 +563,7 @@ def format_job_table(tasks: List[Dict[str, Any]],
                 ])
             job_table.add_row(values)
 
-        if len(tasks) > 1:
+        if len(job_tasks) > 1:
             # Add a row to separate the aggregated job from the next job.
             job_table.add_row([''] * len(columns))
     status_str = ', '.join([

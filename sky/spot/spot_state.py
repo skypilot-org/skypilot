@@ -433,7 +433,8 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
         ON spot.spot_job_id=job_info.spot_job_id
         WHERE status NOT IN
         ({statuses})
-        {name_filter}""", field_values).fetchall()
+        {name_filter}
+        ORDER BY spot.spot_job_id DESC""", field_values).fetchall()
     job_ids = [row[0] for row in rows if row[0] is not None]
     return job_ids
 
