@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import colorama
 
 from sky import sky_logging
-from sky.backends import backend_utils
 from sky.utils import db_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -239,30 +238,34 @@ def set_job_name(job_id: int, name: str):
     _CONN.commit()
 
 
-def set_pending(job_id: int, task_id: int, name: str, resources_str: str):
+def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
     """Set the job to pending state."""
     _CURSOR.execute(
         """\
         INSERT INTO spot
         (spot_job_id, task_id, job_name, resources, status)
         VALUES (?, ?, ?, ?, ?)""",
-        (job_id, task_id, name, resources_str, SpotStatus.PENDING.value))
+        (job_id, task_id, task_name, resources_str, SpotStatus.PENDING.value))
     _CONN.commit()
 
 
-def set_submitted(job_id: int, task_id: int, run_timestamp: Union[float, str],
-                  resources_str: str):
-    """Set the job to submitted."""
-    if isinstance(run_timestamp, float):
-        submit_time = run_timestamp
-    else:
-        # Use the timestamp in the `run_timestamp` ('sky-2022-10...'), to make
-        # the log directory and submission time align with each other, so as to
-        # make it easier to find them based on one of the values.
-        # Also, using the earlier timestamp should be closer to the term
-        # `submit_at`, which represents the time the spot task is submitted.
-        submit_time = backend_utils.get_timestamp_from_run_timestamp(
-            run_timestamp)
+def set_submitted(job_id: int, task_id: int, run_timestamp: str,
+                  submit_time: float, resources_str: str):
+    """Set the job to submitted.
+
+    Args:
+        job_id: The spot job ID.
+        task_id: The task ID.
+        run_timestamp: The run_timestamp of the backend. This will be used to
+            determine the log directory of the spot task.
+        submit_time: The time when the spot task is submitted.
+        resources_str: The resources string of the spot task.
+    """
+    # Use the timestamp in the `run_timestamp` ('sky-2022-10...'), to make
+    # the log directory and submission time align with each other, so as to
+    # make it easier to find them based on one of the values.
+    # Also, using the earlier timestamp should be closer to the term
+    # `submit_at`, which represents the time the spot task is submitted.
     _CURSOR.execute(
         """\
         UPDATE spot SET
@@ -323,13 +326,13 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float):
 
 
 def set_succeeded(job_id: int, task_id: int, end_time: float):
-    sqlite_cmd = """\
+    _CURSOR.execute(
+        """\
         UPDATE spot SET
         status=(?), end_at=(?)
         WHERE spot_job_id=(?) AND task_id=(?)
-        AND end_at IS null"""
-    _CURSOR.execute(sqlite_cmd,
-                    (SpotStatus.SUCCEEDED.value, end_time, job_id, task_id))
+        AND end_at IS null""",
+        (SpotStatus.SUCCEEDED.value, end_time, job_id, task_id))
     _CONN.commit()
     logger.info('Job succeeded.')
 
@@ -339,6 +342,16 @@ def set_failed(job_id: int,
                failure_type: SpotStatus,
                failure_reason: str,
                end_time: Optional[float] = None):
+    """Set the job to failed.
+
+    Args:
+        job_id: The job id.
+        task_id: The task id. If None, all non-finished tasks of the job will
+            be set to failed.
+        failure_type: The failure type. One of SpotStatus.FAILED_*.
+        failure_reason: The failure reason.
+        end_time: The end time. If None, the current time will be used.
+    """
     assert failure_type.is_failed(), failure_type
     end_time = time.time() if end_time is None else end_time
 
@@ -446,6 +459,8 @@ def get_latest_task_id_status(
     controller process. For example, in a spot job with 3 tasks, the first
     task is succeeded, and the second task is being executed. This will
     return (1, SpotStatus.RUNNING).
+
+    If the job_id does not exist, (None, None) will be returned.
     """
     id_statuses = _get_all_task_ids_statuses(job_id)
     if len(id_statuses) == 0:

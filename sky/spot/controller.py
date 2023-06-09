@@ -76,6 +76,14 @@ class SpotController:
 
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring spot cluster status and handling recovery.
+        When the task is successfully completed, this function returns True,
+        and will terminate the spot cluster before returning.
+
+        If the user program fails, i.e. the task is set to FAILED or
+        FAILED_SETUP, this function will return False.
+        In other cases, the function will raise exceptions.
+        All the failure cases will rely on the caller to clean up the spot
+        cluster(s) and storages.
 
         Returns:
             True if the job is successfully completed; False otherwise.
@@ -115,10 +123,12 @@ class SpotController:
         job_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
         submitted_at = time.time()
         if task_id == 0:
-            submitted_at = self._backend.run_timestamp
+            submitted_at = backend_utils.get_timestamp_from_run_timestamp(
+                self._backend.run_timestamp)
         spot_state.set_submitted(
             self._job_id,
             task_id,
+            self._backend.run_timestamp,
             submitted_at,
             resources_str=backend_utils.get_task_resources_str(task))
         logger.info(f'Submitted spot job {self._job_id} (task: {task_id}); '
@@ -264,6 +274,7 @@ class SpotController:
         task_id = 0
         try:
             succeeded = True
+            # We support chain DAGs only for now.
             for task_id, task in enumerate(self._dag.tasks):
                 succeeded = self._run_one_task(task_id, task)
                 if not succeeded:
@@ -302,7 +313,8 @@ class SpotController:
                 failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
                 failure_reason=msg)
         finally:
-            # This will set all unfinished tasks to CANCELLING.
+            # This will set all unfinished tasks to CANCELLING, and will not
+            # affect the jobs in terminal states.
             # We need to call set_cancelling before set_cancelled to make sure
             # the table entries are correctly set.
             spot_state.set_cancelling(self._job_id)
@@ -348,6 +360,14 @@ def _handle_signal(job_id):
 
 
 def _cleanup(job_id: int, dag_yaml: str):
+    """Clean up the spot cluster(s) and storages.
+
+    (1) Clean up the succeeded task(s)' ephemeral storage.
+    (2) Clean up the spot cluster(s) that are not cleaned up yet, which
+        can happen when the spot task failed or cancelled. At most one
+        spot cluster should be left when reaching here, as we currently
+        only support chain DAGs, and only spot task is executed at a time.
+    """
     # NOTE: The code to get cluster name is same as what we did in the spot
     # controller, we should keep it in sync with SpotController.__init__()
     dag, _ = _get_dag_and_name(dag_yaml)

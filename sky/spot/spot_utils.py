@@ -435,7 +435,7 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
-def format_job_table(jobs: List[Dict[str, Any]],
+def format_job_table(tasks: List[Dict[str, Any]],
                      show_all: bool,
                      max_jobs: Optional[int] = None) -> str:
     """Returns spot jobs as a formatted string.
@@ -454,19 +454,20 @@ def format_job_table(jobs: List[Dict[str, Any]],
     job_table = log_utils.create_table(columns)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
-    for task in jobs:
+    for task in tasks:
         if not task['status'].is_terminal():
             status_counts[task['status'].value] += 1
 
     if max_jobs is not None:
-        jobs = jobs[:max_jobs]
-    aggregated_jobs = collections.defaultdict(list)
-    for task in jobs:
+        # pylint: disable=redefined-argument-from-local
+        tasks = tasks[:max_jobs]
+    jobs = collections.defaultdict(list)
+    for task in tasks:
         # The job within the same job_id is already sorted
         # by the task_id.
-        aggregated_jobs[task['job_id']].append(task)
+        jobs[task['job_id']].append(task)
 
-    for job_id, tasks in aggregated_jobs.items():
+    for job_id, tasks in jobs.items():
         if len(tasks) > 1:
             # Aggregate the tasks into a new row in the table.
             job_name = tasks[0]['aggregated_job_name']
@@ -508,7 +509,7 @@ def format_job_table(jobs: List[Dict[str, Any]],
                                                               end_at,
                                                               absolute=True)
 
-            aggregated_values = [
+            job_values = [
                 job_id,
                 '',
                 job_name,
@@ -520,13 +521,13 @@ def format_job_table(jobs: List[Dict[str, Any]],
                 spot_status.colored_str(),
             ]
             if show_all:
-                aggregated_values.extend([
+                job_values.extend([
                     '-',
                     '-',
                     '-',
                     failure_reason if failure_reason is not None else '-',
                 ])
-            job_table.add_row(aggregated_values)
+            job_table.add_row(job_values)
 
         for task in tasks:
             # The job['job_duration'] is already calculated in
