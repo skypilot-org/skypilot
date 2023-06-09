@@ -244,7 +244,8 @@ class OCI(clouds.Cloud):
             except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
                     oci_adaptor.get_oci().exceptions.InvalidConfig) as e:
                 # This should only happen in testing where oci config is
-                # monkeypatched.
+                # monkeypatched. In real use, if the OCI config is not
+                # valid, the 'sky check' would fail(OCI disabled).
                 logger.debug(f'It is OK goes here when testing: {str(e)}')
                 pass
 
