@@ -315,10 +315,10 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                         # The log for the current job is finished. We need to
                         # wait until next job to be started.
                         logger.debug(
-                            f'INFO: Log for the current sub job ({task_id}) '
-                            'is finished. Waiting for the next sub job\'s log '
+                            f'INFO: Log for the current task ({task_id}) '
+                            'is finished. Waiting for the next task\'s log '
                             'to be started.')
-                        status_display.update('Waiting for the next sub job: '
+                        status_display.update('Waiting for the next task: '
                                               f'{task_id + 1}.')
                         status_display.start()
                         original_task_id = task_id
@@ -468,7 +468,7 @@ def format_job_table(jobs: List[Dict[str, Any]],
 
     for job_id, tasks in aggregated_jobs.items():
         if len(tasks) > 1:
-            # Aggregate the sub jobs into a new row in the table.
+            # Aggregate the tasks into a new row in the table.
             job_name = tasks[0]['aggregated_job_name']
             job_duration = 0
             submitted_at = None
@@ -490,6 +490,10 @@ def format_job_table(jobs: List[Dict[str, Any]],
                 recovery_cnt += task['recovery_count']
                 if spot_status == spot_state.SpotStatus.SUCCEEDED:
                     # Use the first non-succeeded status.
+                    # TODO(zhwu): we should not blindly use the first non-
+                    # succeeded as the status could be changed to SUBMITTED
+                    # when going from one task to the next one, which can be
+                    # confusing.
                     spot_status = task['status']
 
                 if (failure_reason is None and

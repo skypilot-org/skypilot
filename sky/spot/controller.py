@@ -40,7 +40,7 @@ def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
 
 
 class SpotController:
-    """Each spot controller manages the life cycle of one spot cluster (job)."""
+    """Each spot controller manages the life cycle of one spot job."""
 
     def __init__(self, job_id: int, dag_yaml: str,
                  retry_until_up: bool) -> None:
@@ -55,7 +55,7 @@ class SpotController:
         # pylint: disable=line-too-long
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
-        #   Example value: sky-2022-10-04-22-46-52-467694_spot-_id-17-1
+        #   Example value: sky-2022-10-04-22-46-52-467694_spot_id-17
         #   Example value (multi-job): sky-2022-10-04-22-46-52-467694_spot_id-17-2
         job_id_env_vars = []
         for i in range(len(self._dag.tasks)):
@@ -63,14 +63,14 @@ class SpotController:
                 self._backend.run_timestamp,
                 'spot',
                 str(self._job_id),
-                sub_id=i)
+                task_id=i)
             job_id_env_vars.append(job_id_env_var)
 
         for i, task in enumerate(self._dag.tasks):
             task_envs = task.envs or {}
-            task_envs[constants.JOB_ID_ENV_VAR_DEPRECATED] = job_id_env_vars[i]
-            task_envs[constants.JOB_ID_ENV_VAR] = job_id_env_vars[i]
-            task_envs[constants.JOB_ID_LIST_ENV_VAR] = '\n'.join(
+            task_envs[constants.TASK_ID_ENV_VAR_DEPRECATED] = job_id_env_vars[i]
+            task_envs[constants.TASK_ID_ENV_VAR] = job_id_env_vars[i]
+            task_envs[constants.TASK_ID_LIST_ENV_VAR] = '\n'.join(
                 job_id_env_vars)
             task.update_envs(task_envs)
 
@@ -79,6 +79,7 @@ class SpotController:
 
         Returns:
             True if the job is successfully completed; False otherwise.
+
         Raises:
             exceptions.ProvisionPrechecksError: This will be raised when the
                 underlying `sky.launch` fails due to precheck errors only.
@@ -99,8 +100,11 @@ class SpotController:
         Other exceptions may be raised depending on the backend.
         """
         if task.run is None:
-            logger.info(f'Sub job {task_id} ({task.name}) is skipped '
-                        'for empty run.')
+            logger.info(f'Skip running task {task_id} ({task.name}) due to its '
+                        'run commands being empty.')
+            # Call set_started first to initialize columns in the state table,
+            # including start_at and last_recovery_at to avoid issues for
+            # uninitialized columns.
             spot_state.set_started(self._job_id,
                                    task_id,
                                    start_time=time.time())
@@ -108,7 +112,7 @@ class SpotController:
                                      task_id,
                                      end_time=time.time())
             return True
-        job_id_env_var = task.envs[constants.JOB_ID_ENV_VAR]
+        job_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
         submitted_at = time.time()
         if task_id == 0:
             submitted_at = self._backend.run_timestamp
@@ -117,8 +121,8 @@ class SpotController:
             task_id,
             submitted_at,
             resources_str=backend_utils.get_task_resources_str(task))
-        logger.info(f'Submitted spot job (sub job: {task_id}); '
-                    f'{constants.JOB_ID_ENV_VAR}: {job_id_env_var}')
+        logger.info(f'Submitted spot job {self._job_id} (task: {task_id}); '
+                    f'{constants.TASK_ID_ENV_VAR}: {job_id_env_var}')
         logger.info(str(task))
         assert task.name is not None, task
         cluster_name = spot_utils.generate_spot_cluster_name(
@@ -392,7 +396,7 @@ def start(job_id, dag_yaml, retry_until_up):
             controller_process.join()
             logger.info(f'Controller process {controller_process.pid} killed.')
 
-        logger.info(f'Cleaning up resources for job {job_id}.')
+        logger.info(f'Cleaning up spot cluster(s) for job {job_id}.')
         # NOTE: Originally, we send an interruption signal to the controller
         # process and the controller process handles cleanup. However, we
         # figure out the behavior differs from cloud to cloud
@@ -401,7 +405,7 @@ def start(job_id, dag_yaml, retry_until_up):
         # But anyway, a clean solution is killing the controller process
         # directly, and then cleanup the cluster state.
         _cleanup(job_id, dag_yaml=dag_yaml)
-        logger.info(f'Resources of job {job_id} has been cleaned up.')
+        logger.info(f'Spot cluster(s) of job {job_id} has been cleaned up.')
 
         if cancelling:
             spot_state.set_cancelled(job_id)

@@ -1614,13 +1614,13 @@ def test_spot_pipeline_failed_setup(generic_cloud: str):
             'sleep 900',
             # Make sure the job failed quickly.
             f'{_SPOT_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED_SETUP"',
-            # Sub job 0 should be SUCCEEDED.
+            # Task 0 should be SUCCEEDED.
             f'{_SPOT_QUEUE_WAIT} | grep {name} | sed -n 2p | grep {name}-.*-0 | grep "SUCCEEDED"',
-            # Sub job 1 should be FAILED_SETUP.
+            # Task 1 should be FAILED_SETUP.
             f'{_SPOT_QUEUE_WAIT} | grep {name} | sed -n 3p | grep {name}-.*-1 | grep "FAILED_SETUP"',
-            # Sub job 2 should be FAILED_PRECHECKS.
+            # Task 2 should be FAILED_PRECHECKS.
             f'{_SPOT_QUEUE_WAIT} | grep {name} | sed -n 4p | grep {name}-.*-2 | grep "FAILED_PRECHECKS"',
-            # Sub job 3 should be FAILED_PRECHECKS.
+            # Task 3 should be FAILED_PRECHECKS.
             f'{_SPOT_QUEUE_WAIT} | grep {name} | sed -n 5p | grep {name}-.*-3 | grep "FAILED_PRECHECKS"',
         ],
         _SPOT_CANCEL_WAIT.format(job_name=name),

@@ -25,9 +25,15 @@ UNINITIALIZED_ONPREM_CLUSTER_MESSAGE = (
     'Found uninitialized local cluster {cluster}. Run this '
     'command to initialize it locally: sky launch -c {cluster} \'\'')
 
-JOB_ID_ENV_VAR_DEPRECATED = 'SKYPILOT_JOB_ID'
-JOB_ID_ENV_VAR = 'SKYPILOT_TASK_ID'
-JOB_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
+# The name for the environment variable that stores the unique ID of the
+# current task. This will stay the same across multiple recoveries of the
+# same spot task.
+TASK_ID_ENV_VAR_DEPRECATED = 'SKYPILOT_JOB_ID'
+TASK_ID_ENV_VAR = 'SKYPILOT_TASK_ID'
+# This environment variable stores a list of task IDs that are within the same
+# spot job (DAG). This can be used by the user to retrieve the task IDs of any
+# tasks that are within the same spot job.
+TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 
 SKYLET_VERSION = '1'
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
