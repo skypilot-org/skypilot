@@ -24,6 +24,8 @@ if typing.TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_tenancy_prefix = None
+
 
 @clouds.CLOUD_REGISTRY.register
 class OCI(clouds.Cloud):
@@ -227,13 +229,25 @@ class OCI(clouds.Cloud):
             if zones is not None:
                 zone = zones[0].name
 
+        global _tenancy_prefix
+        if _tenancy_prefix is None:
+            identity_client = oci_adaptor.get_identity_client(
+                region=region.name, profile=oci_conf.get_profile())
+
+            ad_list = identity_client.list_availability_domains(
+                compartment_id=oci_adaptor.get_oci_config(
+                    profile=oci_conf.get_profile())['tenancy']).data
+
+            first_ad = ad_list[0]
+            _tenancy_prefix = str(first_ad.name).split(':')[0]
+
         return {
             'instance_type': instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
             'cpus': cpus,
             'memory': resources.memory,
-            'zone': zone,
+            'zone': f'{_tenancy_prefix}:{zone}',
             'image': image_id,
             'app_catalog_listing_id': listing_id,
             'resource_version': res_ver,
@@ -339,7 +353,8 @@ class OCI(clouds.Cloud):
         try:
             user = oci_adaptor.get_identity_client(
                 region=None, profile=oci_conf.get_profile()).get_user(
-                    oci_adaptor.get_oci_config()['user']).data
+                    oci_adaptor.get_oci_config(
+                        profile=oci_conf.get_profile())['user']).data
             del user
             # TODO[Hysun]: More privilege check can be added
             return True, None
@@ -351,7 +366,9 @@ class OCI(clouds.Cloud):
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
         oci_cfg_file = oci_adaptor.get_config_file()
-        oci_cfg = oci_adaptor.get_oci_config()
+        # Pass-in a profile parameter so that multiple profile in oci
+        # config file is supported (2023/06/09).
+        oci_cfg = oci_adaptor.get_oci_config(profile=oci_conf.get_profile())
         api_key_file = oci_cfg[
             'key_file'] if 'key_file' in oci_cfg else 'BadConf'
         sky_cfg_file = oci_conf.get_sky_user_config_file()
