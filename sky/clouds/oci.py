@@ -366,13 +366,9 @@ class OCI(clouds.Cloud):
             # TODO[Hysun]: More privilege check can be added
             return True, None
         except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
-                oci_adaptor.get_oci().exceptions.InvalidConfig) as e:
-            # This should only happen in testing where oci config is
-            # monkeypatched.
-            logger.debug(f'It is OK goes here when testing: {str(e)}')
-            return True, None
-
-        except oci_adaptor.service_exception():
+                oci_adaptor.get_oci().exceptions.InvalidConfig,
+                oci_adaptor.service_exception()) as e:
+            logger.warning(f'OCI config error: {str(e)}')
             return False, (f'OCI credential is not correctly set. '
                            f'Check the credential file at {conf_file}\n'
                            f'{cls._INDENT_PREFIX}{credential_help_str}')
