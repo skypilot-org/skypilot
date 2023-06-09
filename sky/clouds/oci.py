@@ -15,6 +15,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky.clouds import service_catalog
 from sky import exceptions
+from sky.utils import common_utils
 from sky.adaptors import oci as oci_adaptor
 from sky.skylet.providers.oci.config import oci_conf
 
@@ -368,12 +369,13 @@ class OCI(clouds.Cloud):
             return True, None
         except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
                 oci_adaptor.get_oci().exceptions.InvalidConfig,
-                oci_adaptor.service_exception()):
-            return False, (f'OCI credential is not correctly set. '
-                           f'Check the credential file at {conf_file}\n'
-                           f'{cls._INDENT_PREFIX}{credential_help_str}\n'
-                           f'{cls._INDENT_PREFIX}Error details: '
-                           f'{common_utils.format_exception(e, use_bracket=True)}')
+                oci_adaptor.service_exception()) as e:
+            return False, (
+                f'OCI credential is not correctly set. '
+                f'Check the credential file at {conf_file}\n'
+                f'{cls._INDENT_PREFIX}{credential_help_str}\n'
+                f'{cls._INDENT_PREFIX}Error details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
