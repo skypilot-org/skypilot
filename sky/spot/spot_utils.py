@@ -500,15 +500,17 @@ def format_job_table(jobs: List[Dict[str, Any]],
                                                             job_duration,
                                                             absolute=True)
             submitted = log_utils.readable_time_duration(submitted_at)
+            total_duration = log_utils.readable_time_duration(submitted_at,
+                                                              end_at,
+                                                              absolute=True)
+
             aggregated_values = [
                 job_id,
                 '',
                 job_name,
                 '-',
                 submitted,
-                log_utils.readable_time_duration(submitted_at,
-                                                 end_at,
-                                                 absolute=True),
+                total_duration,
                 job_duration,
                 recovery_cnt,
                 spot_status.colored_str(),

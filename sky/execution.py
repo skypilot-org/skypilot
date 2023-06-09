@@ -581,11 +581,10 @@ def spot_launch(
 
         name = dag.name
         if len(dag.tasks) > 1:
-            name = f'{dag.name}'
             if task_.name is not None:
-                name += f'-{task_.name}'
+                name = f'{task_.name}'
             else:
-                name += f'-{task_id}'
+                name = f'{dag.name}-{task_id}'
         # Override the task name with the specified name or generated name, so
         # that the controller process can retrieve the task name from the task
         # config.

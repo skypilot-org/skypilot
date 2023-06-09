@@ -821,7 +821,11 @@ def spot_queue(refresh: bool,
 
     jobs = spot.load_spot_job_queue(job_table_payload)
     if skip_finished:
-        jobs = list(filter(lambda job: not job['status'].is_terminal(), jobs))
+        non_finished_tasks = list(
+            filter(lambda job: not job['status'].is_terminal(), jobs))
+        non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
+        jobs = list(
+            filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
     return jobs
 
 
