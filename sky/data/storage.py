@@ -874,9 +874,13 @@ class Storage(object):
 
 
 def format_gitignore_to_exclude_list(src_dir_path: str) -> List[str]:
-    """Returns a list of formatted excluded files read from .gitignore and
-    .git/info/exclude using git. 'git init' is ran when SRC_DIR_PATH
-    is not a git repository and removed after obtaining excluded list
+    """ Lists files and patterns ignored by git in the source directory
+    
+    Runs `git status --ignored` which returns a list of excluded files and patterns 
+    read from .gitignore and .git/info/exclude using git. `git init` is run if SRC_DIR_PATH
+    is not a git repository and removed after obtaining excluded list.
+    
+    Returns: List[str] containing files and patterns to be ignored. <Describe the kinds of patterns, e.g., /*>
     """
     expand_src_dir_path = os.path.expanduser(src_dir_path)
 
