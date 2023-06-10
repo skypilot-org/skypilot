@@ -167,6 +167,12 @@ class OCINodeProvider(NodeProvider):
         ]
         filters = {tag: tags[tag] for tag in VALIDITY_TAGS if tag in tags}
         running_nodes = self.running_nodes(filters)
+        # Make sure the running nodes (to be reused) has correct tags set, esp.
+        # ray-launch-config. Otherwise the nodes will fail to be reused and
+        # the autoscaler will stop them then start new nodes instead.
+        for running_node_id in running_nodes:
+            self.set_node_tags(running_node_id, tags)
+
         if len(running_nodes) > 0:
             logger.info(
                 f"Running nodes found {len(running_nodes)}: {list(running_nodes)}. "
@@ -228,6 +234,10 @@ class OCINodeProvider(NodeProvider):
                         "lifecycle_state",
                         "STOPPED",
                     )
+            # Make sure the stopped nodes (to be reused) has correct tags set,
+            # esp. ray-launch-config. Otherwise the nodes will fail to be reused
+            # and the autoscaler will stop them then start new nodes instead.
+            self.set_node_tags(reuse_node["id"], tags)
 
             start_time1 = round(time.time() * 1000)
             for matched_node in reuse_nodes:
