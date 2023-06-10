@@ -993,7 +993,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     """Creates a task or a dag from an entrypoint with overrides.
 
     Returns:
-        A dag iff the entrypoint and contains a list of tasks.
+        A dag iff the entrypoint is YAML and contains more than 1 task.
         Otherwise, a task.
     """
     entrypoint = ' '.join(entrypoint)
@@ -1031,8 +1031,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint)
         if len(dag.tasks) > 1:
-            # When the dag has more than 1 task (i.e. the yaml file
-            # contains a standalone dag name). It is unclear how to
+            # When the dag has more than 1 task. It is unclear how to
             # override the params for the dag. So we just ignore the
             # override params.
             if override_params:

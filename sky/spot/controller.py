@@ -55,7 +55,7 @@ class SpotController:
         # pylint: disable=line-too-long
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
-        #   Example value: sky-2022-10-04-22-46-52-467694_spot_id-17
+        #   Example value: sky-2022-10-04-22-46-52-467694_spot_id-17-1
         #   Example value (multi-job): sky-2022-10-04-22-46-52-467694_spot_id-17-2
         job_id_env_vars = []
         for i in range(len(self._dag.tasks)):
@@ -120,7 +120,7 @@ class SpotController:
                                      task_id,
                                      end_time=time.time())
             return True
-        job_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
+        task_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
         submitted_at = time.time()
         if task_id == 0:
             submitted_at = backend_utils.get_timestamp_from_run_timestamp(
@@ -131,23 +131,23 @@ class SpotController:
             self._backend.run_timestamp,
             submitted_at,
             resources_str=backend_utils.get_task_resources_str(task))
-        logger.info(f'Submitted spot job {self._job_id} (task: {task_id}); '
-                    f'{constants.TASK_ID_ENV_VAR}: {job_id_env_var}')
+        logger.info(
+            f'Submitted spot job {self._job_id} (task: {task_id}， name: '
+            f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
         assert task.name is not None, task
         cluster_name = spot_utils.generate_spot_cluster_name(
             task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             cluster_name, self._backend, task, self._retry_until_up)
 
-        logger.info(f'Started monitoring spot job {self._job_id} (task: '
-                    f'{task_id}, name: {task.name!r}).')
+        logger.info('Started monitoring.')
         spot_state.set_starting(self._job_id, task_id)
-        remote_job_started_at = self._strategy_executor.launch()
-        assert remote_job_started_at is not None, remote_job_started_at
+        remote_job_submitted_at = self._strategy_executor.launch()
+        assert remote_job_submitted_at is not None, remote_job_submitted_at
 
         spot_state.set_started(self._job_id,
                                task_id,
-                               start_time=remote_job_started_at)
+                               start_time=remote_job_submitted_at)
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
@@ -176,6 +176,8 @@ class SpotController:
                 logger.info(
                     f'Spot job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the spot cluster {cluster_name}.')
+                # Only clean up the spot cluster, not the storages, because
+                # tasks may share storages.
                 recovery_strategy.terminate_cluster(cluster_name=cluster_name)
                 return True
 
@@ -361,7 +363,9 @@ def _handle_signal(job_id):
 def _cleanup(job_id: int, dag_yaml: str):
     """Clean up the spot cluster(s) and storages.
 
-    (1) Clean up the succeeded task(s)' ephemeral storage.
+    (1) Clean up the succeeded task(s)' ephemeral storage. The storage has
+        to be cleaned up after the whole job is finished, as the tasks
+        may share the same storage.
     (2) Clean up the spot cluster(s) that are not cleaned up yet, which
         can happen when the spot task failed or cancelled. At most one
         spot cluster should be left when reaching here, as we currently
@@ -414,7 +418,7 @@ def start(job_id, dag_yaml, retry_until_up):
             controller_process.join()
             logger.info(f'Controller process {controller_process.pid} killed.')
 
-        logger.info(f'Cleaning up spot cluster(s) for job {job_id}.')
+        logger.info(f'Cleaning up any spot cluster for job {job_id}.')
         # NOTE: Originally, we send an interruption signal to the controller
         # process and the controller process handles cleanup. However, we
         # figure out the behavior differs from cloud to cloud
@@ -423,7 +427,7 @@ def start(job_id, dag_yaml, retry_until_up):
         # But anyway, a clean solution is killing the controller process
         # directly, and then cleanup the cluster state.
         _cleanup(job_id, dag_yaml=dag_yaml)
-        logger.info(f'Spot cluster(s) of job {job_id} has been cleaned up.')
+        logger.info(f'Spot cluster of job {job_id} has been cleaned up.')
 
         if cancelling:
             spot_state.set_cancelled(job_id)

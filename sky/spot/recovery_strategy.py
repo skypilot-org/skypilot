@@ -231,6 +231,8 @@ class StrategyExecutor:
 
         The function will wait until the job starts running, but will leave the
         handling for the preemption to the caller.
+        The return value will only be None when the job fails to submit and the
+        raise_on_failure is False.
 
         Args:
             max_retry: The maximum number of retries. If None, retry forever.

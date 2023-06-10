@@ -258,7 +258,7 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
     Args:
         job_id: The spot job ID.
         task_id: The task ID.
-        run_timestamp: The run_timestamp of the backend. This will be used to
+        run_timestamp: The run_timestamp of the run. This will be used to
             determine the log directory of the spot task.
         submit_time: The time when the spot task is submitted.
         resources_str: The resources string of the spot task.
@@ -328,6 +328,7 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float):
 
 
 def set_succeeded(job_id: int, task_id: int, end_time: float):
+    """Set the job/task to succeeded, if they are in non-terminal states."""
     _CURSOR.execute(
         """\
         UPDATE spot SET
@@ -344,7 +345,7 @@ def set_failed(job_id: int,
                failure_type: SpotStatus,
                failure_reason: str,
                end_time: Optional[float] = None):
-    """Set the job to failed.
+    """Set the job/task to failed, if they are in non-terminal states.
 
     Args:
         job_id: The job id.
@@ -385,27 +386,28 @@ def set_failed(job_id: int,
 
 
 def set_cancelling(job_id: int):
-    """Set the job as cancelling.
+    """Set the job as cancelling, if they are in non-terminal states.
 
     task_id is not needed, because we expect the job should be cancelled
     as a whole, and we should not cancel a single task.
     """
-    _CURSOR.execute(
+    rows = _CURSOR.execute(
         """\
         UPDATE spot SET
         status=(?), end_at=(?)
         WHERE spot_job_id=(?) AND end_at IS null""",
         (SpotStatus.CANCELLING.value, time.time(), job_id))
     _CONN.commit()
-    logger.info('Cancelling the job...')
+    if rows.rowcount > 0:
+        logger.info('Cancelling the job...')
 
 
 def set_cancelled(job_id: int):
-    """Set the job as cancelled.
+    """Set the job as cancelled, if they are in CANCELLING state.
 
     The set_cancelling should be called before this function.
     """
-    _CURSOR.execute(
+    rows = _CURSOR.execute(
         """\
         UPDATE spot SET
         status=(?), end_at=(?)
@@ -413,7 +415,8 @@ def set_cancelled(job_id: int):
         (SpotStatus.CANCELLED.value, time.time(), job_id,
          SpotStatus.CANCELLING.value))
     _CONN.commit()
-    logger.info('Job cancelled.')
+    if rows.rowcount > 0:
+        logger.info('Job cancelled.')
 
 
 # ======== utility functions ========
@@ -447,7 +450,7 @@ def _get_all_task_ids_statuses(job_id: int) -> List[Tuple[int, SpotStatus]]:
         SELECT task_id, status FROM spot
         WHERE spot_job_id=(?)
         ORDER BY task_id ASC""", (job_id,)).fetchall()
-    return id_statuses
+    return [(row[0], SpotStatus(row[1])) for row in id_statuses]
 
 
 def get_num_tasks(job_id: int) -> int:
@@ -458,10 +461,10 @@ def get_latest_task_id_status(
         job_id: int) -> Union[Tuple[int, SpotStatus], Tuple[None, None]]:
     """Returns the (task id, status) of the latest task of a job.
 
-    The latest means the task that is currently being executed by the
-    controller process. For example, in a spot job with 3 tasks, the first
-    task is succeeded, and the second task is being executed. This will
-    return (1, SpotStatus.RUNNING).
+    The latest means the task that is currently being executed or to be
+    started by the controller process. For example, in a spot job with
+    3 tasks, the first task is succeeded, and the second task is being
+    executed. This will return (1, SpotStatus.RUNNING).
 
     If the job_id does not exist, (None, None) will be returned.
     """
@@ -469,9 +472,7 @@ def get_latest_task_id_status(
     if len(id_statuses) == 0:
         return None, None
     task_id, status = id_statuses[-1]
-    status = SpotStatus(status)
     for task_id, status in id_statuses:
-        status = SpotStatus(status)
         if not status.is_terminal():
             break
     return task_id, status
