@@ -1766,7 +1766,7 @@ def test_spot_pipeline_recovery_gcp():
             # SKYPILOT_TASK_ID, which gets the second to last field
             # separated by `-`.
             (f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
-            f'cut -d\'-\' -f2 | rev`;{terminate_cmd}'),
+             f'cut -d\'-\' -f2 | rev`;{terminate_cmd}'),
             'sleep 100',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
