@@ -256,6 +256,7 @@ class OCI(clouds.Cloud):
             'region': region.name,
             'cpus': cpus,
             'memory': resources.memory,
+            'disk_size': resources.disk_size,
             'zone': f'{_tenancy_prefix}:{zone}',
             'image': image_id,
             'app_catalog_listing_id': listing_id,
