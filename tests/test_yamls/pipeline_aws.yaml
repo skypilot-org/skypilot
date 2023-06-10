@@ -8,13 +8,11 @@ resources:
   region: us-west-2
   cpus: 2+
 
-setup: |
-  echo setup for train
-  sleep 20
-
 run: |
   echo train starts
-  echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID
+  echo SKYPILOT_TASK_ID: $SKYPILOT_TASK_ID
+  echo SKYPILOT_TASK_IDS
+  echo $SKYPILOT_TASK_IDS
   sleep 600
   echo train ends
 

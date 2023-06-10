@@ -1635,41 +1635,6 @@ def test_spot_pipeline_failed_setup(generic_cloud: str):
 
 
 # ---------- Testing managed spot recovery ----------
-@pytest.mark.aws
-@pytest.mark.managed_spot
-def test_spot_pipeline_recovery_aws(aws_config_region):
-    """Test managed spot recovery for a pipeline."""
-    name = _get_cluster_name()
-    region = aws_config_region
-    if region != 'us-west-2':
-        pytest.skip('Only run spot pipeline recovery test in us-west-2')
-    test = Test(
-        'spot_pipeline_recovery_aws',
-        [
-            f'sky spot launch -n {name} tests/test_yamls/pipeline_aws.yaml  -y -d',
-            'sleep 360',
-            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
-            f'RUN_IDS=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_IDS | cut -d: -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids',
-            # Terminate the cluster manually.
-            (f'aws ec2 terminate-instances --region {region} --instance-ids $('
-             f'aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}* '
-             f'--query Reservations[].Instances[].InstanceId '
-             '--output text)'),
-            'sleep 100',
-            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
-            'sleep 200',
-            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | grep "$RUN_ID"',
-            f'RUN_IDS=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_IDS | cut -d: -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids-new',
-            f'diff /tmp/{name}-run-ids /tmp/{name}-run-ids-new',
-            f'cat /tmp/{name}-run-ids | sed -n 1p | grep `cat /tmp/{name}-run-id`',
-        ],
-        _SPOT_CANCEL_WAIT.format(job_name=name),
-        timeout=25 * 60,
-    )
-    run_one_test(test)
 
 
 @pytest.mark.aws
@@ -1735,14 +1700,56 @@ def test_spot_recovery_gcp():
     run_one_test(test)
 
 
+@pytest.mark.aws
+@pytest.mark.managed_spot
+def test_spot_pipeline_recovery_aws(aws_config_region):
+    """Test managed spot recovery for a pipeline."""
+    name = _get_cluster_name()
+    region = aws_config_region
+    if region != 'us-west-2':
+        pytest.skip('Only run spot pipeline recovery test in us-west-2')
+    test = Test(
+        'spot_pipeline_recovery_aws',
+        [
+            f'sky spot launch -n {name} tests/test_yamls/pipeline_aws.yaml  -y -d',
+            'sleep 360',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
+            f'RUN_IDS=$(sky spot logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS); echo "$RUN_IDS" | tee /tmp/{name}-run-ids',
+            # Terminate the cluster manually.
+            # The `cat ...| rev` is to retrieve the job_id from the
+            # SKYPILOT_TASK_ID, which gets the second to last field
+            # separated by `-`.
+            (f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
+             'cut -d\'-\' -f2 | rev`;'
+             f'aws ec2 terminate-instances --region {region} --instance-ids $('
+             f'aws ec2 describe-instances --region {region} '
+             '--filters Name=tag:ray-cluster-name,Values=*-${SPOT_JOB_ID} '
+             f'--query Reservations[].Instances[].InstanceId '
+             '--output text)'),
+            'sleep 100',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
+            'sleep 200',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | grep "$RUN_ID"',
+            f'RUN_IDS=$(sky spot logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS); echo "$RUN_IDS" | tee /tmp/{name}-run-ids-new',
+            f'diff /tmp/{name}-run-ids /tmp/{name}-run-ids-new',
+            f'cat /tmp/{name}-run-ids | sed -n 1p | grep `cat /tmp/{name}-run-id`',
+        ],
+        _SPOT_CANCEL_WAIT.format(job_name=name),
+        timeout=25 * 60,
+    )
+    run_one_test(test)
+
+
 @pytest.mark.gcp
 @pytest.mark.managed_spot
 def test_spot_pipeline_recovery_gcp():
     """Test managed spot recovery for a pipeline."""
     name = _get_cluster_name()
     zone = 'us-east4-b'
-    query_cmd = (f'gcloud compute instances list --filter='
-                 f'"(labels.ray-cluster-name:{name}*)" '
+    query_cmd = ('gcloud compute instances list --filter='
+                 '"(labels.ray-cluster-name:*-${SPOT_JOB_ID})" '
                  f'--zones={zone} --format="value(name)"')
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
@@ -1753,8 +1760,13 @@ def test_spot_pipeline_recovery_gcp():
             'sleep 360',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
+            f'RUN_IDS=$(sky spot logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS); echo "$RUN_IDS" | tee /tmp/{name}-run-ids',
             # Terminate the cluster manually.
-            terminate_cmd,
+            # The `cat ...| rev` is to retrieve the job_id from the
+            # SKYPILOT_TASK_ID, which gets the second to last field
+            # separated by `-`.
+            (f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
+            f'cut -d\'-\' -f2 | rev`;{terminate_cmd}'),
             'sleep 100',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
