@@ -8,7 +8,7 @@ resources:
 
   region: ap-seoul-1
   
-  #zone: bxtG:AP-SEOUL-1-AD-1
+  #zone: AP-SEOUL-1-AD-1
   
   #instance_type: VM.GPU.A10.1
 
