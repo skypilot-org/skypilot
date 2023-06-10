@@ -313,17 +313,17 @@ def run_bash_command_with_log(bash_command: str,
         else:
             subprocess_cmd = inner_command
 
-        return run_with_log(subprocess_cmd,
-                            os.devnull,
-                            ray_job_id=job_lib.make_ray_job_id(
-                                job_id, job_owner),
-                            stream_logs=True,
-                            use_sudo=use_sudo,
-                            # We don't need to process the stream here, but
-                            # the tee solution above, as the process_stream
-                            # can cause buffer problem.
-                            process_stream=False,
-                            shell=True)
+        return run_with_log(
+            subprocess_cmd,
+            os.devnull,
+            ray_job_id=job_lib.make_ray_job_id(job_id, job_owner),
+            stream_logs=True,
+            use_sudo=use_sudo,
+            # We don't need to process the stream here, but
+            # the tee solution above, as the process_stream
+            # can cause buffer problem.
+            process_stream=False,
+            shell=True)
 
 
 def _follow_job_logs(file,
