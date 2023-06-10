@@ -33,7 +33,6 @@ def process_subprocess_stream(
     start_streaming_at: str = '',
     end_streaming_at: Optional[str] = None,
     skip_lines: Optional[List[str]] = None,
-    replace_crlf: bool = False,
     line_processor: Optional[log_utils.LineProcessor] = None,
     streaming_prefix: Optional[str] = None,
 ) -> Tuple[str, str]:
@@ -72,12 +71,8 @@ def process_subprocess_stream(
                         # Unregister the io when EOF reached
                         sel.unregister(key.fileobj)
                         continue
-                    # TODO(zhwu,gmittal): Put replace_crlf, skip_lines, and
+                    # TODO(zhwu,gmittal): Put skip_lines, and
                     # start_streaming_at logic in processor.process_line(line)
-                    if replace_crlf and line.endswith('\r\n'):
-                        # Replace CRLF with LF to avoid ray logging to the same
-                        # line due to separating lines with '\n'.
-                        line = line[:-2] + '\n'
                     if (skip_lines is not None and
                             any(skip in line for skip in skip_lines)):
                         continue
@@ -117,7 +112,6 @@ def run_with_log(
     end_streaming_at: Optional[str] = None,
     skip_lines: Optional[List[str]] = None,
     shell: bool = False,
-    with_ray: bool = False,
     process_stream: bool = True,
     line_processor: Optional[log_utils.LineProcessor] = None,
     streaming_prefix: Optional[str] = None,
@@ -165,7 +159,7 @@ def run_with_log(
     stdout_arg = stderr_arg = None
     if process_stream:
         stdout_arg = subprocess.PIPE
-        stderr_arg = subprocess.PIPE if not with_ray else subprocess.STDOUT
+        stderr_arg = subprocess.PIPE
     with subprocess.Popen(cmd,
                           stdout=stdout_arg,
                           stderr=stderr_arg,
@@ -230,8 +224,6 @@ def run_with_log(
                 end_streaming_at=end_streaming_at,
                 skip_lines=skip_lines,
                 line_processor=line_processor,
-                # Replace CRLF when the output is logged to driver by ray.
-                replace_crlf=with_ray,
                 streaming_prefix=streaming_prefix,
             )
         proc.wait()
@@ -288,8 +280,6 @@ def run_bash_command_with_log(bash_command: str,
                               job_owner: str,
                               job_id: int,
                               env_vars: Optional[Dict[str, str]] = None,
-                              stream_logs: bool = False,
-                              with_ray: bool = False,
                               use_sudo: bool = False):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
@@ -299,6 +289,10 @@ def run_bash_command_with_log(bash_command: str,
         fp.write(bash_command)
         fp.flush()
         script_path = fp.name
+
+        log_path = os.path.expanduser(log_path)
+        dirname = os.path.dirname(log_path)
+        os.makedirs(dirname, exist_ok=True)
 
         # Need this `-i` option to make sure `source ~/.bashrc` work.
         inner_command = (
@@ -323,8 +317,7 @@ def run_bash_command_with_log(bash_command: str,
                             os.devnull,
                             ray_job_id=job_lib.make_ray_job_id(
                                 job_id, job_owner),
-                            stream_logs=stream_logs,
-                            with_ray=with_ray,
+                            stream_logs=True,
                             use_sudo=use_sudo,
                             # We don't need to process the stream here, but
                             # the tee solution above, as the process_stream

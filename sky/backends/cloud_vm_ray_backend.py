@@ -366,8 +366,6 @@ class RayCodeGen:
                         getpass.getuser(),
                         job_id={self.job_id},
                         env_vars={envs!r},
-                        stream_logs=True,
-                        with_ray=True,
                         use_sudo={self.is_local},
                     ) for i in range(total_num_nodes)]
                 setup_returncodes = ray.get(setup_workers)
@@ -537,8 +535,6 @@ class RayCodeGen:
                         getpass.getuser(),
                         job_id={self.job_id},
                         env_vars=sky_env_vars_dict,
-                        stream_logs=True,
-                        with_ray=True,
                         use_sudo={use_sudo},
                     ))""")
         ]
