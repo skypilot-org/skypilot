@@ -301,7 +301,15 @@ def run_bash_command_with_log(bash_command: str,
         script_path = fp.name
 
         # Need this `-i` option to make sure `source ~/.bashrc` work.
-        inner_command = f'/bin/bash -i {script_path}'
+        inner_command = (
+            f'/bin/bash -i {script_path} 2>&1 '
+            # A hack to remove the following bash warnings:
+            #  bash: cannot set terminal process group
+            #  bash: no job control in this shell
+            '| stdbuf -o0 tail -n +3 '
+            # This is required to make sure the executor of command can get
+            # correct returncode, since linux pipe is used.
+            f'| tee {log_path}; exit ${{PIPESTATUS[0]}}')
 
         subprocess_cmd: Union[str, List[str]]
         if use_sudo:
@@ -312,12 +320,16 @@ def run_bash_command_with_log(bash_command: str,
             subprocess_cmd = inner_command
 
         return run_with_log(subprocess_cmd,
-                            log_path,
+                            os.devnull,
                             ray_job_id=job_lib.make_ray_job_id(
                                 job_id, job_owner),
                             stream_logs=stream_logs,
                             with_ray=with_ray,
                             use_sudo=use_sudo,
+                            # We don't need to process the stream here, but
+                            # the tee solution above, as the process_stream
+                            # can cause buffer problem.
+                            process_stream=False,
                             shell=True)
 
 
