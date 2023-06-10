@@ -314,7 +314,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 assert job_status is not None, 'No job found.'
                 if job_status != job_lib.JobStatus.CANCELLED:
                     assert task_id is not None, job_id
-                    if task_id < num_tasks - 1:
+                    if task_id < num_tasks - 1 and follow:
                         # The log for the current job is finished. We need to
                         # wait until next job to be started.
                         logger.debug(
