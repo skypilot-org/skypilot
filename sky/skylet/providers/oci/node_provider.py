@@ -234,10 +234,10 @@ class OCINodeProvider(NodeProvider):
                         "lifecycle_state",
                         "STOPPED",
                     )
-            # Make sure the stopped nodes (to be reused) has correct tags set,
-            # esp. ray-launch-config. Otherwise the nodes will fail to be reused
-            # and the autoscaler will stop them then start new nodes instead.
-            self.set_node_tags(reuse_node["id"], tags)
+                # Make sure the stopped nodes (to be reused) has correct tags set,
+                # esp. ray-launch-config. Otherwise the nodes will fail to be reused
+                # and the autoscaler will stop them then start new nodes instead.
+                self.set_node_tags(reuse_node["id"], tags)
 
             start_time1 = round(time.time() * 1000)
             for matched_node in reuse_nodes:
