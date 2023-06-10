@@ -1557,19 +1557,23 @@ def test_spot_pipeline(generic_cloud: str):
             f'sky spot launch -n {name} tests/test_yamls/pipeline.yaml -y -d',
             'sleep 5',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING\|RUNNING"',
-            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-0 | head -n1 | grep "STARTING\|RUNNING"',
-            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-1 | head -n1 | grep "PENDING"',
+            # `grep -A 4 {name}` finds the job with {name} and the 4 lines
+            # after it, i.e. the 4 tasks within the job.
+            # `sed -n 2p` gets the second line of the 4 lines, i.e. the first
+            # task within the job.
+            f'{_SPOT_QUEUE_WAIT}| grep -A 4 {name}| sed -n 2p | grep "STARTING\|RUNNING"',
+            f'{_SPOT_QUEUE_WAIT}| grep -A 4 {name}| sed -n 3p | grep "PENDING"',
             _SPOT_CANCEL_WAIT.format(job_name=f'{name}'),
             'sleep 5',
-            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-0 | head -n1 | grep "CANCELLING\|CANCELLED"',
-            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-1 | head -n1 | grep "CANCELLING\|CANCELLED"',
-            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-2 | head -n1 | grep "CANCELLING\|CANCELLED"',
-            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-3 | head -n1 | grep "CANCELLING\|CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep -A 4 {name}| sed -n 2p | grep "CANCELLING\|CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep -A 4 {name}| sed -n 3p | grep "CANCELLING\|CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep -A 4 {name}| sed -n 4p | grep "CANCELLING\|CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep -A 4 {name}| sed -n 5p | grep "CANCELLING\|CANCELLED"',
             'sleep 200',
-            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-0 | head -n1 | grep "CANCELLED"',
-            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-1 | head -n1 | grep "CANCELLED"',
-            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-2 | head -n1 | grep "CANCELLED"',
-            f'{_SPOT_QUEUE_WAIT}| grep {name}-.*-3 | head -n1 | grep "CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep -A 4 {name}| sed -n 2p | grep "CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep -A 4 {name}| sed -n 3p | grep "CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep -A 4 {name}| sed -n 4p | grep "CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep -A 4 {name}| sed -n 5p | grep "CANCELLED"',
         ],
         _SPOT_CANCEL_WAIT.format(job_name=f'{name}'),
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.
@@ -1611,17 +1615,17 @@ def test_spot_pipeline_failed_setup(generic_cloud: str):
         'spot_pipeline_failed_setup',
         [
             f'sky spot launch -n {name} -y -d tests/test_yamls/failed_setup_pipeline.yaml',
-            'sleep 900',
+            'sleep 600',
             # Make sure the job failed quickly.
             f'{_SPOT_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED_SETUP"',
             # Task 0 should be SUCCEEDED.
-            f'{_SPOT_QUEUE_WAIT} | grep {name} | sed -n 2p | grep {name}-.*-0 | grep "SUCCEEDED"',
+            f'{_SPOT_QUEUE_WAIT} | grep -A 4 {name}| sed -n 2p | grep "SUCCEEDED"',
             # Task 1 should be FAILED_SETUP.
-            f'{_SPOT_QUEUE_WAIT} | grep {name} | sed -n 3p | grep {name}-.*-1 | grep "FAILED_SETUP"',
+            f'{_SPOT_QUEUE_WAIT} | grep -A 4 {name}| sed -n 3p | grep "FAILED_SETUP"',
             # Task 2 should be FAILED_PRECHECKS.
-            f'{_SPOT_QUEUE_WAIT} | grep {name} | sed -n 4p | grep {name}-.*-2 | grep "FAILED_PRECHECKS"',
+            f'{_SPOT_QUEUE_WAIT} | grep -A 4 {name}| sed -n 4p | grep "FAILED_PRECHECKS"',
             # Task 3 should be FAILED_PRECHECKS.
-            f'{_SPOT_QUEUE_WAIT} | grep {name} | sed -n 5p | grep {name}-.*-3 | grep "FAILED_PRECHECKS"',
+            f'{_SPOT_QUEUE_WAIT} | grep -A 4 {name}| sed -n 5p | grep "FAILED_PRECHECKS"',
         ],
         _SPOT_CANCEL_WAIT.format(job_name=name),
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.

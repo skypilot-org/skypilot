@@ -7,11 +7,9 @@ num_nodes: 2
 
 setup: |
   echo setup for train
-  sleep 20
 
 run: |
   echo train starts
-  sleep 20
   echo train ends
 
 ---
