@@ -936,7 +936,10 @@ def storage_refresh() -> Tuple[List[str], List[str]]:
         - removed_storages: list of storage names that are removed from state.db
         - added_storages: list of storage names that are added to state.db
     """
-
+    green = colorama.Fore.GREEN
+    red = colorama.Fore.RED
+    bold = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
     # get a list of names in each StoreType in internal state, state.db
     removed_storages: List[str] = []
     added_storages: List[str] = []
@@ -971,7 +974,7 @@ def storage_refresh() -> Tuple[List[str], List[str]]:
         only_in_internal_state = internal_buckets_status[storetype].difference(external_buckets_status[storetype])
         for s_name in only_in_internal_state:
             global_user_state.remove_storage(s_name, storetype)
-            removed_storages.append(f'Removed {storetype.value}: {s_name}')
+            removed_storages.append(f'{red}Removed{reset} {bold}{storetype.value}{reset} bucket: {s_name}')
             
         # check if anything in external state doesn't exist in state.db
         # add storage that exist in external state but not in state.db
@@ -998,7 +1001,7 @@ def storage_refresh() -> Tuple[List[str], List[str]]:
                 handle = storage_lib.Storage.StorageMetadata(storage_name=s_name,source=None,sky_stores={storetype : store_metadata})
             # 2. run add_or_update_storage to update the externally created storage
             global_user_state.add_or_update_storage(s_name, handle, global_user_state.StorageStatus.READY)
-            added_storages.append(f'Added {storetype}: {s_name}')
+            added_storages.append(f'{green}Added{reset} {bold}{storetype.value}{reset} bucket: {s_name}')
     
     return removed_storages, added_storages
 
