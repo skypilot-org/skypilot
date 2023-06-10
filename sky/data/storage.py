@@ -2081,9 +2081,6 @@ class IBMCosStore(AbstractStore):
     """IBMCosStore inherits from Storage Object and represents the backend
     for COS buckets.
     """
-    # keep imports isolated to class
-    ibm_botocore = __import__('ibm_botocore')
-    ibm_boto3 = __import__('ibm_boto3')
     REGIONS = data_utils.get_cos_regions()
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
 
@@ -2222,7 +2219,7 @@ class IBMCosStore(AbstractStore):
                 logger.debug(
                     f'bucket {bucket_name} was found in {region_scanned}')
                 return region_scanned
-            except self.ibm_botocore.exceptions.ClientError as e:
+            except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # pylint: disable=line-too-long
                 if e.response['Error']['Code'] == '404':
                     logger.debug(f'bucket {bucket_name} was not found '
                                  f'in {region_scanned}')
@@ -2441,7 +2438,7 @@ class IBMCosStore(AbstractStore):
                         f'was created in {region}. {colorama.Style.RESET_ALL}')
             self.bucket = self.s3_resource.Bucket(bucket_name)
 
-        except self.ibm_botocore.exceptions.ClientError as e:
+        except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr]  # pylint: disable=line-too-long
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
                     f'Failed to create bucket: '
@@ -2463,7 +2460,7 @@ class IBMCosStore(AbstractStore):
             logger.debug(f'Deleted bucket\'s content:\n{res}')
             bucket.delete()
             bucket.wait_until_not_exists()
-        except self.ibm_botocore.exceptions.ClientError as e:
+        except ibm.ibm_botocore.exceptions.ClientError as e:
             if e.__class__.__name__ == 'NoSuchBucket':
                 logger.debug('bucket already removed')
         Rclone.delete_rclone_bucket_profile(self.name, Rclone.RcloneClouds.IBM)
