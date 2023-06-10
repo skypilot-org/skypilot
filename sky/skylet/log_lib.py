@@ -301,9 +301,11 @@ def run_bash_command_with_log(bash_command: str,
             #  bash: cannot set terminal process group
             #  bash: no job control in this shell
             '| stdbuf -o0 tail -n +3 '
+            # Log to file and stdout.
+            f'| tee {log_path}'
             # This is required to make sure the executor of command can get
             # correct returncode, since linux pipe is used.
-            f'| tee {log_path}; exit ${{PIPESTATUS[0]}}')
+            '; exit ${{PIPESTATUS[0]}}')
 
         subprocess_cmd: Union[str, List[str]]
         if use_sudo:
@@ -323,7 +325,9 @@ def run_bash_command_with_log(bash_command: str,
             # the tee solution above, as the process_stream
             # can cause buffer problem.
             process_stream=False,
-            shell=True)
+            shell=True,
+            # This is to make sure $PIPESTATUS is available.
+            executable='/bin/bash')
 
 
 def _follow_job_logs(file,
