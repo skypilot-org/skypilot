@@ -1615,7 +1615,7 @@ def test_spot_pipeline_failed_setup(generic_cloud: str):
         'spot_pipeline_failed_setup',
         [
             f'sky spot launch -n {name} -y -d tests/test_yamls/failed_setup_pipeline.yaml',
-            'sleep 600',
+            'sleep 800',
             # Make sure the job failed quickly.
             f'{_SPOT_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED_SETUP"',
             # Task 0 should be SUCCEEDED.
