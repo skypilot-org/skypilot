@@ -305,7 +305,7 @@ def run_bash_command_with_log(bash_command: str,
             f'| tee {log_path}'
             # This is required to make sure the executor of command can get
             # correct returncode, since linux pipe is used.
-            '; exit ${{PIPESTATUS[0]}}')
+            '; exit ${PIPESTATUS[0]}')
 
         subprocess_cmd: Union[str, List[str]]
         if use_sudo:
