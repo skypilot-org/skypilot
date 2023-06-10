@@ -162,7 +162,7 @@ class Task:
         self.file_mounts: Optional[Dict[str, str]] = None
 
         # Only set when 'self' is a spot controller task: 'self.spot_dag' is
-        # the underlying managed spot task (Task object).
+        # the underlying managed spot dag (sky.Dag object).
         self.spot_dag: Optional['sky.Dag'] = None
 
         # Filled in by the optimizer.  If None, this Task is not planned.

@@ -11,7 +11,7 @@ def add_column_to_table(
     column_name: str,
     column_type: str,
     copy_from: Optional[str] = None,
-    set_original_value: Optional[Any] = None,
+    default_value_to_replace_nulls: Optional[Any] = None,
 ):
     """Add a column to a table."""
     for row in cursor.execute(f'PRAGMA table_info({table_name})'):
@@ -25,11 +25,12 @@ def add_column_to_table(
             if copy_from is not None:
                 cursor.execute(f'UPDATE {table_name} '
                                f'SET {column_name} = {copy_from}')
-            if set_original_value is not None:
+            if default_value_to_replace_nulls is not None:
                 cursor.execute(
                     f'UPDATE {table_name} '
                     f'SET {column_name} = (?) '
-                    f'WHERE {column_name} IS NULL', (set_original_value,))
+                    f'WHERE {column_name} IS NULL',
+                    (default_value_to_replace_nulls,))
         except sqlite3.OperationalError as e:
             if 'duplicate column name' in str(e):
                 # We may be trying to add the same column twice, when

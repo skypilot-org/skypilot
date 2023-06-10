@@ -4,7 +4,7 @@ from sky import task as task_lib
 from sky.utils import common_utils
 
 
-def load_chain_dag_from_yaml(path) -> dag_lib.Dag:
+def load_chain_dag_from_yaml(path: str) -> dag_lib.Dag:
     configs = common_utils.read_yaml_all(path)
     dag_name = None
     if set(configs[0].keys()) == {'name'}:
@@ -24,7 +24,7 @@ def load_chain_dag_from_yaml(path) -> dag_lib.Dag:
     return dag
 
 
-def dump_chain_dag_to_yaml(dag: dag_lib.Dag, path: str):
+def dump_chain_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:
     assert dag.is_chain(), dag
     configs = [{'name': dag.name}]
     for task in dag.tasks:

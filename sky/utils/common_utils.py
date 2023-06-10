@@ -179,7 +179,7 @@ def read_yaml(path) -> Dict[str, Any]:
     return config
 
 
-def read_yaml_all(path) -> List[Dict[str, Any]]:
+def read_yaml_all(path: str) -> List[Dict[str, Any]]:
     with open(path, 'r') as f:
         config = yaml.safe_load_all(f)
         return list(config)

@@ -1549,7 +1549,7 @@ def test_spot(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_pipeline(generic_cloud: str):
-    """Test the spot yaml."""
+    """Test a spot pipeline."""
     name = _get_cluster_name()
     test = Test(
         'spot-pipeline',
@@ -1605,7 +1605,7 @@ def test_spot_failed_setup(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_pipeline_failed_setup(generic_cloud: str):
-    """Test managed spot job with failed setup."""
+    """Test managed spot job with failed setup for a pipeline."""
     name = _get_cluster_name()
     test = Test(
         'spot_pipeline_failed_setup',
@@ -1634,7 +1634,7 @@ def test_spot_pipeline_failed_setup(generic_cloud: str):
 @pytest.mark.aws
 @pytest.mark.managed_spot
 def test_spot_pipeline_recovery_aws(aws_config_region):
-    """Test managed spot recovery."""
+    """Test managed spot recovery for a pipeline."""
     name = _get_cluster_name()
     region = aws_config_region
     if region != 'us-west-2':
@@ -1734,7 +1734,7 @@ def test_spot_recovery_gcp():
 @pytest.mark.gcp
 @pytest.mark.managed_spot
 def test_spot_pipeline_recovery_gcp():
-    """Test managed spot pipeline recovery."""
+    """Test managed spot recovery for a pipeline."""
     name = _get_cluster_name()
     zone = 'us-east4-b'
     query_cmd = (f'gcloud compute instances list --filter='

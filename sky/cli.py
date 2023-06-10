@@ -990,6 +990,12 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     # spot launch specific
     spot_recovery: Optional[str] = None,
 ) -> Union[sky.Task, sky.Dag]:
+    """Creates a task or a dag from an entrypoint with overrides.
+
+    Returns:
+        A dag iff the entrypoint and contains a list of tasks.
+        Otherwise, a task.
+    """
     entrypoint = ' '.join(entrypoint)
     is_yaml, yaml_config = _check_yaml(entrypoint)
     entrypoint: Optional[str]
@@ -1025,8 +1031,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint)
         if len(dag.tasks) > 1:
-            # When the dag has more than 1 task or the dag name is
-            # different from the task name (i.e. the yaml file
+            # When the dag has more than 1 task (i.e. the yaml file
             # contains a standalone dag name). It is unclear how to
             # override the params for the dag. So we just ignore the
             # override params.

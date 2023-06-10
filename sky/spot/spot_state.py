@@ -63,7 +63,7 @@ db_utils.add_column_to_table(_CURSOR,
                              'spot',
                              'task_id',
                              'INTEGER DEFAULT 0',
-                             set_original_value=0)
+                             default_value_to_replace_nulls=0)
 
 # `job_info` contains the mapping from job_id to the job_name.
 _CURSOR.execute("""\

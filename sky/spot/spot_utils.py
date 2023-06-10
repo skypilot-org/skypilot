@@ -267,8 +267,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         backend = backends.CloudVmRayBackend()
         task_id, spot_status = spot_state.get_latest_task_id_status(job_id)
 
-        # spot_status can be None if the controller process just started and has
-        # not updated the spot status yet.
+        # task_id and spot_status can be None if the controller process just
+        # started and the spot status has not set to PENDING yet.
         while spot_status is None or not spot_status.is_terminal():
             handle = None
             if task_id is not None:
@@ -276,6 +276,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 cluster_name = generate_spot_cluster_name(task_name, job_id)
                 handle = global_user_state.get_handle_from_cluster_name(
                     cluster_name)
+
             # Check the handle: The cluster can be preempted and removed from
             # the table before the spot state is updated by the controller. In
             # this case, we should skip the logging, and wait for the next
