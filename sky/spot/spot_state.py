@@ -24,8 +24,8 @@ _CURSOR = _CONN.cursor()
 # `spot` table contains all the finest-grained tasks, including all the
 # tasks of a spot job. All tasks of the same job will have the same
 # `spot_job_id`.
-# The `job_name` is the name of the task (naming of that column is
-# legacy issue and should be changed to `task_name`).
+# The `job_name` column is now deprecated, as it means the `task_name`,
+# and we added a new column called `task_name`.
 # The `job_id` is now not really a job id, but a only a unique
 # identifier/primary key for all the tasks. We will use `spot_job_id`
 # to identify the spot job.
@@ -44,13 +44,14 @@ _CURSOR.execute("""\
     job_duration FLOAT DEFAULT 0,
     failure_reason TEXT,
     spot_job_id INTEGER,
-    task_id INTEGER DEFAULT 0)""")
+    task_id INTEGER DEFAULT 0,
+    task_name TEXT)""")
 _CONN.commit()
 
 db_utils.add_column_to_table(_CURSOR, _CONN, 'spot', 'failure_reason', 'TEXT')
 # Create a new column `spot_job_id`, which is the same for tasks of the
 # same spot job.
-# The original `job_id`` will no longer have actual meanings, but only a legacy
+# The original `job_id` no longer has an actual meaning, but only a legacy
 # identifier for all tasks in database.
 db_utils.add_column_to_table(_CURSOR,
                              _CONN,
@@ -64,8 +65,15 @@ db_utils.add_column_to_table(_CURSOR,
                              'task_id',
                              'INTEGER DEFAULT 0',
                              default_value_to_replace_nulls=0)
+db_utils.add_column_to_table(_CURSOR,
+                             _CONN,
+                             'spot',
+                             'task_name',
+                             'TEXT',
+                             copy_from='job_name')
 
 # `job_info` contains the mapping from job_id to the job_name.
+# In the future, it may contain more information about each job.
 _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS job_info (
     spot_job_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,7 +94,7 @@ _CONN.commit()
 # by joining the spot and job_info tables.
 columns = [
     '_job_id',
-    'task_name',
+    '_task_name',
     'resources',
     'submitted_at',
     'status',
@@ -99,6 +107,7 @@ columns = [
     'failure_reason',
     'job_id',
     'task_id',
+    'task_name',
     # columns from the job_info table
     '_job_info_job_id',  # This should be the same as job_id
     'job_name'
@@ -241,11 +250,11 @@ def set_job_name(job_id: int, name: str):
 
 
 def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
-    """Set the job to pending state."""
+    """Set the task to pending state."""
     _CURSOR.execute(
         """\
         INSERT INTO spot
-        (spot_job_id, task_id, job_name, resources, status)
+        (spot_job_id, task_id, task_name, resources, status)
         VALUES (?, ?, ?, ?, ?)""",
         (job_id, task_id, task_name, resources_str, SpotStatus.PENDING.value))
     _CONN.commit()
@@ -253,7 +262,7 @@ def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
 
 def set_submitted(job_id: int, task_id: int, run_timestamp: str,
                   submit_time: float, resources_str: str):
-    """Set the job to submitted.
+    """Set the task to submitted.
 
     Args:
         job_id: The spot job ID.
@@ -283,6 +292,7 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
 
 
 def set_starting(job_id: int, task_id: int):
+    """Set the task to starting state."""
     logger.info('Launching the spot cluster...')
     _CURSOR.execute(
         """\
@@ -293,6 +303,7 @@ def set_starting(job_id: int, task_id: int):
 
 
 def set_started(job_id: int, task_id: int, start_time: float):
+    """Set the task to started state."""
     logger.info('Job started.')
     _CURSOR.execute(
         """\
@@ -304,6 +315,7 @@ def set_started(job_id: int, task_id: int, start_time: float):
 
 
 def set_recovering(job_id: int, task_id: int):
+    """Set the task to recovering state, and update the job duration."""
     logger.info('=== Recovering... ===')
     _CURSOR.execute(
         """\
@@ -316,6 +328,7 @@ def set_recovering(job_id: int, task_id: int):
 
 
 def set_recovered(job_id: int, task_id: int, recovered_time: float):
+    """Set the task to recovered."""
     _CURSOR.execute(
         """\
         UPDATE spot SET
@@ -328,7 +341,7 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float):
 
 
 def set_succeeded(job_id: int, task_id: int, end_time: float):
-    """Set the job/task to succeeded, if they are in non-terminal states."""
+    """Set the task to succeeded, if they are in non-terminal states."""
     _CURSOR.execute(
         """\
         UPDATE spot SET
@@ -345,7 +358,7 @@ def set_failed(job_id: int,
                failure_type: SpotStatus,
                failure_reason: str,
                end_time: Optional[float] = None):
-    """Set the job/task to failed, if they are in non-terminal states.
+    """Set the task to failed, if they are in non-terminal states.
 
     Args:
         job_id: The job id.
@@ -422,14 +435,20 @@ def set_cancelled(job_id: int):
 # ======== utility functions ========
 def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get non-terminal job ids by name."""
+    statuses = ', '.join(['?'] * len(SpotStatus.terminal_statuses()))
     field_values = [status.value for status in SpotStatus.terminal_statuses()]
 
     name_filter = ''
     if name is not None:
-        name_filter = 'AND (spot.job_name=(?) OR job_info.name=(?))'
+        # We match the job name from `job_info` for the jobs submitted after
+        # #1982, and from `spot` for the jobs submitted before #1982, whose
+        # job_info is not available.
+        name_filter = ('AND (job_info.name=(?) OR '
+                       '(job_info.name IS NULL AND spot.task_name=(?)))')
         field_values.extend([name, name])
 
-    statuses = ', '.join(['?'] * len(SpotStatus.terminal_statuses()))
+    # Left outer join is used here instead of join, because the job_info does
+    # not contain the spot jobs submitted before #1982.
     rows = _CURSOR.execute(
         f"""\
         SELECT DISTINCT spot.spot_job_id
@@ -529,7 +548,7 @@ def get_task_name(job_id: int, task_id: int) -> str:
     """Get the task name of a job."""
     task_name = _CURSOR.execute(
         """\
-        SELECT job_name FROM spot
+        SELECT task_name FROM spot
         WHERE spot_job_id=(?)
         AND task_id=(?)""", (job_id, task_id)).fetchone()
     return task_name[0]
