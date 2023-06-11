@@ -1991,6 +1991,7 @@ class TestStorageWithCredentials:
 
     @staticmethod
     def create_dir_structure(base_path, structure):
+        # creates a given file STRUCTURE in BASE_PATH
         for name, substructure in structure.items():
             path = os.path.join(base_path, name)
             if substructure is None:
@@ -2046,9 +2047,9 @@ class TestStorageWithCredentials:
                 return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)"'
         elif store_type == storage_lib.StoreType.GCS:
             if suffix:
-                return f'gsutil ls gs://{bucket_name}/{suffix} | grep "{file_name}" | wc -l'
+                return f'gsutil ls -r gs://{bucket_name}/{suffix} | grep "{file_name}" | wc -l'
             else:
-                return f'gsutil ls gs://{bucket_name} | grep "{file_name}" | wc -l'
+                return f'gsutil ls -r gs://{bucket_name} | grep "{file_name}" | wc -l'
         elif store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             if suffix:
@@ -2141,6 +2142,37 @@ class TestStorageWithCredentials:
         # above, but now in COPY mode. This should succeed.
         yield from self.yield_storage_object(name=storage_name,
                                              mode=storage_lib.StorageMode.COPY)
+
+    @pytest.fixture
+    def tmp_gitignore_storage_obj(self, tmp_bucket_name, gitignore_structure):
+        # Creates a temporary storage object for testing .gitignore filter.
+        # GITIGINORE_STRUCTURE is representing a file structure in a dictionary
+        # foramt. Created storage object will contain the file structure along
+        # with .gitignore and .git/info/exclude files to test exclude filter.
+        # Stores must be added in the test.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Creates file structure to be uploaded in the Storage
+            self.create_dir_structure(tmpdir, gitignore_structure)
+
+            # Create .gitignore and list files/dirs to be excluded in it
+            skypilot_path = os.path.dirname(os.path.dirname(sky.__file__))
+            temp_path = f'{tmpdir}/.gitignore'
+            file_path = os.path.join(skypilot_path, 'tests/gitignore_test')
+            shutil.copyfile(file_path, temp_path)
+
+            # Create .git/info/exclude and list files/dirs to be excluded in it
+            temp_path = f'{tmpdir}/.git/info/'
+            os.makedirs(temp_path)
+            temp_exclude_path = os.path.join(temp_path, 'exclude')
+            file_path = os.path.join(skypilot_path,
+                                     'tests/git_info_exclude_test')
+            shutil.copyfile(file_path, temp_exclude_path)
+
+            # Create sky Storage with the files created
+            yield from self.yield_storage_object(
+                name=tmp_bucket_name,
+                source=tmpdir,
+                mode=storage_lib.StorageMode.COPY)
 
     @pytest.fixture
     def tmp_awscli_bucket(self, tmp_bucket_name):
@@ -2419,75 +2451,35 @@ class TestStorageWithCredentials:
                       storage_lib.StoreType.R2,
                       marks=pytest.mark.cloudflare)])
     def test_excluded_file_cloud_storage_upload_copy(self, gitignore_structure,
-                                                     store_type):
+                                                     store_type,
+                                                     tmp_gitignore_storage_obj):
         # tests if files included in .gitignore and .git/info/exclude are
         # excluded from being transferred to Storage
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create files to be uploaded in the Storage
-            self.create_dir_structure(tmpdir, gitignore_structure)
-
-            # Create files to be excluded from .gitignore and list them in the file
-            skypilot_path = os.path.abspath(sys.argv[0])
-            skypilot_path = os.path.dirname(skypilot_path)
-            temp_path = f'{tmpdir}/.gitignore'
-            file_path = os.path.join(skypilot_path, 'tests/gitignore_test')
-            shutil.copyfile(file_path, temp_path)
-
-            # Create files to be excluded from .git/info/exclude and list them in the file
-            temp_path = f'{tmpdir}/.git/info/'
-            os.makedirs(temp_path)
-            temp_exclude_path = os.path.join(temp_path, 'exclude')
-            file_path = os.path.join(skypilot_path,
-                                     'tests/git_info_exclude_test')
-            shutil.copyfile(file_path, temp_exclude_path)
-
-            # Create sky Storage with the files created
-            timestamp = str(time.time()).replace('.', '')
-            bucket_name = f'sky-test-{timestamp}'
-            store_obj = storage_lib.Storage(name=bucket_name,
-                                            source=tmpdir,
-                                            mode=storage_lib.StorageMode.COPY)
-            store_obj.add_store(store_type)
+        tmp_gitignore_storage_obj.add_store(store_type)
 
         upload_file_name = 'included'
         # Count the number of files with the given file name
         up_cmd = self.cli_count_name_in_bucket(store_type, \
-            bucket_name, file_name=upload_file_name)
-        gitignore_cmd = self.cli_count_name_in_bucket(store_type, \
-            bucket_name, file_name='.gitignore')
+            tmp_gitignore_storage_obj.name, file_name=upload_file_name)
         git_exclude_cmd = self.cli_count_name_in_bucket(store_type, \
-            bucket_name, file_name='.git')
+            tmp_gitignore_storage_obj.name, file_name='.git')
         cnt_num_file_cmd = self.cli_count_file_in_bucket(
-            store_type, bucket_name)
+            store_type, tmp_gitignore_storage_obj.name)
 
         up_output = subprocess.check_output(up_cmd, shell=True)
-        gitignore_output = subprocess.check_output(gitignore_cmd, shell=True)
         git_exclude_output = subprocess.check_output(git_exclude_cmd,
                                                      shell=True)
         cnt_output = subprocess.check_output(cnt_num_file_cmd, shell=True)
 
-        # GCS ls and aws s3 list-objects outputs in a different way
-        # Only 'included.*' files should exist in the cloud object storage
-        if store_type == storage_lib.StoreType.GCS:
-            up_dir_output = subprocess.check_output(up_dir_cmd, shell=True)
-            up_dir_cmd = up_cmd = self.cli_count_name_in_bucket(store_type, \
-                bucket_name, file_name=upload_file_name, suffix='include_dir')
-
-            assert '2' in up_output.decode('utf-8'), \
-                    f'Files to be uploaded are not uploaded.: {bucket_name}'
-            assert '1' in up_dir_output.decode('utf-8'), \
-                    f'File to be uploaded in include_dir is not uploaded.: {bucket_name}'
-        else:
-            assert '3' in up_output.decode('utf-8'), \
-                    f'{upload_file_name} is not uploaded.: {bucket_name}'
-        assert '0' in gitignore_output.decode('utf-8'), \
-               '.gitignore file should not be uploaded'
-        assert '0' in git_exclude_output.decode('utf-8'), \
-               '.git directory should not be uploaded'
-        ls_cmd = self.cli_ls_cmd(store_type, bucket_name)
-        assert '3' in cnt_output.decode('utf-8'), \
-               f'Some items listed in .gitignore and .git/info/exclude are not ignored - there must be one item in the bucket. Check with {ls_cmd}'
+        assert '3' in up_output.decode('utf-8'), \
+                'Files to be included are not completely uploaded.'
+        # 1 is read as .gitignore is uploaded
+        assert '1' in git_exclude_output.decode('utf-8'), \
+               '.git directory should not be uploaded.'
+        # 4 files include .gitignore, included.log, included.txt, include_dir/included.log
+        assert '4' in cnt_output.decode('utf-8'), \
+               'Some items listed in .gitignore and .git/info/exclude are not excluded.'
 
 
 # ---------- Testing YAML Specs ----------
