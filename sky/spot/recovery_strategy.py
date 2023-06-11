@@ -226,7 +226,7 @@ class StrategyExecutor:
             time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
         return None
 
-    def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
+    def _launch(self, max_retry: Optional[int]=3, raise_on_failure: bool=True) -> Optional[float]:
         """Implementation of launch().
 
         The function will wait until the job starts running, but will leave the

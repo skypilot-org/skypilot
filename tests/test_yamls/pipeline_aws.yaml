@@ -13,7 +13,10 @@ run: |
   echo SKYPILOT_TASK_ID: $SKYPILOT_TASK_ID
   echo SKYPILOT_TASK_IDS
   echo "$SKYPILOT_TASK_IDS"
-  sleep 1200
+  # Fill in the buffer with 20 lines of output
+  # TODO(zhwu): This is a hack, and should be
+  # removed once #2065 is fixed.
+  for i in {1..20}; do echo $i; sleep 1; done
   echo train ends
 
 ---

@@ -29,6 +29,7 @@ _CURSOR = _CONN.cursor()
 # The `job_id` is now not really a job id, but a only a unique
 # identifier/primary key for all the tasks. We will use `spot_job_id`
 # to identify the spot job.
+# TODO(zhwu): schema migration may be needed.
 _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS spot (
     job_id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -146,7 +146,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
         except subprocess.TimeoutExpired as e:
             log_file.flush()
             test.echo(f'Timeout after {test.timeout} seconds.')
-            test.echo(e)
+            test.echo(str(e))
             log_file.write(f'Timeout after {test.timeout} seconds.\n')
             log_file.flush()
             # Kill the current process.

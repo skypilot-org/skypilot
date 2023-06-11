@@ -248,8 +248,8 @@ class UsageMessageToReport(MessageToReport):
 
     @contextlib.contextmanager
     def update_runtime_context(self, name: str):
+        start = time.time()
         try:
-            start = time.time()
             yield
         finally:
             self.runtimes[name] = time.time() - start
