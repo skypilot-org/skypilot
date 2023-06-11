@@ -8,7 +8,7 @@
 >     def end_for(line: str) -> str:
 >         if sys.platform == "win32":
 >             return "\n"
->         if line.startswith("\r") and not line[1:].strip().startswith("100%"):
+>         if line.endswith("\r"):
 >             return ""
 >         return "\n"
 > 
