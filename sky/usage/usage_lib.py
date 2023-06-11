@@ -366,6 +366,8 @@ def prepare_json_from_yaml_config(
         yaml_info = common_utils.read_yaml_all(yaml_config_or_path)
 
     for i in range(len(yaml_info)):
+        if yaml_info[i] is None:
+            yaml_info[i] = {}
         yaml_info[i] = _clean_yaml(yaml_info[i])
         yaml_info[i]['__redacted_comment_lines'] = len(comment_lines)
     return yaml_info
