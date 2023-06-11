@@ -48,6 +48,7 @@ class _ProcessingArgs:
         self.line_processor = line_processor
         self.streaming_prefix = streaming_prefix
 
+
 # Asyncio does not work as the output processing can be executed in a
 # different thread.
 def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
@@ -91,9 +92,9 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
                 if (args.stream_logs and start_streaming_flag and
                         not end_streaming_flag):
                     print(streaming_prefix + line,
-                        end='',
-                        file=out_stream,
-                        flush=True)
+                          end='',
+                          file=out_stream,
+                          flush=True)
                 if args.log_path != '/dev/null':
                     fout.write(line)
                     fout.flush()
@@ -108,7 +109,9 @@ def process_subprocess_stream(proc, args: _ProcessingArgs) -> Tuple[str, str]:
         with multiprocessing.pool.ThreadPool(processes=1) as pool:
             err_args = copy.copy(args)
             err_args.line_processor = None
-            stderr_fut = pool.apply_async(_handle_io_stream, args=(proc.stderr, sys.stderr, err_args))
+            stderr_fut = pool.apply_async(_handle_io_stream,
+                                          args=(proc.stderr, sys.stderr,
+                                                err_args))
             stdout = _handle_io_stream(proc.stdout, sys.stdout, args)
             stderr = stderr_fut.get()
     else:
