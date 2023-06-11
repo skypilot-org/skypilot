@@ -47,3 +47,14 @@ GCP
 4. Select the checkbox of the region whose quota you want to change.
 5. Click **Edit Quotas** and fill out the new limit.
 6. Click **Submit Request**.
+
+OCI
+-------------------------------
+
+1. Go to the `OCI Limits, Quotas and Usage console <https://cloud.oracle.com/limits>`_ to check out your resoures status.
+2. **request a service limit increase** link on the page if you want to increase quotas.
+3. Choose an Service Category from the list (e.g, ``Compute``). 
+4. Choose an Resource from the list (e.g, ``GPUs for GPU.A10 based VM and BM Instances``). Use ``sky show-gpus --cloud oci --all`` or check `here <https://docs.oracle.com/en-us/iaas/Content/Compute/References/computeshapes.htm>`_ for more instance types.
+5. Enter your new Limit and Reason for request.
+6. Click **Create Support Request** to submit.
+7. You may check `OCI Service Limits <https://docs.oracle.com/en-us/iaas/Content/General/Concepts/servicelimits.htm#computelimits>`_ for more information.
