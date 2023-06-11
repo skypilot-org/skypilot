@@ -212,7 +212,6 @@ class RayCodeGen:
         ray_address = 'ray://localhost:10001' if is_local else 'auto'
         self._code = [
             textwrap.dedent(f"""\
-            import asyncio
             import getpass
             import hashlib
             import io
@@ -253,8 +252,8 @@ class RayCodeGen:
             # FIXME: This is a hack to make sure that the functions can be found
             # by ray.remote. This should be removed once we have a better way to
             # specify dependencies for ray.
-            inspect.getsource(log_lib.ProcessingArgs),
-            inspect.getsource(log_lib.handle_io_stream),
+            inspect.getsource(log_lib._ProcessingArgs),  # pylint: disable=protected-access
+            inspect.getsource(log_lib._handle_io_stream),  # pylint: disable=protected-access
             inspect.getsource(log_lib.process_subprocess_stream),
             inspect.getsource(log_lib.run_with_log),
             inspect.getsource(log_lib.make_task_bash_script),
