@@ -12,7 +12,7 @@ run: |
   echo train starts
   echo SKYPILOT_TASK_ID: $SKYPILOT_TASK_ID
   echo SKYPILOT_TASK_IDS
-  echo $SKYPILOT_TASK_IDS
+  echo "$SKYPILOT_TASK_IDS"
   sleep 1200
   echo train ends
 
