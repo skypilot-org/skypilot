@@ -1078,6 +1078,7 @@ class S3Store(AbstractStore):
             # we exclude .git directory from the sync
             excluded_list = storage_utils.get_excluded_files_from_gitignore(
                 src_dir_path)
+            excluded_list.append('.git/*')
             excludes = ' '.join(
                 [f'--exclude "{file_name}"' for file_name in excluded_list])
             sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
@@ -1504,9 +1505,11 @@ class GcsStore(AbstractStore):
             # we exclude .git directory from the sync
             excluded_list = storage_utils.get_excluded_files_from_gitignore(
                 src_dir_path)
-            excludes = '\'(' + '|'.join(excluded_list) + ')\''
-            sync_command = (f'gsutil -m rsync -r -x {excludes} {src_dir_path}'
-                            f' gs://{self.name}/{dest_dir_name}')
+            excluded_list.append(r'^\.git/.*$')
+            excludes = '|'.join(excluded_list)
+            sync_command = (
+                f'gsutil -m rsync -r -x \'({excludes})\' {src_dir_path}'
+                f' gs://{self.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
@@ -1830,6 +1833,7 @@ class R2Store(AbstractStore):
             # we exclude .git directory from the sync
             excluded_list = storage_utils.get_excluded_files_from_gitignore(
                 src_dir_path)
+            excluded_list.append('.git/*')
             excludes = ' '.join(
                 [f'--exclude "{file_name}"' for file_name in excluded_list])
             endpoint_url = cloudflare.create_endpoint()

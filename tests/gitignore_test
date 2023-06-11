@@ -1,11 +1,11 @@
-# This test should upload only include.txt, included.log, and included/included.l$
+# This test should upload only included.txt, included.log, and included_dir/included.log
 **/double_asterisk_excluded
 **/double_asterisk_excluded_dir
 **/parent/*.txt
 **/parent/child/*.txt
 *.log
 exp-*/
-!included.log
+!included.*
 excluded.*
 /front_slash_excluded
 no_slash_excluded

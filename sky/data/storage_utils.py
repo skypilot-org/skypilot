@@ -71,9 +71,8 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
     # This command outputs a list to be excluded according to .gitignore
     # and .git/info/exclude
     filter_cmd = f'git -C {expand_src_dir_path} status --ignored --porcelain=v1'
-    excluded_list: List[str] = ['.git/*']
+    excluded_list: List[str] = []
 
-    # pylint: disable=W1510
     if git_exclude_exists or gitignore_exists:
         try:
             output = subprocess.run(filter_cmd,
@@ -90,35 +89,44 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
                     # Check if the user has 'write' permission to
                     # SRC_DIR_PATH
                     if not os.access(expand_src_dir_path, os.W_OK):
-                        logger.warning(f'{colorama.Fore.YELLOW}Warning: Write permission denied in {src_dir_path}. Files/dirs specified in .gitignore will be uploaded to the Cloud Storage."')
+                        logger.warning(
+                            f'{colorama.Fore.YELLOW}Warning: Write permission '
+                            f'denied in {src_dir_path}. Files/dirs specified'
+                            ' in .gitignore will be uploaded to the Cloud '
+                            'Storage."')
                         return excluded_list
                     init_cmd = f'git -C {expand_src_dir_path} init'
                     subprocess.run(init_cmd,
-                                shell=True,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+                                   shell=True,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE,
+                                   check=True)
                     output = subprocess.run(filter_cmd,
                                             shell=True,
                                             stdout=subprocess.PIPE,
                                             stderr=subprocess.PIPE,
+                                            check=True,
                                             text=True)
                     if git_exclude_exists:
                         # removes all the files/dirs created with 'git init'
                         # under .git/ except .git/info/exclude
-                        remove_files_cmd = (f'find {expand_src_dir_path}/.git ' \
-                                            f'-path {git_exclude_path} -prune -o ' \
-                                            '-type f -exec rm -f {} +')
-                        remove_dirs_cmd = (f'find {expand_src_dir_path}/.git ' \
-                                        f'-path {git_exclude_path} -prune -o' \
-                                        ' -type d -empty -delete')
+                        remove_files_cmd = (f'find {expand_src_dir_path}' \
+                                            f'/.git -path {git_exclude_path}' \
+                                            ' -prune -o -type f -exec rm -f ' \
+                                            '{} +')
+                        remove_dirs_cmd = (f'find {expand_src_dir_path}' \
+                                        f'/.git -path {git_exclude_path}' \
+                                        ' -o -type d -empty -delete')
                         subprocess.run(remove_files_cmd,
                                     shell=True,
                                     stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE)
+                                    stderr=subprocess.PIPE,
+                                    check=True)
                         subprocess.run(remove_dirs_cmd,
                                     shell=True,
                                     stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE)
+                                    stderr=subprocess.PIPE,
+                                    check=True)
 
         output_list = output.stdout.split('\n')
         for line in output_list:
@@ -128,9 +136,8 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
             if line.startswith('!!'):
                 to_be_excluded = line[3:]
                 if line.endswith('/'):
-                    # aws s3 sync and gsutil rsync require * to exclude 
+                    # aws s3 sync and gsutil rsync require * to exclude
                     # files/dirs under the specified directory.
                     to_be_excluded += '*'
                 excluded_list.append(to_be_excluded)
-    # pylint: enable=W1510
     return excluded_list
