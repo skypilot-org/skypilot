@@ -16,6 +16,8 @@ def load_chain_dag_from_yaml(path: str) -> dag_lib.Dag:
     current_task = None
     with dag_lib.Dag() as dag:
         for task_config in configs:
+            if task_config is None:
+                continue
             task = task_lib.Task.from_yaml_config(task_config)
             if current_task is not None:
                 current_task >> task  # pylint: disable=pointless-statement
