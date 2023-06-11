@@ -114,6 +114,9 @@ def process_subprocess_stream(proc, args: _ProcessingArgs) -> Tuple[str, str]:
             stderr_fut = pool.apply_async(_handle_io_stream,
                                           args=(proc.stderr, sys.stderr,
                                                 err_args))
+            # Do not launch a thread for stdout as the rich.status does not
+            # work in a thread, which is used in
+            # log_utils.RayUpLineProcessor.
             stdout = _handle_io_stream(proc.stdout, sys.stdout, args)
             stderr = stderr_fut.get()
     else:
