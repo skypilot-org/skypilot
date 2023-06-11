@@ -1,6 +1,7 @@
 """Utilities for loading and dumping DAGs from/to YAML files."""
 from sky import dag as dag_lib
 from sky import task as task_lib
+from sky.backends import backend_utils
 from sky.utils import common_utils
 
 
@@ -32,3 +33,17 @@ def dump_chain_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:
     for task in dag.tasks:
         configs.append(task.to_yaml_config())
     common_utils.dump_yaml(path, configs)
+
+
+def infer_and_fill_dag_name(dag: dag_lib.Dag) -> None:
+    # For a singleton task, override the dag name with task name, if it is
+    # not None. Otherwise, use the dag name.
+    first_task = dag.tasks[0]
+    if len(dag.tasks) == 1 and first_task.name is not None:
+        dag.name = first_task.name
+
+    if dag.name is None:
+        dag.name = backend_utils.generate_cluster_name()
+
+    if first_task.name is None:
+        first_task.name = dag.name

@@ -3480,6 +3480,8 @@ def spot_launch(
     if name is not None:
         dag.name = name
 
+    dag_utils.infer_and_fill_dag_name(dag)
+
     if not yes:
         prompt = f'Launching a new spot job {dag.name!r}. Proceed?'
         if prompt is not None:

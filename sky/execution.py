@@ -554,17 +554,7 @@ def spot_launch(
     assert dag.is_chain(), ('Only single-task or chain DAG is '
                             'allowed for spot_launch.', dag)
 
-    if len(dag.tasks) == 1:
-        # For a singleton task, override the dag name with task name, if it is
-        # not None. Otherwise, use the dag name.
-        task_ = dag.tasks[0]
-        if task_.name is not None:
-            dag.name = task_.name
-        else:
-            task_.name = dag.name
-
-    if dag.name is None:
-        dag.name = backend_utils.generate_cluster_name()
+    dag_utils.infer_and_fill_dag_name(dag)
 
     task_names = set()
     for task_ in dag.tasks:
