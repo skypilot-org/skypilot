@@ -41,9 +41,9 @@ _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
-_JOB_WAITING_STATUS_MESSAGE = ('[bold cyan]Waiting for the job to start'
+_JOB_WAITING_STATUS_MESSAGE = ('[bold cyan]Waiting for the task to start'
                                '{status_str}.[/] It may take a few minutes.')
-_JOB_CANCELLED_MESSAGE = ('[bold cyan]Waiting for the job status to be updated.'
+_JOB_CANCELLED_MESSAGE = ('[bold cyan]Waiting for the task status to be updated.'
                           '[/] It may take a minute.')
 
 # The maximum time to wait for the spot job status to transition to terminal
@@ -480,6 +480,7 @@ def format_job_table(tasks: List[Dict[str, Any]],
             recovery_cnt = 0
             spot_status = spot_state.SpotStatus.SUCCEEDED
             failure_reason = None
+            current_task_id = len(job_tasks) - 1
             for task in job_tasks:
                 job_duration += task['job_duration']
                 if task['submitted_at'] is not None:
@@ -499,6 +500,7 @@ def format_job_table(tasks: List[Dict[str, Any]],
                     # when going from one task to the next one, which can be
                     # confusing.
                     spot_status = task['status']
+                    current_task_id = task['task_id']
 
                 if (failure_reason is None and
                         task['status'] > spot_state.SpotStatus.SUCCEEDED):
@@ -511,6 +513,10 @@ def format_job_table(tasks: List[Dict[str, Any]],
             total_duration = log_utils.readable_time_duration(submitted_at,
                                                               end_at,
                                                               absolute=True)
+
+            status_str = spot_status.colored_str()
+            if (spot_status < spot_state.SpotStatus.RUNNING and current_task_id > 0):
+                status_str += f' (task: {current_task_id})'
 
             job_values = [
                 job_id,
