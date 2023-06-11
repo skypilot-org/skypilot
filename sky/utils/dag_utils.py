@@ -35,15 +35,26 @@ def dump_chain_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:
     common_utils.dump_yaml(path, configs)
 
 
-def infer_and_fill_dag_name(dag: dag_lib.Dag) -> None:
-    # For a singleton task, override the dag name with task name, if it is
-    # not None. Otherwise, use the dag name.
+def maybe_infer_and_fill_dag_and_task_names(dag: dag_lib.Dag) -> None:
+    """Infer and fill the dag/task name if it is None.
+
+    This is mostly for display purpose, to make sure the dag/task name is
+    readable and meaningful, instead of a random UUID.
+    """
     first_task = dag.tasks[0]
-    if len(dag.tasks) == 1 and first_task.name is not None:
-        dag.name = first_task.name
+    if len(dag.tasks) == 1:
+        if dag.name is not None:
+            first_task.name = dag.name
+        elif first_task.name is not None:
+            dag.name = first_task.name
 
     if dag.name is None:
         dag.name = backend_utils.generate_cluster_name()
 
-    if first_task.name is None:
-        first_task.name = dag.name
+    if len(dag.tasks) == 1:
+        if first_task.name is None:
+            first_task.name = dag.name
+    else:
+        for task_id, task in enumerate(dag.tasks):
+            if task.name is None:
+                task.name = f'{dag.name}-{task_id}'

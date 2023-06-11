@@ -554,16 +554,15 @@ def spot_launch(
     assert dag.is_chain(), ('Only single-task or chain DAG is '
                             'allowed for spot_launch.', dag)
 
-    dag_utils.infer_and_fill_dag_name(dag)
+    dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
     task_names = set()
     for task_ in dag.tasks:
-        if task_.name is not None:
-            if task_.name in task_names:
-                raise ValueError(
-                    f'Task name {task_.name} is duplicated in the dag.')
-            task_names.add(task_.name)
-    for task_id, task_ in enumerate(dag.tasks):
+        if task_.name in task_names:
+            raise ValueError(
+                f'Task name {task_.name} is duplicated in the dag.')
+        task_names.add(task_.name)
+    for task_ in dag.tasks:
         assert len(task_.resources) == 1, task_
         resources = list(task_.resources)[0]
 
@@ -577,17 +576,6 @@ def spot_launch(
         task_.set_resources({new_resources})
 
         _maybe_translate_local_file_mounts_and_sync_up(task_)
-
-        name = dag.name
-        if len(dag.tasks) > 1:
-            if task_.name is not None:
-                name = f'{task_.name}'
-            else:
-                name = f'{dag.name}-{task_id}'
-        # Override the task name with the specified name or generated name, so
-        # that the controller process can retrieve the task name from the task
-        # config.
-        task_.name = name
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-dag-{dag.name}-',
                                      mode='w') as f:

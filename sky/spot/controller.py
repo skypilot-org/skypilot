@@ -19,6 +19,7 @@ from sky.skylet import job_lib
 from sky.spot import recovery_strategy
 from sky.spot import spot_state
 from sky.spot import spot_utils
+from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import subprocess_utils
@@ -56,7 +57,6 @@ class SpotController:
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
         #   Example value: sky-2022-10-04-22-46-52-467694_spot_id-17-1
-        #   Example value (multi-job): sky-2022-10-04-22-46-52-467694_spot_id-17-2
         job_id_env_vars = []
         for i in range(len(self._dag.tasks)):
             job_id_env_var = common_utils.get_global_job_id(
@@ -120,6 +120,7 @@ class SpotController:
                                      task_id,
                                      end_time=time.time())
             return True
+        usage_lib.messages.usage.update_task_id(task_id)
         task_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
         submitted_at = time.time()
         if task_id == 0:

@@ -24,7 +24,7 @@ _CURSOR = _CONN.cursor()
 # `spot` table contains all the finest-grained tasks, including all the
 # tasks of a spot job. All tasks of the same job will have the same
 # `spot_job_id`.
-# The `job_name` column is now deprecated. It now holds the task's name, i.e., 
+# The `job_name` column is now deprecated. It now holds the task's name, i.e.,
 # the same content as the `task_name` column.
 # The `job_id` is now not really a job id, but a only a unique
 # identifier/primary key for all the tasks. We will use `spot_job_id`
@@ -342,7 +342,7 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float):
 
 
 def set_succeeded(job_id: int, task_id: int, end_time: float):
-    """Set the task to succeeded, if they are in non-terminal states."""
+    """Set the task to succeeded, if it is in a non-terminal state."""
     _CURSOR.execute(
         """\
         UPDATE spot SET
@@ -359,7 +359,7 @@ def set_failed(job_id: int,
                failure_type: SpotStatus,
                failure_reason: str,
                end_time: Optional[float] = None):
-    """Set the task to failed, if they are in non-terminal states.
+    """Set an entire job or task to failed, if they are in non-terminal states.
 
     Args:
         job_id: The job id.
@@ -400,7 +400,7 @@ def set_failed(job_id: int,
 
 
 def set_cancelling(job_id: int):
-    """Set the job as cancelling, if they are in non-terminal states.
+    """Set tasks in the job as cancelling, if they are in non-terminal states.
 
     task_id is not needed, because we expect the job should be cancelled
     as a whole, and we should not cancel a single task.
@@ -417,7 +417,7 @@ def set_cancelling(job_id: int):
 
 
 def set_cancelled(job_id: int):
-    """Set the job as cancelled, if they are in CANCELLING state.
+    """Set tasks in the job as cancelled, if they are in CANCELLING state.
 
     The set_cancelling should be called before this function.
     """

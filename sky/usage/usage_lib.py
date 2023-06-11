@@ -121,6 +121,7 @@ class UsageMessageToReport(MessageToReport):
         #: Whether the cluster is newly launched.
         self.is_new_cluster: bool = False  # set_new_cluster
 
+        self.task_id: Optional[int] = None  # update_task_id
         # Task requested
         #: The number of nodes requested by the task.
         #: Requested cloud
@@ -192,6 +193,9 @@ class UsageMessageToReport(MessageToReport):
                 self.task_accelerators = list(resources.accelerators.keys())[0]
                 self.task_num_accelerators = resources.accelerators[
                     self.task_accelerators]
+
+    def update_task_id(self, task_id: int):
+        self.task_id = task_id
 
     def update_ray_yaml(self, yaml_config_or_path: Union[Dict, str]):
         if self.ray_yamls is None:
