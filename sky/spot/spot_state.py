@@ -24,8 +24,8 @@ _CURSOR = _CONN.cursor()
 # `spot` table contains all the finest-grained tasks, including all the
 # tasks of a spot job. All tasks of the same job will have the same
 # `spot_job_id`.
-# The `job_name` column is now deprecated, as it means the `task_name`,
-# and we added a new column called `task_name`.
+# The `job_name` column is now deprecated. It now holds the task's name, i.e., 
+# the same content as the `task_name` column.
 # The `job_id` is now not really a job id, but a only a unique
 # identifier/primary key for all the tasks. We will use `spot_job_id`
 # to identify the spot job.
