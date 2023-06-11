@@ -118,15 +118,15 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
                                         f'/.git -path {git_exclude_path}' \
                                         ' -o -type d -empty -delete')
                         subprocess.run(remove_files_cmd,
-                                    shell=True,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    check=True)
+                                       shell=True,
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE,
+                                       check=True)
                         subprocess.run(remove_dirs_cmd,
-                                    shell=True,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    check=True)
+                                       shell=True,
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE,
+                                       check=True)
 
         output_list = output.stdout.split('\n')
         for line in output_list:
