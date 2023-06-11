@@ -49,8 +49,6 @@ class _ProcessingArgs:
         self.streaming_prefix = streaming_prefix
 
 
-# Asyncio does not work as the output processing can be executed in a
-# different thread.
 def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     """Process the stream of a process."""
     out_io = io.TextIOWrapper(io_stream,
@@ -106,6 +104,10 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
 def process_subprocess_stream(proc, args: _ProcessingArgs) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     if proc.stderr is not None:
+        # Asyncio does not work as the output processing can be executed in a
+        # different thread.
+        # selectors is possible to handle the multiplexing of stdout/stderr,
+        # but it introduces buffering making the output not streaming.
         with multiprocessing.pool.ThreadPool(processes=1) as pool:
             err_args = copy.copy(args)
             err_args.line_processor = None
