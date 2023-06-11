@@ -2286,6 +2286,31 @@ class TestStorageWithCredentials:
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
+    def test_multiple_buckets_creation_and_deletion(self, tmp_local_storage_obj,
+                                                    store_type):
+        # Creates multiple new buckets with a local source, uploads files
+        # and deletes them.
+        storage_obj_name = []
+        for _ in range(10):
+            tmp_local_storage_obj.add_store(store_type)
+            storage_obj_name.append(tmp_local_storage_obj.name)
+
+        # Run sky storage ls to check if all storage objects exists in the output
+        out = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert all([item in storage_obj_name for item in out.decode('utf-8')])
+
+        # Run sky storage delete all to delete all storage objects
+        subprocess.check_output(['sky', 'storage', 'delete', '-a'])
+
+        # Run sky storage ls to check if all storage objects are deleted
+        out = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert all(
+            [item not in storage_obj_name for item in out.decode('utf-8')])
+
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
     def test_bucket_external_deletion(self, tmp_scratch_storage_obj,
                                       store_type):
         # Creates a bucket, deletes it externally using cloud cli commands

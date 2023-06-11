@@ -3220,9 +3220,7 @@ def storage_delete(names: List[str], all: bool):  # pylint: disable=redefined-bu
     else:
         names = _get_glob_storages(names)
 
-    pool_obj = multiprocessing.Pool()
-    pool_obj.map(sky.storage_delete, names)
-    pool_obj.close()
+    subprocess_utils.run_in_parallel(sky.storage_delete, names)
 
 
 @cli.group(cls=_NaturalOrderGroup)
