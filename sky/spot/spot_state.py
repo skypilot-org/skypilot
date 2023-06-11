@@ -48,7 +48,7 @@ _CURSOR.execute("""\
 _CONN.commit()
 
 db_utils.add_column_to_table(_CURSOR, _CONN, 'spot', 'failure_reason', 'TEXT')
-# Create a new column `spot_job_id`, which can be the same for tasks of the
+# Create a new column `spot_job_id`, which is the same for tasks of the
 # same spot job.
 # The original `job_id`` will no longer have actual meanings, but only a legacy
 # identifier for all tasks in database.
