@@ -43,8 +43,9 @@ _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
 _JOB_WAITING_STATUS_MESSAGE = ('[bold cyan]Waiting for the task to start'
                                '{status_str}.[/] It may take a few minutes.')
-_JOB_CANCELLED_MESSAGE = ('[bold cyan]Waiting for the task status to be updated.'
-                          '[/] It may take a minute.')
+_JOB_CANCELLED_MESSAGE = (
+    '[bold cyan]Waiting for the task status to be updated.'
+    '[/] It may take a minute.')
 
 # The maximum time to wait for the spot job status to transition to terminal
 # state, after the job finished. This is a safeguard to avoid the case where
@@ -515,7 +516,8 @@ def format_job_table(tasks: List[Dict[str, Any]],
                                                               absolute=True)
 
             status_str = spot_status.colored_str()
-            if (spot_status < spot_state.SpotStatus.RUNNING and current_task_id > 0):
+            if (spot_status < spot_state.SpotStatus.RUNNING and
+                    current_task_id > 0):
                 status_str += f' (task: {current_task_id})'
 
             job_values = [
