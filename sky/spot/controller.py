@@ -132,7 +132,7 @@ class SpotController:
             submitted_at,
             resources_str=backend_utils.get_task_resources_str(task))
         logger.info(
-            f'Submitted spot job {self._job_id} (task: {task_id}， name: '
+            f'Submitted spot job {self._job_id} (task: {task_id}, name: '
             f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
         assert task.name is not None, task
         cluster_name = spot_utils.generate_spot_cluster_name(
