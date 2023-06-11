@@ -527,7 +527,7 @@ def format_job_table(tasks: List[Dict[str, Any]],
                 total_duration,
                 job_duration,
                 recovery_cnt,
-                spot_status.colored_str(),
+                status_str,
             ]
             if show_all:
                 job_values.extend([
