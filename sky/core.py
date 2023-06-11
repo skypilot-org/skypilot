@@ -560,6 +560,7 @@ def cancel(
         cluster_name, operation_str='Cancelling jobs')
 
     # Check the status of the cluster.
+    handle = None
     try:
         handle = backend_utils.check_cluster_available(
             cluster_name,
@@ -572,10 +573,14 @@ def cancel(
                 isinstance(e.handle, backends.CloudVmRayResourceHandle)), e
         if (e.handle is None or e.handle.head_ip is None):
             raise
+        handle = e.handle
         # Even if the cluster is not UP, we can still try to cancel the job if
         # the head node is still alive. This is useful when a spot cluster's
         # worker node is preempted, but we can still cancel the job on the head
         # node.
+
+    assert handle is not None, (
+        f'handle for cluster {cluster_name!r} should not be None')
 
     backend = backend_utils.get_backend_from_handle(handle)
 
