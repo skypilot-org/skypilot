@@ -478,7 +478,7 @@ class RayCodeGen:
                 # would be force-set to empty by Ray.
                 options.append(f'num_gpus={num_gpus}')
         options.append(
-            'scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(' # pylint: disable=line-too-long
+            'scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy('  # pylint: disable=line-too-long
             'placement_group=pg, '
             f'placement_group_bundle_index={gang_scheduling_id})')
 
