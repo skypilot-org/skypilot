@@ -2291,6 +2291,58 @@ class TestStorageWithCredentials:
                 storage_obj = storage_lib.Storage(name=name)
                 storage_obj.add_store(store_type)
 
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
+    def test_storage_ref(self, store_type):
+
+        # create temporary .db file using tempfile
+        with tempfile.NamedTemporaryFile(suffix=".db") as temp_db_file:
+            conn = sqlite3.connect(temp_db_file.name)
+            yield conn
+            conn.close()
+        
+
+        # create 1 storage object
+        # run sky storage ls to check if 1 appears
+        # remove 1 storage object
+        # run sky storage ls to check if 1 appears
+        # run storage refresh
+        # run sky storage ls to check if its removed
+        # create 1 storage object
+        # run sky storage ls to check that None exists
+        # run storage refresh
+        # run sky storage ls to check if 1 is appears
+
+        test_new_bucket_creation_and_deletion
+        test_bucket_external_deletion
+
+        tmp_gitignore_storage_obj.add_store(store_type)
+
+        upload_file_name = 'included'
+        # Count the number of files with the given file name
+        up_cmd = self.cli_count_name_in_bucket(store_type, \
+            tmp_gitignore_storage_obj.name, file_name=upload_file_name)
+        git_exclude_cmd = self.cli_count_name_in_bucket(store_type, \
+            tmp_gitignore_storage_obj.name, file_name='.git')
+        cnt_num_file_cmd = self.cli_count_file_in_bucket(
+            store_type, tmp_gitignore_storage_obj.name)
+
+        up_output = subprocess.check_output(up_cmd, shell=True)
+        git_exclude_output = subprocess.check_output(git_exclude_cmd,
+                                                     shell=True)
+        cnt_output = subprocess.check_output(cnt_num_file_cmd, shell=True)
+
+        assert '3' in up_output.decode('utf-8'), \
+                'Files to be included are not completely uploaded.'
+        # 1 is read as .gitignore is uploaded
+        assert '1' in git_exclude_output.decode('utf-8'), \
+               '.git directory should not be uploaded.'
+        # 4 files include .gitignore, included.log, included.txt, include_dir/included.log
+        assert '4' in cnt_output.decode('utf-8'), \
+               'Some items listed in .gitignore and .git/info/exclude are not excluded.'
+
 
 # ---------- Testing YAML Specs ----------
 # Our sky storage requires credentials to check the bucket existance when
