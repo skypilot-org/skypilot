@@ -1712,7 +1712,7 @@ def test_spot_pipeline_recovery_aws(aws_config_region):
         'spot_pipeline_recovery_aws',
         [
             f'sky spot launch -n {name} tests/test_yamls/pipeline_aws.yaml  -y -d',
-            'sleep 360',
+            'sleep 400',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             f'RUN_IDS=$(sky spot logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids',
@@ -1757,7 +1757,7 @@ def test_spot_pipeline_recovery_gcp():
         'spot_pipeline_recovery_gcp',
         [
             f'sky spot launch -n {name} tests/test_yamls/pipeline_gcp.yaml  -y -d',
-            'sleep 360',
+            'sleep 400',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             f'RUN_IDS=$(sky spot logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids',
