@@ -2286,26 +2286,39 @@ class TestStorageWithCredentials:
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
-    def test_multiple_buckets_creation_and_deletion(self, tmp_local_storage_obj,
-                                                    store_type):
-        # Creates multiple new buckets with a local source, uploads files
-        # and deletes them.
+    def test_multiple_buckets_creation_and_deletion(self, store_type):
+        # Creates multiple new buckets(5 buckets) with a local source, uploads
+        # files and deletes them.
         storage_obj_name = []
-        for _ in range(10):
-            tmp_local_storage_obj.add_store(store_type)
-            storage_obj_name.append(tmp_local_storage_obj.name)
+        for _ in range(5):
+            timestamp = str(time.time()).replace('.', '')
+            with tempfile.TemporaryDirectory() as tmpdir:
+                subprocess.check_output(f'mkdir -p {tmpdir}', shell=True)
+                subprocess.check_output(f'touch {tmpdir}/test-{timestamp}.txt',
+                                        shell=True)
+                store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
+                                                source=tmpdir)
+                store_obj.add_store(store_type)
+                storage_obj_name.append(store_obj.name)
 
-        # Run sky storage ls to check if all storage objects exists in the output
-        out = subprocess.check_output(['sky', 'storage', 'ls'])
-        assert all([item in storage_obj_name for item in out.decode('utf-8')])
+        # Run sky storage ls to check if all storage objects exists in the
+        # output
+        out = subprocess.check_output(["sky storage ls | awk '{print $1}'"],
+                                      shell=True)
+        assert all([
+            item in out.decode('utf-8').splitlines()
+            for item in storage_obj_name
+        ])
 
         # Run sky storage delete all to delete all storage objects
-        subprocess.check_output(['sky', 'storage', 'delete', '-a'])
+        subprocess.check_output(["sky storage delete -a"], shell=True)
 
         # Run sky storage ls to check if all storage objects are deleted
-        out = subprocess.check_output(['sky', 'storage', 'ls'])
-        assert all(
-            [item not in storage_obj_name for item in out.decode('utf-8')])
+        out = subprocess.check_output(["sky storage ls"], shell=True)
+        assert all([
+            item not in out.decode('utf-8').splitlines()
+            for item in storage_obj_name
+        ])
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
