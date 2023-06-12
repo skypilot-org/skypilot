@@ -68,7 +68,7 @@ run: |
     echo Load model from /checkpoint/bert_qa/$TRAIN_MODEL_DIR
     cd examples/pytorch/question-answering/
     python run_qa.py \
-    --model_name_or_path bert-base-uncased \
+    --model_name_or_path /checkpoint/bert_qa/$TRAIN_MODEL_DIR \
     --dataset_name squad \
     --do_eval \
     --per_device_train_batch_size 12 \
