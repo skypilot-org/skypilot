@@ -416,7 +416,7 @@ def dump_spot_job_queue() -> str:
         job['job_duration'] = job_duration
         job['status'] = job['status'].value
 
-        cluster_name = generate_spot_cluster_name(job['job_name'],
+        cluster_name = generate_spot_cluster_name(job['task_name'],
                                                   job['job_id'])
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
