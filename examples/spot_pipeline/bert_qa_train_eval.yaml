@@ -64,11 +64,11 @@ setup: |
     pip install wandb
 
 run: |
-    TRAIN_MODEL_DIR=$(echo "$SKYPILOT_TASK_IDS" | sed -n 1p)
-    echo Load model from /checkpoint/bert_qa/$TRAIN_MODEL_DIR
+    FIRST_TASK_UNIQUE_ID=$(echo "$SKYPILOT_TASK_IDS" | sed -n 1p)
+    echo Load model from /checkpoint/bert_qa/$FIRST_TASK_UNIQUE_ID
     cd examples/pytorch/question-answering/
     python run_qa.py \
-    --model_name_or_path /checkpoint/bert_qa/$TRAIN_MODEL_DIR \
+    --model_name_or_path /checkpoint/bert_qa/$FIRST_TASK_UNIQUE_ID \
     --dataset_name squad \
     --do_eval \
     --per_device_train_batch_size 12 \
@@ -78,7 +78,7 @@ run: |
     --doc_stride 128 \
     --report_to wandb \
     --run_name $SKYPILOT_TASK_ID \
-    --output_dir /checkpoint/bert_qa/$TRAIN_MODEL_DIR \
+    --output_dir /checkpoint/bert_qa/$FIRST_TASK_UNIQUE_ID \
     --save_total_limit 10 \
     --save_steps 1000
 
