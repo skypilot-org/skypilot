@@ -12,7 +12,7 @@ import re
 import socket
 import sys
 import time
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 import yaml
 
@@ -86,13 +86,18 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
     return user_hash
 
 
-def get_global_job_id(job_timestamp: str, cluster_name: Optional[str],
-                      job_id: str) -> str:
+def get_global_job_id(job_timestamp: str,
+                      cluster_name: Optional[str],
+                      job_id: str,
+                      task_id: Optional[int] = None) -> str:
     """Returns a unique job run id for each job run.
 
     A job run is defined as the lifetime of a job that has been launched.
     """
-    return f'{job_timestamp}_{cluster_name}_id-{job_id}'
+    global_job_id = f'{job_timestamp}_{cluster_name}_id-{job_id}'
+    if task_id is not None:
+        global_job_id += f'-{task_id}'
+    return global_job_id
 
 
 class Backoff:
@@ -174,6 +179,12 @@ def read_yaml(path) -> Dict[str, Any]:
     return config
 
 
+def read_yaml_all(path: str) -> List[Dict[str, Any]]:
+    with open(path, 'r') as f:
+        config = yaml.safe_load_all(f)
+        return list(config)
+
+
 def dump_yaml(path, config) -> None:
     with open(path, 'w') as f:
         f.write(dump_yaml_str(config))
@@ -188,7 +199,11 @@ def dump_yaml_str(config):
             if len(self.indents) == 1:
                 super().write_line_break()
 
-    return yaml.dump(config,
+    if isinstance(config, list):
+        dump_func = yaml.dump_all
+    else:
+        dump_func = yaml.dump
+    return dump_func(config,
                      Dumper=LineBreakDumper,
                      sort_keys=False,
                      default_flow_style=False)
