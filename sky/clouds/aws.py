@@ -106,7 +106,7 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _sso_credentials_help_str(cls, expired: bool = False) -> str:
-        help_str = 'Run the following commands (must use aws v2 CLI):'
+        help_str = 'Run the following commands (must use AWS CLI v2):'
         if not expired:
             help_str += f'\n{cls._INDENT_PREFIX}  $ aws configure sso'
         help_str += (

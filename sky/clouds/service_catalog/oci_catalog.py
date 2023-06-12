@@ -47,8 +47,9 @@ def _get_df() -> 'pd.DataFrame':
 
         except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
                 oci_adaptor.get_oci().exceptions.InvalidConfig) as e:
-
-            # This should only happen in testing where oci config is missing.
+            # This should only happen in testing where oci config is
+            # missing, because it means the 'sky check' will fail if
+            # enter here (meaning OCI disabled).
             logger.debug(f'It is OK goes here when testing: {str(e)}')
             subscribed_regions = []
 
