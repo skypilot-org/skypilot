@@ -105,7 +105,7 @@ class StrategyExecutor:
         It can fail if resource is not available. Need to check the cluster
         status, after calling.
 
-        Returns: The job's submit timestamp.
+        Returns: The job's submit timestamp, on success (otherwise, an exception is raised).
 
         Raises: Please refer to the docstring of self._launch().
         """
