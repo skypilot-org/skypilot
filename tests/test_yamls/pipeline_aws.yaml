@@ -16,7 +16,7 @@ run: |
   # Fill in the buffer with 20 lines of output
   # TODO(zhwu): This is a hack, and should be
   # removed once #2065 is fixed.
-  for i in {1..20}; do echo $i; done
+  for i in {1..40}; do echo $i; sleep 1; done
   echo train ends
 
 ---
