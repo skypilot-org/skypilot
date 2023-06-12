@@ -560,7 +560,10 @@ def spot_launch(
     for task_ in dag.tasks:
         if task_.name in task_names:
             raise ValueError(
-                f'Task name {task_.name!r} is duplicated in the DAG. Either change task names to be unique, or specify the DAG name only and comment out the task names (so that they will be auto-generated) .')
+                f'Task name {task_.name!r} is duplicated in the DAG. Either '
+                'change task names to be unique, or specify the DAG name only '
+                'and comment out the task names (so that they will be auto-'
+                'generated) .')
         task_names.add(task_.name)
     for task_ in dag.tasks:
         assert len(task_.resources) == 1, task_
