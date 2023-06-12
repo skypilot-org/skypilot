@@ -359,7 +359,13 @@ class RayCodeGen:
                 setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
                 setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
                 setup_workers = [run_bash_command_with_log \\
-                    .options(name='setup', num_cpus=_SETUP_CPUS, placement_group=setup_pg, placement_group_bundle_index=i) \\
+                    .options(
+                        name='setup',
+                        num_cpus=_SETUP_CPUS,
+                        scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(
+                            placement_group=setup_pg,
+                            placement_group_bundle_index=i)
+                        ) \\
                     .remote(
                         setup_cmd,
                         os.path.expanduser({setup_log_path!r}),
@@ -398,9 +404,12 @@ class RayCodeGen:
                 def check_ip():
                     return ray.util.get_node_ip_address()
                 gang_scheduling_id_to_ip = ray.get([
-                    check_ip.options(num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND},
-                                     placement_group=pg,
-                                     placement_group_bundle_index=i).remote()
+                    check_ip.options(
+                            num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND},
+                            scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(
+                                placement_group=pg,
+                                placement_group_bundle_index=i
+                            )).remote()
                     for i in range(pg.bundle_count)
                 ])
                 print('INFO: Reserved IPs:', gang_scheduling_id_to_ip)
@@ -449,29 +458,29 @@ class RayCodeGen:
         # Build remote_task.options(...)
         #   resources=...
         #   num_gpus=...
-        cpu_str = f', num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND}'
+        options = []
+        options.append(f'num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND}')
 
-        resources_str = ''
         num_gpus = 0.0
-        num_gpus_str = ''
         if ray_resources_dict is not None:
             assert len(ray_resources_dict) == 1, \
                 ('There can only be one type of accelerator per instance.'
                  f' Found: {ray_resources_dict}.')
             num_gpus = list(ray_resources_dict.values())[0]
-            resources_str = f', resources={json.dumps(ray_resources_dict)}'
+            options.append(f'resources={json.dumps(ray_resources_dict)}')
 
-            # Passing this ensures that the Ray remote task gets
-            # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
-            # would be force-set to empty by Ray.
-            num_gpus_str = f', num_gpus={num_gpus}'
             # `num_gpus` should be empty when the accelerator is not GPU.
             # FIXME: use a set of GPU types.
             resources_key = list(ray_resources_dict.keys())[0]
-            if 'tpu' in resources_key.lower():
-                num_gpus_str = ''
-        resources_str += ', placement_group=pg'
-        resources_str += f', placement_group_bundle_index={gang_scheduling_id}'
+            if 'tpu' not in resources_key.lower():
+                # Passing this ensures that the Ray remote task gets
+                # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
+                # would be force-set to empty by Ray.
+                options.append(f'num_gpus={num_gpus}')
+        options.append(
+            'scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(' # pylint: disable=line-too-long
+            'placement_group=pg, '
+            f'placement_group_bundle_index={gang_scheduling_id})')
 
         sky_env_vars_dict_str = [
             textwrap.dedent("""\
@@ -496,8 +505,9 @@ class RayCodeGen:
             ]
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
+        options_str = ', '.join(options)
         logger.debug('Added Task with options: '
-                     f'{cpu_str}{resources_str}{num_gpus_str}')
+                     f'{options_str}')
         self._code += [
             sky_env_vars_dict_str,
             textwrap.dedent(f"""\
@@ -534,7 +544,7 @@ class RayCodeGen:
             sky_env_vars_dict['SKY_INTERNAL_JOB_ID'] = {self.job_id}
 
             futures.append(run_bash_command_with_log \\
-                    .options(name=name_str{cpu_str}{resources_str}{num_gpus_str}) \\
+                    .options(name=name_str, {options_str}) \\
                     .remote(
                         script,
                         log_path,
