@@ -332,7 +332,8 @@ class OCINodeProvider(NodeProvider):
                         source_type="image",
                         image_id=node_config["ImageId"],
                         boot_volume_size_in_gbs=node_config["BootVolumeSize"],
-                        boot_volume_vpus_per_gb=20,
+                        boot_volume_vpus_per_gb=int(
+                            node_config["BootVolumePerf"]),
                     ),
                     create_vnic_details=oci_adaptor.get_oci(
                     ).core.models.CreateVnicDetails(

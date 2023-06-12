@@ -7,7 +7,6 @@ History:
 import logging
 import os
 from sky import skypilot_config
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +40,14 @@ class oci_conf:
 
     MAX_RETRY_COUNT = 3
     RETRY_INTERVAL_BASE_SECONDS = 5
+
+    # disk_tier to OCI VPU mapping
+    BOOT_VOLUME_VPU = {
+        None: 10,  # Default, Balanced performance
+        "low": 10,  # 60 IOPS/GB, Balanced performance
+        "medium": 20,  # 75 IOPS/GB, Higher performance
+        "high": 50,  # 120 IOPS/GB, Ultra-high performance
+    }
 
     @classmethod
     def get_compartment(cls, region):
