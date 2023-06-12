@@ -1976,7 +1976,7 @@ class TestStorageWithCredentials:
         if store_type == storage_lib.StoreType.IBM:
             bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
                 bucket_name, Rclone.RcloneClouds.IBM)
-            return f'rclone delete {bucket_rclone_profile}:{bucket_name} && rclone config delete {bucket_rclone_profile}'
+            return f'rclone purge {bucket_rclone_profile}:{bucket_name} && rclone config delete {bucket_rclone_profile}'
 
     @staticmethod
     def cli_ls_cmd(store_type, bucket_name, suffix=''):
