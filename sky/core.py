@@ -923,7 +923,7 @@ def storage_ls() -> List[Dict[str, Any]]:
     return storages
 
 
-def storage_refresh() -> Tuple[List[str], List[str]]:
+def storage_refresh() -> None:
     """Syncs the internal status and the external status of storages
 
     Removes storages from the table in ~/.sky/state.db that are managed 
@@ -940,9 +940,6 @@ def storage_refresh() -> Tuple[List[str], List[str]]:
     red = colorama.Fore.RED
     bold = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
-    # get a list of names in each StoreType in internal state, state.db
-    removed_storages: List[str] = []
-    added_storages: List[str] = []
 
     internal_storage_list = storage_ls()
     internal_buckets_status = collections.defaultdict(set)
@@ -974,7 +971,7 @@ def storage_refresh() -> Tuple[List[str], List[str]]:
         only_in_internal_state = internal_buckets_status[storetype].difference(external_buckets_status[storetype])
         for s_name in only_in_internal_state:
             global_user_state.remove_storage(s_name, storetype)
-            removed_storages.append(f'{red}Removed{reset} {bold}{storetype.value}{reset} bucket: {s_name}')
+            sky_logging.print(f'{red}Removed{reset} {bold}{storetype.value}{reset} bucket: {s_name}')
             
         # check if anything in external state doesn't exist in state.db
         # add storage that exist in external state but not in state.db
@@ -1001,9 +998,8 @@ def storage_refresh() -> Tuple[List[str], List[str]]:
                 handle = storage_lib.Storage.StorageMetadata(storage_name=s_name,source=None,sky_stores={storetype : store_metadata})
             # 2. run add_or_update_storage to update the externally created storage
             global_user_state.add_or_update_storage(s_name, handle, global_user_state.StorageStatus.READY)
-            added_storages.append(f'{green}Added{reset} {bold}{storetype.value}{reset} bucket: {s_name}')
+            sky_logging.print(f'{green}Added{reset} {bold}{storetype.value}{reset} bucket: {s_name}')
     
-    return removed_storages, added_storages
 
 @usage_lib.entrypoint
 def storage_delete(name: str) -> None:

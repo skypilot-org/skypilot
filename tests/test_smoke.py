@@ -2057,6 +2057,18 @@ class TestStorageWithCredentials:
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
 
+    @pytest.fixture
+    def tmp_state_db_file():
+        with tempfile.NamedTemporaryFile(suffix=".db") as temp_db_file:
+            original_db_path = os.environ.get('SMOKE_TEST_DB_PATH')
+            os.environ['SMOKE_TEST_DB_PATH'] = temp_db_file.name
+            yield
+            if original_db_path is not None:
+                os.environ['SMOKE_TEST_DB_PATH'] = original_db_path
+            else:
+                del os.environ['SMOKE_TEST_DB_PATH']
+
+
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
@@ -2295,21 +2307,25 @@ class TestStorageWithCredentials:
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
-    def test_storage_ref(self, store_type):
-
-        # create temporary .db file using tempfile
-        with tempfile.NamedTemporaryFile(suffix=".db") as temp_db_file:
-            conn = sqlite3.connect(temp_db_file.name)
-            yield conn
-            conn.close()
+    def test_storage_refresh(self, store_type, tmp_local_storage_obj, tmp_state_db_file):
         
 
         # create 1 storage object
+        tmp_local_storage_obj.add_store(store_type)
+        # run sky storage ls to check if 1 appears        
+        out = subprocess.check_output(['sky storage ls'], shell=True)
+        assert tmp_local_storage_obj.name in out.decode('utf-8')
+        # externally remove 1 storage object
+        cmd = self.cli_delete_cmd(store_type, tmp_local_storage_obj.name)
+        subprocess.check_output(cmd, shell=True)
         # run sky storage ls to check if 1 appears
-        # remove 1 storage object
-        # run sky storage ls to check if 1 appears
+        out = subprocess.check_output(['sky storage ls'], shell=True)
+        assert tmp_local_storage_obj.name in out.decode('utf-8')
         # run storage refresh
+        sky.storage_refresh()
         # run sky storage ls to check if its removed
+        out = subprocess.check_output(['sky storage ls'], shell=True)
+        assert tmp_local_storage_obj.name not in out.decode('utf-8')
         # create 1 storage object
         # run sky storage ls to check that None exists
         # run storage refresh

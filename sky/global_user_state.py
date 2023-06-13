@@ -32,7 +32,9 @@ if typing.TYPE_CHECKING:
 
 _ENABLED_CLOUDS_KEY = 'enabled_clouds'
 
-_DB_PATH = os.path.expanduser('~/.sky/state.db')
+_DEFAULT_DB_PATH = os.path.expanduser('~/.sky/state.db')
+# set _DB_PATH to temporary testing db when running smoke test
+_DB_PATH = os.environ.get('SMOKE_TEST_DB_PATH', _DEFAULT_DB_PATH)
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 

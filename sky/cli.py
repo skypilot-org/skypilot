@@ -3184,18 +3184,13 @@ def storage():
 @usage_lib.entrypoint
 def storage_ls(refresh: bool):
     """List storage objects created."""
-    # call for storage_refresh from core.py
-    removed_buckets_msg, added_buckets_msg = [], []
+    # call storage_refresh from core.py
     if refresh:
         with log_utils.safe_rich_status(
                 f'[bold cyan]Syncing storage[/]'):
-            removed_buckets_msg, added_buckets_msg = sky.storage_refresh()
+            sky.storage_refresh()
     storages = sky.storage_ls()
     storage_table = storage_utils.format_storage_table(storages)
-    for msg in removed_buckets_msg:
-        click.echo(msg)
-    for msg in added_buckets_msg:
-        click.echo(msg)  
     click.echo(storage_table)
 
 
