@@ -66,10 +66,9 @@ To get the **AWS access key** required by :code:`aws configure`, please go to th
   $ # Configure your AWS credentials
   $ aws configure
 
-To create a new AWS user with minimal permissions for SkyPilot, see :ref:`AWS User Creation <cloud-permissions-aws>`.
-
 Note: If you are using AWS IAM Identity Center (AWS SSO), you will need :code:`pip install awscli>=1.27.10`. See `here <https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html>`_ for instructions on how to configure AWS SSO.
 
+[**Optional**] To create a new AWS user with minimal permissions for SkyPilot, see :ref:`AWS User Creation <cloud-permissions-aws>`.
 
 Google Cloud Platform (GCP)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -85,7 +84,6 @@ Google Cloud Platform (GCP)
   $ # This will generate ~/.config/gcloud/application_default_credentials.json.
   $ gcloud auth application-default login
 
-To create a new GCP user with minimal permissions for SkyPilot, see :ref:`GCP User Creation <cloud-permissions-gcp>`.
 
 If running :code:`conda install -c conda-forge google-cloud-sdk` produces the error *"RemoveError: 'requests' is a dependency of conda and cannot be removed from conda's operating environment"*, try :code:`conda update --force conda` first and rerun the command.
 
@@ -93,7 +91,9 @@ Note: if you encounter *Authorization Error (Error 400: invalid_request)* with t
 
 .. note::
 
-  If you are using multiple GCP projects, list all the configs by :code:`gcloud config configurations list` and activate one by :code:`gcloud config configurations activate <CONFIG_NAME>` (See `GCP docs <https://cloud.google.com/sdk/docs/configurations#activating_a_configuration>`_).
+  If you are using multiple GCP projects, list all the projects by :code:`gcloud project list` and activate one by :code:`gcloud config set project <PROJECT_ID>` (See `GCP docs <https://cloud.google.com/sdk/gcloud/reference/config/set>`_).
+
+[**Optional**] To create a new GCP user with minimal permissions for SkyPilot, see :ref:`GCP User Creation <cloud-permissions-gcp>`.
 
 Azure
 ~~~~~~~~~

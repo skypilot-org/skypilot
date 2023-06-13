@@ -3,9 +3,14 @@
 Cloud Permissions Setup
 =======================
 
+.. note::
+
+    The instructions below are completely **optional** and are not needed to get started with SkyPilot. These steps are for users who want to make SkyPilot use non-default, restricted permissions.
+
 SkyPilot will work out of the box for users who own the root (admin) account of their clouds, if they follow the steps in :ref:`Installation section <cloud-account-setup>`.
 
 However, in some cases, the user may want to **limit the permissions** of the account used by SkyPilot. This is especially true if the user is using a shared cloud account. The following sections describe the permissions required by SkyPilot for each cloud provider.
+
 
 .. _cloud-permissions-aws:
 
@@ -15,23 +20,22 @@ AWS
 .. _cloud-permissions-aws-user-creation:
 
 User Creation
-~~~~~~~~~~~~~
 
 AWS accounts can be attached with a policy that limits the permissions of the account. Follow these steps to create an AWS user with the minimum permissions required by SkyPilot:
 
-1. Open the IAM dashboard in the AWS console and click on the "Users" tab. Then, click "Add users" and enter the user's name.
+1. Open the `IAM dashboard <https://us-east-1.console.aws.amazon.com/iamv2/home#/home>_` in the AWS console and click on the **Users** tab. Then, click **Add users** and enter the user's name. Click **Next**.
 
 .. image:: ../images/screenshots/aws/aws-add-user.png
     :width: 80%
     :align: center
     :alt: AWS Add User
-3. In the "Add user to group" section, select "Attach existing policies directly"; Click on the "Create Policy" button. This opens another window to create an IAM policy.
+2. In the **Permissions options** section, select "Attach existing policies directly"; Click on the **Create Policy**. This opens another window to create an IAM policy.
 
 .. image:: ../images/screenshots/aws/aws-create-policy.png
     :width: 80%
     :align: center
     :alt: AWS Create Policy
-4. Choose "JSON" tab and place the following policy into the box. Replace the ``<account-ID-without-hyphens>`` with your AWS account ID. You can find your AWS account ID by clicking on the upper right corner of the console.
+3. Choose "JSON" tab and place the following policy into the box. Replace the ``<account-ID-without-hyphens>`` with your AWS account ID. You can find your AWS account ID by clicking on the upper right corner of the console.
 
 .. code-block:: json
     :name: aws-policy-json
@@ -100,30 +104,34 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
             }
         ]
     }
-5. Click “Next: Tags” and follow the instructions to create the policy.
-6. Go back to the previous window and click on the refresh button, and you can now search for the policy you just created.
+4. Click **Next: Tags** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
+5. Go back to the previous window and click on the refresh button, and you can now search for the policy you just created.
 
 .. image:: ../images/screenshots/aws/aws-add-policy.png
     :width: 80%
     :align: center
     :alt: AWS Add Policy
-7. [Optional] If you would like to have your users access the s3 bucket. You can additionally attach the S3 access, such as the "AmazonS3FullAccess" policy.
+6. [Optional] If you would like to have your users access the s3 bucket. You can additionally attach the S3 access, such as the "AmazonS3FullAccess" policy.
 
 .. image:: ../images/screenshots/aws/aws-s3-policy.png
     :width: 80%
     :align: center
     :alt: AWS Add S3 Policy
 
-8. Click on "Next" and follow the instructions to create the user.
+7. Click on **Next** and follow the instructions to create the user.
 
 With the steps above you are almost ready to have the users in your organization to use SkyPilot with the minimal permissions.
 
 **One more thing** to do is to create a single service account "skypilot-v1" for all the users in your organization. There are two ways to accomplish this:
 
-1. Add additional permission for the user you created to allow SkyPilot to automatically create the service account using the user account. You can modify the last two rules in the policy you created in step 4 with the highlighted three lines:
+1. Add additional permission for the user you created to allow SkyPilot to automatically create the service account using the user account. You can modify the last two rules in the policy you created in step 4 with the highlighted four lines:
+
+.. note::
+
+    If you have created the policy, you can find the policy in the **Policies** tab in the IAM dashboard. Click on the policy ``minimal-skypilot-policy`` (or the name you set in step 4) and click on the **Edit** to edit the policy.
 
 .. code-block:: json
-    :emphasize-lines: 6-7,17
+    :emphasize-lines: 6-7,17-18
 
             {
                 "Effect": "Allow",
@@ -146,11 +154,15 @@ With the steps above you are almost ready to have the users in your organization
                 ],
                 "Resource": "arn:aws:iam::<account-ID-without-hyphens>:instance-profile/skypilot-v1"
             }
-2. Instead, you can create the "skypilot-v1" service account manually. The following section describe how to create the service account manually.
+2. Alternatively, you can create the "skypilot-v1" service account manually. The following section describe how to create the service account manually.
 
 
 Service Account Creation
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. note::
+
+    If you already have a service account called "skypilot-v1" in your AWS account, it is likely created by SkyPilot automatically, and you can skip this section.
+
 1. Click the “Roles” tab in the IAM console, and click on the “Create role”
 
 .. image:: ../images/screenshots/aws/aws-add-role.png

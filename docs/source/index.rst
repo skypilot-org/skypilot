@@ -103,6 +103,7 @@ Documentation
    reference/quota
    reference/logging
    reference/faq
+   reference/cloud-permissions
 
 .. toctree::
    :maxdepth: 1
@@ -111,4 +112,3 @@ Documentation
    reference/yaml-spec
    reference/cli
    reference/api
-   reference/cloud-permissions
