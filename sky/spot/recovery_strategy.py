@@ -163,8 +163,8 @@ class StrategyExecutor:
                 'might be already down or the head node is preempted.'
                 '\n  Detailed exception: '
                 f'{common_utils.format_exception(e)}\n'
-                'Terminating the cluster again to make sure there is no '
-                'remaining job on the worker nodes.')
+                'Terminating the cluster explicitly to ensure no '
+                'remaining job process interferes with recovery.')
             terminate_cluster(self.cluster_name)
 
     def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
