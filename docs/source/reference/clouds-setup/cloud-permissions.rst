@@ -184,7 +184,7 @@ IAM Role Creation
     :align: center
     :alt: AWS Role Entity
 
-3. Select the policy you created in step 4 in :ref:`User Creation <cloud-permissions-aws-user-creation>` (i.e. the previous step 6) and click on “Next: Tags”.
+3. Select the policy you created in step 4 in :ref:`User Creation <cloud-permissions-aws-user-creation>` (i.e. the previous step 6) and click on **Next: Tags**.
 4. [Optional] If you would like to let the user access S3 buckets on the VM they created, you can additionally attach the s3 access permission to the iam role, such as the "AmazonS3FullAccess" policy.
 5. Click Next, and name your role with “skypilot-v1” and Click “Create role”
 
