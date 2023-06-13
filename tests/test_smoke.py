@@ -2057,6 +2057,7 @@ class TestStorageWithCredentials:
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
 
+    @staticmethod
     @pytest.fixture
     def tmp_state_db_file():
         with tempfile.NamedTemporaryFile(suffix=".db") as temp_db_file:
@@ -2067,7 +2068,6 @@ class TestStorageWithCredentials:
                 os.environ['SMOKE_TEST_DB_PATH'] = original_db_path
             else:
                 del os.environ['SMOKE_TEST_DB_PATH']
-
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -2302,62 +2302,49 @@ class TestStorageWithCredentials:
             with pytest.raises(sky.exceptions.StorageNameError):
                 storage_obj = storage_lib.Storage(name=name)
                 storage_obj.add_store(store_type)
+    
+    """@pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])"""
 
+    """@pytest.mark.parametrize('tmp_state_db_file, store_type', [
+        ('tmp_state_db_file', storage_lib.StoreType.S3), ('tmp_state_db_file', storage_lib.StoreType.GCS),
+        pytest.param('tmp_state_db_file',storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])"""
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
     def test_storage_refresh(self, store_type, tmp_local_storage_obj, tmp_state_db_file):
         
-
         # create 1 storage object
         tmp_local_storage_obj.add_store(store_type)
-        # run sky storage ls to check if 1 appears        
-        out = subprocess.check_output(['sky storage ls'], shell=True)
-        assert tmp_local_storage_obj.name in out.decode('utf-8')
+        # check if created storage appears in state.db        
+        out = global_user_state.get_storage_names_start_with(tmp_local_storage_obj.name)
+        assert tmp_local_storage_obj.name in out
         # externally remove 1 storage object
         cmd = self.cli_delete_cmd(store_type, tmp_local_storage_obj.name)
         subprocess.check_output(cmd, shell=True)
-        # run sky storage ls to check if 1 appears
-        out = subprocess.check_output(['sky storage ls'], shell=True)
-        assert tmp_local_storage_obj.name in out.decode('utf-8')
+        # check if created storage appears in state.db        
+        assert tmp_local_storage_obj.name in out
+        # run storage refresh
+        assert 1 in [100], sky.storage_ls()
+
+        sky.storage_refresh()
+        # check if created storage is removed from state.db        
+        out = global_user_state.get_storage_names_start_with(tmp_local_storage_obj.name)
+        assert tmp_local_storage_obj.name not in out
+        # create 1 storage object
+        tmp_local_storage_obj.add_store(store_type)
+        # check if created storage does not appear in state.db        
+        out = global_user_state.get_storage_names_start_with(tmp_local_storage_obj.name)
+        assert tmp_local_storage_obj.name not in out
         # run storage refresh
         sky.storage_refresh()
-        # run sky storage ls to check if its removed
-        out = subprocess.check_output(['sky storage ls'], shell=True)
-        assert tmp_local_storage_obj.name not in out.decode('utf-8')
-        # create 1 storage object
-        # run sky storage ls to check that None exists
-        # run storage refresh
-        # run sky storage ls to check if 1 is appears
-
-        test_new_bucket_creation_and_deletion
-        test_bucket_external_deletion
-
-        tmp_gitignore_storage_obj.add_store(store_type)
-
-        upload_file_name = 'included'
-        # Count the number of files with the given file name
-        up_cmd = self.cli_count_name_in_bucket(store_type, \
-            tmp_gitignore_storage_obj.name, file_name=upload_file_name)
-        git_exclude_cmd = self.cli_count_name_in_bucket(store_type, \
-            tmp_gitignore_storage_obj.name, file_name='.git')
-        cnt_num_file_cmd = self.cli_count_file_in_bucket(
-            store_type, tmp_gitignore_storage_obj.name)
-
-        up_output = subprocess.check_output(up_cmd, shell=True)
-        git_exclude_output = subprocess.check_output(git_exclude_cmd,
-                                                     shell=True)
-        cnt_output = subprocess.check_output(cnt_num_file_cmd, shell=True)
-
-        assert '3' in up_output.decode('utf-8'), \
-                'Files to be included are not completely uploaded.'
-        # 1 is read as .gitignore is uploaded
-        assert '1' in git_exclude_output.decode('utf-8'), \
-               '.git directory should not be uploaded.'
-        # 4 files include .gitignore, included.log, included.txt, include_dir/included.log
-        assert '4' in cnt_output.decode('utf-8'), \
-               'Some items listed in .gitignore and .git/info/exclude are not excluded.'
+        # check created storage appears in state.db        
+        out = global_user_state.get_storage_names_start_with(tmp_local_storage_obj.name)
+        assert tmp_local_storage_obj.name in out
 
 
 # ---------- Testing YAML Specs ----------

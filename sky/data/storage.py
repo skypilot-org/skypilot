@@ -1,7 +1,6 @@
 """Storage and Store Classes for Sky Data."""
 import botocore
 import enum
-from google.cloud import storage as google_storage
 import os
 import re
 import subprocess
@@ -9,7 +8,6 @@ import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Type, Union, Set
 import urllib.parse
-
 import colorama
 
 from sky import clouds
@@ -148,8 +146,8 @@ def get_bucket_region(bucket_name: str, storetype: StoreType) -> str:
         bucket_location = s3.get_bucket_location(Bucket=bucket_name)
         region = bucket_location['LocationConstraint']
     elif storetype == StoreType.GCS:
-        client = google_storage.Client()
-        bucket = client.get_bucket(bucket_name)
+        storage_client = gcp.storage_client()
+        bucket = storage_client.get_bucket(bucket_name)
         region = bucket.location
     elif storetype == StoreType.R2:
         # Cloudflare only supports 'auto' region for R2
@@ -1753,7 +1751,7 @@ class GcsStore(AbstractStore):
         Returns:
          List[str]: List of bucket names that are sky managed
         """
-        storage_client = google_storage.Client()
+        storage_client = gcp.storage_client()
         buckets = storage_client.list_buckets()
         sky_managed_gcs_buckets = set()
         for bucket in buckets:
@@ -2058,7 +2056,12 @@ class R2Store(AbstractStore):
                 r2_client.create_bucket(Bucket=bucket_name,
                                         CreateBucketConfiguration=location)
                 logger.info(f'Created R2 bucket {bucket_name} in {region}')
-            r2_client.put_object(Bucket=bucket_name, Key='.skymanaged')
+            r2_client.put_object(Bucket=bucket_name, Key='.sky_DO_NOT_DELETE')
+            logger.info(f'{colorama.Fore.YELLOW}Warning:'
+                        f'{colorama.Style.RESET_ALL} '
+                        '\'.sky_DO_NOT_DELETE\' in R2 bucket: '
+                        f'{bucket_name} is crucial for sky storage. '
+                        'Do not delete.')
         except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
@@ -2123,7 +2126,7 @@ class R2Store(AbstractStore):
         buckets = r2_resource.buckets.all()
         for bucket in buckets:
             try:
-                r2_resource.Object(bucket.name, '.skymanaged').load()
+                r2_resource.Object(bucket.name, '.sky_DO_NOT_DELETE').load()
             except Exception as e:
                 # The file does not exist in this bucket
                 continue

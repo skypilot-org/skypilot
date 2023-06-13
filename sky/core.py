@@ -979,7 +979,6 @@ def storage_refresh() -> None:
         for s_name in only_in_external_state:
             # 1-1. Storage with s_name is already in internal_state from different bucket
             # Retrieve the StorageMetedata with get_handle_from_storage_name
-            # run add_store of the StorageMetadata to update sky_stores
             for _storetype in internal_buckets_status.keys():
                 if _storetype != storetype and s_name in internal_buckets_status[_storetype]:
                     handle = global_user_state.get_handle_from_storage_name(s_name)
