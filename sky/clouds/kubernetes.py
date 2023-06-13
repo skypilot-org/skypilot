@@ -19,8 +19,10 @@ _CREDENTIAL_FILES = [
 @clouds.CLOUD_REGISTRY.register
 class Kubernetes(clouds.Cloud):
 
+    _DEFAULT_NUM_VCPUS = 4
+    _DEFAULT_MEMORY_CPU_RATIO = 1
     _REPR = 'Kubernetes'
-    _regions: List[clouds.Region] = ['kubernetes']
+    _regions: List[clouds.Region] = [clouds.Region('kubernetes')]
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Kubernetes does not support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Kubernetes does not support stopping VMs.',
@@ -43,19 +45,8 @@ class Kubernetes(clouds.Cloud):
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
-        del accelerators, zone  # unused
-        if use_spot:
-            return []
-        if instance_type is None:
-            # Fall back to default regions
-            regions = cls.regions()
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'kubernetes')
-
-        if region is not None:
-            regions = [r for r in regions if r.name == region]
-        return regions
+        # No notion of regions in Kubernetes - return a single region.
+        return cls.regions()
 
     @classmethod
     def region_zones_provision_loop(
@@ -65,12 +56,8 @@ class Kubernetes(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        regions = cls.regions_with_offering(instance_type,
-                                            accelerators,
-                                            use_spot,
-                                            region=None,
-                                            zone=None)
-        for region in regions:
+        # No notion of regions in Kubernetes - return a single region.
+        for region in cls.regions():
             yield region, region.zones
 
     def instance_type_to_hourly_cost(self,
@@ -78,11 +65,8 @@ class Kubernetes(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        return service_catalog.get_hourly_cost(instance_type,
-                                               use_spot=use_spot,
-                                               region=region,
-                                               zone=zone,
-                                               clouds='kubernetes')
+        # Assume zero cost for Kubernetes clusters
+        return 0.0
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -112,25 +96,37 @@ class Kubernetes(clouds.Cloud):
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
             disk_tier: Optional[str] = None) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='kubernetes')
+        del disk_tier # Unused.
+        virtual_instance_type = ''
+        if cpus is not None:
+            virtual_instance_type += f'{cpus}vCPU-'
+        else:
+            virtual_instance_type += f'{cls._DEFAULT_NUM_VCPUS}vCPU'
+        if memory is not None:
+            virtual_instance_type += f'{memory}GB'
+        else:
+            virtual_instance_type += f'{cls._DEFAULT_NUM_VCPUS * cls._DEFAULT_MEMORY_CPU_RATIO}GB'
+        return virtual_instance_type
+
 
     @classmethod
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='kubernetes')
+        # TODO(romilb): Add GPU support.
+        return None
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
             cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
         """Returns the #vCPUs and memory that the instance type offers."""
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='kubernetes')
+        vcpus = cls.get_vcpus_from_instance_type(instance_type)
+        mem = cls.get_mem_from_instance_type(instance_type)
+        return vcpus, mem
+
+
+
 
     @classmethod
     def zones_provision_loop(
@@ -143,12 +139,7 @@ class Kubernetes(clouds.Cloud):
             use_spot: bool = False,
     ) -> Iterator[None]:
         del num_nodes  # Unused.
-        regions = cls.regions_with_offering(instance_type,
-                                            accelerators,
-                                            use_spot=use_spot,
-                                            region=region,
-                                            zone=None)
-        for r in regions:
+        for r in cls.regions():
             yield r.zones
 
     @classmethod
@@ -156,8 +147,21 @@ class Kubernetes(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[float]:
-        return service_catalog.get_vcpus_from_instance_type(instance_type,
-                                                            clouds='kubernetes')
+        """Returns the #vCPUs that the instance type offers."""
+        if instance_type is None:
+            return None
+        # TODO(romilb): Better parsing
+        return float(instance_type.split('vCPU')[0])
+
+    @classmethod
+    def get_mem_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Optional[float]:
+        """Returns the memory that the instance type offers."""
+        if instance_type is None:
+            return None
+        return float(instance_type.split('vCPU-')[1].split('GB')[0])
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -178,10 +182,10 @@ class Kubernetes(clouds.Cloud):
         else:
             custom_resources = None
 
-        # TODO: Resources.memory and resources.cpus are None if they are not explicitly set.
-        #      We fetch the default values for the instance type in that case.
-        cpus, mem = service_catalog.get_vcpus_mem_from_instance_type(resources.instance_type, clouds='kubernetes')
-        # Convert to int
+        # resources.memory and resources.cpus are None if they are not explicitly set.
+        # We fetch the default values for the instance type in that case.
+        cpus, mem = self.get_vcpus_mem_from_instance_type(resources.instance_type)
+        # TODO(romilb): Allow fractional resources here
         cpus = int(cpus)
         mem = int(mem)
         return {
@@ -227,18 +231,8 @@ class Kubernetes(clouds.Cloud):
                 return (_make([default_instance_type]), [])
 
         assert len(accelerators) == 1, resources
-        acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
-            acc,
-            acc_count,
-            use_spot=resources.use_spot,
-            region=resources.region,
-            zone=resources.zone,
-            clouds='kubernetes')
-        if instance_list is None:
-            return ([], fuzzy_candidate_list)
-        return (_make(instance_list), fuzzy_candidate_list)
+        # TODO(romilb): Add GPU support.
+        raise NotImplementedError("GPU support not implemented yet.")
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         # TODO(romilb): Check credential validity using k8s api
@@ -257,17 +251,20 @@ class Kubernetes(clouds.Cloud):
         # }
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return service_catalog.instance_type_exists(instance_type, 'kubernetes')
+        # TODO(romilb): All instance types are supported for now. In the future
+        #  we should check if the instance type is supported by the cluster.
+        return True
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region,
-                                                    zone,
-                                                    clouds='kubernetes')
+        # Kubernetes doesn't have regions or zones, so we don't need to validate
+        return region, zone
 
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
                                       acc_count: int,
                                       region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'kubernetes')
+        # TODO(romilb): All accelerators are marked as available for now. In the
+        #  future, we should return false for accelerators that we know are not
+        #  supported by the cluster.
+        return True

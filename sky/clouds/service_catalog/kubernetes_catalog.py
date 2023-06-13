@@ -22,11 +22,6 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-_DEFAULT_NUM_VCPUS = 4
-_DEFAULT_MEMORY_CPU_RATIO = 1
-_DEFAULT_INSTANCE_TYPE = 'cpu4'
-
-_df = common.read_catalog('kubernetes/vms.csv')
 
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
