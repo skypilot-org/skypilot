@@ -116,7 +116,7 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
     :align: center
     :alt: AWS Add Policy
 
-6. [Optional] If you would like to have your users access the s3 bucket. You can additionally attach the S3 access, such as the "AmazonS3FullAccess" policy.
+6. [Optional] If you would like to have your users access S3 buckets: You can additionally attach S3 access, such as the "AmazonS3FullAccess" policy.
 
 .. image:: ../images/screenshots/aws/aws-s3-policy.png
     :width: 80%
