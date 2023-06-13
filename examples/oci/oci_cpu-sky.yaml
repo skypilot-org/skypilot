@@ -14,7 +14,7 @@ resources:
 
   image_id: skypilot:cpu-ubuntu-2004
 
-  #use_spot: False
+  # use_spot: False
 
 # Working directory (optional) containing the project codebase.
 # Its contents are synced to ~/sky_workdir/ on the cluster.
