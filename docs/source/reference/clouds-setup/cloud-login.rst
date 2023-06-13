@@ -1,6 +1,6 @@
 .. _cloud-login:
 
-Using Cloud-specific Login Options
+Using Cloud-Specific Login
 ===================================
 
 SkyPilot is designed to minimize cloud administration and setup steps. It should work out-of-the-box for most users without any additional setup.

@@ -1,6 +1,6 @@
 .. _cloud-permissions:
 
-Minimal Cloud Permissions Setup
+Minimal Cloud Permissions
 =================================
 
 .. note::
