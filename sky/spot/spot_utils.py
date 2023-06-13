@@ -438,7 +438,9 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
         job['status'] = spot_state.SpotStatus(job['status'])
     return jobs
 
-def _get_job_status_from_tasks(job_tasks: List[Dict[str, Any]]) -> Tuple[spot_state.SpotStatus, int]:
+
+def _get_job_status_from_tasks(
+        job_tasks: List[Dict[str, Any]]) -> Tuple[spot_state.SpotStatus, int]:
     """Get the current task status and the current task id for a job."""
     spot_status = spot_state.SpotStatus.SUCCEEDED
     current_task_id = 0
@@ -472,7 +474,7 @@ def format_job_table(tasks: List[Dict[str, Any]],
         # The tasks within the same job_id are already sorted
         # by the task_id.
         jobs[task['job_id']].append(task)
-    
+
     status_counts: Dict[str, int] = collections.defaultdict(int)
     for job_tasks in jobs.values():
         spot_job_status = _get_job_status_from_tasks(job_tasks)[0]
