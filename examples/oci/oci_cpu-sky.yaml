@@ -6,7 +6,7 @@ resources:
 
   region: ap-seoul-1
   
-  #zone: AP-SEOUL-1-AD-1
+  # zone: AP-SEOUL-1-AD-1
   
   instance_type: VM.Standard.E4.Flex$_2_16
 
