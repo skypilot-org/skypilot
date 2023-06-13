@@ -370,9 +370,7 @@ class IBM(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
 
         required_fields = ['iam_api_key', 'resource_group_id']
-        ibm_cos_fields = [
-            'cos_instance_id', 'access_key_id', 'secret_access_key'
-        ]
+        ibm_cos_fields = ['access_key_id', 'secret_access_key']
         help_str = ('    Store your API key and Resource Group id '
                     f'in {CREDENTIAL_FILE} in the following format:\n'
                     '      iam_api_key: <IAM_API_KEY>\n'

@@ -2185,7 +2185,6 @@ class IBMCosStore(AbstractStore):
           StorageInitError: If general initialization fails.
         """
         self.client = ibm.get_cos_client(self.region)
-        self.instance_id = ibm.get_storage_instance_id()
         self.s3_resource = ibm.get_cos_resource(self.region)
         self.bucket, is_new_bucket = self._get_bucket()
         if self.is_sky_managed is None:
@@ -2432,8 +2431,7 @@ class IBMCosStore(AbstractStore):
                 Bucket=bucket_name,
                 CreateBucketConfiguration={
                     'LocationConstraint': f'{region}-smart'
-                },
-                IBMServiceInstanceId=self.instance_id)
+                })
             logger.info(f'{colorama.Fore.GREEN}Bucket: "{bucket_name}" '
                         f'was created in {region}. {colorama.Style.RESET_ALL}')
             self.bucket = self.s3_resource.Bucket(bucket_name)

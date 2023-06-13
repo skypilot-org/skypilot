@@ -64,10 +64,6 @@ def get_hmac_keys():
     return cred_file['access_key_id'], cred_file['secret_access_key']
 
 
-def get_storage_instance_id():
-    return read_credential_file()['cos_instance_id']
-
-
 @import_package
 def _get_authenticator():
     return ibm_cloud_sdk_core.authenticators.IAMAuthenticator(get_api_key())
@@ -129,11 +125,11 @@ def tagging_client():
 
 @import_package
 def get_cos_client(region: str = 'us-east'):
+    access_key_id, secret_access_key = get_hmac_keys()
     return ibm_boto3.client(  # type: ignore[union-attr]
         service_name='s3',
-        ibm_api_key_id=get_api_key(),
-        config=ibm_botocore.client.Config(  # type: ignore[union-attr]
-            signature_version='oauth'),
+        aws_access_key_id=access_key_id,
+        aws_secret_access_key=secret_access_key,
         endpoint_url=f'https://s3.{region}.cloud-object-storage.appdomain.cloud'
     )
 
@@ -141,10 +137,10 @@ def get_cos_client(region: str = 'us-east'):
 @import_package
 def get_cos_resource(region: str = 'us-east'):
     # pylint: disable=line-too-long
+    access_key_id, secret_access_key = get_hmac_keys()
     return ibm_boto3.resource(  # type: ignore[union-attr]
         's3',
-        ibm_api_key_id=get_api_key(),
-        config=ibm_botocore.client.Config(  # type: ignore[union-attr]
-            signature_version='oauth'),
-        endpoint_url=f'https://s3.{region}.cloud-object-storage.appdomain.cloud',
-        ibm_service_instance_id=get_storage_instance_id())
+        aws_access_key_id=access_key_id,
+        aws_secret_access_key=secret_access_key,
+        endpoint_url=f'https://s3.{region}.cloud-object-storage.appdomain.cloud'
+    )

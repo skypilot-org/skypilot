@@ -124,8 +124,7 @@ To access IBM's services, store the following fields in ``~/.ibm/credentials.yam
 To access IBM's Cloud Object Storage (COS), append the following fields to the credentials file:
 
 .. code-block:: text
-  
-  cos_instance_id: <instance_id>
+
   access_key_id: <access_key_id>
   secret_access_key: <secret_key_id>
 
@@ -134,8 +133,6 @@ Follow the next steps to create/extract the above fields:
 1. Create/Select a COS instance from the `web console <https://cloud.ibm.com/objectstorage/>`__.
 2. From "Service Credentials" tab, click "New Credential" and toggle "Include HMAC Credential".
 3. Copy "secret_access_key" and "access_key_id" to file.
-4. Extract cos_instance_id from "resource_instance_id" by copying the string between the last occurrence of ":" and "::",
-   e.g., see "resource_instance_id" in the following example: `"resource_instance_id": "crn:v1:bluemix:public:cloud-object-storage:global:a/<random_string>:<resource_instance_id>::"`.
 
 Finally, install `rclone <https://rclone.org/>`_ via: ``curl https://rclone.org/install.sh | sudo bash``
 
