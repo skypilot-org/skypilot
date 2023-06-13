@@ -167,7 +167,7 @@ Service Account Creation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. note::
 
-    If you already have a service account called "skypilot-v1" in your AWS account, it is likely created by SkyPilot automatically, and you can skip this section.
+    If you already have a service account called ``skypilot-v1`` in your AWS account, it is likely created by SkyPilot automatically, and you can skip this section.
 
 1. Click the “Roles” tab in the IAM console, and click on the “Create role”
 
