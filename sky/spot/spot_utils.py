@@ -474,6 +474,7 @@ def format_job_table(tasks: List[Dict[str, Any]],
         # The tasks within the same job_id are already sorted
         # by the task_id.
         jobs[task['job_id']].append(task)
+    jobs = dict(jobs)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
     for job_tasks in jobs.values():
