@@ -1,9 +1,7 @@
-.. _cloud-login:
+.. _cloud-auth:
 
 Cloud Authentication
 ===================================
-
-SkyPilot is designed to minimize cloud administration and setup steps. It should work out-of-the-box for most users without any additional setup.
 
 
 .. tip::

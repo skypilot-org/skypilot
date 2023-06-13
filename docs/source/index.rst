@@ -104,10 +104,10 @@ Documentation
 
 .. toctree::
    :maxdepth: 1
-   :caption: Cloud Administration and Usage
+   :caption: Cloud Admin and Usage
 
    cloud-setup/cloud-permissions
-   cloud-setup/cloud-login
+   cloud-setup/cloud-auth
    cloud-setup/quota
 
 
