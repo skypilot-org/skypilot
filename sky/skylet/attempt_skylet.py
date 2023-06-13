@@ -9,7 +9,9 @@ VERSION_FILE = os.path.expanduser(constants.SKYLET_VERSION_FILE)
 
 
 def restart_skylet():
-    # Kills old skylet if it is running
+    # Kills old skylet if it is running.
+    # TODO(zhwu): make the killing graceful, e.g., use a signal to tell
+    # skylet to exit, instead of directly killing it.
     subprocess.run(
         'ps aux | grep "sky.skylet.skylet" | grep "python3 -m"'
         '| awk \'{print $2}\' | xargs kill >> ~/.sky/skylet.log 2>&1',

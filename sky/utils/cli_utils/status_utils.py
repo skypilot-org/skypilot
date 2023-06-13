@@ -1,5 +1,7 @@
 """Utilities for sky status."""
+import re
 from typing import Any, Callable, Dict, List, Optional
+
 import click
 import colorama
 
@@ -325,6 +327,14 @@ def _get_resources(cluster_record: _ClusterRecord) -> str:
         if (handle.launched_nodes is not None and
                 handle.launched_resources is not None):
             launched_resource_str = str(handle.launched_resources)
+            # accelerator_args is way too long.
+            # Convert from:
+            #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.5.0'}  # pylint: disable=line-too-long
+            # to:
+            #  GCP(n1-highmem-8, {'tpu-v2-8': 1}...)
+            pattern = ', accelerator_args={.*}'
+            launched_resource_str = re.sub(pattern, '...',
+                                           launched_resource_str)
             resources_str = (f'{handle.launched_nodes}x '
                              f'{launched_resource_str}')
     else:
@@ -341,14 +351,14 @@ def _get_zone(cluster_record: _ClusterRecord) -> str:
 
 def _get_autostop(cluster_record: _ClusterRecord) -> str:
     autostop_str = ''
-    separtion = ''
+    separation = ''
     if cluster_record['autostop'] >= 0:
         # TODO(zhwu): check the status of the autostop cluster.
         autostop_str = str(cluster_record['autostop']) + 'm'
-        separtion = ' '
+        separation = ' '
 
     if cluster_record['to_down']:
-        autostop_str += f'{separtion}(down)'
+        autostop_str += f'{separation}(down)'
     if autostop_str == '':
         autostop_str = '-'
     return autostop_str
