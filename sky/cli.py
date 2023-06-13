@@ -102,7 +102,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 
 # The maximum number of in-progress spot jobs to show in the status
 # command.
-_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 5
+_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 3
 
 
 def _get_glob_clusters(clusters: List[str]) -> List[str]:
