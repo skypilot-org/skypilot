@@ -1,7 +1,7 @@
-.. _cloud-administration:
+.. _cloud-login:
 
-Cloud Administration
-=============================
+Using Cloud-specific Login Options
+===================================
 
 SkyPilot is designed to minimize cloud administration and setup steps. It should work out-of-the-box for most users without any additional setup.
 

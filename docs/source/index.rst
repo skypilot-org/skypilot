@@ -96,14 +96,12 @@ Documentation
    :maxdepth: 1
    :caption: User Guides
 
-   reference/local/index
    examples/iterative-dev-project
    reference/interactive-nodes
-   reference/cloud-administration
-   reference/quota
-   reference/logging
+   reference/clouds-setup/index
    reference/faq
-   reference/cloud-permissions
+   reference/logging
+   reference/local/index
 
 .. toctree::
    :maxdepth: 1
