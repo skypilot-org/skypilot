@@ -160,7 +160,7 @@ With the steps above you are almost ready to have the users in your organization
                 "Resource": "arn:aws:iam::<account-ID-without-hyphens>:instance-profile/skypilot-v1"
             }
 
-2. Alternatively, you can create the "skypilot-v1" service account manually. The following section describe how to create the service account manually.
+2. Alternatively, you can create the ``skypilot-v1`` service account manually. The following section describes how to create the service account manually.
 
 
 Service Account Creation
