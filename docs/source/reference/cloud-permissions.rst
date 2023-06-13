@@ -127,7 +127,7 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
 
 With the steps above you are almost ready to have the users in your organization to use SkyPilot with the minimal permissions.
 
-**One more thing** to do is to create a single service account "skypilot-v1" for all the users in your organization. There are two ways to accomplish this:
+**One more thing** to do is to create a single service account ``skypilot-v1`` for all users in your organization. There are two ways to accomplish this:
 
 1. Add additional permission for the user you created to allow SkyPilot to automatically create the service account using the user account. You can modify the last two rules in the policy you created in step 4 with the highlighted four lines:
 
