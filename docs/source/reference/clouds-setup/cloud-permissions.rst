@@ -116,7 +116,7 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
     :align: center
     :alt: AWS Add Policy
 
-6. [Optional] If you would like to have your users access the s3 bucket. You can additionally attach the S3 access, such as the "AmazonS3FullAccess" policy.
+6. [Optional] If you would like to have your users access S3 buckets: You can additionally attach S3 access, such as the "AmazonS3FullAccess" policy.
 
 .. image:: ../../images/screenshots/aws/aws-s3-policy.png
     :width: 80%
@@ -127,7 +127,7 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
 
 With the steps above you are almost ready to have the users in your organization to use SkyPilot with the minimal permissions.
 
-**One more thing** to do is to create a single iam role "skypilot-v1" for all the users in your organization. There are two ways to accomplish this:
+**One more thing** to do is to create a single iam role ``skypilot-v1`` for all users in your organization. There are two ways to accomplish this:
 
 1. Add additional permission for the user you created to allow SkyPilot to automatically create the iam role using the user account. You can modify the last two rules in the policy you created in step 4 with the highlighted four lines:
 
@@ -160,14 +160,15 @@ With the steps above you are almost ready to have the users in your organization
                 "Resource": "arn:aws:iam::<account-ID-without-hyphens>:instance-profile/skypilot-v1"
             }
 
-2. Alternatively, you can create the "skypilot-v1" iam role manually. The following section describe how to create the iam role manually.
+2. Alternatively, you can create the ``skypilot-v1`` iam role manually. The following section describes how to create the iam role manually.
 
 
 IAM Role Creation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 .. note::
 
-    If you already have an iam role called "skypilot-v1" in your AWS account, it is likely created by SkyPilot automatically, and you can skip this section.
+    If you already have an iam role called ``skypilot-v1`` in your AWS account, it is likely created by SkyPilot automatically, and you can skip this section.
 
 1. Click the “Roles” tab in the IAM console, and click on the “Create role”
 
