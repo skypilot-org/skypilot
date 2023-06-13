@@ -42,6 +42,8 @@ class oci_conf:
     RETRY_INTERVAL_BASE_SECONDS = 5
 
     # disk_tier to OCI VPU mapping
+    # TODO(HysunHe): Confirm that the performance of each tier
+    # roughly matches the other clouds.
     BOOT_VOLUME_VPU = {
         None: 20,  # Default to medium
         "low": 10,  # 60 IOPS/GB, Balanced performance
