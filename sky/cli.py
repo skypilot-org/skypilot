@@ -1713,7 +1713,9 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                     f'* {job_info}To see all spot jobs: {colorama.Style.BRIGHT}'
                     f'sky spot queue{colorama.Style.RESET_ALL}')
 
-        if num_pending_autostop > 0:
+        if num_pending_autostop > 0 and not refresh:
+            # Don't print this hint if there's no pending autostop or user has
+            # already passed --refresh.
             plural_and_verb = ' has'
             if num_pending_autostop > 1:
                 plural_and_verb = 's have'
