@@ -6,18 +6,19 @@ import re
 import socket
 import subprocess
 import sys
-import textwrap
 import time
 from typing import Any, Dict, Tuple
+import uuid
 
 import colorama
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
+import yaml
 
 from sky import clouds
 from sky import sky_logging
-from sky.adaptors import gcp
+from sky.adaptors import gcp, ibm
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -87,26 +88,22 @@ def get_or_generate_keys() -> Tuple[str, str]:
     return private_key_path, public_key_path
 
 
+def _replace_cloud_init_ssh_info_in_config(config: Dict[str, Any],
+                                           public_key: str) -> Dict[str, Any]:
+    config_str = common_utils.dump_yaml_str(config)
+    config_str = config_str.replace('skypilot:ssh_user',
+                                    config['auth']['ssh_user'])
+    config_str = config_str.replace('skypilot:ssh_public_key_content',
+                                    public_key)
+    config = yaml.safe_load(config_str)
+    return config
+
+
 def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r') as f:
         public_key = f.read()
-    # Use cloud init in UserData to set up the authorized_keys to get
-    # around the number of keys limit and permission issues with
-    # ec2.describe_key_pairs.
-    # Note that sudo and shell need to be specified to ensure setup works.
-    # Reference: https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups  # pylint: disable=line-too-long
-    for node_type in config['available_node_types']:
-        config['available_node_types'][node_type]['node_config']['UserData'] = (
-            textwrap.dedent(f"""\
-            #cloud-config
-            users:
-            - name: {config['auth']['ssh_user']}
-              shell: /bin/bash
-              sudo: ALL=(ALL) NOPASSWD:ALL
-              ssh-authorized-keys:
-                - {public_key}
-            """))
+    config = _replace_cloud_init_ssh_info_in_config(config, public_key)
     return config
 
 
@@ -195,31 +192,56 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
          if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
 
     if project_oslogin.lower() == 'true':
-        # project.
         logger.info(
             f'OS Login is enabled for GCP project {project_id}. Running '
             'additional authentication steps.')
-        # Read the account information from the credential file, since the user
-        # should be set according the account, when the oslogin is enabled.
-        config_path = os.path.expanduser(clouds.gcp.GCP_CONFIG_PATH)
-        sky_backup_config_path = os.path.expanduser(
-            clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH)
-        assert os.path.exists(sky_backup_config_path), (
-            'GCP credential backup file '
-            f'{sky_backup_config_path!r} does not exist.')
 
-        with open(sky_backup_config_path, 'r') as infile:
-            for line in infile:
-                if line.startswith('account'):
-                    account = line.split('=')[1].strip()
-                    break
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        'GCP authentication failed, as the oslogin is enabled '
-                        f'but the file {config_path} does not contain the '
-                        'account information.')
-        config['auth']['ssh_user'] = account.replace('@', '_').replace('.', '_')
+        # Try to get the os-login user from `gcloud`, as this is the most
+        # accurate way to figure out how this gcp user is meant to log in.
+        proc = subprocess.run(
+            'gcloud compute os-login describe-profile --format yaml',
+            shell=True,
+            stdout=subprocess.PIPE,
+            check=False)
+        os_login_username = None
+        if proc.returncode == 0:
+            try:
+                profile = yaml.safe_load(proc.stdout)
+                username = profile['posixAccounts'][0]['username']
+                if username:
+                    os_login_username = username
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug('Failed to parse gcloud os-login profile.\n'
+                             f'{common_utils.format_exception(e)}')
+                pass
+
+        if os_login_username is None:
+            # As a fallback, read the account information from the credential
+            # file. This works most of the time, but fails if the user's
+            # os-login username is not a straightforward translation of their
+            # email address, for example because their email address changed
+            # within their google workspace after the os-login credentials
+            # were established.
+            config_path = os.path.expanduser(clouds.gcp.GCP_CONFIG_PATH)
+            sky_backup_config_path = os.path.expanduser(
+                clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH)
+            assert os.path.exists(sky_backup_config_path), (
+                'GCP credential backup file '
+                f'{sky_backup_config_path!r} does not exist.')
+
+            with open(sky_backup_config_path, 'r') as infile:
+                for line in infile:
+                    if line.startswith('account'):
+                        account = line.split('=')[1].strip()
+                        break
+                else:
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError(
+                            'GCP authentication failed, as the oslogin is '
+                            f'enabled but the file {config_path} does not '
+                            'contain the account information.')
+            os_login_username = account.replace('@', '_').replace('.', '_')
+        config['auth']['ssh_user'] = os_login_username
 
         # Add ssh key to GCP with oslogin
         subprocess.run(
@@ -317,12 +339,13 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Ensure ssh key is registered with Lambda Cloud
     lambda_client = lambda_utils.LambdaCloudClient()
-    if lambda_client.ssh_key_name is None:
-        public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
-        with open(public_key_path, 'r') as f:
-            public_key = f.read()
-        name = f'sky-key-{common_utils.get_user_hash()}'
-        lambda_client.set_ssh_key(name, public_key)
+    public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
+    with open(public_key_path, 'r') as f:
+        public_key = f.read()
+    prefix = f'sky-key-{common_utils.get_user_hash()}'
+    name, exists = lambda_client.get_unique_ssh_key_name(prefix, public_key)
+    if not exists:
+        lambda_client.register_ssh_key(name, public_key)
 
     # Need to use ~ relative path because Ray uses the same
     # path for finding the public key path on both local and head node.
@@ -332,4 +355,94 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
     config['file_mounts'] = file_mounts
 
+    return config
+
+
+def setup_ibm_authentication(config):
+    """ registers keys if they do not exist in sky folder
+    and updates config file.
+    keys default location: '~/.ssh/sky-key' and '~/.ssh/sky-key.pub'
+    """
+
+    def _get_unique_key_name():
+        suffix_len = 10
+        return f'skypilot-key-{str(uuid.uuid4())[:suffix_len]}'
+
+    client = ibm.client(region=config['provider']['region'])
+    resource_group_id = config['provider']['resource_group_id']
+
+    _, public_key_path = get_or_generate_keys()
+    with open(os.path.abspath(os.path.expanduser(public_key_path)),
+              'r',
+              encoding='utf-8') as file:
+        ssh_key_data = file.read()
+    # pylint: disable=E1136
+    try:
+        res = client.create_key(public_key=ssh_key_data,
+                                name=_get_unique_key_name(),
+                                resource_group={
+                                    'id': resource_group_id
+                                },
+                                type='rsa').get_result()
+        vpc_key_id = res['id']
+        logger.debug(f'Created new key: {res["name"]}')
+
+    except ibm.ibm_cloud_sdk_core.ApiException as e:
+        if 'Key with fingerprint already exists' in e.message:
+            for key in client.list_keys().result['keys']:
+                if (ssh_key_data in key['public_key'] or
+                        key['public_key'] in ssh_key_data):
+                    vpc_key_id = key['id']
+                    logger.debug(f'Reusing key:{key["name"]}, '
+                                 f'matching existing public key.')
+                    break
+        elif 'Key with name already exists' in e.message:
+            raise Exception("""a key with chosen name
+                already registered in the specified region""") from e
+        else:
+            raise Exception('Failed to register a key') from e
+
+    config['auth']['ssh_private_key'] = PRIVATE_SSH_KEY_PATH
+
+    for node_type in config['available_node_types']:
+        config['available_node_types'][node_type]['node_config'][
+            'key_id'] = vpc_key_id
+
+    # Add public key path to file mounts
+    file_mounts = config['file_mounts']
+    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
+    config['file_mounts'] = file_mounts
+
+    return config
+
+
+# Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
+def setup_oci_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r') as f:
+        public_key = f.read()
+
+    # Need to use ~ relative path because Ray uses the same
+    # path for finding the public key path on both local and head node.
+    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
+
+    file_mounts = config['file_mounts']
+    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
+    config['file_mounts'] = file_mounts
+
+    for node_type in config['available_node_types']:
+        config['available_node_types'][node_type]['node_config'][
+            'AuthorizedKey'] = public_key
+
+    return config
+
+
+def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    private_key_path, public_key_path = get_or_generate_keys()
+    config['auth']['ssh_private_key'] = private_key_path
+    config['auth']['ssh_public_key'] = public_key_path
+
+    file_mounts = config['file_mounts']
+    file_mounts[public_key_path] = public_key_path
+    config['file_mounts'] = file_mounts
     return config

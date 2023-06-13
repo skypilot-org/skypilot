@@ -37,7 +37,7 @@ import subprocess
 import sys
 import textwrap
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import click
 import colorama
@@ -63,6 +63,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import log_utils
 from sky.utils import common_utils
+from sky.utils import dag_utils
 from sky.utils import command_runner
 from sky.utils import schemas
 from sky.utils import subprocess_utils
@@ -104,7 +105,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 5
 
 
-def _get_glob_clusters(clusters: Sequence[str]) -> List[str]:
+def _get_glob_clusters(clusters: List[str]) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
     for cluster in clusters:
@@ -120,7 +121,7 @@ def _get_glob_clusters(clusters: Sequence[str]) -> List[str]:
     return list(set(glob_clusters))
 
 
-def _get_glob_storages(storages: Sequence[str]) -> List[str]:
+def _get_glob_storages(storages: List[str]) -> List[str]:
     """Returns a list of storages that match the glob pattern."""
     glob_storages = []
     for storage_object in storages:
@@ -221,6 +222,12 @@ def _interactive_node_cli_command(cli_func):
                              type=int,
                              required=False,
                              help=('OS disk size in GBs.'))
+    disk_tier = click.option('--disk-tier',
+                             default=None,
+                             type=str,
+                             required=False,
+                             help=('OS disk tier. Could be one of "low", '
+                                   '"medium", "high". Default: medium'))
     no_confirm = click.option('--yes',
                               '-y',
                               is_flag=True,
@@ -299,6 +306,7 @@ def _interactive_node_cli_command(cli_func):
         screen_option,
         tmux_option,
         disk_size,
+        disk_tier,
     ]
     decorator = functools.reduce(lambda res, f: f(res),
                                  reversed(click_decorators), cli_func)
@@ -588,7 +596,8 @@ def _parse_override_params(cloud: Optional[str] = None,
                            instance_type: Optional[str] = None,
                            use_spot: Optional[bool] = None,
                            image_id: Optional[str] = None,
-                           disk_size: Optional[int] = None) -> Dict[str, Any]:
+                           disk_size: Optional[int] = None,
+                           disk_tier: Optional[str] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -635,6 +644,8 @@ def _parse_override_params(cloud: Optional[str] = None,
             override_params['image_id'] = image_id
     if disk_size is not None:
         override_params['disk_size'] = disk_size
+    if disk_tier is not None:
+        override_params['disk_tier'] = disk_tier
     return override_params
 
 
@@ -681,6 +692,9 @@ def _check_resources_match(backend: backends.Backend,
         return
 
     if node_type is not None:
+        assert isinstance(handle,
+                          backends.CloudVmRayResourceHandle), (node_type,
+                                                               handle)
         inferred_node_type = _infer_interactive_node_type(
             handle.launched_resources)
         if node_type != inferred_node_type:
@@ -721,7 +735,7 @@ def _launch_with_confirm(
         # Show the optimize log before the prompt if the cluster does not exist.
         try:
             backend_utils.check_public_cloud_enabled()
-        except RuntimeError as e:
+        except exceptions.NoCloudAccessError as e:
             # Catch the exception where the public cloud is not enabled, and
             # only print the error message without the error type.
             click.secho(e, fg='yellow')
@@ -823,6 +837,35 @@ def _create_and_ssh_into_node(
             f'Name {cluster_name!r} taken by a local cluster and cannot '
             f'be used for a {node_type}.')
 
+    backend = backend if backend is not None else backends.CloudVmRayBackend()
+    if not isinstance(backend, backends.CloudVmRayBackend):
+        raise click.UsageError('Interactive nodes are only supported for '
+                               f'{backends.CloudVmRayBackend.__name__} '
+                               f'backend. Got {type(backend).__name__}.')
+
+    maybe_status, handle = backend_utils.refresh_cluster_status_handle(
+        cluster_name)
+    if maybe_status is not None:
+        if user_requested_resources:
+            if not resources.less_demanding_than(handle.launched_resources):
+                name_arg = ''
+                if cluster_name != _default_interactive_node_name(node_type):
+                    name_arg = f' -c {cluster_name}'
+                raise click.UsageError(
+                    f'Relaunching interactive node {cluster_name!r} with '
+                    'mismatched resources.\n    '
+                    f'Requested resources: {resources}\n    '
+                    f'Launched resources: {handle.launched_resources}\n'
+                    'To login to existing cluster, use '
+                    f'{colorama.Style.BRIGHT}sky {node_type}{name_arg}'
+                    f'{colorama.Style.RESET_ALL}. To launch a new cluster, '
+                    f'use {colorama.Style.BRIGHT}sky {node_type} -c NEW_NAME '
+                    f'{colorama.Style.RESET_ALL}')
+        else:
+            # Use existing interactive node if it exists and no user
+            # resources were specified.
+            resources = handle.launched_resources
+
     # TODO: Add conda environment replication
     # should be setup =
     # 'conda env export | grep -v "^prefix: " > environment.yml'
@@ -833,22 +876,6 @@ def _create_and_ssh_into_node(
         setup=None,
     )
     task.set_resources(resources)
-
-    backend = backend if backend is not None else backends.CloudVmRayBackend()
-    if not isinstance(backend, backends.CloudVmRayBackend):
-        raise click.UsageError('Interactive nodes are only supported for '
-                               f'{backends.CloudVmRayBackend.__name__} '
-                               f'backend. Got {type(backend).__name__}.')
-    maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster_name)
-    if maybe_status is not None and user_requested_resources:
-        name_arg = ''
-        if cluster_name != _default_interactive_node_name(node_type):
-            name_arg = f' -c {cluster_name}'
-        raise click.UsageError(
-            'Resources cannot be specified for an existing interactive node '
-            f'{cluster_name!r}. To login to the cluster, use: '
-            f'{colorama.Style.BRIGHT}'
-            f'sky {node_type}{name_arg}{colorama.Style.RESET_ALL}')
 
     _launch_with_confirm(
         task,
@@ -863,6 +890,7 @@ def _create_and_ssh_into_node(
         node_type=node_type,
     )
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
     # connection, and for allowing adding 'cd workdir' in the future.
@@ -908,7 +936,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     try:
         with open(entrypoint, 'r') as f:
             try:
-                config = yaml.safe_load(f)
+                config = list(yaml.safe_load_all(f))[0]
                 if isinstance(config, str):
                     # 'sky exec cluster ./my_script.sh'
                     is_yaml = False
@@ -940,7 +968,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     return is_yaml, config
 
 
-def _make_task_from_entrypoint_with_overrides(
+def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: List[str],
     *,
     name: Optional[str] = None,
@@ -957,10 +985,17 @@ def _make_task_from_entrypoint_with_overrides(
     use_spot: Optional[bool] = None,
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
+    disk_tier: Optional[str] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
-) -> sky.Task:
+) -> Union[sky.Task, sky.Dag]:
+    """Creates a task or a dag from an entrypoint with overrides.
+
+    Returns:
+        A dag iff the entrypoint is YAML and contains more than 1 task.
+        Otherwise, a task.
+    """
     entrypoint = ' '.join(entrypoint)
     is_yaml, yaml_config = _check_yaml(entrypoint)
     entrypoint: Optional[str]
@@ -979,17 +1014,6 @@ def _make_task_from_entrypoint_with_overrides(
     if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
         cloud = 'local'
 
-    if is_yaml:
-        usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-        task = sky.Task.from_yaml(entrypoint)
-    else:
-        task = sky.Task(name='sky-cmd', run=entrypoint)
-        task.set_resources({sky.Resources()})
-
-    # Override.
-    if workdir is not None:
-        task.workdir = workdir
-
     override_params = _parse_override_params(cloud=cloud,
                                              region=region,
                                              zone=zone,
@@ -999,7 +1023,32 @@ def _make_task_from_entrypoint_with_overrides(
                                              instance_type=instance_type,
                                              use_spot=use_spot,
                                              image_id=image_id,
-                                             disk_size=disk_size)
+                                             disk_size=disk_size,
+                                             disk_tier=disk_tier)
+
+    if is_yaml:
+        assert entrypoint is not None
+        usage_lib.messages.usage.update_user_task_yaml(entrypoint)
+        dag = dag_utils.load_chain_dag_from_yaml(entrypoint)
+        if len(dag.tasks) > 1:
+            # When the dag has more than 1 task. It is unclear how to
+            # override the params for the dag. So we just ignore the
+            # override params.
+            if override_params:
+                click.secho(
+                    f'WARNING: override params {override_params} are ignored, '
+                    'since the yaml file contains multiple tasks.',
+                    fg='yellow')
+            return dag
+        task = sky.Task.from_yaml(entrypoint)
+    else:
+        task = sky.Task(name='sky-cmd', run=entrypoint)
+        task.set_resources({sky.Resources()})
+
+    # Override.
+    if workdir is not None:
+        task.workdir = workdir
+
     # Spot launch specific.
     if spot_recovery is not None:
         if spot_recovery.lower() == 'none':
@@ -1017,7 +1066,7 @@ def _make_task_from_entrypoint_with_overrides(
         task.num_nodes = num_nodes
     if name is not None:
         task.name = name
-    task.set_envs(env)
+    task.update_envs(env)
     # TODO(wei-lin): move this validation into Python API.
     if new_resources.accelerators is not None:
         acc, _ = list(new_resources.accelerators.items())[0]
@@ -1157,6 +1206,14 @@ def cli():
               required=False,
               help=('OS disk size in GBs.'))
 @click.option(
+    '--disk-tier',
+    default=None,
+    type=str,
+    required=False,
+    help=(
+        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
+    ))
+@click.option(
     '--idle-minutes-to-autostop',
     '-i',
     default=None,
@@ -1223,6 +1280,7 @@ def launch(
     image_id: Optional[str],
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
+    disk_tier: Optional[str],
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
@@ -1252,7 +1310,7 @@ def launch(
             'support for spot instances on Azure. Please file '
             'an issue if you need this feature.')
 
-    task = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         cluster=cluster,
@@ -1269,7 +1327,14 @@ def launch(
         image_id=image_id,
         env=env,
         disk_size=disk_size,
+        disk_tier=disk_tier,
     )
+    if isinstance(task_or_dag, sky.Dag):
+        raise click.UsageError(
+            'YAML specifies a DAG which is only supported by '
+            '`sky spot launch`. `sky launch` supports a '
+            'single task only.')
+    task = task_or_dag
 
     backend: backends.Backend
     if backend_name == backends.LocalDockerBackend.NAME:
@@ -1399,7 +1464,7 @@ def exec(
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
 
-    task = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         cluster=cluster,
@@ -1417,6 +1482,11 @@ def exec(
         env=env,
     )
 
+    if isinstance(task_or_dag, sky.Dag):
+        raise click.UsageError('YAML specifies a DAG, while `sky exec` '
+                               'supports a single task only.')
+    task = task_or_dag
+
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
@@ -1425,7 +1495,8 @@ def _get_spot_jobs(
         refresh: bool,
         skip_finished: bool,
         show_all: bool,
-        limit_num_jobs_to_show: bool = False) -> Tuple[Optional[int], str]:
+        limit_num_jobs_to_show: bool = False,
+        is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
     """Get the in-progress spot jobs.
 
     Args:
@@ -1436,6 +1507,8 @@ def _get_spot_jobs(
         limit_num_jobs_to_show: If True, limit the number of jobs to show to
             _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS, which is mainly used by
             `sky status`.
+        is_called_by_user: If this function is called by user directly, or an
+            internal call.
 
     Returns:
         A tuple of (num_in_progress_jobs, msg). If num_in_progress_jobs is None,
@@ -1445,6 +1518,8 @@ def _get_spot_jobs(
     """
     num_in_progress_jobs = None
     try:
+        if not is_called_by_user:
+            usage_lib.messages.usage.set_internal()
         with sky_logging.silent():
             # Make the call silent
             spot_jobs = core.spot_queue(refresh=refresh,
@@ -1463,9 +1538,10 @@ def _get_spot_jobs(
             if controller_status is None:
                 msg += (f' (See: {colorama.Style.BRIGHT}sky spot -h'
                         f'{colorama.Style.RESET_ALL})')
-    except RuntimeError:
+    except RuntimeError as e:
         msg = ('Failed to query spot jobs due to connection '
-               'issues. Try again later.')
+               'issues. Try again later. '
+               f'Details: {common_utils.format_exception(e, use_bracket=True)}')
     except Exception as e:  # pylint: disable=broad-except
         msg = ('Failed to query spot jobs: '
                f'{common_utils.format_exception(e, use_bracket=True)}')
@@ -1566,7 +1642,8 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                 kwds=dict(refresh=False,
                           skip_finished=True,
                           show_all=False,
-                          limit_num_jobs_to_show=not all))
+                          limit_num_jobs_to_show=not all,
+                          is_called_by_user=False))
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                    f'{colorama.Style.RESET_ALL}')
         query_clusters: Optional[List[str]] = None
@@ -1636,7 +1713,9 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                     f'* {job_info}To see all spot jobs: {colorama.Style.BRIGHT}'
                     f'sky spot queue{colorama.Style.RESET_ALL}')
 
-        if num_pending_autostop > 0:
+        if num_pending_autostop > 0 and not refresh:
+            # Don't print this hint if there's no pending autostop or user has
+            # already passed --refresh.
             plural_and_verb = ' has'
             if num_pending_autostop > 1:
                 plural_and_verb = 's have'
@@ -1658,21 +1737,25 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
 @usage_lib.entrypoint
 def cost_report(all: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Show cost reports for each cluster.
+    """Show estimated costs for launched clusters.
 
-    The following fields for each cluster are recorded: cluster name,
-    resources, launched time, duration that cluster was up,
-    and total cost.
+    For each cluster, this shows: cluster name, resources, launched time,
+    duration that cluster was up, and total estimated cost.
 
     The estimated cost column indicates the price for the cluster based on the
-    type of resources being used and the duration of use up until the call
-    to status. This means if the cluster is UP, successive calls to report
-    will show increasing price. The estimated cost is calculated based on
-    the local cache of the cluster status, and may not be accurate for
-    the cluster with autostop/use_spot set or terminated/stopped
-    on the cloud console.
+    type of resources being used and the duration of use up until now. This
+    means if the cluster is UP, successive calls to cost-report will show
+    increasing price.
+
+    This CLI is experimental. The estimated cost is calculated based on the
+    local cache of the cluster status, and may not be accurate for:
+
+    - Clusters with autostop/use_spot set; or
+
+    - Clusters that were terminated/stopped on the cloud console.
     """
     cluster_records = core.cost_report()
+
     nonreserved_cluster_records = []
     reserved_clusters = dict()
     for cluster_record in cluster_records:
@@ -1680,17 +1763,35 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
         if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
             cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
                 cluster_name]
-            reserved_clusters[cluster_group_name] = cluster_record
+            # to display most recent entry for each reserved cluster
+            # TODO(sgurram): fix assumption of sorted order of clusters
+            if cluster_group_name not in reserved_clusters:
+                reserved_clusters[cluster_group_name] = cluster_record
         else:
             nonreserved_cluster_records.append(cluster_record)
 
-    status_utils.show_cost_report_table(nonreserved_cluster_records, all)
+    total_cost = status_utils.get_total_cost_of_displayed_records(
+        nonreserved_cluster_records, all)
 
+    status_utils.show_cost_report_table(nonreserved_cluster_records, all)
     for cluster_group_name, cluster_record in reserved_clusters.items():
         status_utils.show_cost_report_table(
             [cluster_record], all, reserved_group_name=cluster_group_name)
+        total_cost += cluster_record['total_cost']
+
+    click.echo(f'\n{colorama.Style.BRIGHT}'
+               f'Total Cost: ${total_cost:.2f}{colorama.Style.RESET_ALL}')
+
+    if not all:
+        click.secho(
+            f'Showing up to {status_utils.NUM_COST_REPORT_LINES} '
+            'most recent clusters. '
+            'To see all clusters in history, '
+            'pass the --all flag.',
+            fg='yellow')
+
     click.secho(
-        'NOTE: This feature is experimental. '
+        'This feature is experimental. '
         'Costs for clusters with auto{stop,down} '
         'scheduled may not be accurate.',
         fg='yellow')
@@ -1715,7 +1816,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
                 nargs=-1,
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
-def queue(clusters: Sequence[str], skip_finished: bool, all_users: bool):
+def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
@@ -1765,8 +1866,8 @@ def queue(clusters: Sequence[str], skip_finished: bool, all_users: bool):
     '-s',
     is_flag=True,
     default=False,
-    help='Sync down the logs of the job (this is useful for distributed jobs to'
-    'download a separate log for each job from all the workers).')
+    help='Sync down the logs of a job to the local machine. For a distributed'
+    ' job, a separate log file from each worker will be downloaded.')
 @click.option(
     '--status',
     is_flag=True,
@@ -1777,8 +1878,9 @@ def queue(clusters: Sequence[str], skip_finished: bool, all_users: bool):
     '--follow/--no-follow',
     is_flag=True,
     default=True,
-    help=('Follow the logs of the job. [default: --follow] '
-          'If --no-follow is specified, print the log so far and exit.'))
+    help=('Follow the logs of a job. '
+          'If --no-follow is specified, print the log so far and exit. '
+          '[default: --follow]'))
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -1800,12 +1902,14 @@ def logs(
 
     1. If no flags are provided, tail the logs of the job_id specified. At most
     one job_id can be provided.
-    2. If --status is specified, print the status of the job and exit with
-    returncode 0 if the job is succeeded, or 1 otherwise. At most one job_id can
+
+    2. If ``--status`` is specified, print the status of the job and exit with
+    returncode 0 if the job succeeded, or 1 otherwise. At most one job_id can
     be specified.
-    3. If --sync-down is specified, the logs of the job will be downloaded from
-    the cluster and saved to the local machine under `~/sky_logs`. Mulitple
-    job_ids can be specified.
+
+    3. If ``--sync-down`` is specified, the logs of the job will be downloaded
+    from the cluster and saved to the local machine under
+    ``~/sky_logs``. Mulitple job_ids can be specified.
     """
     if sync_down and status:
         raise click.UsageError(
@@ -1933,7 +2037,7 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 def stop(
-    clusters: Tuple[str],
+    clusters: List[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
 ):
@@ -2011,7 +2115,7 @@ def stop(
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 def autostop(
-    clusters: Tuple[str],
+    clusters: List[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     idle_minutes: Optional[int],
     cancel: bool,  # pylint: disable=redefined-outer-name
@@ -2134,7 +2238,7 @@ def autostop(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def start(
-        clusters: Sequence[str],
+        clusters: List[str],
         all: bool,
         yes: bool,
         idle_minutes_to_autostop: Optional[int],
@@ -2323,7 +2427,7 @@ def start(
               'Useful for cleaning up manually deleted cluster(s).')
 @usage_lib.entrypoint
 def down(
-    clusters: Tuple[str],
+    clusters: List[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
     purge: bool,
@@ -2378,7 +2482,9 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.RED}Tearing down the spot controller while '
-                'it is in INIT state is not supported, as we cannot '
+                'it is in INIT state is not supported (this means a spot '
+                'launch is in progress or the previous launch failed), as we '
+                'cannot '
                 'guarantee that all the spot jobs are finished. Please wait '
                 'until the spot controller is UP or fix it with '
                 f'{colorama.Style.BRIGHT}sky start '
@@ -2426,7 +2532,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
 
 
 def _down_or_stop_clusters(
-        names: Sequence[str],
+        names: List[str],
         apply_to_all: Optional[bool],
         down: bool,  # pylint: disable=redefined-outer-name
         no_confirm: bool,
@@ -2591,7 +2697,7 @@ def _down_or_stop_clusters(
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
                     f'{colorama.Style.RESET_ALL}'
-                    f'\n\tReason: {common_utils.format_exception(e)}.')
+                    f'\nReason: {common_utils.format_exception(e)}.')
             except (exceptions.NotSupportedError,
                     exceptions.ClusterOwnerIdentityMismatchError) as e:
                 message = str(e)
@@ -2627,8 +2733,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             memory: Optional[str], gpus: Optional[str],
             use_spot: Optional[bool], screen: Optional[bool],
             tmux: Optional[bool], disk_size: Optional[int],
-            idle_minutes_to_autostop: Optional[int], down: bool,
-            retry_until_up: bool):
+            disk_tier: Optional[str], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
 
     Examples:
@@ -2685,7 +2791,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               memory=memory,
                               accelerators=gpus,
                               use_spot=use_spot,
-                              disk_size=disk_size)
+                              disk_size=disk_size,
+                              disk_tier=disk_tier)
 
     _create_and_ssh_into_node(
         'gpunode',
@@ -2709,8 +2816,9 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             instance_type: Optional[str], cpus: Optional[str],
             memory: Optional[str], use_spot: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
-            down: bool, retry_until_up: bool):
+            disk_size: Optional[int], disk_tier: Optional[str],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
 
     Examples:
@@ -2763,7 +2871,8 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               cpus=cpus,
                               memory=memory,
                               use_spot=use_spot,
-                              disk_size=disk_size)
+                              disk_size=disk_size,
+                              disk_tier=disk_tier)
 
     _create_and_ssh_into_node(
         'cpunode',
@@ -2788,8 +2897,9 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             memory: Optional[str], tpus: Optional[str],
             use_spot: Optional[bool], tpu_vm: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
-            down: bool, retry_until_up: bool):
+            disk_size: Optional[int], disk_tier: Optional[str],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
 
     Examples:
@@ -2849,7 +2959,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               accelerators=tpus,
                               accelerator_args=accelerator_args,
                               use_spot=use_spot,
-                              disk_size=disk_size)
+                              disk_size=disk_size,
+                              disk_tier=disk_tier)
 
     _create_and_ssh_into_node(
         'tpunode',
@@ -2868,17 +2979,20 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 @cli.command()
 @usage_lib.entrypoint
 def check():
-    """Determine the set of clouds available to use.
+    """Check which clouds are available to use.
 
-    This checks access credentials for AWS, Azure and GCP; on failure, it shows
-    the reason and suggests correction steps. Tasks will only run on clouds
-    that you have access to.
+    This checks access credentials for all clouds supported by SkyPilot. If a
+    cloud is detected to be inaccessible, the reason and correction steps will
+    be shown.
+
+    The enabled clouds are cached and form the "search space" to be considered
+    for each task.
     """
     sky_check.check()
 
 
 @cli.command()
-@click.argument('gpu_name', required=False)
+@click.argument('accelerator_str', required=False)
 @click.option('--all',
               '-a',
               is_flag=True,
@@ -2899,33 +3013,43 @@ def check():
 @service_catalog.use_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
-        gpu_name: Optional[str],
+        accelerator_str: Optional[str],
         all: bool,  # pylint: disable=redefined-builtin
         cloud: Optional[str],
         region: Optional[str]):
-    """Show supported GPU/TPU/accelerators.
+    """Show supported GPU/TPU/accelerators and their prices.
 
     The names and counts shown can be set in the ``accelerators`` field in task
     YAMLs, or in the ``--gpus`` flag in CLI commands. For example, if this
     table shows 8x V100s are supported, then the string ``V100:8`` will be
     accepted by the above.
 
-    To show the detailed information of a GPU/TPU type (which clouds offer it,
-    the quantity in each VM type, etc.), use ``sky show-gpus <gpu>``.
+    To show the detailed information of a GPU/TPU type (its price, which clouds
+    offer it, the quantity in each VM type, etc.), use ``sky show-gpus <gpu>``.
 
     To show all accelerators, including less common ones and their detailed
     information, use ``sky show-gpus --all``.
 
-    NOTE: If region is not specified, the price displayed for each instance type
-    is the lowest across all regions for both on-demand and spot instances.
+    Definitions of certain fields:
+
+    * ``DEVICE_MEM``: Memory of a single device; does not depend on the device
+      count of the instance (VM).
+
+    * ``HOST_MEM``: Memory of the host instance (VM).
+
+    If ``--region`` is not specified, the price displayed for each instance
+    type is the lowest across all regions for both on-demand and spot
+    instances. There may be multiple regions with the same lowest price.
     """
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(
             'The --region flag is only valid when the --cloud flag is set.')
+    # This will validate 'cloud' and raise if not found.
+    clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
-    if show_all and gpu_name is not None:
+    if show_all and accelerator_str is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
 
     def _list_to_str(lst):
@@ -2933,19 +3057,21 @@ def show_gpus(
 
     def _output():
         gpu_table = log_utils.create_table(
-            ['NVIDIA_GPU', 'AVAILABLE_QUANTITIES'])
+            ['COMMON_GPU', 'AVAILABLE_QUANTITIES'])
         tpu_table = log_utils.create_table(
             ['GOOGLE_TPU', 'AVAILABLE_QUANTITIES'])
         other_table = log_utils.create_table(
             ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
-        if gpu_name is None:
+        name, quantity = None, None
+
+        if accelerator_str is None:
             result = service_catalog.list_accelerator_counts(
                 gpus_only=True,
                 clouds=cloud,
                 region_filter=region,
             )
-            # NVIDIA GPUs
+            # "Common" GPUs
             for gpu in service_catalog.get_common_gpus():
                 if gpu in result:
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
@@ -2967,22 +3093,49 @@ def show_gpus(
                 yield from other_table.get_string()
                 yield '\n\n'
             else:
+                yield ('\n\nHint: use -a/--all to see all accelerators '
+                       '(including non-common ones) and pricing.')
                 return
+        else:
+            # Parse accelerator string
+            accelerator_split = accelerator_str.split(':')
+            if len(accelerator_split) > 2:
+                raise click.UsageError(
+                    f'Invalid accelerator string {accelerator_str}. '
+                    'Expected format: <accelerator_name>[:<quantity>].')
+            if len(accelerator_split) == 2:
+                name = accelerator_split[0]
+                # Check if quantity is valid
+                try:
+                    quantity = int(accelerator_split[1])
+                    if quantity <= 0:
+                        raise ValueError(
+                            'Quantity cannot be non-positive integer.')
+                except ValueError as invalid_quantity:
+                    raise click.UsageError(
+                        f'Invalid accelerator quantity {accelerator_split[1]}. '
+                        'Expected a positive integer.') from invalid_quantity
+            else:
+                name, quantity = accelerator_str, None
 
-        # Show detailed accelerator information
         result = service_catalog.list_accelerators(gpus_only=True,
-                                                   name_filter=gpu_name,
+                                                   name_filter=name,
+                                                   quantity_filter=quantity,
                                                    region_filter=region,
                                                    clouds=cloud)
         if len(result) == 0:
-            yield f'Resources \'{gpu_name}\' not found. '
+            quantity_str = (f' with requested quantity {quantity}'
+                            if quantity else '')
+            yield f'Resources \'{name}\'{quantity_str} not found. '
             yield 'Try \'sky show-gpus --all\' '
             yield 'to show available accelerators.'
             return
 
-        yield '*NOTE*: for most GCP accelerators, '
-        yield 'INSTANCE_TYPE == (attachable) means '
-        yield 'the host VM\'s cost is not included.\n\n'
+        if cloud is None or cloud.lower() == 'gcp':
+            yield '*NOTE*: for most GCP accelerators, '
+            yield 'INSTANCE_TYPE == (attachable) means '
+            yield 'the host VM\'s cost is not included.\n\n'
+
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table_headers = [
@@ -2990,8 +3143,9 @@ def show_gpus(
                 'QTY',
                 'CLOUD',
                 'INSTANCE_TYPE',
+                'DEVICE_MEM',
                 'vCPUs',
-                'HOST_MEMORY',
+                'HOST_MEM',
                 'HOURLY_PRICE',
                 'HOURLY_SPOT_PRICE',
             ]
@@ -3005,12 +3159,14 @@ def show_gpus(
                 cpu_count = item.cpu_count
                 if pd.isna(cpu_count):
                     cpu_str = '-'
-                elif isinstance(cpu_count, float):
-                    if cpu_count.is_integer():
+                elif isinstance(cpu_count, (float, int)):
+                    if int(cpu_count) == cpu_count:
                         cpu_str = str(int(cpu_count))
                     else:
                         cpu_str = f'{cpu_count:.1f}'
-                mem_str = f'{item.memory:.0f}GB' if not pd.isna(
+                device_memory_str = (f'{item.device_memory:.0f}GB' if
+                                     not pd.isna(item.device_memory) else '-')
+                host_memory_str = f'{item.memory:.0f}GB' if not pd.isna(
                     item.memory) else '-'
                 price_str = f'$ {item.price:.3f}' if not pd.isna(
                     item.price) else '-'
@@ -3022,8 +3178,9 @@ def show_gpus(
                     item.accelerator_count,
                     item.cloud,
                     instance_type_str,
+                    device_memory_str,
                     cpu_str,
-                    mem_str,
+                    host_memory_str,
                     price_str,
                     spot_price_str,
                 ]
@@ -3045,7 +3202,7 @@ def show_gpus(
 
 @cli.group(cls=_NaturalOrderGroup)
 def storage():
-    """Storage related commands."""
+    """SkyPilot Storage CLI."""
     pass
 
 
@@ -3071,7 +3228,7 @@ def storage_ls():
               required=False,
               help='Delete all storage objects.')
 @usage_lib.entrypoint
-def storage_delete(names: Sequence[str], all: bool):  # pylint: disable=redefined-builtin
+def storage_delete(names: List[str], all: bool):  # pylint: disable=redefined-builtin
     """Delete storage objects.
 
     Examples:
@@ -3102,7 +3259,7 @@ def storage_delete(names: Sequence[str], all: bool):  # pylint: disable=redefine
 
 @cli.group(cls=_NaturalOrderGroup)
 def admin():
-    """Sky administrator commands for local clusters."""
+    """SkyPilot On-prem administrator CLI."""
     pass
 
 
@@ -3178,7 +3335,7 @@ def admin_deploy(clusterspec_yaml: str):
 
 @cli.group(cls=_NaturalOrderGroup)
 def spot():
-    """Commands for managed spot jobs."""
+    """Managed Spot commands (spot instances with auto-recovery)."""
     pass
 
 
@@ -3214,6 +3371,14 @@ def spot():
               required=False,
               help=('OS disk size in GBs.'))
 @click.option(
+    '--disk-tier',
+    default=None,
+    type=str,
+    required=False,
+    help=(
+        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
+    ))
+@click.option(
     '--detach-run',
     '-d',
     default=False,
@@ -3221,15 +3386,16 @@ def spot():
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
 @click.option(
-    '--retry-until-up',
-    '-r',
-    default=False,
+    '--retry-until-up/--no-retry-until-up',
+    '-r/-no-r',
+    default=None,
     is_flag=True,
     required=False,
-    help=('Whether to retry provisioning infinitely until the cluster is up, '
-          'if we fail to launch the cluster on any possible region/cloud due '
-          'to unavailability errors. This applies to launching the the spot '
-          'clusters (both initial and recovery attempts).'))
+    help=('(Default: True; this flag is deprecated and will be removed in a '
+          'future release.) Whether to retry provisioning infinitely until the '
+          'cluster is up, if unavailability errors are encountered. This '
+          'applies to launching the spot clusters (both the initial and any '
+          'recovery attempts), not the spot controller.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3255,6 +3421,7 @@ def spot_launch(
     spot_recovery: Optional[str],
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
+    disk_tier: Optional[str],
     detach_run: bool,
     retry_until_up: bool,
     yes: bool,
@@ -3273,10 +3440,7 @@ def spot_launch(
 
       sky spot launch 'echo hello!'
     """
-    if name is None:
-        name = backend_utils.generate_cluster_name()
-
-    task = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
         workdir=workdir,
@@ -3292,24 +3456,52 @@ def spot_launch(
         image_id=image_id,
         env=env,
         disk_size=disk_size,
+        disk_tier=disk_tier,
         spot_recovery=spot_recovery,
     )
+    # Deprecation.
+    if retry_until_up is not None:
+        flag_str = '--retry-until-up'
+        if not retry_until_up:
+            flag_str = '--no-retry-until-up'
+        click.secho(
+            f'Flag {flag_str} is deprecated and will be removed in a '
+            'future release (managed spot jobs will always be retried). '
+            'Please file an issue if this does not work for you.',
+            fg='yellow')
+    else:
+        retry_until_up = True
+
+    if not isinstance(task_or_dag, sky.Dag):
+        assert isinstance(task_or_dag, sky.Task), task_or_dag
+        with sky.Dag() as dag:
+            dag.add(task_or_dag)
+            dag.name = task_or_dag.name
+    else:
+        dag = task_or_dag
+
+    if name is not None:
+        dag.name = name
+
+    dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
     if not yes:
-        prompt = f'Launching a new spot task {name!r}. Proceed?'
+        prompt = f'Launching a new spot job {dag.name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    # We try our best to validate the cluster name before we launch the task.
-    # If the cloud is not specified, this will only validate the cluster name
-    # against the regex, and the cloud-specific validation will be done by
-    # the spot controller when actually launching the spot cluster.
-    resources = list(task.resources)[0]
-    task_cloud = (resources.cloud
-                  if resources.cloud is not None else clouds.Cloud)
-    task_cloud.check_cluster_name_is_valid(name)
+    for task in dag.tasks:
+        # We try our best to validate the cluster name before we launch the
+        # task. If the cloud is not specified, this will only validate the
+        # cluster name against the regex, and the cloud-specific validation will
+        # be done by the spot controller when actually launching the spot
+        # cluster.
+        resources = list(task.resources)[0]
+        task_cloud = (resources.cloud
+                      if resources.cloud is not None else clouds.Cloud)
+        task_cloud.check_cluster_name_is_valid(name)
 
-    sky.spot_launch(task,
+    sky.spot_launch(dag,
                     name,
                     detach_run=detach_run,
                     retry_until_up=retry_until_up)
@@ -3341,36 +3533,63 @@ def spot_launch(
 def spot_queue(all: bool, refresh: bool, skip_finished: bool):
     """Show statuses of managed spot jobs.
 
-    \b
     Each spot job can have one of the following statuses:
 
-    \b
-    - SUBMITTED: The job is submitted to the spot controller.
-    - STARTING: The job is starting (starting a spot cluster).
-    - RUNNING: The job is running.
-    - RECOVERING: The spot cluster is recovering from a preemption.
-    - SUCCEEDED: The job succeeded.
-    - FAILED: The job failed due to an error from the job itself.
-    - FAILED_NO_RESOURCES: The job failed due to resources being unavailable
-        after a maximum number of retry attempts.
-    - FAILED_CONTROLLER: The job failed due to an unexpected error in the spot
-        controller.
-    - CANCELLED: The job was cancelled by the user.
+    - ``PENDING``: Job is waiting for a free slot on the spot controller to be
+      accepted.
 
-    If the job failed, either due to user code or spot unavailability, the error
-    log can be found with ``sky spot logs --controller job_id``.
+    - ``SUBMITTED``: Job is submitted to and accepted by the spot controller.
+
+    - ``STARTING``: Job is starting (provisioning a spot cluster).
+
+    - ``RUNNING``: Job is running.
+
+    - ``RECOVERING``: The spot cluster is recovering from a preemption.
+
+    - ``SUCCEEDED``: Job succeeded.
+
+    - ``CANCELLING``: Job was requested to be cancelled by the user, and the
+      cancellation is in progress.
+
+    - ``CANCELLED``: Job was cancelled by the user.
+
+    - ``FAILED``: Job failed due to an error from the job itself.
+
+    - ``FAILED_SETUP``: Job failed due to an error from the job's ``setup``
+      commands.
+
+    - ``FAILED_PRECHECKS``: Job failed due to an error from our prechecks such
+      as invalid cluster names or an infeasible resource is specified.
+
+    - ``FAILED_NO_RESOURCE``: Job failed due to resources being unavailable
+      after a maximum number of retries.
+
+    - ``FAILED_CONTROLLER``: Job failed due to an unexpected error in the spot
+      controller.
+
+    If the job failed, either due to user code or spot unavailability, the
+    error log can be found with ``sky spot logs --controller``, e.g.:
+
+    .. code-block:: bash
+
+      sky spot logs --controller job_id
+
+    This also shows the logs for provisioning and any preemption and recovery
+    attempts.
 
     (Tip) To fetch job statuses every 60 seconds, use ``watch``:
 
     .. code-block:: bash
 
       watch -n60 sky spot queue
+
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
         _, msg = _get_spot_jobs(refresh=refresh,
                                 skip_finished=skip_finished,
-                                show_all=all)
+                                show_all=all,
+                                is_called_by_user=True)
     if not skip_finished:
         in_progress_only_hint = ''
     else:
@@ -3407,20 +3626,19 @@ _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     """Cancel managed spot jobs.
 
-    You can provide either a job name or a list of job ids to be cancelled.
+    You can provide either a job name or a list of job IDs to be cancelled.
     They are exclusive options.
+
     Examples:
 
     .. code-block:: bash
 
-        # Cancel managed spot job with name 'my-job'
-        $ sky spot cancel -n my-job
-
-        # Cancel managed spot jobs with IDs 1, 2, 3
-        $ sky spot cancel 1 2 3
-
+      # Cancel managed spot job with name 'my-job'
+      $ sky spot cancel -n my-job
+      \b
+      # Cancel managed spot jobs with IDs 1, 2, 3
+      $ sky spot cancel 1 2 3
     """
-
     _, handle = spot_lib.is_spot_controller_up(
         'All managed spot jobs should have finished.')
     if handle is None:
@@ -3529,7 +3747,7 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
 
 @cli.group(cls=_NaturalOrderGroup)
 def bench():
-    """Sky Benchmark related commands."""
+    """SkyPilot Benchmark CLI."""
     pass
 
 
@@ -3555,6 +3773,14 @@ def bench():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
+@click.option(
+    '--disk-tier',
+    default=None,
+    type=str,
+    required=False,
+    help=(
+        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
+    ))
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -3586,6 +3812,7 @@ def benchmark_launch(
     image_id: Optional[str],
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
+    disk_tier: Optional[str],
     idle_minutes_to_autostop: Optional[int],
     yes: bool,
 ) -> None:
@@ -3642,6 +3869,9 @@ def benchmark_launch(
         if disk_size is not None:
             if any('disk_size' in candidate for candidate in candidates):
                 raise click.BadParameter(f'disk_size {message}')
+        if disk_tier is not None:
+            if any('disk_tier' in candidate for candidate in candidates):
+                raise click.BadParameter(f'disk_tier {message}')
 
     # The user can specify the benchmark candidates in either of the two ways:
     # 1. By specifying resources.candidates in the YAML.
@@ -3684,7 +3914,8 @@ def benchmark_launch(
                                              gpus=override_gpu,
                                              use_spot=use_spot,
                                              image_id=image_id,
-                                             disk_size=disk_size)
+                                             disk_size=disk_size,
+                                             disk_tier=disk_tier)
     resources_config.update(override_params)
     if 'cloud' in resources_config:
         cloud = resources_config.pop('cloud')
@@ -4055,6 +4286,7 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
             bucket_name = benchmark_state.get_benchmark_from_name(
                 benchmark)['bucket']
             handle = global_user_state.get_handle_from_storage_name(bucket_name)
+            assert handle is not None, bucket_name
             bucket_type = list(handle.sky_stores.keys())[0]
             benchmark_utils.remove_benchmark_logs(benchmark, bucket_name,
                                                   bucket_type)

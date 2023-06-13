@@ -26,6 +26,13 @@ US_REGIONS = [
     # 'WestUS3',   # WestUS3 pricing table is broken as of 2021/11.
 ]
 
+# Exclude the following regions as they do not have ProductName in the
+# pricing table. Reference: #1768
+EXCLUDED_REGIONS = {
+    'eastus2euap',
+    'centraluseuap',
+}
+
 
 def get_regions() -> List[str]:
     """Get all available regions."""
@@ -242,7 +249,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     region_filter = get_regions() if args.all_regions else US_REGIONS
-    region_filter = set(region_filter)
+    region_filter = set(region_filter) - EXCLUDED_REGIONS
 
     instance_df = get_all_regions_instance_types_df(region_filter)
     os.makedirs('azure', exist_ok=True)
