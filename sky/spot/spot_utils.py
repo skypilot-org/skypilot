@@ -464,7 +464,10 @@ def format_job_table(tasks: List[Dict[str, Any]],
 
     all_tasks = tasks
     if max_jobs is not None:
-        all_tasks = tasks[:max_jobs]
+        all_job_ids = set(task['job_id'] for task in tasks)
+        all_job_ids = sorted(all_job_ids, reverse=True)
+        all_job_ids = all_job_ids[:max_jobs]
+        all_tasks = [task for task in tasks if task['job_id'] in all_job_ids]
     jobs = collections.defaultdict(list)
     for task in all_tasks:
         # The tasks within the same job_id are already sorted

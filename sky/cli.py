@@ -1524,7 +1524,7 @@ def _get_spot_jobs(
             # Make the call silent
             spot_jobs = core.spot_queue(refresh=refresh,
                                         skip_finished=skip_finished)
-        num_in_progress_jobs = len(spot_jobs)
+        num_in_progress_jobs = len(set(job['job_id'] for job in spot_jobs))
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         if controller_status == global_user_state.ClusterStatus.INIT:
