@@ -3,7 +3,7 @@
 Python API
 =================
 
-SkyPilot offers a programmatic API in Python, which is used under the hood by the :ref:`CLI <cli-reference>`.
+SkyPilot offers a programmatic API in Python, which is used under the hood by the :ref:`CLI <cli>`.
 
 .. note::
 

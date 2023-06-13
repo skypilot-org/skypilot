@@ -245,7 +245,7 @@ If your cloud account has not been used to launch instances before, the
 respective quotas are likely set to zero or a low limit.  This is especially
 true for GPU instances.
 
-Please follow :ref:`quota` to check quotas and request quota
+Please follow :ref:`Requesting Quota Increase <quota>` to check quotas and request quota
 increases before proceeding.
 
 .. _docker-image:
