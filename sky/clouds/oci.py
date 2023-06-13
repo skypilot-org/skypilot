@@ -496,4 +496,5 @@ class OCI(clouds.Cloud):
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
                                 disk_tier: str) -> None:
+        # All the disk_tier are supported for any instance_type
         del instance_type, disk_tier  # unused
