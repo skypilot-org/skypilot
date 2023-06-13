@@ -20,6 +20,7 @@ AWS
 .. _cloud-permissions-aws-user-creation:
 
 User Creation
+~~~~~~~~~~~~~~
 
 AWS accounts can be attached with a policy that limits the permissions of the account. Follow these steps to create an AWS user with the minimum permissions required by SkyPilot:
 
@@ -29,12 +30,14 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
     :width: 80%
     :align: center
     :alt: AWS Add User
+
 2. In the **Permissions options** section, select "Attach existing policies directly"; Click on the **Create Policy**. This opens another window to create an IAM policy.
 
 .. image:: ../images/screenshots/aws/aws-create-policy.png
     :width: 80%
     :align: center
     :alt: AWS Create Policy
+
 3. Choose "JSON" tab and place the following policy into the box. Replace the ``<account-ID-without-hyphens>`` with your AWS account ID. You can find your AWS account ID by clicking on the upper right corner of the console.
 
 .. code-block:: json
@@ -104,6 +107,7 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
             }
         ]
     }
+
 4. Click **Next: Tags** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
 5. Go back to the previous window and click on the refresh button, and you can now search for the policy you just created.
 
@@ -111,6 +115,7 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
     :width: 80%
     :align: center
     :alt: AWS Add Policy
+
 6. [Optional] If you would like to have your users access the s3 bucket. You can additionally attach the S3 access, such as the "AmazonS3FullAccess" policy.
 
 .. image:: ../images/screenshots/aws/aws-s3-policy.png
@@ -154,6 +159,7 @@ With the steps above you are almost ready to have the users in your organization
                 ],
                 "Resource": "arn:aws:iam::<account-ID-without-hyphens>:instance-profile/skypilot-v1"
             }
+
 2. Alternatively, you can create the "skypilot-v1" service account manually. The following section describe how to create the service account manually.
 
 

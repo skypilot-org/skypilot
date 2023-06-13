@@ -56,7 +56,7 @@ Otherwise, configure access to at least one cloud, then run ``sky check``:
 Amazon Web Services (AWS)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To get the **AWS access key** required by :code:`aws configure`, please go to the `AWS IAM Management Console <https://us-east-1.console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials>`_ and click on the "Access keys" dropdown (detailed instructions `here <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_). The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
+To get the **AWS access key** required by :code:`aws configure`, please go to the `AWS IAM Management Console <https://us-east-1.console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials>`_ and click on the "Access keys" dropdown (detailed instructions `here <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`__). The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
 
 .. code-block:: console
 
@@ -66,7 +66,7 @@ To get the **AWS access key** required by :code:`aws configure`, please go to th
   $ # Configure your AWS credentials
   $ aws configure
 
-Note: If you are using AWS IAM Identity Center (AWS SSO), you will need :code:`pip install awscli>=1.27.10`. See `here <https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html>`_ for instructions on how to configure AWS SSO.
+Note: If you are using AWS IAM Identity Center (AWS SSO), you will need :code:`pip install awscli>=1.27.10`. See `here <https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html>`__ for instructions on how to configure AWS SSO.
 
 [**Optional**] To create a new AWS user with minimal permissions for SkyPilot, see :ref:`AWS User Creation <cloud-permissions-aws>`.
 
@@ -127,7 +127,7 @@ To access IBM's services, store the following fields in ``~/.ibm/credentials.yam
   iam_api_key: <user_personal_api_key>
   resource_group_id: <resource_group_user_is_a_member_of>
 
-- Create a new API key by following `this guide <https://www.ibm.com/docs/en/app-connect/container?topic=servers-creating-cloud-api-key>`_.
+- Create a new API key by following `this guide <https://www.ibm.com/docs/en/app-connect/container?topic=servers-creating-cloud-api-key>`__.
 - Obtain a resource group's ID from the `web console <https://cloud.ibm.com/account/resource-groups>`_.
 
 .. note::
@@ -138,7 +138,7 @@ To access IBM's services, store the following fields in ``~/.ibm/credentials.yam
 Oracle Cloud Infrastructure (OCI)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`_. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
+To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`__. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
 
 .. code-block:: text
 
@@ -245,7 +245,7 @@ If your cloud account has not been used to launch instances before, the
 respective quotas are likely set to zero or a low limit.  This is especially
 true for GPU instances.
 
-Please follow :ref:`Requesting Quota Increase` to check quotas and request quota
+Please follow :ref:`quota` to check quotas and request quota
 increases before proceeding.
 
 .. _docker-image:
@@ -262,7 +262,7 @@ its dependencies installed for users to quickly try out SkyPilot. You can simply
   $ docker exec -it sky /bin/bash
 
 If your cloud CLIs are already setup, your credentials will be mounted to the
-container and you can proceed to :ref:`Quickstart <Quickstart>`. Else you can
+container and you can proceed to :ref:`Quickstart <quickstart>`. Else you can
 follow the instructions in :ref:`Cloud account setup <cloud-account-setup>`
 inside the container to setup your cloud accounts.
 

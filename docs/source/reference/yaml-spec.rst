@@ -5,7 +5,7 @@ Task YAML
 
 SkyPilot provides an intuitive YAML interface to specify a task (resource requirements, setup commands, run commands, file mounts, storage mounts, and so on).
 
-Task YAMLs can be used with the :ref:`CLI <cli>`, or the programmatic API (:meth:`sky.Task.from_yaml`).
+Task YAMLs can be used with the :ref:`CLI <cli-reference>`, or the programmatic API (:meth:`sky.Task.from_yaml`).
 
 Available fields:
 
