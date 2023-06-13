@@ -5,7 +5,7 @@ SkyPilot On-prem
 
 .. note::
 
-   This feature has been **DEPRECATED**, and under the process of re-implementing. Please stay tuned for updates.
+   This feature has been **DEPRECATED**, and is under the process of re-implementation. Please stay tuned for updates.
 
 SkyPilot On-prem is a lightweight cluster manager and job scheduler for local clusters. SkyPilot On-prem enables multiple users to utilize SkyPilot's :ref:`job submission <job-queue>` feature to share resources on the same local cluster.
 

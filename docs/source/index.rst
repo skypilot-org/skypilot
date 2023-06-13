@@ -98,10 +98,18 @@ Documentation
 
    examples/iterative-dev-project
    reference/interactive-nodes
-   reference/clouds-setup/index
    reference/faq
    reference/logging
    reference/local/index
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Cloud Administration and Usage
+
+   cloud-setup/cloud-permissions
+   cloud-setup/cloud-login
+   cloud-setup/quota
+
 
 .. toctree::
    :maxdepth: 1

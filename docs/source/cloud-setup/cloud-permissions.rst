@@ -26,14 +26,14 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
 
 1. Open the `IAM dashboard <https://us-east-1.console.aws.amazon.com/iamv2/home#/home>`_ in the AWS console and click on the **Users** tab. Then, click **Add users** and enter the user's name. Click **Next**.
 
-.. image:: ../../images/screenshots/aws/aws-add-user.png
+.. image:: ../images/screenshots/aws/aws-add-user.png
     :width: 80%
     :align: center
     :alt: AWS Add User
 
 2. In the **Permissions options** section, select "Attach existing policies directly"; Click on the **Create Policy**. This opens another window to create an IAM policy.
 
-.. image:: ../../images/screenshots/aws/aws-create-policy.png
+.. image:: ../images/screenshots/aws/aws-create-policy.png
     :width: 80%
     :align: center
     :alt: AWS Create Policy
@@ -111,14 +111,14 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
 4. Click **Next: Tags** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
 5. Go back to the previous window and click on the refresh button, and you can now search for the policy you just created.
 
-.. image:: ../../images/screenshots/aws/aws-add-policy.png
+.. image:: ../images/screenshots/aws/aws-add-policy.png
     :width: 80%
     :align: center
     :alt: AWS Add Policy
 
 6. [Optional] If you would like to have your users access S3 buckets: You can additionally attach S3 access, such as the "AmazonS3FullAccess" policy.
 
-.. image:: ../../images/screenshots/aws/aws-s3-policy.png
+.. image:: ../images/screenshots/aws/aws-s3-policy.png
     :width: 80%
     :align: center
     :alt: AWS Add S3 Policy
@@ -127,9 +127,9 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
 
 With the steps above you are almost ready to have the users in your organization to use SkyPilot with the minimal permissions.
 
-**One more thing** to do is to create a single iam role ``skypilot-v1`` for all users in your organization. There are two ways to accomplish this:
+**One more thing** to do is to create a single IAM role ``skypilot-v1`` for all users in your organization. There are two ways to accomplish this:
 
-1. Add additional permission for the user you created to allow SkyPilot to automatically create the iam role using the user account. You can modify the last two rules in the policy you created in step 4 with the highlighted four lines:
+1. Add additional permission for the user you created to allow SkyPilot to automatically create the IAM role using the user account. You can modify the last two rules in the policy you created in step 4 with the highlighted four lines:
 
 .. note::
 
@@ -160,7 +160,7 @@ With the steps above you are almost ready to have the users in your organization
                 "Resource": "arn:aws:iam::<account-ID-without-hyphens>:instance-profile/skypilot-v1"
             }
 
-2. Alternatively, you can create the ``skypilot-v1`` iam role manually. The following section describes how to create the iam role manually.
+2. Alternatively, you can create the ``skypilot-v1`` IAM role manually. The following section describes how to create the IAM role manually.
 
 
 IAM Role Creation
@@ -168,24 +168,24 @@ IAM Role Creation
 
 .. note::
 
-    If you already have an iam role called ``skypilot-v1`` in your AWS account, it is likely created by SkyPilot automatically, and you can skip this section.
+    If you already have an IAM role called ``skypilot-v1`` in your AWS account, it is likely created by SkyPilot automatically, and you can skip this section.
 
 1. Click the “Roles” tab in the IAM console, and click on the “Create role”
 
-.. image:: ../../images/screenshots/aws/aws-add-role.png
+.. image:: ../images/screenshots/aws/aws-add-role.png
     :width: 80%
     :align: center
     :alt: AWS Add Role
 
 2. Select the following entity and common use cases and Next
 
-.. image:: ../../images/screenshots/aws/aws-add-role-entity.png
+.. image:: ../images/screenshots/aws/aws-add-role-entity.png
     :width: 80%
     :align: center
     :alt: AWS Role Entity
 
 3. Select the policy you created in step 4 in :ref:`User Creation <cloud-permissions-aws-user-creation>` (i.e. the previous step 6) and click on **Next: Tags**.
-4. [Optional] If you would like to let the user access S3 buckets on the VM they created, you can additionally attach the s3 access permission to the iam role, such as the "AmazonS3FullAccess" policy.
+4. [Optional] If you would like to let the user access S3 buckets on the VM they created, you can additionally attach the s3 access permission to the IAM role, such as the "AmazonS3FullAccess" policy.
 5. Click Next, and name your role with “skypilot-v1” and Click “Create role”
 
 
