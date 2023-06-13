@@ -313,11 +313,22 @@ class OCINodeProvider(NodeProvider):
                     display_name=
                     f"{self.cluster_name}_{node_type}_{batch_id}_{seq}",
                     freeform_tags=vm_tags,
-                    image_id=node_config["ImageId"],
                     metadata={
                         "ssh_authorized_keys": node_config["AuthorizedKey"]
                     },
-                    subnet_id=vcn,
+                    source_details=oci_adaptor.get_oci(
+                    ).core.models.InstanceSourceViaImageDetails(
+                        source_type="image",
+                        image_id=node_config["ImageId"],
+                        boot_volume_size_in_gbs=node_config["BootVolumeSize"],
+                        boot_volume_vpus_per_gb=int(
+                            node_config["BootVolumePerf"]),
+                    ),
+                    create_vnic_details=oci_adaptor.get_oci(
+                    ).core.models.CreateVnicDetails(
+                        assign_public_ip=True,
+                        subnet_id=vcn,
+                    ),
                     shape_config=machine_shape_config,
                     preemptible_instance_config=preempitible_config,
                 ))
