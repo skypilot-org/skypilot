@@ -1,0 +1,15 @@
+name: dag-name
+
+---
+name: simple-task
+
+resources:
+  cpus: 2+
+  memory: 8+
+
+setup: |
+  echo setup for task 1
+
+run: |
+  echo run for task 1
+

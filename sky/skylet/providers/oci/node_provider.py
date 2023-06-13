@@ -166,18 +166,6 @@ class OCINodeProvider(NodeProvider):
             TAG_RAY_USER_NODE_TYPE,
         ]
         filters = {tag: tags[tag] for tag in VALIDITY_TAGS if tag in tags}
-        running_nodes = self.running_nodes(filters)
-        if len(running_nodes) > 0:
-            logger.info(
-                f"Running nodes found {len(running_nodes)}: {list(running_nodes)}. "
-                " Reuse existing running nodes. ")
-            count -= len(running_nodes)
-
-        if count <= 0:
-            logger.info(
-                f"No need to create new node since there are enough running nodes"
-            )
-            return
 
         # Starting stopped nodes if cache_stopped_nodes=True
         if self.cache_stopped_nodes:
@@ -302,7 +290,8 @@ class OCINodeProvider(NodeProvider):
                 TAG_RAY_CLUSTER_NAME: self.cluster_name,
                 "sky_spot_flag": str(node_config["Preemptible"]).lower(),
             }
-            batch_id = datetime.now().strftime("%Y%m%d%H%M%S")
+            # Use UTC time so that header & worker nodes use same rule
+            batch_id = datetime.utcnow().strftime("%Y%m%d%H%M%S")
             node_type = tags[TAG_RAY_NODE_KIND]
 
             oci_query_helper.subscribe_image(

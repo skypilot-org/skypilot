@@ -63,9 +63,14 @@ def pytest_addoption(parser):
         'cloud in the list of the clouds to be run.')
 
     parser.addoption('--terminate-on-failure',
+                     dest='terminate_on_failure',
                      action='store_true',
-                     default=False,
+                     default=True,
                      help='Terminate test VMs on failure.')
+    parser.addoption('--no-terminate-on-failure',
+                     dest='terminate_on_failure',
+                     action='store_false',
+                     help='Do not terminate test VMs on failure.')
 
 
 def pytest_configure(config):
