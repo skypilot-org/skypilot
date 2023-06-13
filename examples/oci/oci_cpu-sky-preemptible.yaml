@@ -1,4 +1,4 @@
-name: cpu-task
+name: cpu-task2
 
 resources:
   # Optional; if left out, automatically pick the cheapest cloud.
@@ -6,13 +6,13 @@ resources:
 
   region: ap-seoul-1
   
-  zone: bxtG:AP-SEOUL-1-AD-1
+  # zone: AP-SEOUL-1-AD-1
   
-  #instance_type: VM.Standard.E4.Flex
+  instance_type: VM.Standard.E4.Flex$_2_16
 
   cpus: 2
 
-  image_id: skypilot:oci-ubuntu-20_04
+  image_id: skypilot:cpu-ubuntu-2004
 
   use_spot: True
 
