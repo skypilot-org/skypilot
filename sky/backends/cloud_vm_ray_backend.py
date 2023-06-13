@@ -367,7 +367,7 @@ class RayCodeGen:
                         scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(
                             placement_group=setup_pg,
                             placement_group_bundle_index=i)
-                        ) \\
+                    ) \\
                     .remote(
                         setup_cmd,
                         os.path.expanduser({setup_log_path!r}),
@@ -471,10 +471,11 @@ class RayCodeGen:
             num_gpus = list(ray_resources_dict.values())[0]
             options.append(f'resources={json.dumps(ray_resources_dict)}')
 
-            # `num_gpus` should be empty when the accelerator is not GPU.
-            # FIXME: use a set of GPU types.
             resources_key = list(ray_resources_dict.keys())[0]
             if 'tpu' not in resources_key.lower():
+                # `num_gpus` should be empty when the accelerator is not GPU.
+                # FIXME: use a set of GPU types, instead of 'tpu' in the key.
+
                 # Passing this ensures that the Ray remote task gets
                 # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
                 # would be force-set to empty by Ray.
