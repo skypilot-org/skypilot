@@ -43,7 +43,7 @@ class oci_conf:
 
     # disk_tier to OCI VPU mapping
     BOOT_VOLUME_VPU = {
-        None: 10,  # Default, Balanced performance
+        None: 20,  # Default to medium
         "low": 10,  # 60 IOPS/GB, Balanced performance
         "medium": 20,  # 75 IOPS/GB, Higher performance
         "high": 50,  # 120 IOPS/GB, Ultra-high performance
