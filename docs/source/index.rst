@@ -96,12 +96,12 @@ Documentation
    :maxdepth: 1
    :caption: User Guides
 
-   reference/local/index
    examples/iterative-dev-project
    reference/interactive-nodes
    reference/quota
    reference/logging
    reference/faq
+   reference/local/index
 
 .. toctree::
    :maxdepth: 1
