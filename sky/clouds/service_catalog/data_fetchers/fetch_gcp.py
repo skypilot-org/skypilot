@@ -32,10 +32,6 @@ TPU_SERVICE_ID = 'E000-3F24-B8AA'
 # The number of digits to round the price to.
 PRICE_ROUNDING = 5
 
-# Refer to: https://github.com/skypilot-org/skypilot/issues/1006
-# G2 series has L4 GPU, which is not supported by SkyPilot yet
-UNSUPPORTED_SERIES = ['f1', 'm2', 'g2']
-
 # This zone is only for TPU v4, and does not appear in the skus yet.
 TPU_V4_ZONES = ['us-central2-b']
 # TPU v3 pods are available in us-east1-d, but hidden in the skus.
@@ -62,6 +58,9 @@ TPU_V4_HOST_DF = pd.read_csv(
  """)))
 
 # TODO(woosuk): Make this more robust.
+# Refer to: https://github.com/skypilot-org/skypilot/issues/1006
+# G2 series has L4 GPU, which is not supported by SkyPilot yet
+# Unsupported Series: 'f1', 'm2', 'g2'
 SERIES_TO_DISCRIPTION = {
     'a2': 'A2 Instance',
     'c2': 'Compute optimized',
@@ -184,7 +183,8 @@ def _get_machine_types(region_prefix: str) -> pd.DataFrame:
 def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
     df = _get_machine_types(region_prefix)
     # Drop the unsupported series.
-    df = df[~df['InstanceType'].str.startswith(tuple(UNSUPPORTED_SERIES))]
+    df = df[df['InstanceType'].str.startswith(
+        tuple(f'{series}-' for series in SERIES_TO_DISCRIPTION))]
     df = df[~df['AvailabilityZone'].str.startswith(tuple(TPU_V4_ZONES))]
 
     # TODO(woosuk): Make this more efficient.

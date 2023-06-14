@@ -37,7 +37,7 @@ import subprocess
 import sys
 import textwrap
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import click
 import colorama
@@ -63,6 +63,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import log_utils
 from sky.utils import common_utils
+from sky.utils import dag_utils
 from sky.utils import command_runner
 from sky.utils import schemas
 from sky.utils import subprocess_utils
@@ -935,7 +936,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     try:
         with open(entrypoint, 'r') as f:
             try:
-                config = yaml.safe_load(f)
+                config = list(yaml.safe_load_all(f))[0]
                 if isinstance(config, str):
                     # 'sky exec cluster ./my_script.sh'
                     is_yaml = False
@@ -967,7 +968,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     return is_yaml, config
 
 
-def _make_task_from_entrypoint_with_overrides(
+def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: List[str],
     *,
     name: Optional[str] = None,
@@ -988,7 +989,13 @@ def _make_task_from_entrypoint_with_overrides(
     env: Optional[List[Tuple[str, str]]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
-) -> sky.Task:
+) -> Union[sky.Task, sky.Dag]:
+    """Creates a task or a dag from an entrypoint with overrides.
+
+    Returns:
+        A dag iff the entrypoint is YAML and contains more than 1 task.
+        Otherwise, a task.
+    """
     entrypoint = ' '.join(entrypoint)
     is_yaml, yaml_config = _check_yaml(entrypoint)
     entrypoint: Optional[str]
@@ -1004,18 +1011,6 @@ def _make_task_from_entrypoint_with_overrides(
             click.secho('Task from command: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
 
-    if is_yaml:
-        assert entrypoint is not None
-        usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-        task = sky.Task.from_yaml(entrypoint)
-    else:
-        task = sky.Task(name='sky-cmd', run=entrypoint)
-        task.set_resources({sky.Resources()})
-
-    # Override.
-    if workdir is not None:
-        task.workdir = workdir
-
     if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
         cloud = 'local'
 
@@ -1030,6 +1025,30 @@ def _make_task_from_entrypoint_with_overrides(
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier)
+
+    if is_yaml:
+        assert entrypoint is not None
+        usage_lib.messages.usage.update_user_task_yaml(entrypoint)
+        dag = dag_utils.load_chain_dag_from_yaml(entrypoint)
+        if len(dag.tasks) > 1:
+            # When the dag has more than 1 task. It is unclear how to
+            # override the params for the dag. So we just ignore the
+            # override params.
+            if override_params:
+                click.secho(
+                    f'WARNING: override params {override_params} are ignored, '
+                    'since the yaml file contains multiple tasks.',
+                    fg='yellow')
+            return dag
+        task = sky.Task.from_yaml(entrypoint)
+    else:
+        task = sky.Task(name='sky-cmd', run=entrypoint)
+        task.set_resources({sky.Resources()})
+
+    # Override.
+    if workdir is not None:
+        task.workdir = workdir
+
     # Spot launch specific.
     if spot_recovery is not None:
         if spot_recovery.lower() == 'none':
@@ -1291,7 +1310,7 @@ def launch(
             'support for spot instances on Azure. Please file '
             'an issue if you need this feature.')
 
-    task = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         cluster=cluster,
@@ -1310,6 +1329,12 @@ def launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
     )
+    if isinstance(task_or_dag, sky.Dag):
+        raise click.UsageError(
+            'YAML specifies a DAG which is only supported by '
+            '`sky spot launch`. `sky launch` supports a '
+            'single task only.')
+    task = task_or_dag
 
     backend: backends.Backend
     if backend_name == backends.LocalDockerBackend.NAME:
@@ -1439,7 +1464,7 @@ def exec(
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
 
-    task = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         cluster=cluster,
@@ -1456,6 +1481,11 @@ def exec(
         num_nodes=num_nodes,
         env=env,
     )
+
+    if isinstance(task_or_dag, sky.Dag):
+        raise click.UsageError('YAML specifies a DAG, while `sky exec` '
+                               'supports a single task only.')
+    task = task_or_dag
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
@@ -1508,9 +1538,10 @@ def _get_spot_jobs(
             if controller_status is None:
                 msg += (f' (See: {colorama.Style.BRIGHT}sky spot -h'
                         f'{colorama.Style.RESET_ALL})')
-    except RuntimeError:
+    except RuntimeError as e:
         msg = ('Failed to query spot jobs due to connection '
-               'issues. Try again later.')
+               'issues. Try again later. '
+               f'Details: {common_utils.format_exception(e, use_bracket=True)}')
     except Exception as e:  # pylint: disable=broad-except
         msg = ('Failed to query spot jobs: '
                f'{common_utils.format_exception(e, use_bracket=True)}')
@@ -1682,7 +1713,9 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                     f'* {job_info}To see all spot jobs: {colorama.Style.BRIGHT}'
                     f'sky spot queue{colorama.Style.RESET_ALL}')
 
-        if num_pending_autostop > 0:
+        if num_pending_autostop > 0 and not refresh:
+            # Don't print this hint if there's no pending autostop or user has
+            # already passed --refresh.
             plural_and_verb = ' has'
             if num_pending_autostop > 1:
                 plural_and_verb = 's have'
@@ -3407,10 +3440,7 @@ def spot_launch(
 
       sky spot launch 'echo hello!'
     """
-    if name is None:
-        name = backend_utils.generate_cluster_name()
-
-    task = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
         workdir=workdir,
@@ -3442,21 +3472,36 @@ def spot_launch(
     else:
         retry_until_up = True
 
+    if not isinstance(task_or_dag, sky.Dag):
+        assert isinstance(task_or_dag, sky.Task), task_or_dag
+        with sky.Dag() as dag:
+            dag.add(task_or_dag)
+            dag.name = task_or_dag.name
+    else:
+        dag = task_or_dag
+
+    if name is not None:
+        dag.name = name
+
+    dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
+
     if not yes:
-        prompt = f'Launching a new spot task {name!r}. Proceed?'
+        prompt = f'Launching a new spot job {dag.name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    # We try our best to validate the cluster name before we launch the task.
-    # If the cloud is not specified, this will only validate the cluster name
-    # against the regex, and the cloud-specific validation will be done by
-    # the spot controller when actually launching the spot cluster.
-    resources = list(task.resources)[0]
-    task_cloud = (resources.cloud
-                  if resources.cloud is not None else clouds.Cloud)
-    task_cloud.check_cluster_name_is_valid(name)
+    for task in dag.tasks:
+        # We try our best to validate the cluster name before we launch the
+        # task. If the cloud is not specified, this will only validate the
+        # cluster name against the regex, and the cloud-specific validation will
+        # be done by the spot controller when actually launching the spot
+        # cluster.
+        resources = list(task.resources)[0]
+        task_cloud = (resources.cloud
+                      if resources.cloud is not None else clouds.Cloud)
+        task_cloud.check_cluster_name_is_valid(name)
 
-    sky.spot_launch(task,
+    sky.spot_launch(dag,
                     name,
                     detach_run=detach_run,
                     retry_until_up=retry_until_up)

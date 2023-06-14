@@ -131,7 +131,10 @@ class oci_query_helper:
             return skypilot_compartment
 
         # If not specified, we try to find the one skypilot-compartment
-        root = oci_adaptor.get_oci_config(region)['tenancy']
+        # Pass-in a profile parameter so that multiple profile in oci
+        # config file is supported (2023/06/09).
+        root = oci_adaptor.get_oci_config(region,
+                                          oci_conf.get_profile())['tenancy']
         list_compartments_response = oci_adaptor.get_identity_client(
             region,
             oci_conf.get_profile()).list_compartments(compartment_id=root,
