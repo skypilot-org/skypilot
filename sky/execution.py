@@ -39,6 +39,7 @@ from sky.data import storage as storage_lib
 from sky.usage import usage_lib
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import dag_utils
 from sky.utils import env_options, timeline
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -84,6 +85,7 @@ def _convert_to_dag(entrypoint: Any) -> 'sky.Dag':
         entrypoint = copy.deepcopy(entrypoint)
         with sky.Dag() as dag:
             dag.add(entrypoint)
+            dag.name = entrypoint.name
         return dag
     else:
         raise TypeError(
@@ -546,55 +548,50 @@ def spot_launch(
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
     entrypoint = task
-    task_uuid = str(uuid.uuid4().hex[:4])
+    dag_uuid = str(uuid.uuid4().hex[:4])
 
     dag = _convert_to_dag(entrypoint)
-    assert len(dag.tasks) == 1, ('Only one task is allowed in a spot launch.',
-                                 dag)
-    task = dag.tasks[0]
-    assert len(task.resources) == 1, task
-    resources = list(task.resources)[0]
+    assert dag.is_chain(), ('Only single-task or chain DAG is '
+                            'allowed for spot_launch.', dag)
 
-    change_default_value: Dict[str, Any] = {}
-    if not resources.use_spot_specified:
-        change_default_value['use_spot'] = True
-    if resources.spot_recovery is None:
-        change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
+    dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
-    new_resources = resources.copy(**change_default_value)
-    task.set_resources({new_resources})
+    task_names = set()
+    for task_ in dag.tasks:
+        if task_.name in task_names:
+            raise ValueError(
+                f'Task name {task_.name!r} is duplicated in the DAG. Either '
+                'change task names to be unique, or specify the DAG name only '
+                'and comment out the task names (so that they will be auto-'
+                'generated) .')
+        task_names.add(task_.name)
+    for task_ in dag.tasks:
+        assert len(task_.resources) == 1, task_
+        resources = list(task_.resources)[0]
 
-    if task.run is None:
-        print(f'{colorama.Fore.GREEN}'
-              'Skipping the managed spot task as the run section is not set.'
-              f'{colorama.Style.RESET_ALL}')
-        return
+        change_default_value: Dict[str, Any] = {}
+        if not resources.use_spot_specified:
+            change_default_value['use_spot'] = True
+        if resources.spot_recovery is None:
+            change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
 
-    task = _maybe_translate_local_file_mounts_and_sync_up(task)
+        new_resources = resources.copy(**change_default_value)
+        task_.set_resources({new_resources})
 
-    if name is None:
-        if task.name is not None:
-            name = task.name
-        else:
-            name = backend_utils.generate_cluster_name()
-    # Override the task name with the specified name or generated name, so that
-    # the controller process can retrieve the task name from the task config.
-    task.name = name
+        _maybe_translate_local_file_mounts_and_sync_up(task_)
 
-    with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
+    with tempfile.NamedTemporaryFile(prefix=f'spot-dag-{dag.name}-',
                                      mode='w') as f:
-        task_config = task.to_yaml_config()
-        common_utils.dump_yaml(f.name, task_config)
-
+        dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller_name = spot.SPOT_CONTROLLER_NAME
         vars_to_fill = {
             'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
             'user_yaml_path': f.name,
             'user_config_path': None,
             'spot_controller': controller_name,
-            # Note: actual spot cluster name will be <task_name>-<spot job ID>
-            'task_name': name,
-            'uuid': task_uuid,
+            # Note: actual spot cluster name will be <task.name>-<spot job ID>
+            'dag_name': dag.name,
+            'uuid': dag_uuid,
             'google_sdk_installation_commands':
                 gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'is_dev': env_options.Options.IS_DEVELOPER.get(),
@@ -606,6 +603,8 @@ def spot_launch(
             # running in a container.
             'user': getpass.getuser(),
         }
+        controller_resources_config = copy.copy(
+            spot.constants.CONTROLLER_RESOURCES)
         if skypilot_config.loaded():
             # Look up the contents of the already loaded configs via the
             # 'skypilot_config' module. Don't simply read the on-disk file as
@@ -660,17 +659,46 @@ def spot_launch(
                         skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
                 })
 
+            # Override the controller resources with the ones specified in the
+            # config.
+            custom_controller_resources_config = skypilot_config.get_nested(
+                ('spot', 'controller', 'resources'), None)
+            if custom_controller_resources_config is not None:
+                controller_resources_config.update(
+                    custom_controller_resources_config)
+        try:
+            controller_resources = sky.Resources.from_yaml_config(
+                controller_resources_config)
+        except ValueError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Spot controller resources is not valid, please check '
+                    '~/.sky/config.yaml file and make sure '
+                    'spot.controller.resources is a valid resources spec. '
+                    'Details:\n'
+                    f'  {common_utils.format_exception(e, use_bracket=True)}'
+                ) from e
+
         yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
-                                 f'{name}-{task_uuid}.yaml')
+                                 f'{name}-{dag_uuid}.yaml')
         backend_utils.fill_template(spot.SPOT_CONTROLLER_TEMPLATE,
                                     vars_to_fill,
                                     output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
-        controller_task.spot_task = task
+        assert len(controller_task.resources) == 1, controller_task
+        # Backward compatibility: if the user changed the
+        # spot-controller.yaml.j2 to customize the controller resources,
+        # we should use it.
+        controller_task_resources = list(controller_task.resources)[0]
+        if not controller_task_resources.is_empty():
+            controller_resources = controller_task_resources
+        controller_task.set_resources(controller_resources)
+
+        controller_task.spot_dag = dag
         assert len(controller_task.resources) == 1
 
         print(f'{colorama.Fore.YELLOW}'
-              f'Launching managed spot job {name} from spot controller...'
+              f'Launching managed spot job {dag.name} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
         _execute(
@@ -684,8 +712,7 @@ def spot_launch(
         )
 
 
-def _maybe_translate_local_file_mounts_and_sync_up(
-        task: task_lib.Task) -> task_lib.Task:
+def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
     """Translates local->VM mounts into Storage->VM, then syncs up any Storage.
 
     Eagerly syncing up local->Storage ensures Storage->VM would work at task
@@ -698,7 +725,6 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     # ================================================================
     # Translate the workdir and local file mounts to cloud file mounts.
     # ================================================================
-    task = copy.deepcopy(task)
     run_id = common_utils.get_usage_run_id()[:8]
     original_file_mounts = task.file_mounts if task.file_mounts else {}
     original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
@@ -854,5 +880,3 @@ def _maybe_translate_local_file_mounts_and_sync_up(
                     raise exceptions.NotSupportedError(
                         f'Unsupported store type: {store_type}')
             storage_obj.force_delete = True
-
-    return task

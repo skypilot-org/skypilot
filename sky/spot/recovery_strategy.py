@@ -99,19 +99,24 @@ class StrategyExecutor:
         return SPOT_STRATEGIES[spot_recovery](cluster_name, backend, task,
                                               retry_until_up)
 
-    def launch(self) -> Optional[float]:
+    def launch(self) -> float:
         """Launch the spot cluster for the first time.
 
         It can fail if resource is not available. Need to check the cluster
         status, after calling.
 
-        Returns: The job's submit timestamp, or None if failed.
+        Returns: The job's submit timestamp, on success (otherwise, an
+            exception is raised).
 
         Raises: Please refer to the docstring of self._launch().
         """
+
         if self.retry_until_up:
-            return self._launch(max_retry=None)
-        return self._launch()
+            job_submit_at = self._launch(max_retry=None)
+        else:
+            job_submit_at = self._launch()
+        assert job_submit_at is not None
+        return job_submit_at
 
     def recover(self) -> float:
         """Relaunch the spot cluster after failure and wait until job starts.
@@ -153,13 +158,12 @@ class StrategyExecutor:
                        all=True,
                        _try_cancel_if_cluster_is_init=True)
         except Exception as e:  # pylint: disable=broad-except
-            logger.info(
-                'Failed to cancel the job on the cluster. The cluster '
-                'might be already down or the head node is preempted.'
-                '\n  Detailed exception: '
-                f'{common_utils.format_exception(e)}\n'
-                'Terminating the cluster again to make sure there is no '
-                'remaining job on the worker nodes.')
+            logger.info('Failed to cancel the job on the cluster. The cluster '
+                        'might be already down or the head node is preempted.'
+                        '\n  Detailed exception: '
+                        f'{common_utils.format_exception(e)}\n'
+                        'Terminating the cluster explicitly to ensure no '
+                        'remaining job process interferes with recovery.')
             terminate_cluster(self.cluster_name)
 
     def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
@@ -226,7 +230,9 @@ class StrategyExecutor:
             time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
         return None
 
-    def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
+    def _launch(self,
+                max_retry: Optional[int] = 3,
+                raise_on_failure: bool = True) -> Optional[float]:
         """Implementation of launch().
 
         The function will wait until the job starts running, but will leave the
@@ -363,7 +369,9 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         self._launched_cloud_region: Optional[Tuple['sky.clouds.Cloud',
                                                     'sky.clouds.Region']] = None
 
-    def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
+    def _launch(self,
+                max_retry: Optional[int] = 3,
+                raise_on_failure: bool = True) -> Optional[float]:
         job_submitted_at = super()._launch(max_retry, raise_on_failure)
         if job_submitted_at is not None:
             # Only record the cloud/region if the launch is successful.

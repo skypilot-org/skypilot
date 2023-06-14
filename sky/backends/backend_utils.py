@@ -276,21 +276,42 @@ def _optimize_file_mounts(yaml_path: str) -> None:
 
 
 def path_size_megabytes(path: str) -> int:
-    """Returns the size of 'path' (directory or file) in megabytes."""
+    """Returns the size of 'path' (directory or file) in megabytes.
+
+    Returns:
+        If successful: the size of 'path' in megabytes, rounded down. Otherwise,
+        -1.
+    """
     resolved_path = pathlib.Path(path).expanduser().resolve()
     git_exclude_filter = ''
     if (resolved_path / command_runner.GIT_EXCLUDE).exists():
         # Ensure file exists; otherwise, rsync will error out.
         git_exclude_filter = command_runner.RSYNC_EXCLUDE_OPTION.format(
             str(resolved_path / command_runner.GIT_EXCLUDE))
-    rsync_output = str(
-        subprocess.check_output(
-            f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
-            f'{command_runner.RSYNC_FILTER_OPTION} '
-            f'{git_exclude_filter} --dry-run {path!r}',
-            shell=True).splitlines()[-1])
-    total_bytes = rsync_output.split(' ')[3].replace(',', '')
-    return int(float(total_bytes)) // 10**6
+    rsync_command = (f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
+                     f'{command_runner.RSYNC_FILTER_OPTION} '
+                     f'{git_exclude_filter} --dry-run {path!r}')
+    rsync_output = ''
+    try:
+        rsync_output = str(subprocess.check_output(rsync_command, shell=True))
+    except subprocess.CalledProcessError:
+        logger.debug('Command failed, proceeding without estimating size: '
+                     f'{rsync_command}')
+        return -1
+    # 3.2.3:
+    #  total size is 250,957,728  speedup is 330.19 (DRY RUN)
+    # 2.6.9:
+    #  total size is 212627556  speedup is 2437.41
+    match = re.search(r'total size is ([\d,]+)', rsync_output)
+    if match is not None:
+        try:
+            total_bytes = int(float(match.group(1).replace(',', '')))
+            return total_bytes // (1024**2)
+        except ValueError:
+            logger.debug('Failed to find "total size" in rsync output. Inspect '
+                         f'output of the following command: {rsync_command}')
+            pass  # Maybe different rsync versions have different output.
+    return -1
 
 
 class FileMountHelper(object):
@@ -1538,21 +1559,24 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
 @timeline.event
 def get_head_ip(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-    use_cached_head_ip: bool = True,
     max_attempts: int = 1,
 ) -> str:
-    """Returns the ip of the head node."""
-    if use_cached_head_ip:
-        if handle.head_ip is None:
-            # This happens for INIT clusters (e.g., exit 1 in setup).
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cluster\'s head IP not found; is it up? To fix: '
-                    'run a successful launch first (`sky launch`) to ensure'
-                    ' the cluster status is UP (`sky status`).')
-        head_ip = handle.head_ip
-    else:
-        head_ip = _query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
+    """Returns the ip of the head node.
+
+    First try to use the cached head ip. If it is not available, query
+    the head ip from the cluster.
+
+    Args:
+        handle: The ResourceHandle of the cluster.
+        max_attempts: The maximum number of attempts to query the head ip.
+
+    Returns:
+        The ip of the head node.
+    """
+    head_ip = handle.head_ip
+    if head_ip is not None:
+        return head_ip
+    head_ip = _query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
     return head_ip
 
 
@@ -2004,62 +2028,64 @@ def _update_cluster_status_no_lock(
     handle = record['handle']
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return record
-
     cluster_name = handle.cluster_name
-    use_spot = handle.launched_resources.use_spot
-    ray_cluster_up = False
-    try:
-        # TODO(zhwu): This function cannot distinguish transient network error
-        # in ray's get IPs vs. ray runtime failing.
-        external_ips = handle.external_ips(use_cached_ips=False)
-        # This happens to a stopped TPU VM as we use gcloud to query the IP.
-        if external_ips is None or len(external_ips) == 0:
-            raise exceptions.FetchIPError(
-                reason=exceptions.FetchIPError.Reason.HEAD)
-        # Check if ray cluster status is healthy.
-        ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
-        runner = command_runner.SSHCommandRunner(external_ips[0],
-                                                 **ssh_credentials)
-        rc, output, _ = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-                                   stream_logs=False,
-                                   require_outputs=True,
-                                   separate_stderr=True)
-        if rc:
-            raise exceptions.FetchIPError(
-                reason=exceptions.FetchIPError.Reason.HEAD)
 
-        ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
-
-        if ready_head + ready_workers == handle.launched_nodes:
-            ray_cluster_up = True
-
-        # For non-spot clusters:
-        # If ray status shows all nodes are healthy, it is safe to set
-        # the status to UP as starting ray is the final step of sky launch.
-        # For spot clusters, the above can be unsafe because the Ray cluster
-        # may remain healthy for a while before the cloud completely
-        # preempts the VMs.
-        # Additionally, we query the VM state from the cloud provider.
-        if ray_cluster_up and not use_spot:
-            record['status'] = global_user_state.ClusterStatus.UP
-            global_user_state.add_or_update_cluster(cluster_name,
-                                                    handle,
-                                                    requested_resources=None,
-                                                    ready=True,
-                                                    is_launch=False)
-            return record
-    except exceptions.FetchIPError:
-        logger.debug('Refreshing status: Failed to get IPs from cluster '
-                     f'{cluster_name!r}, trying to fetch from provider.')
-    # For all code below, we query cluster status by cloud CLI for two cases:
-    # 1) ray fails to get IPs for the cluster.
-    # 2) the cluster is a spot cluster.
+    # Query the cloud provider.
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
-
     all_nodes_up = (all(status == global_user_state.ClusterStatus.UP
                         for status in node_statuses) and
                     len(node_statuses) == handle.launched_nodes)
-    if ray_cluster_up and all_nodes_up:
+
+    def run_ray_status_to_check_ray_cluster_healthy() -> bool:
+        try:
+            # TODO(zhwu): This function cannot distinguish transient network
+            # error in ray's get IPs vs. ray runtime failing.
+            #
+            # NOTE: using use_cached_ips=False is very slow as it calls into
+            # `ray get head-ip/worker-ips`. Setting it to True is safe because
+            # in the worst case we time out in the `ray status` SSH command
+            # below.
+            external_ips = handle.external_ips(use_cached_ips=True)
+            # This happens to a stopped TPU VM as we use gcloud to query the IP.
+            if external_ips is None or len(external_ips) == 0:
+                raise exceptions.FetchIPError(
+                    reason=exceptions.FetchIPError.Reason.HEAD)
+            # Check if ray cluster status is healthy.
+            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
+            runner = command_runner.SSHCommandRunner(external_ips[0],
+                                                     **ssh_credentials)
+            rc, output, _ = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                                       stream_logs=False,
+                                       require_outputs=True,
+                                       separate_stderr=True)
+            if rc:
+                raise exceptions.FetchIPError(
+                    reason=exceptions.FetchIPError.Reason.HEAD)
+
+            ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
+            if ready_head + ready_workers == handle.launched_nodes:
+                return True
+        except exceptions.FetchIPError:
+            logger.debug(
+                'Refreshing status: Failed to use `ray` to get IPs from cluster'
+                f' {cluster_name!r}.')
+        return False
+
+    # Determining if the cluster is healthy (UP):
+    #
+    # For non-spot clusters: If ray status shows all nodes are healthy, it is
+    # safe to set the status to UP as starting ray is the final step of sky
+    # launch. But we found that ray status is way too slow (see NOTE below) so
+    # we always query the cloud provider first which is faster.
+    #
+    # For spot clusters: the above can be unsafe because the Ray cluster may
+    # remain healthy for a while before the cloud completely preempts the VMs.
+    # We have mitigated this by again first querying the VM state from the cloud
+    # provider.
+    if all_nodes_up and run_ray_status_to_check_ray_cluster_healthy():
+        # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
+        # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
+        # head-ip/worker-ips`.
         record['status'] = global_user_state.ClusterStatus.UP
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
@@ -2067,6 +2093,8 @@ def _update_cluster_status_no_lock(
                                                 ready=True,
                                                 is_launch=False)
         return record
+
+    # All cases below are transitioning the cluster to non-UP states.
 
     if len(node_statuses) > handle.launched_nodes:
         # Unexpected: in the queried region more than 1 cluster with the same
@@ -2086,13 +2114,14 @@ def _update_cluster_status_no_lock(
         # Since we failed to refresh, raise the status fetching error.
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterStatusFetchingError(
-                f'Found {len(node_statuses)} node(s) with the same cluster name tag in the '
-                f'cloud provider for cluster {cluster_name!r}, which should have '
-                f'{handle.launched_nodes} nodes. This normally should not happen. '
-                f'{colorama.Fore.RED}Please check the cloud console and fix any possible '
-                'resources leakage (e.g., if there are any stopped nodes and they do not '
-                f'have data or are unhealthy, terminate them).{colorama.Style.RESET_ALL}'
-            )
+                f'Found {len(node_statuses)} node(s) with the same cluster name'
+                f' tag in the cloud provider for cluster {cluster_name!r}, '
+                f'which should have {handle.launched_nodes} nodes. This '
+                f'normally should not happen. {colorama.Fore.RED}Please check '
+                'the cloud console and fix any possible resources leakage '
+                '(e.g., if there are any stopped nodes and they do not have '
+                'data or are unhealthy, terminate them).'
+                f'{colorama.Style.RESET_ALL}')
     assert len(node_statuses) <= handle.launched_nodes
 
     # If the node_statuses is empty, all the nodes are terminated. We can
@@ -2115,7 +2144,7 @@ def _update_cluster_status_no_lock(
     #     abnormal.
     #
     # An abnormal cluster will transition to INIT and have any autostop setting
-    # reset (unless it's autostopping/autodowning.).
+    # reset (unless it's autostopping/autodowning).
     is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or
                    any(status != global_user_state.ClusterStatus.STOPPED
                        for status in node_statuses))
@@ -2659,6 +2688,11 @@ def stop_handler(signum, frame):
 
 
 def validate_schema(obj, schema, err_msg_prefix=''):
+    """Validates an object against a JSON schema.
+
+    Raises:
+        ValueError: if the object does not match the schema.
+    """
     err_msg = None
     try:
         validator.SchemaValidator(schema).validate(obj)

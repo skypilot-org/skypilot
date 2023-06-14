@@ -198,10 +198,7 @@ class RayCodeGen:
         #   job_id = get_output(run_on_cluster(code))
         self.job_id = None
 
-    def add_prologue(self,
-                     job_id: int,
-                     spot_task: Optional['task_lib.Task'] = None,
-                     is_local: bool = False) -> None:
+    def add_prologue(self, job_id: int, is_local: bool = False) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
@@ -255,6 +252,8 @@ class RayCodeGen:
             # FIXME: This is a hack to make sure that the functions can be found
             # by ray.remote. This should be removed once we have a better way to
             # specify dependencies for ray.
+            inspect.getsource(log_lib._ProcessingArgs),  # pylint: disable=protected-access
+            inspect.getsource(log_lib._handle_io_stream),  # pylint: disable=protected-access
             inspect.getsource(log_lib.process_subprocess_stream),
             inspect.getsource(log_lib.run_with_log),
             inspect.getsource(log_lib.make_task_bash_script),
@@ -275,14 +274,6 @@ class RayCodeGen:
         self._code += [
             f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
         ]
-        if spot_task is not None:
-            # Add the spot job to spot queue table.
-            resources_str = backend_utils.get_task_resources_str(spot_task)
-            self._code += [
-                'from sky.spot import spot_state',
-                f'spot_state.set_pending('
-                f'{job_id}, {spot_task.name!r}, {resources_str!r})',
-            ]
 
     def add_gang_scheduling_placement_group_and_setup(
         self,
@@ -370,7 +361,13 @@ class RayCodeGen:
                 setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
                 setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
                 setup_workers = [run_bash_command_with_log \\
-                    .options(name='setup', num_cpus=_SETUP_CPUS, placement_group=setup_pg, placement_group_bundle_index=i) \\
+                    .options(
+                        name='setup',
+                        num_cpus=_SETUP_CPUS,
+                        scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(
+                            placement_group=setup_pg,
+                            placement_group_bundle_index=i)
+                    ) \\
                     .remote(
                         setup_cmd,
                         os.path.expanduser({setup_log_path!r}),
@@ -409,9 +406,12 @@ class RayCodeGen:
                 def check_ip():
                     return ray.util.get_node_ip_address()
                 gang_scheduling_id_to_ip = ray.get([
-                    check_ip.options(num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND},
-                                     placement_group=pg,
-                                     placement_group_bundle_index=i).remote()
+                    check_ip.options(
+                            num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND},
+                            scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(
+                                placement_group=pg,
+                                placement_group_bundle_index=i
+                            )).remote()
                     for i in range(pg.bundle_count)
                 ])
                 print('INFO: Reserved IPs:', gang_scheduling_id_to_ip)
@@ -460,29 +460,30 @@ class RayCodeGen:
         # Build remote_task.options(...)
         #   resources=...
         #   num_gpus=...
-        cpu_str = f', num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND}'
+        options = []
+        options.append(f'num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND}')
 
-        resources_str = ''
         num_gpus = 0.0
-        num_gpus_str = ''
         if ray_resources_dict is not None:
             assert len(ray_resources_dict) == 1, \
                 ('There can only be one type of accelerator per instance.'
                  f' Found: {ray_resources_dict}.')
             num_gpus = list(ray_resources_dict.values())[0]
-            resources_str = f', resources={json.dumps(ray_resources_dict)}'
+            options.append(f'resources={json.dumps(ray_resources_dict)}')
 
-            # Passing this ensures that the Ray remote task gets
-            # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
-            # would be force-set to empty by Ray.
-            num_gpus_str = f', num_gpus={num_gpus}'
-            # `num_gpus` should be empty when the accelerator is not GPU.
-            # FIXME: use a set of GPU types.
             resources_key = list(ray_resources_dict.keys())[0]
-            if 'tpu' in resources_key.lower():
-                num_gpus_str = ''
-        resources_str += ', placement_group=pg'
-        resources_str += f', placement_group_bundle_index={gang_scheduling_id}'
+            if 'tpu' not in resources_key.lower():
+                # `num_gpus` should be empty when the accelerator is not GPU.
+                # FIXME: use a set of GPU types, instead of 'tpu' in the key.
+
+                # Passing this ensures that the Ray remote task gets
+                # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
+                # would be force-set to empty by Ray.
+                options.append(f'num_gpus={num_gpus}')
+        options.append(
+            'scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy('  # pylint: disable=line-too-long
+            'placement_group=pg, '
+            f'placement_group_bundle_index={gang_scheduling_id})')
 
         sky_env_vars_dict_str = [
             textwrap.dedent("""\
@@ -498,13 +499,18 @@ class RayCodeGen:
                                          for k, v in env_vars.items())
         if job_run_id is not None:
             sky_env_vars_dict_str += [
-                f'sky_env_vars_dict[{constants.JOB_ID_ENV_VAR!r}]'
+                f'sky_env_vars_dict[{constants.TASK_ID_ENV_VAR!r}]'
+                f' = {job_run_id!r}',
+                # TODO(zhwu): remove this deprecated env var in later release
+                # (after 0.5).
+                f'sky_env_vars_dict[{constants.TASK_ID_ENV_VAR_DEPRECATED!r}]'
                 f' = {job_run_id!r}'
             ]
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
+        options_str = ', '.join(options)
         logger.debug('Added Task with options: '
-                     f'{cpu_str}{resources_str}{num_gpus_str}')
+                     f'{options_str}')
         self._code += [
             sky_env_vars_dict_str,
             textwrap.dedent(f"""\
@@ -541,7 +547,7 @@ class RayCodeGen:
             sky_env_vars_dict['SKY_INTERNAL_JOB_ID'] = {self.job_id}
 
             futures.append(run_bash_command_with_log \\
-                    .options(name=name_str{cpu_str}{resources_str}{num_gpus_str}) \\
+                    .options(name=name_str, {options_str}) \\
                     .remote(
                         script,
                         log_path,
@@ -1816,12 +1822,7 @@ class RetryingVmProvisioner(object):
         backend = CloudVmRayBackend()
 
         returncode = backend.run_on_head(
-            handle,
-            backend_utils.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-            # At this state, an erroneous cluster may not have cached
-            # handle.head_ip (global_user_state.add_or_update_cluster(...,
-            # ready=True)).
-            use_cached_head_ip=False)
+            handle, backend_utils.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND)
         if returncode == 0:
             return
         launched_resources = handle.launched_resources
@@ -1832,7 +1833,7 @@ class RetryingVmProvisioner(object):
                 'The command `ray status` errored out on the head node '
                 'of the local cluster. Check if ray[default]==2.4.0 '
                 'is installed or running correctly.')
-        backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
+        backend.run_on_head(handle, 'ray stop')
 
         # Runs `ray up <kwargs>` with our monkey-patched launch hash
         # calculation. See the monkey patch file for why.
@@ -2516,11 +2517,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # For backward compatability and robustness of skylet, it is restarted
         with log_utils.safe_rich_status('Updating remote skylet'):
-            self.run_on_head(
-                handle,
-                _MAYBE_SKYLET_RESTART_CMD,
-                use_cached_head_ip=False,
-            )
+            self.run_on_head(handle, _MAYBE_SKYLET_RESTART_CMD)
 
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.
@@ -2742,6 +2739,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_id: int,
         executable: str,
         detach_run: bool = False,
+        spot_dag: Optional['dag.Dag'] = None,
     ) -> None:
         """Executes generated code on the head node."""
         style = colorama.Style
@@ -2790,7 +2788,25 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                           f'touch {remote_log_path}')
             code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
+
             job_submit_cmd = mkdir_code + ' && ' + code
+
+            if spot_dag is not None:
+                # Add the spot job to spot queue table.
+                spot_codegen = spot_lib.SpotCodeGen()
+                spot_code = spot_codegen.set_pending(job_id, spot_dag)
+                # Set the spot job to PENDING state to make sure that this spot
+                # job appears in the `sky spot queue`, when there are already 16
+                # controller process jobs running on the controller VM with 8
+                # CPU cores.
+                # The spot job should be set to PENDING state *after* the
+                # controller process job has been queued, as our skylet on spot
+                # controller will set the spot job in FAILED state if the
+                # controller process job does not exist.
+                # We cannot set the spot job to PENDING state in the codegen for
+                # the controller process job, as it will stay in the job pending
+                # table and not be executed until there is an empty slot.
+                job_submit_cmd = job_submit_cmd + ' && ' + spot_code
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
@@ -3573,19 +3589,38 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         *,
         port_forward: Optional[List[int]] = None,
         log_path: str = '/dev/null',
-        process_stream: bool = True,
         stream_logs: bool = False,
-        use_cached_head_ip: bool = True,
         ssh_mode: command_runner.SshMode = command_runner.SshMode.
         NON_INTERACTIVE,
         under_remote_workdir: bool = False,
         require_outputs: bool = False,
         separate_stderr: bool = False,
+        process_stream: bool = True,
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
-        """Runs 'cmd' on the cluster's head node."""
-        head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip,
-                                            _FETCH_IP_MAX_ATTEMPTS)
+        """Runs 'cmd' on the cluster's head node.
+
+        Args:
+            handle: The ResourceHandle to the cluster.
+            cmd: The command to run.
+
+            Advanced options:
+
+            port_forward: A list of ports to forward.
+            log_path: The path to the log file.
+            stream_logs: Whether to stream the logs to stdout/stderr.
+            ssh_mode: The mode to use for ssh.
+                See command_runner.SSHCommandRunner.SSHMode for more details.
+            under_remote_workdir: Whether to run the command under the remote
+                workdir ~/sky_workdir.
+            require_outputs: Whether to return the stdout and stderr of the
+                command.
+            separate_stderr: Whether to separate stderr from stdout.
+            process_stream: Whether to post-process the stdout/stderr of the
+                command, such as replacing or skipping lines on the fly. If
+                enabled, lines are printed only when '\r' or '\n' is found.
+        """
+        head_ip = backend_utils.get_head_ip(handle, _FETCH_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
@@ -3904,9 +3939,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
-        codegen.add_prologue(job_id,
-                             spot_task=task.spot_task,
-                             is_local=is_local)
+        codegen.add_prologue(job_id, is_local=is_local)
         codegen.add_gang_scheduling_placement_group_and_setup(
             1,
             accelerator_dict,
@@ -3921,10 +3954,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
 
-        # If it is a managed spot job, the JOB_ID_ENV_VAR will have been already
-        # set by the controller.
+        # If it is a managed spot job, the TASK_ID_ENV_VAR will have been
+        # already set by the controller.
         job_run_id = task.envs.get(
-            constants.JOB_ID_ENV_VAR,
+            constants.TASK_ID_ENV_VAR,
             common_utils.get_global_job_id(self.run_timestamp,
                                            cluster_name=handle.cluster_name,
                                            job_id=str(job_id)))
@@ -3946,7 +3979,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 executable='python3',
-                                detach_run=detach_run)
+                                detach_run=detach_run,
+                                spot_dag=task.spot_dag)
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
@@ -3972,9 +4006,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
-        codegen.add_prologue(job_id,
-                             spot_task=task.spot_task,
-                             is_local=is_local)
+        codegen.add_prologue(job_id, is_local=is_local)
         codegen.add_gang_scheduling_placement_group_and_setup(
             num_actual_nodes,
             accelerator_dict,
@@ -3988,10 +4020,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
 
-        # If it is a managed spot job, the JOB_ID_ENV_VAR will have been already
-        # set by the controller.
+        # If it is a managed spot job, the TASK_ID_ENV_VAR will have been
+        # already set by the controller.
         job_run_id = task.envs.get(
-            constants.JOB_ID_ENV_VAR,
+            constants.TASK_ID_ENV_VAR,
             common_utils.get_global_job_id(self.run_timestamp,
                                            cluster_name=handle.cluster_name,
                                            job_id=str(job_id)))
@@ -4021,4 +4053,5 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 executable='python3',
-                                detach_run=detach_run)
+                                detach_run=detach_run,
+                                spot_dag=task.spot_dag)
