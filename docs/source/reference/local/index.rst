@@ -1,5 +1,10 @@
 .. _local-overview:
 
+.. note::
+    SkyPilot On-prem is an experimental feature and is being redesigned. While it is still available for use, please be aware there may have rough edges. If you'd like to use SkyPilot On-prem, please reach out to us on `Slack <http://slack.skypilot.co>`_.
+
+
+
 SkyPilot On-prem
 ===================================
 
