@@ -52,7 +52,7 @@ such as :code:`scp`, :code:`rsync`, and `Visual Studio Code Remote
 
 .. note::
 
-  Refer to :ref:`Syncing Code and Artifacts` for more details
+  Refer to :ref:`Syncing Code and Artifacts <sync-code-artifacts>` for more details
   on how to upload code and download outputs from the cluster.
 
 Ending a development session
