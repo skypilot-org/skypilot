@@ -11,6 +11,7 @@ from sky.utils import log_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from sky import status_lib
     from sky import resources
 
 
@@ -465,6 +466,25 @@ class Cloud:
         Raises:
             exceptions.NotSupportedError: If the disk tier is not supported.
         """
+        raise NotImplementedError
+
+    @classmethod
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List['status_lib.ClusterStatus']:
+        raise NotImplementedError
+
+    @classmethod
+    def create_image_from_cluster(cls, tag_filters: Dict[str, str],
+                                  image_name: str) -> str:
+        raise NotImplementedError
+
+    @classmethod
+    def move_image(cls, image_name: str, region: str) -> None:
+        raise NotImplementedError
+
+    @classmethod
+    def delete_image(cls, image_id: str) -> None:
         raise NotImplementedError
 
     def __repr__(self):

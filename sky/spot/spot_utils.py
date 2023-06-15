@@ -15,6 +15,7 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import status_lib
 from sky.backends import backend_utils
 from sky.skylet import job_lib
 from sky.utils import common_utils
@@ -694,7 +695,7 @@ def load_job_table_cache() -> Optional[Tuple[float, str]]:
 
 def is_spot_controller_up(
     stopped_message: str,
-) -> Tuple[Optional[global_user_state.ClusterStatus],
+) -> Tuple[Optional[status_lib.ClusterStatus],
            Optional['backends.CloudVmRayResourceHandle']]:
     """Check if the spot controller is up.
 
@@ -739,12 +740,12 @@ def is_spot_controller_up(
 
     if controller_status is None:
         sky_logging.print('No managed spot jobs are found.')
-    elif controller_status != global_user_state.ClusterStatus.UP:
+    elif controller_status != status_lib.ClusterStatus.UP:
         msg = (f'Spot controller {SPOT_CONTROLLER_NAME} '
                f'is {controller_status.value}.')
-        if controller_status == global_user_state.ClusterStatus.STOPPED:
+        if controller_status == status_lib.ClusterStatus.STOPPED:
             msg += f'\n{stopped_message}'
-        if controller_status == global_user_state.ClusterStatus.INIT:
+        if controller_status == status_lib.ClusterStatus.INIT:
             msg += '\nPlease wait for the controller to be ready.'
         sky_logging.print(msg)
         handle = None

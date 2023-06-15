@@ -12,8 +12,10 @@ import colorama
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky import status_lib
 from sky.adaptors import azure
 from sky.clouds import service_catalog
+from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
@@ -490,3 +492,65 @@ class Azure(clouds.Cloud):
             'low': 'Standard_LRS',
         }
         return tier2name[tier]
+
+    @classmethod
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List[status_lib.ClusterStatus]:
+        del zone  # unused
+        status_map = {
+            'VM starting': status_lib.ClusterStatus.INIT,
+            'VM running': status_lib.ClusterStatus.UP,
+            # 'VM stopped' in Azure means Stopped (Allocated), which still bills
+            # for the VM.
+            'VM stopping': status_lib.ClusterStatus.INIT,
+            'VM stopped': status_lib.ClusterStatus.INIT,
+            # 'VM deallocated' in Azure means Stopped (Deallocated), which does not
+            # bill for the VM.
+            'VM deallocating': status_lib.ClusterStatus.STOPPED,
+            'VM deallocated': status_lib.ClusterStatus.STOPPED,
+        }
+        tag_filter_str = ' '.join(
+            f'tags.\\"{k}\\"==\\"{v}\\"' for k, v in tag_filters.items())
+        query_cmd = ('az vm show -d --ids $(az vm list --query '
+                     f'"[?{tag_filter_str}].id" '
+                     '-o tsv) --query "powerState" -o json')
+        # NOTE: Azure cli should be handled carefully. The query command above
+        # takes about 1 second to run.
+        # An alternative is the following command, but it will take more than
+        # 20 seconds to run.
+        # query_cmd = (
+        #     f'az vm list --show-details --query "['
+        #     f'?tags.\\"ray-cluster-name\\" == \'{handle.cluster_name}\' '
+        #     '&& tags.\\"ray-node-type\\" == \'head\'].powerState" -o tsv'
+        # )
+        returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
+                                                          '/dev/null',
+                                                          require_outputs=True,
+                                                          shell=True)
+        logger.debug(f'{query_cmd} returned {returncode}.\n'
+                     '**** STDOUT ****\n'
+                     f'{stdout}\n'
+                     '**** STDERR ****\n'
+                     f'{stderr}')
+
+        if (returncode == 2 and
+                'argument --ids: expected at least one argument' in stderr):
+            # Azure CLI has a returncode 2 when the cluster is not found, as
+            # --ids <empty> is passed to the query command. In that case, the
+            # cluster should be considered as DOWN.
+            return []
+        elif returncode != 0:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ClusterStatusFetchingError(
+                    f'Failed to query Azure cluster {name!r} status: '
+                    f'{stdout + stderr}')
+
+        original_statuses = json.loads(stdout.strip())
+
+        statuses = []
+        for s in original_statuses:
+            node_status = status_map[s]
+            if node_status is not None:
+                statuses.append(node_status)
+        return statuses

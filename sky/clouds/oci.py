@@ -13,8 +13,9 @@ import logging
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky.clouds import service_catalog
 from sky import exceptions
+from sky import status_lib
+from sky.clouds import service_catalog
 from sky.utils import common_utils
 from sky.adaptors import oci as oci_adaptor
 from sky.skylet.providers.oci.config import oci_conf
@@ -498,3 +499,36 @@ class OCI(clouds.Cloud):
                                 disk_tier: str) -> None:
         # All the disk_tier are supported for any instance_type
         del instance_type, disk_tier  # unused
+
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List[status_lib.ClusterStatus]:
+        del tag_filters, zone, kwargs  # Unused.
+        # Check the lifecycleState definition from the page
+        # https://docs.oracle.com/en-us/iaas/api/#/en/iaas/latest/Instance/
+        status_map = {
+            'PROVISIONING': status_lib.ClusterStatus.INIT,
+            'STARTING': status_lib.ClusterStatus.INIT,
+            'RUNNING': status_lib.ClusterStatus.UP,
+            'STOPPING': status_lib.ClusterStatus.STOPPED,
+            'STOPPED': status_lib.ClusterStatus.STOPPED,
+            'TERMINATED': None,
+            'TERMINATING': None,
+        }
+
+        # pylint: disable=import-outside-toplevel
+        from sky.skylet.providers.oci.query_helper import oci_query_helper
+        from ray.autoscaler.tags import (
+            TAG_RAY_CLUSTER_NAME,)
+
+        status_list = []
+        vms = oci_query_helper.query_instances_by_tags(
+            tag_filters={TAG_RAY_CLUSTER_NAME: name}, region=region)
+        for node in vms:
+            vm_status = node.lifecycle_state
+            if vm_status in status_map:
+                sky_status = status_map[vm_status]
+                if sky_status is not None:
+                    status_list.append(sky_status)
+
+        return status_list
