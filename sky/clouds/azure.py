@@ -512,9 +512,37 @@ class Azure(clouds.Cloud):
         }
         tag_filter_str = ' '.join(
             f'tags.\\"{k}\\"==\'{v}\'' for k, v in tag_filters.items())
-        query_cmd = ('az vm show -d --ids $(az vm list --query '
-                     f'"[?{tag_filter_str}].id" '
-                     '-o tsv) --query "powerState" -o json')
+
+        query_node_id = (f'az vm list --query "[?{tag_filter_str}].id" -o json')
+        returncode, stdout, stderr = log_lib.run_with_log(query_node_id,
+                                                          '/dev/null',
+                                                          require_outputs=True,
+                                                          shell=True)
+        logger.debug(f'{query_node_id} returned {returncode}.\n'
+                     '**** STDOUT ****\n'
+                     f'{stdout}\n'
+                     '**** STDERR ****\n'
+                     f'{stderr}')
+        if returncode == 0:
+            if not stdout.strip():
+                return []
+            node_ids = json.loads(stdout.strip())
+            state_str = '[].powerState'
+            if not isinstance(node_ids, list):
+                node_ids = [node_ids]
+                state_str = 'powerState'
+            node_ids_str = '\t'.join(node_ids)
+            query_cmd = (
+                f'az vm show -d --ids {node_ids_str} --query "{state_str}" -o json'
+            )
+            returncode, stdout, stderr = log_lib.run_with_log(
+                query_cmd, '/dev/null', require_outputs=True, shell=True)
+            logger.debug(f'{query_cmd} returned {returncode}.\n'
+                         '**** STDOUT ****\n'
+                         f'{stdout}\n'
+                         '**** STDERR ****\n'
+                         f'{stderr}')
+
         # NOTE: Azure cli should be handled carefully. The query command above
         # takes about 1 second to run.
         # An alternative is the following command, but it will take more than
@@ -524,32 +552,18 @@ class Azure(clouds.Cloud):
         #     f'?tags.\\"ray-cluster-name\\" == \'{handle.cluster_name}\' '
         #     '&& tags.\\"ray-node-type\\" == \'head\'].powerState" -o tsv'
         # )
-        returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
-                                                          '/dev/null',
-                                                          require_outputs=True,
-                                                          shell=True)
-        logger.debug(f'{query_cmd} returned {returncode}.\n'
-                     '**** STDOUT ****\n'
-                     f'{stdout}\n'
-                     '**** STDERR ****\n'
-                     f'{stderr}')
 
-        if (returncode == 2 and
-                'argument --ids: expected at least one argument' in stderr):
-            # Azure CLI has a returncode 2 when the cluster is not found, as
-            # --ids <empty> is passed to the query command. In that case, the
-            # cluster should be considered as DOWN.
-            return []
-        elif returncode != 0:
+        if returncode != 0:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ClusterStatusFetchingError(
                     f'Failed to query Azure cluster {name!r} status: '
                     f'{stdout + stderr}')
 
-        original_statuses = json.loads(stdout.strip())
+        assert stdout.strip(), f'No status returned for {name!r}'
 
+        original_statuses_list = json.loads(stdout.strip())
         statuses = []
-        for s in original_statuses:
+        for s in original_statuses_list:
             node_status = status_map[s]
             if node_status is not None:
                 statuses.append(node_status)
