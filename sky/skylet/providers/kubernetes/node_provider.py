@@ -239,7 +239,8 @@ class KubernetesNodeProvider(NodeProvider):
                 networking_api().create_namespaced_ingress(self.namespace, ingress_spec)
 
         # Wait for all pods to be ready, and if it exceeds the timeout, raise an
-        # exception.
+        # exception. If pod's container is ContainerCreating, then we can assume
+        # that resources have been allocated and we can exit.
 
         # TODO(romilb): Figure out a way to make this timeout configurable.
         TIMEOUT = 60
@@ -250,15 +251,22 @@ class KubernetesNodeProvider(NodeProvider):
                     "Timed out while waiting for nodes to start. Cluster may be out of resources or may be too slow to autoscale."
                 )
             all_ready = True
-            for pod in new_nodes:
-                pod = core_api().read_namespaced_pod(pod.metadata.name, self.namespace)
-                if pod.status.phase != "Running":
-                    all_ready = False
-                    break
+            for node in new_nodes:
+                pod = core_api().read_namespaced_pod(node.metadata.name, self.namespace)
+                if pod.status.phase == "Pending":
+                    # Check conditions for more detailed status
+                    for condition in pod.status.conditions:
+                        if condition.reason == 'ContainerCreating':
+                            # Container is creating, so we can assume resources
+                            # have been allocated. Safe to exit.
+                            break
+                    else:
+                        # Pod is pending and not in 'ContainerCreating' state
+                        all_ready = False
+                        break
             if all_ready:
                 break
-            else:
-                time.sleep(1)
+            time.sleep(1)
 
 
 
