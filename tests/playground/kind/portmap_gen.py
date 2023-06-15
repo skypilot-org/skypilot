@@ -5,7 +5,7 @@ nodes:
 - role: control-plane
   extraPortMappings:"""
 suffix = """- role: worker"""
-with open('cluster.yaml', 'w') as f:
+with open('kind-cluster.yaml', 'w') as f:
     f.write(preamble)
     for port in range(30000, 32768):
         f.write(f"""

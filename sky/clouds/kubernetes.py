@@ -98,14 +98,10 @@ class Kubernetes(clouds.Cloud):
             disk_tier: Optional[str] = None) -> Optional[str]:
         del disk_tier # Unused.
         virtual_instance_type = ''
-        if cpus is not None:
-            virtual_instance_type += f'{cpus}vCPU-'
-        else:
-            virtual_instance_type += f'{cls._DEFAULT_NUM_VCPUS}vCPU'
-        if memory is not None:
-            virtual_instance_type += f'{memory}GB'
-        else:
-            virtual_instance_type += f'{cls._DEFAULT_NUM_VCPUS * cls._DEFAULT_MEMORY_CPU_RATIO}GB'
+        n_cpus = cpus if cpus is not None else cls._DEFAULT_NUM_VCPUS
+        mem = memory if memory is not None else cls._DEFAULT_NUM_VCPUS * cls._DEFAULT_MEMORY_CPU_RATIO
+        virtual_instance_type += f'{n_cpus}vCPU-'
+        virtual_instance_type += f'{mem}GB'
         return virtual_instance_type
 
 
@@ -124,8 +120,6 @@ class Kubernetes(clouds.Cloud):
         vcpus = cls.get_vcpus_from_instance_type(instance_type)
         mem = cls.get_mem_from_instance_type(instance_type)
         return vcpus, mem
-
-
 
 
     @classmethod
