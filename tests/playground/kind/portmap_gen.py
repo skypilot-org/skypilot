@@ -15,5 +15,3 @@ with open('kind-cluster.yaml', 'w') as f:
     protocol: tcp""")
     f.write("\n")
     f.write(suffix)
-
-

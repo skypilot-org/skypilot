@@ -2032,7 +2032,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                  launched_resources: resources_lib.Resources,
                  stable_internal_external_ips: Optional[List[Tuple[
                      str, str]]] = None,
-                      stable_ssh_ports: Optional[List[int]] = None,
+                 stable_ssh_ports: Optional[List[int]] = None,
                  tpu_create_script: Optional[str] = None,
                  tpu_delete_script: Optional[str] = None) -> None:
         self._version = self._VERSION
@@ -2129,13 +2129,16 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
     def _update_stable_ssh_ports(self, max_attempts: int = 1) -> None:
         if isinstance(self.launched_resources.cloud, clouds.Kubernetes):
-            head_port = backend_utils.get_head_ssh_port(self, use_cache=False, max_attempts=max_attempts)
+            head_port = backend_utils.get_head_ssh_port(
+                self, use_cache=False, max_attempts=max_attempts)
             # TODO(romilb): Multinode doesn't work with Kubernetes yet.
             worker_ports = [22] * self.launched_nodes
             ports = [head_port] + worker_ports
         else:
             # Use port 22 for other clouds
-            ports = [22] * len(self.external_ips())
+            ext_ips = self.external_ips()
+            assert ext_ips is not None, ext_ips
+            ports = [22] * len(ext_ips)
         self.stable_ssh_ports = ports
 
     def _update_stable_cluster_ips(self, max_attempts: int = 1) -> None:
@@ -2204,9 +2207,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             return [ips[1] for ips in self.stable_internal_external_ips]
         return None
 
-    def external_ssh_ports(self,
-                           max_attempts: int = _FETCH_IP_MAX_ATTEMPTS,
-                           use_cached_ports: bool = True) -> Optional[List[str]]:
+    def external_ssh_ports(
+            self,
+            max_attempts: int = _FETCH_IP_MAX_ATTEMPTS,
+            use_cached_ports: bool = True) -> Optional[List[int]]:
         if not use_cached_ports:
             self._update_stable_ssh_ports(max_attempts=max_attempts)
         if self.stable_ssh_ports is not None:
@@ -2506,9 +2510,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             ip_list = handle.external_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
                                           use_cached_ips=False)
-            ssh_port_list = handle.external_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
-                                          use_cached_ports=False)
+            ssh_port_list = handle.external_ssh_ports(
+                max_attempts=_FETCH_IP_MAX_ATTEMPTS, use_cached_ports=False)
             assert ip_list is not None, handle
+            assert ssh_port_list is not None, handle
 
             if 'tpu_name' in config_dict:
                 self._set_tpu_name(handle, config_dict['tpu_name'])
@@ -2566,14 +2571,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # to None.
             self._update_after_cluster_provisioned(handle, task,
                                                    prev_cluster_status, ip_list,
-ssh_port_list,
-                                                   lock_path)
+                                                   ssh_port_list, lock_path)
             return handle
 
     def _update_after_cluster_provisioned(
             self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
             prev_cluster_status: Optional[global_user_state.ClusterStatus],
-            ip_list: List[str], ssh_port_list: List[int], lock_path: str) -> None:
+            ip_list: List[str], ssh_port_list: List[int],
+            lock_path: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
         usage_lib.messages.usage.update_final_cluster_status(
@@ -2625,7 +2630,8 @@ ssh_port_list,
                 global_user_state.ClusterStatus.UP)
             auth_config = common_utils.read_yaml(handle.cluster_yaml)['auth']
             backend_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
-                                                      ip_list, auth_config, ssh_port_list)
+                                                      ip_list, auth_config,
+                                                      ssh_port_list)
 
             common_utils.remove_file_if_exists(lock_path)
 
@@ -3692,7 +3698,9 @@ ssh_port_list,
                                                         _FETCH_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
-        runner = command_runner.SSHCommandRunner(head_ip, port=head_ssh_port, **ssh_credentials)
+        runner = command_runner.SSHCommandRunner(head_ip,
+                                                 port=head_ssh_port,
+                                                 **ssh_credentials)
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 

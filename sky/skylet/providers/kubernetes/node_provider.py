@@ -1,7 +1,5 @@
 import copy
-import json
 import logging
-import subprocess
 import time
 from typing import Dict
 from urllib.parse import urlparse
@@ -26,11 +24,14 @@ DELAY_BEFORE_TAG_RETRY = 0.5
 
 RAY_COMPONENT_LABEL = "cluster.ray.io/component"
 
-# Patch SSHCommandRunner to allow specifying SSH port
+
+# Monkey patch SSHCommandRunner to allow specifying SSH port
 def set_port(self, port):
     self.ssh_options.arg_dict["Port"] = port
 
+
 SSHCommandRunner.set_port = set_port
+
 
 def head_service_selector(cluster_name: str) -> Dict[str, str]:
     """Selector for Operator-configured head service."""
@@ -47,6 +48,7 @@ def to_label_selector(tags):
 
 
 class KubernetesNodeProvider(NodeProvider):
+
     def __init__(self, provider_config, cluster_name):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.cluster_name = cluster_name
@@ -56,20 +58,18 @@ class KubernetesNodeProvider(NodeProvider):
         # Match pods that are in the 'Pending' or 'Running' phase.
         # Unfortunately there is no OR operator in field selectors, so we
         # have to match on NOT any of the other phases.
-        field_selector = ",".join(
-            [
-                "status.phase!=Failed",
-                "status.phase!=Unknown",
-                "status.phase!=Succeeded",
-                "status.phase!=Terminating",
-            ]
-        )
+        field_selector = ",".join([
+            "status.phase!=Failed",
+            "status.phase!=Unknown",
+            "status.phase!=Succeeded",
+            "status.phase!=Terminating",
+        ])
 
         tag_filters[TAG_RAY_CLUSTER_NAME] = self.cluster_name
         label_selector = to_label_selector(tag_filters)
-        pod_list = core_api().list_namespaced_pod(
-            self.namespace, field_selector=field_selector, label_selector=label_selector
-        )
+        pod_list = core_api().list_namespaced_pod(self.namespace,
+                                                  field_selector=field_selector,
+                                                  label_selector=label_selector)
 
         # Don't return pods marked for deletion,
         # i.e. pods with non-null metadata.DeletionTimestamp.
@@ -91,16 +91,8 @@ class KubernetesNodeProvider(NodeProvider):
         pod = core_api().read_namespaced_pod(node_id, self.namespace)
         return pod.metadata.labels
 
-    @staticmethod
-    def get_apiserver_ip() -> str:
-        output = subprocess.Popen("kubectl config view -o json".split(),
-                                  stdout=subprocess.PIPE).communicate()[0]
-        api_server_ip = json.loads(output)["clusters"][0]["cluster"][
-            "server"].split("//")[1].split(":")[0]
-        return api_server_ip
-
-    @staticmethod
-    def get_external_ip_for_nodeport() -> str:
+    def external_ip(self, node_id):
+        #
         # Return the IP address of the first node with an external IP
         nodes = core_api().list_node().items
         for node in nodes:
@@ -112,10 +104,6 @@ class KubernetesNodeProvider(NodeProvider):
         api_host = core_api().api_client.configuration.host
         parsed_url = urlparse(api_host)
         return parsed_url.hostname
-
-    def external_ip(self, node_id):
-        # Extract the IP address of the API server from kubectl
-        return self.get_external_ip_for_nodeport()
 
     def external_port(self, node_id):
         # Extract the NodePort of the head node's SSH service
@@ -143,9 +131,8 @@ class KubernetesNodeProvider(NodeProvider):
         if not find_node_id():
             all_nodes = self.non_terminated_nodes({})
             ip_func = self.internal_ip if use_internal_ip else self.external_ip
-            ip_cache = (
-                self._internal_ip_cache if use_internal_ip else self._external_ip_cache
-            )
+            ip_cache = (self._internal_ip_cache
+                        if use_internal_ip else self._external_ip_cache)
             for node_id in all_nodes:
                 ip_cache[ip_func(node_id)] = node_id
 
@@ -165,10 +152,8 @@ class KubernetesNodeProvider(NodeProvider):
                 return
             except ApiException as e:
                 if e.status == 409:
-                    logger.info(
-                        log_prefix + "Caught a 409 error while setting"
-                        " node tags. Retrying..."
-                    )
+                    logger.info(log_prefix + "Caught a 409 error while setting"
+                                " node tags. Retrying...")
                     time.sleep(DELAY_BEFORE_TAG_RETRY)
                     continue
                 else:
@@ -200,9 +185,8 @@ class KubernetesNodeProvider(NodeProvider):
             head_selector = head_service_selector(self.cluster_name)
             pod_spec["metadata"]["labels"].update(head_selector)
 
-        logger.info(
-            log_prefix + "calling create_namespaced_pod (count={}).".format(count)
-        )
+        logger.info(log_prefix +
+                    "calling create_namespaced_pod (count={}).".format(count))
         new_nodes = []
         for _ in range(count):
             pod = core_api().create_namespaced_pod(self.namespace, pod_spec)
@@ -210,10 +194,8 @@ class KubernetesNodeProvider(NodeProvider):
 
         new_svcs = []
         if service_spec is not None:
-            logger.info(
-                log_prefix + "calling create_namespaced_service "
-                "(count={}).".format(count)
-            )
+            logger.info(log_prefix + "calling create_namespaced_service "
+                        "(count={}).".format(count))
 
             for new_node in new_nodes:
 
@@ -221,22 +203,21 @@ class KubernetesNodeProvider(NodeProvider):
                 metadata["name"] = new_node.metadata.name
                 service_spec["metadata"] = metadata
                 service_spec["spec"]["selector"] = {"ray-node-uuid": node_uuid}
-                svc = core_api().create_namespaced_service(self.namespace, service_spec)
+                svc = core_api().create_namespaced_service(
+                    self.namespace, service_spec)
                 new_svcs.append(svc)
 
         if ingress_spec is not None:
-            logger.info(
-                log_prefix + "calling create_namespaced_ingress "
-                "(count={}).".format(count)
-            )
+            logger.info(log_prefix + "calling create_namespaced_ingress "
+                        "(count={}).".format(count))
             for new_svc in new_svcs:
                 metadata = ingress_spec.get("metadata", {})
                 metadata["name"] = new_svc.metadata.name
                 ingress_spec["metadata"] = metadata
                 ingress_spec = _add_service_name_to_service_port(
-                    ingress_spec, new_svc.metadata.name
-                )
-                networking_api().create_namespaced_ingress(self.namespace, ingress_spec)
+                    ingress_spec, new_svc.metadata.name)
+                networking_api().create_namespaced_ingress(
+                    self.namespace, ingress_spec)
 
         # Wait for all pods to be ready, and if it exceeds the timeout, raise an
         # exception. If pod's container is ContainerCreating, then we can assume
@@ -252,7 +233,8 @@ class KubernetesNodeProvider(NodeProvider):
                 )
             all_ready = True
             for node in new_nodes:
-                pod = core_api().read_namespaced_pod(node.metadata.name, self.namespace)
+                pod = core_api().read_namespaced_pod(node.metadata.name,
+                                                     self.namespace)
                 if pod.status.phase == "Pending":
                     # Check conditions for more detailed status
                     for condition in pod.status.conditions:
@@ -268,19 +250,14 @@ class KubernetesNodeProvider(NodeProvider):
                 break
             time.sleep(1)
 
-
-
-
     def terminate_node(self, node_id):
         logger.info(log_prefix + "calling delete_namespaced_pod")
         try:
             core_api().delete_namespaced_pod(node_id, self.namespace)
         except ApiException as e:
             if e.status == 404:
-                logger.warning(
-                    log_prefix + f"Tried to delete pod {node_id},"
-                    " but the pod was not found (404)."
-                )
+                logger.warning(log_prefix + f"Tried to delete pod {node_id},"
+                               " but the pod was not found (404).")
             else:
                 raise
         try:
@@ -299,15 +276,14 @@ class KubernetesNodeProvider(NodeProvider):
         for node_id in node_ids:
             self.terminate_node(node_id)
 
-    def get_command_runner(
-        self,
-        log_prefix,
-        node_id,
-        auth_config,
-        cluster_name,
-        process_runner,
-        use_internal_ip,
-        docker_config = None):
+    def get_command_runner(self,
+                           log_prefix,
+                           node_id,
+                           auth_config,
+                           cluster_name,
+                           process_runner,
+                           use_internal_ip,
+                           docker_config=None):
         """Returns the CommandRunner class used to perform SSH commands.
 
         Args:
@@ -344,6 +320,7 @@ class KubernetesNodeProvider(NodeProvider):
             f.write(f'{node_id} port: {port}\n')
         command_runner.set_port(port)
         return command_runner
+
     # def get_command_runner(
     #     self,
     #     log_prefix,
@@ -381,11 +358,12 @@ def _add_service_name_to_service_port(spec, svc_name):
                 raise ValueError(
                     "The value of serviceName must be set to "
                     "${RAY_POD_NAME}. It is automatically replaced "
-                    "when using the autoscaler."
-                )
+                    "when using the autoscaler.")
 
     elif isinstance(spec, list):
-        spec = [_add_service_name_to_service_port(item, svc_name) for item in spec]
+        spec = [
+            _add_service_name_to_service_port(item, svc_name) for item in spec
+        ]
 
     elif isinstance(spec, str):
         # The magic string ${RAY_POD_NAME} is replaced with

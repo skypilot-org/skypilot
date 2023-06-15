@@ -142,6 +142,7 @@ class SSHCommandRunner:
             ssh_proxy_command: Optional, the value to pass to '-o
                 ProxyCommand'. Useful for communicating with clusters without
                 public IPs using a "jump server".
+            port: The port to use for ssh.
         """
         self.ip = ip
         self.ssh_user = ssh_user
@@ -163,11 +164,11 @@ class SSHCommandRunner:
     ) -> List['SSHCommandRunner']:
         """Helper function for creating runners with the same ssh credentials"""
         if not port_list:
-            port_list = [22] * len(ip_list)
+            port_list = ["22"] * len(ip_list)
         return [
             SSHCommandRunner(ip, ssh_user, ssh_private_key, ssh_control_name,
-                             ssh_proxy_command, port) for ip, port in zip(
-                                 ip_list, port_list)
+                             ssh_proxy_command, port)
+            for ip, port in zip(ip_list, port_list)
         ]
 
     def _ssh_base_command(self, *, ssh_mode: SshMode,
@@ -190,7 +191,7 @@ class SSHCommandRunner:
             self.ssh_private_key,
             self.ssh_control_name,
             ssh_proxy_command=self._ssh_proxy_command,
-            port = self.port,
+            port=self.port,
         ) + [f'{self.ssh_user}@{self.ip}']
 
     def run(
@@ -345,7 +346,7 @@ class SSHCommandRunner:
                 self.ssh_private_key,
                 self.ssh_control_name,
                 ssh_proxy_command=self._ssh_proxy_command,
-                port = self.port,
+                port=self.port,
             ))
         rsync_command.append(f'-e "ssh {ssh_options}"')
         # To support spaces in the path, we need to quote source and target.

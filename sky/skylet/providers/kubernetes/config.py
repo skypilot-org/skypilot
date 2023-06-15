@@ -11,21 +11,20 @@ from sky.skylet.providers.kubernetes import auth_api, core_api, log_prefix
 logger = logging.getLogger(__name__)
 
 MEMORY_SIZE_UNITS = {
-    "K": 2 ** 10,
-    "M": 2 ** 20,
-    "G": 2 ** 30,
-    "T": 2 ** 40,
-    "P": 2 ** 50,
+    "K": 2**10,
+    "M": 2**20,
+    "G": 2**30,
+    "T": 2**40,
+    "P": 2**50,
 }
 
 
 class InvalidNamespaceError(ValueError):
+
     def __init__(self, field_name, namespace):
-        self.message = (
-            "Namespace of {} config doesn't match provided "
-            "namespace '{}'. Either set it to {} or remove the "
-            "field".format(field_name, namespace, namespace)
-        )
+        self.message = ("Namespace of {} config doesn't match provided "
+                        "namespace '{}'. Either set it to {} or remove the "
+                        "field".format(field_name, namespace, namespace))
 
     def __str__(self):
         return self.message
@@ -40,7 +39,8 @@ def updating_existing_msg(resource_type, name):
 
 
 def not_found_msg(resource_type, name):
-    return "{} '{}' not found, attempting to create it".format(resource_type, name)
+    return "{} '{}' not found, attempting to create it".format(
+        resource_type, name)
 
 
 def not_checking_msg(resource_type, name):
@@ -107,14 +107,12 @@ def fillout_resources_kubernetes(config):
         if "resources" not in config["available_node_types"][node_type]:
             config["available_node_types"][node_type]["resources"] = {}
         autodetected_resources.update(
-            config["available_node_types"][node_type]["resources"]
-        )
-        config["available_node_types"][node_type]["resources"] = autodetected_resources
+            config["available_node_types"][node_type]["resources"])
+        config["available_node_types"][node_type][
+            "resources"] = autodetected_resources
         logger.debug(
             "Updating the resources of node type {} to include {}.".format(
-                node_type, autodetected_resources
-            )
-        )
+                node_type, autodetected_resources))
     return config
 
 
@@ -135,7 +133,9 @@ def get_autodetected_resources(container_data):
 
 
 def get_resource(container_resources, resource_name):
-    limit = _get_resource(container_resources, resource_name, field_name="limits")
+    limit = _get_resource(container_resources,
+                          resource_name,
+                          field_name="limits")
     # float("inf") means there's no limit set
     return 0 if limit == float("inf") else int(limit)
 
@@ -204,9 +204,11 @@ def _configure_namespace(provider_config):
     namespace = provider_config[namespace_field]
     field_selector = "metadata.name={}".format(namespace)
     try:
-        namespaces = core_api().list_namespace(field_selector=field_selector).items
+        namespaces = core_api().list_namespace(
+            field_selector=field_selector).items
     except ApiException:
-        logger.warning(log_prefix + not_checking_msg(namespace_field, namespace))
+        logger.warning(log_prefix +
+                       not_checking_msg(namespace_field, namespace))
         return namespace
 
     if len(namespaces) > 0:
@@ -215,7 +217,8 @@ def _configure_namespace(provider_config):
         return namespace
 
     logger.info(log_prefix + not_found_msg(namespace_field, namespace))
-    namespace_config = client.V1Namespace(metadata=client.V1ObjectMeta(name=namespace))
+    namespace_config = client.V1Namespace(metadata=client.V1ObjectMeta(
+        name=namespace))
     core_api().create_namespace(namespace_config)
     logger.info(log_prefix + created_msg(namespace_field, namespace))
     return namespace
@@ -235,11 +238,8 @@ def _configure_autoscaler_service_account(namespace, provider_config):
 
     name = account["metadata"]["name"]
     field_selector = "metadata.name={}".format(name)
-    accounts = (
-        core_api()
-        .list_namespaced_service_account(namespace, field_selector=field_selector)
-        .items
-    )
+    accounts = (core_api().list_namespaced_service_account(
+        namespace, field_selector=field_selector).items)
     if len(accounts) > 0:
         assert len(accounts) == 1
         logger.info(log_prefix + using_existing_msg(account_field, name))
@@ -264,9 +264,8 @@ def _configure_autoscaler_role(namespace, provider_config):
 
     name = role["metadata"]["name"]
     field_selector = "metadata.name={}".format(name)
-    accounts = (
-        auth_api().list_namespaced_role(namespace, field_selector=field_selector).items
-    )
+    accounts = (auth_api().list_namespaced_role(
+        namespace, field_selector=field_selector).items)
     if len(accounts) > 0:
         assert len(accounts) == 1
         logger.info(log_prefix + using_existing_msg(role_field, name))
@@ -293,16 +292,13 @@ def _configure_autoscaler_role_binding(namespace, provider_config):
             subject["namespace"] = namespace
         elif subject["namespace"] != namespace:
             raise InvalidNamespaceError(
-                binding_field + " subject '{}'".format(subject["name"]), namespace
-            )
+                binding_field + " subject '{}'".format(subject["name"]),
+                namespace)
 
     name = binding["metadata"]["name"]
     field_selector = "metadata.name={}".format(name)
-    accounts = (
-        auth_api()
-        .list_namespaced_role_binding(namespace, field_selector=field_selector)
-        .items
-    )
+    accounts = (auth_api().list_namespaced_role_binding(
+        namespace, field_selector=field_selector).items)
     if len(accounts) > 0:
         assert len(accounts) == 1
         logger.info(log_prefix + using_existing_msg(binding_field, name))
@@ -328,11 +324,8 @@ def _configure_services(namespace, provider_config):
 
         name = service["metadata"]["name"]
         field_selector = "metadata.name={}".format(name)
-        services = (
-            core_api()
-            .list_namespaced_service(namespace, field_selector=field_selector)
-            .items
-        )
+        services = (core_api().list_namespaced_service(
+            namespace, field_selector=field_selector).items)
         if len(services) > 0:
             assert len(services) == 1
             existing_service = services[0]

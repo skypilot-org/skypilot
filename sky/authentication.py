@@ -461,7 +461,9 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         output = e.output.decode('utf-8')
         print(output)
         if 'already exists' in output:
-            logger.warning(f'Key {key_label} already exists in Kubernetes cluster, continuing...')
+            logger.warning(
+                f'Key {key_label} already exists in Kubernetes cluster, continuing...'
+            )
             pass
         else:
             raise e

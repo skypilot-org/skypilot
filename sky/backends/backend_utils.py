@@ -433,13 +433,8 @@ class SSHConfigHelper(object):
 
     @classmethod
     @timeline.FileLockEvent(ssh_conf_lock_path)
-    def add_cluster(
-        cls,
-        cluster_name: str,
-        ips: List[str],
-        auth_config: Dict[str, str],
-        ports: List[int]
-    ):
+    def add_cluster(cls, cluster_name: str, ips: List[str],
+                    auth_config: Dict[str, str], ports: List[int]):
         """Add authentication information for cluster to local SSH config file.
 
         If a host with `cluster_name` already exists and the configuration was
@@ -532,7 +527,6 @@ class SSHConfigHelper(object):
         external_worker_ips: List[str],
         auth_config: Dict[str, str],
     ):
-        # TODO(romilb): Make this work with multinode!
         username = auth_config['ssh_user']
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
@@ -599,8 +593,13 @@ class SSHConfigHelper(object):
                 host_name = external_worker_ips[idx]
                 logger.warning(f'Using {host_name} to identify host instead.')
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, host_name, external_worker_ips[idx],
-                    username, key_path, proxy_command, port = 22)
+                    sky_autogen_comment,
+                    host_name,
+                    external_worker_ips[idx],
+                    username,
+                    key_path,
+                    proxy_command,
+                    port=22)
 
         # All workers go to SKY_USER_FILE_PATH/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
@@ -612,15 +611,24 @@ class SSHConfigHelper(object):
                     overwrites[idx] = True
                     overwrite_begin_idxs[idx] = i - 1
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, host_name, external_worker_ips[idx],
-                    username, key_path, proxy_command, port = 22)
+                    sky_autogen_comment,
+                    host_name,
+                    external_worker_ips[idx],
+                    username,
+                    key_path,
+                    proxy_command,
+                    port=22)
 
         # This checks if all codegens have been created.
         for idx, ip in enumerate(external_worker_ips):
             if not codegens[idx]:
-                codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, worker_names[idx], ip, username,
-                    key_path, proxy_command, port = 22)
+                codegens[idx] = cls._get_generated_config(sky_autogen_comment,
+                                                          worker_names[idx],
+                                                          ip,
+                                                          username,
+                                                          key_path,
+                                                          proxy_command,
+                                                          port=22)
 
         for idx in range(len(external_worker_ips)):
             # Add (or overwrite) the new config.
@@ -1598,12 +1606,12 @@ def get_head_ip(
 
 @timeline.event
 def get_head_ssh_port(
-    handle: backends.Backend.ResourceHandle,
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
     use_cache: bool = True,
     max_attempts: int = 1,
-) -> str:
+) -> int:
     """Returns the ip of the head node."""
-    del max_attempts # Unused.
+    del max_attempts  # Unused.
     # Use port 22 for everything except Kubernetes
     # TODO(romilb): Add a get port method to the cloud classes.
     if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
@@ -1615,86 +1623,6 @@ def get_head_ssh_port(
         svc_name = f'{handle.get_cluster_name()}-ray-head-ssh'
         head_ssh_port = clouds.Kubernetes.get_port(svc_name, 'default')
     return head_ssh_port
-
-def run_command_and_handle_ssh_failure(
-        runner: command_runner.SSHCommandRunner,
-        command: str,
-        failure_message: Optional[str] = None) -> str:
-    """Runs command remotely and returns output with proper error handling."""
-    rc, stdout, stderr = runner.run(command,
-                                    require_outputs=True,
-                                    stream_logs=False)
-    if rc == 255:
-        # SSH failed
-        raise RuntimeError(
-            f'SSH with user {runner.ssh_user} and key {runner.ssh_private_key} '
-            f'to {runner.ip} failed. This is most likely due to incorrect '
-            'credentials or incorrect permissions for the key file. Check '
-            'your credentials and try again.')
-    subprocess_utils.handle_returncode(rc,
-                                       command,
-                                       failure_message,
-                                       stderr=stderr)
-    return stdout
-
-
-def do_filemounts_and_setup_on_local_workers(
-        cluster_config_file: str,
-        worker_ips: List[str] = None,
-        extra_setup_cmds: List[str] = None):
-    """Completes filemounting and setup on worker nodes.
-
-    Syncs filemounts and runs setup on worker nodes for a local cluster. This
-    is a workaround for a Ray Autoscaler bug where `ray up` does not perform
-    filemounting or setup for local cluster worker nodes.
-    """
-    config = common_utils.read_yaml(cluster_config_file)
-
-    ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
-    if worker_ips is None:
-        worker_ips = config['provider']['worker_ips']
-    file_mounts = config['file_mounts']
-
-    setup_cmds = config['setup_commands']
-    if extra_setup_cmds is not None:
-        setup_cmds += extra_setup_cmds
-    setup_script = log_lib.make_task_bash_script('\n'.join(setup_cmds))
-
-    worker_runners = command_runner.SSHCommandRunner.make_runner_list(
-        worker_ips, **ssh_credentials)
-
-    # Uploads setup script to the worker node
-    with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
-        f.write(setup_script)
-        f.flush()
-        setup_sh_path = f.name
-        setup_file = os.path.basename(setup_sh_path)
-        file_mounts[f'/tmp/{setup_file}'] = setup_sh_path
-
-        # Ray Autoscaler Bug: Filemounting + Ray Setup
-        # does not happen on workers.
-        def _setup_local_worker(runner: command_runner.SSHCommandRunner):
-            for dst, src in file_mounts.items():
-                mkdir_dst = f'mkdir -p {os.path.dirname(dst)}'
-                run_command_and_handle_ssh_failure(
-                    runner,
-                    mkdir_dst,
-                    failure_message=f'Failed to run {mkdir_dst} on remote.')
-                if os.path.isdir(src):
-                    src = os.path.join(src, '')
-                runner.rsync(source=src, target=dst, up=True, stream_logs=False)
-
-            setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
-            rc, stdout, _ = runner.run(setup_cmd,
-                                       stream_logs=False,
-                                       require_outputs=True)
-            subprocess_utils.handle_returncode(
-                rc,
-                setup_cmd,
-                'Failed to setup Ray autoscaler commands on remote.',
-                stderr=stdout)
-
-        subprocess_utils.run_in_parallel(_setup_local_worker, worker_runners)
 
 
 def check_network_connection():
@@ -2051,6 +1979,7 @@ def _query_status_kubernetes(
         ray_config: Dict[str, Any],  # pylint: disable=unused-argument
 ) -> List[global_user_state.ClusterStatus]:
     raise NotImplementedError
+
 
 _QUERY_STATUS_FUNCS = {
     'AWS': _query_status_aws,

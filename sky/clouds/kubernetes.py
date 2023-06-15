@@ -49,18 +49,6 @@ class Kubernetes(clouds.Cloud):
         # No notion of regions in Kubernetes - return a single region.
         return cls.regions()
 
-    @classmethod
-    def region_zones_provision_loop(
-        cls,
-        *,
-        instance_type: Optional[str] = None,
-        accelerators: Optional[Dict[str, int]] = None,
-        use_spot: bool = False,
-    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        # No notion of regions in Kubernetes - return a single region.
-        for region in cls.regions():
-            yield region, region.zones
-
     def instance_type_to_hourly_cost(self,
                                      instance_type: str,
                                      use_spot: bool,
@@ -87,7 +75,7 @@ class Kubernetes(clouds.Cloud):
         return isinstance(other, Kubernetes)
 
     @classmethod
-    def get_port(cls, svc_name, namespace):
+    def get_port(cls, svc_name, namespace) -> int:
         from sky.skylet.providers.kubernetes.utils import get_port
         return get_port(svc_name, namespace)
 
@@ -97,14 +85,17 @@ class Kubernetes(clouds.Cloud):
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
             disk_tier: Optional[str] = None) -> Optional[str]:
-        del disk_tier # Unused.
+        del disk_tier  # Unused.
         virtual_instance_type = ''
-        n_cpus = cpus if cpus is not None else cls._DEFAULT_NUM_VCPUS
-        mem = memory if memory is not None else n_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
+        # Remove the + from the cpus/memory string
+        n_cpus = int(
+            cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
+        mem = int(
+            memory.strip('+')
+        ) if memory is not None else n_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
         virtual_instance_type += f'{n_cpus}vCPU-'
         virtual_instance_type += f'{mem}GB'
         return virtual_instance_type
-
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -116,46 +107,43 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
-            cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+            cls, instance_type: str) -> Tuple[float, float]:
         """Returns the #vCPUs and memory that the instance type offers."""
         vcpus = cls.get_vcpus_from_instance_type(instance_type)
         mem = cls.get_mem_from_instance_type(instance_type)
         return vcpus, mem
 
-
     @classmethod
     def zones_provision_loop(
-            cls,
-            *,
-            region: str,
-            num_nodes: int,
-            instance_type: str,
-            accelerators: Optional[Dict[str, int]] = None,
-            use_spot: bool = False,
-    ) -> Iterator[None]:
+        cls,
+        *,
+        region: str,
+        num_nodes: int,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]] = None,
+        use_spot: bool = False,
+    ) -> Iterator[List[clouds.Zone]]:
         del num_nodes  # Unused.
         for r in cls.regions():
+            assert r.zones is not None, r
             yield r.zones
 
     @classmethod
     def get_vcpus_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[float]:
+    ) -> float:
         """Returns the #vCPUs that the instance type offers."""
-        if instance_type is None:
-            return None
-        # TODO(romilb): Better parsing
+        # TODO(romilb): Need more robust parsing
         return float(instance_type.split('vCPU')[0])
 
     @classmethod
     def get_mem_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[float]:
+    ) -> float:
         """Returns the memory that the instance type offers."""
-        if instance_type is None:
-            return None
+        # TODO(romilb): Need more robust parsing
         return float(instance_type.split('vCPU-')[1].split('GB')[0])
 
     @classmethod
@@ -168,7 +156,7 @@ class Kubernetes(clouds.Cloud):
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         del zones
         if region is None:
-            region = self._get_default_region()
+            region = self._regions[0]
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -179,16 +167,17 @@ class Kubernetes(clouds.Cloud):
 
         # resources.memory and resources.cpus are None if they are not explicitly set.
         # We fetch the default values for the instance type in that case.
-        cpus, mem = self.get_vcpus_mem_from_instance_type(resources.instance_type)
+        cpus, mem = self.get_vcpus_mem_from_instance_type(
+            resources.instance_type)
         # TODO(romilb): Allow fractional resources here
-        cpus = int(cpus)
-        mem = int(mem)
+        # cpus = int(cpus)
+        # mem = int(mem)
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
-            'cpus': cpus,
-            'memory': mem
+            'cpus': str(cpus),
+            'memory': str(mem)
         }
 
     def get_feasible_launchable_resources(self,
@@ -229,7 +218,8 @@ class Kubernetes(clouds.Cloud):
         # TODO(romilb): Add GPU support.
         raise NotImplementedError("GPU support not implemented yet.")
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         # TODO(romilb): Check credential validity using k8s api
         if os.path.exists(os.path.expanduser(f'~/.kube/config')):
             return True, None
