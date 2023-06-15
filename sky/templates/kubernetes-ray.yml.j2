@@ -131,7 +131,7 @@ available_node_types:
         volumes:
         - name: secret-volume
           secret:
-            secretName: ssh-key-secret
+            secretName: {{ssh_key_secret_name}}
         - name: dshm
           emptyDir:
             medium: Memory
@@ -202,7 +202,7 @@ available_node_types:
         volumes:
         - name: secret-volume
           secret:
-            secretName: ssh-key-secret
+            secretName: {{ssh_key_secret_name}}
         - name: dshm
           emptyDir:
             medium: Memory

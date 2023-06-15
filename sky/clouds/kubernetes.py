@@ -5,7 +5,7 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky.clouds import service_catalog
+from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -19,6 +19,7 @@ _CREDENTIAL_FILES = [
 @clouds.CLOUD_REGISTRY.register
 class Kubernetes(clouds.Cloud):
 
+    SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
     _DEFAULT_NUM_VCPUS = 4
     _DEFAULT_MEMORY_CPU_RATIO = 1
     _REPR = 'Kubernetes'
@@ -99,7 +100,7 @@ class Kubernetes(clouds.Cloud):
         del disk_tier # Unused.
         virtual_instance_type = ''
         n_cpus = cpus if cpus is not None else cls._DEFAULT_NUM_VCPUS
-        mem = memory if memory is not None else cls._DEFAULT_NUM_VCPUS * cls._DEFAULT_MEMORY_CPU_RATIO
+        mem = memory if memory is not None else n_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
         virtual_instance_type += f'{n_cpus}vCPU-'
         virtual_instance_type += f'{mem}GB'
         return virtual_instance_type

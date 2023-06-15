@@ -853,8 +853,10 @@ def write_cluster_config(
     credentials = sky_check.get_cloud_credential_file_mounts()
 
     k8s_image = None
+    ssh_key_secret_name = None
     if isinstance(cloud, clouds.Kubernetes):
         k8s_image = cloud.IMAGE
+        ssh_key_secret_name = cloud.SKY_SSH_KEY_SECRET_NAME
 
     ip_list = None
     auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
@@ -951,6 +953,7 @@ def write_cluster_config(
 
                 # Kubernetes only:
                 'skypilot_k8s_image': k8s_image,
+                'ssh_key_secret_name': ssh_key_secret_name,
 
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.

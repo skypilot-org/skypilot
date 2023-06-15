@@ -428,8 +428,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Run kubectl command to add the public key to the cluster.
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
-    # TODO(romilb): Change 'ssh-key-secret' to a unique name.
-    key_label = 'ssh-key-secret'
+    key_label = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
     cmd = f"kubectl create secret generic {key_label} --from-file=ssh-publickey={public_key_path}"
     try:
         subprocess.check_output(cmd, stderr=subprocess.STDOUT, shell=True)
