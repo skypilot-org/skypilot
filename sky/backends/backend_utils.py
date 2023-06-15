@@ -1676,7 +1676,7 @@ def _query_cluster_status_via_cloud_api(
     zone = ray_config['provider'].get('availability_zone')
     kwargs = {}
     if isinstance(handle.launched_resources.cloud, clouds.GCP):
-        kwargs['use_tpu_vm'] = ray_config['provider'].get('use_tpu_vm', False)
+        kwargs['use_tpu_vm'] = ray_config['provider'].get('_has_tpus', False)
 
     # Query the cloud provider.
     node_statuses = handle.launched_resources.cloud.query_status(
