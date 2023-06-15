@@ -1671,7 +1671,8 @@ def _query_cluster_status_via_cloud_api(
     # handle.launched_resources, because the latter may not be set
     # correctly yet.
     ray_config = common_utils.read_yaml(handle.cluster_yaml)
-    region = ray_config['provider']['region']
+    provider_config = ray_config['provider']
+    region = provider_config.get('region') or provider_config.get('location')
     zone = ray_config['provider'].get('availability_zone')
     kwargs = {}
     if isinstance(handle.launched_resources.cloud, clouds.GCP):

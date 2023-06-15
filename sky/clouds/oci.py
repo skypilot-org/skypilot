@@ -525,13 +525,12 @@ class OCI(clouds.Cloud):
         try:
             vms = oci_query_helper.query_instances_by_tags(
                 tag_filters=tag_filters, region=region)
-        except Exception as e: # pylint: disable=broad-except
+        except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ClusterStatusFetchingError(
                     f'Failed to query OCI cluster {name!r} status. '
                     'Details: '
-                    f'{common_utils.format_exception(e, use_bracket=True)}'
-                )
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
 
         for node in vms:
             vm_status = node.lifecycle_state
