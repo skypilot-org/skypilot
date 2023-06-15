@@ -511,7 +511,7 @@ class Azure(clouds.Cloud):
             'VM deallocated': status_lib.ClusterStatus.STOPPED,
         }
         tag_filter_str = ' '.join(
-            f'tags.\\"{k}\\"==\\"{v}\\"' for k, v in tag_filters.items())
+            f'tags.\\"{k}\\"==\'{v}\'' for k, v in tag_filters.items())
         query_cmd = ('az vm show -d --ids $(az vm list --query '
                      f'"[?{tag_filter_str}].id" '
                      '-o tsv) --query "powerState" -o json')
