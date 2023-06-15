@@ -1,11 +1,8 @@
-.. _cloud-administration:
+.. _cloud-auth:
 
-Cloud Administration
-=============================
+Cloud Authentication
+===================================
 
-SkyPilot is designed to minimize cloud administration and setup steps. It should work out-of-the-box for most users without any additional setup.
-
-For users who want to use advanced cloud-specific features (e.g., use SSO; have fine-grained control over permissions; etc.), this page provides instructions to do so.
 
 .. tip::
 

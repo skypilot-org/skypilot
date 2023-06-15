@@ -53,7 +53,7 @@ The VMs can be terminated by either ``sky bench down`` or ``sky down``:
 .. note::
 
     Here, the columns other than ``DURATION`` and ``SPENT($)`` are empty.
-    To get a complete benchmark report, please refer to :ref:`SkyCallback`.
+    To get a complete benchmark report, please refer to :ref:`SkyCallback <benchmark-skycallback>`.
 
 
 Managing benchmark reports

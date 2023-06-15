@@ -35,7 +35,7 @@ run: |
     --max_seq_length 384 \
     --doc_stride 128 \
     --report_to wandb \
-    --run_name $SKYPILOT_JOB_ID \
+    --run_name $SKYPILOT_TASK_ID \
     --output_dir /checkpoint/bert_qa/ \
     --save_total_limit 10 \
     --save_steps 1000
