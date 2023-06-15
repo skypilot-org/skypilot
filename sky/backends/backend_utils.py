@@ -1603,17 +1603,12 @@ def get_head_ssh_port(
     max_attempts: int = 1,
 ) -> str:
     """Returns the ip of the head node."""
+    del max_attempts # Unused.
     # Use port 22 for everything except Kubernetes
+    # TODO(romilb): Add a get port method to the cloud classes.
     if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
         return 22
-    if use_cache:
-        if handle.head_ssh_port is None:
-            # This happens for INIT clusters (e.g., exit 1 in setup).
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cluster\'s head SSH port not found; is it up? To fix: '
-                    'run a successful launch first (`sky launch`) to ensure'
-                    ' the cluster status is UP (`sky status`).')
+    if use_cache and handle.head_ssh_port is not None:
         head_ssh_port = handle.head_ssh_port
     else:
         # TODO(romilb): Only supports headnode for now! No multinode!

@@ -2127,9 +2127,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         self.launched_resources = self.launched_resources.copy(region=region)
 
-    def _update_stable_ssh_ports(self):
+    def _update_stable_ssh_ports(self, max_attempts: int = 1) -> None:
         if isinstance(self.launched_resources.cloud, clouds.Kubernetes):
-            head_port = backend_utils.get_head_ssh_port(self, use_cache=False)
+            head_port = backend_utils.get_head_ssh_port(self, use_cache=False, max_attempts=max_attempts)
             # TODO(romilb): Multinode doesn't work with Kubernetes yet.
             worker_ports = [22] * self.launched_nodes
             ports = [head_port] + worker_ports
@@ -2208,7 +2208,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                            max_attempts: int = _FETCH_IP_MAX_ATTEMPTS,
                            use_cached_ports: bool = True) -> Optional[List[str]]:
         if not use_cached_ports:
-            self._update_stable_ssh_ports()
+            self._update_stable_ssh_ports(max_attempts=max_attempts)
         if self.stable_ssh_ports is not None:
             return self.stable_ssh_ports
         return None
@@ -3656,21 +3656,40 @@ ssh_port_list,
         *,
         port_forward: Optional[List[int]] = None,
         log_path: str = '/dev/null',
-        process_stream: bool = True,
         stream_logs: bool = False,
-        use_cached_head_ip: bool = True,
         ssh_mode: command_runner.SshMode = command_runner.SshMode.
         NON_INTERACTIVE,
         under_remote_workdir: bool = False,
         require_outputs: bool = False,
         separate_stderr: bool = False,
+        process_stream: bool = True,
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
-        """Runs 'cmd' on the cluster's head node."""
-        head_ip = backend_utils.get_head_ip(handle,
-                                            _FETCH_IP_MAX_ATTEMPTS)
-        head_ssh_port = backend_utils.get_head_ssh_port(handle, use_cached_head_ip,
-                                            _FETCH_IP_MAX_ATTEMPTS)
+        """Runs 'cmd' on the cluster's head node.
+
+        Args:
+            handle: The ResourceHandle to the cluster.
+            cmd: The command to run.
+
+            Advanced options:
+
+            port_forward: A list of ports to forward.
+            log_path: The path to the log file.
+            stream_logs: Whether to stream the logs to stdout/stderr.
+            ssh_mode: The mode to use for ssh.
+                See command_runner.SSHCommandRunner.SSHMode for more details.
+            under_remote_workdir: Whether to run the command under the remote
+                workdir ~/sky_workdir.
+            require_outputs: Whether to return the stdout and stderr of the
+                command.
+            separate_stderr: Whether to separate stderr from stdout.
+            process_stream: Whether to post-process the stdout/stderr of the
+                command, such as replacing or skipping lines on the fly. If
+                enabled, lines are printed only when '\r' or '\n' is found.
+        """
+        head_ip = backend_utils.get_head_ip(handle, _FETCH_IP_MAX_ATTEMPTS)
+        head_ssh_port = backend_utils.get_head_ssh_port(handle,
+                                                        _FETCH_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runner = command_runner.SSHCommandRunner(head_ip, port=head_ssh_port, **ssh_credentials)
