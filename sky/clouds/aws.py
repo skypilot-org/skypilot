@@ -18,6 +18,8 @@ from sky.adaptors import aws
 from sky.clouds import service_catalog
 from sky.skylet import log_lib
 from sky.utils import common_utils
+from sky.utils import log_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -142,7 +144,7 @@ class AWS(clouds.Cloud):
             for r in regions:
                 assert r.zones is not None, r
                 r.set_zones([z for z in r.zones if z.name == zone])
-            regions = [r for r in regions if r.zones]
+        regions = [r for r in regions if r.zones]
         return regions
 
     @classmethod
@@ -696,32 +698,14 @@ class AWS(clouds.Cloud):
         }
 
     @classmethod
-    def query_status(cls, name: str, tag_filters: Dict[str, str],
-                     region: Optional[str], zone: Optional[str],
-                     **kwargs) -> List['status_lib.ClusterStatus']:
-        del zone  # unused
-        status_map = {
-            'pending': status_lib.ClusterStatus.INIT,
-            'running': status_lib.ClusterStatus.UP,
-            # TODO(zhwu): stopping and shutting-down could occasionally fail
-            # due to internal errors of AWS. We should cover that case.
-            'stopping': status_lib.ClusterStatus.STOPPED,
-            'stopped': status_lib.ClusterStatus.STOPPED,
-            'shutting-down': None,
-            'terminated': None,
-        }
-
-        fitler_str = ' '.join(f'Name=tag:{key},Values={value}'
+    def _query_and_retry(cls, tag_filters: Dict[str, str], region: str,
+                         query: str) -> Tuple[int, str, str]:
+        filter_str = ' '.join(f'Name=tag:{key},Values={value}'
                               for key, value in tag_filters.items())
-
+        query_cmd = (f'aws ec2 describe-instances --filters {filter_str} '
+                     f'--region {region} --query {query} --output json')
         retry_cnt = 0
         while retry_cnt < 3:
-            query_cmd = ('aws ec2 describe-instances --filters '
-                         f'{fitler_str} '
-                         f'--region {region} '
-                         '--query "Reservations[].Instances[].State.Name" '
-                         '--output json')
-
             returncode, stdout, stderr = log_lib.run_with_log(
                 query_cmd, '/dev/null', require_outputs=True, shell=True)
             logger.debug(f'{query_cmd} returned {returncode}.\n'
@@ -738,6 +722,27 @@ class AWS(clouds.Cloud):
                 continue
             else:
                 break
+        return returncode, stdout, stderr
+
+    @classmethod
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List['status_lib.ClusterStatus']:
+        del zone  # unused
+        status_map = {
+            'pending': status_lib.ClusterStatus.INIT,
+            'running': status_lib.ClusterStatus.UP,
+            # TODO(zhwu): stopping and shutting-down could occasionally fail
+            # due to internal errors of AWS. We should cover that case.
+            'stopping': status_lib.ClusterStatus.STOPPED,
+            'stopped': status_lib.ClusterStatus.STOPPED,
+            'shutting-down': None,
+            'terminated': None,
+        }
+
+        assert region is not None, (tag_filters, region)
+        returncode, stdout, stderr = cls._query_and_retry(
+            tag_filters, region, query='Reservations[].Instances[].State.Name')
 
         if returncode != 0:
             with ux_utils.print_exception_no_traceback():
@@ -753,3 +758,124 @@ class AWS(clouds.Cloud):
             if node_status is not None:
                 statuses.append(node_status)
         return statuses
+
+    @classmethod
+    def create_image_from_cluster(cls, name: str, tag_filters: Dict[str, str],
+                                  region: Optional[str], **kwargs) -> str:
+        del kwargs  # unused
+        assert region is not None, (tag_filters, region)
+        image_name = f'skypilot-{name}-{int(time.time())}'
+        returncode, stdout, stderr = cls._query_and_retry(
+            tag_filters, region, query='Reservations[].Instances[].InstanceId')
+
+        subprocess_utils.handle_returncode(
+            returncode,
+            '',
+            error_msg='Failed to find the source cluster on AWS.',
+            stderr=stderr,
+            stream_logs=False)
+
+        instance_ids = json.loads(stdout.strip())
+        if len(instance_ids) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ClusterStatusFetchingError(
+                    f'Failed to query AWS cluster {name!r}: '
+                    f'{stdout + stderr}')
+
+        instance_id = instance_ids[0]
+        create_image_cmd = (
+            f'aws ec2 create-image --region {region} --instance-id {instance_id} '
+            f'--name {image_name} --output text')
+
+        returncode, stdout, stderr = log_lib.run_with_log(create_image_cmd,
+                                                          '/dev/null',
+                                                          require_outputs=True,
+                                                          shell=True)
+        subprocess_utils.handle_returncode(
+            returncode,
+            create_image_cmd,
+            error_msg=
+            f'Failed to create image from the source instance {instance_id}.',
+            stderr=stderr,
+            stream_logs=False)
+
+        log_utils.force_update_rich_status(
+            f'Waiting for the source image from {name!r} to be available on AWS.'
+        )
+        image_id = stdout.strip()
+        # Wait for the image to be available
+        wait_image_cmd = (
+            f'aws ec2 wait image-available --region {region} --image-ids {image_id}'
+        )
+        returncode, stdout, stderr = log_lib.run_with_log(wait_image_cmd,
+                                                          '/dev/null',
+                                                          require_outputs=True,
+                                                          shell=True)
+        subprocess_utils.handle_returncode(
+            returncode,
+            wait_image_cmd,
+            error_msg=
+            f'The source image {image_id!r} creation fails to complete.',
+            stderr=stderr,
+            stream_logs=False)
+        sky_logging.print(
+            f'The source image {image_id!r} is created successfully.')
+        return image_id
+
+    @classmethod
+    def copy_image(cls, image_id: str, source_region: str, target_region: str,
+                   **kwargs) -> str:
+        del kwargs
+        image_name = f'skypilot-cloned-from-{source_region}-{int(time.time())}'
+        copy_image_cmd = (f'aws ec2 copy-image --name {image_name} '
+                          f'--source-image-id {image_id} '
+                          f'--source-region {source_region} '
+                          f'--region {target_region} --output text')
+        returncode, stdout, stderr = log_lib.run_with_log(copy_image_cmd,
+                                                          '/dev/null',
+                                                          require_outputs=True,
+                                                          shell=True)
+        subprocess_utils.handle_returncode(
+            returncode,
+            copy_image_cmd,
+            error_msg=
+            f'Failed to copy image {image_id!r} from {source_region} to {target_region}.',
+            stderr=stderr,
+            stream_logs=False)
+
+        target_image_id = stdout.strip()
+        wait_image_cmd = (
+            f'aws ec2 wait image-available --region {target_region} --image-ids {target_image_id}'
+        )
+        log_utils.force_update_rich_status(
+            'Waiting for the target image to be available on AWS.')
+        returncode, stdout, stderr = log_lib.run_with_log(wait_image_cmd,
+                                                          '/dev/null',
+                                                          require_outputs=True,
+                                                          shell=True)
+        subprocess_utils.handle_returncode(
+            returncode,
+            wait_image_cmd,
+            error_msg=
+            f'The target image {target_image_id!r} creation fails to complete.',
+            stderr=stderr,
+            stream_logs=False)
+        sky_logging.print(
+            f'The target image {target_image_id!r} is created successfully.')
+        return target_image_id
+
+    @classmethod
+    def delete_image(cls, image_id: str, region: Optional[str]) -> None:
+        assert region is not None, (image_id, region)
+        delete_image_cmd = (f'aws ec2 deregister-image --region {region} '
+                            f'--image-id {image_id}')
+        returncode, _, stderr = log_lib.run_with_log(delete_image_cmd,
+                                                     '/dev/null',
+                                                     require_outputs=True,
+                                                     shell=True)
+        subprocess_utils.handle_returncode(
+            returncode,
+            delete_image_cmd,
+            error_msg=f'Failed to delete image {image_id!r} from {region}.',
+            stderr=stderr,
+            stream_logs=False)

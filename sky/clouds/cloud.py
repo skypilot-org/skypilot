@@ -27,6 +27,7 @@ class CloudImplementationFeatures(enum.Enum):
     STOP = 'stop'
     AUTOSTOP = 'autostop'
     MULTI_NODE = 'multi-node'
+    MIGRATE_DISK = 'migrate-disk'
 
 
 class Region(collections.namedtuple('Region', ['name'])):
@@ -483,6 +484,20 @@ class Cloud:
             A list of ClusterStatus representing the status of all the
             alive nodes in the cluster.
         """
+        raise NotImplementedError
+
+    @classmethod
+    def create_image_from_cluster(cls, name: str, tag_filters: Dict[str, str],
+                                  region: Optional[str], **kwargs) -> str:
+        raise NotImplementedError
+
+    @classmethod
+    def move_image(cls, image_name: str, source_region: str,
+                   target_region: str) -> None:
+        raise NotImplementedError
+
+    @classmethod
+    def delete_image(cls, image_id: str, region: Optional[str]) -> None:
         raise NotImplementedError
 
     def __repr__(self):
