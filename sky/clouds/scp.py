@@ -341,6 +341,8 @@ class SCP(clouds.Cloud):
                      **kwargs) -> List[status_lib.ClusterStatus]:
         del tag_filters, region, zone, kwargs  # Unused.
 
+        # TODO: Multi-node is not supported yet.
+
         status_map = {
             'CREATING': status_lib.ClusterStatus.INIT,
             'EDITING': status_lib.ClusterStatus.INIT,
