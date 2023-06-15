@@ -2167,18 +2167,27 @@ def _update_cluster_status_no_lock(
                                  f'{common_utils.format_exception(e)}')
                 global_user_state.set_cluster_autostop_value(
                     handle.cluster_name, -1, to_down=False)
+
+                # Friendly hint.
+                autostop = record['autostop']
+                maybe_down_str = ' --down' if record['to_down'] else ''
+                noun = 'autodown' if record['to_down'] else 'autostop'
                 if success:
-                    operation_str = 'canceled autostop/down on the cluster'
+                    operation_str = (f'Canceled {noun} on the cluster '
+                                     f'{cluster_name!r}')
                 else:
-                    operation_str = ('attempted to cancel autostop/down on the '
-                                     'cluster with best effort')
+                    operation_str = (
+                        f'Attempted to cancel {noun} on the '
+                        f'cluster {cluster_name!r} with best effort')
                 yellow = colorama.Fore.YELLOW
+                bright = colorama.Style.BRIGHT
                 reset = colorama.Style.RESET_ALL
+                ux_utils.console_newline()
                 logger.warning(
-                    f'\n{yellow}Cluster {cluster_name!r} is in an abnormal '
-                    f'state; {operation_str}. To fix the cluster state, '
-                    'rerun `sky launch` or `sky start` with the original '
-                    f'autostop settings.{reset}')
+                    f'{yellow}{operation_str}, since it is found to be in an '
+                    f'abnormal state. To fix, try running: {reset}{bright}sky '
+                    f'start -f -i {autostop}{maybe_down_str} {cluster_name}'
+                    f'{reset}')
             else:
                 ux_utils.console_newline()
                 operation_str = 'autodowning' if record[

@@ -2217,7 +2217,7 @@ def autostop(
     help=
     ('Autodown the cluster: tear down the cluster after specified minutes of '
      'idle time after all jobs finish (successfully or abnormally). Requires '
-     ' --idle-minutes-to-autostop to be set.'),
+     '--idle-minutes-to-autostop to be set.'),
 )
 @click.option(
     '--retry-until-up',
