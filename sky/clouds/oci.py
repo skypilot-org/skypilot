@@ -500,6 +500,7 @@ class OCI(clouds.Cloud):
         # All the disk_tier are supported for any instance_type
         del instance_type, disk_tier  # unused
 
+    @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List[status_lib.ClusterStatus]:
