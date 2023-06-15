@@ -528,8 +528,7 @@ class Azure(clouds.Cloud):
                 return []
             node_ids = json.loads(stdout.strip())
             state_str = '[].powerState'
-            if not isinstance(node_ids, list):
-                node_ids = [node_ids]
+            if len(node_ids) == 1:
                 state_str = 'powerState'
             node_ids_str = '\t'.join(node_ids)
             query_cmd = (
@@ -562,6 +561,8 @@ class Azure(clouds.Cloud):
         assert stdout.strip(), f'No status returned for {name!r}'
 
         original_statuses_list = json.loads(stdout.strip())
+        if not isinstance(original_statuses_list, list):
+            original_statuses_list = [original_statuses_list]
         statuses = []
         for s in original_statuses_list:
             node_status = status_map[s]
