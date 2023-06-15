@@ -2158,13 +2158,27 @@ def _update_cluster_status_no_lock(
                 # not correctly autostop. Resetting the autostop will let
                 # the user know that the autostop may not happen to avoid
                 # leakages from the assumption that the cluster will autostop.
+                success = True
                 try:
                     backend.set_autostop(handle, -1, stream_logs=False)
                 except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+                    success = False
                     logger.debug(f'Failed to reset autostop. Due to '
                                  f'{common_utils.format_exception(e)}')
                 global_user_state.set_cluster_autostop_value(
                     handle.cluster_name, -1, to_down=False)
+                if success:
+                    operation_str = 'canceled autostop/down on the cluster'
+                else:
+                    operation_str = ('attempted to cancel autostop/down on the '
+                                     'cluster with best effort')
+                yellow = colorama.Fore.YELLOW
+                reset = colorama.Style.RESET_ALL
+                logger.warning(
+                    f'\n{yellow}Cluster {cluster_name!r} is in an abnormal '
+                    f'state; {operation_str}. To fix the cluster state, '
+                    'rerun `sky launch` or `sky start` with the original '
+                    f'autostop settings.{reset}')
             else:
                 ux_utils.console_newline()
                 operation_str = 'autodowning' if record[
