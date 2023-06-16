@@ -531,5 +531,4 @@ class OCI(clouds.Cloud):
                     f'Automatically set the VPU to {oci_conf.DISK_TIER_MEDIUM}'
                     f' as less than {cpus}x vCPU is configured.')
                 vpu = oci_conf.DISK_TIER_MEDIUM
-
         return vpu
