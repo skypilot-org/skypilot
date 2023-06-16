@@ -256,6 +256,8 @@ class OCI(clouds.Cloud):
             'region': region.name,
             'cpus': cpus,
             'memory': resources.memory,
+            'disk_size': resources.disk_size,
+            'vpu': f'{oci_conf.BOOT_VOLUME_VPU[resources.disk_tier]}',
             'zone': f'{_tenancy_prefix}:{zone}',
             'image': image_id,
             'app_catalog_listing_id': listing_id,
@@ -490,3 +492,9 @@ class OCI(clouds.Cloud):
         raise exceptions.ResourcesUnavailableError(
             'ERR: No image found in catalog for region '
             f'{region_name}. Try update your default image_id settings.')
+
+    @classmethod
+    def check_disk_tier_enabled(cls, instance_type: str,
+                                disk_tier: str) -> None:
+        # All the disk_tier are supported for any instance_type
+        del instance_type, disk_tier  # unused

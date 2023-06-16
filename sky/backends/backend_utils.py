@@ -2028,62 +2028,64 @@ def _update_cluster_status_no_lock(
     handle = record['handle']
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return record
-
     cluster_name = handle.cluster_name
-    use_spot = handle.launched_resources.use_spot
-    ray_cluster_up = False
-    try:
-        # TODO(zhwu): This function cannot distinguish transient network error
-        # in ray's get IPs vs. ray runtime failing.
-        external_ips = handle.external_ips(use_cached_ips=False)
-        # This happens to a stopped TPU VM as we use gcloud to query the IP.
-        if external_ips is None or len(external_ips) == 0:
-            raise exceptions.FetchIPError(
-                reason=exceptions.FetchIPError.Reason.HEAD)
-        # Check if ray cluster status is healthy.
-        ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
-        runner = command_runner.SSHCommandRunner(external_ips[0],
-                                                 **ssh_credentials)
-        rc, output, _ = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-                                   stream_logs=False,
-                                   require_outputs=True,
-                                   separate_stderr=True)
-        if rc:
-            raise exceptions.FetchIPError(
-                reason=exceptions.FetchIPError.Reason.HEAD)
 
-        ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
-
-        if ready_head + ready_workers == handle.launched_nodes:
-            ray_cluster_up = True
-
-        # For non-spot clusters:
-        # If ray status shows all nodes are healthy, it is safe to set
-        # the status to UP as starting ray is the final step of sky launch.
-        # For spot clusters, the above can be unsafe because the Ray cluster
-        # may remain healthy for a while before the cloud completely
-        # preempts the VMs.
-        # Additionally, we query the VM state from the cloud provider.
-        if ray_cluster_up and not use_spot:
-            record['status'] = global_user_state.ClusterStatus.UP
-            global_user_state.add_or_update_cluster(cluster_name,
-                                                    handle,
-                                                    requested_resources=None,
-                                                    ready=True,
-                                                    is_launch=False)
-            return record
-    except exceptions.FetchIPError:
-        logger.debug('Refreshing status: Failed to get IPs from cluster '
-                     f'{cluster_name!r}, trying to fetch from provider.')
-    # For all code below, we query cluster status by cloud CLI for two cases:
-    # 1) ray fails to get IPs for the cluster.
-    # 2) the cluster is a spot cluster.
+    # Query the cloud provider.
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
-
     all_nodes_up = (all(status == global_user_state.ClusterStatus.UP
                         for status in node_statuses) and
                     len(node_statuses) == handle.launched_nodes)
-    if ray_cluster_up and all_nodes_up:
+
+    def run_ray_status_to_check_ray_cluster_healthy() -> bool:
+        try:
+            # TODO(zhwu): This function cannot distinguish transient network
+            # error in ray's get IPs vs. ray runtime failing.
+            #
+            # NOTE: using use_cached_ips=False is very slow as it calls into
+            # `ray get head-ip/worker-ips`. Setting it to True is safe because
+            # in the worst case we time out in the `ray status` SSH command
+            # below.
+            external_ips = handle.external_ips(use_cached_ips=True)
+            # This happens to a stopped TPU VM as we use gcloud to query the IP.
+            if external_ips is None or len(external_ips) == 0:
+                raise exceptions.FetchIPError(
+                    reason=exceptions.FetchIPError.Reason.HEAD)
+            # Check if ray cluster status is healthy.
+            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
+            runner = command_runner.SSHCommandRunner(external_ips[0],
+                                                     **ssh_credentials)
+            rc, output, _ = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                                       stream_logs=False,
+                                       require_outputs=True,
+                                       separate_stderr=True)
+            if rc:
+                raise exceptions.FetchIPError(
+                    reason=exceptions.FetchIPError.Reason.HEAD)
+
+            ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
+            if ready_head + ready_workers == handle.launched_nodes:
+                return True
+        except exceptions.FetchIPError:
+            logger.debug(
+                'Refreshing status: Failed to use `ray` to get IPs from cluster'
+                f' {cluster_name!r}.')
+        return False
+
+    # Determining if the cluster is healthy (UP):
+    #
+    # For non-spot clusters: If ray status shows all nodes are healthy, it is
+    # safe to set the status to UP as starting ray is the final step of sky
+    # launch. But we found that ray status is way too slow (see NOTE below) so
+    # we always query the cloud provider first which is faster.
+    #
+    # For spot clusters: the above can be unsafe because the Ray cluster may
+    # remain healthy for a while before the cloud completely preempts the VMs.
+    # We have mitigated this by again first querying the VM state from the cloud
+    # provider.
+    if all_nodes_up and run_ray_status_to_check_ray_cluster_healthy():
+        # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
+        # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
+        # head-ip/worker-ips`.
         record['status'] = global_user_state.ClusterStatus.UP
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
@@ -2091,6 +2093,8 @@ def _update_cluster_status_no_lock(
                                                 ready=True,
                                                 is_launch=False)
         return record
+
+    # All cases below are transitioning the cluster to non-UP states.
 
     if len(node_statuses) > handle.launched_nodes:
         # Unexpected: in the queried region more than 1 cluster with the same
@@ -2110,13 +2114,14 @@ def _update_cluster_status_no_lock(
         # Since we failed to refresh, raise the status fetching error.
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterStatusFetchingError(
-                f'Found {len(node_statuses)} node(s) with the same cluster name tag in the '
-                f'cloud provider for cluster {cluster_name!r}, which should have '
-                f'{handle.launched_nodes} nodes. This normally should not happen. '
-                f'{colorama.Fore.RED}Please check the cloud console and fix any possible '
-                'resources leakage (e.g., if there are any stopped nodes and they do not '
-                f'have data or are unhealthy, terminate them).{colorama.Style.RESET_ALL}'
-            )
+                f'Found {len(node_statuses)} node(s) with the same cluster name'
+                f' tag in the cloud provider for cluster {cluster_name!r}, '
+                f'which should have {handle.launched_nodes} nodes. This '
+                f'normally should not happen. {colorama.Fore.RED}Please check '
+                'the cloud console and fix any possible resources leakage '
+                '(e.g., if there are any stopped nodes and they do not have '
+                'data or are unhealthy, terminate them).'
+                f'{colorama.Style.RESET_ALL}')
     assert len(node_statuses) <= handle.launched_nodes
 
     # If the node_statuses is empty, all the nodes are terminated. We can
@@ -2139,7 +2144,7 @@ def _update_cluster_status_no_lock(
     #     abnormal.
     #
     # An abnormal cluster will transition to INIT and have any autostop setting
-    # reset (unless it's autostopping/autodowning.).
+    # reset (unless it's autostopping/autodowning).
     is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or
                    any(status != global_user_state.ClusterStatus.STOPPED
                        for status in node_statuses))
@@ -2153,13 +2158,36 @@ def _update_cluster_status_no_lock(
                 # not correctly autostop. Resetting the autostop will let
                 # the user know that the autostop may not happen to avoid
                 # leakages from the assumption that the cluster will autostop.
+                success = True
                 try:
                     backend.set_autostop(handle, -1, stream_logs=False)
                 except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+                    success = False
                     logger.debug(f'Failed to reset autostop. Due to '
                                  f'{common_utils.format_exception(e)}')
                 global_user_state.set_cluster_autostop_value(
                     handle.cluster_name, -1, to_down=False)
+
+                # Friendly hint.
+                autostop = record['autostop']
+                maybe_down_str = ' --down' if record['to_down'] else ''
+                noun = 'autodown' if record['to_down'] else 'autostop'
+                if success:
+                    operation_str = (f'Canceled {noun} on the cluster '
+                                     f'{cluster_name!r}')
+                else:
+                    operation_str = (
+                        f'Attempted to cancel {noun} on the '
+                        f'cluster {cluster_name!r} with best effort')
+                yellow = colorama.Fore.YELLOW
+                bright = colorama.Style.BRIGHT
+                reset = colorama.Style.RESET_ALL
+                ux_utils.console_newline()
+                logger.warning(
+                    f'{yellow}{operation_str}, since it is found to be in an '
+                    f'abnormal state. To fix, try running: {reset}{bright}sky '
+                    f'start -f -i {autostop}{maybe_down_str} {cluster_name}'
+                    f'{reset}')
             else:
                 ux_utils.console_newline()
                 operation_str = 'autodowning' if record[
