@@ -251,8 +251,9 @@ class OCI(clouds.Cloud):
                 pass
 
         # Disk performane: Volume Performance Units.
-        vpu = self.get_vpu_from_disktier(cpus=float(cpus),
-                                         disk_tier=resources.disk_tier)
+        vpu = self.get_vpu_from_disktier(
+            cpus=None if cpus is None else float(cpus),
+            disk_tier=resources.disk_tier)
 
         return {
             'instance_type': instance_type,
@@ -503,8 +504,12 @@ class OCI(clouds.Cloud):
         # All the disk_tier are supported for any instance_type
         del instance_type, disk_tier  # unused
 
-    def get_vpu_from_disktier(self, cpus: float, disk_tier: str) -> int:
+    def get_vpu_from_disktier(self, cpus: Optional[float],
+                              disk_tier: Optional[str]) -> int:
         vpu = oci_conf.BOOT_VOLUME_VPU[disk_tier]
+        if cpus is None:
+            return vpu
+
         if cpus <= 2:
             vpu = oci_conf.DISK_TIER_LOW if disk_tier is None else vpu
             if vpu > oci_conf.DISK_TIER_LOW:
