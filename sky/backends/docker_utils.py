@@ -33,7 +33,6 @@ DOCKERFILE_COPYCMD = """COPY {copy_command}"""
 DOCKERFILE_RUNCMD = """CMD {run_command}"""
 
 # Docker default options
-DEFAULT_DOCKER_IMAGE = 'brymastr/ubuntu-rsync'
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
 
 CONDA_SETUP_PREFIX = '. $(conda info --base)/etc/profile.d/conda.sh 2> ' \
@@ -210,8 +209,6 @@ def build_dockerimage(task: task_mod.Task,
     if callable(task.run):
         raise ValueError(
             'Cannot build docker image for a task.run with function.')
-    assert task.docker_image is not None, 'Docker image cannot be None - ' \
-                                            'have you specified a task name? '
     _, img_metadata = create_dockerfile(base_image=task.docker_image,
                                         setup_command=task.setup,
                                         copy_path=f'{SKY_DOCKER_WORKDIR}/',

@@ -2469,7 +2469,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                           use_cached_ips=False)
             assert ip_list is not None, handle
 
-            if task.docker_image is not None:
+            config = common_utils.read_yaml(cluster_config_file)
+            if 'docker' in config:
                 handle.docker_setup(cluster_config_file)
 
             if 'tpu_name' in config_dict:
