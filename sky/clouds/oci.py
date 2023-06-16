@@ -250,14 +250,18 @@ class OCI(clouds.Cloud):
                 logger.debug(f'It is OK goes here when testing: {str(e)}')
                 pass
 
+        # Disk performane: Volume Performance Units.
+        vpu = self.get_vpu_from_disktier(cpus=float(cpus),
+                                         disk_tier=resources.disk_tier)
+
         return {
             'instance_type': instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
-            'cpus': cpus,
+            'cpus': str(cpus),
             'memory': resources.memory,
             'disk_size': resources.disk_size,
-            'vpu': f'{oci_conf.BOOT_VOLUME_VPU[resources.disk_tier]}',
+            'vpu': str(vpu),
             'zone': f'{_tenancy_prefix}:{zone}',
             'image': image_id,
             'app_catalog_listing_id': listing_id,
@@ -498,3 +502,29 @@ class OCI(clouds.Cloud):
                                 disk_tier: str) -> None:
         # All the disk_tier are supported for any instance_type
         del instance_type, disk_tier  # unused
+
+    def get_vpu_from_disktier(self, cpus: float, disk_tier: str) -> int:
+        vpu = oci_conf.BOOT_VOLUME_VPU[disk_tier]
+        if cpus <= 2:
+            vpu = oci_conf.DISK_TIER_LOW if disk_tier is None else vpu
+            if vpu > oci_conf.DISK_TIER_LOW:
+                # If only 1 OCPU is configured, best to use the OCI default
+                # VPU (10) for the boot volume. Even if the VPU is configured
+                # to higher value (no error to launch the instance), we cannot
+                # fully achieve its IOPS/throughput performance.
+                logger.warning(
+                    f'Automatically set the VPU to {oci_conf.DISK_TIER_LOW}'
+                    f' as only 2x vCPU is configured.')
+                vpu = oci_conf.DISK_TIER_LOW
+        elif cpus <= 8:
+            # If less than 4 OCPU is configured, best not to set the disk_tier
+            # to 'high' (vpu=100). Even if the disk_tier is configured to high
+            # (no error to launch the instance), we cannot fully achieve its
+            # IOPS/throughput performance.
+            if vpu > oci_conf.DISK_TIER_MEDIUM:
+                logger.warning(
+                    f'Automatically set the VPU to {oci_conf.DISK_TIER_MEDIUM}'
+                    f' as less than {cpus}x vCPU is configured.')
+                vpu = oci_conf.DISK_TIER_MEDIUM
+
+        return vpu
