@@ -184,11 +184,11 @@ def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     if image_str is None:
         # Support cross-region (general) imageid
         image_str = common.get_image_id_from_tag_impl(_image_df, tag, 'general')
-    
+
     df = _image_df[_image_df['Tag'].str.fullmatch(tag)]
     app_catalog_listing_id = df['AppCatalogListingId'].iloc[0]
     resource_version = df['ResourceVersion'].iloc[0]
-    
+
     return (f'{image_str}{oci_conf.IMAGE_TAG_SPERATOR}{app_catalog_listing_id}'
             f'{oci_conf.IMAGE_TAG_SPERATOR}{resource_version}')
 
