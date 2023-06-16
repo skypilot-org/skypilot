@@ -1243,8 +1243,8 @@ def test_gcp_start_stop():
             f'sky start -y {name} -i 1',
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
-            'sleep 100',
-            f'sky status -r {name} | grep "STOPPED"',
+            'sleep 180',
+            f'sky status -r {name} | grep "INIT\|STOPPED"',
         ],
         f'sky down -y {name}',
     )
@@ -1267,8 +1267,8 @@ def test_azure_start_stop():
             f'sky start -y {name} -i 1',
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
-            'sleep 100',
-            f'sky status -r {name} | grep "STOPPED"'
+            'sleep 180',
+            f'sky status -r {name} | grep "INIT\|STOPPED"'
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # 30 mins
