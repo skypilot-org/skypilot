@@ -916,7 +916,7 @@ def storage_ls() -> List[Dict[str, Any]]:
                 'status': sky.StorageStatus,
             }
         ]
-    """   
+    """
     storages = global_user_state.get_storage()
     for storage in storages:
         storage['store'] = list(storage.pop('handle').sky_stores.keys())

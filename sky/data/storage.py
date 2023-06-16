@@ -1248,7 +1248,7 @@ class S3Store(AbstractStore):
                     'TagSet': [
                         {
                             'Key': 'skymanaged',
-                            'Value': ''
+                            'Value': 'sky'
                         },
                     ]
                 }
@@ -1693,7 +1693,7 @@ class GcsStore(AbstractStore):
         try:
             bucket = self.client.bucket(bucket_name)
             bucket.storage_class = 'STANDARD'
-            bucket.labels = {"skymanaged" : ""}
+            bucket.labels = {"skymanaged" : "sky"}
             new_bucket = self.client.create_bucket(bucket, location=region)
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
