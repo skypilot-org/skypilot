@@ -441,8 +441,9 @@ def launch(
                 entrypoint = entrypoint.tasks[0]
         assert isinstance(entrypoint, sky.Task), entrypoint
         task, handle = backend_utils.check_clone_disk_and_override_task(
-            clone_disk_from, entrypoint)
+            clone_disk_from, cluster_name, entrypoint)
         original_cloud = handle.launched_resources.cloud
+        assert original_cloud is not None, handle.launched_resources
         task_resources = list(task.resources)[0]
 
         with log_utils.safe_rich_status('Creating image from source cluster '
@@ -452,24 +453,28 @@ def launch(
                 backend_utils.tag_filter_for_cluster(clone_disk_from),
                 region=handle.launched_resources.region,
             )
-            if task_resources.region != handle.launched_resources.region:
-                log_utils.force_update_rich_status(
-                    f'Migrating image {image_id} to target region '
-                    f'{task_resources.region}...')
-                original_image_id = image_id
-                image_id = original_cloud.copy_image(
-                    image_id,
-                    source_region=handle.launched_resources.region,
-                    source_zone=handle.launched_resources.zone,
-                    target_region=task_resources.region,
-                    target_zone=task_resources.zone)
-                original_cloud.delete_image(
-                    original_image_id, region=handle.launched_resources.region)
+            log_utils.force_update_rich_status(
+                f'Migrating image {image_id} to target region '
+                f'{task_resources.region}...')
+            source_region = handle.launched_resources.region
+            target_region = task_resources.region
+            assert source_region is not None, handle.launched_resources
+            assert target_region is not None, task_resources
+
+            image_id = original_cloud.maybe_move_image(
+                image_id,
+                source_region=source_region,
+                target_region=target_region,
+                source_zone=handle.launched_resources.zone,
+                target_zone=task_resources.zone,
+            )
         sky_logging.print(
             f'Image {image_id!r} created successfully. Overriding task '
             f'image_id.')
         task_resources = task_resources.copy(image_id=image_id)
-        task.set_resources({task_resources})
+        task.set_resources(task_resources)
+        task.best_resources = None
+        logger.debug(f'Overridden task resources: {task.resources}')
         entrypoint = task
 
     _execute(

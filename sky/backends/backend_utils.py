@@ -1711,7 +1711,7 @@ def _query_cluster_status_via_cloud_api(
 
 
 def check_clone_disk_and_override_task(
-    cluster_name: str, task: 'task_lib.Task'
+    cluster_name: str, target_cluster_name: Optional[str], task: 'task_lib.Task'
 ) -> Tuple['task_lib.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']:
     """Check if the task is compatible to clone disk from the source cluster.
 
@@ -1728,6 +1728,15 @@ def check_clone_disk_and_override_task(
             task is not compatible to clone disk from the source cluster.
     """
     source_cluster_status, handle = refresh_cluster_status_handle(cluster_name)
+
+    if target_cluster_name is not None:
+        target_cluster_status, _ = refresh_cluster_status_handle(
+            target_cluster_name)
+        if target_cluster_status is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    'The target cluster already exists. Cloning disk is only '
+                    'supported for creating a new cluster.')
 
     if source_cluster_status is None:
         with ux_utils.print_exception_no_traceback():
@@ -1771,6 +1780,7 @@ def check_clone_disk_and_override_task(
             f'({handle.launched_resources.region}).')
         task_resources = task_resources.copy(**override_param)
         task.set_resources({task_resources})
+        task.best_resources = None
     return task, handle
 
 

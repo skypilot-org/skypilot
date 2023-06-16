@@ -726,14 +726,18 @@ def _launch_with_confirm(
     clone_disk_from: Optional[str] = None,
 ):
     """Launch a cluster with a Task."""
-    source_str = ''
-    if clone_disk_from is not None:
-        backend_utils.check_clone_disk_and_override_task(clone_disk_from, task)
-        source_str = f' from the disk of {clone_disk_from!r}'
-    with sky.Dag() as dag:
-        dag.add(task)
     if cluster is None:
         cluster = backend_utils.generate_cluster_name()
+
+    clone_source_str = ''
+    if clone_disk_from is not None:
+        clone_source_str = f' from the disk of {clone_disk_from!r}'
+        task, _ = backend_utils.check_clone_disk_and_override_task(
+            clone_disk_from, cluster, task)
+
+    with sky.Dag() as dag:
+        dag.add(task)
+
     maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
     if maybe_status is None:
         # Show the optimize log before the prompt if the cluster does not exist.
@@ -759,8 +763,9 @@ def _launch_with_confirm(
             if onprem_utils.check_if_local_cloud(cluster):
                 prompt = f'Initializing local cluster{cluster_str}. Proceed?'
             else:
-                prompt = (f'Launching a new cluster{cluster_str}{source_str}. '
-                          'Proceed?')
+                prompt = (
+                    f'Launching a new cluster{cluster_str}{clone_source_str}. '
+                    'Proceed?')
         elif maybe_status == status_lib.ClusterStatus.STOPPED:
             prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
         if prompt is not None:
