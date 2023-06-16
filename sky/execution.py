@@ -456,6 +456,7 @@ def launch(
                 log_utils.force_update_rich_status(
                     f'Migrating image {image_id} to target region '
                     f'{task_resources.region}...')
+                original_image_id = image_id
                 image_id = original_cloud.copy_image(
                     image_id,
                     source_region=handle.launched_resources.region,
@@ -463,7 +464,7 @@ def launch(
                     target_region=task_resources.region,
                     target_zone=task_resources.zone)
                 original_cloud.delete_image(
-                    image_id, region=handle.launched_resources.region)
+                    original_image_id, region=handle.launched_resources.region)
         sky_logging.print(
             f'Image {image_id!r} created successfully. Overriding task '
             f'image_id.')
