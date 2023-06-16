@@ -1301,7 +1301,6 @@ class RetryingVmProvisioner(object):
         cluster_name: str,
         cloud_user_identity: Optional[List[str]],
         prev_cluster_status: Optional[global_user_state.ClusterStatus],
-        docker_image: Optional[str],
     ):
         """The provision retry loop."""
         style = colorama.Style
@@ -1366,7 +1365,6 @@ class RetryingVmProvisioner(object):
                     cluster_name,
                     self._local_wheel_path,
                     self._wheel_hash,
-                    docker_image,
                     region=region,
                     zones=zones,
                     dryrun=dryrun,
@@ -1423,8 +1421,7 @@ class RetryingVmProvisioner(object):
             }
             status, stdout, stderr, head_ip = self._gang_schedule_ray_up(
                 to_provision.cloud, cluster_config_file, handle, log_abs_path,
-                stream_logs, logging_info, to_provision.use_spot, docker_image
-                is not None)
+                stream_logs, logging_info, to_provision.use_spot)
 
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 if cluster_exists:
@@ -1571,9 +1568,10 @@ class RetryingVmProvisioner(object):
 
     @timeline.event
     def _gang_schedule_ray_up(
-        self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
-        cluster_handle: 'backends.CloudVmRayResourceHandle', log_abs_path: str,
-        stream_logs: bool, logging_info: dict, use_spot: bool, use_docker: bool
+            self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
+            cluster_handle: 'backends.CloudVmRayResourceHandle',
+            log_abs_path: str, stream_logs: bool, logging_info: dict,
+            use_spot: bool
     ) -> Tuple[GangSchedulingStatus, str, str, Optional[str]]:
         """Provisions a cluster via 'ray up' and wait until fully provisioned.
 
@@ -1780,8 +1778,7 @@ class RetryingVmProvisioner(object):
             log_path=log_abs_path,
             nodes_launching_progress_timeout=_NODES_LAUNCHING_PROGRESS_TIMEOUT[
                 type(to_provision_cloud)],
-            is_local_cloud=isinstance(to_provision_cloud, clouds.Local),
-            use_docker=use_docker)
+            is_local_cloud=isinstance(to_provision_cloud, clouds.Local))
         if cluster_ready:
             cluster_status = self.GangSchedulingStatus.CLUSTER_READY
             # ray up --no-restart again with upscaling_speed=0 after cluster is
@@ -1897,8 +1894,7 @@ class RetryingVmProvisioner(object):
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
                     cloud_user_identity=cloud_user,
-                    prev_cluster_status=prev_cluster_status,
-                    docker_image=task.docker_image)
+                    prev_cluster_status=prev_cluster_status)
                 if dryrun:
                     return
             except (exceptions.InvalidClusterNameError,

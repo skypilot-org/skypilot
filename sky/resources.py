@@ -638,8 +638,21 @@ class Resources:
                         'Local/On-prem mode does not support custom '
                         'images.')
 
+    def extract_docker_image(self, remove=False) -> Optional[str]:
+        if len(self.image_id) == 1 and self.region in self.image_id:
+            image_id = self.image_id[self.region]
+            if image_id.startswith('docker:'):
+                docker_image = image_id[len('docker:'):]
+                if remove:
+                    self._image_id = None
+                return docker_image
+        return None
+
     def _try_validate_image_id(self) -> None:
         if self._image_id is None:
+            return
+
+        if self.extract_docker_image() is not None:
             return
 
         if self.cloud is None:
@@ -900,9 +913,11 @@ class Resources:
         if config.get('zone') is not None:
             resources_fields['zone'] = config.pop('zone')
         if config.get('image_id') is not None:
-            logger.warning('image_id in resources is experimental. It only '
-                           'supports AWS/GCP/IBM/OCI.')
             resources_fields['image_id'] = config.pop('image_id')
+            if not (isinstance(resources_fields['image_id'], str) and
+                    resources_fields['image_id'].startswith('docker:')):
+                logger.warning('image_id in resources is experimental. It only '
+                               'supports AWS/GCP/IBM/OCI')
         if config.get('disk_tier') is not None:
             resources_fields['disk_tier'] = config.pop('disk_tier')
 

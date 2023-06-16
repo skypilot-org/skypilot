@@ -94,14 +94,9 @@ def _get_optimized_resources(
     for config in candidate_configs:
         with sky.Dag() as dag:
             resources = config.get('resources', None)
-            # pylint: disable=import-outside-toplevel
-            from sky.backends.docker_utils import \
-                extract_docker_image_from_resources
-            docker_image = extract_docker_image_from_resources(resources)
             resources = sky.Resources.from_yaml_config(resources)
             task = sky.Task()
             task.set_resources({resources})
-            task.docker_image = docker_image
 
         dag = sky.optimize(dag, quiet=True)
         task = dag.tasks[0]

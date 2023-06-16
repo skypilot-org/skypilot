@@ -153,23 +153,6 @@ def _execute_build(tag, context_path):
         raise
 
 
-def extract_docker_image_from_resources(
-        resources: Optional[Dict[str, Any]]) -> Optional[str]:
-    """
-    Extracts the docker image from the resources dict.
-    """
-    if resources is None:
-        return None
-    if 'image_id' not in resources:
-        return None
-    if isinstance(resources['image_id'], str):
-        if resources['image_id'].startswith('docker:'):
-            image = resources['image_id'][len('docker:'):]
-            del resources['image_id']
-            return image
-    return None
-
-
 def docker_host_setup(ip: str, cluster_config_file: str) -> str:
     """
     Performs setup on the docker host. This setup do 2 things:

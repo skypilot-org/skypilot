@@ -779,7 +779,6 @@ def write_cluster_config(
         cluster_name: str,
         local_wheel_path: pathlib.Path,
         wheel_hash: str,
-        docker_image: Optional[str],
         region: Optional[clouds.Region] = None,
         zones: Optional[List[clouds.Zone]] = None,
         dryrun: bool = False,
@@ -799,6 +798,7 @@ def write_cluster_config(
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
+    docker_image = to_provision.extract_docker_image(remove=True)
     # This can raise a ResourcesUnavailableError, when the region/zones
     # requested does not appear in the catalog. It can be triggered when the
     # user changed the catalog file, while there is a cluster in the removed
@@ -1111,7 +1111,6 @@ def wait_until_ray_cluster_ready(
     num_nodes: int,
     log_path: str,
     is_local_cloud: bool = False,
-    use_docker: bool = False,
     nodes_launching_progress_timeout: Optional[int] = None,
 ) -> Tuple[bool, Optional[str]]:
     """Returns whether the entire ray cluster is ready, and docker username
@@ -1125,6 +1124,9 @@ def wait_until_ray_cluster_ready(
     except RuntimeError as e:
         logger.error(e)
         return False, None  # failed
+
+    config = common_utils.read_yaml(cluster_config_file)
+    use_docker = 'docker' in config
 
     docker_user = None
     if use_docker:
