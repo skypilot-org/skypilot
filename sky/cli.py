@@ -1742,7 +1742,6 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
             click.echo('\n' + '\n'.join(hints))
 
 
-
 @cli.command()
 @click.option('--all-users',
               '-a',
@@ -2670,7 +2669,6 @@ def _down_or_stop_clusters(
         progress.refresh()
 
 
-
 @cli.command()
 @click.argument('accelerator_str', required=False)
 @click.option('--all',
@@ -3501,7 +3499,6 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     )
 
 
-
 @cli.group(cls=_NaturalOrderGroup)
 def storage():
     """SkyPilot Storage CLI."""
@@ -3557,9 +3554,6 @@ def storage_delete(names: List[str], all: bool):  # pylint: disable=redefined-bu
 
     for name in names:
         sky.storage_delete(name)
-
-
-
 
 
 # ==============================
@@ -3673,7 +3667,6 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
         'Costs for clusters with auto{stop,down} '
         'scheduled may not be accurate.',
         fg='yellow')
-
 
 
 @cli.group(cls=_NaturalOrderGroup)
