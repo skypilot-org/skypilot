@@ -516,7 +516,7 @@ class OCI(clouds.Cloud):
                     f'Automatically set the VPU to {oci_conf.DISK_TIER_LOW}'
                     f' as only 2x vCPU is configured.')
                 vpu = oci_conf.DISK_TIER_LOW
-        elif cpus <= 8:
+        elif cpus < 8:
             # If less than 4 OCPU is configured, best not to set the disk_tier
             # to 'high' (vpu=100). Even if the disk_tier is configured to high
             # (no error to launch the instance), we cannot fully achieve its
