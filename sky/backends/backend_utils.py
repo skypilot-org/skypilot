@@ -1718,7 +1718,7 @@ def _process_cli_query(
     return statuses
 
 
-def (
+def _query_status_aws(
     cluster: str,
     ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
