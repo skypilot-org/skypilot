@@ -256,6 +256,7 @@ available_node_types:
               memory: {{memory}}G
 
 setup_commands:
+  # TODO(romilb): Clean up setup commands which are irrelevant to k8s.
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Create ~/.ssh/config file in case the file does not exist in the image.
   # Line 'rm ..': there is another installation of pip.
