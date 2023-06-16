@@ -10,9 +10,6 @@ SkyPilot On-prem is a lightweight cluster manager and job scheduler for local cl
 
 SkyPilot On-prem is readily deployable on top of any operating system and requires :code:`python3` to be globally installed on all machines.
 
-.. warning::
-    SkyPilot On-prem is an experimental feature and is being redesigned. While it is still available for use, please be aware there may have rough edges. If you'd like to use SkyPilot On-prem, please reach out to us on `Slack <http://slack.skypilot.co>`_.
-
 Design
 -------------------
 SkyPilot cluster manager is central for running SkyPilot On-prem. It consists of the SkyPilot job scheduler, which resides on the head node and schedules jobs to be run on local nodes, and the SkyPilot job daemon, which resides on all local nodes and coordinates job logs and metadata with the head node.
