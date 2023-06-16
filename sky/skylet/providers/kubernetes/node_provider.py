@@ -223,7 +223,7 @@ class KubernetesNodeProvider(NodeProvider):
         # exception. If pod's container is ContainerCreating, then we can assume
         # that resources have been allocated and we can exit.
 
-        # TODO(romilb): Figure out a way to make this timeout configurable.
+        # TODO(romilb): Make timeout configurable in Kubernetes cloud class.
         TIMEOUT = 60
         start = time.time()
         while True:

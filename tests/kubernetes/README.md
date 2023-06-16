@@ -25,6 +25,8 @@ cd kind
 ./create_cluster.sh
 ```
 
+## Running a GKE cluster
+
 ## Other useful scripts
 `scripts` directory contains other useful scripts for development, including 
 Kubernetes dashboard, ray yaml for testing the SkyPilot Kubernetes node provider 
