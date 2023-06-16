@@ -229,7 +229,9 @@ class KubernetesNodeProvider(NodeProvider):
         while True:
             if time.time() - start > TIMEOUT:
                 raise KubernetesError(
-                    "Timed out while waiting for nodes to start. Cluster may be out of resources or may be too slow to autoscale."
+                    "Timed out while waiting for nodes to start. "
+                    "Cluster may be out of resources or "
+                    "may be too slow to autoscale."
                 )
             all_ready = True
             for node in new_nodes:
@@ -320,20 +322,6 @@ class KubernetesNodeProvider(NodeProvider):
             f.write(f'{node_id} port: {port}\n')
         command_runner.set_port(port)
         return command_runner
-
-    # def get_command_runner(
-    #     self,
-    #     log_prefix,
-    #     node_id,
-    #     auth_config,
-    #     cluster_name,
-    #     process_runner,
-    #     use_internal_ip,
-    #     docker_config=None,
-    # ):
-    #     return KubernetesCommandRunner(
-    #         log_prefix, self.namespace, node_id, auth_config, process_runner
-    #     )
 
     @staticmethod
     def bootstrap_config(cluster_config):

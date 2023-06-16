@@ -1980,7 +1980,11 @@ def _query_status_kubernetes(
         cluster: str,
         ray_config: Dict[str, Any],  # pylint: disable=unused-argument
 ) -> List[global_user_state.ClusterStatus]:
-    raise NotImplementedError
+    # TODO(romilb): Implement this. For now, we return UP as the status.
+    #  Assuming single node cluster.
+    del cluster  # Unused.
+    del ray_config  # Unused.
+    return [global_user_state.ClusterStatus.UP]
 
 
 _QUERY_STATUS_FUNCS = {
@@ -2108,7 +2112,8 @@ def _update_cluster_status_no_lock(
             # Check if ray cluster status is healthy.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
             runner = command_runner.SSHCommandRunner(external_ips[0],
-                                                     **ssh_credentials)
+                                                     **ssh_credentials,
+                                                     port=handle.head_ssh_port)
             rc, output, _ = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                                        stream_logs=False,
                                        require_outputs=True,

@@ -56,13 +56,6 @@ def not_provided_msg(resource_type):
 
 
 def bootstrap_kubernetes(config):
-    # if not config["provider"]["use_internal_ips"]:
-    #     return ValueError(
-    #         "Exposing external IP addresses for ray containers isn't "
-    #         "currently supported. Please set "
-    #         "'use_internal_ips' to false."
-    #     )
-
     if config["provider"].get("_operator"):
         namespace = config["provider"]["namespace"]
     else:
@@ -181,7 +174,7 @@ def _parse_cpu_or_gpu_resource(resource):
         # For example, '500m' rounds up to 1.
         return math.ceil(int(resource_str[:-1]) / 1000)
     else:
-        return int(resource_str)
+        return float(resource_str)
 
 
 def _parse_memory_resource(resource):

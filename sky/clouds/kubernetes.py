@@ -129,10 +129,9 @@ class Kubernetes(clouds.Cloud):
         instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[List[clouds.Zone]]:
+    ) -> Iterator[Optional[List[clouds.Zone]]]:
         del num_nodes, region, instance_type, accelerators, use_spot  # Unused.
         for r in cls.regions():
-            assert r.zones is not None, r
             yield r.zones
 
     @classmethod
