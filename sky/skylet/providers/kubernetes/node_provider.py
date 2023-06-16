@@ -239,11 +239,12 @@ class KubernetesNodeProvider(NodeProvider):
                                                      self.namespace)
                 if pod.status.phase == "Pending":
                     # Check conditions for more detailed status
-                    for condition in pod.status.conditions:
-                        if condition.reason == 'ContainerCreating':
-                            # Container is creating, so we can assume resources
-                            # have been allocated. Safe to exit.
-                            break
+                    if pod.status.conditions is not None:
+                        for condition in pod.status.conditions:
+                            if condition.reason == 'ContainerCreating':
+                                # Container is creating, so we can assume resources
+                                # have been allocated. Safe to exit.
+                                break
                     else:
                         # Pod is pending and not in 'ContainerCreating' state
                         all_ready = False

@@ -1670,6 +1670,9 @@ class RetryingVmProvisioner(object):
             cluster_name = logging_info['cluster_name']
             logger.info(f'{style.BRIGHT}Launching on local cluster '
                         f'{cluster_name!r}.')
+        elif isinstance(to_provision_cloud, clouds.Kubernetes):
+            logger.info(f'{style.BRIGHT}Launching on {to_provision_cloud} '
+                        f'{style.RESET_ALL}')
         else:
             logger.info(f'{style.BRIGHT}Launching on {to_provision_cloud} '
                         f'{region_name}{style.RESET_ALL}{zone_str}')
