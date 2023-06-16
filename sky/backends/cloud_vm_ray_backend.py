@@ -2537,7 +2537,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     ssh_credentials = backend_utils.ssh_credential_from_yaml(
                         handle.cluster_yaml)
                     runners = command_runner.SSHCommandRunner.make_runner_list(
-                        ip_list, **ssh_credentials, port_list=None)
+                        ip_list, **ssh_credentials, port_list=ssh_port_list)
 
                     def _get_zone(runner):
                         retry_count = 0
@@ -3215,10 +3215,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         ip_list = handle.external_ips()
         assert ip_list is not None, 'external_ips is not cached in handle'
+        ssh_port_list = handle.external_ssh_ports()
+        assert ssh_port_list is not None, 'external_ssh_ports is not cached ' \
+                                          'in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, **ssh_credentials, port_list=None)
+            ip_list, **ssh_credentials, port_list=ssh_port_list)
 
         def _rsync_down(args) -> None:
             """Rsync down logs from remote nodes.
