@@ -1146,6 +1146,21 @@ def cli():
     pass
 
 
+@cli.command()
+@usage_lib.entrypoint
+def check():
+    """Check which clouds are available to use.
+
+    This checks access credentials for all clouds supported by SkyPilot. If a
+    cloud is detected to be inaccessible, the reason and correction steps will
+    be shown.
+
+    The enabled clouds are cached and form the "search space" to be considered
+    for each task.
+    """
+    sky_check.check()
+
+
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('entrypoint',
                 required=False,
@@ -1726,75 +1741,6 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
         if hints:
             click.echo('\n' + '\n'.join(hints))
 
-
-@cli.command()
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all information in full.')
-@usage_lib.entrypoint
-def cost_report(all: bool):  # pylint: disable=redefined-builtin
-    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Show estimated costs for launched clusters.
-
-    For each cluster, this shows: cluster name, resources, launched time,
-    duration that cluster was up, and total estimated cost.
-
-    The estimated cost column indicates the price for the cluster based on the
-    type of resources being used and the duration of use up until now. This
-    means if the cluster is UP, successive calls to cost-report will show
-    increasing price.
-
-    This CLI is experimental. The estimated cost is calculated based on the
-    local cache of the cluster status, and may not be accurate for:
-
-    - Clusters with autostop/use_spot set; or
-
-    - Clusters that were terminated/stopped on the cloud console.
-    """
-    cluster_records = core.cost_report()
-
-    nonreserved_cluster_records = []
-    reserved_clusters = dict()
-    for cluster_record in cluster_records:
-        cluster_name = cluster_record['name']
-        if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
-            cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
-                cluster_name]
-            # to display most recent entry for each reserved cluster
-            # TODO(sgurram): fix assumption of sorted order of clusters
-            if cluster_group_name not in reserved_clusters:
-                reserved_clusters[cluster_group_name] = cluster_record
-        else:
-            nonreserved_cluster_records.append(cluster_record)
-
-    total_cost = status_utils.get_total_cost_of_displayed_records(
-        nonreserved_cluster_records, all)
-
-    status_utils.show_cost_report_table(nonreserved_cluster_records, all)
-    for cluster_group_name, cluster_record in reserved_clusters.items():
-        status_utils.show_cost_report_table(
-            [cluster_record], all, reserved_group_name=cluster_group_name)
-        total_cost += cluster_record['total_cost']
-
-    click.echo(f'\n{colorama.Style.BRIGHT}'
-               f'Total Cost: ${total_cost:.2f}{colorama.Style.RESET_ALL}')
-
-    if not all:
-        click.secho(
-            f'Showing up to {status_utils.NUM_COST_REPORT_LINES} '
-            'most recent clusters. '
-            'To see all clusters in history, '
-            'pass the --all flag.',
-            fg='yellow')
-
-    click.secho(
-        'This feature is experimental. '
-        'Costs for clusters with auto{stop,down} '
-        'scheduled may not be accurate.',
-        fg='yellow')
 
 
 @cli.command()
@@ -2724,272 +2670,6 @@ def _down_or_stop_clusters(
         progress.refresh()
 
 
-@_interactive_node_cli_command
-@usage_lib.entrypoint
-# pylint: disable=redefined-outer-name
-def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
-            cloud: Optional[str], region: Optional[str], zone: Optional[str],
-            instance_type: Optional[str], cpus: Optional[str],
-            memory: Optional[str], gpus: Optional[str],
-            use_spot: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool], disk_size: Optional[int],
-            disk_tier: Optional[str], idle_minutes_to_autostop: Optional[int],
-            down: bool, retry_until_up: bool):
-    """Launch or attach to an interactive GPU node.
-
-    Examples:
-
-    .. code-block:: bash
-
-        # Launch a default gpunode.
-        sky gpunode
-        \b
-        # Do work, then log out. The node is kept running. Attach back to the
-        # same node and do more work.
-        sky gpunode
-        \b
-        # Create many interactive nodes by assigning names via --cluster (-c).
-        sky gpunode -c node0
-        sky gpunode -c node1
-        \b
-        # Port forward.
-        sky gpunode --port-forward 8080 --port-forward 4650 -c cluster_name
-        sky gpunode -p 8080 -p 4650 -c cluster_name
-        \b
-        # Sync current working directory to ~/workdir on the node.
-        rsync -r . cluster_name:~/workdir
-
-    """
-    # TODO: Factor out the shared logic below for [gpu|cpu|tpu]node.
-    if screen and tmux:
-        raise click.UsageError('Cannot use both screen and tmux.')
-
-    session_manager = None
-    if screen or tmux:
-        session_manager = 'tmux' if tmux else 'screen'
-    name = cluster
-    if name is None:
-        name = _default_interactive_node_name('gpunode')
-
-    user_requested_resources = not (cloud is None and region is None and
-                                    zone is None and instance_type is None and
-                                    cpus is None and memory is None and
-                                    gpus is None and use_spot is None)
-    default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
-    cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
-    if gpus is None and instance_type is None:
-        # Use this request if both gpus and instance_type are not specified.
-        gpus = default_resources.accelerators
-        instance_type = default_resources.instance_type
-    if use_spot is None:
-        use_spot = default_resources.use_spot
-    resources = sky.Resources(cloud=cloud_provider,
-                              region=region,
-                              zone=zone,
-                              instance_type=instance_type,
-                              cpus=cpus,
-                              memory=memory,
-                              accelerators=gpus,
-                              use_spot=use_spot,
-                              disk_size=disk_size,
-                              disk_tier=disk_tier)
-
-    _create_and_ssh_into_node(
-        'gpunode',
-        resources,
-        cluster_name=name,
-        port_forward=port_forward,
-        session_manager=session_manager,
-        user_requested_resources=user_requested_resources,
-        no_confirm=yes,
-        idle_minutes_to_autostop=idle_minutes_to_autostop,
-        down=down,
-        retry_until_up=retry_until_up,
-    )
-
-
-@_interactive_node_cli_command
-@usage_lib.entrypoint
-# pylint: disable=redefined-outer-name
-def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
-            cloud: Optional[str], region: Optional[str], zone: Optional[str],
-            instance_type: Optional[str], cpus: Optional[str],
-            memory: Optional[str], use_spot: Optional[bool],
-            screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], disk_tier: Optional[str],
-            idle_minutes_to_autostop: Optional[int], down: bool,
-            retry_until_up: bool):
-    """Launch or attach to an interactive CPU node.
-
-    Examples:
-
-    .. code-block:: bash
-
-        # Launch a default cpunode.
-        sky cpunode
-        \b
-        # Do work, then log out. The node is kept running. Attach back to the
-        # same node and do more work.
-        sky cpunode
-        \b
-        # Create many interactive nodes by assigning names via --cluster (-c).
-        sky cpunode -c node0
-        sky cpunode -c node1
-        \b
-        # Port forward.
-        sky cpunode --port-forward 8080 --port-forward 4650 -c cluster_name
-        sky cpunode -p 8080 -p 4650 -c cluster_name
-        \b
-        # Sync current working directory to ~/workdir on the node.
-        rsync -r . cluster_name:~/workdir
-
-    """
-    if screen and tmux:
-        raise click.UsageError('Cannot use both screen and tmux.')
-
-    session_manager = None
-    if screen or tmux:
-        session_manager = 'tmux' if tmux else 'screen'
-    name = cluster
-    if name is None:
-        name = _default_interactive_node_name('cpunode')
-
-    user_requested_resources = not (cloud is None and region is None and
-                                    zone is None and instance_type is None and
-                                    cpus is None and memory is None and
-                                    use_spot is None)
-    default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
-    cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
-    if instance_type is None:
-        instance_type = default_resources.instance_type
-    if use_spot is None:
-        use_spot = default_resources.use_spot
-    resources = sky.Resources(cloud=cloud_provider,
-                              region=region,
-                              zone=zone,
-                              instance_type=instance_type,
-                              cpus=cpus,
-                              memory=memory,
-                              use_spot=use_spot,
-                              disk_size=disk_size,
-                              disk_tier=disk_tier)
-
-    _create_and_ssh_into_node(
-        'cpunode',
-        resources,
-        cluster_name=name,
-        port_forward=port_forward,
-        session_manager=session_manager,
-        user_requested_resources=user_requested_resources,
-        no_confirm=yes,
-        idle_minutes_to_autostop=idle_minutes_to_autostop,
-        down=down,
-        retry_until_up=retry_until_up,
-    )
-
-
-@_interactive_node_cli_command
-@usage_lib.entrypoint
-# pylint: disable=redefined-outer-name
-def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
-            region: Optional[str], zone: Optional[str],
-            instance_type: Optional[str], cpus: Optional[str],
-            memory: Optional[str], tpus: Optional[str],
-            use_spot: Optional[bool], tpu_vm: Optional[bool],
-            screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], disk_tier: Optional[str],
-            idle_minutes_to_autostop: Optional[int], down: bool,
-            retry_until_up: bool):
-    """Launch or attach to an interactive TPU node.
-
-    Examples:
-
-    .. code-block:: bash
-
-        # Launch a default tpunode.
-        sky tpunode
-        \b
-        # Do work, then log out. The node is kept running. Attach back to the
-        # same node and do more work.
-        sky tpunode
-        \b
-        # Create many interactive nodes by assigning names via --cluster (-c).
-        sky tpunode -c node0
-        sky tpunode -c node1
-        \b
-        # Port forward.
-        sky tpunode --port-forward 8080 --port-forward 4650 -c cluster_name
-        sky tpunode -p 8080 -p 4650 -c cluster_name
-        \b
-        # Sync current working directory to ~/workdir on the node.
-        rsync -r . cluster_name:~/workdir
-
-    """
-    if screen and tmux:
-        raise click.UsageError('Cannot use both screen and tmux.')
-
-    session_manager = None
-    if screen or tmux:
-        session_manager = 'tmux' if tmux else 'screen'
-    name = cluster
-    if name is None:
-        name = _default_interactive_node_name('tpunode')
-
-    user_requested_resources = not (region is None and zone is None and
-                                    instance_type is None and cpus is None and
-                                    memory is None and tpus is None and
-                                    use_spot is None)
-    default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
-    accelerator_args = default_resources.accelerator_args
-    if tpu_vm:
-        accelerator_args['tpu_vm'] = True
-        accelerator_args['runtime_version'] = 'tpu-vm-base'
-    if instance_type is None:
-        instance_type = default_resources.instance_type
-    if tpus is None:
-        tpus = default_resources.accelerators
-    if use_spot is None:
-        use_spot = default_resources.use_spot
-    resources = sky.Resources(cloud=sky.GCP(),
-                              region=region,
-                              zone=zone,
-                              instance_type=instance_type,
-                              cpus=cpus,
-                              memory=memory,
-                              accelerators=tpus,
-                              accelerator_args=accelerator_args,
-                              use_spot=use_spot,
-                              disk_size=disk_size,
-                              disk_tier=disk_tier)
-
-    _create_and_ssh_into_node(
-        'tpunode',
-        resources,
-        cluster_name=name,
-        port_forward=port_forward,
-        session_manager=session_manager,
-        user_requested_resources=user_requested_resources,
-        no_confirm=yes,
-        idle_minutes_to_autostop=idle_minutes_to_autostop,
-        down=down,
-        retry_until_up=retry_until_up,
-    )
-
-
-@cli.command()
-@usage_lib.entrypoint
-def check():
-    """Check which clouds are available to use.
-
-    This checks access credentials for all clouds supported by SkyPilot. If a
-    cloud is detected to be inaccessible, the reason and correction steps will
-    be shown.
-
-    The enabled clouds are cached and form the "search space" to be considered
-    for each task.
-    """
-    sky_check.check()
-
 
 @cli.command()
 @click.argument('accelerator_str', required=False)
@@ -3198,139 +2878,6 @@ def show_gpus(
         for out in _output():
             click.echo(out, nl=False)
         click.echo()
-
-
-@cli.group(cls=_NaturalOrderGroup)
-def storage():
-    """SkyPilot Storage CLI."""
-    pass
-
-
-@storage.command('ls', cls=_DocumentedCodeCommand)
-@usage_lib.entrypoint
-def storage_ls():
-    """List storage objects created."""
-    storages = sky.storage_ls()
-    storage_table = storage_utils.format_storage_table(storages)
-    click.echo(storage_table)
-
-
-@storage.command('delete', cls=_DocumentedCodeCommand)
-@click.argument('names',
-                required=False,
-                type=str,
-                nargs=-1,
-                **_get_shell_complete_args(_complete_storage_name))
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Delete all storage objects.')
-@usage_lib.entrypoint
-def storage_delete(names: List[str], all: bool):  # pylint: disable=redefined-builtin
-    """Delete storage objects.
-
-    Examples:
-
-    .. code-block:: bash
-
-        # Delete two storage objects.
-        sky storage delete imagenet cifar10
-        \b
-        # Delete all storage objects matching glob pattern 'imagenet*'.
-        sky storage delete "imagenet*"
-        \b
-        # Delete all storage objects.
-        sky storage delete -a
-    """
-    if sum([len(names) > 0, all]) != 1:
-        raise click.UsageError('Either --all or a name must be specified.')
-    if all:
-        click.echo('Deleting all storage objects.')
-        storages = sky.storage_ls()
-        names = [s['name'] for s in storages]
-    else:
-        names = _get_glob_storages(names)
-
-    for name in names:
-        sky.storage_delete(name)
-
-
-@cli.group(cls=_NaturalOrderGroup)
-def admin():
-    """SkyPilot On-prem administrator CLI."""
-    pass
-
-
-@admin.command('deploy', cls=_DocumentedCodeCommand)
-@click.argument('clusterspec_yaml', required=True, type=str, nargs=-1)
-@usage_lib.entrypoint
-def admin_deploy(clusterspec_yaml: str):
-    """Launches Sky on a local cluster.
-
-    Performs preflight checks (environment setup, cluster resources)
-    and launches Ray to serve sky tasks on the cluster. Finally
-    generates a distributable YAML that can be used by multiple
-    users sharing the cluster.
-
-    This command should be run once by the cluster admin, not cluster users.
-
-    Example:
-
-    .. code-block:: bash
-
-        sky admin deploy examples/local/cluster-config.yaml
-    """
-    steps = 1
-    clusterspec_yaml = ' '.join(clusterspec_yaml)
-    assert clusterspec_yaml
-    is_yaml, yaml_config = _check_yaml(clusterspec_yaml)
-    backend_utils.validate_schema(yaml_config, schemas.get_cluster_schema(),
-                                  'Invalid cluster YAML: ')
-    if not is_yaml:
-        raise ValueError('Must specify cluster config')
-    assert yaml_config is not None, (is_yaml, yaml_config)
-
-    auth_config = yaml_config['auth']
-    ips = yaml_config['cluster']['ips']
-    if not isinstance(ips, list):
-        ips = [ips]
-    local_cluster_name = yaml_config['cluster']['name']
-    usage_lib.record_cluster_name_for_current_operation(local_cluster_name)
-    usage_lib.messages.usage.update_cluster_resources(
-        len(ips), sky.Resources(sky.Local()))
-
-    # Check for Ray
-    click.secho(f'[{steps}/4] Installing on-premise dependencies\n',
-                fg='green',
-                nl=False)
-    onprem_utils.check_and_install_local_env(ips, auth_config)
-    steps += 1
-
-    # Detect what GPUs the cluster has (which can be heterogeneous)
-    click.secho(f'[{steps}/4] Auto-detecting cluster resources\n',
-                fg='green',
-                nl=False)
-    custom_resources = onprem_utils.get_local_cluster_accelerators(
-        ips, auth_config)
-    steps += 1
-
-    # Launching Ray Autoscaler service
-    click.secho(f'[{steps}/4] Launching sky runtime\n', fg='green', nl=False)
-    onprem_utils.launch_ray_on_local_cluster(yaml_config, custom_resources)
-    steps += 1
-
-    # Generate sanitized yaml file to be sent to non-admin users
-    click.secho(f'[{steps}/4] Generating sanitized local yaml file\n',
-                fg='green',
-                nl=False)
-    sanitized_yaml_path = onprem_utils.SKY_USER_LOCAL_CONFIG_PATH.format(
-        local_cluster_name)
-    onprem_utils.save_distributable_yaml(yaml_config)
-    click.secho(f'Saved in {sanitized_yaml_path} \n', fg='yellow', nl=False)
-    click.secho(f'Successfully deployed local cluster {local_cluster_name!r}\n',
-                fg='green')
 
 
 @cli.group(cls=_NaturalOrderGroup)
@@ -3702,6 +3249,319 @@ def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool,
         sys.exit(1)
 
 
+@_interactive_node_cli_command
+@usage_lib.entrypoint
+# pylint: disable=redefined-outer-name
+def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
+            cloud: Optional[str], region: Optional[str], zone: Optional[str],
+            instance_type: Optional[str], cpus: Optional[str],
+            memory: Optional[str], gpus: Optional[str],
+            use_spot: Optional[bool], screen: Optional[bool],
+            tmux: Optional[bool], disk_size: Optional[int],
+            disk_tier: Optional[str], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
+    """Launch or attach to an interactive GPU node.
+
+    Examples:
+
+    .. code-block:: bash
+
+        # Launch a default gpunode.
+        sky gpunode
+        \b
+        # Do work, then log out. The node is kept running. Attach back to the
+        # same node and do more work.
+        sky gpunode
+        \b
+        # Create many interactive nodes by assigning names via --cluster (-c).
+        sky gpunode -c node0
+        sky gpunode -c node1
+        \b
+        # Port forward.
+        sky gpunode --port-forward 8080 --port-forward 4650 -c cluster_name
+        sky gpunode -p 8080 -p 4650 -c cluster_name
+        \b
+        # Sync current working directory to ~/workdir on the node.
+        rsync -r . cluster_name:~/workdir
+
+    """
+    # TODO: Factor out the shared logic below for [gpu|cpu|tpu]node.
+    if screen and tmux:
+        raise click.UsageError('Cannot use both screen and tmux.')
+
+    session_manager = None
+    if screen or tmux:
+        session_manager = 'tmux' if tmux else 'screen'
+    name = cluster
+    if name is None:
+        name = _default_interactive_node_name('gpunode')
+
+    user_requested_resources = not (cloud is None and region is None and
+                                    zone is None and instance_type is None and
+                                    cpus is None and memory is None and
+                                    gpus is None and use_spot is None)
+    default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
+    cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
+    if gpus is None and instance_type is None:
+        # Use this request if both gpus and instance_type are not specified.
+        gpus = default_resources.accelerators
+        instance_type = default_resources.instance_type
+    if use_spot is None:
+        use_spot = default_resources.use_spot
+    resources = sky.Resources(cloud=cloud_provider,
+                              region=region,
+                              zone=zone,
+                              instance_type=instance_type,
+                              cpus=cpus,
+                              memory=memory,
+                              accelerators=gpus,
+                              use_spot=use_spot,
+                              disk_size=disk_size,
+                              disk_tier=disk_tier)
+
+    _create_and_ssh_into_node(
+        'gpunode',
+        resources,
+        cluster_name=name,
+        port_forward=port_forward,
+        session_manager=session_manager,
+        user_requested_resources=user_requested_resources,
+        no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
+    )
+
+
+@_interactive_node_cli_command
+@usage_lib.entrypoint
+# pylint: disable=redefined-outer-name
+def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
+            cloud: Optional[str], region: Optional[str], zone: Optional[str],
+            instance_type: Optional[str], cpus: Optional[str],
+            memory: Optional[str], use_spot: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int], disk_tier: Optional[str],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
+    """Launch or attach to an interactive CPU node.
+
+    Examples:
+
+    .. code-block:: bash
+
+        # Launch a default cpunode.
+        sky cpunode
+        \b
+        # Do work, then log out. The node is kept running. Attach back to the
+        # same node and do more work.
+        sky cpunode
+        \b
+        # Create many interactive nodes by assigning names via --cluster (-c).
+        sky cpunode -c node0
+        sky cpunode -c node1
+        \b
+        # Port forward.
+        sky cpunode --port-forward 8080 --port-forward 4650 -c cluster_name
+        sky cpunode -p 8080 -p 4650 -c cluster_name
+        \b
+        # Sync current working directory to ~/workdir on the node.
+        rsync -r . cluster_name:~/workdir
+
+    """
+    if screen and tmux:
+        raise click.UsageError('Cannot use both screen and tmux.')
+
+    session_manager = None
+    if screen or tmux:
+        session_manager = 'tmux' if tmux else 'screen'
+    name = cluster
+    if name is None:
+        name = _default_interactive_node_name('cpunode')
+
+    user_requested_resources = not (cloud is None and region is None and
+                                    zone is None and instance_type is None and
+                                    cpus is None and memory is None and
+                                    use_spot is None)
+    default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
+    cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
+    if instance_type is None:
+        instance_type = default_resources.instance_type
+    if use_spot is None:
+        use_spot = default_resources.use_spot
+    resources = sky.Resources(cloud=cloud_provider,
+                              region=region,
+                              zone=zone,
+                              instance_type=instance_type,
+                              cpus=cpus,
+                              memory=memory,
+                              use_spot=use_spot,
+                              disk_size=disk_size,
+                              disk_tier=disk_tier)
+
+    _create_and_ssh_into_node(
+        'cpunode',
+        resources,
+        cluster_name=name,
+        port_forward=port_forward,
+        session_manager=session_manager,
+        user_requested_resources=user_requested_resources,
+        no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
+    )
+
+
+@_interactive_node_cli_command
+@usage_lib.entrypoint
+# pylint: disable=redefined-outer-name
+def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
+            region: Optional[str], zone: Optional[str],
+            instance_type: Optional[str], cpus: Optional[str],
+            memory: Optional[str], tpus: Optional[str],
+            use_spot: Optional[bool], tpu_vm: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int], disk_tier: Optional[str],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
+    """Launch or attach to an interactive TPU node.
+
+    Examples:
+
+    .. code-block:: bash
+
+        # Launch a default tpunode.
+        sky tpunode
+        \b
+        # Do work, then log out. The node is kept running. Attach back to the
+        # same node and do more work.
+        sky tpunode
+        \b
+        # Create many interactive nodes by assigning names via --cluster (-c).
+        sky tpunode -c node0
+        sky tpunode -c node1
+        \b
+        # Port forward.
+        sky tpunode --port-forward 8080 --port-forward 4650 -c cluster_name
+        sky tpunode -p 8080 -p 4650 -c cluster_name
+        \b
+        # Sync current working directory to ~/workdir on the node.
+        rsync -r . cluster_name:~/workdir
+
+    """
+    if screen and tmux:
+        raise click.UsageError('Cannot use both screen and tmux.')
+
+    session_manager = None
+    if screen or tmux:
+        session_manager = 'tmux' if tmux else 'screen'
+    name = cluster
+    if name is None:
+        name = _default_interactive_node_name('tpunode')
+
+    user_requested_resources = not (region is None and zone is None and
+                                    instance_type is None and cpus is None and
+                                    memory is None and tpus is None and
+                                    use_spot is None)
+    default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
+    accelerator_args = default_resources.accelerator_args
+    if tpu_vm:
+        accelerator_args['tpu_vm'] = True
+        accelerator_args['runtime_version'] = 'tpu-vm-base'
+    if instance_type is None:
+        instance_type = default_resources.instance_type
+    if tpus is None:
+        tpus = default_resources.accelerators
+    if use_spot is None:
+        use_spot = default_resources.use_spot
+    resources = sky.Resources(cloud=sky.GCP(),
+                              region=region,
+                              zone=zone,
+                              instance_type=instance_type,
+                              cpus=cpus,
+                              memory=memory,
+                              accelerators=tpus,
+                              accelerator_args=accelerator_args,
+                              use_spot=use_spot,
+                              disk_size=disk_size,
+                              disk_tier=disk_tier)
+
+    _create_and_ssh_into_node(
+        'tpunode',
+        resources,
+        cluster_name=name,
+        port_forward=port_forward,
+        session_manager=session_manager,
+        user_requested_resources=user_requested_resources,
+        no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
+    )
+
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def storage():
+    """SkyPilot Storage CLI."""
+    pass
+
+
+@storage.command('ls', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
+def storage_ls():
+    """List storage objects created."""
+    storages = sky.storage_ls()
+    storage_table = storage_utils.format_storage_table(storages)
+    click.echo(storage_table)
+
+
+@storage.command('delete', cls=_DocumentedCodeCommand)
+@click.argument('names',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_storage_name))
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Delete all storage objects.')
+@usage_lib.entrypoint
+def storage_delete(names: List[str], all: bool):  # pylint: disable=redefined-builtin
+    """Delete storage objects.
+
+    Examples:
+
+    .. code-block:: bash
+
+        # Delete two storage objects.
+        sky storage delete imagenet cifar10
+        \b
+        # Delete all storage objects matching glob pattern 'imagenet*'.
+        sky storage delete "imagenet*"
+        \b
+        # Delete all storage objects.
+        sky storage delete -a
+    """
+    if sum([len(names) > 0, all]) != 1:
+        raise click.UsageError('Either --all or a name must be specified.')
+    if all:
+        click.echo('Deleting all storage objects.')
+        storages = sky.storage_ls()
+        names = [s['name'] for s in storages]
+    else:
+        names = _get_glob_storages(names)
+
+    for name in names:
+        sky.storage_delete(name)
+
+
+
+
+
 # ==============================
 # Sky Benchmark CLIs
 # ==============================
@@ -3745,9 +3605,80 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
     return candidates
 
 
+@cli.command()
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
+@usage_lib.entrypoint
+def cost_report(all: bool):  # pylint: disable=redefined-builtin
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """[Experimental] Show estimated costs for launched clusters.
+
+    For each cluster, this shows: cluster name, resources, launched time,
+    duration that cluster was up, and total estimated cost.
+
+    The estimated cost column indicates the price for the cluster based on the
+    type of resources being used and the duration of use up until now. This
+    means if the cluster is UP, successive calls to cost-report will show
+    increasing price.
+
+    This CLI is experimental. The estimated cost is calculated based on the
+    local cache of the cluster status, and may not be accurate for:
+
+    - Clusters with autostop/use_spot set; or
+
+    - Clusters that were terminated/stopped on the cloud console.
+    """
+    cluster_records = core.cost_report()
+
+    nonreserved_cluster_records = []
+    reserved_clusters = dict()
+    for cluster_record in cluster_records:
+        cluster_name = cluster_record['name']
+        if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+            cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
+                cluster_name]
+            # to display most recent entry for each reserved cluster
+            # TODO(sgurram): fix assumption of sorted order of clusters
+            if cluster_group_name not in reserved_clusters:
+                reserved_clusters[cluster_group_name] = cluster_record
+        else:
+            nonreserved_cluster_records.append(cluster_record)
+
+    total_cost = status_utils.get_total_cost_of_displayed_records(
+        nonreserved_cluster_records, all)
+
+    status_utils.show_cost_report_table(nonreserved_cluster_records, all)
+    for cluster_group_name, cluster_record in reserved_clusters.items():
+        status_utils.show_cost_report_table(
+            [cluster_record], all, reserved_group_name=cluster_group_name)
+        total_cost += cluster_record['total_cost']
+
+    click.echo(f'\n{colorama.Style.BRIGHT}'
+               f'Total Cost: ${total_cost:.2f}{colorama.Style.RESET_ALL}')
+
+    if not all:
+        click.secho(
+            f'Showing up to {status_utils.NUM_COST_REPORT_LINES} '
+            'most recent clusters. '
+            'To see all clusters in history, '
+            'pass the --all flag.',
+            fg='yellow')
+
+    click.secho(
+        'This feature is experimental. '
+        'Costs for clusters with auto{stop,down} '
+        'scheduled may not be accurate.',
+        fg='yellow')
+
+
+
 @cli.group(cls=_NaturalOrderGroup)
 def bench():
-    """SkyPilot Benchmark CLI."""
+    """[Experimental] SkyPilot Benchmark CLI."""
     pass
 
 
@@ -4305,6 +4236,82 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
         subprocess_utils.run_in_parallel(_delete_benchmark, to_delete)
         progress.live.transient = False
         progress.refresh()
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def admin():
+    """[Deprecated] SkyPilot On-prem administrator CLI."""
+    pass
+
+
+@admin.command('deploy', cls=_DocumentedCodeCommand)
+@click.argument('clusterspec_yaml', required=True, type=str, nargs=-1)
+@usage_lib.entrypoint
+def admin_deploy(clusterspec_yaml: str):
+    """Launches Sky on a local cluster.
+
+    Performs preflight checks (environment setup, cluster resources)
+    and launches Ray to serve sky tasks on the cluster. Finally
+    generates a distributable YAML that can be used by multiple
+    users sharing the cluster.
+
+    This command should be run once by the cluster admin, not cluster users.
+
+    Example:
+
+    .. code-block:: bash
+
+        sky admin deploy examples/local/cluster-config.yaml
+    """
+    steps = 1
+    clusterspec_yaml = ' '.join(clusterspec_yaml)
+    assert clusterspec_yaml
+    is_yaml, yaml_config = _check_yaml(clusterspec_yaml)
+    backend_utils.validate_schema(yaml_config, schemas.get_cluster_schema(),
+                                  'Invalid cluster YAML: ')
+    if not is_yaml:
+        raise ValueError('Must specify cluster config')
+    assert yaml_config is not None, (is_yaml, yaml_config)
+
+    auth_config = yaml_config['auth']
+    ips = yaml_config['cluster']['ips']
+    if not isinstance(ips, list):
+        ips = [ips]
+    local_cluster_name = yaml_config['cluster']['name']
+    usage_lib.record_cluster_name_for_current_operation(local_cluster_name)
+    usage_lib.messages.usage.update_cluster_resources(
+        len(ips), sky.Resources(sky.Local()))
+
+    # Check for Ray
+    click.secho(f'[{steps}/4] Installing on-premise dependencies\n',
+                fg='green',
+                nl=False)
+    onprem_utils.check_and_install_local_env(ips, auth_config)
+    steps += 1
+
+    # Detect what GPUs the cluster has (which can be heterogeneous)
+    click.secho(f'[{steps}/4] Auto-detecting cluster resources\n',
+                fg='green',
+                nl=False)
+    custom_resources = onprem_utils.get_local_cluster_accelerators(
+        ips, auth_config)
+    steps += 1
+
+    # Launching Ray Autoscaler service
+    click.secho(f'[{steps}/4] Launching sky runtime\n', fg='green', nl=False)
+    onprem_utils.launch_ray_on_local_cluster(yaml_config, custom_resources)
+    steps += 1
+
+    # Generate sanitized yaml file to be sent to non-admin users
+    click.secho(f'[{steps}/4] Generating sanitized local yaml file\n',
+                fg='green',
+                nl=False)
+    sanitized_yaml_path = onprem_utils.SKY_USER_LOCAL_CONFIG_PATH.format(
+        local_cluster_name)
+    onprem_utils.save_distributable_yaml(yaml_config)
+    click.secho(f'Saved in {sanitized_yaml_path} \n', fg='yellow', nl=False)
+    click.secho(f'Successfully deployed local cluster {local_cluster_name!r}\n',
+                fg='green')
 
 
 def main():
