@@ -454,16 +454,15 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Run kubectl command to add the public key to the cluster.
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     key_label = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
-    cmd = f"kubectl create secret generic {key_label} --from-file=ssh-publickey={public_key_path}"
+    cmd = f'kubectl create secret generic {key_label} ' \
+          f'--from-file=ssh-publickey={public_key_path}'
     try:
         subprocess.check_output(cmd, stderr=subprocess.STDOUT, shell=True)
     except subprocess.CalledProcessError as e:
         output = e.output.decode('utf-8')
-        print(output)
         if 'already exists' in output:
             logger.warning(
-                f'Key {key_label} already exists in Kubernetes cluster, continuing...'
-            )
+                f'Key {key_label} already exists in the cluster, continuing...')
             pass
         else:
             raise e

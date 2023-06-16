@@ -1,11 +1,12 @@
+"""Kubernetes."""
 import json
 import os
-import sys
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky.utils import common_utils
+from sky.skylet.providers.kubernetes.utils import get_port
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -18,6 +19,7 @@ _CREDENTIAL_FILES = [
 
 @clouds.CLOUD_REGISTRY.register
 class Kubernetes(clouds.Cloud):
+    """Kubernetes."""
 
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
     _DEFAULT_NUM_VCPUS = 4
@@ -25,12 +27,18 @@ class Kubernetes(clouds.Cloud):
     _REPR = 'Kubernetes'
     _regions: List[clouds.Region] = [clouds.Region('kubernetes')]
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.STOP: 'Kubernetes does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'Kubernetes does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the Kubernetes implementation yet.',
+        clouds.CloudImplementationFeatures.STOP: 'Kubernetes does not '
+                                                 'support stopping VMs.',
+        clouds.CloudImplementationFeatures.AUTOSTOP: 'Kubernetes does not '
+                                                     'support stopping VMs.',
+        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not '
+                                                       'supported by the '
+                                                       'Kubernetes '
+                                                       'implementation yet.',
     }
 
-    IMAGE = 'us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest'
+    IMAGE = 'us-central1-docker.pkg.dev/' \
+            'skypilot-375900/skypilotk8s/skypilot:latest'
 
     @classmethod
     def _cloud_unsupported_features(
@@ -76,7 +84,6 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def get_port(cls, svc_name, namespace) -> int:
-        from sky.skylet.providers.kubernetes.utils import get_port
         return get_port(svc_name, namespace)
 
     @classmethod
@@ -123,7 +130,7 @@ class Kubernetes(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[List[clouds.Zone]]:
-        del num_nodes  # Unused.
+        del num_nodes, region, instance_type, accelerators, use_spot  # Unused.
         for r in cls.regions():
             assert r.zones is not None, r
             yield r.zones
@@ -165,7 +172,7 @@ class Kubernetes(clouds.Cloud):
         else:
             custom_resources = None
 
-        # resources.memory and resources.cpus are None if they are not explicitly set.
+        # resources.memory and cpus are None if they are not explicitly set.
         # We fetch the default values for the instance type in that case.
         cpus, mem = self.get_vcpus_mem_from_instance_type(
             resources.instance_type)
@@ -216,19 +223,22 @@ class Kubernetes(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         # TODO(romilb): Add GPU support.
-        raise NotImplementedError("GPU support not implemented yet.")
+        raise NotImplementedError('GPUs are not supported for Kubernetes '
+                                  'clusters yet.')
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         # TODO(romilb): Check credential validity using k8s api
-        if os.path.exists(os.path.expanduser(f'~/.kube/config')):
+        if os.path.exists(os.path.expanduser('~/.kube/config')):
             return True, None
         else:
-            return False, "Kubeconfig doesn't exist"
+            return False, 'Kubeconfig not found - ' \
+                          'check if ~/.kube/config exists.'
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {}
-        # TODO(romilb): Fix the file mounts optimization ('config' here clashes with azure config file)
+        # TODO(romilb): Fix the file mounts optimization
+        #  ('config' here clashes with azure config file)
         # return {
         #     f'~/.kube/{filename}': f'~/.kube/{filename}'
         #     for filename in _CREDENTIAL_FILES

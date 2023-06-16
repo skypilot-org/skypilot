@@ -164,7 +164,7 @@ class SSHCommandRunner:
     ) -> List['SSHCommandRunner']:
         """Helper function for creating runners with the same ssh credentials"""
         if not port_list:
-            port_list = ["22"] * len(ip_list)
+            port_list = [22] * len(ip_list)
         return [
             SSHCommandRunner(ip, ssh_user, ssh_private_key, ssh_control_name,
                              ssh_proxy_command, port)

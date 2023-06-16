@@ -2534,7 +2534,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     ssh_credentials = backend_utils.ssh_credential_from_yaml(
                         handle.cluster_yaml)
                     runners = command_runner.SSHCommandRunner.make_runner_list(
-                        ip_list, **ssh_credentials)
+                        ip_list, **ssh_credentials, port_list=None)
 
                     def _get_zone(runner):
                         retry_count = 0
@@ -3215,7 +3215,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, **ssh_credentials)
+            ip_list, **ssh_credentials, port_list=None)
 
         def _rsync_down(args) -> None:
             """Rsync down logs from remote nodes.
@@ -3784,7 +3784,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle.cluster_yaml)
 
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, **ssh_credentials)
+            ip_list, **ssh_credentials, port_list=None)
 
         def _setup_tpu_name_on_node(
                 runner: command_runner.SSHCommandRunner) -> None:
