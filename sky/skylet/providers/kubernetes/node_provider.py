@@ -244,8 +244,12 @@ class KubernetesNodeProvider(NodeProvider):
                                 # Container is creating, so we can assume resources
                                 # have been allocated. Safe to exit.
                                 break
+                            else:
+                                # Pod is pending but not in 'ContainerCreating' state
+                                all_ready = False
+                                break
                     else:
-                        # Pod is pending and not in 'ContainerCreating' state
+                        # No conditions also indicates that the pod is pending
                         all_ready = False
                         break
             if all_ready:
