@@ -112,18 +112,6 @@ def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
             raise ValueError(f'Unknown cloud type: {cloud}')
 
 
-def get_abstract_store_from_storetype(storetype: 'StoreType') -> 'AbstractStore':
-    if storetype == StoreType.S3:
-        return S3Store
-    elif storetype == StoreType.GCS:
-        return GcsStore
-    elif storetype == StoreType.R2:
-        return R2Store
-    else:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Unknown store type: {storetype}')
-
-
 def get_store_prefix(storetype: StoreType) -> str:
     if storetype == StoreType.S3:
         return 's3://'
@@ -147,7 +135,13 @@ def get_bucket_region(bucket_name: str, storetype: StoreType) -> str:
         region = bucket_location['LocationConstraint']
     elif storetype == StoreType.GCS:
         storage_client = gcp.storage_client()
-        bucket = storage_client.get_bucket(bucket_name)
+        try:
+            bucket = storage_client.get_bucket(bucket_name)
+        except gcp.not_found_exception() as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketGetError(
+                    'Attempted to get region of a non-existent bucket: '
+                    f'{bucket_name}') from e
         region = bucket.location
     elif storetype == StoreType.R2:
         # Cloudflare only supports 'auto' region for R2
@@ -909,6 +903,19 @@ class Storage(object):
         return config
 
 
+def get_abstract_store_from_storetype(
+        storetype: 'StoreType') -> Type[AbstractStore]:
+    if storetype == StoreType.S3:
+        return S3Store
+    elif storetype == StoreType.GCS:
+        return GcsStore
+    elif storetype == StoreType.R2:
+        return R2Store
+    else:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Unknown store type: {storetype}')
+
+
 class S3Store(AbstractStore):
     """S3Store inherits from Storage Object and represents the backend
     for S3 buckets.
@@ -1244,15 +1251,10 @@ class S3Store(AbstractStore):
                 logger.info(f'Created S3 bucket {bucket_name} in {region}')
             s3_client.put_bucket_tagging(
                 Bucket=bucket_name,
-                Tagging={
-                    'TagSet': [
-                        {
-                            'Key': 'skymanaged',
-                            'Value': 'sky'
-                        },
-                    ]
-                }
-            )
+                Tagging={'TagSet': [{
+                    'Key': 'skymanaged',
+                    'Value': 'sky'
+                },]})
         except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
@@ -1298,7 +1300,7 @@ class S3Store(AbstractStore):
         while data_utils.verify_s3_bucket(bucket_name):
             time.sleep(0.1)
         return True
-    
+
     @staticmethod
     def get_sky_managed_bucket_names() -> Set[str]:
         """Gets a set of sky managed buckets from AWS S3
@@ -1314,7 +1316,7 @@ class S3Store(AbstractStore):
         for bucket_name in bucket_names:
             try:
                 response = s3_client.get_bucket_tagging(Bucket=bucket_name)
-                tagset = response['TagSet'] # list of dictionaries
+                tagset = response['TagSet']  # list of dictionaries
                 for tag in tagset:
                     if tag['Key'] == 'skymanaged':
                         sky_managed_s3_buckets.add(bucket_name)
@@ -1322,6 +1324,7 @@ class S3Store(AbstractStore):
                 if e.response['Error']['Code'] == 'NoSuchTagSet':
                     continue
         return sky_managed_s3_buckets
+
 
 class GcsStore(AbstractStore):
     """GcsStore inherits from Storage Object and represents the backend
@@ -1693,7 +1696,7 @@ class GcsStore(AbstractStore):
         try:
             bucket = self.client.bucket(bucket_name)
             bucket.storage_class = 'STANDARD'
-            bucket.labels = {"skymanaged" : "sky"}
+            bucket.labels = {'skymanaged': 'sky'}
             new_bucket = self.client.create_bucket(bucket, location=region)
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
@@ -1755,10 +1758,11 @@ class GcsStore(AbstractStore):
         buckets = storage_client.list_buckets()
         sky_managed_gcs_buckets = set()
         for bucket in buckets:
-            labels: Dict[str,str] = bucket.labels
+            labels: Dict[str, str] = bucket.labels
             if 'skymanaged' in labels:
                 sky_managed_gcs_buckets.add(bucket.name)
         return sky_managed_gcs_buckets
+
 
 class R2Store(AbstractStore):
     """R2Store inherits from S3Store Object and represents the backend
@@ -2127,7 +2131,7 @@ class R2Store(AbstractStore):
         for bucket in buckets:
             try:
                 r2_resource.Object(bucket.name, '.sky_DO_NOT_DELETE').load()
-            except Exception as e:
+            except aws.botocore_exceptions().ClientError:
                 # The file does not exist in this bucket
                 continue
             else:

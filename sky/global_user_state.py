@@ -21,7 +21,7 @@ import colorama
 
 from sky import clouds
 from sky.adaptors import cloudflare
-from sky.data import storage as storage_lib 
+from sky.data import storage as storage_lib
 from sky.utils import common_utils
 from sky.utils import db_utils
 
@@ -709,15 +709,16 @@ def add_or_update_storage(storage_name: str,
     _DB.conn.commit()
 
 
-def remove_storage(storage_name: str, storetype: 'StoreType' = None):
+def remove_storage(storage_name: str, storetype: Optional['StoreType'] = None):
     """Removes Storage from Database"""
-    if storetype:
+    if storetype is not None:
         handle = get_handle_from_storage_name(storage_name)
-        del handle.sky_stores[storetype]
-        # if the storage is not empty
-        if len(handle.sky_stores) != 0:
-            add_or_update_storage(storage_name, handle, StorageStatus.READY)
-            return
+        if handle is not None:
+            del handle.sky_stores[storetype]
+            # if the storage is not empty
+            if len(handle.sky_stores) != 0:
+                add_or_update_storage(storage_name, handle, StorageStatus.READY)
+                return
     _DB.cursor.execute('DELETE FROM storage WHERE name=(?)', (storage_name,))
     _DB.conn.commit()
 

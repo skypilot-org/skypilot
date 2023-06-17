@@ -3174,20 +3174,19 @@ def storage():
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
-@click.option(
-    '--refresh',
-    '-r',
-    default=False,
-    is_flag=True,
-    required=False,
-    help='Syncs the internal state, state.db, and external state, console, of storages.')
+@click.option('--refresh',
+              '-r',
+              default=False,
+              is_flag=True,
+              required=False,
+              help=('Syncs the internal state, state.db, and external '
+                    'state, console, of storages.'))
 @usage_lib.entrypoint
 def storage_ls(refresh: bool):
     """List storage objects created."""
     # call storage_refresh from core.py
     if refresh:
-        with log_utils.safe_rich_status(
-                f'[bold cyan]Syncing storage[/]'):
+        with log_utils.safe_rich_status('[bold cyan]Syncing storage[/]'):
             sky.storage_refresh()
     storages = sky.storage_ls()
     storage_table = storage_utils.format_storage_table(storages)
