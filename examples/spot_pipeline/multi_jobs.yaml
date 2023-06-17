@@ -1,0 +1,65 @@
+name: pipeline
+
+---
+name: train1
+
+resources:
+  accelerators: V100:1
+
+num_nodes: 2
+
+setup: |
+  echo setup for train
+  sleep 20
+
+run: |
+  echo train starts
+  sleep 20
+  echo train ends
+
+---
+name: train2
+
+resources:
+  accelerators: V100:1
+
+setup: |
+  echo setup for train
+  sleep 20
+
+run: |
+  echo train starts
+  sleep 20
+  echo train ends
+
+---
+
+name: eval1
+
+resources:
+  accelerators: T4:1
+
+setup: |
+  echo setup for eval
+  sleep 20
+
+run: |
+  echo eval starts
+  sleep 20
+  echo eval ends
+
+---
+
+name: eval2
+
+resources:
+  accelerators: T4:4
+
+setup: |
+  echo setup for eval
+  sleep 20
+
+run: |
+  echo eval starts
+  sleep 20
+  echo eval ends

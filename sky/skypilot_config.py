@@ -117,6 +117,14 @@ def set_nested(keys: Iterable[str], value: Any) -> Dict[str, Any]:
     return to_return
 
 
+def to_dict() -> Dict[str, Any]:
+    """Returns a deep-copied version of the current config."""
+    global _dict
+    if _dict is not None:
+        return copy.deepcopy(_dict)
+    return {}
+
+
 def _syntax_check_for_ssh_proxy_command(cloud: str) -> None:
     ssh_proxy_command_config = get_nested((cloud.lower(), 'ssh_proxy_command'),
                                           None)

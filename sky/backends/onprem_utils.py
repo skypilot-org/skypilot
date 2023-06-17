@@ -278,7 +278,7 @@ def get_local_cluster_accelerators(
                             'A100',
                             '1080',
                             '2080',
-                            'A5000'
+                            'A5000',
                             'A6000']
         accelerators_dict = {}
         for acc in all_accelerators:

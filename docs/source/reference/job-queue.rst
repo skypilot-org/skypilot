@@ -77,7 +77,7 @@ This specifies a task that needs to be run on 2 nodes, each of which must have 4
 
 Use :code:`sky exec mycluster task.yaml` to submit this task, which will be scheduled correctly by the job queue.
 
-See :ref:`Distributed Jobs on Many VMs` for more details.
+See :ref:`dist-jobs` for more details.
 
 Using ``CUDA_VISIBLE_DEVICES``
 --------------------------------
@@ -111,7 +111,7 @@ SkyPilot's scheduler serves two goals:
 2. **Minimizing resource idleness**: If a resource is idle, SkyPilot will schedule a
    queued job that can utilize that resource.
 
-We illustrate the scheduling behavior by revisiting :ref:`Tutorial: DNN Training <huggingface>`.
+We illustrate the scheduling behavior by revisiting :ref:`Tutorial: DNN Training <dnn-training>`.
 In that tutorial, we have a task YAML that specifies these resource requirements:
 
 .. code-block:: yaml

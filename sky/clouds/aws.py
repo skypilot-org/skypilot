@@ -90,6 +90,7 @@ class AWS(clouds.Cloud):
         'Run the following commands:'
         f'\n{_INDENT_PREFIX}  $ pip install boto3'
         f'\n{_INDENT_PREFIX}  $ aws configure'
+        f'\n{_INDENT_PREFIX}  $ aws configure list  # Ensure that this shows identity is set.'
         f'\n{_INDENT_PREFIX}For more info: '
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
     )
@@ -105,7 +106,7 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _sso_credentials_help_str(cls, expired: bool = False) -> str:
-        help_str = 'Run the following commands (must use aws v2 CLI):'
+        help_str = 'Run the following commands (must use AWS CLI v2):'
         if not expired:
             help_str += f'\n{cls._INDENT_PREFIX}  $ aws configure sso'
         help_str += (
@@ -567,17 +568,25 @@ class AWS(clouds.Cloud):
             # 2. In the case where the multiple users belong to an organization,
             # those users will have different account id, so fallback works.
             user_ids = [user_info['UserId'], user_info['Account']]
-        except aws.botocore_exceptions().NoCredentialsError:
+        except aws.botocore_exceptions().NoCredentialsError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
-                    f'AWS credentials are not set. {cls._STATIC_CREDENTIAL_HELP_STR}'
+                    'AWS credentials are not set. '
+                    f'{cls._STATIC_CREDENTIAL_HELP_STR}\n'
+                    f'{cls._INDENT_PREFIX}Details: `aws sts '
+                    'get-caller-identity` failed with error:'
+                    f' {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
-        except aws.botocore_exceptions().ClientError:
+        except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'Failed to access AWS services with credentials. '
                     'Make sure that the access and secret keys are correct.'
-                    f' {cls._STATIC_CREDENTIAL_HELP_STR}') from None
+                    f' {cls._STATIC_CREDENTIAL_HELP_STR}\n'
+                    f'{cls._INDENT_PREFIX}Details: `aws sts '
+                    'get-caller-identity` failed with error:'
+                    f' {common_utils.format_exception(e, use_bracket=True)}.'
+                ) from None
         except aws.botocore_exceptions().InvalidConfigError as e:
             # pylint: disable=import-outside-toplevel
             import awscli
