@@ -65,7 +65,8 @@ _image_df = common.read_catalog('aws/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 _quotas_df = common.read_catalog('aws/instance_quota_mapping.csv',
-                                pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+
 
 def _fetch_and_apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
     """Maps zone IDs (use1-az1) to zone names (us-east-1x).
@@ -149,15 +150,19 @@ def _get_df() -> pd.DataFrame:
                 _user_df = _fetch_and_apply_az_mapping(_default_df)
         return _user_df
 
-def get_quota_code(instance_type: str, spot_header: str) -> str:
+
+def get_quota_code(instance_type: str, spot_header: str) -> Optional[str]:
+    # Get the quota code from the accelerator instance type
+    # This will be used in the botocore command to check for
+    # a non-zero quota
     try:
-        quota_code = _quotas_df.loc[
-            _quotas_df['InstanceType'] == instance_type, 
-            spot_header].values[0]
+        quota_code = _quotas_df.loc[_quotas_df['InstanceType'] == instance_type,
+                                    spot_header].values[0]
         return quota_code
 
     except IndexError:
         return None
+
 
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_get_df(), instance_type)

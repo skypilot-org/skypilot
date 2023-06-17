@@ -1332,14 +1332,15 @@ class RetryingVmProvisioner(object):
         region = clouds.Region(to_provision.region)
 
         if (not to_provision.cloud.check_quota_not_zero(
-                to_provision.region,
-                to_provision.instance_type,
+                to_provision.region, to_provision.instance_type,
                 to_provision.use_spot)):
-                
-                raise exceptions.ResourcesUnavailableError(
-                    'Zero quota in the region with '
-                    'attempted provisioning')
-            
+
+            # if quota is found to be zero, raise exception and skip to
+            # the next region
+            raise exceptions.ResourcesUnavailableError(
+                'Zero quota in the region with '
+                'attempted provisioning')
+
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status):
             # Filter out zones that are blocked, if any.

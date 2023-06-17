@@ -689,45 +689,55 @@ class AWS(clouds.Cloud):
         }
 
     @classmethod
-    def check_quota_not_zero(
-        cls,
-        region: str,
-        instance_type: str,
-        use_spot: bool = False) -> bool:
+    def check_quota_not_zero(cls,
+                             region: str,
+                             instance_type: str,
+                             use_spot: bool = False) -> bool:
+        """
+        AWS-specific implmentation of check_quota_not_zero. The function works by
+        matching the instance_type to the corresponding AWS quota code, and then using
+        the boto3 Python API to query the region for the specific quota code.
+
+        Returns:
+            False if the quota is found to be zero, and True otherwise.
+        Raises:
+            ImportError: if the dependencies for AWS are not able to be installed.
+            botocore.exceptions.ClientError: error in Boto3 client request.
+        """
 
         try:
-            # pylint: disable=import-outside-toplevel,unused-import
+            # pylint: disable=import-outside-toplevel
             import boto3
             import botocore
-            import pandas as pd
         except ImportError:
             raise ImportError('Fail to import dependencies for AWS.'
                               'Try pip install "skypilot[aws]"') from None
-        
-        from sky.clouds.service_catalog import aws_catalog
-        
+
+        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
+
         spot_header = ''
-        if (use_spot):
+        if use_spot:
             spot_header = 'SpotInstanceCode'
         else:
-            spot_header = 'OnDemandInstanceCode' 
-        
+            spot_header = 'OnDemandInstanceCode'
+
         quota_code = aws_catalog.get_quota_code(instance_type, spot_header)
 
-        if (quota_code == None):
+        if quota_code is None:
+            # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
             return True
-        
+
         client = boto3.client('service-quotas', region_name=region)
         try:
-            response = client.get_service_quota(
-                ServiceCode='ec2',
-                QuotaCode=quota_code)
-        except botocore.exceptions.ClientError as e:
+            response = client.get_service_quota(ServiceCode='ec2',
+                                                QuotaCode=quota_code)
+        except botocore.exceptions.ClientError:
+            # Botocore client connection not established, try provisioning anyways
             return True
 
-            
         if response['Quota']['Value'] == 0:
+            # Quota found to be zero, do not try provisioning
             return False
 
+        # Quota found to be greater than zero, try provisioning
         return True
-
