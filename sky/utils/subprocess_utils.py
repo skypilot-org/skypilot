@@ -1,13 +1,16 @@
 """Utility functions for subprocesses."""
 from multiprocessing import pool
 import psutil
+import random
 import subprocess
+import time
 from typing import Any, Callable, List, Optional, Union
 
 import colorama
 
 from sky import exceptions
 from sky import sky_logging
+from sky.skylet import log_lib
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -117,3 +120,25 @@ def kill_children_processes(first_pid_to_kill: Optional[int] = None,
         except psutil.NoSuchProcess:
             # The child process may have already been terminated.
             pass
+
+
+def run_and_retry_for_disconnection(cmd: str,
+                                    error_msg: str,
+                                    max_retry: int = 3):
+    retry_cnt = 0
+    while True:
+        returncode, stdout, stderr = log_lib.run_with_log(cmd,
+                                                          '/dev/null',
+                                                          require_outputs=True,
+                                                          shell=True)
+        if retry_cnt < max_retry and returncode == 255:
+            retry_cnt += 1
+            time.sleep(random.uniform(0, 1) * 2)
+            continue
+        break
+    handle_returncode(returncode,
+                      cmd,
+                      error_msg=error_msg,
+                      stderr=stderr,
+                      stream_logs=True)
+    return stdout.strip()
