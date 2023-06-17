@@ -151,7 +151,7 @@ and storage mounting:
       # this approach can also be used to create a shared filesystem across workers.
       # See examples/storage/pingpong.yaml for an example.
       /outputs-mount:
-        name: romil-output-bucket
+        name: my-output-bucket
         mode: MOUNT
 
       # *** Uploading multiple files to the same Storage object ***
