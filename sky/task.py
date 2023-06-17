@@ -684,7 +684,7 @@ class Task:
         storage_cloud = None
 
         backend_utils.check_public_cloud_enabled()
-        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+        enabled_storage_clouds = global_user_state.get_storage_enabled_clouds()
         if not enabled_storage_clouds:
             raise ValueError('No enabled cloud for storage, run: sky check')
 

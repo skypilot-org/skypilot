@@ -63,7 +63,7 @@ _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
 
 def _is_storage_cloud_enabled(cloud_name: str,
                               try_fix_with_sky_check: bool = True) -> bool:
-    enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+    enabled_storage_clouds = global_user_state.get_storage_enabled_clouds()
     if cloud_name in enabled_storage_clouds:
         return True
     if try_fix_with_sky_check:
