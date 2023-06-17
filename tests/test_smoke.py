@@ -2388,7 +2388,6 @@ class TestStorageWithCredentials:
             subprocess.check_output(
                 ['aws', 's3', 'mb', f's3://{tmp_bucket_name}'],
                 stderr=subprocess.PIPE)
-            cmd = f'aws s3api put-bucket-tagging --bucket {tmp_bucket_name} --tagging \'TagSet=[{{Key=skymanaged,Value=sky}}]\''
         except subprocess.CalledProcessError as e:
             # To avoid errors in test_storage_refresh due to immediate
             # s3 bucket recreation after deletion, unique name is created.
@@ -2397,7 +2396,7 @@ class TestStorageWithCredentials:
                 tmp_bucket_name = f'{tmp_bucket_name}-2'
                 subprocess.check_call(
                     ['aws', 's3', 'mb', f's3://{tmp_bucket_name}'])
-                cmd = f'aws s3api put-bucket-tagging --bucket {tmp_bucket_name} --tagging \'TagSet=[{{Key=skymanaged,Value=sky}}]\''
+        cmd = f'aws s3api put-bucket-tagging --bucket {tmp_bucket_name} --tagging \'TagSet=[{{Key=skymanaged,Value=sky}}]\''
         subprocess.check_call(cmd, shell=True)
         yield tmp_bucket_name
         subprocess.check_call(
@@ -2413,6 +2412,7 @@ class TestStorageWithCredentials:
         except subprocess.CalledProcessError as e:
             # To avoid errors in test_storage_refresh due to immediate
             # gcs bucket recreation after deletion, unique name is created.
+            # Error is caught when label cmd is ran.
             stderr = e.stderr.decode()
             if 'BucketNotFoundException: 404' in stderr:
                 tmp_bucket_name = f'{tmp_bucket_name}-2'

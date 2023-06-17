@@ -2146,7 +2146,8 @@ class R2Store(AbstractStore):
             try:
                 r2_resource.Object(bucket.name, '.sky_DO_NOT_DELETE').load()
             except aws.botocore_exceptions().ClientError:
-                # The file does not exist in this bucket
+                # The file does not exist in this bucket, and therefore,
+                # the bucket is not sky managed
                 continue
             else:
                 # The file exists in this bucket

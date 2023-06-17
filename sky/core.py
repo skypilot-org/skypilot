@@ -963,11 +963,6 @@ def storage_refresh() -> None:
     by Sky but no longer exist in the cloud console. It also adds storages
     to the same table if they are managed by Sky, exist in the cloud console,
     but are not currently listed in ~/.sky/state.db.
-
-    Returns:
-        A tuple of (removed_storages, added_storages):
-        - removed_storages: list of storage names that are removed from state.db
-        - added_storages: list of storage names that are added to state.db
     """
     green = colorama.Fore.GREEN
     red = colorama.Fore.RED
@@ -1013,7 +1008,7 @@ def storage_refresh() -> None:
             internal_buckets_status[storetype])
         # add storage that exist in external state but not in state.db
         for s_name in only_in_external_state:
-            # Storage with s_name is already in internal_state from different
+            # Storage with S_NAME is already in internal_state from different
             # cloud storage provider. Obtain StorageMetedata to update handle
             for s_type in internal_buckets_status.keys():
                 if s_type != storetype and s_name in internal_buckets_status[
