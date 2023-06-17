@@ -1,4 +1,4 @@
-.. _huggingface:
+.. _dnn-training:
 
 Tutorial: DNN Training
 ======================

@@ -161,9 +161,9 @@ class Task:
                                                     int]] = None
         self.file_mounts: Optional[Dict[str, str]] = None
 
-        # Only set when 'self' is a spot controller task: 'self.spot_task' is
-        # the underlying managed spot task (Task object).
-        self.spot_task: Optional['Task'] = None
+        # Only set when 'self' is a spot controller task: 'self.spot_dag' is
+        # the underlying managed spot dag (sky.Dag object).
+        self.spot_dag: Optional['sky.Dag'] = None
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
@@ -231,35 +231,7 @@ class Task:
                         f'a symlink to a directory). {self.workdir} not found.')
 
     @staticmethod
-    def from_yaml(yaml_path: str) -> 'Task':
-        """Initializes a task from a task YAML.
-
-        Example:
-            .. code-block:: python
-
-                task = sky.Task.from_yaml('/path/to/task.yaml')
-
-        Args:
-          yaml_path: file path to a valid task yaml file.
-
-        Raises:
-          ValueError: if the path gets loaded into a str instead of a dict; or
-            if there are any other parsing errors.
-        """
-        with open(os.path.expanduser(yaml_path), 'r') as f:
-            # TODO(zongheng): use
-            #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
-            # to raise errors on duplicate keys.
-            config = yaml.safe_load(f)
-
-        if isinstance(config, str):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('YAML loaded as str, not as dict. '
-                                 f'Is it correct? Path: {yaml_path}')
-
-        if config is None:
-            config = {}
-
+    def from_yaml_config(config: Dict[str, Any]) -> 'Task':
         backend_utils.validate_schema(config, schemas.get_task_schema(),
                                       'Invalid task YAML: ')
 
@@ -332,6 +304,37 @@ class Task:
         task.set_resources({resources})
         assert not config, f'Invalid task args: {config.keys()}'
         return task
+
+    @staticmethod
+    def from_yaml(yaml_path: str) -> 'Task':
+        """Initializes a task from a task YAML.
+
+        Example:
+            .. code-block:: python
+
+                task = sky.Task.from_yaml('/path/to/task.yaml')
+
+        Args:
+          yaml_path: file path to a valid task yaml file.
+
+        Raises:
+          ValueError: if the path gets loaded into a str instead of a dict; or
+            if there are any other parsing errors.
+        """
+        with open(os.path.expanduser(yaml_path), 'r') as f:
+            # TODO(zongheng): use
+            #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
+            # to raise errors on duplicate keys.
+            config = yaml.safe_load(f)
+
+        if isinstance(config, str):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('YAML loaded as str, not as dict. '
+                                 f'Is it correct? Path: {yaml_path}')
+
+        if config is None:
+            config = {}
+        return Task.from_yaml_config(config)
 
     @property
     def num_nodes(self) -> int:
@@ -674,27 +677,30 @@ class Task:
         #  order:
         #  1. cloud decided in best_resources.
         #  2. cloud specified in the task resources.
-        #  3. the first enabled cloud.
+        #  3. if not specified or the task's cloud does not support storage,
+        #     use the first enabled storage cloud.
         # This should be refactored and moved to the optimizer.
         assert len(self.resources) == 1, self.resources
         storage_cloud = None
+
+        backend_utils.check_public_cloud_enabled()
+        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+        if not enabled_storage_clouds:
+            raise ValueError('No enabled cloud for storage, run: sky check')
+
         if self.best_resources is not None:
             storage_cloud = self.best_resources.cloud
         else:
             resources = list(self.resources)[0]
             storage_cloud = resources.cloud
-            if storage_cloud is None:
-                # Get the first enabled cloud.
-                backend_utils.check_public_cloud_enabled()
-                enabled_clouds = global_user_state.get_enabled_clouds()
+        if storage_cloud is not None:
+            if str(storage_cloud) not in enabled_storage_clouds:
+                storage_cloud = None
 
-                for cloud in storage_lib.STORE_ENABLED_CLOUDS:
-                    for enabled_cloud in enabled_clouds:
-                        if cloud.is_same_cloud(enabled_cloud):
-                            storage_cloud = cloud
-                            break
         if storage_cloud is None:
-            raise ValueError('No available cloud to mount storage.')
+            storage_cloud = clouds.CLOUD_REGISTRY.from_str(
+                enabled_storage_clouds[0])
+
         store_type = storage_lib.get_storetype_from_cloud(storage_cloud)
         return store_type
 

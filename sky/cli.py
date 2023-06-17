@@ -37,7 +37,7 @@ import subprocess
 import sys
 import textwrap
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import click
 import colorama
@@ -63,6 +63,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import log_utils
 from sky.utils import common_utils
+from sky.utils import dag_utils
 from sky.utils import command_runner
 from sky.utils import schemas
 from sky.utils import subprocess_utils
@@ -935,7 +936,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     try:
         with open(entrypoint, 'r') as f:
             try:
-                config = yaml.safe_load(f)
+                config = list(yaml.safe_load_all(f))[0]
                 if isinstance(config, str):
                     # 'sky exec cluster ./my_script.sh'
                     is_yaml = False
@@ -967,7 +968,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     return is_yaml, config
 
 
-def _make_task_from_entrypoint_with_overrides(
+def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: List[str],
     *,
     name: Optional[str] = None,
@@ -988,7 +989,13 @@ def _make_task_from_entrypoint_with_overrides(
     env: Optional[List[Tuple[str, str]]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
-) -> sky.Task:
+) -> Union[sky.Task, sky.Dag]:
+    """Creates a task or a dag from an entrypoint with overrides.
+
+    Returns:
+        A dag iff the entrypoint is YAML and contains more than 1 task.
+        Otherwise, a task.
+    """
     entrypoint = ' '.join(entrypoint)
     is_yaml, yaml_config = _check_yaml(entrypoint)
     entrypoint: Optional[str]
@@ -1004,18 +1011,6 @@ def _make_task_from_entrypoint_with_overrides(
             click.secho('Task from command: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
 
-    if is_yaml:
-        assert entrypoint is not None
-        usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-        task = sky.Task.from_yaml(entrypoint)
-    else:
-        task = sky.Task(name='sky-cmd', run=entrypoint)
-        task.set_resources({sky.Resources()})
-
-    # Override.
-    if workdir is not None:
-        task.workdir = workdir
-
     if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
         cloud = 'local'
 
@@ -1030,6 +1025,30 @@ def _make_task_from_entrypoint_with_overrides(
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier)
+
+    if is_yaml:
+        assert entrypoint is not None
+        usage_lib.messages.usage.update_user_task_yaml(entrypoint)
+        dag = dag_utils.load_chain_dag_from_yaml(entrypoint)
+        if len(dag.tasks) > 1:
+            # When the dag has more than 1 task. It is unclear how to
+            # override the params for the dag. So we just ignore the
+            # override params.
+            if override_params:
+                click.secho(
+                    f'WARNING: override params {override_params} are ignored, '
+                    'since the yaml file contains multiple tasks.',
+                    fg='yellow')
+            return dag
+        task = sky.Task.from_yaml(entrypoint)
+    else:
+        task = sky.Task(name='sky-cmd', run=entrypoint)
+        task.set_resources({sky.Resources()})
+
+    # Override.
+    if workdir is not None:
+        task.workdir = workdir
+
     # Spot launch specific.
     if spot_recovery is not None:
         if spot_recovery.lower() == 'none':
@@ -1291,7 +1310,7 @@ def launch(
             'support for spot instances on Azure. Please file '
             'an issue if you need this feature.')
 
-    task = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         cluster=cluster,
@@ -1310,6 +1329,12 @@ def launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
     )
+    if isinstance(task_or_dag, sky.Dag):
+        raise click.UsageError(
+            'YAML specifies a DAG which is only supported by '
+            '`sky spot launch`. `sky launch` supports a '
+            'single task only.')
+    task = task_or_dag
 
     backend: backends.Backend
     if backend_name == backends.LocalDockerBackend.NAME:
@@ -1439,7 +1464,7 @@ def exec(
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
 
-    task = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         cluster=cluster,
@@ -1456,6 +1481,11 @@ def exec(
         num_nodes=num_nodes,
         env=env,
     )
+
+    if isinstance(task_or_dag, sky.Dag):
+        raise click.UsageError('YAML specifies a DAG, while `sky exec` '
+                               'supports a single task only.')
+    task = task_or_dag
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
@@ -1508,9 +1538,10 @@ def _get_spot_jobs(
             if controller_status is None:
                 msg += (f' (See: {colorama.Style.BRIGHT}sky spot -h'
                         f'{colorama.Style.RESET_ALL})')
-    except RuntimeError:
+    except RuntimeError as e:
         msg = ('Failed to query spot jobs due to connection '
-               'issues. Try again later.')
+               'issues. Try again later. '
+               f'Details: {common_utils.format_exception(e, use_bracket=True)}')
     except Exception as e:  # pylint: disable=broad-except
         msg = ('Failed to query spot jobs: '
                f'{common_utils.format_exception(e, use_bracket=True)}')
@@ -1682,7 +1713,9 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                     f'* {job_info}To see all spot jobs: {colorama.Style.BRIGHT}'
                     f'sky spot queue{colorama.Style.RESET_ALL}')
 
-        if num_pending_autostop > 0:
+        if num_pending_autostop > 0 and not refresh:
+            # Don't print this hint if there's no pending autostop or user has
+            # already passed --refresh.
             plural_and_verb = ' has'
             if num_pending_autostop > 1:
                 plural_and_verb = 's have'
@@ -1714,12 +1747,12 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     means if the cluster is UP, successive calls to cost-report will show
     increasing price.
 
-    The estimated cost is calculated based on the local cache of the cluster
-    status, and may not be accurate for:
+    This CLI is experimental. The estimated cost is calculated based on the
+    local cache of the cluster status, and may not be accurate for:
 
-      - clusters with autostop/use_spot set; or
+    - Clusters with autostop/use_spot set; or
 
-      - clusters that were terminated/stopped on the cloud console.
+    - Clusters that were terminated/stopped on the cloud console.
     """
     cluster_records = core.cost_report()
 
@@ -2184,7 +2217,7 @@ def autostop(
     help=
     ('Autodown the cluster: tear down the cluster after specified minutes of '
      'idle time after all jobs finish (successfully or abnormally). Requires '
-     ' --idle-minutes-to-autostop to be set.'),
+     '--idle-minutes-to-autostop to be set.'),
 )
 @click.option(
     '--retry-until-up',
@@ -2664,7 +2697,7 @@ def _down_or_stop_clusters(
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
                     f'{colorama.Style.RESET_ALL}'
-                    f'\n\tReason: {common_utils.format_exception(e)}.')
+                    f'\nReason: {common_utils.format_exception(e)}.')
             except (exceptions.NotSupportedError,
                     exceptions.ClusterOwnerIdentityMismatchError) as e:
                 message = str(e)
@@ -2959,7 +2992,7 @@ def check():
 
 
 @cli.command()
-@click.argument('gpu_name', required=False)
+@click.argument('accelerator_str', required=False)
 @click.option('--all',
               '-a',
               is_flag=True,
@@ -2980,7 +3013,7 @@ def check():
 @service_catalog.use_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
-        gpu_name: Optional[str],
+        accelerator_str: Optional[str],
         all: bool,  # pylint: disable=redefined-builtin
         cloud: Optional[str],
         region: Optional[str]):
@@ -3016,7 +3049,7 @@ def show_gpus(
     clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
-    if show_all and gpu_name is not None:
+    if show_all and accelerator_str is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
 
     def _list_to_str(lst):
@@ -3030,7 +3063,9 @@ def show_gpus(
         other_table = log_utils.create_table(
             ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
-        if gpu_name is None:
+        name, quantity = None, None
+
+        if accelerator_str is None:
             result = service_catalog.list_accelerator_counts(
                 gpus_only=True,
                 clouds=cloud,
@@ -3061,21 +3096,46 @@ def show_gpus(
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
                 return
+        else:
+            # Parse accelerator string
+            accelerator_split = accelerator_str.split(':')
+            if len(accelerator_split) > 2:
+                raise click.UsageError(
+                    f'Invalid accelerator string {accelerator_str}. '
+                    'Expected format: <accelerator_name>[:<quantity>].')
+            if len(accelerator_split) == 2:
+                name = accelerator_split[0]
+                # Check if quantity is valid
+                try:
+                    quantity = int(accelerator_split[1])
+                    if quantity <= 0:
+                        raise ValueError(
+                            'Quantity cannot be non-positive integer.')
+                except ValueError as invalid_quantity:
+                    raise click.UsageError(
+                        f'Invalid accelerator quantity {accelerator_split[1]}. '
+                        'Expected a positive integer.') from invalid_quantity
+            else:
+                name, quantity = accelerator_str, None
 
-        # Show detailed accelerator information
         result = service_catalog.list_accelerators(gpus_only=True,
-                                                   name_filter=gpu_name,
+                                                   name_filter=name,
+                                                   quantity_filter=quantity,
                                                    region_filter=region,
                                                    clouds=cloud)
         if len(result) == 0:
-            yield f'Resources \'{gpu_name}\' not found. '
+            quantity_str = (f' with requested quantity {quantity}'
+                            if quantity else '')
+            yield f'Resources \'{name}\'{quantity_str} not found. '
             yield 'Try \'sky show-gpus --all\' '
             yield 'to show available accelerators.'
             return
 
-        yield '*NOTE*: for most GCP accelerators, '
-        yield 'INSTANCE_TYPE == (attachable) means '
-        yield 'the host VM\'s cost is not included.\n\n'
+        if cloud is None or cloud.lower() == 'gcp':
+            yield '*NOTE*: for most GCP accelerators, '
+            yield 'INSTANCE_TYPE == (attachable) means '
+            yield 'the host VM\'s cost is not included.\n\n'
+
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table_headers = [
@@ -3099,8 +3159,8 @@ def show_gpus(
                 cpu_count = item.cpu_count
                 if pd.isna(cpu_count):
                     cpu_str = '-'
-                elif isinstance(cpu_count, float):
-                    if cpu_count.is_integer():
+                elif isinstance(cpu_count, (float, int)):
+                    if int(cpu_count) == cpu_count:
                         cpu_str = str(int(cpu_count))
                     else:
                         cpu_str = f'{cpu_count:.1f}'
@@ -3326,9 +3386,9 @@ def spot():
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
 @click.option(
-    '--retry-until-up',
-    '-r',
-    default=True,
+    '--retry-until-up/--no-retry-until-up',
+    '-r/-no-r',
+    default=None,
     is_flag=True,
     required=False,
     help=('(Default: True; this flag is deprecated and will be removed in a '
@@ -3380,10 +3440,7 @@ def spot_launch(
 
       sky spot launch 'echo hello!'
     """
-    if name is None:
-        name = backend_utils.generate_cluster_name()
-
-    task = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
         workdir=workdir,
@@ -3402,30 +3459,49 @@ def spot_launch(
         disk_tier=disk_tier,
         spot_recovery=spot_recovery,
     )
+    # Deprecation.
+    if retry_until_up is not None:
+        flag_str = '--retry-until-up'
+        if not retry_until_up:
+            flag_str = '--no-retry-until-up'
+        click.secho(
+            f'Flag {flag_str} is deprecated and will be removed in a '
+            'future release (managed spot jobs will always be retried). '
+            'Please file an issue if this does not work for you.',
+            fg='yellow')
+    else:
+        retry_until_up = True
+
+    if not isinstance(task_or_dag, sky.Dag):
+        assert isinstance(task_or_dag, sky.Task), task_or_dag
+        with sky.Dag() as dag:
+            dag.add(task_or_dag)
+            dag.name = task_or_dag.name
+    else:
+        dag = task_or_dag
+
+    if name is not None:
+        dag.name = name
+
+    dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
     if not yes:
-        prompt = f'Launching a new spot task {name!r}. Proceed?'
+        prompt = f'Launching a new spot job {dag.name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    # We try our best to validate the cluster name before we launch the task.
-    # If the cloud is not specified, this will only validate the cluster name
-    # against the regex, and the cloud-specific validation will be done by
-    # the spot controller when actually launching the spot cluster.
-    resources = list(task.resources)[0]
-    task_cloud = (resources.cloud
-                  if resources.cloud is not None else clouds.Cloud)
-    task_cloud.check_cluster_name_is_valid(name)
+    for task in dag.tasks:
+        # We try our best to validate the cluster name before we launch the
+        # task. If the cloud is not specified, this will only validate the
+        # cluster name against the regex, and the cloud-specific validation will
+        # be done by the spot controller when actually launching the spot
+        # cluster.
+        resources = list(task.resources)[0]
+        task_cloud = (resources.cloud
+                      if resources.cloud is not None else clouds.Cloud)
+        task_cloud.check_cluster_name_is_valid(name)
 
-    # Deprecation.
-    if not retry_until_up:
-        click.secho(
-            'Flag --retry-until-up is deprecated and will be removed in a '
-            'future release (defaults to True). Please file an issue if this '
-            'does not work for you.',
-            fg='yellow')
-
-    sky.spot_launch(task,
+    sky.spot_launch(dag,
                     name,
                     detach_run=detach_run,
                     retry_until_up=retry_until_up)

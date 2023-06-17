@@ -260,12 +260,13 @@ def list_accelerators(
         gpus_only: bool,
         name_filter: Optional[str],
         region_filter: Optional[str],
+        quantity_filter: Optional[int],
         case_sensitive: bool = True
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in AWS offering accelerators."""
     return common.list_accelerators_impl('AWS', _get_df(), gpus_only,
                                          name_filter, region_filter,
-                                         case_sensitive)
+                                         quantity_filter, case_sensitive)
 
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:

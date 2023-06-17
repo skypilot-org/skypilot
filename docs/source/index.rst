@@ -31,17 +31,28 @@ SkyPilot abstracts away cloud infra burden:
 
 SkyPilot cuts your cloud costs:
 
-* :ref:`Managed Spot <Managed Spot Jobs>`: **3x cost savings** using spot VMs, with auto-recovery from preemptions
-* :ref:`Autostop <Auto-stopping>`: hands-free cleanup of idle clusters
-* :ref:`Benchmark <Benchmark: Find the Best Hardware for Your Jobs>`: find best VM types for your jobs
+* :ref:`Managed Spot <spot-jobs>`: **3x cost savings** using spot VMs, with auto-recovery from preemptions
+* :ref:`Autostop <auto-stop>`: hands-free cleanup of idle clusters
+* :ref:`Benchmark <benchmark-overview>`: find best VM types for your jobs
 * Optimizer: **2x cost savings** by auto-picking best prices across zones/regions/clouds
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
+.. raw:: html
+
+   <p align="center">
+   <picture>
+      <a href="https://skypilot.readthedocs.io/en/latest/getting-started/installation.html">
+      <img alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png" width=80%></a>
+   </picture>
+   </p>
+
+
 **More information**
 
-* `Project blog <https://blog.skypilot.co/>`_
+* `SkyPilot blog <https://blog.skypilot.co/>`_
 * `Introductory blog post <https://blog.skypilot.co/introducing-skypilot/>`_
+* `NSDI 2023 paper & talk <https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng>`_
 * `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutorial>`_
 * Framework examples: `PyTorch DDP <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml>`_,  `Distributed <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py>`_ `TensorFlow <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml>`_, `JAX/Flax on TPU <https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml>`_, `Stable Diffusion <https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion>`_, `Detectron2 <https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml>`_, `programmatic grid search <https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py>`_, `Docker <https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml>`_, and `many more <https://github.com/skypilot-org/skypilot/tree/master/examples>`_.
 
@@ -85,12 +96,21 @@ Documentation
    :maxdepth: 1
    :caption: User Guides
 
-   reference/local/index
+   examples/docker-containers
    examples/iterative-dev-project
    reference/interactive-nodes
-   reference/quota
-   reference/logging
    reference/faq
+   reference/logging
+   reference/local/index
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Cloud Admin and Usage
+
+   cloud-setup/cloud-permissions
+   cloud-setup/cloud-auth
+   cloud-setup/quota
+
 
 .. toctree::
    :maxdepth: 1

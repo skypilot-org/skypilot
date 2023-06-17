@@ -19,7 +19,7 @@ from typing import List
 #
 # To only run tests for managed spot (without generic tests), use --managed-spot.
 all_clouds_in_smoke_tests = [
-    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm'
+    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci'
 ]
 default_clouds_to_run = ['gcp', 'azure']
 
@@ -33,6 +33,8 @@ cloud_to_pytest_keyword = {
     'lambda': 'lambda_cloud',
     'cloudflare': 'cloudflare',
     'ibm': 'ibm',
+    'scp': 'scp',
+    'oci': 'oci',
 }
 
 
@@ -61,9 +63,14 @@ def pytest_addoption(parser):
         'cloud in the list of the clouds to be run.')
 
     parser.addoption('--terminate-on-failure',
+                     dest='terminate_on_failure',
                      action='store_true',
-                     default=False,
+                     default=True,
                      help='Terminate test VMs on failure.')
+    parser.addoption('--no-terminate-on-failure',
+                     dest='terminate_on_failure',
+                     action='store_false',
+                     help='Do not terminate test VMs on failure.')
 
 
 def pytest_configure(config):
@@ -182,6 +189,7 @@ def enable_all_clouds(monkeypatch):
         prefix='tmp_backup_config_default', delete=False)
     monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
                         config_file_backup.name)
+    monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
 
 
 @pytest.fixture

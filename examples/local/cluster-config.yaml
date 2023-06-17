@@ -4,7 +4,7 @@
 # The system administrator must have `sudo` access to the local nodes.
 # Requirements:
 #   1) Python (> 3.6) on all nodes.
-#   2) Ray CLI (= 2.0.1) on all nodes.
+#   2) Ray CLI (= 2.4.0) on all nodes.
 #
 # Example usage:
 #   >> sky admin deploy cluster-config.yaml
