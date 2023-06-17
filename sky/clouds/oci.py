@@ -529,6 +529,6 @@ class OCI(clouds.Cloud):
             if vpu > oci_conf.DISK_TIER_MEDIUM:
                 logger.warning(
                     f'Automatically set the VPU to {oci_conf.DISK_TIER_MEDIUM}'
-                    f' as less than {cpus}x vCPU is configured.')
+                    f' as less than 8x vCPU is configured.')
                 vpu = oci_conf.DISK_TIER_MEDIUM
         return vpu
