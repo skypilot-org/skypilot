@@ -41,7 +41,6 @@ def _get_df() -> 'pd.DataFrame':
         except ImportError:
             _df = df
             return _df
-        
 
         try:
             config_profile = oci_conf.get_profile()
@@ -68,7 +67,6 @@ def _get_df() -> 'pd.DataFrame':
             logger.warning(
                 f'Unexpected exception when handle catalog: {str(e)}')
             subscribed_regions = []
-
 
         if subscribed_regions:
             _df = df[df['Region'].isin(subscribed_regions)]
