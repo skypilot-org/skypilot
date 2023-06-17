@@ -53,6 +53,10 @@ class oci_conf:
     # read: IOPS=3104, BW=194MiB/s (203MB/s)(4096MiB/21113msec)
     # write: IOPS=3079, BW=192MiB/s (202MB/s)(4096MiB/21280msec)
     DISK_TIER_MEDIUM = 30
+    # -----------vpu=90------------
+    # Use --numjobs=8 in fio command
+    # read: IOPS=5843, BW=365MiB/s (383MB/s)(8192MiB/22429msec)
+    # write: IOPS=5833, BW=365MiB/s (382MB/s)(8192MiB/22469msec);
     # -----------vpu=100------------
     # Use --numjobs=8 in fio command
     # read: IOPS=6698, BW=419MiB/s (439MB/s)(8192MiB/19568msec)
@@ -63,7 +67,7 @@ class oci_conf:
     BOOT_VOLUME_VPU = {
         None: DISK_TIER_MEDIUM,  # Default to medium
         "low": DISK_TIER_LOW,
-        "medium": DISK_TIER_HIGH,
+        "medium": DISK_TIER_MEDIUM,
         "high": DISK_TIER_HIGH,
     }
 
