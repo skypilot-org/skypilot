@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import textwrap
-from typing import Dict, Optional, Tuple, Any
+from typing import Dict, Optional, Tuple
 
 import colorama
 
@@ -160,9 +160,10 @@ def docker_host_setup(ip: str, cluster_config_file: str) -> str:
          to the docker container.
     """
     # pylint: disable=import-outside-toplevel
-    from sky.backends.backend_utils import ssh_credential_from_yaml
+    from sky.backends import backend_utils
     from sky.utils import command_runner
-    ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
+    ssh_credentials = backend_utils.ssh_credential_from_yaml(
+        cluster_config_file)
     runner = command_runner.SSHCommandRunner(ip, **ssh_credentials)
     whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
         f'sudo docker exec {DEFAULT_DOCKER_CONTAINER_NAME} whoami',

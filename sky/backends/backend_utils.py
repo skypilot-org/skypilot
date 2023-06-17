@@ -879,8 +879,7 @@ def write_cluster_config(
     )
 
     # pylint: disable=import-outside-toplevel
-    from sky.backends.docker_utils import \
-        DEFAULT_DOCKER_CONTAINER_NAME
+    from sky.backends import docker_utils
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
@@ -921,9 +920,14 @@ def write_cluster_config(
                 'public_key': public_key,
 
                 # Docker config
+                # docker_image: the image name used to pull the image, e.g.
+                #   ubuntu:latest.
+                # docker_container_name: the name of the container. Default to
+                #   `sky_container`.
                 'use_docker': docker_image is not None,
                 'docker_image': docker_image,
-                'docker_container_name': DEFAULT_DOCKER_CONTAINER_NAME,
+                'docker_container_name':
+                    docker_utils.DEFAULT_DOCKER_CONTAINER_NAME,
 
                 # Azure only:
                 'azure_subscription_id': azure_subscription_id,
@@ -1113,7 +1117,9 @@ def wait_until_ray_cluster_ready(
     is_local_cloud: bool = False,
     nodes_launching_progress_timeout: Optional[int] = None,
 ) -> Tuple[bool, Optional[str]]:
-    """Returns whether the entire ray cluster is ready, and docker username
+    """Wait until the ray cluster is set up on VMs or in containers.
+
+    Returns:  whether the entire ray cluster is ready, and docker username
     if launched with docker."""
     # Manually fetching head ip instead of using `ray exec` to avoid the bug
     # that `ray exec` fails to connect to the head node after some workers
@@ -1131,8 +1137,9 @@ def wait_until_ray_cluster_ready(
     docker_user = None
     if use_docker:
         # pylint: disable=import-outside-toplevel
-        from sky.backends.docker_utils import docker_host_setup
-        docker_user = docker_host_setup(head_ip, cluster_config_file)
+        from sky.backends import docker_utils
+        docker_user = docker_utils.docker_host_setup(head_ip,
+                                                     cluster_config_file)
 
     if num_nodes <= 1:
         return True, docker_user

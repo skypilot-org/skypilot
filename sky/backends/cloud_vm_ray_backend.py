@@ -2170,17 +2170,19 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         ip_list = self.external_ips()
         assert ip_list is not None
         # pylint: disable=import-outside-toplevel
-        from sky.backends.docker_utils import docker_host_setup
+        from sky.backends import docker_utils
         if len(ip_list) == 1:
             # Setup head node.
-            docker_user = docker_host_setup(ip_list[0], cluster_config_file)
+            docker_user = docker_utils.docker_host_setup(
+                ip_list[0], cluster_config_file)
             self.docker_user = docker_user
         else:
             # Setup docker for all worker nodes. Head node setup is done
             # in `backend_utils.wait_until_ray_cluster_ready`.
             # Skip head ip here.
             for worker_ip in ip_list[1:]:
-                docker_user = docker_host_setup(worker_ip, cluster_config_file)
+                docker_user = docker_utils.docker_host_setup(
+                    worker_ip, cluster_config_file)
                 if self.docker_user is not None:
                     assert docker_user == self.docker_user
                 else:
