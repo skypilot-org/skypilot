@@ -526,8 +526,7 @@ def format_job_table(tasks: List[Dict[str, Any]],
                                                               absolute=True)
 
             status_str = spot_status.colored_str()
-            if (spot_status < spot_state.SpotStatus.RUNNING and
-                    current_task_id > 0):
+            if not spot_status.is_terminal():
                 status_str += f' (task: {current_task_id})'
 
             job_values = [
