@@ -471,7 +471,8 @@ def launch(
         sky_logging.print(
             f'Image {image_id!r} created successfully. Overriding task '
             f'image_id.')
-        task_resources = task_resources.copy(image_id=image_id)
+        task_resources = task_resources.copy(image_id=image_id,
+                                             _is_image_managed=True)
         task.set_resources(task_resources)
         task.best_resources = None
         logger.debug(f'Overridden task resources: {task.resources}')

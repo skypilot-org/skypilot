@@ -4,7 +4,7 @@ import psutil
 import random
 import subprocess
 import time
-from typing import Any, Callable, List, Optional, Union
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import colorama
 
@@ -122,23 +122,35 @@ def kill_children_processes(first_pid_to_kill: Optional[int] = None,
             pass
 
 
-def run_and_retry_for_disconnection(cmd: str,
-                                    error_msg: str,
-                                    max_retry: int = 3):
+def run_and_retry(
+        cmd: str,
+        max_retry: int = 3,
+        retry_returncode: Optional[List[int]] = None,
+        retry_stderr: Optional[List[str]] = None) -> Tuple[int, str, str]:
     retry_cnt = 0
     while True:
         returncode, stdout, stderr = log_lib.run_with_log(cmd,
                                                           '/dev/null',
                                                           require_outputs=True,
                                                           shell=True)
-        if retry_cnt < max_retry and returncode == 255:
-            retry_cnt += 1
-            time.sleep(random.uniform(0, 1) * 2)
-            continue
+        if retry_cnt < max_retry:
+            if (retry_returncode is not None and
+                    returncode in retry_returncode):
+                retry_cnt += 1
+                time.sleep(random.uniform(0, 1) * 2)
+                continue
+
+            if retry_stderr is None:
+                break
+
+            need_retry = False
+            for retry_err in retry_stderr:
+                if retry_err in stderr:
+                    retry_cnt += 1
+                    time.sleep(random.uniform(0, 1) * 2)
+                    need_retry = True
+                    break
+            if need_retry:
+                continue
         break
-    handle_returncode(returncode,
-                      cmd,
-                      error_msg=error_msg,
-                      stderr=stderr,
-                      stream_logs=True)
-    return stdout.strip()
+    return returncode, stdout, stderr

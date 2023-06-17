@@ -3,7 +3,6 @@ import enum
 import functools
 import json
 import os
-import random
 import re
 import subprocess
 import time
@@ -16,7 +15,6 @@ from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import aws
 from sky.clouds import service_catalog
-from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import subprocess_utils
@@ -708,25 +706,13 @@ class AWS(clouds.Cloud):
                               for key, value in tag_filters.items())
         query_cmd = (f'aws ec2 describe-instances --filters {filter_str} '
                      f'--region {region} --query {query} --output json')
-        retry_cnt = 0
-        while retry_cnt < 3:
-            returncode, stdout, stderr = log_lib.run_with_log(
-                query_cmd, '/dev/null', require_outputs=True, shell=True)
-            logger.debug(f'{query_cmd} returned {returncode}.\n'
-                         '**** STDOUT ****\n'
-                         f'{stdout}\n'
-                         '**** STDERR ****\n'
-                         f'{stderr}')
-
-            if (returncode != 0 and
-                    'Unable to locate credentials. You can configure credentials by '
-                    'running "aws configure"'
-                    in stdout + stderr) or returncode == 255:
-                retry_cnt += 1
-                time.sleep(random.uniform(0, 1) * 2)
-                continue
-            else:
-                break
+        returncode, stdout, stderr = subprocess_utils.run_and_retry(
+            query_cmd,
+            retry_returncode=[255],
+            retry_stderr=[
+                'Unable to locate credentials. You can configure credentials by '
+                'running "aws configure"'
+            ])
         return returncode, stdout, stderr
 
     @classmethod
@@ -791,11 +777,18 @@ class AWS(clouds.Cloud):
         create_image_cmd = (
             f'aws ec2 create-image --region {region} --instance-id {instance_id} '
             f'--name {image_name} --output text')
-        image_id = subprocess_utils.run_and_retry_for_disconnection(
+        returncode, image_id, stderr = subprocess_utils.run_and_retry(
+            create_image_cmd,
+            retry_returncode=[255],
+        )
+        image_id = image_id.strip()
+        subprocess_utils.handle_returncode(
+            returncode,
             create_image_cmd,
             error_msg=
             f'Failed to create image from the source instance {instance_id}.',
-        )
+            stderr=stderr,
+            stream_logs=True)
 
         log_utils.force_update_rich_status(
             f'Waiting for the source image {name!r} from {region} to be available on AWS.'
@@ -804,11 +797,17 @@ class AWS(clouds.Cloud):
         wait_image_cmd = (
             f'aws ec2 wait image-available --region {region} --image-ids {image_id}'
         )
-        subprocess_utils.run_and_retry_for_disconnection(
+        returncode, stdout, stderr = subprocess_utils.run_and_retry(
+            wait_image_cmd,
+            retry_returncode=[255],
+        )
+        subprocess_utils.handle_returncode(
+            returncode,
             wait_image_cmd,
             error_msg=
             f'The source image {image_id!r} creation fails to complete.',
-        )
+            stderr=stderr,
+            stream_logs=True)
         sky_logging.print(
             f'The source image {image_id!r} is created successfully.')
         return image_id
@@ -820,29 +819,43 @@ class AWS(clouds.Cloud):
         del source_zone, target_zone  # unused
         if source_region == target_region:
             return image_id
-        image_name = f'skypilot-cloned-from-{source_region}-{int(time.time())}'
+        image_name = f'skypilot-cloned-from-{source_region}-{image_id}'
         copy_image_cmd = (f'aws ec2 copy-image --name {image_name} '
                           f'--source-image-id {image_id} '
                           f'--source-region {source_region} '
                           f'--region {target_region} --output text')
-        target_image_id = subprocess_utils.run_and_retry_for_disconnection(
+        returncode, target_image_id, stderr = subprocess_utils.run_and_retry(
+            copy_image_cmd,
+            retry_returncode=[255],
+        )
+        target_image_id = target_image_id.strip()
+        subprocess_utils.handle_returncode(
+            returncode,
             copy_image_cmd,
             error_msg=
-            f'Failed to copy image {image_id!r} from {source_region} to {target_region}.'
-        )
+            f'Failed to copy image {image_id!r} from {source_region} to {target_region}.',
+            stderr=stderr,
+            stream_logs=True)
 
         log_utils.force_update_rich_status(
             f'Waiting for the target image {target_image_id!r} on {target_region} to be '
             'available on AWS.')
         wait_image_cmd = (
-            f'aws ec2 wait image-available --region {target_region} --image-ids {target_image_id}'
+            f'aws ec2 wait image-available --region {target_region} '
+            f'--image-ids {target_image_id}'
         )
-        subprocess_utils.run_and_retry_for_disconnection(
+        subprocess_utils.run_and_retry(
+            wait_image_cmd,
+            max_retry=5,
+            retry_returncode=[255],
+        )
+        subprocess_utils.handle_returncode(
+            returncode,
             wait_image_cmd,
             error_msg=
             f'The target image {target_image_id!r} creation fails to complete.',
-            max_retry=5,
-        )
+            stderr=stderr,
+            stream_logs=True)
 
         sky_logging.print(
             f'The target image {target_image_id!r} is created successfully.')
@@ -856,6 +869,13 @@ class AWS(clouds.Cloud):
         assert region is not None, (image_id, region)
         delete_image_cmd = (f'aws ec2 deregister-image --region {region} '
                             f'--image-id {image_id}')
-        subprocess_utils.run_and_retry_for_disconnection(
+        returncode, _, stderr = subprocess_utils.run_and_retry(
             delete_image_cmd,
-            error_msg=f'Failed to delete image {image_id!r} from {region}.')
+            retry_returncode=[255],
+        )
+        subprocess_utils.handle_returncode(
+            returncode,
+            delete_image_cmd,
+            error_msg=f'Failed to delete image {image_id!r} on {region}.',
+            stderr=stderr,
+            stream_logs=True)

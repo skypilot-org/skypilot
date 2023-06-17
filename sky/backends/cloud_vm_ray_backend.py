@@ -3547,6 +3547,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             cluster_name=handle.cluster_name,
                             stdout=tpu_stdout,
                             stderr=tpu_stderr))
+        if handle.launched_resources.is_image_managed:
+            logger.debug(f'Deleting image {handle.launched_resources.image_id}')
+            cluster_resources = handle.launched_resources
+            cluster_cloud = cluster_resources.cloud
+            image_dict = cluster_resources.image_id
+            assert cluster_cloud is not None, cluster_resources
+            assert image_dict is not None and len(image_dict) == 1
+            image_id = list(image_dict.values())[0]
+            try:
+                cluster_cloud.delete_image(image_id,
+                                           handle.launched_resources.region)
+            except exceptions.CommandError as e:
+                logger.debug(
+                    f'Failed to delete image {image_id}: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.

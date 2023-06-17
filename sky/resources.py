@@ -47,7 +47,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 9
+    _VERSION = 10
 
     def __init__(
         self,
@@ -64,6 +64,8 @@ class Resources:
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
+        # Internal use only.
+        _is_image_managed: Optional[bool] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
@@ -100,6 +102,7 @@ class Resources:
                 self._image_id = {
                     k.strip(): v.strip() for k, v in image_id.items()
                 }
+        self._is_image_managed = _is_image_managed
 
         self._disk_tier = disk_tier
 
@@ -284,6 +287,10 @@ class Resources:
     @property
     def disk_tier(self) -> str:
         return self._disk_tier
+
+    @property
+    def is_image_managed(self) -> Optional[str]:
+        return self._is_image_managed
 
     def _set_cpus(
         self,
@@ -867,6 +874,8 @@ class Resources:
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
+            _is_image_managed=override.pop('_is_image_managed',
+                                           self._is_image_managed),
         )
         assert len(override) == 0
         return resources
@@ -919,6 +928,9 @@ class Resources:
             resources_fields['image_id'] = config.pop('image_id')
         if config.get('disk_tier') is not None:
             resources_fields['disk_tier'] = config.pop('disk_tier')
+        if config.get('_is_image_managed') is not None:
+            resources_fields['_is_image_managed'] = config.pop(
+                '_is_image_managed')
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -946,6 +958,8 @@ class Resources:
         add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
         add_if_not_none('disk_tier', self.disk_tier)
+        if self._is_image_managed is not None:
+            config['_is_image_managed'] = self._is_image_managed
         return config
 
     def __setstate__(self, state):
@@ -1007,5 +1021,8 @@ class Resources:
 
         if version < 9:
             self._disk_tier = None
+
+        if version < 10:
+            self._is_image_managed = None
 
         self.__dict__.update(state)
