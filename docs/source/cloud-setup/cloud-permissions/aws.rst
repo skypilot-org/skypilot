@@ -103,8 +103,22 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
         ]
     }
 
-4. Click **Next: Tags** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
-5. Go back to the previous window and click on the refresh button, and you can now search for the policy you just created.
+4. [Optional] To allow ``--clone-disk-from`` to work, you need to add the following permissions to the policy above as well.
+
+.. code-block:: json
+
+           {
+                "Effect": "Allow",
+                "Action": [
+                    "ec2:CreateImage",
+                    "ec2:CopyImage",
+                    "ec2:DeregisterImage"
+                ],
+                "Resource": "*"
+            }
+
+5. Click **Next: Tags** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
+6. Go back to the previous window and click on the refresh button, and you can now search for the policy you just created.
 
 .. image:: ../../images/screenshots/aws/aws-add-policy.png
     :width: 80%
@@ -118,7 +132,7 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
     :align: center
     :alt: AWS Add S3 Policy
 
-7. Click on **Next** and follow the instructions to create the user.
+8. Click on **Next** and follow the instructions to create the user.
 
 With the steps above you are almost ready to have the users in your organization to use SkyPilot with the minimal permissions.
 
