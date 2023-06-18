@@ -241,6 +241,7 @@ If you would like to grant fine-grained minimal permissions to your users, you c
     compute.instances.list
     compute.instances.setLabels
     compute.instances.setServiceAccount
+    compute.instances.stop
     compute.networks.get
     compute.networks.list
     compute.networks.getEffectiveFirewalls
