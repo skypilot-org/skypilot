@@ -2403,15 +2403,17 @@ class IBMCosStore(AbstractStore):
             Rclone.RcloneClouds.IBM,
             self.region,  # type: ignore
         )
-        # 'configure_rclone_profile' cmd stores bucket profile
-        # in rclone config file at the cluster's nodes.
         # pylint: disable=line-too-long
+        # creates a fusermount soft link on older (<22) Ubuntu systems for rclone's mount utility.
+        create_fuser3_soft_link = '[ ! -f /bin/fusermount3 ] && sudo ln -s /bin/fusermount /bin/fusermount3 || true'
+        # stores bucket profile in rclone config file at the cluster's nodes.
         configure_rclone_profile = (
-            f' mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> {Rclone.RCLONE_CONFIG_PATH}'
+            f'{create_fuser3_soft_link}; mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> {Rclone.RCLONE_CONFIG_PATH}'
         )
-        install_cmd = 'rclone version >/dev/null 2>&1 || curl https://rclone.org/install.sh | sudo bash'
+        # install rclone if not installed.
+        install_cmd = 'rclone version >/dev/null 2>&1 || (curl https://rclone.org/install.sh | sudo bash)'
         # --daemon will keep the mounting process running in the background.
-        mount_cmd = f'{install_cmd} && {configure_rclone_profile} && rclone mount {self.bucket_rclone_profile}:{self.bucket.name} {mount_path} --daemon'
+        mount_cmd = f'{configure_rclone_profile} && rclone mount {self.bucket_rclone_profile}:{self.bucket.name} {mount_path} --daemon'
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -2432,8 +2434,8 @@ class IBMCosStore(AbstractStore):
                 CreateBucketConfiguration={
                     'LocationConstraint': f'{region}-smart'
                 })
-            logger.info(f'{colorama.Fore.GREEN}Bucket: "{bucket_name}" '
-                        f'was created in {region}. {colorama.Style.RESET_ALL}')
+            logger.info(f'Created IBM COS bucket {bucket_name} in {region} '
+                        f'with storage class smart tier')
             self.bucket = self.s3_resource.Bucket(bucket_name)
 
         except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr]  # pylint: disable=line-too-long
