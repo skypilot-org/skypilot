@@ -118,7 +118,8 @@ class SpotController:
                                    start_time=time.time())
             spot_state.set_succeeded(self._job_id,
                                      task_id,
-                                     end_time=time.time())
+                                     end_time=time.time(),
+                                     callback_func=self.event_callback_func)
             return True
         usage_lib.messages.usage.update_task_id(task_id)
         task_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
@@ -173,7 +174,8 @@ class SpotController:
                 # The job is done.
                 spot_state.set_succeeded(self._job_id,
                                          task_id,
-                                         end_time=end_time)
+                                         end_time=end_time,
+                                         callback_func=self.event_callback_func)
                 logger.info(
                     f'Spot job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the spot cluster {cluster_name}.')
@@ -243,7 +245,8 @@ class SpotController:
                                           task_id,
                                           failure_type=spot_status_to_set,
                                           failure_reason=failure_reason,
-                                          end_time=end_time)
+                                          end_time=end_time,
+                                          callback_func=self.event_callback_func)
                     return False
                 # Although the cluster is healthy, we fail to access the
                 # job status. Try to recover the job (will not restart the
@@ -271,6 +274,23 @@ class SpotController:
                                      task_id,
                                      recovered_time=recovered_time)
 
+    def event_callback_func(self, task_id: int, state: str, comment: str=''):
+
+        event_callback_str = self._dag.tasks[task_id].event_callback
+        if event_callback_str is None:
+            return
+        if event_callback_str.find("controller_log:") == 0:
+            print_str = event_callback_str[len("controller_log:"):].strip()
+            if '$JOB_ID' in print_str:
+                print_str = print_str.replace('$JOB_ID', str(self._job_id))
+            if '$TASK_ID' in print_str:
+                print_str = print_str.replace('$TASK_ID', str(task_id))
+            if '$JOB_STATUS' in print_str:
+                print_str = print_str.replace('$JOB_STATUS', state)
+            if '$COMMENT' in print_str:
+                print_str = print_str.replace('$COMMENT', comment)
+            logger.info(print_str)
+
     def run(self):
         """Run controller logic and handle exceptions."""
         task_id = 0
@@ -292,7 +312,8 @@ class SpotController:
                 self._job_id,
                 task_id=task_id,
                 failure_type=spot_state.SpotStatus.FAILED_PRECHECKS,
-                failure_reason=failure_reason)
+                failure_reason=failure_reason,
+                callback_func=self.event_callback_func)
         except exceptions.SpotJobReachedMaxRetriesError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
@@ -303,7 +324,8 @@ class SpotController:
                 self._job_id,
                 task_id=task_id,
                 failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE,
-                failure_reason=common_utils.format_exception(e))
+                failure_reason=common_utils.format_exception(e),
+                callback_func=self.event_callback_func)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.error(traceback.format_exc())
             msg = ('Unexpected error occurred: '
@@ -313,7 +335,8 @@ class SpotController:
                 self._job_id,
                 task_id=task_id,
                 failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
-                failure_reason=msg)
+                failure_reason=msg,
+                callback_func=self.event_callback_func)
         finally:
             # This will set all unfinished tasks to CANCELLING, and will not
             # affect the jobs in terminal states.

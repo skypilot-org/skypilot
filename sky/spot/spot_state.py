@@ -5,7 +5,7 @@ import enum
 import pathlib
 import sqlite3
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 
 import colorama
 
@@ -341,7 +341,7 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float):
     logger.info('==== Recovered. ====')
 
 
-def set_succeeded(job_id: int, task_id: int, end_time: float):
+def set_succeeded(job_id: int, task_id: int, end_time: float, callback_func: Callable = None):
     """Set the task to succeeded, if it is in a non-terminal state."""
     _CURSOR.execute(
         """\
@@ -351,6 +351,8 @@ def set_succeeded(job_id: int, task_id: int, end_time: float):
         AND end_at IS null""",
         (SpotStatus.SUCCEEDED.value, end_time, job_id, task_id))
     _CONN.commit()
+    if callback_func is not None:
+        callback_func(task_id=task_id, state="SUCCEEDED")
     logger.info('Job succeeded.')
 
 
@@ -358,7 +360,8 @@ def set_failed(job_id: int,
                task_id: Optional[int],
                failure_type: SpotStatus,
                failure_reason: str,
-               end_time: Optional[float] = None):
+               end_time: Optional[float] = None,
+               callback_func: Callable = None):
     """Set an entire job or task to failed, if they are in non-terminal states.
 
     Args:
@@ -396,6 +399,8 @@ def set_failed(job_id: int,
         WHERE spot_job_id=(?){task_str} AND end_at IS null""",
         (*list(fields_to_set.values()), job_id))
     _CONN.commit()
+    if callback_func is not None:
+        callback_func(task_id=task_id, state="FAILED", comment=failure_reason)
     logger.info(failure_reason)
 
 
