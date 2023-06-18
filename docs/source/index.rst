@@ -96,6 +96,7 @@ Documentation
    :maxdepth: 1
    :caption: User Guides
 
+   examples/docker-containers
    examples/iterative-dev-project
    reference/interactive-nodes
    reference/faq
