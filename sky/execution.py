@@ -452,6 +452,7 @@ def launch(
                 clone_disk_from,
                 backend_utils.tag_filter_for_cluster(clone_disk_from),
                 region=handle.launched_resources.region,
+                zone=handle.launched_resources.zone,
             )
             log_utils.force_update_rich_status(
                 f'Migrating image {image_id} to target region '

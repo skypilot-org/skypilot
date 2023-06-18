@@ -752,8 +752,9 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def create_image_from_cluster(cls, name: str, tag_filters: Dict[str, str],
-                                  region: Optional[str], **kwargs) -> str:
-        del kwargs  # unused
+                                  region: Optional[str],
+                                  zone: Optional[str]) -> str:
+        del zone  # unused
         assert region is not None, (tag_filters, region)
         image_name = f'skypilot-{name}-{int(time.time())}'
         returncode, stdout, stderr = cls._query_instance_property_and_retry(
@@ -769,8 +770,8 @@ class AWS(clouds.Cloud):
         instance_ids = json.loads(stdout.strip())
         if len(instance_ids) != 1:
             with ux_utils.print_exception_no_traceback():
-                raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query AWS cluster {name!r}: '
+                raise exceptions.NotSupportedError(
+                    f'More than one instance found: '
                     f'{stdout + stderr}')
 
         instance_id = instance_ids[0]
@@ -842,8 +843,7 @@ class AWS(clouds.Cloud):
             'available on AWS.')
         wait_image_cmd = (
             f'aws ec2 wait image-available --region {target_region} '
-            f'--image-ids {target_image_id}'
-        )
+            f'--image-ids {target_image_id}')
         subprocess_utils.run_and_retry(
             wait_image_cmd,
             max_retry=5,

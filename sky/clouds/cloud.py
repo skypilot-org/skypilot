@@ -488,7 +488,8 @@ class Cloud:
 
     @classmethod
     def create_image_from_cluster(cls, name: str, tag_filters: Dict[str, str],
-                                  region: Optional[str], **kwargs) -> str:
+                                  region: Optional[str],
+                                  zone: Optional[str]) -> str:
         raise NotImplementedError
 
     @classmethod
