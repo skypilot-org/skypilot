@@ -264,10 +264,12 @@ If you would like to grant fine-grained minimal permissions to your users, you c
 
 .. code-block:: text
 
+    storage.buckets.create
+    storage.buckets.get
     storage.objects.create
     storage.objects.delete
     storage.objects.get
-    Storage.objects.list
+    storage.objects.list
 
 
 5. Click **Create** to create the role.
