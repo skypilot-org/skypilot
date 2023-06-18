@@ -798,7 +798,6 @@ def write_cluster_config(
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
-    docker_image = to_provision.extract_docker_image(remove=True)
     # This can raise a ResourcesUnavailableError, when the region/zones
     # requested does not appear in the catalog. It can be triggered when the
     # user changed the catalog file, while there is a cluster in the removed
@@ -880,6 +879,7 @@ def write_cluster_config(
 
     # pylint: disable=import-outside-toplevel
     from sky.backends import docker_utils
+    docker_image = to_provision.extract_docker_image()
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.

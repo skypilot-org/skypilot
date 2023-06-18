@@ -342,7 +342,8 @@ class GCP(clouds.Cloud):
                     # Does not support torch==1.13.0 with cu117
                     image_id = 'skypilot:gpu-debian-10'
 
-        if resources.image_id is not None:
+        if resources.image_id is not None and resources.extract_docker_image(
+        ) is None:
             if None in resources.image_id:
                 image_id = resources.image_id[None]
             else:

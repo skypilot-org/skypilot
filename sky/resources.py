@@ -638,14 +638,11 @@ class Resources:
                         'Local/On-prem mode does not support custom '
                         'images.')
 
-    def extract_docker_image(self, remove=False) -> Optional[str]:
+    def extract_docker_image(self) -> Optional[str]:
         if len(self.image_id) == 1 and self.region in self.image_id:
             image_id = self.image_id[self.region]
             if image_id.startswith('docker:'):
-                docker_image = image_id[len('docker:'):]
-                if remove:
-                    self._image_id = None
-                return docker_image
+                return image_id[len('docker:'):]
         return None
 
     def _try_validate_image_id(self) -> None:
