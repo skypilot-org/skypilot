@@ -1684,6 +1684,9 @@ def _query_cluster_status_via_cloud_api(
         **kwargs)
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
     # TODO(wei-lin): handle multi-node cases.
+    # TODO(zhwu): this should be moved into the GCP class, after we refactor
+    # the cluster termination, as the preempted TPU VM should always be
+    # removed.
     if kwargs.get('use_tpu_vm', False) and len(node_statuses) == 0:
         logger.debug(f'Terminating preempted TPU VM cluster {cluster_name}')
         backend = backends.CloudVmRayBackend()
