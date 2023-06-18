@@ -4,8 +4,6 @@ This module includes the set of functions
 to access the SCP catalog and check credentials for the SCP access.
 """
 
-import os
-import yaml
 import json
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -284,32 +282,20 @@ class SCP(clouds.Cloud):
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has access credentials to this cloud."""
-        #SCP-TODO - create a configuration script for this cloud.
-        required_fields = ['access_key', 'secret_key', 'project_id']
-        credential_file = os.path.expanduser('~/.scp/scp_credential')
-        help_str = (
-            '    Store your access key, secret key and project id '
-            f'in {credential_file} in the following format:\n'
-            '      access_key: [YOUR API ACCESS KEY]\n'
-            '      secret_key: [YOUR API SECRET KEY]\n'
-            '      project_id: [YOUR PROJECT ID]\n'
-            'For more info see: https://cloud.samsungsds.com/openapiguide')
-        base_config = _read_credential_file()
-        if not base_config:
-            return (False, 'Missing credential file at '
-                    f'{credential_file}.\n' + help_str)
-        for field in required_fields:
-            if field not in base_config:
-                return (False, f'Missing field "{field}" in '
-                        f'{credential_file}.\n' + help_str)
-        # verifies ability of user to list instances,
-        # e.g. bad API KEY.
         try:
             scp_utils.SCPClient().list_instances()
-            return True, None
-        except (AssertionError, KeyError, scp_utils.SCPClientError) as e:
-            return (False, f'{str(e)} not configured' + help_str)
+        except (AssertionError, KeyError, scp_utils.SCPClientError):
+            return False, (
+                'Failed to access SCP with credentials. '
+                'To configure credentials, see: '
+                'https://cloud.samsungsds.com/openapiguide\n'
+                f'{cls._INDENT_PREFIX}Generate API key and add the '
+                'following line to ~/.scp/scp_credential:\n'
+                f'{cls._INDENT_PREFIX}  access_key = [YOUR API ACCESS KEY]\n'
+                f'{cls._INDENT_PREFIX}  secret_key = [YOUR API SECRET KEY]\n'
+                f'{cls._INDENT_PREFIX}  project_id = [YOUR PROJECT ID]')
+
+        return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {
@@ -347,13 +333,3 @@ class SCP(clouds.Cloud):
                         f'Input: {resources.disk_size}')
             return False, []
         return True, [resources]
-
-
-def _read_credential_file():
-    try:
-        with open(os.path.expanduser('~/.scp/scp_credential'),
-                  'r',
-                  encoding='utf-8') as f:
-            return yaml.safe_load(f)
-    except FileNotFoundError:
-        return False
