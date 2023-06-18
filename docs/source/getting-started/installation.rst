@@ -70,6 +70,8 @@ To use AWS IAM Identity Center (AWS SSO), see :ref:`here<aws-sso>` for instructi
 
 **Optional**: To create a new AWS user with minimal permissions for SkyPilot, see :ref:`AWS User Creation <cloud-permissions-aws>`.
 
+.. _installation-gcp:
+
 Google Cloud Platform (GCP)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
