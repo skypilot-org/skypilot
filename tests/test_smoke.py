@@ -556,6 +556,7 @@ def test_image_no_conda():
 
 # ------------ Test stale job ------------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
+@pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 def test_stale_job(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
