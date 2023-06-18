@@ -1,6 +1,6 @@
 .. _cloud-permissions:
 
-Minimal Cloud Permissions
+Cloud Account Permissions
 =================================
 
 .. note::
@@ -212,3 +212,70 @@ Optionally, to use TPUs, add the following role:
   roles/tpu.admin
 
 You can grant those accesses via the `GCP IAM console <https://console.cloud.google.com/iam-admin/iam>`_.
+
+
+Minimal Permissions
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you would like to grant fine-grained minimal permissions to your users, you can create a custom role with the permissions required by following the steps below:
+
+1. Go to the `GCP IAM console <https://console.cloud.google.com/iam-admin/roles>`_ and click on **Create Role**.
+
+.. image:: ../images/screenshots/gcp/create-role.png
+    :width: 80%
+    :align: center
+    :alt: GCP Create Role
+
+2. Give the role a descriptive name, such as ``minimal-skypilot-role``.
+3. Click **Add Permissions** and search for the following permissions and add them to the role:
+
+.. code-block:: text
+
+    compute.disks.create
+    compute.firewalls.create
+    compute.firewalls.delete
+    compute.firewalls.get
+    compute.instances.create 
+    compute.instances.delete
+    compute.instances.get
+    compute.instances.list
+    compute.instances.setLabels
+    compute.instances.setServiceAccount
+    compute.networks.get
+    compute.networks.list
+    compute.networks.getEffectiveFirewalls
+    compute.subnetworks.use
+    compute.subnetworks.list
+    compute.subnetworks.useExternalIp
+    compute.projects.get
+    compute.projects.setCommonInstanceMetadata
+    compute.zoneOperations.get
+    iam.serviceAccounts.actAs
+    iam.serviceAccounts.get
+    serviceusage.services.enable
+    serviceusage.services.list
+    serviceusage.services.use
+    resourcemanager.projects.get
+    resourcemanager.projects.getIamPolicy
+
+4. [Optional] If the user need to access GCS buckets, you can additionally add the following permissions:
+
+.. code-block:: text
+
+    storage.objects.create
+    storage.objects.delete
+    storage.objects.get
+    Storage.objects.list
+
+
+5. Click **Create** to create the role.
+6. Go back to the "IAM" tab and click on **GRANT ACCESS**.
+7. Fill in the email address of the user in the “Add principles”, and select the ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
+
+
+.. image:: ../images/screenshots/gcp/create-iam.png
+    :width: 80%
+    :align: center
+    :alt: GCP Grant Access
+
+8. The user should receive an invitation to the project and should be able to setup SkyPilot by following the instructions in :ref:`Installation <installation-gcp>`.
