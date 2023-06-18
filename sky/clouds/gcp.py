@@ -860,10 +860,9 @@ class GCP(clouds.Cloud):
             error_msg=f'Failed to create image for {name!r}',
             stderr=stderr,
             stream_logs=True)
-        sky_logging.print(f'Image {image_name!r} created for {name!r}')
 
         image_uri_cmd = (f'gcloud compute images describe {image_name} '
-        '--format="get(selfLink)"')
+                         '--format="get(selfLink)"')
         returncode, stdout, stderr = subprocess_utils.run_and_retry(
             image_uri_cmd,
             retry_returncode=[255],
@@ -893,7 +892,7 @@ class GCP(clouds.Cloud):
     def delete_image(cls, image_id: str, region: Optional[str]) -> None:
         del region  # Unused.
         image_name = image_id.rpartition('/')[2]
-        delete_image_cmd = f'gcloud compute images delete {image_name}'
+        delete_image_cmd = f'gcloud compute images delete {image_name} --quiet'
         returncode, _, stderr = subprocess_utils.run_and_retry(
             delete_image_cmd,
             retry_returncode=[255],

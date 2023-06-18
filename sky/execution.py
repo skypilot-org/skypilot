@@ -470,8 +470,8 @@ def launch(
                 target_zone=task_resources.zone,
             )
         sky_logging.print(
-            f'Image {image_id!r} created successfully. Overriding task '
-            f'image_id.')
+            f'Image {image_id!r} for {clone_disk_from!r} created '
+            f'successfully on {original_cloud}. Overriding task\'s image_id.')
         task_resources = task_resources.copy(image_id=image_id,
                                              _is_image_managed=True)
         task.set_resources(task_resources)
