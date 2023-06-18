@@ -1,4 +1,6 @@
 """Lambda Cloud."""
+import os
+import yaml
 import json
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -216,16 +218,31 @@ class Lambda(clouds.Cloud):
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud."""
+        #Lambda-TODO - create a configuration script for this cloud.
+        required_fields = ['api_key']
+        credential_file = os.path.expanduser('~/.lambda_cloud/lambda_keys')
+        help_str = (' Store your api key '
+                    f'in {credential_file} in the following format:\n'
+                    '      api_key = [YOUR API KEY]\n'
+                    'To configure credentials, go to:\n    '
+                    '  https://cloud.lambdalabs.com/api-keys\n    '
+                    'and generate API key ')
+        base_config = _read_credential_file()
+        if not base_config:
+            return (False, 'Missing credential file at '
+                    f'{credential_file}.\n' + help_str)
+        for field in required_fields:
+            if field not in base_config:
+                return (False, f'Missing field "{field}" in '
+                        f'{credential_file}.\n' + help_str)
+        # verifies ability of user to list instances,
+        # e.g. bad API KEY.
         try:
             lambda_utils.LambdaCloudClient().list_instances()
-        except (AssertionError, KeyError, lambda_utils.LambdaCloudError):
-            return False, ('Failed to access Lambda Cloud with credentials. '
-                           'To configure credentials, go to:\n    '
-                           '  https://cloud.lambdalabs.com/api-keys\n    '
-                           'to generate API key and add the line\n    '
-                           '  api_key = [YOUR API KEY]\n    '
-                           'to ~/.lambda_cloud/lambda_keys')
-        return True, None
+            return True, None
+        except (AssertionError, KeyError, lambda_utils.LambdaCloudError) as e:
+            return (False, f'{str(e)}' + help_str)
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {
@@ -263,3 +280,13 @@ class Lambda(clouds.Cloud):
                                 disk_tier: str) -> None:
         raise exceptions.NotSupportedError(
             'Lambda does not support disk tiers.')
+
+
+def _read_credential_file():
+    try:
+        with open(os.path.expanduser('~/.lambda_cloud/lambda_keys'),
+                  'r',
+                  encoding='utf-8') as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        return False
