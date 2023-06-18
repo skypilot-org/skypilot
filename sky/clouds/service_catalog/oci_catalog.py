@@ -35,6 +35,13 @@ def _get_df() -> 'pd.DataFrame':
         if _df is not None:
             return _df
 
+        df = common.read_catalog('oci/vms.csv')
+        try:
+            oci_adaptor.get_oci()
+        except ImportError:
+            _df = df
+            return _df
+
         try:
             config_profile = oci_conf.get_profile()
             client = oci_adaptor.get_identity_client(profile=config_profile)
@@ -60,8 +67,6 @@ def _get_df() -> 'pd.DataFrame':
             logger.warning(
                 f'Unexpected exception when handle catalog: {str(e)}')
             subscribed_regions = []
-
-        df = common.read_catalog('oci/vms.csv')
 
         if subscribed_regions:
             _df = df[df['Region'].isin(subscribed_regions)]
