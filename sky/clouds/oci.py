@@ -13,9 +13,11 @@ import logging
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky.clouds import service_catalog
 from sky import exceptions
+from sky import status_lib
+from sky.clouds import service_catalog
 from sky.utils import common_utils
+from sky.utils import ux_utils
 from sky.adaptors import oci as oci_adaptor
 from sky.skylet.providers.oci.config import oci_conf
 
@@ -250,14 +252,19 @@ class OCI(clouds.Cloud):
                 logger.debug(f'It is OK goes here when testing: {str(e)}')
                 pass
 
+        # Disk performane: Volume Performance Units.
+        vpu = self.get_vpu_from_disktier(
+            cpus=None if cpus is None else float(cpus),
+            disk_tier=resources.disk_tier)
+
         return {
             'instance_type': instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
-            'cpus': cpus,
+            'cpus': str(cpus),
             'memory': resources.memory,
             'disk_size': resources.disk_size,
-            'vpu': f'{oci_conf.BOOT_VOLUME_VPU[resources.disk_tier]}',
+            'vpu': str(vpu),
             'zone': f'{_tenancy_prefix}:{zone}',
             'image': image_id,
             'app_catalog_listing_id': listing_id,
@@ -498,3 +505,72 @@ class OCI(clouds.Cloud):
                                 disk_tier: str) -> None:
         # All the disk_tier are supported for any instance_type
         del instance_type, disk_tier  # unused
+
+    def get_vpu_from_disktier(self, cpus: Optional[float],
+                              disk_tier: Optional[str]) -> int:
+        vpu = oci_conf.BOOT_VOLUME_VPU[disk_tier]
+        if cpus is None:
+            return vpu
+
+        if cpus <= 2:
+            vpu = oci_conf.DISK_TIER_LOW if disk_tier is None else vpu
+            if vpu > oci_conf.DISK_TIER_LOW:
+                # If only 1 OCPU is configured, best to use the OCI default
+                # VPU (10) for the boot volume. Even if the VPU is configured
+                # to higher value (no error to launch the instance), we cannot
+                # fully achieve its IOPS/throughput performance.
+                logger.warning(
+                    f'Automatically set the VPU to {oci_conf.DISK_TIER_LOW}'
+                    f' as only 2x vCPU is configured.')
+                vpu = oci_conf.DISK_TIER_LOW
+        elif cpus < 8:
+            # If less than 4 OCPU is configured, best not to set the disk_tier
+            # to 'high' (vpu=100). Even if the disk_tier is configured to high
+            # (no error to launch the instance), we cannot fully achieve its
+            # IOPS/throughput performance.
+            if vpu > oci_conf.DISK_TIER_MEDIUM:
+                logger.warning(
+                    f'Automatically set the VPU to {oci_conf.DISK_TIER_MEDIUM}'
+                    f' as less than 8x vCPU is configured.')
+                vpu = oci_conf.DISK_TIER_MEDIUM
+        return vpu
+
+    @classmethod
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List[status_lib.ClusterStatus]:
+        del zone, kwargs  # Unused.
+        # Check the lifecycleState definition from the page
+        # https://docs.oracle.com/en-us/iaas/api/#/en/iaas/latest/Instance/
+        status_map = {
+            'PROVISIONING': status_lib.ClusterStatus.INIT,
+            'STARTING': status_lib.ClusterStatus.INIT,
+            'RUNNING': status_lib.ClusterStatus.UP,
+            'STOPPING': status_lib.ClusterStatus.STOPPED,
+            'STOPPED': status_lib.ClusterStatus.STOPPED,
+            'TERMINATED': None,
+            'TERMINATING': None,
+        }
+
+        # pylint: disable=import-outside-toplevel
+        from sky.skylet.providers.oci.query_helper import oci_query_helper
+
+        status_list = []
+        try:
+            vms = oci_query_helper.query_instances_by_tags(
+                tag_filters=tag_filters, region=region)
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ClusterStatusFetchingError(
+                    f'Failed to query OCI cluster {name!r} status. '
+                    'Details: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
+
+        for node in vms:
+            vm_status = node.lifecycle_state
+            if vm_status in status_map:
+                sky_status = status_map[vm_status]
+                if sky_status is not None:
+                    status_list.append(sky_status)
+
+        return status_list

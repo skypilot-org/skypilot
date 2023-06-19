@@ -48,11 +48,12 @@ import sky
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
+from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
-from sky import core
+from sky import status_lib
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
 from sky.benchmark import benchmark_state
@@ -756,14 +757,14 @@ def _launch_with_confirm(
                 prompt = f'Initializing local cluster{cluster_str}. Proceed?'
             else:
                 prompt = f'Launching a new cluster{cluster_str}. Proceed?'
-        elif maybe_status == global_user_state.ClusterStatus.STOPPED:
+        elif maybe_status == status_lib.ClusterStatus.STOPPED:
             prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
         if prompt is not None:
             confirm_shown = True
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
     if node_type is not None:
-        if maybe_status != global_user_state.ClusterStatus.UP:
+        if maybe_status != status_lib.ClusterStatus.UP:
             click.secho(f'Setting up interactive node {cluster}...',
                         fg='yellow')
 
@@ -777,7 +778,7 @@ def _launch_with_confirm(
     elif not confirm_shown:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
 
-    if node_type is None or maybe_status != global_user_state.ClusterStatus.UP:
+    if node_type is None or maybe_status != status_lib.ClusterStatus.UP:
         # No need to sky.launch again when interactive node is already up.
         sky.launch(
             dag,
@@ -1527,13 +1528,11 @@ def _get_spot_jobs(
         num_in_progress_jobs = len(spot_jobs)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
-        if controller_status == global_user_state.ClusterStatus.INIT:
+        if controller_status == status_lib.ClusterStatus.INIT:
             msg = ('Controller\'s latest status is INIT; jobs '
                    'will not be shown until it becomes UP.')
         else:
-            assert controller_status in [
-                None, global_user_state.ClusterStatus.STOPPED
-            ]
+            assert controller_status in [None, status_lib.ClusterStatus.STOPPED]
             msg = 'No in progress jobs.'
             if controller_status is None:
                 msg += (f' (See: {colorama.Style.BRIGHT}sky spot -h'
@@ -2332,8 +2331,7 @@ def start(
             #      INIT state cluster due to head_ip not being cached).
             #
             #      This can be replicated by adding `exit 1` to Task.setup.
-            if (not force and
-                    cluster_status == global_user_state.ClusterStatus.UP):
+            if (not force and cluster_status == status_lib.ClusterStatus.UP):
                 # An UP cluster; skipping 'sky start' because:
                 #  1. For a really up cluster, this has no effects (ray up -y
                 #    --no-restart) anyway.
@@ -2348,8 +2346,8 @@ def start(
                 continue
 
             assert force or cluster_status in (
-                global_user_state.ClusterStatus.INIT,
-                global_user_state.ClusterStatus.STOPPED), cluster_status
+                status_lib.ClusterStatus.INIT,
+                status_lib.ClusterStatus.STOPPED), cluster_status
             to_start.append(name)
     if not to_start:
         return
@@ -2478,7 +2476,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
         click.echo('Managed spot controller has already been torn down.')
         return
 
-    if cluster_status == global_user_state.ClusterStatus.INIT:
+    if cluster_status == status_lib.ClusterStatus.INIT:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.RED}Tearing down the spot controller while '
@@ -2495,7 +2493,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
            '\n * All logs and status information of the spot '
            'jobs (output of `sky spot queue`) will be lost.')
     click.echo(msg)
-    if cluster_status == global_user_state.ClusterStatus.UP:
+    if cluster_status == status_lib.ClusterStatus.UP:
         with log_utils.safe_rich_status(
                 '[bold cyan]Checking for in-progress spot jobs[/]'):
             try:
@@ -2513,7 +2511,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
         non_terminal_jobs = [
             job for job in spot_jobs if not job['status'].is_terminal()
         ]
-        if (cluster_status == global_user_state.ClusterStatus.UP and
+        if (cluster_status == status_lib.ClusterStatus.UP and
                 non_terminal_jobs):
             job_table = spot_lib.format_job_table(non_terminal_jobs,
                                                   show_all=False)
