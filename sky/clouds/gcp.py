@@ -43,8 +43,34 @@ GCP_CONFIG_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
 # This is not a complete list but still useful to check first
 # and hint users if not sufficient during sky check.
 GCP_PREMISSION_CHECK_LIST = [
+    'compute.disks.create',
+    'compute.firewalls.create',
+    'compute.firewalls.delete',
+    'compute.firewalls.get',
+    'compute.instances.create',
+    'compute.instances.delete',
+    'compute.instances.get',
+    'compute.instances.list',
+    'compute.instances.setLabels',
+    'compute.instances.setServiceAccount',
+    'compute.instances.start',
+    'compute.instances.stop',
+    'compute.networks.get',
+    'compute.networks.list',
+    'compute.networks.getEffectiveFirewalls',
+    'compute.subnetworks.use',
+    'compute.subnetworks.list',
+    'compute.subnetworks.useExternalIp',
     'compute.projects.get',
+    'compute.projects.setCommonInstanceMetadata',
+    'compute.zoneOperations.get',
     'iam.serviceAccounts.actAs',
+    'iam.serviceAccounts.get',
+    'serviceusage.services.enable',
+    'serviceusage.services.list',
+    'serviceusage.services.use',
+    'resourcemanager.projects.get',
+    'resourcemanager.projects.getIamPolicy',
 ]
 
 # Minimum set of files under ~/.config/gcloud that grant GCP access.
@@ -603,15 +629,15 @@ class GCP(clouds.Cloud):
         request = service.projects().testIamPermissions(resource=project,
                                                         body=permissions)
         ret_permissions = request.execute().get('permissions', [])
-        if len(ret_permissions) < len(GCP_PREMISSION_CHECK_LIST):
-            diffs = set(GCP_PREMISSION_CHECK_LIST).difference(
-                set(ret_permissions))
+
+        diffs = set(GCP_PREMISSION_CHECK_LIST).difference(set(ret_permissions))
+        if len(diffs) > 0:
             identity_str = identity[0] if identity else None
             return False, (
                 'The following permissions are not enabled for the current '
                 f'GCP identity ({identity_str}):\n    '
                 f'{diffs}\n    '
-                'For more details, visit: https://skypilot.readthedocs.io/en/latest/reference/faq.html#what-are-the-required-iam-permissons-on-gcp-for-skypilot')  # pylint: disable=line-too-long
+                'For more details, visit: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp')  # pylint: disable=line-too-long
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
