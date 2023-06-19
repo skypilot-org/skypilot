@@ -1,7 +1,6 @@
 """The database for spot jobs status."""
 # TODO(zhwu): maybe use file based status instead of database, so
 # that we can easily switch to a s3-based storage.
-import contextlib
 import enum
 import pathlib
 import sqlite3
@@ -24,20 +23,6 @@ _DB_PATH = str(_DB_PATH)
 # once.
 _CONN = sqlite3.connect(_DB_PATH)
 _CURSOR = _CONN.cursor()
-
-
-@contextlib.contextmanager
-def _safe_cursor():
-    """A newly created, auto-committing, auto-closing cursor."""
-    conn = sqlite3.connect(_DB_PATH)
-    cursor = conn.cursor()
-    try:
-        yield cursor
-    finally:
-        cursor.close()
-        conn.commit()
-        conn.close()
-
 
 # `spot` table contains all the finest-grained tasks, including all the
 # tasks of a spot job. All tasks of the same job will have the same
