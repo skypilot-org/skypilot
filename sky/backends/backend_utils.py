@@ -1687,7 +1687,8 @@ def _query_cluster_status_via_cloud_api(
 
     # Query the cloud provider.
     node_statuses = handle.launched_resources.cloud.query_status(
-        cluster_name, tag_filter_for_cluster(cluster_name), region, zone, **kwargs)
+        cluster_name, tag_filter_for_cluster(cluster_name), region, zone,
+        **kwargs)
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
     # TODO(wei-lin): handle multi-node cases.
     # TODO(zhwu): this should be moved into the GCP class, after we refactor
