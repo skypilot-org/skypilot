@@ -283,3 +283,7 @@ If you would like to grant fine-grained minimal permissions to your users, you c
     :alt: GCP Grant Access
 
 8. The user should receive an invitation to the project and should be able to setup SkyPilot by following the instructions in :ref:`Installation <installation-gcp>`.
+
+.. note::
+
+    With the above setup, the user will not have the permission to create the service account required by the SkyPilot on GCP. The admin needs to run :code:`sky launch --cloud gcp` once, to create the service account for all the users in the organization. The way to create the service account manually will be added in the future release.
