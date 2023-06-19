@@ -1,7 +1,6 @@
 """The database for spot jobs status."""
 # TODO(zhwu): maybe use file based status instead of database, so
 # that we can easily switch to a s3-based storage.
-import contextlib
 import enum
 import pathlib
 import sqlite3
@@ -18,25 +17,12 @@ logger = sky_logging.init_logger(__name__)
 _DB_PATH = pathlib.Path('~/.sky/spot_jobs.db')
 _DB_PATH = _DB_PATH.expanduser().absolute()
 _DB_PATH.parents[0].mkdir(parents=True, exist_ok=True)
+_DB_PATH = str(_DB_PATH)
 
 # Module-level connection/cursor; thread-safe as the module is only imported
 # once.
-_CONN = sqlite3.connect(str(_DB_PATH))
+_CONN = sqlite3.connect(_DB_PATH)
 _CURSOR = _CONN.cursor()
-
-
-@contextlib.contextmanager
-def _safe_cursor():
-    """A newly created, auto-committing, auto-closing cursor."""
-    conn = sqlite3.connect(_DB_PATH)
-    cursor = conn.cursor()
-    try:
-        yield cursor
-    finally:
-        cursor.close()
-        conn.commit()
-        conn.close()
-
 
 # `spot` table contains all the finest-grained tasks, including all the
 # tasks of a spot job. All tasks of the same job will have the same
@@ -259,7 +245,7 @@ _SPOT_STATUS_TO_COLOR = {
 
 # === Status transition functions ===
 def set_job_name(job_id: int, name: str):
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             INSERT INTO job_info
@@ -269,7 +255,7 @@ def set_job_name(job_id: int, name: str):
 
 def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
     """Set the task to pending state."""
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             INSERT INTO spot
@@ -296,7 +282,7 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
     # make it easier to find them based on one of the values.
     # Also, using the earlier timestamp should be closer to the term
     # `submit_at`, which represents the time the spot task is submitted.
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             UPDATE spot SET
@@ -313,7 +299,7 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
 def set_starting(job_id: int, task_id: int):
     """Set the task to starting state."""
     logger.info('Launching the spot cluster...')
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             UPDATE spot SET status=(?)
@@ -324,7 +310,7 @@ def set_starting(job_id: int, task_id: int):
 def set_started(job_id: int, task_id: int, start_time: float):
     """Set the task to started state."""
     logger.info('Job started.')
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             UPDATE spot SET status=(?), start_at=(?), last_recovered_at=(?)
@@ -336,7 +322,7 @@ def set_started(job_id: int, task_id: int, start_time: float):
 def set_recovering(job_id: int, task_id: int):
     """Set the task to recovering state, and update the job duration."""
     logger.info('=== Recovering... ===')
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
                 UPDATE spot SET
@@ -348,7 +334,7 @@ def set_recovering(job_id: int, task_id: int):
 
 def set_recovered(job_id: int, task_id: int, recovered_time: float):
     """Set the task to recovered."""
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             UPDATE spot SET
@@ -361,7 +347,7 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float):
 
 def set_succeeded(job_id: int, task_id: int, end_time: float):
     """Set the task to succeeded, if it is in a non-terminal state."""
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             UPDATE spot SET
@@ -395,7 +381,7 @@ def set_failed(job_id: int,
         'status': failure_type.value,
         'failure_reason': failure_reason,
     }
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         previous_status = cursor.execute(
             'SELECT status FROM spot WHERE spot_job_id=(?)',
             (job_id,)).fetchone()
@@ -424,7 +410,7 @@ def set_cancelling(job_id: int):
     task_id is not needed, because we expect the job should be cancelled
     as a whole, and we should not cancel a single task.
     """
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(
             """\
             UPDATE spot SET
@@ -440,7 +426,7 @@ def set_cancelled(job_id: int):
 
     The set_cancelling should be called before this function.
     """
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(
             """\
             UPDATE spot SET
@@ -469,7 +455,7 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
 
     # Left outer join is used here instead of join, because the job_info does
     # not contain the spot jobs submitted before #1982.
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(
             f"""\
             SELECT DISTINCT spot.spot_job_id
@@ -485,7 +471,7 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
 
 
 def _get_all_task_ids_statuses(job_id: int) -> List[Tuple[int, SpotStatus]]:
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         id_statuses = cursor.execute(
             """\
             SELECT task_id, status FROM spot
@@ -529,7 +515,7 @@ def get_failure_reason(job_id: int) -> Optional[str]:
 
     If the job has multiple tasks, we return the first failure reason.
     """
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         reason = cursor.execute(
             """\
             SELECT failure_reason FROM spot
@@ -550,7 +536,7 @@ def get_spot_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
     # existing controller before #1982, the job_info table may not exist,
     # and all the spot jobs created before will not present in the
     # job_info.
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(f"""\
             SELECT *
             FROM spot
@@ -570,7 +556,7 @@ def get_spot_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
 
 def get_task_name(job_id: int, task_id: int) -> str:
     """Get the task name of a job."""
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         task_name = cursor.execute(
             """\
             SELECT task_name FROM spot
@@ -581,7 +567,7 @@ def get_task_name(job_id: int, task_id: int) -> str:
 
 def get_latest_job_id() -> Optional[int]:
     """Get the latest job id."""
-    with _safe_cursor() as cursor:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute("""\
             SELECT spot_job_id FROM spot
             WHERE task_id=0
