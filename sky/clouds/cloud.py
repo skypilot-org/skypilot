@@ -476,7 +476,7 @@ class Cloud:
         Checks to ensure that a particular accelerator has a nonzero quota
         in a region.
 
-        (As of right now, check_quota_not_zero is only implemented for AWS.)
+        (Currently, check_quota_not_zero is only implemented for AWS.)
 
         The _retry_zones funtion in cloud_vm_ray_backend goes through different
         candidate regions and attempts to provision the requested instance_type
