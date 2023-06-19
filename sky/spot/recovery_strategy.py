@@ -8,6 +8,7 @@ import sky
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import status_lib
 from sky import backends
 from sky.backends import backend_utils
 from sky.skylet import job_lib
@@ -190,7 +191,7 @@ class StrategyExecutor:
                 logger.info(f'Unexpected exception: {e}\nFailed to get the '
                             'refresh the cluster status. Retrying.')
                 continue
-            if cluster_status != global_user_state.ClusterStatus.UP:
+            if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster can be preempted before the job is
                 # launched.
                 # Break to let the retry launch kick in.

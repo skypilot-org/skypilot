@@ -17,7 +17,7 @@ from sky.resources import Resources
 from sky.task import Task
 from sky.optimizer import Optimizer, OptimizeTarget
 from sky.data import Storage, StorageMode, StoreType
-from sky.global_user_state import ClusterStatus
+from sky.status_lib import ClusterStatus
 from sky.skylet.job_lib import JobStatus
 from sky.core import (status, start, stop, down, autostop, queue, cancel,
                       tail_logs, download_logs, job_status, spot_queue,

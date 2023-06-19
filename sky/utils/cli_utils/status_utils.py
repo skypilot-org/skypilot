@@ -6,8 +6,8 @@ import click
 import colorama
 
 from sky import backends
-from sky import global_user_state
 from sky import spot
+from sky import status_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import log_utils
@@ -309,8 +309,7 @@ _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
 
 
-def _get_status(
-        cluster_record: _ClusterRecord) -> global_user_state.ClusterStatus:
+def _get_status(cluster_record: _ClusterRecord) -> status_lib.ClusterStatus:
     return cluster_record['status']
 
 
@@ -367,7 +366,7 @@ def _get_autostop(cluster_record: _ClusterRecord) -> str:
 def _is_pending_autostop(cluster_record: _ClusterRecord) -> bool:
     # autostop < 0 means nothing scheduled.
     return cluster_record['autostop'] >= 0 and _get_status(
-        cluster_record) != global_user_state.ClusterStatus.STOPPED
+        cluster_record) != status_lib.ClusterStatus.STOPPED
 
 
 # ---- 'sky cost-report' helper functions below ----
