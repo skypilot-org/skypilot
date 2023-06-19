@@ -1,6 +1,7 @@
 """Kubernetes."""
 import json
 import os
+import re
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -39,6 +40,90 @@ class Kubernetes(clouds.Cloud):
 
     IMAGE = 'us-central1-docker.pkg.dev/' \
             'skypilot-375900/skypilotk8s/skypilot:latest'
+
+    class KubernetesInstanceName:
+        """
+        Class to represent the name of a Kubernetes instance.
+
+        Since Kubernetes does not have a notion of instances, we generate
+        virtual instance types that represent the resources requested by a
+        pod ("node").
+
+        This name captures the following resource requests:
+            - CPU
+            - Memory
+            - Accelerators
+
+        The name format is "{n}CPU--{k}GB" where n is the number of vCPUs and
+        k is the amount of memory in GB. Accelerators can be specified by
+        appending "--{a}{type}" where a is the number of accelerators and
+        type is the accelerator type.
+
+        Examples:
+            - 4CPU--16GB
+            - 4CPU--16GB--1V100
+        """
+
+        def __init__(self,
+                     name: Optional[str] = None,
+                     cpus: Optional[int] = None,
+                     memory: Optional[int] = None,
+                     accelerator_count: Optional[int] = None,
+                     accelerator_type: Optional[str] = None):
+            self.name = name
+            self.cpus = cpus
+            self.memory = memory
+            self.accelerator_count = accelerator_count
+            self.accelerator_type = accelerator_type
+
+        @staticmethod
+        def is_valid_instance_name(name: str) -> bool:
+            """Returns whether the given name is a valid instance name."""
+            # Check if the name is of the form "{n}CPU--{k}GB--{a}{type}".
+            cpumemgpu_pattern = re.compile(r'^\d+CPU--\d+GB--\d+[A-Za-z]+$')
+            if cpumemgpu_pattern.match(name):
+                return True
+            else:
+                # Check if the name is of the form "{n}CPU--{k}GB".
+                cpumem_pattern = re.compile(r'^\d+CPU--\d+GB$')
+                if cpumem_pattern.match(name):
+                    return True
+            return False
+
+        @classmethod
+        def _parse_instance_name(cls, name: str) -> Tuple[int, int, int, str]:
+            """Returns the cpus, memory, accelerator_count, and accelerator_type
+            from the given name."""
+            if not cls.is_valid_instance_name(name):
+                raise ValueError(f'Invalid instance name: {name}')
+            # Split the name into cpus, memory, and accelerators.
+            cpus, memory, accelerators = name.split('--')
+            # Parse the cpus and memory.
+            cpus = int(cpus.replace('CPU', ''))
+            memory = int(memory.replace('GB', ''))
+            # Parse the accelerators.
+            accelerator_count = 0
+            accelerator_type = ''
+            if accelerators:
+                accelerator_count = int(accelerators[:-2])
+                accelerator_type = accelerators[-2:]
+            return cpus, memory, accelerator_count, accelerator_type
+
+        @classmethod
+        def from_instance_name(cls, name: str) -> 'KubernetesInstanceName':
+            """Returns an instance name object from the given name."""
+            if not cls.is_valid_instance_name(name):
+                raise ValueError(f'Invalid instance name: {name}')
+            cpus, memory, accelerator_count, accelerator_type = \
+                cls._parse_instance_name(name)
+            return cls(name=name,
+                       cpus=cpus,
+                       memory=memory,
+                       accelerator_count=accelerator_count,
+                       accelerator_type=accelerator_type)
+
+        def __str__(self):
+            return self.name
 
     @classmethod
     def _cloud_unsupported_features(
