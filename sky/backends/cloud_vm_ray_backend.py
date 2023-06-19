@@ -1331,15 +1331,24 @@ class RetryingVmProvisioner(object):
             to_provision, 'region should have been set by the optimizer.')
         region = clouds.Region(to_provision.region)
 
-        if (not to_provision.cloud.check_quota_not_zero(
-                to_provision.region, to_provision.instance_type,
-                to_provision.use_spot)):
+        try:
+            has_non_zero_quota = to_provision.cloud.check_quota_not_zero(
+                to_provision.region, 
+                to_provision.instance_type,
+                to_provision.use_spot
+            )
 
+        except:
+            has_non_zero_quota = True
+
+        if not has_non_zero_quota:
             # if quota is found to be zero, raise exception and skip to
             # the next region
             raise exceptions.ResourcesUnavailableError(
-                'Zero quota in the region with '
-                'attempted provisioning')
+                f'Found no quota for {to_provision.instance_type} in region '
+                f'{to_provision.region}. To request quotas in this region, '
+                f'visit http://aws.amazon.com/contact-us/ec2-request.'
+            )
 
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status):

@@ -722,13 +722,7 @@ class AWS(clouds.Cloud):
 
         from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
 
-        spot_header = ''
-        if use_spot:
-            spot_header = 'SpotInstanceCode'
-        else:
-            spot_header = 'OnDemandInstanceCode'
-
-        quota_code = aws_catalog.get_quota_code(instance_type, spot_header)
+        quota_code = aws_catalog.get_quota_code(instance_type, use_spot)
 
         if quota_code is None:
             # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway

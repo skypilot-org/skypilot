@@ -2232,7 +2232,7 @@ def test_aws_zero_quota_failover():
     test = Test(
         'aws-zero-quota-failover',
         [
-            f'sky launch -y -c {name} --cloud aws --region {region} --gpus V100:8 --use-spot | grep "Zero quota in the region with attempted provisioning"',
+            f'sky launch -y -c {name} --cloud aws --region {region} --gpus V100:8 --use-spot | grep "Found no quota"',
         ]
     )
     run_one_test(test)

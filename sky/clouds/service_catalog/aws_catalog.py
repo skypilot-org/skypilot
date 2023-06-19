@@ -151,10 +151,15 @@ def _get_df() -> pd.DataFrame:
         return _user_df
 
 
-def get_quota_code(instance_type: str, spot_header: str) -> Optional[str]:
+def get_quota_code(instance_type: str, use_spot: bool) -> Optional[str]:
     # Get the quota code from the accelerator instance type
     # This will be used in the botocore command to check for
     # a non-zero quota
+
+    if use_spot == True:
+        spot_header = 'SpotInstanceCode'
+    else:
+        spot_header = 'OnDemandInstanceCode'
     try:
         quota_code = _quotas_df.loc[_quotas_df['InstanceType'] == instance_type,
                                     spot_header].values[0]
