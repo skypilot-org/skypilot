@@ -475,7 +475,7 @@ class Cloud:
         """Queries the latest status of the cluster from the cloud.
 
         The global_user_state caches the status of the clusters, but the
-        actualy status of the clusters may change on the cloud, e.g., the
+        actual status of the clusters may change on the cloud, e.g., the
         autostop happens, or the user manually stops the cluster. This
         method queries the cloud to get the latest cluster status.
 
