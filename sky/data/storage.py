@@ -14,6 +14,7 @@ from sky import check
 from sky import clouds
 from sky.adaptors import aws
 from sky.adaptors import gcp
+from sky.adaptors import oci
 from sky.adaptors import cloudflare
 from sky.backends import backend_utils
 from sky.utils import schemas
@@ -42,7 +43,9 @@ SourceType = Union[Path, List[Path]]
 # TODO(Doyoung): need to add clouds.CLOUDFLARE() to support
 # R2 to be an option as preferred store type
 STORE_ENABLED_CLOUDS: List[str] = [
-    str(clouds.AWS()), str(clouds.GCP()), cloudflare.NAME
+    str(clouds.AWS()),
+    str(clouds.GCP()), cloudflare.NAME,
+    str(clouds.OCI())
 ]
 
 # Maximum number of concurrent rsync upload processes
@@ -80,6 +83,7 @@ class StoreType(enum.Enum):
     GCS = 'GCS'
     AZURE = 'AZURE'
     R2 = 'R2'
+    OCI = 'OCI'
 
     @classmethod
     def from_cloud(cls, cloud: clouds.Cloud) -> 'StoreType':
@@ -89,6 +93,8 @@ class StoreType(enum.Enum):
             return StoreType.GCS
         elif isinstance(cloud, clouds.Azure):
             return StoreType.AZURE
+        elif isinstance(cloud, clouds.OCI):
+            return StoreType.OCI
 
         raise ValueError(f'Unsupported cloud for StoreType: {cloud}')
 
@@ -100,6 +106,8 @@ class StoreType(enum.Enum):
             return StoreType.GCS
         elif isinstance(store, R2Store):
             return StoreType.R2
+        elif isinstance(store, OciStore):
+            return StoreType.OCI
         else:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unknown store type: {store}')
@@ -115,6 +123,8 @@ def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
         return StoreType.S3
     elif isinstance(cloud, clouds.GCP):
         return StoreType.GCS
+    elif isinstance(cloud, clouds.OCI):
+        return StoreType.OCI
     elif isinstance(cloud, clouds.Azure):
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure Blob Storage is not supported yet.')
@@ -137,6 +147,8 @@ def get_store_prefix(storetype: StoreType) -> str:
     # R2 storages use 's3://' as a prefix for various aws cli commands
     elif storetype == StoreType.R2:
         return 's3://'
+    elif storetype == StoreType.OCI:
+        return 'oss://'
     elif storetype == StoreType.AZURE:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure Blob Storage is not supported yet.')
@@ -461,6 +473,11 @@ class Storage(object):
                         s_metadata,
                         source=self.source,
                         sync_on_reconstruction=self.sync_on_reconstruction)
+                elif s_type == StoreType.OCI:
+                    store = OciStore.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction)
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Unknown store type: {s_type}')
@@ -499,6 +516,8 @@ class Storage(object):
                         self.add_store(StoreType.GCS)
                     elif self.source.startswith('r2://'):
                         self.add_store(StoreType.R2)
+                    elif self.source.startswith('oci://'):
+                        self.add_store(StoreType.OCI)
 
     @staticmethod
     def _validate_source(
@@ -508,7 +527,7 @@ class Storage(object):
 
         Args:
           source: str; File path where the data is initially stored. Can be a
-            local path or a cloud URI (s3://, gs://, r2:// etc.).
+            local path or a cloud URI (s3://, gs://, r2://, oci:// etc.).
             Local paths do not need to be absolute.
           mode: StorageMode; StorageMode of the storage object
 
@@ -579,7 +598,7 @@ class Storage(object):
                             'using a bucket by writing <destination_path>: '
                             f'{source} in the file_mounts section of your YAML')
                 is_local_source = True
-            elif split_path.scheme in ['s3', 'gs', 'r2']:
+            elif split_path.scheme in ['s3', 'gs', 'r2', 'oci']:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
                 # cloud store - ensure path points to only a directory
@@ -596,7 +615,7 @@ class Storage(object):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         f'Supported paths: local, s3://, gs://, '
-                        f'r2://. Got: {source}')
+                        f'r2://, oci://. Got: {source}')
         return source, is_local_source
 
     def _validate_storage_spec(self, name: Optional[str]) -> None:
@@ -607,13 +626,13 @@ class Storage(object):
         def validate_name(name):
             """ Checks for validating the storage name.
 
-            Checks if the name starts the s3, gcs or r2 prefix and raise error
-            if it does. Store specific validation checks (e.g., S3 specific
-            rules) happen in the corresponding store class.
+            Checks if the name starts the s3, gcs, r2, oci prefix and raise
+            error if it does. Store specific validation checks (e.g., S3
+            specific rules) happen in the corresponding store class.
             """
             prefix = name.split('://')[0]
             prefix = prefix.lower()
-            if prefix in ['s3', 'gs', 'r2']:
+            if prefix in ['s3', 'gs', 'r2', 'oci']:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageNameError(
                         'Prefix detected: `name` cannot start with '
@@ -706,6 +725,8 @@ class Storage(object):
             store_cls = GcsStore
         elif store_type == StoreType.R2:
             store_cls = R2Store
+        elif store_type == StoreType.OCI:
+            store_cls = OciStore
         else:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageSpecError(
@@ -928,6 +949,13 @@ class S3Store(AbstractStore):
                 assert data_utils.verify_r2_bucket(self.name), (
                     f'Source specified as {self.source}, a R2 bucket. ',
                     'R2 Bucket should exist.')
+            elif self.source.startswith('oci://'):
+                assert self.name == data_utils.split_oci_path(self.source)[0], (
+                    'OCI Bucket is specified as path, the name should be '
+                    'the same as OCI bucket.')
+                assert data_utils.verify_oci_bucket(self.name), (
+                    f'Source specified as {self.source}, a OCI bucket. ',
+                    'OCI Bucket should exist.')
         # Validate name
         self.name = self.validate_name(self.name)
 
@@ -1039,6 +1067,8 @@ class S3Store(AbstractStore):
                     self._transfer_to_s3()
                 elif self.source.startswith('r2://'):
                     self._transfer_to_s3()
+                elif self.source.startswith('oci://'):
+                    self._transfer_to_s3()
                 else:
                     self.batch_aws_rsync([self.source])
         except exceptions.StorageUploadError:
@@ -1121,6 +1151,8 @@ class S3Store(AbstractStore):
             data_transfer.gcs_to_s3(self.name, self.name)
         elif self.source.startswith('r2://'):
             data_transfer.r2_to_s3(self.name, self.name)
+        elif self.source.startswith('oci://'):
+            data_transfer.oci_to_s3(self.name, self.name)
 
     def _get_bucket(self) -> Tuple[Optional[StorageHandle], bool]:
         """Obtains the S3 bucket.
@@ -1314,6 +1346,15 @@ class GcsStore(AbstractStore):
                     assert data_utils.verify_r2_bucket(self.name), (
                         f'Source specified as {self.source}, a R2 bucket. ',
                         'R2 Bucket should exist.')
+                elif self.source.startswith('oci://'):
+                    assert self.name == data_utils.split_oci_path(
+                        self.source
+                    )[0], (
+                        'OCI Bucket is specified as path, the name should be '
+                        'the same as OCI bucket.')
+                    assert data_utils.verify_oci_bucket(self.name), (
+                        f'Source specified as {self.source}, a OCI bucket. ',
+                        'OCI Bucket should exist.')
         # Validate name
         self.name = self.validate_name(self.name)
         # Check if the storage is enabled
@@ -1422,6 +1463,8 @@ class GcsStore(AbstractStore):
                 elif self.source.startswith('s3://'):
                     self._transfer_to_gcs()
                 elif self.source.startswith('r2://'):
+                    self._transfer_to_gcs()
+                elif self.source.startswith('oci://'):
                     self._transfer_to_gcs()
                 else:
                     # If a single directory is specified in source, upload
@@ -1540,6 +1583,8 @@ class GcsStore(AbstractStore):
             data_transfer.s3_to_gcs(self.name, self.name)
         elif isinstance(self.source, str) and self.source.startswith('r2://'):
             data_transfer.r2_to_gcs(self.name, self.name)
+        elif isinstance(self.source, str) and self.source.startswith('oci://'):
+            data_transfer.oci_to_gcs(self.name, self.name)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the GCS bucket.
@@ -1727,6 +1772,13 @@ class R2Store(AbstractStore):
                 assert self.name == data_utils.split_r2_path(self.source)[0], (
                     'R2 Bucket is specified as path, the name should be '
                     'the same as R2 bucket.')
+            elif self.source.startswith('oci://'):
+                assert self.name == data_utils.split_oci_path(self.source)[0], (
+                    'OCI Bucket is specified as path, the name should be '
+                    'the same as OCI bucket.')
+                assert data_utils.verify_oci_bucket(self.name), (
+                    f'Source specified as {self.source}, a OCI bucket. ',
+                    'OCI Bucket should exist.')
         # Validate name
         self.name = S3Store.validate_name(self.name)
         # Check if the storage is enabled
@@ -1778,6 +1830,8 @@ class R2Store(AbstractStore):
                     self._transfer_to_r2()
                 elif self.source.startswith('r2://'):
                     pass
+                elif self.source.startswith('oci://'):
+                    self._transfer_to_r2()
                 else:
                     self.batch_aws_rsync([self.source])
         except exceptions.StorageUploadError:
@@ -1870,6 +1924,8 @@ class R2Store(AbstractStore):
             data_transfer.gcs_to_r2(self.name, self.name)
         elif self.source.startswith('s3://'):
             data_transfer.s3_to_r2(self.name, self.name)
+        elif self.source.startswith('oci://'):
+            data_transfer.oci_to_r2(self.name, self.name)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the R2 bucket.
@@ -2034,4 +2090,402 @@ class R2Store(AbstractStore):
         # Wait until bucket deletion propagates on AWS servers
         while data_utils.verify_r2_bucket(bucket_name):
             time.sleep(0.1)
+        return True
+
+
+class OciStore(AbstractStore):
+    """OciStore inherits from Storage Object and represents the backend
+    for OCI buckets.
+    """
+
+    _ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
+    RCLONE_VERSION = 'v1.61.1'
+    RCLONE_INSTALL_FILE = f'rclone-{RCLONE_VERSION}-linux-amd64.deb'
+
+    def __init__(self,
+                 name: str,
+                 source: str,
+                 region: Optional[str] = 'us-sanjose-1',
+                 is_sky_managed: Optional[bool] = None,
+                 sync_on_reconstruction: Optional[bool] = True):
+        self.client: Any
+        self.bucket: StorageHandle
+        self.oci_config_file: str
+        self.config_profile: str
+        self.compartment: str
+        self.namespace: str
+        self.mount_path: str
+        logger.debug(f'OciStore - region: {region}')
+        super().__init__(name, source, region, is_sky_managed,
+                         sync_on_reconstruction)
+
+    def _validate(self):
+        if self.source is not None and isinstance(self.source, str):
+            if self.source.startswith('s3://'):
+                assert self.name == data_utils.split_s3_path(self.source)[0], (
+                    'S3 Bucket is specified as path, the name should be the'
+                    ' same as S3 bucket.')
+                assert data_utils.verify_s3_bucket(self.name), (
+                    f'Source specified as {self.source}, an S3 bucket. ',
+                    'S3 Bucket should exist.')
+            elif self.source.startswith('gs://'):
+                assert self.name == data_utils.split_gcs_path(self.source)[0], (
+                    'GCS Bucket is specified as path, the name should be '
+                    'the same as GCS bucket.')
+            elif self.source.startswith('r2://'):
+                assert self.name == data_utils.split_r2_path(self.source)[0], (
+                    'R2 Bucket is specified as path, the name should be '
+                    'the same as R2 bucket.')
+                assert data_utils.verify_r2_bucket(self.name), (
+                    f'Source specified as {self.source}, a R2 bucket. ',
+                    'R2 Bucket should exist.')
+            elif self.source.startswith('oci://'):
+                assert self.name == data_utils.split_oci_path(self.source)[0], (
+                    'OCI Bucket is specified as path, the name should be '
+                    'the same as OCI bucket.')
+                assert data_utils.verify_oci_bucket(self.name), (
+                    f'Source specified as {self.source}, a OCI bucket. ',
+                    'OCI Bucket should exist.')
+        # Validate name
+        self.name = self.validate_name(self.name)
+        # Check if the storage is enabled
+        if not _is_storage_cloud_enabled(str(clouds.OCI())):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    'Storage \'store: oci\' specified, but ' \
+                    'OCI access is disabled. To fix, enable '\
+                    'OCI by running `sky check`. '\
+                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
+                    )
+
+    @classmethod
+    def validate_name(cls, name) -> str:
+        # pylint: disable=line-too-long
+        """Validates the name of the OCI store.
+
+        Source for rules: https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/managingbuckets.htm#Managing_Buckets
+        """
+
+        def _raise_no_traceback_name_error(err_str):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageNameError(err_str)
+
+        if name is not None and isinstance(name, str):
+            # Check for overall length
+            if not 1 <= len(name) <= 256:
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must contain 1-256 '
+                    'characters.')
+
+            # Check for valid characters and start/end with a number or letter
+            pattern = r'^[A-Za-z0-9-._]+$'
+            if not re.match(pattern, name):
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} can only contain '
+                    'upper or lower case letters, numeric characters, dashes (-), '
+                    'underscores (_), and dots (.). Spaces are not allowed. '
+                    'Names must start and end with a number or letter.')
+        else:
+            _raise_no_traceback_name_error('Store name must be specified.')
+        return name
+
+    def initialize(self):
+        """Initializes the OCI store object on the cloud.
+
+        Initialization involves fetching bucket if exists, or creating it if
+        it does not.
+
+        Raises:
+          StorageBucketCreateError: If bucket creation fails
+          StorageBucketGetError: If fetching existing bucket fails
+          StorageInitError: If general initialization fails.
+        """
+        from sky.skylet.providers.oci.config import oci_conf  # pylint: disable=import-outside-toplevel,line-too-long
+        from sky.skylet.providers.oci.query_helper import oci_query_helper  # pylint: disable=import-outside-toplevel,line-too-long
+        self.oci_config_file = oci.get_config_file()
+        self.config_profile = oci_conf.get_profile()
+        self.compartment = oci_query_helper.find_compartment(self.region)
+        self.client = oci.get_object_storage_client(region=self.region,
+                                                    profile=self.config_profile)
+        self.namespace = self.client.get_namespace(
+            compartment_id=oci.get_oci_config()['tenancy']).data
+
+        self.bucket, is_new_bucket = self._get_bucket()
+        if self.is_sky_managed is None:
+            # If is_sky_managed is not specified, then this is a new storage
+            # object (i.e., did not exist in global_user_state) and we should
+            # set the is_sky_managed property.
+            # If is_sky_managed is specified, then we take no action.
+            self.is_sky_managed = is_new_bucket
+
+    def upload(self):
+        """Uploads source to store bucket.
+
+        Upload must be called by the Storage handler - it is not called on
+        Store initialization.
+
+        Raises:
+            StorageUploadError: if upload fails.
+        """
+        try:
+            if isinstance(self.source, list):
+                self.batch_rclone_cp(self.source, create_dirs=True)
+            elif self.source is not None:
+                if self.source.startswith('s3://'):
+                    self._transfer_to_oci()
+                elif self.source.startswith('gs://'):
+                    self._transfer_to_oci()
+                elif self.source.startswith('r2://'):
+                    self._transfer_to_oci()
+                elif self.source.startswith('oci://'):
+                    pass
+                else:
+                    self.batch_rclone_cp([self.source], create_dirs=True)
+        except exceptions.StorageUploadError:
+            raise
+        except Exception as e:
+            raise exceptions.StorageUploadError(
+                f'Upload failed for store {self.name}') from e
+
+    def delete(self) -> None:
+        deleted_by_skypilot = self._delete_oci_bucket(self.name)
+        if deleted_by_skypilot:
+            msg_str = f'Deleted OCI bucket {self.name}.'
+        else:
+            msg_str = f'OCI bucket {self.name} may have been deleted ' \
+                      f'externally. Removing from local state.'
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}'
+                    f'{colorama.Style.RESET_ALL}')
+
+    def get_handle(self) -> StorageHandle:
+        return self.client.get_bucket(self.name)
+
+    def batch_rclone_cp(self,
+                        source_path_list: List[Path],
+                        create_dirs: bool = False) -> None:
+        """Invokes cp command to batch upload a list of local paths
+        """
+        # Generate message for upload
+        if len(source_path_list) > 1:
+            source_message = f'{len(source_path_list)} paths'
+        else:
+            source_message = source_path_list[0]
+
+        # If the source_path list contains a directory, then cp command
+        # copies the dir as is to the root of the bucket. To copy the
+        # contents of directory to the root, add /* to the directory path
+        # e.g., /mydir/*
+        source_path_list = [
+            str(path) + '/*' if
+            (os.path.isdir(path) and not create_dirs) else str(path)
+            for path in source_path_list
+        ]
+        copy_list = ' '.join(
+            os.path.abspath(os.path.expanduser(p)) for p in source_path_list)
+        sync_command = (f'cp -rf {copy_list} {self.mount_path}')
+
+        with log_utils.safe_rich_status(
+                f'[bold cyan]Syncing '
+                f'[green]{source_message}[/] to [green]oci://{self.name}/[/]'):
+            data_utils.run_upload_cli(sync_command,
+                                      self._ACCESS_DENIED_MESSAGE,
+                                      bucket_name=self.name)
+
+    def _transfer_to_oci(self) -> None:
+        assert isinstance(self.source, str), self.source
+        if self.source.startswith('s3://'):
+            data_transfer.s3_to_oci(self.name, self.name)
+        elif self.source.startswith('gs://'):
+            data_transfer.gcs_to_oci(self.name, self.name)
+        elif self.source.startswith('r2://'):
+            data_transfer.r2_to_oci(self.name, self.name)
+
+    def _get_bucket(self) -> Tuple[StorageHandle, bool]:
+        """Obtains the OCI bucket.
+        If the bucket exists, this method will connect to the bucket.
+
+        If the bucket does not exist, there are three cases:
+          1) Raise an error if the bucket source starts with oci://
+          2) Return None if bucket has been externally deleted and
+             sync_on_reconstruction is False
+          3) Create and return a new bucket otherwise
+
+        Raises:
+            StorageBucketCreateError: If creating the bucket fails
+            StorageBucketGetError: If fetching a bucket fails
+        """
+        logger.debug(f'_get_bucket: {self.name}')
+        try:
+            get_bucket_response = self.client.get_bucket(
+                namespace_name=self.namespace, bucket_name=self.name)
+            bucket = get_bucket_response.data
+            bucket_compartment = bucket.compartment_id
+            if bucket_compartment != self.compartment:
+                raise exceptions.StorageBucketGetError(
+                    f'InvalidBucketLocation: Bucket {self.name} should be '
+                    f'in the same compartment with the sky compute instances.')
+            return bucket, False
+        except oci.service_exception() as e:
+            if e.status == 404:
+                if isinstance(self.source,
+                              str) and self.source.startswith('oci://'):
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageBucketGetError(
+                            'Attempted to connect to a non-existent bucket: '
+                            f'{self.source}') from e
+                else:
+                    # If bucket cannot be found (i.e., does not exist), it is to be
+                    # created by Sky. However, creation is skipped if Store object
+                    # is being reconstructed for deletion.
+                    if self.sync_on_reconstruction:
+                        bucket = self._create_oci_bucket(self.name)
+                        return bucket, True
+                    else:
+                        return None, False
+            elif e.status == 401:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketGetError(
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                            name=self.name)) from e
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketGetError(
+                        'Failed to connect to OCI bucket {self.name}') from e
+
+    def mount_command(self, mount_path: str) -> str:
+        """Returns the command to mount the bucket to the mount_path.
+
+        Uses gcsfuse to mount the bucket.
+
+        Args:
+          mount_path: str; Path to mount the bucket to.
+        """
+        logger.debug(f'mount_command(): {mount_path}')
+        self.mount_path = mount_path
+
+        install_cmd = (
+            f'which rclone > /dev/null || (cd ~ > /dev/null'
+            f' && curl -O https://downloads.rclone.org/{self.RCLONE_VERSION}/rclone-{self.RCLONE_VERSION}-linux-amd64.deb'  # pylint: disable=line-too-long
+            f' && sudo dpkg -i rclone-{self.RCLONE_VERSION}-linux-amd64.deb'
+            f' && rm -f rclone-{self.RCLONE_VERSION}-linux-amd64.deb)')
+
+        mount_cmd = (
+            f'sudo chown -R `whoami`:`whoami` {mount_path}'
+            f' && rclone config create oos oracleobjectstorage'
+            f' provider user_principal_auth namespace {self.namespace}'
+            f' compartment {self.compartment} region {self.region}'
+            f' oci-config-file {self.oci_config_file}'
+            f' oci-config-profile {self.config_profile}'
+            f' && sed -i "s/oci-config-file/config_file/g;'
+            f' s/oci-config-profile/config_profile/g" ~/.config/rclone/rclone.conf'
+            f' && rclone mount oos:{self.name} {mount_path} --daemon --allow-non-empty'
+        )
+
+        version_check_cmd = (
+            f'rclone --version | grep -q {self.RCLONE_VERSION}')
+
+        logger.debug(f'install_cmd: {install_cmd}')
+        logger.debug(f'mount_cmd: {mount_cmd}')
+        logger.debug(f'version_check_cmd: {version_check_cmd}')
+
+        return mounting_utils.get_mounting_command(self.mount_path, install_cmd,
+                                                   mount_cmd, version_check_cmd)
+
+    def _download_file(self, remote_path: str, local_path: str) -> None:
+        """Downloads file from remote to local on OCI bucket
+
+        Args:
+          remote_path: str; Remote path on OCI bucket
+          local_path: str; Local path on user's device
+        """
+        logger.debug(
+            f'_download_file:: {self.name}:{remote_path} -> {local_path}')
+        download_command = f'cp -rf {self.mount_path}{remote_path} {local_path}'
+        try:
+            with log_utils.safe_rich_status(
+                    f'[bold cyan]Downloading: {remote_path} -> {local_path}[/]'
+            ):
+                subprocess.check_output(download_command,
+                                        stderr=subprocess.STDOUT,
+                                        shell=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f'Download failed: {remote_path} -> {local_path}.\n'
+                         f'Detail errors: {e.output}')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketDeleteError(
+                    f'Failed download file {self.name}:{remote_path}.') from e
+
+    def _create_oci_bucket(self, bucket_name: str) -> StorageHandle:
+        """Creates OCI bucket with specific name in specific region
+
+        Args:
+          bucket_name: str; Name of bucket
+          region: str; Region name, e.g. us-central1, us-west1
+        """
+        logger.debug(f'_create_oci_bucket: {bucket_name}')
+        try:
+            create_bucket_response = self.client.create_bucket(
+                namespace_name=self.namespace,
+                create_bucket_details=oci.get_oci(
+                ).object_storage.models.CreateBucketDetails(
+                    name=bucket_name,
+                    compartment_id=self.compartment,
+                ))
+            bucket = create_bucket_response.data
+            return bucket
+        except oci.service_exception() as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketCreateError(
+                    f'Failed to create OCI bucket: {self.name}') from e
+
+    def _delete_oci_bucket(self, bucket_name: str) -> bool:
+        """Deletes OCI bucket, including all objects in bucket
+
+        Args:
+          bucket_name: str; Name of bucket
+
+        Returns:
+         bool; True if bucket was deleted, False if it was deleted externally.
+        """
+        logger.debug(f'_delete_oci_bucket: {bucket_name}')
+        remove_command = (f'cd {self.mount_path} && rm -rf * && '
+                          f'cd ~ && fusermount -u {self.mount_path}')
+        with log_utils.safe_rich_status(
+                f'[bold cyan]Deleting OCI bucket {bucket_name}[/]'):
+            try:
+                subprocess.check_output(remove_command.split(' '),
+                                        stderr=subprocess.STDOUT)
+            except subprocess.CalledProcessError as e:
+                logger.error(e.output)
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketDeleteError(
+                        f'Failed to umount OCI bucket {bucket_name} {self.mount_path}.'
+                    ) from e
+
+            try:
+                self.client.delete_bucket(namespace_name=self.namespace,
+                                          bucket_name=bucket_name)
+            except oci.service_exception() as e:
+                if e.status == 404:
+                    # If bucket does not exist, it may have been deleted externally.
+                    # Do a no-op in that case.
+                    logger.debug(
+                        _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
+                            bucket_name=bucket_name))
+                    return False
+                else:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageBucketDeleteError(
+                            f'Failed to delete OCI bucket {bucket_name}.'
+                        ) from e
+
+        # Wait until bucket deletion propagates on OCI servers
+        while True:
+            try:
+                self.client.get_bucket(namespace_name=self.namespace,
+                                       bucket_name=self.name)
+                time.sleep(0.5)
+            except oci.service_exception() as e:
+                if e.status == 404:
+                    break
         return True

@@ -52,6 +52,18 @@ def split_r2_path(r2_path: str) -> Tuple[str, str]:
     return bucket, key
 
 
+def split_oci_path(oci_path: str) -> Tuple[str, str]:
+    """Splits OCI Path into Bucket name and Relative Path to Bucket
+
+    Args:
+      oci_path: str; OCI Path, e.g. oci://imagenet/train/
+    """
+    path_parts = oci_path.replace('oci://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
 def create_s3_client(region: str = 'us-east-2') -> Client:
     """Helper method that connects to Boto3 client for S3 Bucket
 
@@ -103,6 +115,17 @@ def verify_r2_bucket(name: str) -> bool:
     r2 = cloudflare.resource('s3')
     bucket = r2.Bucket(name)
     return bucket in r2.buckets.all()
+
+
+def verify_oci_bucket(name: str) -> bool:
+    """Helper method that checks if the OCI bucket exists
+
+    Args:
+      name: str; Name of OCI Bucket (without oci:// prefix)
+    """
+    # TODO(HysunHe): no region info here to verify a bucket?
+    logger.debug(f'verify_oci_bucket: {name}')
+    return True
 
 
 def is_cloud_store_url(url):

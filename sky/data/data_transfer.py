@@ -187,6 +187,82 @@ def r2_to_s3(r2_bucket_name: str, s3_bucket_name: str) -> None:
                               'a local source for the storage object.')
 
 
+def s3_to_oci(s3_bucket_name: str, oci_bucket_name: str) -> None:
+    """Creates a one-time transfer from Amazon S3 to OCI Object Storage.
+
+    Args:
+      s3_bucket_name: str; Name of the Amazon S3 Bucket
+      oci_bucket_name: str; Name of the OCI Bucket
+    """
+    raise NotImplementedError('Moving data directly from S3 to OCI bucket '
+                              'is currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
+def gcs_to_oci(gs_bucket_name: str, oci_bucket_name: str) -> None:
+    """Creates a one-time transfer from Google Cloud Storage to
+    OCI Object Storage.
+
+    Args:
+      gs_bucket_name: str; Name of the Google Cloud Storage Bucket
+      oci_bucket_name: str; Name of the OCI Bucket
+    """
+    raise NotImplementedError('Moving data directly from GCS to OCI bucket '
+                              'is currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
+def r2_to_oci(r2_bucket_name: str, oci_bucket_name: str) -> None:
+    """Creates a one-time transfer from Cloudflare R2 to OCI Bucket.
+
+    Args:
+      r2_bucket_name: str; Name of the Cloudflare R2 Bucket
+      oci_bucket_name: str; Name of the OCI Bucket
+    """
+    raise NotImplementedError(
+        'Moving data directly from Cloudflare R2 to OCI '
+        'bucket is currently not supported. Please specify '
+        'a local source for the storage object.')
+
+
+def oci_to_gcs(oci_bucket_name: str, gs_bucket_name: str) -> None:
+    """Creates a one-time transfer from OCI Object Storage to
+    Google Cloud Storage.
+
+    Args:
+      oci_bucket_name: str; Name of the OCI Bucket
+      gs_bucket_name: str; Name of the Google Cloud Storage Bucket
+    """
+    raise NotImplementedError('Moving data directly from OCI to GCS bucket '
+                              'is currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
+def oci_to_s3(oci_bucket_name: str, gs_bucket_name: str) -> None:
+    """Creates a one-time transfer from OCI Object Storage to Amazon S3.
+
+    Args:
+      oci_bucket_name: str; Name of the OCI Bucket
+      s3_bucket_name: str; Name of the Amazon S3 Bucket
+    """
+    raise NotImplementedError('Moving data directly from OCI to S3 bucket '
+                              'is currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
+def oci_to_r2(oci_bucket_name: str, r2_bucket_name: str) -> None:
+    """Creates a one-time transfer from OCI Object Storage to
+    Cloudflare R2 Bucket.
+
+    Args:
+      oci_bucket_name: str; Name of the OCI Bucket
+      r2_bucket_name: str; Name of the Cloudflare R2 Bucket
+    """
+    raise NotImplementedError('Moving data directly from OCI to Cloudflare '
+                              'R2 bucket is currently not supported. Please '
+                              'specify a local source for the storage object.')
+
+
 def _add_bucket_iam_member(bucket_name: str, role: str, member: str) -> None:
     storage_client = gcp.storage_client()
     bucket = storage_client.bucket(bucket_name)
