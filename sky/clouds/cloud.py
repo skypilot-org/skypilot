@@ -11,6 +11,7 @@ from sky.utils import log_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from sky import status_lib
     from sky import resources
 
 
@@ -519,6 +520,23 @@ class Cloud:
         """
 
         return True
+    
+    @classmethod
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List['status_lib.ClusterStatus']:
+        """Queries the latest status of the cluster from the cloud.
+
+        The global_user_state caches the status of the clusters, but the
+        actual status of the clusters may change on the cloud, e.g., the
+        autostop happens, or the user manually stops the cluster. This
+        method queries the cloud to get the latest cluster status.
+
+        Returns:
+            A list of ClusterStatus representing the status of all the
+            alive nodes in the cluster.
+        """
+        raise NotImplementedError
 
     def __repr__(self):
         return self._REPR
