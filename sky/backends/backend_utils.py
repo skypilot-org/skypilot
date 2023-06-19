@@ -1687,7 +1687,7 @@ def _query_cluster_status_via_cloud_api(
 
     # Query the cloud provider.
     node_statuses = handle.launched_resources.cloud.query_status(
-        cluster_name, tag_filter_for_cluster, region, zone, **kwargs)
+        cluster_name, tag_filter_for_cluster(cluster_name), region, zone, **kwargs)
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
     # TODO(wei-lin): handle multi-node cases.
     # TODO(zhwu): this should be moved into the GCP class, after we refactor
@@ -1758,6 +1758,7 @@ def check_clone_disk_and_override_task(
     task_resources = list(task.resources)[0]
     override_param = {}
     original_cloud = handle.launched_resources.cloud
+    assert original_cloud is not None, handle.launched_resources
     if task_resources.cloud is None:
         override_param['cloud'] = original_cloud
     else:
@@ -1767,7 +1768,7 @@ def check_clone_disk_and_override_task(
                     f'Cannot clone disk across cloud from {original_cloud} to '
                     f'{task_resources.cloud}.')
     original_cloud.check_features_are_supported(
-        {clouds.CloudImplementationFeatures.MIGRATE_DISK})
+        {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
 
     if task_resources.region is None:
         override_param['region'] = handle.launched_resources.region

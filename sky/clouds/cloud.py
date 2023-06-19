@@ -27,7 +27,7 @@ class CloudImplementationFeatures(enum.Enum):
     STOP = 'stop'
     AUTOSTOP = 'autostop'
     MULTI_NODE = 'multi-node'
-    MIGRATE_DISK = 'migrate-disk'
+    CLONE_DISK_FROM_CLUSTER = 'migrate-disk'
 
 
 class Region(collections.namedtuple('Region', ['name'])):

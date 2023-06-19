@@ -60,7 +60,7 @@ class Azure(clouds.Cloud):
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
         return {
-            clouds.CloudImplementationFeatures.MIGRATE_DISK: f'Migrating disk is not supported in {cls._REPR}.',
+            clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {cls._REPR}.',
         }
 
     @classmethod
