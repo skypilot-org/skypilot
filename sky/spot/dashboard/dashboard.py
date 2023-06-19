@@ -1,14 +1,15 @@
+"""Dashboard for spot jobs based on Flask."""
 import datetime
-from pathlib import Path
+import pathlib
 import re
 import yaml
 
-from flask import Flask, render_template
+import flask
 
 import sky
 from sky import spot
 
-app = Flask(__name__)
+app = flask.Flask(__name__)
 
 
 def _is_running_on_spot_controller() -> bool:
@@ -16,9 +17,9 @@ def _is_running_on_spot_controller() -> bool:
 
     Loads ~/.sky/sky_ray.yml and check cluster_name.
     """
-    if Path('~/.sky/sky_ray.yml').expanduser().exists():
+    if pathlib.Path('~/.sky/sky_ray.yml').expanduser().exists():
         config = yaml.safe_load(
-            Path('~/.sky/sky_ray.yml').expanduser().read_text())
+            pathlib.Path('~/.sky/sky_ray.yml').expanduser().read_text())
         return config.get('cluster_name', '').startswith('sky-spot-controller-')
     return False
 
@@ -52,7 +53,7 @@ def home():
     # Remove filler rows ([''], ..., ['-']).
     rows = [row for row in rows if ''.join(map(str, row)) != '']
 
-    rendered_html = render_template(
+    rendered_html = flask.render_template(
         'index.html',
         columns=columns,
         rows=rows,
