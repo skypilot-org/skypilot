@@ -41,3 +41,8 @@ TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 
 SKYLET_VERSION = '2'
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
+
+# `sky spot dashboard`-related
+#
+# Port on the remote spot controller that the dashboard is running on.
+SPOT_DASHBOARD_REMOTE_PORT = 5000
