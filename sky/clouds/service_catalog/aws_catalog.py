@@ -156,7 +156,7 @@ def get_quota_code(instance_type: str, use_spot: bool) -> Optional[str]:
     # This will be used in the botocore command to check for
     # a non-zero quota
 
-    if use_spot == True:
+    if use_spot:
         spot_header = 'SpotInstanceCode'
     else:
         spot_header = 'OnDemandInstanceCode'

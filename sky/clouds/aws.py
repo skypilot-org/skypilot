@@ -742,7 +742,7 @@ class AWS(clouds.Cloud):
 
         # Quota found to be greater than zero, try provisioning
         return True
-    
+
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],

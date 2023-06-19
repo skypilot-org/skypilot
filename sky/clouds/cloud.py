@@ -469,6 +469,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
+    # pylint: disable=unused-argument
     def check_quota_not_zero(cls,
                              region: str,
                              instance_type: str,
@@ -520,7 +521,7 @@ class Cloud:
         """
 
         return True
-    
+
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],

@@ -1333,12 +1333,10 @@ class RetryingVmProvisioner(object):
 
         try:
             has_non_zero_quota = to_provision.cloud.check_quota_not_zero(
-                to_provision.region, 
-                to_provision.instance_type,
-                to_provision.use_spot
-            )
+                to_provision.region, to_provision.instance_type,
+                to_provision.use_spot)
 
-        except:
+        except Exception as e:  # pylint: disable=broad-except
             has_non_zero_quota = True
 
         if not has_non_zero_quota:
@@ -1347,8 +1345,7 @@ class RetryingVmProvisioner(object):
             raise exceptions.ResourcesUnavailableError(
                 f'Found no quota for {to_provision.instance_type} in region '
                 f'{to_provision.region}. To request quotas in this region, '
-                f'visit http://aws.amazon.com/contact-us/ec2-request.'
-            )
+                f'visit http://aws.amazon.com/contact-us/ec2-request.')
 
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status):
