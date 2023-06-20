@@ -5,7 +5,7 @@ import re
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
-from sky import clouds
+from sky import clouds, status_lib
 from sky.utils import common_utils
 from sky.skylet.providers.kubernetes.utils import get_port
 
@@ -335,3 +335,14 @@ class Kubernetes(clouds.Cloud):
         #  future, we should return false for accelerators that we know are not
         #  supported by the cluster.
         return True
+
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List['status_lib.ClusterStatus']:
+        # TODO(romilb): Implement this. For now, we return UP as the status.
+        #  Assuming single node cluster.
+        del name, tag_filters, region, zone, kwargs  # Unused.
+        # Assume single node cluster.
+        return [status_lib.ClusterStatus.UP]
+
+
