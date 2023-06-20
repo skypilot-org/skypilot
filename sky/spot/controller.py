@@ -276,20 +276,32 @@ class SpotController:
 
     def event_callback_func(self, task_id: int, state: str, comment: str=''):
 
-        event_callback_str = self._dag.tasks[task_id].event_callback
-        if event_callback_str is None:
+        callback_str = self._dag.tasks[task_id].event_callback
+        if callback_str is None:
             return
-        if event_callback_str.find("controller_log:") == 0:
-            print_str = event_callback_str[len("controller_log:"):].strip()
-            if '$JOB_ID' in print_str:
-                print_str = print_str.replace('$JOB_ID', str(self._job_id))
-            if '$TASK_ID' in print_str:
-                print_str = print_str.replace('$TASK_ID', str(task_id))
-            if '$JOB_STATUS' in print_str:
-                print_str = print_str.replace('$JOB_STATUS', state)
-            if '$COMMENT' in print_str:
-                print_str = print_str.replace('$COMMENT', comment)
+
+        if '$JOB_ID' in callback_str:
+            callback_str = callback_str.replace('$JOB_ID', str(self._job_id))
+        if '$TASK_ID' in callback_str:
+            callback_str = callback_str.replace('$TASK_ID', str(task_id))
+        if '$JOB_STATUS' in callback_str:
+            callback_str = callback_str.replace('$JOB_STATUS', state)
+        if '$COMMENT' in callback_str:
+            callback_str = callback_str.replace('$COMMENT', comment)
+
+        if callback_str.find("controller_log:") == 0:
+            print_str = callback_str[len("controller_log:"):].strip()
             logger.info(print_str)
+        elif callback_str.find("callback_script:") == 0:
+            ''' 
+            Example: callback_script: echo "id: $JOB_ID, status: $JOB_STATUS, comment: $COMMENT" >> callback.txt && cat callback.txt
+            '''
+            import subprocess
+            run_str = callback_str[len("callback_script:"):].strip()
+            result = subprocess.run(run_str, capture_output=True, shell=True, text=True)
+            logger.info(f'stdout: {result.stdout.strip()}')
+        else:
+            logger.info(f'Unrecognized callback_str: {callback_str}')
 
     def run(self):
         """Run controller logic and handle exceptions."""
