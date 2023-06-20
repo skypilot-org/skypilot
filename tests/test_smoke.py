@@ -2226,7 +2226,7 @@ class TestStorageWithCredentials:
             subprocess.check_output(
                 f'touch {tmpdir}/folder{{000..255}}/test.txt', shell=True)
             yield from self.yield_storage_object(name=tmp_bucket_name,
-                                                 source=tmp_source)
+                                                 source=tmpdir)
 
     @pytest.fixture
     def tmp_copy_mnt_existing_storage_obj(self, tmp_scratch_storage_obj):
