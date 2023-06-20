@@ -3742,8 +3742,7 @@ def spot_dashboard(port: Optional[int]):
             f'Dashboard is now available at: http://127.0.0.1:{free_port}',
             fg='green')
         try:
-            while True:
-                time.sleep(1)
+            ssh_process.wait()
         except KeyboardInterrupt:
             # When user presses Ctrl-C in terminal, exits the previous ssh
             # command so that <free local port> is freed up.
