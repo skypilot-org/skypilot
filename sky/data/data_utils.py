@@ -120,10 +120,18 @@ def verify_r2_bucket(name: str) -> bool:
 def verify_oci_bucket(name: str) -> bool:
     """Helper method that checks if the OCI bucket exists
 
+    This method is mainly used by other cloud stores to check the
+    existence of an OCI bucket when it is specified as source. However,
+    We don't verify the existence of OCI bucket because moving data
+    directly between other cloud buckets and OCI buckets is currently
+    not supported.
+
+    Currently, this method always return True and in data_transfer, it
+    will throw NotImplementedError.
+
     Args:
       name: str; Name of OCI Bucket (without oci:// prefix)
     """
-    # TODO(HysunHe): no region info here to verify a bucket?
     logger.debug(f'verify_oci_bucket: {name}')
     return True
 

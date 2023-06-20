@@ -2106,7 +2106,7 @@ class OciStore(AbstractStore):
     def __init__(self,
                  name: str,
                  source: str,
-                 region: Optional[str] = 'us-sanjose-1',
+                 region: Optional[str],
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: Optional[bool] = True):
         self.client: Any
@@ -2116,7 +2116,22 @@ class OciStore(AbstractStore):
         self.compartment: str
         self.namespace: str
         self.mount_path: str
+
+        from sky.skylet.providers.oci.config import oci_conf  # pylint: disable=import-outside-toplevel,line-too-long
+        from sky.skylet.providers.oci.query_helper import oci_query_helper  # pylint: disable=import-outside-toplevel,line-too-long
+
         logger.debug(f'OciStore - region: {region}')
+        if region is None:
+            region = oci.get_oci_config()['region']
+
+        self.oci_config_file = oci.get_config_file()
+        self.config_profile = oci_conf.get_profile()
+        self.compartment = oci_query_helper.find_compartment(region)
+        self.client = oci.get_object_storage_client(region=region,
+                                                    profile=self.config_profile)
+        self.namespace = self.client.get_namespace(
+            compartment_id=oci.get_oci_config()['tenancy']).data
+
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
 
@@ -2144,9 +2159,6 @@ class OciStore(AbstractStore):
                 assert self.name == data_utils.split_oci_path(self.source)[0], (
                     'OCI Bucket is specified as path, the name should be '
                     'the same as OCI bucket.')
-                assert data_utils.verify_oci_bucket(self.name), (
-                    f'Source specified as {self.source}, a OCI bucket. ',
-                    'OCI Bucket should exist.')
         # Validate name
         self.name = self.validate_name(self.name)
         # Check if the storage is enabled
@@ -2201,16 +2213,6 @@ class OciStore(AbstractStore):
           StorageBucketGetError: If fetching existing bucket fails
           StorageInitError: If general initialization fails.
         """
-        from sky.skylet.providers.oci.config import oci_conf  # pylint: disable=import-outside-toplevel,line-too-long
-        from sky.skylet.providers.oci.query_helper import oci_query_helper  # pylint: disable=import-outside-toplevel,line-too-long
-        self.oci_config_file = oci.get_config_file()
-        self.config_profile = oci_conf.get_profile()
-        self.compartment = oci_query_helper.find_compartment(self.region)
-        self.client = oci.get_object_storage_client(region=self.region,
-                                                    profile=self.config_profile)
-        self.namespace = self.client.get_namespace(
-            compartment_id=oci.get_oci_config()['tenancy']).data
-
         self.bucket, is_new_bucket = self._get_bucket()
         if self.is_sky_managed is None:
             # If is_sky_managed is not specified, then this is a new storage
@@ -2483,10 +2485,14 @@ class OciStore(AbstractStore):
         # Wait until bucket deletion propagates on OCI servers
         while True:
             try:
-                self.client.get_bucket(namespace_name=self.namespace,
-                                       bucket_name=self.name)
-                time.sleep(0.5)
+                time.sleep(
+                    0.5)  # wait a while so that mostly the bucket is deleted.
+                self.client.head_bucket(namespace_name=self.namespace,
+                                        bucket_name=self.name)
             except oci.service_exception() as e:
-                if e.status == 404:
+                if e.status == 404:  # NotFound
                     break
+                else:
+                    logger.warning(f'Unexpected exception found while delete '
+                                   f'oci bucket: {str(e)}')
         return True
