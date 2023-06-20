@@ -30,7 +30,6 @@ import multiprocessing
 import os
 import shlex
 import signal
-import socket
 import subprocess
 import sys
 import textwrap
@@ -3735,24 +3734,26 @@ def spot_dashboard(port: Optional[int]):
                    f'{spot_lib.SPOT_CONTROLLER_NAME}')
     click.echo('Forwarding port: ', nl=False)
     click.secho(f'{ssh_command}', dim=True)
-    ssh_process = subprocess.Popen(ssh_command,
-                                   shell=True,
-                                   preexec_fn=os.setsid)
 
-    webbrowser.open(f'http://localhost:{free_port}')
-    click.secho(f'Dashboard is now available at: http://127.0.0.1:{free_port}',
-                fg='green')
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        # When user presses Ctrl-C in terminal, exits the previous ssh command
-        # so that <free local port> is freed up.
+    with subprocess.Popen(ssh_command, shell=True,
+                          start_new_session=True) as ssh_process:
+        webbrowser.open(f'http://localhost:{free_port}')
+        click.secho(
+            f'Dashboard is now available at: http://127.0.0.1:{free_port}',
+            fg='green')
         try:
-            os.killpg(os.getpgid(ssh_process.pid), signal.SIGTERM)
-        except ProcessLookupError:
-            # This happens if spot controller is auto-stopped.
-            pass
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            # When user presses Ctrl-C in terminal, exits the previous ssh
+            # command so that <free local port> is freed up.
+            try:
+                os.killpg(os.getpgid(ssh_process.pid), signal.SIGTERM)
+            except ProcessLookupError:
+                # This happens if spot controller is auto-stopped.
+                pass
+        finally:
+            click.echo('Exiting.')
 
 
 # ==============================

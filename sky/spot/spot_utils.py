@@ -453,7 +453,7 @@ def format_job_table(tasks: List[Dict[str, Any]],
 @typing.overload
 def format_job_table(tasks: List[Dict[str, Any]],
                      show_all: bool,
-                     return_rows: Literal[True] = True,
+                     return_rows: Literal[True],
                      max_jobs: Optional[int] = None) -> List[List[str]]:
     ...
 
