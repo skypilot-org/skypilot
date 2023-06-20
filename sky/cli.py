@@ -33,7 +33,6 @@ import signal
 import subprocess
 import sys
 import textwrap
-import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 import webbrowser
