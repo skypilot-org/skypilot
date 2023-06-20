@@ -2111,8 +2111,7 @@ class OciStore(AbstractStore):
         try:
             return oci.get_oci_config()['region']
         except (oci.get_oci().exceptions.ConfigFileNotFound,
-                oci.get_oci().exceptions.InvalidConfig,
-                ImportError) as e:
+                oci.get_oci().exceptions.InvalidConfig, ImportError) as e:
             # In test env, the OCI config may not exist
             logger.debug(f'It is OK goes here when testing: {str(e)}')
             return 'us-sanjose-1'
