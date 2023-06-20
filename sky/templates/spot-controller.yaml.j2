@@ -28,6 +28,10 @@ setup: |
   echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
   {% endif %}
 
+  # Dashboard.
+  pip list | grep flask  > /dev/null 2>&1 || pip install flask 2>&1 > /dev/null
+  ((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.spot.dashboard.dashboard") || (nohup python3 -m sky.spot.dashboard.dashboard >> ~/.sky/spot-dashboard.log 2>&1 &));
+
 run: |
   python -u -m sky.spot.controller \
     {{remote_user_yaml_prefix}}/{{dag_name}}-{{uuid}}.yaml \

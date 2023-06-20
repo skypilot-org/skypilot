@@ -19,10 +19,6 @@ Example usage:
   # Tear down all existing clusters.
   >> sky down -a
 
-TODO:
-- Add support for local Docker backend.  Currently this module is very coupled
-  with CloudVmRayBackend, as seen by the many use of ray commands.
-
 NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
@@ -33,11 +29,13 @@ import functools
 import multiprocessing
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import textwrap
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
+import webbrowser
 
 import click
 import colorama
@@ -3698,6 +3696,62 @@ def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     except exceptions.ClusterNotUpError:
         # Hint messages already printed by the call above.
         sys.exit(1)
+
+
+@spot.command('dashboard', cls=_DocumentedCodeCommand)
+@click.option(
+    '--port',
+    '-p',
+    default=None,
+    type=int,
+    required=False,
+    help=('Local port to use for the dashboard. If None, a free port is '
+          'automatically chosen.'))
+@usage_lib.entrypoint
+def spot_dashboard(port: Optional[int]):
+    """Opens a dashboard for spot jobs (needs controller to be UP)."""
+    # TODO(zongheng): ideally, the controller/dashboard server should expose the
+    # API perhaps via REST. Then here we would (1) not have to use SSH to try to
+    # see if the controller is UP first, which is slow; (2) not have to run SSH
+    # port forwarding first (we'd just launch a local dashboard which would make
+    # REST API calls to the controller dashboard server).
+    click.secho('Checking if spot controller is up...', fg='yellow')
+    hint = (
+        'Dashboard is not available if spot controller is not up. Run a spot '
+        'job first, or use `sky start` to bring up an existing controller.')
+    _, handle = spot_lib.is_spot_controller_up(stopped_message=hint,
+                                               non_existent_message=hint)
+    if handle is None:
+        sys.exit(1)
+    # SSH forward a free local port to remote's dashboard port.
+    remote_port = constants.SPOT_DASHBOARD_REMOTE_PORT
+    if port is None:
+        free_port = common_utils.find_free_port(remote_port)
+    else:
+        free_port = port
+    ssh_command = (f'ssh -qNL {free_port}:localhost:{remote_port} '
+                   f'{spot_lib.SPOT_CONTROLLER_NAME}')
+    click.echo('Forwarding port: ', nl=False)
+    click.secho(f'{ssh_command}', dim=True)
+
+    with subprocess.Popen(ssh_command, shell=True,
+                          start_new_session=True) as ssh_process:
+        webbrowser.open(f'http://localhost:{free_port}')
+        click.secho(
+            f'Dashboard is now available at: http://127.0.0.1:{free_port}',
+            fg='green')
+        try:
+            ssh_process.wait()
+        except KeyboardInterrupt:
+            # When user presses Ctrl-C in terminal, exits the previous ssh
+            # command so that <free local port> is freed up.
+            try:
+                os.killpg(os.getpgid(ssh_process.pid), signal.SIGTERM)
+            except ProcessLookupError:
+                # This happens if spot controller is auto-stopped.
+                pass
+        finally:
+            click.echo('Exiting.')
 
 
 # ==============================
