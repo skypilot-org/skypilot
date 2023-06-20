@@ -2430,9 +2430,20 @@ class OciStore(AbstractStore):
           remote_path: str; Remote path on OCI bucket
           local_path: str; Local path on user's device
         """
-        logger.debug(
-            f'_download_file:: {self.name}:{remote_path} -> {local_path}')
-        download_command = f'cp -rf {self.mount_path}{remote_path} {local_path}'
+        if remote_path.startswith(f'/{self.name}'):
+            _, oos_path = data_utils.split_oci_path(remote_path)
+            remote_path = oos_path
+
+        filename = os.path.basename(remote_path)
+        if not local_path.endswith(filename):
+            if local_path.endswith('/'):
+                local_path = f'{local_path}{filename}'
+            else:
+                local_path = f'{local_path}/{filename}'
+
+        download_command = (f'oci os object get --bucket-name {self.name} '
+                            f'--namespace-name {self.namespace} '
+                            f'--name {remote_path} --file {local_path}')
         try:
             with log_utils.safe_rich_status(
                     f'[bold cyan]Downloading: {remote_path} -> {local_path}[/]'

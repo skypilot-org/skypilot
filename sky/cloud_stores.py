@@ -268,7 +268,7 @@ class OciCloudStorage(CloudStorage):
 
         download_via_ocicli = (f'oci os object sync --no-follow-symlinks '
                                f'--bucket-name {bucket_name} '
-                               f'--prefix {path} --dest-dir {destination}')
+                               f'--prefix "{path}" --dest-dir "{destination}"')
 
         all_commands = list(self._GET_OCICLI)
         all_commands.append(download_via_ocicli)
@@ -278,8 +278,9 @@ class OciCloudStorage(CloudStorage):
         """Downloads a file using OCI CLI."""
         bucket_name, path = data_utils.split_oci_path(source)
         filename = os.path.basename(path)
-        download_via_ocicli = (f'oci os object get --bucket-name {bucket_name} '
-                               f'--name {path} --file {destination}/{filename}')
+        download_via_ocicli = (
+            f'oci os object get --bucket-name {bucket_name} '
+            f'--name "{path}" --file "{destination}/{filename}"')
 
         all_commands = list(self._GET_OCICLI)
         all_commands.append(download_via_ocicli)
