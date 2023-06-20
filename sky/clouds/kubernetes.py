@@ -18,6 +18,104 @@ _CREDENTIAL_FILES = [
 ]
 
 
+class KubernetesInstanceType:
+    """
+    Class to represent the "Instance Type" in a Kubernetes.
+
+    Since Kubernetes does not have a notion of instances, we generate
+    virtual instance types that represent the resources requested by a
+    pod ("node").
+
+    This name captures the following resource requests:
+        - CPU
+        - Memory
+        - Accelerators
+
+    The name format is "{n}CPU--{k}GB" where n is the number of vCPUs and
+    k is the amount of memory in GB. Accelerators can be specified by
+    appending "--{a}{type}" where a is the number of accelerators and
+    type is the accelerator type.
+
+    Examples:
+        - 4CPU--16GB
+        - 0.5CPU--1.5GB
+        - 4CPU--16GB--1V100
+    """
+
+    def __init__(self,
+                 cpus: Optional[float] = None,
+                 memory: Optional[float] = None,
+                 accelerator_count: Optional[float] = None,
+                 accelerator_type: Optional[str] = None):
+        self.cpus = cpus
+        self.memory = memory
+        self.accelerator_count = accelerator_count
+        self.accelerator_type = accelerator_type
+
+    @property
+    def name(self) -> str:
+        """Returns the name of the instance."""
+        name = f'{self.cpus}CPU--{self.memory}GB'
+        if self.accelerator_count:
+            name += f'--{self.accelerator_count}{self.accelerator_type}'
+        return name
+
+    @staticmethod
+    def is_valid_instance_type(name: str) -> bool:
+        """Returns whether the given name is a valid instance type."""
+        pattern = re.compile(r'^(\d+(\.\d+)?CPU--\d+(\.\d+)?GB)(--\d+\S+)?$')
+        return bool(pattern.match(name))
+
+    @classmethod
+    def _parse_instance_type(cls, name: str) -> Tuple[
+        float, float, Optional[float], Optional[str]]:
+        """Returns the cpus, memory, accelerator_count, and accelerator_type
+        from the given name."""
+        pattern = re.compile(
+            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_count>\d+)(?P<accelerator_type>\S+))?$')
+        match = pattern.match(name)
+        if match:
+            cpus = float(match.group('cpus'))
+            memory = float(match.group('memory'))
+            accelerator_count = match.group('accelerator_count')
+            accelerator_type = match.group('accelerator_type')
+            if accelerator_count:
+                accelerator_count = float(accelerator_count)
+            return cpus, memory, accelerator_count, accelerator_type
+        else:
+            raise ValueError(f'Invalid instance name: {name}')
+
+    @classmethod
+    def from_instance_type(cls, name: str) -> 'KubernetesInstanceName':
+        """Returns an instance name object from the given name."""
+        if not cls.is_valid_instance_type(name):
+            raise ValueError(f'Invalid instance name: {name}')
+        cpus, memory, accelerator_count, accelerator_type = \
+            cls._parse_instance_type(name)
+        return cls(cpus=cpus,
+                   memory=memory,
+                   accelerator_count=accelerator_count,
+                   accelerator_type=accelerator_type)
+
+    @classmethod
+    def from_resources(cls,
+                       cpus: float,
+                       memory: float,
+                       accelerator_count: float = 0,
+                       accelerator_type: str = '') -> 'KubernetesInstanceName':
+        """Returns an instance name object from the given resources."""
+        name = f'{cpus}CPU--{memory}GB'
+        if accelerator_count > 0:
+            name += f'--{accelerator_count}{accelerator_type}'
+        return cls(cpus=cpus,
+                   memory=memory,
+                   accelerator_count=accelerator_count,
+                   accelerator_type=accelerator_type)
+
+    def __str__(self):
+        return self.name
+
+
 @clouds.CLOUD_REGISTRY.register
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
@@ -40,90 +138,6 @@ class Kubernetes(clouds.Cloud):
 
     IMAGE = 'us-central1-docker.pkg.dev/' \
             'skypilot-375900/skypilotk8s/skypilot:latest'
-
-    class KubernetesInstanceName:
-        """
-        Class to represent the name of a Kubernetes instance.
-
-        Since Kubernetes does not have a notion of instances, we generate
-        virtual instance types that represent the resources requested by a
-        pod ("node").
-
-        This name captures the following resource requests:
-            - CPU
-            - Memory
-            - Accelerators
-
-        The name format is "{n}CPU--{k}GB" where n is the number of vCPUs and
-        k is the amount of memory in GB. Accelerators can be specified by
-        appending "--{a}{type}" where a is the number of accelerators and
-        type is the accelerator type.
-
-        Examples:
-            - 4CPU--16GB
-            - 4CPU--16GB--1V100
-        """
-
-        def __init__(self,
-                     name: Optional[str] = None,
-                     cpus: Optional[int] = None,
-                     memory: Optional[int] = None,
-                     accelerator_count: Optional[int] = None,
-                     accelerator_type: Optional[str] = None):
-            self.name = name
-            self.cpus = cpus
-            self.memory = memory
-            self.accelerator_count = accelerator_count
-            self.accelerator_type = accelerator_type
-
-        @staticmethod
-        def is_valid_instance_name(name: str) -> bool:
-            """Returns whether the given name is a valid instance name."""
-            # Check if the name is of the form "{n}CPU--{k}GB--{a}{type}".
-            cpumemgpu_pattern = re.compile(r'^\d+CPU--\d+GB--\d+[A-Za-z]+$')
-            if cpumemgpu_pattern.match(name):
-                return True
-            else:
-                # Check if the name is of the form "{n}CPU--{k}GB".
-                cpumem_pattern = re.compile(r'^\d+CPU--\d+GB$')
-                if cpumem_pattern.match(name):
-                    return True
-            return False
-
-        @classmethod
-        def _parse_instance_name(cls, name: str) -> Tuple[int, int, int, str]:
-            """Returns the cpus, memory, accelerator_count, and accelerator_type
-            from the given name."""
-            if not cls.is_valid_instance_name(name):
-                raise ValueError(f'Invalid instance name: {name}')
-            # Split the name into cpus, memory, and accelerators.
-            cpus, memory, accelerators = name.split('--')
-            # Parse the cpus and memory.
-            cpus = int(cpus.replace('CPU', ''))
-            memory = int(memory.replace('GB', ''))
-            # Parse the accelerators.
-            accelerator_count = 0
-            accelerator_type = ''
-            if accelerators:
-                accelerator_count = int(accelerators[:-2])
-                accelerator_type = accelerators[-2:]
-            return cpus, memory, accelerator_count, accelerator_type
-
-        @classmethod
-        def from_instance_name(cls, name: str) -> 'KubernetesInstanceName':
-            """Returns an instance name object from the given name."""
-            if not cls.is_valid_instance_name(name):
-                raise ValueError(f'Invalid instance name: {name}')
-            cpus, memory, accelerator_count, accelerator_type = \
-                cls._parse_instance_name(name)
-            return cls(name=name,
-                       cpus=cpus,
-                       memory=memory,
-                       accelerator_count=accelerator_count,
-                       accelerator_type=accelerator_type)
-
-        def __str__(self):
-            return self.name
 
     @classmethod
     def _cloud_unsupported_features(
@@ -178,15 +192,10 @@ class Kubernetes(clouds.Cloud):
             memory: Optional[str] = None,
             disk_tier: Optional[str] = None) -> Optional[str]:
         del disk_tier  # Unused.
-        virtual_instance_type = ''
-        # Remove the + from the cpus/memory string
-        n_cpus = int(
-            cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
-        mem = int(
-            memory.strip('+')
-        ) if memory is not None else n_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
-        virtual_instance_type += f'{n_cpus}vCPU-'
-        virtual_instance_type += f'{mem}GB'
+
+        instance_cpus = int(cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
+        instance_mem = int(memory.strip('+')) if memory is not None else instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
+        virtual_instance_type = KubernetesInstanceType(instance_cpus, instance_mem).name
         return virtual_instance_type
 
     @classmethod
@@ -201,9 +210,8 @@ class Kubernetes(clouds.Cloud):
     def get_vcpus_mem_from_instance_type(
             cls, instance_type: str) -> Tuple[float, float]:
         """Returns the #vCPUs and memory that the instance type offers."""
-        vcpus = cls.get_vcpus_from_instance_type(instance_type)
-        mem = cls.get_mem_from_instance_type(instance_type)
-        return vcpus, mem
+        k = KubernetesInstanceType.from_instance_type(instance_type)
+        return k.cpus, k.memory
 
     @classmethod
     def zones_provision_loop(
@@ -218,24 +226,6 @@ class Kubernetes(clouds.Cloud):
         del num_nodes, region, instance_type, accelerators, use_spot  # Unused.
         for r in cls.regions():
             yield r.zones
-
-    @classmethod
-    def get_vcpus_from_instance_type(
-        cls,
-        instance_type: str,
-    ) -> float:
-        """Returns the #vCPUs that the instance type offers."""
-        # TODO(romilb): Need more robust parsing
-        return float(instance_type.split('vCPU')[0])
-
-    @classmethod
-    def get_mem_from_instance_type(
-        cls,
-        instance_type: str,
-    ) -> float:
-        """Returns the memory that the instance type offers."""
-        # TODO(romilb): Need more robust parsing
-        return float(instance_type.split('vCPU-')[1].split('GB')[0])
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -330,9 +320,7 @@ class Kubernetes(clouds.Cloud):
         # }
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        # TODO(romilb): All instance types are supported for now. In the future
-        #  we should check if the instance type is supported by the cluster.
-        return True
+        return KubernetesInstanceType.is_valid_instance_type(instance_type)
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         # Kubernetes doesn't have regions or zones, so we don't need to validate
