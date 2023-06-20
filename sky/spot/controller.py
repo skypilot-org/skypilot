@@ -10,8 +10,8 @@ from typing import Tuple
 import filelock
 
 from sky import exceptions
-from sky import global_user_state
 from sky import sky_logging
+from sky import status_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.skylet import constants
@@ -205,7 +205,7 @@ class SpotController:
              handle) = backend_utils.refresh_cluster_status_handle(
                  cluster_name, force_refresh=True)
 
-            if cluster_status != global_user_state.ClusterStatus.UP:
+            if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster is (partially) preempted. It can be down, INIT
                 # or STOPPED, based on the interruption behavior of the cloud.
                 # Spot recovery is needed (will be done later in the code).
