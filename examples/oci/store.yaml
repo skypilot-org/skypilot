@@ -1,0 +1,51 @@
+name: cpu-task1
+
+resources:
+  # Optional; if left out, automatically pick the cheapest cloud.
+  cloud: oci
+
+  #region: ap-seoul-1
+  
+  #zone: AP-SEOUL-1-AD-1
+  
+  #instance_type: VM.Standard.E4.Flex$_2_8
+
+  cpus: 2
+
+  #image_id: skypilot:cpu-ubuntu-2004
+
+  disk_size: 256
+
+  disk_tier: medium
+
+  use_spot: False
+
+file_mounts:
+  /datasets-storage:
+    name: skybucket5  # Name of storage, optional when source is bucket URI
+    source: ['/home/hysunhe/python/dev/mylog', '/home/hysunhe/rust/dev/modsample']  # Source path, can be local or s3/gcs URL. Optional, do not specify to create an empty bucket.
+    store: oci  # Could be either 's3' or 'gcs'; default: None. Optional.
+    persistent: True  # Defaults to True; can be set to false. Optional.
+    mode: COPY  # Either MOUNT or COPY. Optional.
+
+# Working directory (optional) containing the project codebase.
+# Its contents are synced to ~/sky_workdir/ on the cluster.
+workdir: .
+
+num_nodes: 1
+
+# Typical use: pip install -r requirements.txt
+# Invoked under the workdir (i.e., can use its files).
+setup: |
+  echo "*** Running setup for the task. ***"
+
+# Typical use: make use of resources, such as running training.
+# Invoked under the workdir (i.e., can use its files).
+run: |
+  echo "*** Running the task on OCI ***"
+  timestamp=$(date +%s)
+  for i in {1..10}; do
+    echo "$timestamp $i"
+    sleep 1
+  done
+  echo "The task is completed."
