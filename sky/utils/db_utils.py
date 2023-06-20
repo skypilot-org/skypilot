@@ -1,7 +1,21 @@
 """Utils for sky databases."""
-import threading
+import contextlib
 import sqlite3
+import threading
 from typing import Any, Callable, Optional
+
+
+@contextlib.contextmanager
+def safe_cursor(db_path: str):
+    """A newly created, auto-committing, auto-closing cursor."""
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    try:
+        yield cursor
+    finally:
+        cursor.close()
+        conn.commit()
+        conn.close()
 
 
 def add_column_to_table(

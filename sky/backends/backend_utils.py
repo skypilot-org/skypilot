@@ -6,15 +6,13 @@ import getpass
 import json
 import os
 import pathlib
-import random
 import re
 import subprocess
 import tempfile
 import textwrap
 import time
 import typing
-from typing import (Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple,
-                    Union)
+from typing import (Any, Dict, List, Optional, Sequence, Set, Tuple, Union)
 from typing_extensions import Literal
 import uuid
 
@@ -39,11 +37,10 @@ from sky import global_user_state
 from sky import skypilot_config
 from sky import sky_logging
 from sky import spot as spot_lib
+from sky import status_lib
 from sky.backends import onprem_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
-from sky.skylet.providers.lambda_cloud import lambda_utils
-from sky.skylet.providers.scp import scp_utils
 from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import env_options
@@ -54,7 +51,6 @@ from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import validator
 from sky.usage import usage_lib
-from sky.adaptors import ibm
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -1643,362 +1639,6 @@ def check_network_connection():
                                               'Network seems down.') from e
 
 
-def _process_cli_query(
-    cloud: str,
-    cluster: str,
-    query_cmd: str,
-    deliminator: str,
-    status_map: Mapping[str, Optional[global_user_state.ClusterStatus]],
-    max_retries: int = 3,
-) -> List[global_user_state.ClusterStatus]:
-    """Run the cloud CLI query and returns cluster status.
-
-    Args:
-        cloud: The cloud provider name.
-        cluster: The cluster name.
-        query_cmd: The cloud CLI query command.
-        deliminator: The deliminator separating the status in the output
-            of the query command.
-        status_map: A map from the CLI status string to the corresponding
-            global_user_state.ClusterStatus.
-        max_retries: Maximum number of retries before giving up. For AWS only.
-
-    Returns:
-        A list of global_user_state.ClusterStatus of all existing nodes in the
-        cluster. The list can be empty if none of the nodes in the clusters are
-        found, i.e. the nodes are all terminated.
-    """
-    returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
-                                                      '/dev/null',
-                                                      require_outputs=True,
-                                                      shell=True)
-    logger.debug(f'{query_cmd} returned {returncode}.\n'
-                 '**** STDOUT ****\n'
-                 f'{stdout}\n'
-                 '**** STDERR ****\n'
-                 f'{stderr}')
-
-    # Cloud-specific error handling.
-    if (cloud == str(clouds.Azure()) and returncode == 2 and
-            'argument --ids: expected at least one argument' in stderr):
-        # Azure CLI has a returncode 2 when the cluster is not found, as
-        # --ids <empty> is passed to the query command. In that case, the
-        # cluster should be considered as DOWN.
-        return []
-    if (cloud == str(clouds.AWS()) and returncode != 0 and
-            'Unable to locate credentials. You can configure credentials by '
-            'running "aws configure"' in stdout + stderr):
-        # AWS: has run into this rare error with spot controller (which has an
-        # assumed IAM role and is working fine most of the time).
-        #
-        # We do not know the root cause. For now, the hypothesis is instance
-        # metadata service is temporarily unavailable. So, we retry the query.
-        if max_retries > 0:
-            logger.info('Encountered AWS "Unable to locate credentials" '
-                        'error. Retrying.')
-            time.sleep(random.uniform(0, 1) * 2)
-            return _process_cli_query(cloud, cluster, query_cmd, deliminator,
-                                      status_map, max_retries - 1)
-
-    if returncode != 0:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterStatusFetchingError(
-                f'Failed to query {cloud} cluster {cluster!r} status: '
-                f'{stdout + stderr}')
-
-    cluster_status = stdout.strip()
-    if cluster_status == '':
-        return []
-
-    statuses = []
-    for s in cluster_status.split(deliminator):
-        node_status = status_map[s]
-        if node_status is not None:
-            statuses.append(node_status)
-    return statuses
-
-
-def _query_status_aws(
-    cluster: str,
-    ray_config: Dict[str, Any],
-) -> List[global_user_state.ClusterStatus]:
-    status_map = {
-        'pending': global_user_state.ClusterStatus.INIT,
-        'running': global_user_state.ClusterStatus.UP,
-        # TODO(zhwu): stopping and shutting-down could occasionally fail
-        # due to internal errors of AWS. We should cover that case.
-        'stopping': global_user_state.ClusterStatus.STOPPED,
-        'stopped': global_user_state.ClusterStatus.STOPPED,
-        'shutting-down': None,
-        'terminated': None,
-    }
-    region = ray_config['provider']['region']
-    query_cmd = ('aws ec2 describe-instances --filters '
-                 f'Name=tag:ray-cluster-name,Values={cluster} '
-                 f'--region {region} '
-                 '--query "Reservations[].Instances[].State.Name" '
-                 '--output text')
-    return _process_cli_query('AWS', cluster, query_cmd, '\t', status_map)
-
-
-def _query_status_gcp(
-    cluster: str,
-    ray_config: Dict[str, Any],
-) -> List[global_user_state.ClusterStatus]:
-    # Note: we use ":" for filtering labels for gcloud, as the latest gcloud (v393.0)
-    # fails to filter labels with "=".
-    # Reference: https://cloud.google.com/sdk/gcloud/reference/topic/filters
-
-    use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
-    zone = ray_config['provider'].get('availability_zone', '')
-    if use_tpu_vm:
-        # TPU VM's state definition is different from compute VM
-        # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#State # pylint: disable=line-too-long
-        status_map = {
-            'CREATING': global_user_state.ClusterStatus.INIT,
-            'STARTING': global_user_state.ClusterStatus.INIT,
-            'RESTARTING': global_user_state.ClusterStatus.INIT,
-            'READY': global_user_state.ClusterStatus.UP,
-            'REPAIRING': global_user_state.ClusterStatus.INIT,
-            # 'STOPPED' in GCP TPU VM means stopped, with disk preserved.
-            'STOPPING': global_user_state.ClusterStatus.STOPPED,
-            'STOPPED': global_user_state.ClusterStatus.STOPPED,
-            'DELETING': None,
-            'PREEMPTED': None,
-        }
-        tpu_utils.check_gcp_cli_include_tpu_vm()
-        query_cmd = ('gcloud compute tpus tpu-vm list '
-                     f'--zone {zone} '
-                     f'--filter="(labels.ray-cluster-name={cluster})" '
-                     '--format="value(state)"')
-    else:
-        # Ref: https://cloud.google.com/compute/docs/instances/instance-life-cycle
-        status_map = {
-            'PROVISIONING': global_user_state.ClusterStatus.INIT,
-            'STAGING': global_user_state.ClusterStatus.INIT,
-            'RUNNING': global_user_state.ClusterStatus.UP,
-            'REPAIRING': global_user_state.ClusterStatus.INIT,
-            # 'TERMINATED' in GCP means stopped, with disk preserved.
-            'STOPPING': global_user_state.ClusterStatus.STOPPED,
-            'TERMINATED': global_user_state.ClusterStatus.STOPPED,
-            # 'SUSPENDED' in GCP means stopped, with disk and OS memory
-            # preserved.
-            'SUSPENDING': global_user_state.ClusterStatus.STOPPED,
-            'SUSPENDED': global_user_state.ClusterStatus.STOPPED,
-        }
-        # TODO(zhwu): The status of the TPU attached to the cluster should also
-        # be checked, since TPUs are not part of the VMs.
-        query_cmd = ('gcloud compute instances list '
-                     f'--filter="(labels.ray-cluster-name={cluster})" '
-                     '--format="value(status)"')
-    status_list = _process_cli_query('GCP', cluster, query_cmd, '\n',
-                                     status_map)
-
-    # GCP does not clean up preempted TPU VMs. We remove it ourselves.
-    # TODO(wei-lin): handle multi-node cases.
-    if use_tpu_vm and len(status_list) == 0:
-        logger.debug(f'Terminating preempted TPU VM cluster {cluster}')
-        backend = backends.CloudVmRayBackend()
-        handle = global_user_state.get_handle_from_cluster_name(cluster)
-        assert isinstance(handle,
-                          backends.CloudVmRayResourceHandle), (cluster, handle)
-        # Do not use refresh cluster status during teardown, as that will
-        # cause inifinite recursion by calling cluster status refresh
-        # again.
-        # The caller of this function, `_update_cluster_status_no_lock() ->
-        # _get_cluster_status_via_cloud_cli()`, will do the post teardown
-        # cleanup, which will remove the cluster entry from the status table
-        # & the ssh config file.
-        backend.teardown_no_lock(handle,
-                                 terminate=True,
-                                 purge=False,
-                                 post_teardown_cleanup=False,
-                                 refresh_cluster_status=False)
-    return status_list
-
-
-def _query_status_azure(
-    cluster: str,
-    ray_config: Dict[str, Any],
-) -> List[global_user_state.ClusterStatus]:
-    del ray_config  # Unused.
-    status_map = {
-        'VM starting': global_user_state.ClusterStatus.INIT,
-        'VM running': global_user_state.ClusterStatus.UP,
-        # 'VM stopped' in Azure means Stopped (Allocated), which still bills
-        # for the VM.
-        'VM stopping': global_user_state.ClusterStatus.INIT,
-        'VM stopped': global_user_state.ClusterStatus.INIT,
-        # 'VM deallocated' in Azure means Stopped (Deallocated), which does not
-        # bill for the VM.
-        'VM deallocating': global_user_state.ClusterStatus.STOPPED,
-        'VM deallocated': global_user_state.ClusterStatus.STOPPED,
-    }
-    query_cmd = ('az vm show -d --ids $(az vm list --query '
-                 f'"[?tags.\\"ray-cluster-name\\" == \'{cluster}\'].id" '
-                 '-o tsv) --query "powerState" -o tsv')
-    # NOTE: Azure cli should be handled carefully. The query command above
-    # takes about 1 second to run.
-    # An alternative is the following command, but it will take more than
-    # 20 seconds to run.
-    # query_cmd = (
-    #     f'az vm list --show-details --query "['
-    #     f'?tags.\\"ray-cluster-name\\" == \'{handle.cluster_name}\' '
-    #     '&& tags.\\"ray-node-type\\" == \'head\'].powerState" -o tsv'
-    # )
-    return _process_cli_query('Azure', cluster, query_cmd, '\t', status_map)
-
-
-def _query_status_ibm(
-    cluster: str,
-    ray_config: Dict[str, Any],
-) -> List[global_user_state.ClusterStatus]:
-    """
-    returns a list of Statuses for each of the cluster's nodes.
-    this function gets called when running `sky status` with -r flag and the cluster's head node is either stopped or down.
-    """
-
-    status_map: Dict[str, Any] = {
-        'pending': global_user_state.ClusterStatus.INIT,
-        'starting': global_user_state.ClusterStatus.INIT,
-        'restarting': global_user_state.ClusterStatus.INIT,
-        'running': global_user_state.ClusterStatus.UP,
-        'stopping': global_user_state.ClusterStatus.STOPPED,
-        'stopped': global_user_state.ClusterStatus.STOPPED,
-        'deleting': None,
-        'failed': global_user_state.ClusterStatus.INIT,
-        'cluster_deleted': []
-    }
-
-    client = ibm.client(region=ray_config['provider']['region'])
-    search_client = ibm.search_client()
-    # pylint: disable=E1136
-    vpcs_filtered_by_tags_and_region = search_client.search(
-        query=
-        f'type:vpc AND tags:{cluster} AND region:{ray_config["provider"]["region"]}',
-        fields=['tags', 'region', 'type'],
-        limit=1000).get_result()['items']
-    if not vpcs_filtered_by_tags_and_region:
-        # a vpc could have been removed unkownlingly to skypilot, such as
-        # via `sky autostop --down`, or simply manually (e.g. via console).
-        logger.warning('No vpc exists in '
-                       f'{ray_config["provider"]["region"]} '
-                       f'with tag: {cluster}')
-        return status_map['cluster_deleted']
-    vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(':', 1)[-1]
-    instances = client.list_instances(vpc_id=vpc_id).get_result()['instances']
-
-    return [status_map[instance['status']] for instance in instances]
-
-
-def _query_status_lambda(
-        cluster: str,
-        ray_config: Dict[str, Any],  # pylint: disable=unused-argument
-) -> List[global_user_state.ClusterStatus]:
-    status_map = {
-        'booting': global_user_state.ClusterStatus.INIT,
-        'active': global_user_state.ClusterStatus.UP,
-        'unhealthy': global_user_state.ClusterStatus.INIT,
-        'terminated': None,
-    }
-    # TODO(ewzeng): filter by hash_filter_string to be safe
-    status_list = []
-    vms = lambda_utils.LambdaCloudClient().list_instances()
-    possible_names = [f'{cluster}-head', f'{cluster}-worker']
-    for node in vms:
-        if node.get('name') in possible_names:
-            node_status = status_map[node['status']]
-            if node_status is not None:
-                status_list.append(node_status)
-    return status_list
-
-
-def _query_status_scp(
-    cluster: str,
-    ray_config: Dict[str, Any],
-) -> List[global_user_state.ClusterStatus]:
-    del ray_config  # Unused.
-    status_map = {
-        'CREATING': global_user_state.ClusterStatus.INIT,
-        'EDITING': global_user_state.ClusterStatus.INIT,
-        'RUNNING': global_user_state.ClusterStatus.UP,
-        'STARTING': global_user_state.ClusterStatus.INIT,
-        'RESTARTING': global_user_state.ClusterStatus.INIT,
-        'STOPPING': global_user_state.ClusterStatus.STOPPED,
-        'STOPPED': global_user_state.ClusterStatus.STOPPED,
-        'TERMINATING': None,
-        'TERMINATED': None,
-    }
-    status_list = []
-    vms = scp_utils.SCPClient().list_instances()
-    for node in vms:
-        if node['virtualServerName'] == cluster:
-            node_status = status_map[node['virtualServerState']]
-            if node_status is not None:
-                status_list.append(node_status)
-    return status_list
-
-
-#Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
-def _query_status_oci(
-        cluster: str,
-        ray_config: Dict[str, Any],  # pylint: disable=unused-argument
-) -> List[global_user_state.ClusterStatus]:
-    region = ray_config['provider']['region']
-
-    # Check the lifecycleState definition from the page
-    # https://docs.oracle.com/en-us/iaas/api/#/en/iaas/latest/Instance/
-    status_map = {
-        'PROVISIONING': global_user_state.ClusterStatus.INIT,
-        'STARTING': global_user_state.ClusterStatus.INIT,
-        'RUNNING': global_user_state.ClusterStatus.UP,
-        'STOPPING': global_user_state.ClusterStatus.STOPPED,
-        'STOPPED': global_user_state.ClusterStatus.STOPPED,
-        'TERMINATED': None,
-        'TERMINATING': None,
-    }
-
-    # pylint: disable=import-outside-toplevel
-    from sky.skylet.providers.oci.query_helper import oci_query_helper
-    from ray.autoscaler.tags import (
-        TAG_RAY_CLUSTER_NAME,)
-
-    status_list = []
-    vms = oci_query_helper.query_instances_by_tags(
-        tag_filters={TAG_RAY_CLUSTER_NAME: cluster}, region=region)
-    for node in vms:
-        vm_status = node.lifecycle_state
-        if vm_status in status_map:
-            sky_status = status_map[vm_status]
-            if sky_status is not None:
-                status_list.append(sky_status)
-
-    return status_list
-
-
-def _query_status_kubernetes(
-        cluster: str,
-        ray_config: Dict[str, Any],  # pylint: disable=unused-argument
-) -> List[global_user_state.ClusterStatus]:
-    # TODO(romilb): Implement this. For now, we return UP as the status.
-    #  Assuming single node cluster.
-    del cluster  # Unused.
-    del ray_config  # Unused.
-    return [global_user_state.ClusterStatus.UP]
-
-
-_QUERY_STATUS_FUNCS = {
-    'AWS': _query_status_aws,
-    'GCP': _query_status_gcp,
-    'Azure': _query_status_azure,
-    'Lambda': _query_status_lambda,
-    'IBM': _query_status_ibm,
-    'SCP': _query_status_scp,
-    'OCI': _query_status_oci,
-    'Kubernetes': _query_status_kubernetes,
-}
-
-
 def check_owner_identity(cluster_name: str) -> None:
     """Check if current user is the same as the user who created the cluster.
 
@@ -2069,14 +1709,45 @@ def check_owner_identity(cluster_name: str) -> None:
                 f'is {current_user_identity!r}.')
 
 
-def _get_cluster_status_via_cloud_cli(
+def _query_cluster_status_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
-) -> List[global_user_state.ClusterStatus]:
+) -> List[status_lib.ClusterStatus]:
     """Returns the status of the cluster."""
-    resources: sky.Resources = handle.launched_resources
-    cloud = resources.cloud
+    cluster_name = handle.cluster_name
+    # Use region and zone from the cluster config, instead of the
+    # handle.launched_resources, because the latter may not be set
+    # correctly yet.
     ray_config = common_utils.read_yaml(handle.cluster_yaml)
-    return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name, ray_config)
+    provider_config = ray_config['provider']
+    region = provider_config.get('region') or provider_config.get('location')
+    zone = ray_config['provider'].get('availability_zone')
+    kwargs = {}
+    if isinstance(handle.launched_resources.cloud, clouds.GCP):
+        kwargs['use_tpu_vm'] = ray_config['provider'].get('_has_tpus', False)
+
+    # Query the cloud provider.
+    node_statuses = handle.launched_resources.cloud.query_status(
+        cluster_name, {'ray-cluster-name': cluster_name}, region, zone,
+        **kwargs)
+    # GCP does not clean up preempted TPU VMs. We remove it ourselves.
+    # TODO(wei-lin): handle multi-node cases.
+    # TODO(zhwu): this should be moved into the GCP class, after we refactor
+    # the cluster termination, as the preempted TPU VM should always be
+    # removed.
+    if kwargs.get('use_tpu_vm', False) and len(node_statuses) == 0:
+        logger.debug(f'Terminating preempted TPU VM cluster {cluster_name}')
+        backend = backends.CloudVmRayBackend()
+        # Do not use refresh cluster status during teardown, as that will
+        # cause inifinite recursion by calling cluster status refresh
+        # again.
+        # Post teardown cleanup be done later in this function, which will remove
+        # the cluster entry from the status table & the ssh config file.
+        backend.teardown_no_lock(handle,
+                                 terminate=True,
+                                 purge=False,
+                                 post_teardown_cleanup=False,
+                                 refresh_cluster_status=False)
+    return node_statuses
 
 
 def _update_cluster_status_no_lock(
@@ -2089,10 +1760,10 @@ def _update_cluster_status_no_lock(
         return record
     cluster_name = handle.cluster_name
 
-    # Query the cloud provider.
-    node_statuses = _get_cluster_status_via_cloud_cli(handle)
-    all_nodes_up = (all(status == global_user_state.ClusterStatus.UP
-                        for status in node_statuses) and
+    node_statuses = _query_cluster_status_via_cloud_api(handle)
+
+    all_nodes_up = (all(
+        status == status_lib.ClusterStatus.UP for status in node_statuses) and
                     len(node_statuses) == handle.launched_nodes)
 
     def run_ray_status_to_check_ray_cluster_healthy() -> bool:
@@ -2146,7 +1817,7 @@ def _update_cluster_status_no_lock(
         # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.
-        record['status'] = global_user_state.ClusterStatus.UP
+        record['status'] = status_lib.ClusterStatus.UP
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 requested_resources=None,
@@ -2205,9 +1876,8 @@ def _update_cluster_status_no_lock(
     #
     # An abnormal cluster will transition to INIT and have any autostop setting
     # reset (unless it's autostopping/autodowning).
-    is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or
-                   any(status != global_user_state.ClusterStatus.STOPPED
-                       for status in node_statuses))
+    is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or any(
+        status != status_lib.ClusterStatus.STOPPED for status in node_statuses))
     if is_abnormal:
         backend = get_backend_from_handle(handle)
         if isinstance(backend,
@@ -2365,9 +2035,8 @@ def _refresh_cluster_record(
     handle = record['handle']
     if isinstance(handle, backends.CloudVmRayResourceHandle):
         use_spot = handle.launched_resources.use_spot
-        has_autostop = (
-            record['status'] != global_user_state.ClusterStatus.STOPPED and
-            record['autostop'] >= 0)
+        has_autostop = (record['status'] != status_lib.ClusterStatus.STOPPED and
+                        record['autostop'] >= 0)
         if force_refresh or has_autostop or use_spot:
             record = _update_cluster_status(
                 cluster_name,
@@ -2381,7 +2050,7 @@ def refresh_cluster_status_handle(
     *,
     force_refresh: bool = False,
     acquire_per_cluster_status_lock: bool = True,
-) -> Tuple[Optional[global_user_state.ClusterStatus],
+) -> Tuple[Optional[status_lib.ClusterStatus],
            Optional[backends.ResourceHandle]]:
     """Refresh the cluster, and return the possibly updated status and handle.
 
@@ -2396,6 +2065,9 @@ def refresh_cluster_status_handle(
     if record is None:
         return None, None
     return record['status'], record['handle']
+
+
+# =====================================
 
 
 @typing.overload
@@ -2476,7 +2148,7 @@ def check_cluster_available(
                 f'cluster {cluster_name!r}. It is only supported by backend: '
                 f'{backends.CloudVmRayBackend.NAME}.'
                 f'{reset}')
-    if cluster_status != global_user_state.ClusterStatus.UP:
+    if cluster_status != status_lib.ClusterStatus.UP:
         if onprem_utils.check_if_local_cloud(cluster_name):
             raise exceptions.ClusterNotUpError(
                 constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
@@ -2485,7 +2157,7 @@ def check_cluster_available(
                 handle=handle)
         with ux_utils.print_exception_no_traceback():
             hint_for_init = ''
-            if cluster_status == global_user_state.ClusterStatus.INIT:
+            if cluster_status == status_lib.ClusterStatus.INIT:
                 hint_for_init = (
                     f'{reset} Wait for a launch to finish, or use this command '
                     f'to try to transition the cluster to UP: {bright}sky '
@@ -2494,7 +2166,7 @@ def check_cluster_available(
                 f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for '
                 f'cluster {cluster_name!r} (status: {cluster_status.value}). '
                 'It is only allowed for '
-                f'{global_user_state.ClusterStatus.UP.value} clusters.'
+                f'{status_lib.ClusterStatus.UP.value} clusters.'
                 f'{hint_for_init}'
                 f'{reset}',
                 cluster_status=cluster_status,
