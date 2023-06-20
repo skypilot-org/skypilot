@@ -194,6 +194,7 @@ def s3_to_oci(s3_bucket_name: str, oci_bucket_name: str) -> None:
       s3_bucket_name: str; Name of the Amazon S3 Bucket
       oci_bucket_name: str; Name of the OCI Bucket
     """
+    # TODO(HysunHe): Implement sync with other clouds (s3, gs)
     raise NotImplementedError('Moving data directly from S3 to OCI bucket '
                               'is currently not supported. Please specify '
                               'a local source for the storage object.')
@@ -207,6 +208,7 @@ def gcs_to_oci(gs_bucket_name: str, oci_bucket_name: str) -> None:
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
       oci_bucket_name: str; Name of the OCI Bucket
     """
+    # TODO(HysunHe): Implement sync with other clouds (s3, gs)
     raise NotImplementedError('Moving data directly from GCS to OCI bucket '
                               'is currently not supported. Please specify '
                               'a local source for the storage object.')
@@ -233,6 +235,7 @@ def oci_to_gcs(oci_bucket_name: str, gs_bucket_name: str) -> None:
       oci_bucket_name: str; Name of the OCI Bucket
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
     """
+    # TODO(HysunHe): Implement sync with other clouds (s3, gs)
     raise NotImplementedError('Moving data directly from OCI to GCS bucket '
                               'is currently not supported. Please specify '
                               'a local source for the storage object.')
@@ -245,6 +248,7 @@ def oci_to_s3(oci_bucket_name: str, gs_bucket_name: str) -> None:
       oci_bucket_name: str; Name of the OCI Bucket
       s3_bucket_name: str; Name of the Amazon S3 Bucket
     """
+    # TODO(HysunHe): Implement sync with other clouds (s3, gs)
     raise NotImplementedError('Moving data directly from OCI to S3 bucket '
                               'is currently not supported. Please specify '
                               'a local source for the storage object.')

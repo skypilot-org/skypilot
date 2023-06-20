@@ -132,6 +132,7 @@ def verify_oci_bucket(name: str) -> bool:
     Args:
       name: str; Name of OCI Bucket (without oci:// prefix)
     """
+    # TODO(HysunHe): Implement sync with other clouds (s3, gs)
     logger.debug(f'verify_oci_bucket: {name}')
     return True
 

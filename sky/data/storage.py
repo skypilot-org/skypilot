@@ -9,9 +9,6 @@ from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
 
 import colorama
-import pathlib
-from multiprocessing import Process
-from multiprocessing import Semaphore
 
 from sky import check
 from sky import clouds
@@ -2106,23 +2103,12 @@ class OciStore(AbstractStore):
     RCLONE_VERSION = 'v1.61.1'
     RCLONE_INSTALL_FILE = f'rclone-{RCLONE_VERSION}-linux-amd64.deb'
 
-    @staticmethod
-    def get_configured_region():
-        try:
-            return oci.get_oci_config()['region']
-        except (oci.get_oci().exceptions.ConfigFileNotFound,
-                oci.get_oci().exceptions.InvalidConfig, ImportError) as e:
-            # In test env, the OCI config may not exist
-            logger.debug(f'It is OK goes here when testing: {str(e)}')
-            return 'us-sanjose-1'
-
     def __init__(self,
                  name: str,
                  source: str,
-                 region: Optional[str] = get_configured_region(),
+                 region: Optional[str] = None,
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: Optional[bool] = True):
-        logger.debug(f'OciStore - region: {region}')
         self.client: Any
         self.bucket: StorageHandle
         self.oci_config_file: str
@@ -2130,7 +2116,16 @@ class OciStore(AbstractStore):
         self.compartment: str
         self.namespace: str
         self.mount_path: str
-        self.sema = Semaphore(5)
+        # self.sema = Semaphore(5)
+
+        if region is None:
+            try:
+                region = oci.get_oci_config()['region']
+            except (oci.get_oci().exceptions.ConfigFileNotFound,
+                    oci.get_oci().exceptions.InvalidConfig, ImportError):
+                # In test env, the OCI config may not exist
+                region = 'us-sanjose-1'
+
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
 
@@ -2172,10 +2167,9 @@ class OciStore(AbstractStore):
 
     @classmethod
     def validate_name(cls, name) -> str:
-        # pylint: disable=line-too-long
         """Validates the name of the OCI store.
 
-        Source for rules: https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/managingbuckets.htm#Managing_Buckets
+        Source for rules: https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/managingbuckets.htm#Managing_Buckets # pylint: disable=line-too-long
         """
 
         def _raise_no_traceback_name_error(err_str):
@@ -2194,9 +2188,10 @@ class OciStore(AbstractStore):
             if not re.match(pattern, name):
                 _raise_no_traceback_name_error(
                     f'Invalid store name: name {name} can only contain '
-                    'upper or lower case letters, numeric characters, dashes (-), '
-                    'underscores (_), and dots (.). Spaces are not allowed. '
-                    'Names must start and end with a number or letter.')
+                    'upper or lower case letters, numeric characters, dashes '
+                    '(-), underscores (_), and dots (.). Spaces are not '
+                    'allowed. Names must start and end with a number or '
+                    'letter.')
         else:
             _raise_no_traceback_name_error('Store name must be specified.')
         return name
@@ -2242,7 +2237,7 @@ class OciStore(AbstractStore):
         """
         try:
             if isinstance(self.source, list):
-                self.oci_parallel_upload(self.source)
+                self.batch_oci_rsync(self.source, create_dirs=True)
             elif self.source is not None:
                 if self.source.startswith('s3://'):
                     self._transfer_to_oci()
@@ -2253,7 +2248,7 @@ class OciStore(AbstractStore):
                 elif self.source.startswith('oci://'):
                     pass
                 else:
-                    self.oci_parallel_upload([self.source])
+                    self.batch_oci_rsync([self.source])
         except exceptions.StorageUploadError:
             raise
         except Exception as e:
@@ -2274,110 +2269,59 @@ class OciStore(AbstractStore):
         return self.client.get_bucket(namespace_name=self.namespace,
                                       bucket_name=self.name).data
 
-    def oci_parallel_upload(self, source_path_list: List[Path]) -> None:
-        """Upload a list of local paths
+    def batch_oci_rsync(self,
+                        source_path_list: List[Path],
+                        create_dirs: bool = False) -> None:
+        """Invokes oci sync to batch upload a list of local paths to Bucket
+
+        Use OCI bulk operation to batch process the file upload
+
+        Args:
+            source_path_list: List of paths to local files or directories
+            create_dirs: If the local_path is a directory and this is set to
+                False, the contents of the directory are directly uploaded to
+                root of the bucket. If the local_path is a directory and this is
+                set to True, the directory is created in the bucket root and
+                contents are uploaded to it.
         """
+
+        def get_file_sync_command(base_dir_path, file_names):
+            includes = ' '.join(
+                [f'--include "{file_name}"' for file_name in file_names])
+            sync_command = (
+                'oci os object bulk-upload --no-follow-symlinks --overwrite '
+                f'--bucket-name {self.name} --namespace-name {self.namespace} '
+                f'--src-dir "{base_dir_path}" {includes}')
+            return sync_command
+
+        def get_dir_sync_command(src_dir_path, dest_dir_name):
+            if not str(dest_dir_name).endswith('/'):
+                dest_dir_name = f'{dest_dir_name}/'
+
+            # we exclude .git directory from the sync
+            sync_command = (
+                'oci os object bulk-upload --no-follow-symlinks --overwrite '
+                f'--bucket-name {self.name} --namespace-name {self.namespace} '
+                f'--object-prefix "{dest_dir_name}" --src-dir "{src_dir_path}" '
+                f'--exclude ".git/*" ')
+            return sync_command
+
         # Generate message for upload
         if len(source_path_list) > 1:
             source_message = f'{len(source_path_list)} paths'
         else:
             source_message = source_path_list[0]
 
-        proc_list: List[Process] = []
         with log_utils.safe_rich_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]oci://{self.name}/[/]'):
-
-            for path_str in source_path_list:
-                p = pathlib.Path(path_str)
-                if not p.exists():
-                    logger.warning(f'Path {path_str} does not exist, skip it.')
-                    continue
-
-                if path_str.endswith('/') or path_str.endswith(
-                        '/*') or path_str.endswith('/**'):
-                    relative_to = p
-                else:
-                    relative_to = p.parent.absolute()
-
-                if p.is_dir():
-                    self.process_directory(base=relative_to,
-                                           path=p,
-                                           proc_list=proc_list)
-                else:
-                    self.process_directory_objects(base=relative_to,
-                                                   obj=p,
-                                                   proc_list=proc_list)
-                for job in proc_list:
-                    job.join()
-
-    def upload_to_object_storage(self, path: str, name: str):
-        """
-        upload_to_object_storage will upload a file to an object storage bucket.
-        This function is intended to be run as a separate process. The client is
-        created with each invocation so that the separate processes do not have
-        a reference to the same client.
-
-        Args:
-            path: The path of the object to upload
-            name: The name of the object to upload
-        """
-        with open(path, 'rb') as in_file:
-            self.client.put_object(self.namespace, self.name, name, in_file)
-            self.sema.release()
-
-    def create_upload_process(self, base: pathlib.Path, obj: pathlib.Path,
-                              proc_list):
-        """
-        Create a concurrent upload process and put it in proc_list.
-
-        Args:
-            obj: The path of the object to upload
-            proc_list:The client list, The client is created with each invocation
-            so that the separate processes do not have a reference to the same
-            client.
-        """
-        if os.path.samestat(base.stat(), obj.stat()):
-            name = obj.name
-        else:
-            name = obj.relative_to(base).as_posix()
-
-        self.sema.acquire()
-        process = Process(target=self.upload_to_object_storage,
-                          args=(obj.as_posix(), name))
-        proc_list.append(process)
-        process.start()
-
-    def process_directory_objects(self, base: pathlib.Path, obj: pathlib.Path,
-                                  proc_list):
-        """
-        Check if the current object path is a file or not, if yes it will create a
-        upload process
-
-        Args:
-            obj: The path of the object to upload
-            proc_list: The client list, The client is created with each invocation so
-                       that the separate processes do not have a reference to the same
-                       client.
-        """
-        if obj.is_file():
-            self.create_upload_process(base, obj, proc_list)
-
-    def process_directory(self, base: pathlib.Path, path: pathlib.Path,
-                          proc_list):
-        """
-        Process the current directory
-
-        Args:
-            path: the path of the current directory
-            proc_list: The client list, The client is created with each invocation so that
-                    the separate processes do not have a reference to the same client.
-        """
-        for objects in path.iterdir():
-            if objects.is_dir():
-                self.process_directory(base, objects, proc_list)
-            else:
-                self.process_directory_objects(base, objects, proc_list)
+            data_utils.parallel_upload(source_path_list,
+                                       get_file_sync_command,
+                                       get_dir_sync_command,
+                                       self.name,
+                                       self._ACCESS_DENIED_MESSAGE,
+                                       create_dirs=create_dirs,
+                                       max_concurrent_uploads=1)
 
     def _transfer_to_oci(self) -> None:
         assert isinstance(self.source, str), self.source
@@ -2422,9 +2366,9 @@ class OciStore(AbstractStore):
                             'Attempted to connect to a non-existent bucket: '
                             f'{self.source}') from e
                 else:
-                    # If bucket cannot be found (i.e., does not exist), it is to be
-                    # created by Sky. However, creation is skipped if Store object
-                    # is being reconstructed for deletion.
+                    # If bucket cannot be found (i.e., does not exist), it is
+                    # to be created by Sky. However, creation is skipped if
+                    # Store object is being reconstructed for deletion.
                     if self.sync_on_reconstruction:
                         bucket = self._create_oci_bucket(self.name)
                         return bucket, True
@@ -2465,7 +2409,7 @@ class OciStore(AbstractStore):
             f' oci-config-file {self.oci_config_file}'
             f' oci-config-profile {self.config_profile}'
             f' && sed -i "s/oci-config-file/config_file/g;'
-            f' s/oci-config-profile/config_profile/g" ~/.config/rclone/rclone.conf'
+            f' s/oci-config-profile/config_profile/g" ~/.config/rclone/rclone.conf'  # pylint: disable=line-too-long
             f' && rclone mount oos_{self.name}:{self.name} {mount_path} --daemon --allow-non-empty'  # pylint: disable=line-too-long
         )
 
@@ -2536,49 +2480,22 @@ class OciStore(AbstractStore):
          bool; True if bucket was deleted, False if it was deleted externally.
         """
         logger.debug(f'_delete_oci_bucket: {bucket_name}')
-        remove_command = (f'cd {self.mount_path} && rm -rf * && '
-                          f'cd ~ && fusermount -u {self.mount_path} && '
-                          f'rclone config delete oos_{bucket_name}')
-        with log_utils.safe_rich_status(
-                f'[bold cyan]Deleting OCI bucket {bucket_name}[/]'):
-            try:
+        remove_command = (f'oci os bucket delete --bucket-name '
+                          f'{bucket_name} --empty --force')
+        try:
+            with log_utils.safe_rich_status(
+                    f'[bold cyan]Deleting OCI bucket {bucket_name}[/]'):
                 subprocess.check_output(remove_command.split(' '),
                                         stderr=subprocess.STDOUT)
-            except subprocess.CalledProcessError as e:
+        except subprocess.CalledProcessError as e:
+            if 'BucketNotFound' in e.output.decode('utf-8'):
+                logger.debug(
+                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
+                        bucket_name=bucket_name))
+                return False
+            else:
                 logger.error(e.output)
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketDeleteError(
-                        f'Failed to umount OCI bucket {bucket_name} {self.mount_path}.'
-                    ) from e
-
-            try:
-                self.client.delete_bucket(namespace_name=self.namespace,
-                                          bucket_name=bucket_name)
-            except oci.service_exception() as e:
-                if e.status == 404:
-                    # If bucket does not exist, it may have been deleted externally.
-                    # Do a no-op in that case.
-                    logger.debug(
-                        _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
-                            bucket_name=bucket_name))
-                    return False
-                else:
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageBucketDeleteError(
-                            f'Failed to delete OCI bucket {bucket_name}.'
-                        ) from e
-
-        # Wait until bucket deletion propagates on OCI servers
-        while True:
-            try:
-                time.sleep(
-                    0.5)  # wait a while so that mostly the bucket is deleted.
-                self.client.head_bucket(namespace_name=self.namespace,
-                                        bucket_name=self.name)
-            except oci.service_exception() as e:
-                if e.status == 404:  # NotFound
-                    break
-                else:
-                    logger.warning(f'Unexpected exception found while delete '
-                                   f'oci bucket: {str(e)}')
+                        f'Failed to delete OCI bucket {bucket_name}.')
         return True

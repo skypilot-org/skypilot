@@ -140,7 +140,7 @@ extras_require: Dict[str, List[str]] = {
     'lambda': [],
     'cloudflare': aws_dependencies,
     'scp': [],
-    'oci': ['oci'],
+    'oci': ['oci>=2.104,<3', 'oci-cli>=3.29,<4'],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])
