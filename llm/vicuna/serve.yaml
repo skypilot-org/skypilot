@@ -15,13 +15,7 @@ setup: |
   # Install dependencies
   pip install torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
   pip install git+https://github.com/lm-sys/FastChat.git
-  pip install git+https://github.com/huggingface/transformers.git@41a2f3529c6b56866c317031375ffd3e7b8bea01
 
-  echo "Downloading model..."
-  python3 -m fastchat.model.apply_delta \
-    --base huggyllama/llama-${MODEL_SIZE}b \
-    --target ~/vicuna-${MODEL_SIZE}b \
-    --delta lmsys/vicuna-${MODEL_SIZE}b-delta-v1.1
 
 run: |
   conda activate chatbot
@@ -30,7 +24,7 @@ run: |
   python3 -m fastchat.serve.controller > ~/controller.log 2>&1 &
   sleep 10
   echo 'Starting model worker...'
-  python3 -m fastchat.serve.model_worker --model-path ~/vicuna-${MODEL_SIZE}b > ~/model_worker.log 2>&1 &
+  python3 -m fastchat.serve.model_worker --model-path lmsys/vicuna-${MODEL_SIZE}b-v1.3 > ~/model_worker.log 2>&1 &
   sleep 10
   echo 'Starting gradio server...'
   python3 -m fastchat.serve.gradio_web_server --share | tee ~/gradio.log
