@@ -5,13 +5,9 @@ from typing import Dict
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from kubernetes.client.rest import ApiException
-
-from sky.skylet.providers.kubernetes import core_api, log_prefix, networking_api, get_head_ssh_port, KubernetesError
-from sky.skylet.providers.kubernetes.config import (
-    bootstrap_kubernetes,
-    fillout_resources_kubernetes,
-)
+from sky.adaptors import kubernetes
+from sky.skylet.providers.kubernetes import get_head_ssh_port
+from sky.skylet.providers.kubernetes import config
 from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler._private.cli_logger import cli_logger
 from ray.autoscaler.node_provider import NodeProvider
@@ -67,7 +63,7 @@ class KubernetesNodeProvider(NodeProvider):
 
         tag_filters[TAG_RAY_CLUSTER_NAME] = self.cluster_name
         label_selector = to_label_selector(tag_filters)
-        pod_list = core_api().list_namespaced_pod(self.namespace,
+        pod_list = kubernetes.core_api().list_namespaced_pod(self.namespace,
                                                   field_selector=field_selector,
                                                   label_selector=label_selector)
 
@@ -80,48 +76,45 @@ class KubernetesNodeProvider(NodeProvider):
         ]
 
     def is_running(self, node_id):
-        pod = core_api().read_namespaced_pod(node_id, self.namespace)
+        pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
         return pod.status.phase == "Running"
 
     def is_terminated(self, node_id):
-        pod = core_api().read_namespaced_pod(node_id, self.namespace)
+        pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
         return pod.status.phase not in ["Running", "Pending"]
 
     def node_tags(self, node_id):
-        pod = core_api().read_namespaced_pod(node_id, self.namespace)
+        pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
         return pod.metadata.labels
 
     def external_ip(self, node_id):
         #
         # Return the IP address of the first node with an external IP
-        nodes = core_api().list_node().items
+        nodes = kubernetes.core_api().list_node().items
         for node in nodes:
             if node.status.addresses:
                 for address in node.status.addresses:
                     if address.type == "ExternalIP":
                         return address.address
         # If no external IP is found, use the API server IP
-        api_host = core_api().api_client.configuration.host
+        api_host = kubernetes.core_api().api_client.configuration.host
         parsed_url = urlparse(api_host)
         return parsed_url.hostname
 
     def external_port(self, node_id):
         # Extract the NodePort of the head node's SSH service
-        # TODO(romilb): Implement caching here for performance
-        #
         # Node id is str e.g., example-cluster-ray-head-v89lb
-        cli_logger.print("GETTING HEAD NODE SSH! MULTINODE WOULD FAIL!")
+
+        # TODO(romilb): Implement caching here for performance
+        # TODO(romilb): Multi-node would need more handling here
         cluster_name = node_id.split('-ray-head')[0]
         return get_head_ssh_port(cluster_name, self.namespace)
 
     def internal_ip(self, node_id):
-        pod = core_api().read_namespaced_pod(node_id, self.namespace)
+        pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
         return pod.status.pod_ip
 
     def get_node_id(self, ip_address, use_internal_ip=True) -> str:
-        # if not use_internal_ip:
-        #     raise ValueError("Must use internal IPs with Kubernetes.")
-        # Overriding parent method to use ip+port as cache
         def find_node_id():
             if use_internal_ip:
                 return self._internal_ip_cache.get(ip_address)
@@ -150,9 +143,9 @@ class KubernetesNodeProvider(NodeProvider):
             try:
                 self._set_node_tags(node_ids, tags)
                 return
-            except ApiException as e:
+            except kubernetes.api_exception() as e:
                 if e.status == 409:
-                    logger.info(log_prefix + "Caught a 409 error while setting"
+                    logger.info(kubernetes.log_prefix + "Caught a 409 error while setting"
                                 " node tags. Retrying...")
                     time.sleep(DELAY_BEFORE_TAG_RETRY)
                     continue
@@ -162,9 +155,9 @@ class KubernetesNodeProvider(NodeProvider):
         self._set_node_tags(node_ids, tags)
 
     def _set_node_tags(self, node_id, tags):
-        pod = core_api().read_namespaced_pod(node_id, self.namespace)
+        pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
         pod.metadata.labels.update(tags)
-        core_api().patch_namespaced_pod(node_id, self.namespace, pod)
+        kubernetes.core_api().patch_namespaced_pod(node_id, self.namespace, pod)
 
     def create_node(self, node_config, tags, count):
         conf = copy.deepcopy(node_config)
@@ -185,16 +178,16 @@ class KubernetesNodeProvider(NodeProvider):
             head_selector = head_service_selector(self.cluster_name)
             pod_spec["metadata"]["labels"].update(head_selector)
 
-        logger.info(log_prefix +
+        logger.info(config.log_prefix +
                     "calling create_namespaced_pod (count={}).".format(count))
         new_nodes = []
         for _ in range(count):
-            pod = core_api().create_namespaced_pod(self.namespace, pod_spec)
+            pod = kubernetes.core_api().create_namespaced_pod(self.namespace, pod_spec)
             new_nodes.append(pod)
 
         new_svcs = []
         if service_spec is not None:
-            logger.info(log_prefix + "calling create_namespaced_service "
+            logger.info(config.log_prefix + "calling create_namespaced_service "
                         "(count={}).".format(count))
 
             for new_node in new_nodes:
@@ -203,12 +196,12 @@ class KubernetesNodeProvider(NodeProvider):
                 metadata["name"] = new_node.metadata.name
                 service_spec["metadata"] = metadata
                 service_spec["spec"]["selector"] = {"ray-node-uuid": node_uuid}
-                svc = core_api().create_namespaced_service(
+                svc = kubernetes.core_api().create_namespaced_service(
                     self.namespace, service_spec)
                 new_svcs.append(svc)
 
         if ingress_spec is not None:
-            logger.info(log_prefix + "calling create_namespaced_ingress "
+            logger.info(config.log_prefix + "calling create_namespaced_ingress "
                         "(count={}).".format(count))
             for new_svc in new_svcs:
                 metadata = ingress_spec.get("metadata", {})
@@ -216,7 +209,7 @@ class KubernetesNodeProvider(NodeProvider):
                 ingress_spec["metadata"] = metadata
                 ingress_spec = _add_service_name_to_service_port(
                     ingress_spec, new_svc.metadata.name)
-                networking_api().create_namespaced_ingress(
+                kubernetes.networking_api().create_namespaced_ingress(
                     self.namespace, ingress_spec)
 
         # Wait for all pods to be ready, and if it exceeds the timeout, raise an
@@ -228,13 +221,13 @@ class KubernetesNodeProvider(NodeProvider):
         start = time.time()
         while True:
             if time.time() - start > TIMEOUT:
-                raise KubernetesError(
+                raise config.KubernetesError(
                     "Timed out while waiting for nodes to start. "
                     "Cluster may be out of resources or "
                     "may be too slow to autoscale.")
             all_ready = True
             for node in new_nodes:
-                pod = core_api().read_namespaced_pod(node.metadata.name,
+                pod = kubernetes.core_api().read_namespaced_pod(node.metadata.name,
                                                      self.namespace)
                 if pod.status.phase == "Pending":
                     # Check conditions for more detailed status
@@ -257,26 +250,26 @@ class KubernetesNodeProvider(NodeProvider):
             time.sleep(1)
 
     def terminate_node(self, node_id):
-        logger.info(log_prefix + "calling delete_namespaced_pod")
+        logger.info(config.log_prefix + "calling delete_namespaced_pod")
         try:
-            core_api().delete_namespaced_pod(node_id, self.namespace)
-        except ApiException as e:
+            kubernetes.core_api().delete_namespaced_pod(node_id, self.namespace)
+        except kubernetes.api_exception() as e:
             if e.status == 404:
-                logger.warning(log_prefix + f"Tried to delete pod {node_id},"
+                logger.warning(config.log_prefix + f"Tried to delete pod {node_id},"
                                " but the pod was not found (404).")
             else:
                 raise
         try:
-            core_api().delete_namespaced_service(node_id, self.namespace)
-            core_api().delete_namespaced_service(f'{node_id}-ssh', self.namespace)
-        except ApiException:
+            kubernetes.core_api().delete_namespaced_service(node_id, self.namespace)
+            kubernetes.core_api().delete_namespaced_service(f'{node_id}-ssh', self.namespace)
+        except kubernetes.api_exception():
             pass
         try:
-            networking_api().delete_namespaced_ingress(
+            kubernetes.networking_api().delete_namespaced_ingress(
                 node_id,
                 self.namespace,
             )
-        except ApiException:
+        except kubernetes.api_exception():
             pass
 
     def terminate_nodes(self, node_ids):
@@ -330,12 +323,12 @@ class KubernetesNodeProvider(NodeProvider):
 
     @staticmethod
     def bootstrap_config(cluster_config):
-        return bootstrap_kubernetes(cluster_config)
+        return config.bootstrap_kubernetes(cluster_config)
 
     @staticmethod
     def fillout_available_node_types_resources(cluster_config):
         """Fills out missing "resources" field for available_node_types."""
-        return fillout_resources_kubernetes(cluster_config)
+        return config.fillout_resources_kubernetes(cluster_config)
 
 
 def _add_service_name_to_service_port(spec, svc_name):
