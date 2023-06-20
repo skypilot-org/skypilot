@@ -278,9 +278,14 @@ class OciCloudStorage(CloudStorage):
         """Downloads a file using OCI CLI."""
         bucket_name, path = data_utils.split_oci_path(source)
         filename = os.path.basename(path)
-        download_via_ocicli = (
-            f'oci os object get --bucket-name {bucket_name} '
-            f'--name "{path}" --file "{destination}/{filename}"')
+
+        if destination.endswith('/'):
+            destination = f'{destination}{filename}'
+        else:
+            destination = f'{destination}/{filename}'
+
+        download_via_ocicli = (f'oci os object get --bucket-name {bucket_name} '
+                               f'--name "{path}" --file "{destination}"')
 
         all_commands = list(self._GET_OCICLI)
         all_commands.append(download_via_ocicli)
