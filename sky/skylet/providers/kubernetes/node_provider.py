@@ -268,6 +268,7 @@ class KubernetesNodeProvider(NodeProvider):
                 raise
         try:
             core_api().delete_namespaced_service(node_id, self.namespace)
+            core_api().delete_namespaced_service(f'{node_id}-ssh', self.namespace)
         except ApiException:
             pass
         try:
