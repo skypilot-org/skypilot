@@ -2106,10 +2106,21 @@ class OciStore(AbstractStore):
     RCLONE_VERSION = 'v1.61.1'
     RCLONE_INSTALL_FILE = f'rclone-{RCLONE_VERSION}-linux-amd64.deb'
 
+    @staticmethod
+    def get_configured_region():
+        try:
+            return oci.get_oci_config()['region']
+        except (oci.get_oci().exceptions.ConfigFileNotFound,
+                oci.get_oci().exceptions.InvalidConfig,
+                ImportError) as e:
+            # In test env, the OCI config may not exist
+            logger.debug(f'It is OK goes here when testing: {str(e)}')
+            return 'us-sanjose-1'
+
     def __init__(self,
                  name: str,
                  source: str,
-                 region: Optional[str] = oci.get_oci_config()['region'],
+                 region: Optional[str] = get_configured_region(),
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: Optional[bool] = True):
         logger.debug(f'OciStore - region: {region}')
@@ -2363,12 +2374,11 @@ class OciStore(AbstractStore):
             proc_list: The client list, The client is created with each invocation so that
                     the separate processes do not have a reference to the same client.
         """
-        if path.exists():
-            for objects in path.iterdir():
-                if objects.is_dir():
-                    self.process_directory(base, objects, proc_list)
-                else:
-                    self.process_directory_objects(base, objects, proc_list)
+        for objects in path.iterdir():
+            if objects.is_dir():
+                self.process_directory(base, objects, proc_list)
+            else:
+                self.process_directory_objects(base, objects, proc_list)
 
     def _transfer_to_oci(self) -> None:
         assert isinstance(self.source, str), self.source
