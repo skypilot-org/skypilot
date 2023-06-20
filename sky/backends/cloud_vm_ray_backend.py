@@ -1330,7 +1330,10 @@ class RetryingVmProvisioner(object):
         assert to_provision.region is not None, (
             to_provision, 'region should have been set by the optimizer.')
         region = clouds.Region(to_provision.region)
-
+        
+        # Optimization - check if user has non-zero quota for 
+        # the instance type in the target region. If not, fail early 
+        # instead of trying to provision and failing later.
         try:
             has_non_zero_quota = to_provision.cloud.check_quota_not_zero(
                 to_provision.region, to_provision.instance_type,
@@ -1338,6 +1341,10 @@ class RetryingVmProvisioner(object):
 
         except Exception as e:  # pylint: disable=broad-except
             has_non_zero_quota = True
+            logger.info(
+                f'Error occurred when trying to check quota. '
+                f'Proceeding assuming quotas are available. Error: {str(e)}'
+            )
 
         if not has_non_zero_quota:
             # if quota is found to be zero, raise exception and skip to
