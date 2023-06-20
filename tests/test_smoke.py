@@ -2215,7 +2215,7 @@ class TestStorageWithCredentials:
                                              source=list_source)
 
     @pytest.fixture
-    def tmp_bulk_del_storage_obj(self, tmp_bucket_name, tmp_source):
+    def tmp_bulk_del_storage_obj(self, tmp_bucket_name):
         # Creates a temporary storage object for testing bulk deletion.
         # Stores must be added in the test.
         with tempfile.TemporaryDirectory() as tmpdir:
