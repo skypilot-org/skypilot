@@ -3701,8 +3701,16 @@ def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool,
 
 
 @spot.command('dashboard', cls=_DocumentedCodeCommand)
+@click.option(
+    '--port',
+    '-p',
+    default=None,
+    type=int,
+    required=False,
+    help=('Local port to use for the dashboard. If None, a free port is '
+          'automatically chosen.'))
 @usage_lib.entrypoint
-def spot_dashboard():
+def spot_dashboard(port: Optional[int]):
     """Opens a dashboard for spot jobs (needs controller to be UP)."""
     # TODO(zongheng): ideally, the controller/dashboard server should expose the
     # API perhaps via REST. Then here we would (1) not have to use SSH to try to
@@ -3719,7 +3727,10 @@ def spot_dashboard():
         sys.exit(1)
     # SSH forward a free local port to remote's dashboard port.
     remote_port = constants.SPOT_DASHBOARD_REMOTE_PORT
-    free_port = common_utils.find_free_port(remote_port)
+    if port is None:
+        free_port = common_utils.find_free_port(remote_port)
+    else:
+        free_port = port
     ssh_command = (f'ssh -qNL {free_port}:localhost:{remote_port} '
                    f'{spot_lib.SPOT_CONTROLLER_NAME}')
     click.echo('Forwarding port: ', nl=False)
@@ -3737,7 +3748,11 @@ def spot_dashboard():
     except KeyboardInterrupt:
         # When user presses Ctrl-C in terminal, exits the previous ssh command
         # so that <free local port> is freed up.
-        os.killpg(os.getpgid(ssh_process.pid), signal.SIGTERM)
+        try:
+            os.killpg(os.getpgid(ssh_process.pid), signal.SIGTERM)
+        except ProcessLookupError:
+            # This happens if spot controller is auto-stopped.
+            pass
 
 
 # ==============================

@@ -445,26 +445,24 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
 @typing.overload
 def format_job_table(tasks: List[Dict[str, Any]],
                      show_all: bool,
-                     max_jobs: Optional[int] = None,
-                     *,
-                     return_rows: Literal[False] = False) -> str:
+                     return_rows: Literal[False] = False,
+                     max_jobs: Optional[int] = None) -> str:
     ...
 
 
 @typing.overload
 def format_job_table(tasks: List[Dict[str, Any]],
                      show_all: bool,
-                     max_jobs: Optional[int] = None,
-                     *,
-                     return_rows: Literal[True] = True) -> List[List[str]]:
+                     return_rows: Literal[True] = True,
+                     max_jobs: Optional[int] = None) -> List[List[str]]:
     ...
 
 
-def format_job_table(tasks: List[Dict[str, Any]],
-                     show_all: bool,
-                     max_jobs: Optional[int] = None,
-                     *,
-                     return_rows: bool = False) -> Union[str, List[List[str]]]:
+def format_job_table(
+        tasks: List[Dict[str, Any]],
+        show_all: bool,
+        return_rows: bool = False,
+        max_jobs: Optional[int] = None) -> Union[str, List[List[str]]]:
     """Returns spot jobs as a formatted string.
 
     Args:

@@ -1,13 +1,20 @@
-"""Dashboard for spot jobs based on Flask."""
+"""Dashboard for spot jobs based on Flask.
+
+TODO(zongheng): This is a basic version. In the future we can beef up the web
+frameworks used (e.g.,
+https://github.com/ray-project/ray/tree/master/dashboard/client/src) and/or get
+rid of the SSH port-forwarding business (see cli.py's spot_dashboard()
+comment).
+"""
 import datetime
 import pathlib
-import re
 import yaml
 
 import flask
 
 import sky
 from sky import spot
+from sky.utils import common_utils
 
 app = flask.Flask(__name__)
 
@@ -49,7 +56,7 @@ def home():
 
     # Fix STATUS color codes: '\x1b[33mCANCELLED\x1b[0m' -> 'CANCELLED'.
     for row in rows:
-        row[-5] = re.sub(r'[^A-Z_]', '', row[-5])
+        row[-5] = common_utils.remove_color(row[-5])
     # Remove filler rows ([''], ..., ['-']).
     rows = [row for row in rows if ''.join(map(str, row)) != '']
 
