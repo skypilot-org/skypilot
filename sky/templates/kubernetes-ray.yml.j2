@@ -183,8 +183,7 @@ available_node_types:
       apiVersion: v1
       kind: Pod
       metadata:
-        # Automatically generates a name for the pod with this prefix.
-        generateName: {{cluster_name}}-ray-head-
+        name: {{cluster_name}}-ray-head
         # Must match the head node service selector above if a head node
         # service is required.
         labels:
