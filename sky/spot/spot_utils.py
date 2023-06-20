@@ -6,7 +6,8 @@ import pathlib
 import shlex
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
+from typing_extensions import Literal
 
 import colorama
 import filelock
@@ -426,6 +427,7 @@ def dump_spot_job_queue() -> str:
                 f'{handle.launched_nodes}x {handle.launched_resources}')
             job['region'] = handle.launched_resources.region
         else:
+            # FIXME(zongheng): display the last cached values for these.
             job['cluster_resources'] = '-'
             job['region'] = '-'
 
@@ -440,15 +442,38 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
+@typing.overload
 def format_job_table(tasks: List[Dict[str, Any]],
                      show_all: bool,
+                     return_rows: Literal[False] = False,
                      max_jobs: Optional[int] = None) -> str:
+    ...
+
+
+@typing.overload
+def format_job_table(tasks: List[Dict[str, Any]],
+                     show_all: bool,
+                     return_rows: Literal[True],
+                     max_jobs: Optional[int] = None) -> List[List[str]]:
+    ...
+
+
+def format_job_table(
+        tasks: List[Dict[str, Any]],
+        show_all: bool,
+        return_rows: bool = False,
+        max_jobs: Optional[int] = None) -> Union[str, List[List[str]]]:
     """Returns spot jobs as a formatted string.
 
     Args:
         jobs: A list of spot jobs.
         show_all: Whether to show all columns.
         max_jobs: The maximum number of jobs to show in the table.
+        return_rows: If True, return the rows as a list of strings instead of
+          all rows concatenated into a single string.
+
+    Returns: A formatted string of spot jobs, if not `return_rows`; otherwise a
+      list of "rows" (each of which is a list of str).
     """
     columns = [
         'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
@@ -586,6 +611,8 @@ def format_job_table(tasks: List[Dict[str, Any]],
     output = status_str
     if str(job_table):
         output += f'\n{job_table}'
+    if return_rows:
+        return job_table.rows
     return output
 
 
@@ -695,6 +722,7 @@ def load_job_table_cache() -> Optional[Tuple[float, str]]:
 
 def is_spot_controller_up(
     stopped_message: str,
+    non_existent_message: str = 'No managed spot jobs are found.',
 ) -> Tuple[Optional[status_lib.ClusterStatus],
            Optional['backends.CloudVmRayResourceHandle']]:
     """Check if the spot controller is up.
@@ -702,6 +730,10 @@ def is_spot_controller_up(
     It can be used to check the actual controller status (since the autostop is
     set for the controller) before the spot commands interact with the
     controller.
+
+    Args:
+        stopped_message: Message to print if the controller is STOPPED.
+        non_existent_message: Message to show if the controller does not exist.
 
     Returns:
         controller_status: The status of the spot controller. If it fails during
@@ -739,7 +771,7 @@ def is_spot_controller_up(
             controller_status, handle = record['status'], record['handle']
 
     if controller_status is None:
-        sky_logging.print('No managed spot jobs are found.')
+        sky_logging.print(non_existent_message)
     elif controller_status != status_lib.ClusterStatus.UP:
         msg = (f'Spot controller {SPOT_CONTROLLER_NAME} '
                f'is {controller_status.value}.')
