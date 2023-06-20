@@ -209,6 +209,8 @@ setup_commands:
     python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
     {%- if use_docker %}
+    sudo sed -i 's/#Port 22/Port {{docker_port}}/' /etc/ssh/sshd_config;
+    sudo service ssh start;
     echo "{{public_key}}" >> ~/.ssh/authorized_keys;
     sudo sed -i 's/mesg n/tty -s \&\& mesg n/' ~/.profile;
     {%- endif %}

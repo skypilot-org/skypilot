@@ -2173,15 +2173,15 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         from sky.backends import docker_utils
         if len(ip_list) == 1:
             # Setup head node.
-            docker_user = docker_utils.docker_host_setup(
-                ip_list[0], cluster_config_file)
+            docker_user = docker_utils.get_docker_user(ip_list[0],
+                                                       cluster_config_file)
             self.docker_user = docker_user
         else:
             # Setup docker for all worker nodes. Head node setup is done
             # in `backend_utils.wait_until_ray_cluster_ready`.
             # Skip head ip here.
             for worker_ip in ip_list[1:]:
-                docker_user = docker_utils.docker_host_setup(
+                docker_user = docker_utils.get_docker_user(
                     worker_ip, cluster_config_file)
                 if self.docker_user is not None:
                     assert docker_user == self.docker_user
@@ -2593,8 +2593,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             usage_lib.messages.usage.update_final_cluster_status(
                 global_user_state.ClusterStatus.UP)
             auth_config = common_utils.read_yaml(handle.cluster_yaml)['auth']
-            if handle.docker_user:
-                auth_config['ssh_user'] = handle.docker_user
             backend_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
                                                       ip_list, auth_config)
 
@@ -3533,8 +3531,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # be removed after the cluster entry in the database is removed.
         config = common_utils.read_yaml(handle.cluster_yaml)
         auth_config = config['auth']
-        if handle.docker_user:
-            auth_config['ssh_user'] = handle.docker_user
         backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name,
                                                      handle.head_ip,
                                                      auth_config)

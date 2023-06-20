@@ -402,8 +402,6 @@ class SSHConfigHelper(object):
             """.rstrip())
         codegen = codegen + '\n'
         return codegen
-        # TODO(tian): add a host_name + '-host' option with Port=10022
-        # to enable ssh into host machine when we are running with docker
 
     @classmethod
     @timeline.FileLockEvent(ssh_conf_lock_path)
@@ -928,6 +926,7 @@ def write_cluster_config(
                 'docker_image': docker_image,
                 'docker_container_name':
                     docker_utils.DEFAULT_DOCKER_CONTAINER_NAME,
+                'docker_port': docker_utils.DEFAULT_DOCKER_PORT,
 
                 # Azure only:
                 'azure_subscription_id': azure_subscription_id,
@@ -1138,8 +1137,7 @@ def wait_until_ray_cluster_ready(
     if use_docker:
         # pylint: disable=import-outside-toplevel
         from sky.backends import docker_utils
-        docker_user = docker_utils.docker_host_setup(head_ip,
-                                                     cluster_config_file)
+        docker_user = docker_utils.get_docker_user(head_ip, cluster_config_file)
 
     if num_nodes <= 1:
         return True, docker_user
@@ -1228,11 +1226,14 @@ def ssh_credential_from_yaml(cluster_yaml: str,
     ssh_private_key = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
+    # pylint: disable=import-outside-toplevel
+    from sky.backends import docker_utils
     return {
         'ssh_user': ssh_user,
         'ssh_private_key': ssh_private_key,
         'ssh_control_name': ssh_control_name,
         'ssh_proxy_command': ssh_proxy_command,
+        'port': docker_utils.DEFAULT_DOCKER_PORT if docker_user else '22'
     }
 
 

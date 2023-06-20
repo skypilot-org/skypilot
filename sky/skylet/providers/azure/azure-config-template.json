@@ -67,7 +67,7 @@
                         }
                     },
                     {
-                        "name": "SSH-DOCKER-HOST",
+                        "name": "SSH-DOCKER",
                         "properties": {
                             "priority": 1000,
                             "protocol": "TCP",

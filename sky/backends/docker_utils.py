@@ -34,6 +34,7 @@ DOCKERFILE_RUNCMD = """CMD {run_command}"""
 
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
+DEFAULT_DOCKER_PORT = '10022'
 
 CONDA_SETUP_PREFIX = '. $(conda info --base)/etc/profile.d/conda.sh 2> ' \
                      '/dev/null || true '
@@ -152,13 +153,8 @@ def _execute_build(tag, context_path):
         raise
 
 
-def docker_host_setup(ip: str, cluster_config_file: str) -> str:
-    """
-    Performs setup on the docker host. This setup do 2 things:
-      1. Find docker container username.
-      2. Change the host ssh port to 10022 and enable ssh login
-         to the docker container.
-    """
+def get_docker_user(ip: str, cluster_config_file: str) -> str:
+    """Find docker container username."""
     # pylint: disable=import-outside-toplevel
     from sky.backends import backend_utils
     from sky.utils import command_runner
@@ -174,22 +170,6 @@ def docker_host_setup(ip: str, cluster_config_file: str) -> str:
         f'code: {whoami_returncode}, Error: {whoami_stderr}')
     docker_user = whoami_stdout.strip()
     logger.debug(f'Docker container user: {docker_user}')
-    # Change host ssh port to 10022 to avoid conflict with docker.
-    # Docker is running with --net=host, which means the container
-    # will have the same IP address as the host machine. If both
-    # container and host sshd are running on the same port, the
-    # docker sshd will fail to start. So we change the host ssh
-    # port to 10022 to avoid conflict with docker, in the same time
-    # we restart the docker sshd service.
-    docker_host_ssh_setup_commands = [
-        'sudo sed -i "s/#Port 22/Port 10022/" /etc/ssh/sshd_config',
-        'sudo systemctl restart sshd',
-        # Restart ssh service in docker here since previous default
-        # ssh port is occupied by the host.
-        f'sudo docker exec {DEFAULT_DOCKER_CONTAINER_NAME} '
-        'bash --login -c -i "sudo service ssh restart"'
-    ]
-    runner.run('; '.join(docker_host_ssh_setup_commands), stream_logs=False)
     return docker_user
 
 
@@ -355,6 +335,13 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             user_docker_run_options = self.docker_config.get(
                 'run_options', []) + self.docker_config.get(
                     f'{"head" if as_head else "worker"}_run_options', [])
+
+            # Setup workdir mount for stop-start recovery
+            container_workdir = os.path.join(home_directory, "sky_workdir")
+            user_docker_run_options += [
+                f'-v ~/sky_workdir:{container_workdir}'
+            ]
+
             start_command = docker_start_cmds(
                 self.ssh_command_runner.ssh_user,
                 specific_image,
