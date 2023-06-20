@@ -1,5 +1,9 @@
+from typing import List
+
 import kubernetes
 from kubernetes.config.config_exception import ConfigException
+
+from sky import status_lib
 
 _configured = False
 _core_api = None
@@ -7,6 +11,7 @@ _auth_api = None
 _networking_api = None
 _custom_objects_api = None
 
+log_prefix = "KubernetesNodeProvider: "
 
 def _load_config():
     global _configured
@@ -65,7 +70,23 @@ def get_port(svc_name, namespace):
     return head_service.spec.ports[0].node_port
 
 
-log_prefix = "KubernetesNodeProvider: "
+def get_cluster_status(cluster_name: str, namespace: str) -> List[status_lib.ClusterStatus]:
+    # Get all the pods with the label skypilot-cluster: <cluster_name>
+    pods = core_api().list_namespaced_pod(namespace, label_selector=f'skypilot-cluster={cluster_name}').items
+
+    # Check if the pods are running or pending
+    cluster_status = []
+    for pod in pods:
+        if pod.status.phase == 'Running':
+            cluster_status.append(status_lib.ClusterStatus(cluster_name, status_lib.ClusterStatus.UP))
+        elif pod.status.phase == 'Pending':
+            cluster_status.append(status_lib.ClusterStatus(cluster_name, status_lib.ClusterStatus.INIT))
+    # If pods are not found, we don't add them to the return list
+    return cluster_status
+
+
+
+
 
 
 class KubernetesError(Exception):

@@ -74,6 +74,7 @@ provider:
         metadata:
           labels:
             parent: skypilot
+            skypilot-cluster: {{cluster_name}}
           name: {{cluster_name}}-ray-head-ssh
         spec:
           type: NodePort
@@ -89,6 +90,7 @@ provider:
         metadata:
             labels:
               parent: skypilot
+              skypilot-cluster: {{cluster_name}}
             # NOTE: If you're running multiple Ray clusters with services
             # on one Kubernetes cluster, they must have unique service
             # names.
@@ -125,6 +127,7 @@ available_node_types:
       metadata:
         labels:
           parent: skypilot
+          skypilot-cluster: {{cluster_name}}
         # Automatically generates a name for the pod with this prefix.
         generateName: {{cluster_name}}-ray-worker-
       spec:
@@ -189,6 +192,7 @@ available_node_types:
         labels:
             parent: skypilot
             component: {{cluster_name}}-ray-head
+            skypilot-cluster: {{cluster_name}}
       spec:
         # Change this if you altered the autoscaler_service_account above
         # or want to provide your own.

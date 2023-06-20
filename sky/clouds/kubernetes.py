@@ -7,7 +7,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds, status_lib
 from sky.utils import common_utils
-from sky.skylet.providers.kubernetes.utils import get_port
+from sky.skylet.providers.kubernetes import utils as kubernetes_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -183,7 +183,7 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def get_port(cls, svc_name, namespace) -> int:
-        return get_port(svc_name, namespace)
+        return kubernetes_utils.get_port(svc_name, namespace)
 
     @classmethod
     def get_default_instance_type(
@@ -341,8 +341,9 @@ class Kubernetes(clouds.Cloud):
                      **kwargs) -> List['status_lib.ClusterStatus']:
         # TODO(romilb): Implement this. For now, we return UP as the status.
         #  Assuming single node cluster.
-        del name, tag_filters, region, zone, kwargs  # Unused.
-        # Assume single node cluster.
+        del tag_filters, region, zone, kwargs  # Unused.
         return [status_lib.ClusterStatus.UP]
+        # TODO(romilb): Change from default namespace to user-specified namespace
+        # return kubernetes_utils.get_cluster_status(cluster_name=name, namespace='default')
 
 
