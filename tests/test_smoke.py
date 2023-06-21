@@ -2352,6 +2352,18 @@ class TestStorageWithCredentials:
         yield from self.yield_storage_object(name=tmp_bucket_name)
 
     @pytest.fixture
+    def tmp_multiple_scratch_storage_obj(self):
+        # Creates a list of 5 storage objects with no source to create
+        # multiple scratch storages.
+        # Stores for each object in the list must be added in the test.
+        storage_mult_obj = []
+        for _ in range(5):
+            timestamp = str(time.time()).replace('.', '')
+            store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}')
+            storage_mult_obj.append(store_obj)
+        yield storage_mult_obj
+
+    @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):
         # Creates a temporary storage object. Stores must be added in the test.
         yield from self.yield_storage_object(name=tmp_bucket_name,
@@ -2438,20 +2450,14 @@ class TestStorageWithCredentials:
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
-    def test_multiple_buckets_creation_and_deletion(self, store_type):
-        # Creates multiple new buckets(5 buckets) with a local source, uploads
-        # files and deletes them.
+    def test_multiple_buckets_creation_and_deletion(
+            self, tmp_multiple_scratch_storage_obj, store_type):
+        # Creates multiple new buckets(5 buckets) with a local source
+        # and deletes them.
         storage_obj_name = []
-        for _ in range(5):
-            timestamp = str(time.time()).replace('.', '')
-            with tempfile.TemporaryDirectory() as tmpdir:
-                subprocess.check_output(f'mkdir -p {tmpdir}', shell=True)
-                subprocess.check_output(f'touch {tmpdir}/test-{timestamp}.txt',
-                                        shell=True)
-                store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
-                                                source=tmpdir)
-                store_obj.add_store(store_type)
-                storage_obj_name.append(store_obj.name)
+        for store_obj in tmp_multiple_scratch_storage_obj:
+            store_obj.add_store(store_type)
+            storage_obj_name.append(store_obj.name)
 
         # Run sky storage ls to check if all storage objects exists in the
         # output
