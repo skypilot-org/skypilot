@@ -479,8 +479,8 @@ class GCP(clouds.Cloud):
         if application_key_path:
             if not os.path.isfile(os.path.expanduser(application_key_path)):
                 raise FileNotFoundError(
-                    f'{_GCP_APPLICATION_CREDENTIAL_ENV}={application_key_path}, '
-                    'but the file does not exist.')
+                    f'{_GCP_APPLICATION_CREDENTIAL_ENV}={application_key_path},'
+                    ' but the file does not exist.')
             return application_key_path
         if (not os.path.isfile(
                 os.path.expanduser(DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH))):
