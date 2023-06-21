@@ -44,7 +44,6 @@ GCP_PREMISSION_CHECK_LIST = [
 # Minimum set of files under ~/.config/gcloud that grant GCP access.
 _CREDENTIAL_FILES = [
     'credentials.db',
-    'application_default_credentials.json',
     'access_tokens.db',
     'configurations',
     'legacy_credentials',
@@ -471,6 +470,24 @@ class GCP(clouds.Cloud):
                                                                 clouds='gcp')
 
     @classmethod
+    def _find_application_key_path(cls) -> str:
+        # Check the application default credentials in the environment variable.
+        # If the file does not exist, fallback to the default path.
+        application_key_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS',
+                                              None)
+        if application_key_path:
+            if not os.path.isfile(os.path.expanduser(application_key_path)):
+                raise FileNotFoundError(
+                    f'GOOGLE_APPLICATION_CREDENTIALS={application_key_path}, '
+                    'but the file does not exist.')
+            return application_key_path
+        if (not os.path.isfile(
+                os.path.expanduser(DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH))):
+            # Fallback to the default application credential path.
+            raise FileNotFoundError(DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH)
+        return DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
+
+    @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
@@ -485,10 +502,12 @@ class GCP(clouds.Cloud):
             for file in [
                     '~/.config/gcloud/access_tokens.db',
                     '~/.config/gcloud/credentials.db',
-                    '~/.config/gcloud/application_default_credentials.json'
             ]:
                 if not os.path.isfile(os.path.expanduser(file)):
                     raise FileNotFoundError(file)
+
+            cls._find_application_key_path()
+
             # Check the installation of google-cloud-sdk.
             _run_output('gcloud --version')
 
@@ -500,7 +519,7 @@ class GCP(clouds.Cloud):
         except (auth.exceptions.DefaultCredentialsError,
                 subprocess.CalledProcessError,
                 exceptions.CloudUserIdentityError, FileNotFoundError,
-                ImportError):
+                ImportError) as e:
             # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
                 'GCP tools are not installed or credentials are not set. '
@@ -515,6 +534,7 @@ class GCP(clouds.Cloud):
                 '  $ gcloud auth application-default login\n    '
                 'For more info: '
                 'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
+                f'\nDetails: {common_utils.format_exception(e, use_bracket=True)}'
             )
 
         # Check APIs.
@@ -611,6 +631,10 @@ class GCP(clouds.Cloud):
             f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
             for filename in _CREDENTIAL_FILES
         }
+        # Upload the application key path to the default path, so that
+        # autostop and GCS can be accessed on the remote cluster.
+        credentials[DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH] = (
+            self._find_application_key_path())
         credentials[GCP_CONFIG_SKY_BACKUP_PATH] = GCP_CONFIG_SKY_BACKUP_PATH
         return credentials
 
