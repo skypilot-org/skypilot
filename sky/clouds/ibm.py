@@ -377,6 +377,10 @@ class IBM(clouds.Cloud):
                     '      resource_group_id: <RESOURCE_GROUP_ID>')
         base_config = ibm.read_credential_file()
 
+        if not base_config:
+            return (False, 'Missing credential file at '
+                    f'{os.path.expanduser(CREDENTIAL_FILE)}.\n' + help_str)
+
         if set(ibm_cos_fields) - set(base_config):
             logger.error(f'{colorama.Fore.RED}IBM Storage is missing the '
                          'following fields in '
@@ -385,9 +389,6 @@ class IBM(clouds.Cloud):
                             set(ibm_cos_fields) - set(base_config)))}"""
                          f'{colorama.Style.RESET_ALL}')
 
-        if not base_config:
-            return (False, 'Missing credential file at '
-                    f'{os.path.expanduser(CREDENTIAL_FILE)}.\n' + help_str)
         if set(required_fields) - set(base_config):
             return (
                 False, f'Missing field(s): '
