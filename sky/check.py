@@ -28,7 +28,7 @@ def check(quiet: bool = False, show_all: bool = False) -> None:
         if ok:
             enabled_clouds.append(str(cloud))
             if show_all:
-                activated_account = cloud.get_current_user_identity()
+                activated_account = cloud.get_current_user_identity_str()
                 if activated_account is not None:
                     echo(f'    Activated account: {activated_account}')
             if reason is not None:

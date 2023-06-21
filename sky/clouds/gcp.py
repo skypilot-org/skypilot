@@ -648,6 +648,13 @@ class GCP(clouds.Cloud):
                 ) from e
         return [f'{account} [project_id={project_id}]']
 
+    @classmethod
+    def get_current_user_identity_str(cls) -> Optional[str]:
+        user_identity = cls.get_current_user_identity()
+        if user_identity is None:
+            return None
+        return user_identity[0].replace('\n', '')
+
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
 
