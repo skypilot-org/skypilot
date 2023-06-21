@@ -3923,6 +3923,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  f' task. To fix, change the mount path'
                                  f' to an empty or non-existent path.')
                     raise RuntimeError(error_msg) from None
+                else:
+                    # Strip the command (a big heredoc) from the exception
+                    raise exceptions.CommandError(e.returncode,
+                                                  command='to mount',
+                                                  error_msg=e.error_msg) from None
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
