@@ -881,29 +881,25 @@ def _add_iam_policy_binding(service_account, minimal_permissions, roles, crm, ia
     """Add new IAM roles for the service account."""
     project_id = service_account["projectId"]
     email = service_account["email"]
-    # Form the resource name
-    resource_name = f"projects/{project_id}/serviceAccounts/{email}"
-
-    permissions = {"permissions": minimal_permissions}
-    request = (
-        iam.projects()
-        .serviceAccounts()
-        .testIamPermissions(resource=resource_name, body=permissions)
-    )
-    ret_permissions = request.execute().get("permissions", [])
-
-    diffs = set(minimal_permissions).difference(set(ret_permissions))
-
-    if not diffs:
-        # In some managed environments, an admin needs to grant the
-        # roles, so only call setIamPolicy if needed.
-        return
 
     member_id = "serviceAccount:" + email
 
+    required_permissions = set(minimal_permissions)
     policy = crm.projects().getIamPolicy(resource=project_id, body={}).execute()
-
     already_configured = True
+    for binding in policy["bindings"]:
+        if member_id in binding["members"]:
+            role = binding["role"]
+            role_definition = iam.projects().roles().get(name=role).execute()
+            permissions = role_definition["includedPermissions"]
+            required_permissions -= set(permissions)
+        if not required_permissions:
+            break
+    if not required_permissions:
+        # All required permissions are already granted. We don't need to check
+        # the roles below.
+        return
+
     for role in roles:
         role_exists = False
         for binding in policy["bindings"]:

@@ -106,6 +106,7 @@ VM_MINIMAL_PERMISSIONS = [
     "compute.zoneOperations.get",
     "iam.serviceAccounts.actAs",
     "iam.serviceAccounts.get",
+    "iam.roles.get",
     "serviceusage.services.enable",
     "serviceusage.services.list",
     "serviceusage.services.use",

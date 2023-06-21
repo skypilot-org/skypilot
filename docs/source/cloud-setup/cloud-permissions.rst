@@ -170,7 +170,7 @@ IAM Role Creation
 
     If you already have an IAM role called ``skypilot-v1`` in your AWS account, it is likely created by SkyPilot automatically, and you can skip this section.
 
-1. Click the “Roles” tab in the IAM console, and click on the “Create role”
+1. Click the "Roles" tab in the IAM console, and click on the **Create role**
 
 .. image:: ../images/screenshots/aws/aws-add-role.png
     :width: 80%
@@ -186,7 +186,7 @@ IAM Role Creation
 
 3. Select the policy you created in step 4 in :ref:`User Creation <cloud-permissions-aws-user-creation>` (i.e. the previous step 6) and click on **Next: Tags**.
 4. [Optional] If you would like to let the user access S3 buckets on the VM they created, you can additionally attach the s3 access permission to the IAM role, such as the "AmazonS3FullAccess" policy.
-5. Click Next, and name your role with “skypilot-v1” and Click “Create role”
+5. Click **Next**, and name your role with "skypilot-v1" and Click **Create role**
 
 
 .. _cloud-permissions-gcp:
@@ -211,7 +211,7 @@ Optionally, to use TPUs, add the following role:
 
   roles/tpu.admin
 
-You can grant those accesses via the `GCP IAM console <https://console.cloud.google.com/iam-admin/iam>`_.
+You can grant those accesses via the GCP's `IAM & Admin console <https://console.cloud.google.com/iam-admin/iam>`__.
 
 
 Minimal Permissions
@@ -219,7 +219,7 @@ Minimal Permissions
 
 If you would like to grant fine-grained minimal permissions to your users, you can create a custom role with the permissions required by following the steps below:
 
-1. Go to the `GCP IAM console <https://console.cloud.google.com/iam-admin/roles>`_ and click on **Create Role**.
+1. Go to the GCP's `IAM & Admin console <https://console.cloud.google.com/iam-admin/roles>`__ and click on **Create Role**.
 
 .. image:: ../images/screenshots/gcp/create-role.png
     :width: 80%
@@ -254,6 +254,7 @@ If you would like to grant fine-grained minimal permissions to your users, you c
     compute.zoneOperations.get
     iam.serviceAccounts.actAs
     iam.serviceAccounts.get
+    iam.roles.get
     serviceusage.services.enable
     serviceusage.services.list
     serviceusage.services.use
@@ -282,7 +283,7 @@ If you would like to grant fine-grained minimal permissions to your users, you c
 
 5. Click **Create** to create the role.
 6. Go back to the "IAM" tab and click on **GRANT ACCESS**.
-7. Fill in the email address of the user in the “Add principles”, and select the ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
+7. Fill in the email address of the user in the "Add principles", and select the ``minimal-skypilot-role`` in the "Assign roles" section. Click **Save**.
 
 
 .. image:: ../images/screenshots/gcp/create-iam.png
@@ -294,4 +295,33 @@ If you would like to grant fine-grained minimal permissions to your users, you c
 
 .. note::
 
-    With the above setup, the user will not have the permission to create the service account required by the SkyPilot on GCP. The admin needs to run :code:`sky launch --cloud gcp` once, to create the service account for all the users in the organization. The way to create the service account manually will be added in the future release.
+    With the above setup, the user will not have the permission to create the service account required by the SkyPilot on GCP. The admin needs to run :code:`sky launch --cloud gcp` once, to create the service account for all the users in the organization. Or the following section describes how to create the service account manually with the minimal permissions for all the users.
+
+
+Service Account
+~~~~~~~~~~~~~~~~~~
+.. note::
+
+    If you already have an service account under "Service Accounts" tab with the email starting with ``skypilot-v1@``, it is likely created by SkyPilot automatically, and you can skip this section.
+
+1. Click the "Service Accounts" tab in the "IAM & Admin" console, and click on the **CREATE SERVICE ACCOUNT**.
+
+.. image:: ../images/screenshots/gcp/create-service-account.png
+    :width: 80%
+    :align: center
+    :alt: GCP Create Service Account
+
+2. Set the service account id to ``skypilot-v1`` and click **CREATE AND CONTINUE**.
+
+.. image:: ../images/screenshots/gcp/service-account-name.png
+    :width: 80%
+    :align: center
+    :alt: Set Service Account Name
+
+3. Select the ``minimal-skypilot-role`` (or the name you set) created in last section and click on **DONE**.
+
+.. image:: ../images/screenshots/gcp/service-account-grant-role.png
+    :width: 80%
+    :align: center
+    :alt: Set Service Account Role
+
