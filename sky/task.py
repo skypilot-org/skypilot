@@ -82,7 +82,7 @@ class Task:
         num_nodes: Optional[int] = None,
         # Advanced:
         docker_image: Optional[str] = None,
-        event_callback: str = "",
+        event_callback: str = '',
     ):
         """Initializes a Task.
 
@@ -148,7 +148,8 @@ class Task:
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
-        self.event_callback = event_callback.strip(" \n") if event_callback is not None else ""
+        self.event_callback = event_callback.strip(
+        ) if event_callback is not None else ''
         # Ignore type error due to a mypy bug.
         # https://github.com/python/mypy/issues/3004
         self.num_nodes = num_nodes  # type: ignore

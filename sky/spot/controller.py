@@ -7,6 +7,7 @@ import traceback
 import typing
 from typing import Tuple
 
+import subprocess
 import filelock
 
 from sky import exceptions
@@ -241,12 +242,13 @@ class SpotController:
                         'To see the details, run: '
                         f'sky spot logs --controller {self._job_id}')
 
-                    spot_state.set_failed(self._job_id,
-                                          task_id,
-                                          failure_type=spot_status_to_set,
-                                          failure_reason=failure_reason,
-                                          end_time=end_time,
-                                          callback_func=self.event_callback_func)
+                    spot_state.set_failed(
+                        self._job_id,
+                        task_id,
+                        failure_type=spot_status_to_set,
+                        failure_reason=failure_reason,
+                        end_time=end_time,
+                        callback_func=self.event_callback_func)
                     return False
                 # Although the cluster is healthy, we fail to access the
                 # job status. Try to recover the job (will not restart the
@@ -274,7 +276,7 @@ class SpotController:
                                      task_id,
                                      recovered_time=recovered_time)
 
-    def event_callback_func(self, task_id: int, state: str, comment: str=''):
+    def event_callback_func(self, task_id: int, state: str, comment: str = ''):
 
         callback_str = self._dag.tasks[task_id].event_callback
         if callback_str is None:
@@ -289,16 +291,16 @@ class SpotController:
         if '$COMMENT' in callback_str:
             callback_str = callback_str.replace('$COMMENT', comment)
 
-        if callback_str.find("controller_log:") == 0:
-            print_str = callback_str[len("controller_log:"):].strip()
+        if callback_str.find('controller_log:') == 0:
+            print_str = callback_str[len('controller_log:'):].strip()
             logger.info(print_str)
-        elif callback_str.find("callback_script:") == 0:
-            ''' 
-            Example: callback_script: echo "id: $JOB_ID, status: $JOB_STATUS, comment: $COMMENT" >> callback.txt && cat callback.txt
-            '''
-            import subprocess
-            run_str = callback_str[len("callback_script:"):].strip()
-            result = subprocess.run(run_str, capture_output=True, shell=True, text=True)
+        elif callback_str.find('callback_script:') == 0:
+            run_str = callback_str[len('callback_script:'):].strip()
+            result = subprocess.run(run_str,
+                                    capture_output=True,
+                                    shell=True,
+                                    check=True,
+                                    text=True)
             logger.info(f'stdout: {result.stdout.strip()}')
         else:
             logger.info(f'Unrecognized callback_str: {callback_str}')

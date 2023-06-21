@@ -345,7 +345,11 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float):
     logger.info('==== Recovered. ====')
 
 
-def set_succeeded(job_id: int, task_id: int, end_time: float, callback_func: Callable = None):
+def set_succeeded(job_id: int,
+                  task_id: int,
+                  end_time: float,
+                  callback_func: Optional[Callable[[int, str, str],
+                                                   None]] = None):
     """Set the task to succeeded, if it is in a non-terminal state."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
@@ -356,7 +360,7 @@ def set_succeeded(job_id: int, task_id: int, end_time: float, callback_func: Cal
             AND end_at IS null""",
             (SpotStatus.SUCCEEDED.value, end_time, job_id, task_id))
     if callback_func is not None:
-        callback_func(task_id=task_id, state="SUCCEEDED")
+        callback_func(task_id, 'SUCCEEDED', '')
     logger.info('Job succeeded.')
 
 
@@ -365,7 +369,7 @@ def set_failed(job_id: int,
                failure_type: SpotStatus,
                failure_reason: str,
                end_time: Optional[float] = None,
-               callback_func: Callable = None):
+               callback_func: Optional[Callable[[int, str, str], None]] = None):
     """Set an entire job or task to failed, if they are in non-terminal states.
 
     Args:
@@ -404,8 +408,8 @@ def set_failed(job_id: int,
             {set_str}
             WHERE spot_job_id=(?){task_str} AND end_at IS null""",
             (*list(fields_to_set.values()), job_id))
-    if callback_func is not None:
-        callback_func(task_id=task_id, state="FAILED", comment=failure_reason)
+    if callback_func is not None and task_id is not None:
+        callback_func(task_id, 'FAILED', failure_reason)
     logger.info(failure_reason)
 
 
