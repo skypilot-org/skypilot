@@ -271,6 +271,14 @@ If you would like to grant fine-grained minimal permissions to your users, you c
     storage.objects.get
     storage.objects.list
 
+5. [Optional] If the user need to access TPU VMs, you can additionally add the following permissions (the following may not be exhaustive, please file an issue if you find any missing permissions):
+
+.. code-block:: text
+
+    tpu.nodes.create
+    tpu.nodes.delete
+    tpu.nodes.list
+    tpu.operations.get
 
 5. Click **Create** to create the role.
 6. Go back to the "IAM" tab and click on **GRANT ACCESS**.
