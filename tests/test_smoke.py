@@ -182,6 +182,8 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
+
+@pytest.mark.kubernetes
 def test_example_app():
     test = Test(
         'example_app',
@@ -191,6 +193,7 @@ def test_example_app():
 
 
 # ---------- A minimal task ----------
+@pytest.mark.kubernetes
 def test_minimal(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -556,7 +559,6 @@ def test_image_no_conda():
 
 # ------------ Test stale job ------------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
-@pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 def test_stale_job(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -635,12 +637,17 @@ def test_gcp_stale_job_manual_restart():
 
 # ---------- Check Sky's environment variables; workdir. ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_kubernetes
 def test_env_check(generic_cloud: str):
     name = _get_cluster_name()
+    extra_flags = ''
+    if generic_cloud == 'kubernetes':
+        # Kubernetes does not support multi-node
+        extra_flags = '--num-nodes 1'
     test = Test(
         'env_check',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} --detach-setup examples/env_check.yaml',
+            f'sky launch -y -c {name} --cloud {generic_cloud} {extra_flags} --detach-setup examples/env_check.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -650,11 +657,16 @@ def test_env_check(generic_cloud: str):
 
 # ---------- file_mounts ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_file_mounts instead.
+@pytest.mark.kubernetes
 def test_file_mounts(generic_cloud: str):
     name = _get_cluster_name()
+    extra_flags = ''
+    if generic_cloud in 'kubernetes':
+        # Kubernetes does not support multi-node
+        extra_flags = '--num-nodes 1'
     test_commands = [
         *storage_setup_commands,
-        f'sky launch -y -c {name} --cloud {generic_cloud} examples/using_file_mounts.yaml',
+        f'sky launch -y -c {name} --cloud {generic_cloud} {extra_flags} examples/using_file_mounts.yaml',
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
     ]
     test = Test(
@@ -738,6 +750,34 @@ def test_gcp_storage_mounts():
         run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_storage_mounts():
+    # Tests bucket mounting on k8s, assuming S3 is configured.
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud kubernetes {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'aws s3 ls {storage_name}/hello.txt',
+        ]
+        test = Test(
+            'kubernetes_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
 @pytest.mark.cloudflare
 def test_cloudflare_storage_mounts(generic_cloud: str):
     name = _get_cluster_name()
@@ -769,13 +809,18 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
 
 # ---------- CLI logs ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_logs instead.
+@pytest.mark.kubernetes
 def test_cli_logs(generic_cloud: str):
     name = _get_cluster_name()
+    num_nodes = 2
+    if generic_cloud == 'kubernetes':
+        # Kubernetes does not support multi-node
+        num_nodes = 1
     timestamp = time.time()
     test = Test(
         'cli_logs',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} --num-nodes 2 "echo {timestamp} 1"',
+            f'sky launch -y -c {name} --cloud {generic_cloud} --num-nodes {num_nodes} "echo {timestamp} 1"',
             f'sky exec {name} "echo {timestamp} 2"',
             f'sky exec {name} "echo {timestamp} 3"',
             f'sky exec {name} "echo {timestamp} 4"',
@@ -955,6 +1000,7 @@ def test_job_queue_multinode(generic_cloud: str):
 
 
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
+@pytest.mark.kubernetes
 def test_large_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -998,6 +1044,7 @@ def test_large_job_queue(generic_cloud: str):
 
 
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
+@pytest.mark.kubernetes
 def test_fast_large_job_queue(generic_cloud: str):
     # This is to test the jobs can be scheduled quickly when there are many jobs in the queue.
     name = _get_cluster_name()
@@ -2201,12 +2248,12 @@ def test_azure_disk_tier():
 
 
 # ------- Testing user ray cluster --------
-def test_user_ray_cluster():
+def test_user_ray_cluster(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
         'user-ray-cluster',
         [
-            f'sky launch -y -c {name} "ray start --head"',
+            f'sky launch -y -c {name} --cloud {generic_cloud} "ray start --head"',
             f'sky exec {name} "echo hi"',
             f'sky logs {name} 1 --status',
             f'sky status -r | grep {name} | grep UP',
