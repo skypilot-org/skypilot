@@ -2979,7 +2979,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
               default=False,
               help='Show details of all clouds.')
 @usage_lib.entrypoint
-def check(all: bool): # pylint: disable=redefined-builtin
+def check(all: bool):  # pylint: disable=redefined-builtin
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
