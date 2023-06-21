@@ -753,7 +753,7 @@ def test_ibm_storage_mounts():
     bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
         storage_name, Rclone.RcloneClouds.IBM)
     template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml').read_text()
+        'tests/test_yamls/test_ibm_cos_storage_mounting.yaml').read_text()
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
