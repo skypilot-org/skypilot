@@ -24,6 +24,7 @@ from sky.skylet.providers.gcp.constants import (
     VPC_TEMPLATE,
     FIREWALL_RULES_TEMPLATE,
     FIREWALL_RULES_REQUIRED,
+    GCP_MINIMAL_PERMISSIONS,
 )
 from ray.autoscaler._private.util import check_legacy_fields
 
@@ -37,6 +38,13 @@ DEFAULT_SERVICE_ACCOUNT_ID = RAY + "-sa-" + VERSION
 SERVICE_ACCOUNT_EMAIL_TEMPLATE = "{account_id}@{project_id}.iam.gserviceaccount.com"
 DEFAULT_SERVICE_ACCOUNT_CONFIG = {
     "displayName": "Ray Autoscaler Service Account ({})".format(VERSION),
+}
+
+SKYPILOT = "skypilot"
+SKYPILOT_SERVICE_ACCOUNT_ID = SKYPILOT + "-sa-" + VERSION
+SKYPILOT_SERVICE_ACCOUNT_EMAIL_TEMPLATE = "{account_id}@{project_id}.iam.gserviceaccount.com"
+SKYPILOT_SERVICE_ACCOUNT_CONFIG = {
+    "displayName": "SkyPilot Service Account ({})".format(VERSION),
 }
 
 # Those roles will be always added.
@@ -135,7 +143,7 @@ def wait_for_compute_global_operation(project_name, operation, compute):
 
 def key_pair_name(i, region, project_id, ssh_user):
     """Returns the ith default gcp_key_pair_name."""
-    key_name = "{}_gcp_{}_{}_{}_{}".format(RAY, region, project_id, ssh_user, i)
+    key_name = "{}_gcp_{}_{}_{}_{}".format(SKYPILOT, region, project_id, ssh_user, i)
     return key_name
 
 
@@ -345,8 +353,8 @@ def _configure_iam_role(config, crm, iam):
     """
     config = copy.deepcopy(config)
 
-    email = SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
-        account_id=DEFAULT_SERVICE_ACCOUNT_ID,
+    email = SKYPILOT_SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
+        account_id=SKYPILOT_SERVICE_ACCOUNT_ID,
         project_id=config["provider"]["project_id"],
     )
     service_account = _get_service_account(email, config, iam)
@@ -354,11 +362,11 @@ def _configure_iam_role(config, crm, iam):
     if service_account is None:
         logger.info(
             "_configure_iam_role: "
-            "Creating new service account {}".format(DEFAULT_SERVICE_ACCOUNT_ID)
+            "Creating new service account {}".format(SKYPILOT_SERVICE_ACCOUNT_ID)
         )
 
         service_account = _create_service_account(
-            DEFAULT_SERVICE_ACCOUNT_ID, DEFAULT_SERVICE_ACCOUNT_CONFIG, config, iam
+            SKYPILOT_SERVICE_ACCOUNT_ID, SKYPILOT_SERVICE_ACCOUNT_CONFIG, config, iam
         )
 
     assert service_account is not None, "Failed to create service account"
@@ -869,6 +877,22 @@ def _add_iam_policy_binding(service_account, roles, crm):
     """Add new IAM roles for the service account."""
     project_id = service_account["projectId"]
     email = service_account["email"]
+    # Form the resource name
+    resource_name = f'projects/-/serviceAccounts/{email}'
+
+
+    permissions = {'permissions': GCP_MINIMAL_PERMISSIONS}
+    request = crm.projects().testIamPermissions(resource=resource_name,
+                                                    body=permissions)
+    ret_permissions = request.execute().get('permissions', [])
+
+    diffs = set(GCP_MINIMAL_PERMISSIONS).difference(set(ret_permissions))
+
+    if not diffs:
+        # In some managed environments, an admin needs to grant the
+        # roles, so only call setIamPolicy if needed.
+        return
+
     member_id = "serviceAccount:" + email
 
     policy = crm.projects().getIamPolicy(resource=project_id, body={}).execute()

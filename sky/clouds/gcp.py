@@ -39,40 +39,6 @@ GCP_CONFIG_PATH = '~/.config/gcloud/configurations/config_default'
 # autoscaler can overwrite that directory on the remote nodes.
 GCP_CONFIG_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
 
-# A list of permissions required to run SkyPilot on GCP.
-# This is not a complete list but still useful to check first
-# and hint users if not sufficient during sky check.
-GCP_PREMISSION_CHECK_LIST = [
-    'compute.disks.create',
-    'compute.firewalls.create',
-    'compute.firewalls.delete',
-    'compute.firewalls.get',
-    'compute.instances.create',
-    'compute.instances.delete',
-    'compute.instances.get',
-    'compute.instances.list',
-    'compute.instances.setLabels',
-    'compute.instances.setServiceAccount',
-    'compute.instances.start',
-    'compute.instances.stop',
-    'compute.networks.get',
-    'compute.networks.list',
-    'compute.networks.getEffectiveFirewalls',
-    'compute.subnetworks.use',
-    'compute.subnetworks.list',
-    'compute.subnetworks.useExternalIp',
-    'compute.projects.get',
-    'compute.projects.setCommonInstanceMetadata',
-    'compute.zoneOperations.get',
-    'iam.serviceAccounts.actAs',
-    'iam.serviceAccounts.get',
-    'serviceusage.services.enable',
-    'serviceusage.services.list',
-    'serviceusage.services.use',
-    'resourcemanager.projects.get',
-    'resourcemanager.projects.getIamPolicy',
-]
-
 # Minimum set of files under ~/.config/gcloud that grant GCP access.
 _CREDENTIAL_FILES = [
     'credentials.db',
@@ -619,13 +585,14 @@ class GCP(clouds.Cloud):
         # pylint: disable=import-outside-toplevel,unused-import
         import googleapiclient.discovery
         import google.auth
+        from sky.skylet.providers.gcp import constants
 
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
         credentials, project = google.auth.default()
         service = googleapiclient.discovery.build('cloudresourcemanager',
                                                   'v1',
                                                   credentials=credentials)
-        permissions = {'permissions': GCP_PREMISSION_CHECK_LIST}
+        permissions = {'permissions': constants.GCP_MINIMAL_PERMISSIONS}
         request = service.projects().testIamPermissions(resource=project,
                                                         body=permissions)
         ret_permissions = request.execute().get('permissions', [])

@@ -78,3 +78,37 @@ FIREWALL_RULES_TEMPLATE = [
         "sourceRanges": ["0.0.0.0/0"],
     },
 ]
+
+# A list of permissions required to run SkyPilot on GCP.
+# This is not a complete list but still useful to check first
+# and hint users if not sufficient during sky check.
+GCP_MINIMAL_PERMISSIONS = [
+    'compute.disks.create',
+    'compute.firewalls.create',
+    'compute.firewalls.delete',
+    'compute.firewalls.get',
+    'compute.instances.create',
+    'compute.instances.delete',
+    'compute.instances.get',
+    'compute.instances.list',
+    'compute.instances.setLabels',
+    'compute.instances.setServiceAccount',
+    'compute.instances.start',
+    'compute.instances.stop',
+    'compute.networks.get',
+    'compute.networks.list',
+    'compute.networks.getEffectiveFirewalls',
+    'compute.subnetworks.use',
+    'compute.subnetworks.list',
+    'compute.subnetworks.useExternalIp',
+    'compute.projects.get',
+    'compute.projects.setCommonInstanceMetadata',
+    'compute.zoneOperations.get',
+    'iam.serviceAccounts.actAs',
+    'iam.serviceAccounts.get',
+    'serviceusage.services.enable',
+    'serviceusage.services.list',
+    'serviceusage.services.use',
+    'resourcemanager.projects.get',
+    'resourcemanager.projects.getIamPolicy',
+]
