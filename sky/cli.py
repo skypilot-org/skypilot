@@ -2973,8 +2973,13 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
 
 @cli.command()
+@click.option('--all',
+                '-a',
+                is_flag=True,
+                default=False,
+                help='Show details of all clouds.')
 @usage_lib.entrypoint
-def check():
+def check(all: bool):
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
@@ -2984,7 +2989,7 @@ def check():
     The enabled clouds are cached and form the "search space" to be considered
     for each task.
     """
-    sky_check.check()
+    sky_check.check(show_all=all)
 
 
 @cli.command()

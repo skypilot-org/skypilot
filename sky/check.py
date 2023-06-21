@@ -9,7 +9,7 @@ from sky.adaptors import cloudflare
 
 
 # TODO(zhwu): add check for a single cloud to improve performance
-def check(quiet: bool = False) -> None:
+def check(quiet: bool = False, show_all: bool = False) -> None:
     echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
     echo('Checking credentials to enable clouds for SkyPilot.')
 
@@ -27,6 +27,10 @@ def check(quiet: bool = False) -> None:
                  ' ' * 10)
         if ok:
             enabled_clouds.append(str(cloud))
+            if show_all:
+                activated_account = cloud.get_current_user_identity()
+                if activated_account is not None:
+                    echo(f'    Activated account: {activated_account}')
             if reason is not None:
                 echo(f'    Hint: {reason}')
         else:
