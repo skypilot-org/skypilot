@@ -22,6 +22,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+_GCP_APPLICATION_CREDENTIAL_ENV = 'GOOGLE_APPLICATION_CREDENTIALS'
 DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH: str = os.path.expanduser(
     '~/.config/gcloud/'
     'application_default_credentials.json')
@@ -473,12 +474,12 @@ class GCP(clouds.Cloud):
     def _find_application_key_path(cls) -> str:
         # Check the application default credentials in the environment variable.
         # If the file does not exist, fallback to the default path.
-        application_key_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS',
+        application_key_path = os.environ.get(_GCP_APPLICATION_CREDENTIAL_ENV,
                                               None)
         if application_key_path:
             if not os.path.isfile(os.path.expanduser(application_key_path)):
                 raise FileNotFoundError(
-                    f'GOOGLE_APPLICATION_CREDENTIALS={application_key_path}, '
+                    f'{_GCP_APPLICATION_CREDENTIAL_ENV}={application_key_path}, '
                     'but the file does not exist.')
             return application_key_path
         if (not os.path.isfile(
