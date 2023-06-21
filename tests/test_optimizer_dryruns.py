@@ -42,6 +42,8 @@ def _test_parse_accelerators(spec, expected_accelerators):
 # clouds are enabled, so we monkeypatch the `sky.global_user_state` module
 # to return all three clouds. We also monkeypatch `sky.check.check` so that
 # when the optimizer tries calling it to update enabled_clouds, it does not
+# TODO: Keep the cloud enabling in sync with the fixture enable_all_clouds
+# in tests/conftest.py
 # raise exceptions.
 def _make_resources(
     monkeypatch,
@@ -57,10 +59,14 @@ def _make_resources(
     )
     monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
 
+
     config_file_backup = tempfile.NamedTemporaryFile(
         prefix='tmp_backup_config_default', delete=False)
     monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
                         config_file_backup.name)
+    monkeypatch.setattr(
+        'sky.clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH',
+        config_file_backup.name)
     monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
 
     # Should create Resources here, since it uses the enabled clouds.
