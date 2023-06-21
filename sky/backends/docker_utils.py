@@ -355,6 +355,13 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             docker_run_executed = True
 
         self.run('apt-get update; apt-get install -y rsync')
+        # Copy local authorized_keys to docker container
+        from sky.backends import docker_utils
+        container_name = docker_utils.DEFAULT_DOCKER_CONTAINER_NAME
+        self.run(
+            'rsync -e "docker exec -i" -avz ~/.ssh/authorized_keys '
+            f'{container_name}:/tmp/host_ssh_authorized_keys',
+            run_env='host')
 
         # Explicitly copy in ray bootstrap files.
         for mount in bootstrap_mounts:

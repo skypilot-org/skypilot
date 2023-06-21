@@ -854,10 +854,6 @@ def write_cluster_config(
             assert region_name in ssh_proxy_command_config, (
                 region_name, ssh_proxy_command_config)
             ssh_proxy_command = ssh_proxy_command_config[region_name]
-    public_key_path = os.path.expanduser(auth.PUBLIC_SSH_KEY_PATH)
-    with open(public_key_path, 'r') as f:
-        public_key = f.read()
-
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # User-supplied instance tags.
@@ -875,8 +871,7 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
     )
 
-    # pylint: disable=import-outside-toplevel
-    from sky.backends import docker_utils
+    from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
     docker_image = to_provision.extract_docker_image()
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
@@ -913,9 +908,6 @@ def write_cluster_config(
                 'ssh_proxy_command': ssh_proxy_command,
                 # User-supplied instance tags.
                 'instance_tags': instance_tags,
-
-                # For docker authentication
-                'public_key': public_key,
 
                 # Docker config
                 # docker_image: the image name used to pull the image, e.g.
@@ -1135,8 +1127,7 @@ def wait_until_ray_cluster_ready(
 
     docker_user = None
     if use_docker:
-        # pylint: disable=import-outside-toplevel
-        from sky.backends import docker_utils
+        from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
         docker_user = docker_utils.get_docker_user(head_ip, cluster_config_file)
 
     if num_nodes <= 1:
@@ -1226,8 +1217,7 @@ def ssh_credential_from_yaml(cluster_yaml: str,
     ssh_private_key = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
-    # pylint: disable=import-outside-toplevel
-    from sky.backends import docker_utils
+    from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
     return {
         'ssh_user': ssh_user,
         'ssh_private_key': ssh_private_key,

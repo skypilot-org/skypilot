@@ -191,12 +191,13 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         (item for item in project['commonInstanceMetadata'].get('items', [])
          if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
 
-    def allow_ssh_port(port):
+    def allow_ssh_port(port, vpc_name=None):
         # Enable ssh port for all the instances
         enable_ssh_cmd = ('gcloud compute firewall-rules create '
-                          'allow-ssh-ingress-from-iap '
+                          f'allow-ssh-{port}-ingress-from-iap '
                           '--direction=INGRESS '
                           '--action=allow '
+                          f'--network={vpc_name if vpc_name else "default"} '
                           f'--rules=tcp:{port} '
                           '--source-ranges=0.0.0.0/0')
         proc = subprocess.run(enable_ssh_cmd,
@@ -209,9 +210,6 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             subprocess_utils.handle_returncode(proc.returncode, enable_ssh_cmd,
                                                'Failed to enable ssh port.',
                                                proc.stderr.decode('utf-8'))
-
-    # For docker host machine
-    allow_ssh_port('10022')
 
     if project_oslogin.lower() == 'true':
         # project.
@@ -249,7 +247,13 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             stdout=subprocess.DEVNULL)
 
         allow_ssh_port('22')
+        allow_ssh_port('10022')
         return config
+    else:
+        # For docker host machine
+        from sky.skylet.providers.gcp import config as gcp_config  # pylint: disable=import-outside-toplevel
+        vpc_name = gcp_config.get_usable_vpc(config)
+        allow_ssh_port('10022', vpc_name)
 
     # OS Login is not enabled for the project. Add the ssh key directly to the
     # metadata.

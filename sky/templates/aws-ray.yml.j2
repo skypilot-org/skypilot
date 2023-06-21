@@ -220,7 +220,7 @@ setup_commands:
     {%- if use_docker %}
     sudo sed -i 's/#Port 22/Port {{docker_port}}/' /etc/ssh/sshd_config;
     sudo service ssh start;
-    echo "{{public_key}}" >> ~/.ssh/authorized_keys;
+    cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;
     sudo sed -i 's/mesg n/tty -s \&\& mesg n/' ~/.profile;
     {%- endif %}
 

@@ -161,7 +161,10 @@ class Resources:
 
         image_id = ''
         if self.image_id is not None:
-            if None in self.image_id:
+            docker_image = self.extract_docker_image()
+            if docker_image is not None:
+                image_id = f', docker_image={docker_image}'
+            elif None in self.image_id:
                 image_id = f', image_id={self.image_id[None]}'
             else:
                 image_id = f', image_id={self.image_id!r}'

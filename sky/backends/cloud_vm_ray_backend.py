@@ -2169,8 +2169,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def docker_setup(self, cluster_config_file: str):
         ip_list = self.external_ips()
         assert ip_list is not None
-        # pylint: disable=import-outside-toplevel
-        from sky.backends import docker_utils
+        from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
         if len(ip_list) == 1:
             # Setup head node.
             docker_user = docker_utils.get_docker_user(ip_list[0],
