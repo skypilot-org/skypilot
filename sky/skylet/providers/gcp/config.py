@@ -899,6 +899,9 @@ def _add_iam_policy_binding(service_account, minimal_permissions, roles, crm, ia
         # All required permissions are already granted. We don't need to check
         # the roles below.
         return
+    print(
+        f"Missing permissions from the service account {email!r}: {required_permissions}"
+    )
 
     for role in roles:
         role_exists = False
