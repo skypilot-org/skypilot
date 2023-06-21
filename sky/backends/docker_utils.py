@@ -337,10 +337,8 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                     f'{"head" if as_head else "worker"}_run_options', [])
 
             # Setup workdir mount for stop-start recovery
-            container_workdir = os.path.join(home_directory, "sky_workdir")
-            user_docker_run_options += [
-                f'-v ~/sky_workdir:{container_workdir}'
-            ]
+            container_workdir = os.path.join(home_directory, 'sky_workdir')
+            user_docker_run_options += [f'-v ~/sky_workdir:{container_workdir}']
 
             start_command = docker_start_cmds(
                 self.ssh_command_runner.ssh_user,

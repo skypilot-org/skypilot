@@ -10,10 +10,9 @@ docker:
   image: {{docker_image}}
   container_name: {{docker_container_name}}
   run_options:
-    {%- if custom_resources is none %}
-    []
-    {%- else %}
-    - --gpus all
+    - --ulimit nofile=1048576:1048576
+    {%- if custom_resources is not none %}
+      --gpus all
     {%- endif %}
 {%- endif %}
 

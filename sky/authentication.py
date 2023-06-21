@@ -191,6 +191,28 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         (item for item in project['commonInstanceMetadata'].get('items', [])
          if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
 
+    def allow_ssh_port(port):
+        # Enable ssh port for all the instances
+        enable_ssh_cmd = ('gcloud compute firewall-rules create '
+                          'allow-ssh-ingress-from-iap '
+                          '--direction=INGRESS '
+                          '--action=allow '
+                          f'--rules=tcp:{port} '
+                          '--source-ranges=0.0.0.0/0')
+        proc = subprocess.run(enable_ssh_cmd,
+                              check=False,
+                              shell=True,
+                              stdout=subprocess.DEVNULL,
+                              stderr=subprocess.PIPE)
+        if proc.returncode != 0 and \
+            'already exists' not in proc.stderr.decode('utf-8'):
+            subprocess_utils.handle_returncode(proc.returncode, enable_ssh_cmd,
+                                               'Failed to enable ssh port.',
+                                               proc.stderr.decode('utf-8'))
+
+    # For docker host machine
+    allow_ssh_port('10022')
+
     if project_oslogin.lower() == 'true':
         # project.
         logger.info(
@@ -226,28 +248,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             shell=True,
             stdout=subprocess.DEVNULL)
 
-        def allow_ssh_port(port):
-            # Enable ssh port for all the instances
-            enable_ssh_cmd = ('gcloud compute firewall-rules create '
-                              'allow-ssh-ingress-from-iap '
-                              '--direction=INGRESS '
-                              '--action=allow '
-                              f'--rules=tcp:{port} '
-                              '--source-ranges=0.0.0.0/0')
-            proc = subprocess.run(enable_ssh_cmd,
-                                  check=False,
-                                  shell=True,
-                                  stdout=subprocess.DEVNULL,
-                                  stderr=subprocess.PIPE)
-            if proc.returncode != 0 and \
-                'already exists' not in proc.stderr.decode('utf-8'):
-                subprocess_utils.handle_returncode(
-                    proc.returncode, enable_ssh_cmd,
-                    'Failed to enable ssh port.', proc.stderr.decode('utf-8'))
-
         allow_ssh_port('22')
-        # For docker host machine
-        allow_ssh_port('10022')
         return config
 
     # OS Login is not enabled for the project. Add the ssh key directly to the
