@@ -240,12 +240,14 @@ If you would like to grant fine-grained minimal permissions to your users, you c
     compute.instances.get
     compute.instances.list
     compute.instances.setLabels
+    compute.instances.setMetadata
     compute.instances.setServiceAccount
     compute.instances.start
     compute.instances.stop
     compute.networks.get
     compute.networks.list
     compute.networks.getEffectiveFirewalls
+    compute.globalOperations.get
     compute.subnetworks.use
     compute.subnetworks.list
     compute.subnetworks.useExternalIp
