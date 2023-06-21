@@ -245,7 +245,8 @@ class OciCloudStorage(CloudStorage):
 
         objects = client.list_objects(namespace_name=namespace,
                                       bucket_name=bucket_name,
-                                      prefix=path).data
+                                      prefix=path).data.objects
+
         if len(objects) == 0:
             # A directory with few or no items
             return True
