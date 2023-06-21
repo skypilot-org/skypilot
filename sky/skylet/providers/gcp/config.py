@@ -24,7 +24,8 @@ from sky.skylet.providers.gcp.constants import (
     VPC_TEMPLATE,
     FIREWALL_RULES_TEMPLATE,
     FIREWALL_RULES_REQUIRED,
-    GCP_MINIMAL_PERMISSIONS,
+    VM_MINIMAL_PERMISSIONS,
+    TPU_MINIMAL_PERMISSIONS,
 )
 from ray.autoscaler._private.util import check_legacy_fields
 
@@ -41,8 +42,10 @@ DEFAULT_SERVICE_ACCOUNT_CONFIG = {
 }
 
 SKYPILOT = "skypilot"
-SKYPILOT_SERVICE_ACCOUNT_ID = SKYPILOT + "-sa-" + VERSION
-SKYPILOT_SERVICE_ACCOUNT_EMAIL_TEMPLATE = "{account_id}@{project_id}.iam.gserviceaccount.com"
+SKYPILOT_SERVICE_ACCOUNT_ID = SKYPILOT + "-" + VERSION
+SKYPILOT_SERVICE_ACCOUNT_EMAIL_TEMPLATE = (
+    "{account_id}@{project_id}.iam.gserviceaccount.com"
+)
 SKYPILOT_SERVICE_ACCOUNT_CONFIG = {
     "displayName": "SkyPilot Service Account ({})".format(VERSION),
 }
@@ -371,12 +374,13 @@ def _configure_iam_role(config, crm, iam):
 
     assert service_account is not None, "Failed to create service account"
 
+    permissions = VM_MINIMAL_PERMISSIONS
+    roles = DEFAULT_SERVICE_ACCOUNT_ROLES
     if config["provider"].get(HAS_TPU_PROVIDER_FIELD, False):
         roles = DEFAULT_SERVICE_ACCOUNT_ROLES + TPU_SERVICE_ACCOUNT_ROLES
-    else:
-        roles = DEFAULT_SERVICE_ACCOUNT_ROLES
+        permissions = VM_MINIMAL_PERMISSIONS + TPU_MINIMAL_PERMISSIONS
 
-    _add_iam_policy_binding(service_account, roles, crm)
+    _add_iam_policy_binding(service_account, permissions, roles, crm, iam)
 
     account_dict = {
         "email": service_account["email"],
@@ -873,20 +877,22 @@ def _create_service_account(account_id, account_config, config, iam):
     return service_account
 
 
-def _add_iam_policy_binding(service_account, roles, crm):
+def _add_iam_policy_binding(service_account, minimal_permissions, roles, crm, iam):
     """Add new IAM roles for the service account."""
     project_id = service_account["projectId"]
     email = service_account["email"]
     # Form the resource name
-    resource_name = f'projects/-/serviceAccounts/{email}'
+    resource_name = f"projects/{project_id}/serviceAccounts/{email}"
 
+    permissions = {"permissions": minimal_permissions}
+    request = (
+        iam.projects()
+        .serviceAccounts()
+        .testIamPermissions(resource=resource_name, body=permissions)
+    )
+    ret_permissions = request.execute().get("permissions", [])
 
-    permissions = {'permissions': GCP_MINIMAL_PERMISSIONS}
-    request = crm.projects().testIamPermissions(resource=resource_name,
-                                                    body=permissions)
-    ret_permissions = request.execute().get('permissions', [])
-
-    diffs = set(GCP_MINIMAL_PERMISSIONS).difference(set(ret_permissions))
+    diffs = set(minimal_permissions).difference(set(ret_permissions))
 
     if not diffs:
         # In some managed environments, an admin needs to grant the

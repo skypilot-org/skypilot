@@ -592,12 +592,13 @@ class GCP(clouds.Cloud):
         service = googleapiclient.discovery.build('cloudresourcemanager',
                                                   'v1',
                                                   credentials=credentials)
-        permissions = {'permissions': constants.GCP_MINIMAL_PERMISSIONS}
+        permissions = {'permissions': constants.VM_MINIMAL_PERMISSIONS}
         request = service.projects().testIamPermissions(resource=project,
                                                         body=permissions)
         ret_permissions = request.execute().get('permissions', [])
 
-        diffs = set(GCP_PREMISSION_CHECK_LIST).difference(set(ret_permissions))
+        diffs = set(constants.VM_MINIMAL_PERMISSIONS).difference(
+            set(ret_permissions))
         if len(diffs) > 0:
             identity_str = identity[0] if identity else None
             return False, (
