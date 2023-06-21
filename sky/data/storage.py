@@ -1762,7 +1762,7 @@ class R2Store(AbstractStore):
                     'the same as R2 bucket.')
             elif self.source.startswith('cos://'):
                 assert self.name == data_utils.split_cos_path(self.source)[0], (
-                    'COS Bucket is specified as path, the name should be '
+                    'IBM COS Bucket is specified as path, the name should be '
                     'the same as COS bucket.')
                 assert data_utils.verify_cos_bucket(self.name), (
                     f'Source specified as {self.source}, a COS bucket. ',
