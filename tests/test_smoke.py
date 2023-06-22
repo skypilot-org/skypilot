@@ -2225,9 +2225,13 @@ def test_aws_zero_quota_failover():
     if not region:
         return
 
-    test = Test('aws-zero-quota-failover', [
-        f'sky launch -y -c {name} --cloud aws --region {region} --gpus V100:8 --use-spot | grep "Found no quota"',
-    ])
+    test = Test(
+         'aws-zero-quota-failover', 
+         [
+            f'sky launch -y -c {name} --cloud aws --region {region} --gpus V100:8 --use-spot | grep "Found no quota"',
+         ],
+         f'sky down -y {name}'
+     )
     run_one_test(test)
 
 
