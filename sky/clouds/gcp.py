@@ -40,7 +40,7 @@ GCP_CONFIG_PATH = '~/.config/gcloud/configurations/config_default'
 GCP_CONFIG_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
 
 # A list of permissions required to run SkyPilot on GCP.
-# This is not a complete list but still useful to check first
+# This is likely a complete list and is useful to check first
 # and hint users if not sufficient during sky check.
 GCP_PREMISSION_CHECK_LIST = [
     'compute.disks.create',

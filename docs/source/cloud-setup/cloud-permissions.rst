@@ -1,6 +1,6 @@
 .. _cloud-permissions:
 
-Cloud Account Permissions
+Minimal Cloud Permissions
 =================================
 
 .. note::
