@@ -7,7 +7,7 @@ VMs, GPUs, and TPUs. The script takes about 1-2 minutes to run.
 import argparse
 import functools
 import io
-import multiprocessing.pool
+import multiprocessing
 import os
 import textwrap
 from typing import Any, Dict, List, Optional
@@ -138,7 +138,7 @@ def _get_unit_price(sku: Dict[str, Any]) -> float:
     return units + nanos
 
 
-@functools.lru_cache(maxsize=None)
+@functools.lru_cache(maxsize=1)
 def _get_all_zones() -> List[str]:
     zones_request = gcp_client.zones().list(project=project_id)
     zones = []
@@ -174,7 +174,7 @@ def _get_machine_type_for_zone(zone: str) -> pd.DataFrame:
 def _get_machine_types(region_prefix: str) -> pd.DataFrame:
     zones = _get_all_zones()
     zones = [zone for zone in zones if zone.startswith(region_prefix)]
-    with multiprocessing.pool.ThreadPool() as pool:
+    with multiprocessing.Pool() as pool:
         all_machine_dfs = pool.map(_get_machine_type_for_zone, zones)
     machine_df = pd.concat(all_machine_dfs, ignore_index=True)
     return machine_df
@@ -285,7 +285,7 @@ def _get_gpus_for_zone(zone: str) -> pd.DataFrame:
 def _get_gpus(region_prefix: str) -> pd.DataFrame:
     zones = _get_all_zones()
     zones = [zone for zone in zones if zone.startswith(region_prefix)]
-    with multiprocessing.pool.ThreadPool() as pool:
+    with multiprocessing.Pool() as pool:
         all_gpu_dfs = pool.map(_get_gpus_for_zone, zones)
     gpu_df = pd.concat(all_gpu_dfs, ignore_index=True)
     return gpu_df
@@ -368,7 +368,7 @@ def _get_tpus() -> pd.DataFrame:
     zones = _get_all_zones()
     # Add TPU-v4 zones.
     zones += TPU_V4_ZONES
-    with multiprocessing.pool.ThreadPool() as pool:
+    with multiprocessing.Pool() as pool:
         all_tpu_dfs = pool.map(_get_tpu_for_zone, zones)
     tpu_df = pd.concat(all_tpu_dfs, ignore_index=True)
     return tpu_df
