@@ -475,7 +475,7 @@ def _configure_iam_role(config, crm, iam):
         ray_satisfied, _ = _is_permission_satisfied(
             ray_service_account, crm, iam, permissions, roles
         )
-        logger.info(f"Fallback to service account {email} succeeded? {satisfied}")
+        logger.info(f"Fallback to service account {email} succeeded? {ray_satisfied}")
 
         if ray_satisfied:
             service_account = ray_service_account
