@@ -22,6 +22,10 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+# Env var pointing to any service account key. If it exists, this path takes priority
+# over the DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH below, and will be
+# used instead for SkyPilot-launched instances. This is the same behavior as gcloud:
+# https://cloud.google.com/docs/authentication/provide-credentials-adc#local-key
 _GCP_APPLICATION_CREDENTIAL_ENV = 'GOOGLE_APPLICATION_CREDENTIALS'
 DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH: str = os.path.expanduser(
     '~/.config/gcloud/'
@@ -476,7 +480,7 @@ class GCP(clouds.Cloud):
         # If the file does not exist, fallback to the default path.
         application_key_path = os.environ.get(_GCP_APPLICATION_CREDENTIAL_ENV,
                                               None)
-        if application_key_path:
+        if application_key_path is not None:
             if not os.path.isfile(os.path.expanduser(application_key_path)):
                 raise FileNotFoundError(
                     f'{_GCP_APPLICATION_CREDENTIAL_ENV}={application_key_path},'
