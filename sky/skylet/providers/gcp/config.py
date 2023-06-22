@@ -361,6 +361,18 @@ def _configure_iam_role(config, crm, iam):
         project_id=config["provider"]["project_id"],
     )
     service_account = _get_service_account(email, config, iam)
+    if service_account is None:
+        # SkyPilot: Fallback to the old ray service account name for
+        # backwards compatibility. This is needed because the GCP
+        # project with the old service account setup may still be in
+        # use, and the user may not have the permissions to create the
+        # new service account.
+        email = SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
+            account_id=DEFAULT_SERVICE_ACCOUNT_ID,
+            project_id=config["provider"]["project_id"],
+        )
+        service_account = _get_service_account(email, config, iam)
+
 
     if service_account is None:
         logger.info(
