@@ -397,8 +397,10 @@ def _is_permission_satisfied(
                 role_definition = iam.projects().roles().get(name=role).execute()
             except TypeError as e:
                 if "does not match the pattern" in str(e):
-                    logger.info(f"_configure_iam_role: fail to check permission for built-in role {role}. skipped.")
-                    permissions = []                  
+                    logger.info(
+                        f"_configure_iam_role: fail to check permission for built-in role {role}. skipped."
+                    )
+                    permissions = []
                 else:
                     raise
             else:
@@ -482,11 +484,13 @@ def _configure_iam_role(config, crm, iam):
             satisfied, policy = _is_permission_satisfied(
                 service_account, crm, iam, permissions, roles
             )
-            logger.info(f"Creation of service account {email} succeeded? {satisfied}")
 
     assert service_account is not None, "Failed to create service account"
 
     if not satisfied:
+        logger.info(
+            "_configure_iam_role: "
+            f"Adding roles to service account {email}...")
         _add_iam_policy_binding(service_account, policy, crm, iam)
 
     account_dict = {
