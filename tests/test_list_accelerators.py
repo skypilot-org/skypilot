@@ -72,7 +72,7 @@ def test_list_accelerators_name_clouds_filter():
         ])
 
 
-def test_list_accelerators_name_quantity_cloud_filter():
+def test_list_accelerators_name_quantity_clouds_filter():
     clouds = ['AWS', 'GCP', 'IBM', 'Azure', 'Lambda']
 
     for i in range(len(clouds)):
