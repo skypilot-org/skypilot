@@ -288,7 +288,7 @@ If you would like to grant fine-grained minimal permissions to your users, you c
 
 5. Click **Create** to create the role.
 6. Go back to the "IAM" tab and click on **GRANT ACCESS**.
-7. Fill in the email address of the user in the “Add principles”, and select the ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
+7. Fill in the email address of the user in the “Add principals” section, and select ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
 
 
 .. image:: ../images/screenshots/gcp/create-iam.png
