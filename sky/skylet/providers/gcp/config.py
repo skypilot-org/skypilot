@@ -877,6 +877,9 @@ def _get_service_account(account, config, iam):
             raise
         service_account = None
 
+    if service_account is not None and service_account["disabled"]:
+        service_account = None
+
     return service_account
 
 
