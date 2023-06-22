@@ -701,6 +701,8 @@ class AWS(clouds.Cloud):
                              instance_type: str,
                              use_spot: bool = False) -> bool:
         """
+        Check if the quota is available for the requested instance_type
+
         AWS-specific implmentation of check_quota_not_zero. The function works by
         matching the instance_type to the corresponding AWS quota code, and then using
         the boto3 Python API to query the region for the specific quota code.

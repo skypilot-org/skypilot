@@ -1343,7 +1343,8 @@ class RetryingVmProvisioner(object):
             has_non_zero_quota = True
             logger.info(
                 f'Error occurred when trying to check quota. '
-                f'Proceeding assuming quotas are available. Error: {str(e)}')
+                f'Proceeding assuming quotas are available. Error: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
         if not has_non_zero_quota:
             # if quota is found to be zero, raise exception and skip to
