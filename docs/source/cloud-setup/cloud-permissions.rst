@@ -282,6 +282,8 @@ If you would like to grant fine-grained minimal permissions to your users, you c
     tpu.nodes.create
     tpu.nodes.delete
     tpu.nodes.list
+    tpu.nodes.get
+    tpu.nodes.update
     tpu.operations.get
 
 5. Click **Create** to create the role.
