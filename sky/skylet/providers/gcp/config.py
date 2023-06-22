@@ -361,6 +361,20 @@ def _configure_iam_role(config, crm, iam):
         project_id=config["provider"]["project_id"],
     )
     service_account = _get_service_account(email, config, iam)
+
+    if service_account is None:
+        logger.info("_configure_iam_role: "
+                    "Creating new service account {}".format(
+                        SKYPILOT_SERVICE_ACCOUNT_ID))
+        try:
+            service_account = _create_service_account(
+                SKYPILOT_SERVICE_ACCOUNT_ID, SKYPILOT_SERVICE_ACCOUNT_CONFIG,
+                config, iam)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.info(
+                f"Failed to create service account: {SKYPILOT_SERVICE_ACCOUNT_CONFIG}"
+                f" with error: {e}")
+
     if service_account is None:
         # SkyPilot: Fallback to the old ray service account name for
         # backwards compatibility. Users using GCP before #2112 have
@@ -372,17 +386,9 @@ def _configure_iam_role(config, crm, iam):
             account_id=DEFAULT_SERVICE_ACCOUNT_ID,
             project_id=config["provider"]["project_id"],
         )
+
         service_account = _get_service_account(email, config, iam)
 
-    if service_account is None:
-        logger.info(
-            "_configure_iam_role: "
-            "Creating new service account {}".format(SKYPILOT_SERVICE_ACCOUNT_ID)
-        )
-
-        service_account = _create_service_account(
-            SKYPILOT_SERVICE_ACCOUNT_ID, SKYPILOT_SERVICE_ACCOUNT_CONFIG, config, iam
-        )
 
 
     assert service_account is not None, "Failed to create service account"
