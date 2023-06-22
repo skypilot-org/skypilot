@@ -4359,6 +4359,48 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
         progress.refresh()
 
 
+@cli.group(cls=_NaturalOrderGroup, hidden=True)
+def local():
+    """SkyPilot local tools CLI."""
+    pass
+
+@cli.group(cls=_NaturalOrderGroup, hidden=True)
+def local():
+    """SkyPilot local tools CLI."""
+    pass
+
+@local.command('up', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
+def local_up():
+    """Creates a local cluster."""
+    with log_utils.safe_rich_status('Creating local cluster...'):
+        path_to_package = os.path.dirname(os.path.dirname(__file__))
+        up_script_path = os.path.join(path_to_package, 'tests', 'kubernetes', 'kind',
+                                                                              'create_cluster.sh')
+        subprocess.check_output('chmod +x {}'.format(up_script_path), shell=True)
+        subprocess.check_output(up_script_path, shell=True)
+    # Run sky check
+    sky_check.check()
+    click.echo('Local cluster created successfully. `sky launch` can now use Kubernetes to run tasks locally.')
+
+
+@local.command('down', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
+def local_up():
+    """Creates a local cluster."""
+    with log_utils.safe_rich_status('Removing local cluster...'):
+        path_to_package = os.path.dirname(os.path.dirname(__file__))
+        down_script_path = os.path.join(path_to_package, 'tests', 'kubernetes',
+                                      'kind',
+                                      'delete_cluster.sh')
+        subprocess.check_output('chmod +x {}'.format(down_script_path),
+                                shell=True)
+        subprocess.check_output(down_script_path, shell=True)
+    # Run sky check
+    sky_check.check()
+    click.echo('Local cluster removed.')
+
+
 def main():
     return cli()
 
