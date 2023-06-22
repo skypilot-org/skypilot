@@ -422,6 +422,7 @@ def _is_permission_satisfied(
             required_permissions -= set(permissions)
         if not required_permissions:
             break
+    logger.info(f"_configure_iam_role: missing permisisons {required_permissions}")
     if not required_permissions:
         # All required permissions are already granted. We don't need to check
         # the roles below.
