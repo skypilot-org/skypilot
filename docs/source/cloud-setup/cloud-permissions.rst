@@ -255,9 +255,9 @@ If you would like to grant fine-grained minimal permissions to your users, you c
     compute.projects.get
     compute.projects.setCommonInstanceMetadata
     compute.zoneOperations.get
+    iam.roles.get
     iam.serviceAccounts.actAs
     iam.serviceAccounts.get
-    iam.roles.get
     serviceusage.services.enable
     serviceusage.services.list
     serviceusage.services.use
@@ -301,7 +301,9 @@ If you would like to grant fine-grained minimal permissions to your users, you c
 
 .. note::
 
-    With the above setup, the user will not have the permission to create the service account required by the SkyPilot on GCP. The admin needs to run :code:`sky launch --cloud gcp` once, to create the service account for all the users in the organization. Or the following section describes how to create the service account manually with the minimal permissions for all the users.
+    With the above setup, the user will not have the permission to create the service account required by the SkyPilot on GCP. There are two solutions:
+    1. The admin needs to run :code:`sky launch --cloud gcp` once, to create the service account for all the users in the organization. 
+    2. Alternatively, the admin can use the following section to create the service account manually with the minimal permissions for all the users.
 
 
 Service Account
@@ -324,7 +326,7 @@ Service Account
     :align: center
     :alt: Set Service Account Name
 
-3. Select the ``minimal-skypilot-role`` (or the name you set) created in last section and click on **DONE**.
+3. Select the ``minimal-skypilot-role`` (or the name you set) created in the last section and click on **DONE**.
 
 .. image:: ../images/screenshots/gcp/service-account-grant-role.png
     :width: 80%

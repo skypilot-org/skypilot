@@ -363,10 +363,11 @@ def _configure_iam_role(config, crm, iam):
     service_account = _get_service_account(email, config, iam)
     if service_account is None:
         # SkyPilot: Fallback to the old ray service account name for
-        # backwards compatibility. This is needed because the GCP
-        # project with the old service account setup may still be in
-        # use, and the user may not have the permissions to create the
-        # new service account.
+        # backwards compatibility. Users using GCP before #2112 have
+        # the old service account setup setup in their GCP project,
+        # and the user may not have the permissions to create the
+        # new service account. This is to ensure that the old service
+        # account is still usable.
         email = SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
             account_id=DEFAULT_SERVICE_ACCOUNT_ID,
             project_id=config["provider"]["project_id"],
@@ -382,6 +383,7 @@ def _configure_iam_role(config, crm, iam):
         service_account = _create_service_account(
             SKYPILOT_SERVICE_ACCOUNT_ID, SKYPILOT_SERVICE_ACCOUNT_CONFIG, config, iam
         )
+
 
     assert service_account is not None, "Failed to create service account"
 
@@ -888,14 +890,14 @@ def _create_service_account(account_id, account_config, config, iam):
     return service_account
 
 
-def _add_iam_policy_binding(service_account, minimal_permissions, roles, crm, iam):
+def _add_iam_policy_binding(service_account, required_permissions, roles, crm, iam):
     """Add new IAM roles for the service account."""
     project_id = service_account["projectId"]
     email = service_account["email"]
 
     member_id = "serviceAccount:" + email
 
-    required_permissions = set(minimal_permissions)
+    required_permissions = set(required_permissions)
     policy = crm.projects().getIamPolicy(resource=project_id, body={}).execute()
     already_configured = True
     for binding in policy["bindings"]:
