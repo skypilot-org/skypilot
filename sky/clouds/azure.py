@@ -254,9 +254,13 @@ class Azure(clouds.Cloud):
                 ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
                 return disk_tier if ok else None
             disk_tier = clouds.Cloud._DEFAULT_DISK_TIER
-            all_tiers = ['high', 'medium', 'low']
+            all_tiers = {'high', 'medium', 'low'}
             while not Azure.check_disk_tier(instance_type, disk_tier)[0]:
-                disk_tier = all_tiers[all_tiers.index(disk_tier) + 1]
+                all_tiers.remove(disk_tier)
+                if not all_tiers:
+                    # No available disk_tier found the specified instance_type
+                    return None
+                disk_tier = list(all_tiers)[0]
             # The disk_tier specified by the user will be checked in the
             # initialization of the Resources.
             return disk_tier
