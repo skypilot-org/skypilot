@@ -232,6 +232,7 @@ If you would like to grant fine-grained minimal permissions to your users, you c
 .. code-block:: text
 
     compute.disks.create
+    compute.disks.list
     compute.firewalls.create
     compute.firewalls.delete
     compute.firewalls.get
@@ -268,6 +269,7 @@ If you would like to grant fine-grained minimal permissions to your users, you c
 
     storage.buckets.create
     storage.buckets.get
+    storage.buckets.delete
     storage.objects.create
     storage.objects.delete
     storage.objects.get
