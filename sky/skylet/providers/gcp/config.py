@@ -373,7 +373,6 @@ def _configure_iam_role(config, crm, iam):
         )
         service_account = _get_service_account(email, config, iam)
 
-
     if service_account is None:
         logger.info(
             "_configure_iam_role: "
