@@ -363,24 +363,6 @@ def _configure_iam_role(config, crm, iam):
     service_account = _get_service_account(email, config, iam)
 
     if service_account is None:
-        logger.info(
-            "_configure_iam_role: "
-            "Creating new service account {}".format(SKYPILOT_SERVICE_ACCOUNT_ID)
-        )
-        try:
-            service_account = _create_service_account(
-                SKYPILOT_SERVICE_ACCOUNT_ID,
-                SKYPILOT_SERVICE_ACCOUNT_CONFIG,
-                config,
-                iam,
-            )
-        except Exception as e:  # pylint: disable=broad-except
-            logger.info(
-                f"Failed to create service account: {SKYPILOT_SERVICE_ACCOUNT_CONFIG}"
-                f" with error: {e}"
-            )
-
-    if service_account is None:
         # SkyPilot: Fallback to the old ray service account name for
         # backwards compatibility. Users using GCP before #2112 have
         # the old service account setup setup in their GCP project,
@@ -393,6 +375,18 @@ def _configure_iam_role(config, crm, iam):
         )
 
         service_account = _get_service_account(email, config, iam)
+
+    if service_account is None:
+        logger.info(
+            "_configure_iam_role: "
+            "Creating new service account {}".format(SKYPILOT_SERVICE_ACCOUNT_ID)
+        )
+        service_account = _create_service_account(
+            SKYPILOT_SERVICE_ACCOUNT_ID,
+            SKYPILOT_SERVICE_ACCOUNT_CONFIG,
+            config,
+            iam,
+        )
 
     assert service_account is not None, "Failed to create service account"
 
@@ -873,7 +867,7 @@ def _get_service_account(account, config, iam):
     try:
         service_account = iam.projects().serviceAccounts().get(name=full_name).execute()
     except errors.HttpError as e:
-        if e.resp.status != 404:
+        if e.resp.status not in [403, 404]:
             raise
         service_account = None
 
