@@ -343,6 +343,90 @@ def _configure_project(config, crm):
 
     return config
 
+def _is_permission_satisfied(service_account, crm, iam, required_permissions, required_roles):
+    """Check if either of the roles or permissions are satisfied."""
+    if service_account is None:
+        return False, None
+
+    project_id = service_account["projectId"]
+    email = service_account["email"]
+
+    member_id = "serviceAccount:" + email
+
+    required_permissions = set(required_permissions)
+    policy = crm.projects().getIamPolicy(resource=project_id, body={}).execute()
+    original_policy = copy.deepcopy(policy)
+    already_configured = True
+
+    print(f'Checking permissions for {email}...')
+
+    # Check the roles first, as checking the permission requires more API calls and
+    # permissions.
+    for role in required_roles:
+        role_exists = False
+        for binding in policy["bindings"]:
+            if binding["role"] == role:
+                if member_id not in binding["members"]:
+                    print(f'Role missing: {role}')
+                    binding["members"].append(member_id)
+                    already_configured = False
+                role_exists = True
+
+        if not role_exists:
+            already_configured = False
+            policy["bindings"].append(
+                {
+                    "members": [member_id],
+                    "role": role,
+                }
+            )
+
+    if already_configured:
+        # In some managed environments, an admin needs to grant the
+        # roles, so only call setIamPolicy if needed.
+        return True, policy
+
+
+    all_role_permissions = None
+    for binding in original_policy["bindings"]:
+        if member_id in binding["members"]:
+            role = binding["role"]
+            try:
+                role_definition = iam.projects().roles().get(name=role).execute()
+            except TypeError as e:
+                if "does not match the pattern" in str(e):
+                    # This is a pre-defined role, and cannot be checked with
+                    # iam.projects().roles().get() API, using the another API
+                    # to get the permissions.
+                    if all_role_permissions is None:
+                        all_role_permissions = (
+                            iam.permissions()
+                            .queryTestablePermissions(
+                                body={
+                                    "fullResourceName": f"//cloudresourcemanager.googleapis.com/projects/{project_id}"
+                                }
+                            )
+                            .execute()
+                        )
+                    permissions = [
+                        permission
+                        for permission in all_role_permissions["permissions"]
+                        if binding["role"] in permission["roles"]
+                    ]
+                else:
+                    raise
+            else:
+                permissions = role_definition["includedPermissions"]
+            required_permissions -= set(permissions)
+        if not required_permissions:
+            break
+    if not required_permissions:
+        # All required permissions are already granted. We don't need to check
+        # the roles below.
+        return True, policy
+
+    return False, policy
+
 
 def _configure_iam_role(config, crm, iam):
     """Setup a gcp service account with IAM roles.
@@ -362,7 +446,31 @@ def _configure_iam_role(config, crm, iam):
     )
     service_account = _get_service_account(email, config, iam)
 
-    if service_account is None:
+    permissions = VM_MINIMAL_PERMISSIONS
+    roles = DEFAULT_SERVICE_ACCOUNT_ROLES
+    if config["provider"].get(HAS_TPU_PROVIDER_FIELD, False):
+        roles = DEFAULT_SERVICE_ACCOUNT_ROLES + TPU_SERVICE_ACCOUNT_ROLES
+        permissions = VM_MINIMAL_PERMISSIONS + TPU_MINIMAL_PERMISSIONS
+
+    satisfied, policy = _is_permission_satisfied(service_account, crm, iam, permissions, roles)
+
+    if not satisfied:
+        logger.info(
+            "_configure_iam_role: "
+            "Creating new service account {}".format(SKYPILOT_SERVICE_ACCOUNT_ID)
+        )
+        service_account = _create_service_account(
+            SKYPILOT_SERVICE_ACCOUNT_ID,
+            SKYPILOT_SERVICE_ACCOUNT_CONFIG,
+            config,
+            iam,
+        )
+
+        satisfied, policy = _is_permission_satisfied(service_account, crm, iam, permissions, roles)
+        logger.info(f'Creation of service account {service_account} succeeded? {satisfied}')
+
+    if not satisfied:
+        logger.info(f'Fallback to {email}')
         # SkyPilot: Fallback to the old ray service account name for
         # backwards compatibility. Users using GCP before #2112 have
         # the old service account setup setup in their GCP project,
@@ -375,28 +483,13 @@ def _configure_iam_role(config, crm, iam):
         )
 
         service_account = _get_service_account(email, config, iam)
-
-    if service_account is None:
-        logger.info(
-            "_configure_iam_role: "
-            "Creating new service account {}".format(SKYPILOT_SERVICE_ACCOUNT_ID)
-        )
-        service_account = _create_service_account(
-            SKYPILOT_SERVICE_ACCOUNT_ID,
-            SKYPILOT_SERVICE_ACCOUNT_CONFIG,
-            config,
-            iam,
-        )
+        satisfied, policy = _is_permission_satisfied(service_account, crm, iam, permissions, roles)
+        logger.info(f'Fallback to service account {service_account} succeeded? {satisfied}')
 
     assert service_account is not None, "Failed to create service account"
 
-    permissions = VM_MINIMAL_PERMISSIONS
-    roles = DEFAULT_SERVICE_ACCOUNT_ROLES
-    if config["provider"].get(HAS_TPU_PROVIDER_FIELD, False):
-        roles = DEFAULT_SERVICE_ACCOUNT_ROLES + TPU_SERVICE_ACCOUNT_ROLES
-        permissions = VM_MINIMAL_PERMISSIONS + TPU_MINIMAL_PERMISSIONS
-
-    _add_iam_policy_binding(service_account, permissions, roles, crm, iam)
+    if not satisfied:
+        _add_iam_policy_binding(service_account, policy, crm, iam)
 
     account_dict = {
         "email": service_account["email"],
@@ -893,88 +986,9 @@ def _create_service_account(account_id, account_config, config, iam):
     return service_account
 
 
-def _add_iam_policy_binding(service_account, required_permissions, roles, crm, iam):
+def _add_iam_policy_binding(service_account, policy, crm, iam):
     """Add new IAM roles for the service account."""
     project_id = service_account["projectId"]
-    email = service_account["email"]
-
-    member_id = "serviceAccount:" + email
-
-    required_permissions = set(required_permissions)
-    policy = crm.projects().getIamPolicy(resource=project_id, body={}).execute()
-    original_policy = copy.deepcopy(policy)
-    already_configured = True
-
-    print(f'Checking permissions for {email}...')
-
-    # Check the roles first, as checking the permission requires more API calls and
-    # permissions.
-    for role in roles:
-        role_exists = False
-        for binding in policy["bindings"]:
-            if binding["role"] == role:
-                if member_id not in binding["members"]:
-                    print(f'Role missing: {role}')
-                    binding["members"].append(member_id)
-                    already_configured = False
-                role_exists = True
-
-        if not role_exists:
-            already_configured = False
-            policy["bindings"].append(
-                {
-                    "members": [member_id],
-                    "role": role,
-                }
-            )
-
-    if already_configured:
-        # In some managed environments, an admin needs to grant the
-        # roles, so only call setIamPolicy if needed.
-        return
-
-
-    all_role_permissions = None
-    for binding in original_policy["bindings"]:
-        if member_id in binding["members"]:
-            role = binding["role"]
-            try:
-                role_definition = iam.projects().roles().get(name=role).execute()
-            except TypeError as e:
-                if "does not match the pattern" in str(e):
-                    # This is a pre-defined role, and cannot be checked with
-                    # iam.projects().roles().get() API, using the another API
-                    # to get the permissions.
-                    if all_role_permissions is None:
-                        all_role_permissions = (
-                            iam.permissions()
-                            .queryTestablePermissions(
-                                body={
-                                    "fullResourceName": f"//cloudresourcemanager.googleapis.com/projects/{project_id}"
-                                }
-                            )
-                            .execute()
-                        )
-                    permissions = [
-                        permission
-                        for permission in all_role_permissions["permissions"]
-                        if binding["role"] in permission["roles"]
-                    ]
-                else:
-                    raise
-            else:
-                permissions = role_definition["includedPermissions"]
-            required_permissions -= set(permissions)
-        if not required_permissions:
-            break
-    if not required_permissions:
-        # All required permissions are already granted. We don't need to check
-        # the roles below.
-        return
-
-    print(
-        f"Missing permissions from the service account {email!r}: {required_permissions}"
-    )
 
     result = (
         crm.projects()
