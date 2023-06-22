@@ -118,5 +118,7 @@ TPU_MINIMAL_PERMISSIONS = [
     "tpu.nodes.create",
     "tpu.nodes.delete",
     "tpu.nodes.list",
+    "tpu.nodes.get",
+    "tpu.nodes.update",
     "tpu.operations.get",
 ]
