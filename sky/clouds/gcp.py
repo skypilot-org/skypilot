@@ -10,8 +10,10 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky import status_lib
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
+from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
@@ -20,7 +22,13 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
+# Env var pointing to any service account key. If it exists, this path takes
+# priority over the DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH below, and will be
+# used instead for SkyPilot-launched instances. This is the same behavior as
+# gcloud:
+# https://cloud.google.com/docs/authentication/provide-credentials-adc#local-key
+_GCP_APPLICATION_CREDENTIAL_ENV = 'GOOGLE_APPLICATION_CREDENTIALS'
+DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH: str = os.path.expanduser(
     '~/.config/gcloud/'
     'application_default_credentials.json')
 
@@ -68,7 +76,6 @@ GCP_PREMISSION_CHECK_LIST = [
 # Minimum set of files under ~/.config/gcloud that grant GCP access.
 _CREDENTIAL_FILES = [
     'credentials.db',
-    'application_default_credentials.json',
     'access_tokens.db',
     'configurations',
     'legacy_credentials',
@@ -80,7 +87,7 @@ _GCLOUD_VERSION = '424.0.0'
 # Need to be run with /bin/bash
 # We factor out the installation logic to keep it align in both spot
 # controller and cloud stores.
-GOOGLE_SDK_INSTALLATION_COMMAND = f'pushd /tmp &>/dev/null && \
+GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
     {{ gcloud --help > /dev/null 2>&1 || \
     {{ mkdir -p {os.path.dirname(_GCLOUD_INSTALLATION_LOG)} && \
     wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-{_GCLOUD_VERSION}-linux-x86_64.tar.gz > {_GCLOUD_INSTALLATION_LOG} && \
@@ -495,6 +502,24 @@ class GCP(clouds.Cloud):
                                                                 clouds='gcp')
 
     @classmethod
+    def _find_application_key_path(cls) -> str:
+        # Check the application default credentials in the environment variable.
+        # If the file does not exist, fallback to the default path.
+        application_key_path = os.environ.get(_GCP_APPLICATION_CREDENTIAL_ENV,
+                                              None)
+        if application_key_path is not None:
+            if not os.path.isfile(os.path.expanduser(application_key_path)):
+                raise FileNotFoundError(
+                    f'{_GCP_APPLICATION_CREDENTIAL_ENV}={application_key_path},'
+                    ' but the file does not exist.')
+            return application_key_path
+        if (not os.path.isfile(
+                os.path.expanduser(DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH))):
+            # Fallback to the default application credential path.
+            raise FileNotFoundError(DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH)
+        return DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
+
+    @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
@@ -509,10 +534,12 @@ class GCP(clouds.Cloud):
             for file in [
                     '~/.config/gcloud/access_tokens.db',
                     '~/.config/gcloud/credentials.db',
-                    '~/.config/gcloud/application_default_credentials.json'
             ]:
                 if not os.path.isfile(os.path.expanduser(file)):
                     raise FileNotFoundError(file)
+
+            cls._find_application_key_path()
+
             # Check the installation of google-cloud-sdk.
             _run_output('gcloud --version')
 
@@ -524,7 +551,7 @@ class GCP(clouds.Cloud):
         except (auth.exceptions.DefaultCredentialsError,
                 subprocess.CalledProcessError,
                 exceptions.CloudUserIdentityError, FileNotFoundError,
-                ImportError):
+                ImportError) as e:
             # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
                 'GCP tools are not installed or credentials are not set. '
@@ -539,6 +566,7 @@ class GCP(clouds.Cloud):
                 '  $ gcloud auth application-default login\n    '
                 'For more info: '
                 'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
+                f'\nDetails: {common_utils.format_exception(e, use_bracket=True)}'
             )
 
         # Check APIs.
@@ -635,6 +663,10 @@ class GCP(clouds.Cloud):
             f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
             for filename in _CREDENTIAL_FILES
         }
+        # Upload the application key path to the default path, so that
+        # autostop and GCS can be accessed on the remote cluster.
+        credentials[DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH] = (
+            self._find_application_key_path())
         credentials[GCP_CONFIG_SKY_BACKUP_PATH] = GCP_CONFIG_SKY_BACKUP_PATH
         return credentials
 
@@ -736,3 +768,80 @@ class GCP(clouds.Cloud):
             'low': 'pd-standard',
         }
         return tier2name[tier]
+
+    @classmethod
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List['status_lib.ClusterStatus']:
+        """Query the status of a cluster."""
+        del region  # unused
+
+        from sky.utils import tpu_utils  # pylint: disable=import-outside-toplevel
+        use_tpu_vm = kwargs.pop('use_tpu_vm', False)
+
+        label_filter_str = ' '.join(
+            f'labels.{k}={v}' for k, v in tag_filters.items())
+        if use_tpu_vm:
+            # TPU VM's state definition is different from compute VM
+            # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#State # pylint: disable=line-too-long
+            status_map = {
+                'CREATING': status_lib.ClusterStatus.INIT,
+                'STARTING': status_lib.ClusterStatus.INIT,
+                'RESTARTING': status_lib.ClusterStatus.INIT,
+                'READY': status_lib.ClusterStatus.UP,
+                'REPAIRING': status_lib.ClusterStatus.INIT,
+                # 'STOPPED' in GCP TPU VM means stopped, with disk preserved.
+                'STOPPING': status_lib.ClusterStatus.STOPPED,
+                'STOPPED': status_lib.ClusterStatus.STOPPED,
+                'DELETING': None,
+                'PREEMPTED': None,
+            }
+            tpu_utils.check_gcp_cli_include_tpu_vm()
+            query_cmd = ('gcloud compute tpus tpu-vm list '
+                         f'--zone {zone} '
+                         f'--filter="({label_filter_str})" '
+                         '--format="value(state)"')
+        else:
+            # Ref: https://cloud.google.com/compute/docs/instances/instance-life-cycle
+            status_map = {
+                'PROVISIONING': status_lib.ClusterStatus.INIT,
+                'STAGING': status_lib.ClusterStatus.INIT,
+                'RUNNING': status_lib.ClusterStatus.UP,
+                'REPAIRING': status_lib.ClusterStatus.INIT,
+                # 'TERMINATED' in GCP means stopped, with disk preserved.
+                'STOPPING': status_lib.ClusterStatus.STOPPED,
+                'TERMINATED': status_lib.ClusterStatus.STOPPED,
+                # 'SUSPENDED' in GCP means stopped, with disk and OS memory
+                # preserved.
+                'SUSPENDING': status_lib.ClusterStatus.STOPPED,
+                'SUSPENDED': status_lib.ClusterStatus.STOPPED,
+            }
+            # TODO(zhwu): The status of the TPU attached to the cluster should also
+            # be checked, since TPUs are not part of the VMs.
+            query_cmd = ('gcloud compute instances list '
+                         f'--filter="({label_filter_str})" '
+                         '--format="value(status)"')
+        returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
+                                                          '/dev/null',
+                                                          require_outputs=True,
+                                                          shell=True)
+        logger.debug(f'{query_cmd} returned {returncode}.\n'
+                     '**** STDOUT ****\n'
+                     f'{stdout}\n'
+                     '**** STDERR ****\n'
+                     f'{stderr}')
+
+        if returncode != 0:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ClusterStatusFetchingError(
+                    f'Failed to query GCP cluster {name!r} status: '
+                    f'{stdout + stderr}')
+
+        status_list = []
+        for line in stdout.splitlines():
+            status = status_map.get(line.strip())
+            if status is None:
+                continue
+            status_list.append(status)
+
+        return status_list

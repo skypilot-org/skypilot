@@ -32,6 +32,7 @@ from sky import sky_logging
 from sky import optimizer
 from sky import skypilot_config
 from sky import spot as spot_lib
+from sky import status_lib
 from sky import task as task_lib
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -604,9 +605,9 @@ class RetryingVmProvisioner(object):
         """Resources to be provisioned."""
 
         def __init__(
-            self, cluster_name: str, resources: resources_lib.Resources,
-            num_nodes: int,
-            prev_cluster_status: Optional[global_user_state.ClusterStatus]
+                self, cluster_name: str, resources: resources_lib.Resources,
+                num_nodes: int,
+                prev_cluster_status: Optional[status_lib.ClusterStatus]
         ) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
             self.cluster_name = cluster_name
@@ -1095,7 +1096,7 @@ class RetryingVmProvisioner(object):
     def _yield_zones(
         self, to_provision: resources_lib.Resources, num_nodes: int,
         cluster_name: str,
-        prev_cluster_status: Optional[global_user_state.ClusterStatus]
+        prev_cluster_status: Optional[status_lib.ClusterStatus]
     ) -> Iterable[Optional[List[clouds.Zone]]]:
         """Yield zones within the given region to try for provisioning.
 
@@ -1149,7 +1150,7 @@ class RetryingVmProvisioner(object):
             # same region and zone.
             zones = _get_previously_launched_zones()
 
-            if prev_cluster_status != global_user_state.ClusterStatus.UP:
+            if prev_cluster_status != status_lib.ClusterStatus.UP:
                 logger.info(
                     f'Cluster {cluster_name!r} (status: '
                     f'{prev_cluster_status.value}) was previously launched '
@@ -1168,7 +1169,7 @@ class RetryingVmProvisioner(object):
             # Cluster with status UP can reach here, if it was killed by the
             # cloud provider and no available resources in that region to
             # relaunch, which can happen to spot instance.
-            if prev_cluster_status == global_user_state.ClusterStatus.UP:
+            if prev_cluster_status == status_lib.ClusterStatus.UP:
                 message = (
                     f'Failed to connect to the cluster {cluster_name!r}. '
                     'It is possibly killed by cloud provider or manually '
@@ -1181,7 +1182,7 @@ class RetryingVmProvisioner(object):
                 # we may need to confirm whether the cluster is down in all
                 # cases.
                 global_user_state.set_cluster_status(
-                    cluster_name, global_user_state.ClusterStatus.UP)
+                    cluster_name, status_lib.ClusterStatus.UP)
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesUnavailableError(message,
                                                                no_failover=True)
@@ -1189,7 +1190,7 @@ class RetryingVmProvisioner(object):
             # Check the *previous* cluster status. If the cluster is previously
             # stopped, we should not retry other regions, since the previously
             # attached volumes are not visible on another region.
-            elif prev_cluster_status == global_user_state.ClusterStatus.STOPPED:
+            elif prev_cluster_status == status_lib.ClusterStatus.STOPPED:
                 message = (
                     'Failed to acquire resources to restart the stopped '
                     f'cluster {cluster_name} in {region.name}. Please retry '
@@ -1199,12 +1200,12 @@ class RetryingVmProvisioner(object):
                 # (1) the cluster is not up (2) it ensures future `sky start`
                 # will disable auto-failover too.
                 global_user_state.set_cluster_status(
-                    cluster_name, global_user_state.ClusterStatus.STOPPED)
+                    cluster_name, status_lib.ClusterStatus.STOPPED)
 
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesUnavailableError(message,
                                                                no_failover=True)
-            assert prev_cluster_status == global_user_state.ClusterStatus.INIT
+            assert prev_cluster_status == status_lib.ClusterStatus.INIT
             message = (f'Failed to launch cluster {cluster_name!r} '
                        f'(previous status: {prev_cluster_status.value}) '
                        f'with the original resources: {to_provision}.')
@@ -1309,7 +1310,7 @@ class RetryingVmProvisioner(object):
         stream_logs: bool,
         cluster_name: str,
         cloud_user_identity: Optional[List[str]],
-        prev_cluster_status: Optional[global_user_state.ClusterStatus],
+        prev_cluster_status: Optional[status_lib.ClusterStatus],
     ):
         """The provision retry loop."""
         style = colorama.Style
@@ -1326,8 +1327,7 @@ class RetryingVmProvisioner(object):
         # Get previous cluster status
         cluster_exists = prev_cluster_status is not None
         is_prev_cluster_healthy = prev_cluster_status in [
-            global_user_state.ClusterStatus.STOPPED,
-            global_user_state.ClusterStatus.UP
+            status_lib.ClusterStatus.STOPPED, status_lib.ClusterStatus.UP
         ]
 
         assert to_provision.region is not None, (
@@ -1399,7 +1399,7 @@ class RetryingVmProvisioner(object):
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
             usage_lib.messages.usage.update_final_cluster_status(
-                global_user_state.ClusterStatus.INIT)
+                status_lib.ClusterStatus.INIT)
 
             # This sets the status to INIT (even for a normal, UP cluster).
             global_user_state.add_or_update_cluster(
@@ -1946,8 +1946,8 @@ class RetryingVmProvisioner(object):
                 # STOPPED) will not trigger the failover due to `no_failover`
                 # flag; see _yield_zones(). Also, the cluster should have been
                 # terminated by _retry_zones().
-                assert (prev_cluster_status == global_user_state.ClusterStatus.
-                        INIT), prev_cluster_status
+                assert (prev_cluster_status == status_lib.ClusterStatus.INIT
+                       ), prev_cluster_status
                 assert global_user_state.get_handle_from_cluster_name(
                     cluster_name) is None, cluster_name
                 logger.info('Retrying provisioning with requested resources '
@@ -2511,12 +2511,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _update_after_cluster_provisioned(
             self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
-            prev_cluster_status: Optional[global_user_state.ClusterStatus],
+            prev_cluster_status: Optional[status_lib.ClusterStatus],
             ip_list: List[str], lock_path: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
         usage_lib.messages.usage.update_final_cluster_status(
-            global_user_state.ClusterStatus.UP)
+            status_lib.ClusterStatus.UP)
 
         # For backward compatability and robustness of skylet, it is restarted
         with log_utils.safe_rich_status('Updating remote skylet'):
@@ -2524,7 +2524,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.
-        if prev_cluster_status == global_user_state.ClusterStatus.INIT:
+        if prev_cluster_status == status_lib.ClusterStatus.INIT:
             # update_status will query the ray job status for all INIT /
             # PENDING / RUNNING jobs for the real status, since we do not
             # know the actual previous status of the cluster.
@@ -2537,7 +2537,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             subprocess_utils.handle_returncode(returncode, cmd,
                                                'Failed to update job status.',
                                                stderr)
-        if prev_cluster_status == global_user_state.ClusterStatus.STOPPED:
+        if prev_cluster_status == status_lib.ClusterStatus.STOPPED:
             # Safely set all the previous jobs to FAILED since the cluster
             # is restarted
             # An edge case here due to racing:
@@ -2561,7 +2561,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ready=True,
             )
             usage_lib.messages.usage.update_final_cluster_status(
-                global_user_state.ClusterStatus.UP)
+                status_lib.ClusterStatus.UP)
             auth_config = common_utils.read_yaml(handle.cluster_yaml)['auth']
             backend_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
                                                       ip_list, auth_config)
@@ -3296,7 +3296,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     require_outputs=True)
 
         elif (isinstance(cloud, clouds.IBM) and terminate and
-              prev_cluster_status == global_user_state.ClusterStatus.STOPPED):
+              prev_cluster_status == status_lib.ClusterStatus.STOPPED):
             # pylint: disable= W0622 W0703 C0415
             from sky.adaptors import ibm
             from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
@@ -3353,8 +3353,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # May, 2023 by Hysun: Allow terminate INIT cluster which may have
         # some instances provisioning in backgroud but not completed.
         elif (isinstance(cloud, clouds.OCI) and terminate and
-              prev_cluster_status in (global_user_state.ClusterStatus.STOPPED,
-                                      global_user_state.ClusterStatus.INIT)):
+              prev_cluster_status in (status_lib.ClusterStatus.STOPPED,
+                                      status_lib.ClusterStatus.INIT)):
             region = config['provider']['region']
 
             # pylint: disable=import-outside-toplevel
@@ -3368,7 +3368,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # To avoid undefined local varaiables error.
             stdout = stderr = ''
         elif (terminate and
-              (prev_cluster_status == global_user_state.ClusterStatus.STOPPED or
+              (prev_cluster_status == status_lib.ClusterStatus.STOPPED or
                use_tpu_vm)):
             # For TPU VMs, gcloud CLI is used for VM termination.
             if isinstance(cloud, clouds.AWS):

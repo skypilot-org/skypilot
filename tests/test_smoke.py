@@ -1240,9 +1240,11 @@ def test_gcp_start_stop():
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
             f'sleep 20',
-            f'sky start -y {name}',
+            f'sky start -y {name} -i 1',
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
+            'sleep 180',
+            f'sky status -r {name} | grep "INIT\|STOPPED"',
         ],
         f'sky down -y {name}',
     )
@@ -1262,9 +1264,11 @@ def test_azure_start_stop():
             f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',  # Ensure the raylet process has the correct file descriptor limit.
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
-            f'sky start -y {name}',
+            f'sky start -y {name} -i 1',
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
+            'sleep 200',
+            f's=$(sky status -r {name}) | echo $s && echo $s | grep "INIT\|STOPPED"'
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # 30 mins
