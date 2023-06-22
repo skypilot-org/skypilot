@@ -1351,8 +1351,8 @@ class RetryingVmProvisioner(object):
             # the next region
             raise exceptions.ResourcesUnavailableError(
                 f'Found no quota for {to_provision.instance_type} in region '
-                f'{to_provision.region}. To request quotas in this region, '
-                f'visit http://aws.amazon.com/contact-us/ec2-request.')
+                f'{to_provision.region}. To request quotas, check the instruction: '
+                f'https://skypilot.readthedocs.io/en/latest/cloud-setup/quota.html.')
 
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status):
