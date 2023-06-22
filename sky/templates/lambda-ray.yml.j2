@@ -24,6 +24,8 @@ available_node_types:
   ray_head_default:
     resources: {}
     node_config:
+      AuthorizedKey: |
+        skypilot:ssh_public_key_content
       InstanceType: {{instance_type}}
 {% if num_nodes > 1 %}
   ray_worker_default:
@@ -31,6 +33,8 @@ available_node_types:
     max_workers: {{num_nodes - 1}}
     resources: {}
     node_config:
+      AuthorizedKey: |
+        skypilot:ssh_public_key_content
       InstanceType: {{instance_type}}
 {%- endif %}
 

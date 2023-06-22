@@ -74,7 +74,8 @@ available_node_types:
             shell: /bin/bash
             sudo: ALL=(ALL) NOPASSWD:ALL
             ssh_authorized_keys:
-              - skypilot:ssh_public_key_content
+              - |
+                skypilot:ssh_public_key_content
         write_files:
           - path: /etc/apt/apt.conf.d/20auto-upgrades
             content: |
@@ -126,7 +127,8 @@ available_node_types:
             shell: /bin/bash
             sudo: ALL=(ALL) NOPASSWD:ALL
             ssh_authorized_keys:
-              - skypilot:ssh_public_key_content
+              - |
+                skypilot:ssh_public_key_content
         write_files:
           - path: /etc/apt/apt.conf.d/20auto-upgrades
             content: |

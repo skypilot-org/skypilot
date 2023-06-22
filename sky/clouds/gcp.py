@@ -62,7 +62,6 @@ GCP_PREMISSION_CHECK_LIST = [
     'compute.subnetworks.list',
     'compute.subnetworks.useExternalIp',
     'compute.projects.get',
-    'compute.projects.setCommonInstanceMetadata',
     'compute.zoneOperations.get',
     'iam.serviceAccounts.actAs',
     'iam.serviceAccounts.get',

@@ -6,7 +6,6 @@ import re
 import socket
 import subprocess
 import sys
-import time
 from typing import Any, Dict, Tuple
 import uuid
 
@@ -71,7 +70,7 @@ def _save_key_pair(private_key_path: str, public_key_path: str,
 
 
 def get_or_generate_keys() -> Tuple[str, str]:
-    """Returns the aboslute public and private key paths."""
+    """Returns the aboslute private and public key paths."""
     private_key_path = os.path.expanduser(PRIVATE_SSH_KEY_PATH)
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     if not os.path.exists(private_key_path):
@@ -88,8 +87,8 @@ def get_or_generate_keys() -> Tuple[str, str]:
     return private_key_path, public_key_path
 
 
-def _replace_cloud_init_ssh_info_in_config(config: Dict[str, Any],
-                                           public_key: str) -> Dict[str, Any]:
+def _replace_ssh_info_in_config(config: Dict[str, Any],
+                                public_key: str) -> Dict[str, Any]:
     config_str = common_utils.dump_yaml_str(config)
     config_str = config_str.replace('skypilot:ssh_user',
                                     config['auth']['ssh_user'])
@@ -103,33 +102,8 @@ def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r') as f:
         public_key = f.read()
-    config = _replace_cloud_init_ssh_info_in_config(config, public_key)
+    config = _replace_ssh_info_in_config(config, public_key)
     return config
-
-
-# Reference:
-# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/config.py
-def _wait_for_compute_global_operation(project_name: str, operation_name: str,
-                                       compute: Any) -> None:
-    """Poll for global compute operation until finished."""
-    logger.debug('wait_for_compute_global_operation: '
-                 'Waiting for operation {} to finish...'.format(operation_name))
-    max_polls = 10
-    poll_interval = 5
-    for _ in range(max_polls):
-        result = compute.globalOperations().get(
-            project=project_name,
-            operation=operation_name,
-        ).execute()
-        if 'error' in result:
-            raise Exception(result['error'])
-
-        if result['status'] == 'DONE':
-            logger.debug('wait_for_compute_global_operation: '
-                         'Operation done.')
-            break
-        time.sleep(poll_interval)
-    return result
 
 
 # Snippets of code inspired from
@@ -140,7 +114,9 @@ def _wait_for_compute_global_operation(project_name: str, operation_name: str,
 # Retry for the GCP as sometimes there will be connection reset by peer error.
 @common_utils.retry
 def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    private_key_path, public_key_path = get_or_generate_keys()
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r') as f:
+        public_key = f.read()
     config = copy.deepcopy(config)
 
     project_id = config['provider']['project_id']
@@ -148,7 +124,6 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                         'v1',
                         credentials=None,
                         cache_discovery=False)
-    user = config['auth']['ssh_user']
 
     try:
         project = compute.projects().get(project=project_id).execute()
@@ -267,71 +242,17 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             subprocess_utils.handle_returncode(proc.returncode, enable_ssh_cmd,
                                                'Failed to enable ssh port.',
                                                proc.stderr.decode('utf-8'))
-        return config
-
-    # OS Login is not enabled for the project. Add the ssh key directly to the
-    # metadata.
     # TODO(zhwu): Use cloud init to add ssh public key, to avoid the permission
     # issue. A blocker is that the cloud init is not installed in the debian
     # image by default.
-    project_keys: str = next(  # type: ignore
-        (item for item in project['commonInstanceMetadata'].get('items', [])
-         if item['key'] == 'ssh-keys'), {}).get('value', '')
-    ssh_keys = project_keys.split('\n') if project_keys else []
-
-    # Get public key from file.
-    with open(public_key_path, 'r') as f:
-        public_key = f.read()
-
-    # Check if ssh key in Google Project's metadata
-    public_key_token = public_key.split(' ')[1]
-
-    key_found = False
-    for key in ssh_keys:
-        key_list = key.split(' ')
-        if len(key_list) != 3:
-            continue
-        if user == key_list[-1] and os.path.exists(
-                private_key_path) and key_list[1] == public_key.split(' ')[1]:
-            key_found = True
-
-    if not key_found:
-        new_ssh_key = '{user}:ssh-rsa {public_key_token} {user}'.format(
-            user=user, public_key_token=public_key_token)
-        metadata = project['commonInstanceMetadata'].get('items', [])
-
-        ssh_key_index = [
-            k for k, v in enumerate(metadata) if v['key'] == 'ssh-keys'
-        ]
-        assert len(ssh_key_index) <= 1
-
-        if len(ssh_key_index) == 0:
-            metadata.append({'key': 'ssh-keys', 'value': new_ssh_key})
-        else:
-            first_ssh_key_index = ssh_key_index[0]
-            metadata[first_ssh_key_index]['value'] += '\n' + new_ssh_key
-
-        project['commonInstanceMetadata']['items'] = metadata
-
-        operation = compute.projects().setCommonInstanceMetadata(
-            project=project['name'],
-            body=project['commonInstanceMetadata']).execute()
-        _wait_for_compute_global_operation(project['name'], operation['name'],
-                                           compute)
-    return config
+    return _replace_ssh_info_in_config(config, public_key)
 
 
 def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    get_or_generate_keys()
-    # Need to use ~ relative path because Ray uses the same
-    # path for finding the public key path on both local and head node.
-    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
-
-    file_mounts = config['file_mounts']
-    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
-    config['file_mounts'] = file_mounts
-
-    return config
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r') as f:
+        public_key = f.read()
+    return _replace_ssh_info_in_config(config, public_key)
 
 
 def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -422,14 +343,6 @@ def setup_oci_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     with open(public_key_path, 'r') as f:
         public_key = f.read()
 
-    # Need to use ~ relative path because Ray uses the same
-    # path for finding the public key path on both local and head node.
-    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
-
-    file_mounts = config['file_mounts']
-    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
-    config['file_mounts'] = file_mounts
-
     for node_type in config['available_node_types']:
         config['available_node_types'][node_type]['node_config'][
             'AuthorizedKey'] = public_key
@@ -438,11 +351,7 @@ def setup_oci_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    private_key_path, public_key_path = get_or_generate_keys()
-    config['auth']['ssh_private_key'] = private_key_path
-    config['auth']['ssh_public_key'] = public_key_path
-
-    file_mounts = config['file_mounts']
-    file_mounts[public_key_path] = public_key_path
-    config['file_mounts'] = file_mounts
-    return config
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r') as f:
+        public_key = f.read()
+    return _replace_ssh_info_in_config(config, public_key)

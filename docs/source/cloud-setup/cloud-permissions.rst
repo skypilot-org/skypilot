@@ -253,7 +253,6 @@ If you would like to grant fine-grained minimal permissions to your users, you c
     compute.subnetworks.list
     compute.subnetworks.useExternalIp
     compute.projects.get
-    compute.projects.setCommonInstanceMetadata
     compute.zoneOperations.get
     iam.serviceAccounts.actAs
     iam.serviceAccounts.get

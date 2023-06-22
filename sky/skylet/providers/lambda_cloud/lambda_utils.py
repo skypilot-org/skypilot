@@ -4,8 +4,11 @@ import os
 import requests
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky.utils import common_utils
+
 CREDENTIALS_PATH = '~/.lambda_cloud/lambda_keys'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
+SSH_KEY_PREFIX = f'sky-key-{common_utils.get_user_hash()}'
 
 
 class LambdaCloudError(Exception):
@@ -189,7 +192,7 @@ class LambdaCloudClient:
         suffix_digits = [0]
         for key_info in candidate_keys:
             name = key_info.get('name', '')
-            if key_info.get('public_key', '') == pub_key:
+            if key_info.get('public_key', '').strip() == pub_key.strip():
                 return name, True
             if (len(name) > len(prefix) + 1 and name[len(prefix)] == '-' and
                     name[len(prefix) + 1:].isdigit()):
