@@ -2295,7 +2295,7 @@ class OciStore(AbstractStore):
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
-            if not str(dest_dir_name).endswith('/'):
+            if dest_dir_name and not str(dest_dir_name).endswith('/'):
                 dest_dir_name = f'{dest_dir_name}/'
 
             # we exclude .git directory from the sync
@@ -2346,7 +2346,6 @@ class OciStore(AbstractStore):
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
         """
-        logger.debug(f'_get_bucket: {self.name}')
         try:
             get_bucket_response = self.client.get_bucket(
                 namespace_name=self.namespace, bucket_name=self.name)
@@ -2392,7 +2391,6 @@ class OciStore(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        logger.debug(f'mount_command(): {mount_path}')
         self.mount_path = mount_path
 
         install_cmd = (
@@ -2415,10 +2413,6 @@ class OciStore(AbstractStore):
 
         version_check_cmd = (
             f'rclone --version | grep -q {self.RCLONE_VERSION}')
-
-        logger.debug(f'install_cmd: {install_cmd}')
-        logger.debug(f'mount_cmd: {mount_cmd}')
-        logger.debug(f'version_check_cmd: {version_check_cmd}')
 
         return mounting_utils.get_mounting_command(self.mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
