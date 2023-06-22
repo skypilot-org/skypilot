@@ -263,7 +263,7 @@ If you would like to grant fine-grained minimal permissions to your users, you c
     resourcemanager.projects.get
     resourcemanager.projects.getIamPolicy
 
-4. [Optional] If the user need to access GCS buckets, you can additionally add the following permissions:
+4. **Optional**: If the user needs to access GCS buckets, you can additionally add the following permissions:
 
 .. code-block:: text
 
