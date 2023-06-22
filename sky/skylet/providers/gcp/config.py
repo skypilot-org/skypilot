@@ -911,6 +911,8 @@ def _add_iam_policy_binding(service_account, required_permissions, roles, crm, i
     original_policy = copy.deepcopy(policy)
     already_configured = True
 
+    print(f'Checking permissions for {email}...')
+
     # Check the roles first, as checking the permission requires more API calls and
     # permissions.
     for role in roles:
