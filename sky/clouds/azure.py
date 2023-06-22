@@ -527,6 +527,8 @@ class Azure(clouds.Cloud):
             if not stdout.strip():
                 return []
             node_ids = json.loads(stdout.strip())
+            if not node_ids:
+                return []
             state_str = '[].powerState'
             if len(node_ids) == 1:
                 state_str = 'powerState'
