@@ -75,9 +75,9 @@ def test_accelerator_mismatch(enable_all_clouds):
         _capture_match_gpus_spec(f.name, 'V100')
 
 
-def test_show_gpus_gpu_name():
+def test_show_gpus():
     """
-    This is a conprehensive test quite for `sky show-gpus`.
+    This is a test suite for `sky show-gpus` to check functionality (but not correctness).
     The tests below correspond to the following terminal commands,
     in order:
 
@@ -111,18 +111,23 @@ def test_show_gpus_gpu_name():
     result = cli_runner.invoke(cli.show_gpus, ['V100:-2'])
     assert isinstance(result.exception, SystemExit)
 
-    result = cli_runner.invoke(cli.show_gpus, ['--cloud', 'lambda'])
-    assert not result.exit_code
-
-    result = cli_runner.invoke(cli.show_gpus, ['--cloud', 'lambda', '--all'])
-    assert not result.exit_code
-
-    result = cli_runner.invoke(cli.show_gpus, ['V100', '--cloud', 'lambda'])
-    assert not result.exit_code
-
-    result = cli_runner.invoke(cli.show_gpus, ['V100:4', '--cloud', 'lambda'])
-    assert not result.exit_code
-
     result = cli_runner.invoke(cli.show_gpus,
-                               ['V100:4', '--cloud', 'lambda', '--all'])
-    assert isinstance(result.exception, SystemExit)
+                               ['--cloud', 'aws', '--region', 'us-west-1'])
+    assert not result.exit_code
+
+    for c in ['aws', 'azure', 'ibm', 'gcp', 'lambda']:
+        result = cli_runner.invoke(cli.show_gpus, ['--cloud', c])
+        assert not result.exit_code
+
+        result = cli_runner.invoke(cli.show_gpus, ['--cloud', c, '--all'])
+        assert not result.exit_code
+
+        result = cli_runner.invoke(cli.show_gpus, ['V100', '--cloud', c])
+        assert not result.exit_code
+
+        result = cli_runner.invoke(cli.show_gpus, ['V100:4', '--cloud', c])
+        assert not result.exit_code
+
+        result = cli_runner.invoke(cli.show_gpus,
+                                   ['V100:4', '--cloud', c, '--all'])
+        assert isinstance(result.exception, SystemExit)
