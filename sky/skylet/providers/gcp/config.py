@@ -489,8 +489,8 @@ def _configure_iam_role(config, crm, iam):
 
     if not satisfied:
         logger.info(
-            "_configure_iam_role: "
-            f"Adding roles to service account {email}...")
+            "_configure_iam_role: " f"Adding roles to service account {email}..."
+        )
         _add_iam_policy_binding(service_account, policy, crm, iam)
 
     account_dict = {

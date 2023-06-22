@@ -723,7 +723,8 @@ class RetryingVmProvisioner(object):
                 logger.info('Skipping all regions due to disk size issue.')
                 self._blocked_resources.add(
                     launchable_resources.copy(region=None, zone=None))
-            elif 'Policy update access denied.' in httperror_str[0]:
+            elif ('Policy update access denied.' in httperror_str[0] or
+                  'IAM_PERMISSION_DENIED' in httperror_str[0]):
                 logger.info('Skipping all regions due to service account not '
                             'having the required permissions and the user '
                             'account does not have enough permission to '
