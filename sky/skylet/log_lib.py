@@ -303,8 +303,8 @@ def add_ray_env_vars(
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
-                              job_owner: str,
-                              job_id: int,
+                              job_owner: Optional[str] = None,
+                              job_id: Optional[int] = None,
                               env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
                               with_ray: bool = False,
@@ -322,17 +322,19 @@ def run_bash_command_with_log(bash_command: str,
         inner_command = f'/bin/bash -i {script_path}'
 
         subprocess_cmd: Union[str, List[str]]
-        if use_sudo:
+        if use_sudo and job_owner is not None:
             subprocess.run(f'chmod a+rwx {script_path}', shell=True, check=True)
             subprocess_cmd = job_lib.make_job_command_with_user_switching(
                 job_owner, inner_command)
         else:
             subprocess_cmd = inner_command
 
+        ray_job_id = job_lib.make_ray_job_id(job_id,
+                                             job_owner) if job_id else None
         return run_with_log(
             subprocess_cmd,
             log_path,
-            ray_job_id=job_lib.make_ray_job_id(job_id, job_owner),
+            ray_job_id=ray_job_id,
             stream_logs=stream_logs,
             with_ray=with_ray,
             use_sudo=use_sudo,

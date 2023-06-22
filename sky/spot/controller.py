@@ -6,10 +6,8 @@ import time
 import traceback
 import typing
 from typing import Tuple
-
-import subprocess
 import filelock
-
+import os
 from sky import exceptions
 from sky import sky_logging
 from sky import status_lib
@@ -17,6 +15,7 @@ from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.skylet.log_lib import run_bash_command_with_log
 from sky.spot import recovery_strategy
 from sky.spot import spot_state
 from sky.spot import spot_utils
@@ -270,7 +269,9 @@ class SpotController:
 
             # Try to recover the spot jobs, when the cluster is preempted
             # or the job status is failed to be fetched.
-            spot_state.set_recovering(self._job_id, task_id)
+            spot_state.set_recovering(self._job_id,
+                                      task_id,
+                                      callback_func=self.event_callback_func)
             recovered_time = self._strategy_executor.recover()
             spot_state.set_recovered(self._job_id,
                                      task_id,
@@ -278,32 +279,25 @@ class SpotController:
 
     def event_callback_func(self, task_id: int, state: str, comment: str = ''):
 
-        callback_str = self._dag.tasks[task_id].event_callback
-        if callback_str is None:
+        event_callback = self._dag.tasks[task_id].event_callback
+        if event_callback is None:
             return
+        event_callback = event_callback.strip()
 
-        if '$JOB_ID' in callback_str:
-            callback_str = callback_str.replace('$JOB_ID', str(self._job_id))
-        if '$TASK_ID' in callback_str:
-            callback_str = callback_str.replace('$TASK_ID', str(task_id))
-        if '$JOB_STATUS' in callback_str:
-            callback_str = callback_str.replace('$JOB_STATUS', state)
-        if '$COMMENT' in callback_str:
-            callback_str = callback_str.replace('$COMMENT', comment)
-
-        if callback_str.find('controller_log:') == 0:
-            print_str = callback_str[len('controller_log:'):].strip()
-            logger.info(print_str)
-        elif callback_str.find('callback_script:') == 0:
-            run_str = callback_str[len('callback_script:'):].strip()
-            result = subprocess.run(run_str,
-                                    capture_output=True,
-                                    shell=True,
-                                    check=True,
-                                    text=True)
-            logger.info(f'stdout: {result.stdout.strip()}')
-        else:
-            logger.info(f'Unrecognized callback_str: {callback_str}')
+        logger.info(f'=== START: event callback for {state!r} ===')
+        log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                self._backend.run_timestamp,
+                                f'spot-callback-{self._job_id}-{task_id}.log')
+        result = run_bash_command_with_log(bash_command=event_callback,
+                                           log_path=log_path,
+                                           env_vars=dict(SKYPILOT_JOB_ID=str(
+                                               self._job_id),
+                                                         TASK_ID=str(task_id),
+                                                         JOB_STATUS=state,
+                                                         COMMENT=comment))
+        logger.info(
+            f'Bash:{event_callback},log_path:{log_path},result:{result}')
+        logger.info(f'=== END: event callback for {state!r} ===')
 
     def run(self):
         """Run controller logic and handle exceptions."""

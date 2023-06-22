@@ -319,7 +319,10 @@ def set_started(job_id: int, task_id: int, start_time: float):
             (SpotStatus.RUNNING.value, start_time, start_time, job_id, task_id))
 
 
-def set_recovering(job_id: int, task_id: int):
+def set_recovering(job_id: int,
+                   task_id: int,
+                   callback_func: Optional[Callable[[int, str, str],
+                                                    None]] = None):
     """Set the task to recovering state, and update the job duration."""
     logger.info('=== Recovering... ===')
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -330,6 +333,8 @@ def set_recovering(job_id: int, task_id: int):
                 WHERE spot_job_id=(?) AND
                 task_id=(?)""",
             (SpotStatus.RECOVERING.value, time.time(), job_id, task_id))
+    if callback_func is not None:
+        callback_func(task_id, 'RECOVERING', '')
 
 
 def set_recovered(job_id: int, task_id: int, recovered_time: float):
