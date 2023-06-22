@@ -343,7 +343,10 @@ def _configure_project(config, crm):
 
     return config
 
-def _is_permission_satisfied(service_account, crm, iam, required_permissions, required_roles):
+
+def _is_permission_satisfied(
+    service_account, crm, iam, required_permissions, required_roles
+):
     """Check if either of the roles or permissions are satisfied."""
     if service_account is None:
         return False, None
@@ -358,7 +361,7 @@ def _is_permission_satisfied(service_account, crm, iam, required_permissions, re
     original_policy = copy.deepcopy(policy)
     already_configured = True
 
-    print(f'Checking permissions for {email}...')
+    logger.info(f"Checking permissions for {email}...")
 
     # Check the roles first, as checking the permission requires more API calls and
     # permissions.
@@ -367,7 +370,7 @@ def _is_permission_satisfied(service_account, crm, iam, required_permissions, re
         for binding in policy["bindings"]:
             if binding["role"] == role:
                 if member_id not in binding["members"]:
-                    print(f'Role missing: {role}')
+                    print(f"Role missing: {role}")
                     binding["members"].append(member_id)
                     already_configured = False
                 role_exists = True
@@ -385,7 +388,6 @@ def _is_permission_satisfied(service_account, crm, iam, required_permissions, re
         # In some managed environments, an admin needs to grant the
         # roles, so only call setIamPolicy if needed.
         return True, policy
-
 
     all_role_permissions = None
     for binding in original_policy["bindings"]:
@@ -452,28 +454,11 @@ def _configure_iam_role(config, crm, iam):
         roles = DEFAULT_SERVICE_ACCOUNT_ROLES + TPU_SERVICE_ACCOUNT_ROLES
         permissions = VM_MINIMAL_PERMISSIONS + TPU_MINIMAL_PERMISSIONS
 
-    satisfied, policy = _is_permission_satisfied(service_account, crm, iam, permissions, roles)
+    satisfied, policy = _is_permission_satisfied(
+        service_account, crm, iam, permissions, roles
+    )
 
     if not satisfied:
-        logger.info(
-            "_configure_iam_role: "
-            "Creating new service account {}".format(SKYPILOT_SERVICE_ACCOUNT_ID)
-        )
-        try:
-            service_account = _create_service_account(
-                SKYPILOT_SERVICE_ACCOUNT_ID,
-                SKYPILOT_SERVICE_ACCOUNT_CONFIG,
-                config,
-                iam,
-            )
-        except Exception as e:
-            logger.info(f'Creation of service account {SKYPILOT_SERVICE_ACCOUNT_ID} failed: {e}')
-        else:
-            satisfied, policy = _is_permission_satisfied(service_account, crm, iam, permissions, roles)
-            logger.info(f'Creation of service account {service_account} succeeded? {satisfied}')
-
-    if not satisfied:
-        logger.info(f'Fallback to {email}')
         # SkyPilot: Fallback to the old ray service account name for
         # backwards compatibility. Users using GCP before #2112 have
         # the old service account setup setup in their GCP project,
@@ -484,10 +469,32 @@ def _configure_iam_role(config, crm, iam):
             account_id=DEFAULT_SERVICE_ACCOUNT_ID,
             project_id=config["provider"]["project_id"],
         )
+        logger.info(f"Fallback to service account: {email}")
 
-        service_account = _get_service_account(email, config, iam)
-        satisfied, policy = _is_permission_satisfied(service_account, crm, iam, permissions, roles)
-        logger.info(f'Fallback to service account {service_account} succeeded? {satisfied}')
+        ray_service_account = _get_service_account(email, config, iam)
+        ray_satisfied, _ = _is_permission_satisfied(
+            service_account, crm, iam, permissions, roles
+        )
+        logger.info(f"Fallback to service account {email} succeeded? {satisfied}")
+
+        if ray_satisfied:
+            service_account = ray_service_account
+            satisfied = ray_satisfied
+        elif service_account is None:
+            logger.info(
+                "_configure_iam_role: "
+                "Creating new service account {}".format(SKYPILOT_SERVICE_ACCOUNT_ID)
+            )
+            service_account = _create_service_account(
+                SKYPILOT_SERVICE_ACCOUNT_ID,
+                SKYPILOT_SERVICE_ACCOUNT_CONFIG,
+                config,
+                iam,
+            )
+            satisfied, policy = _is_permission_satisfied(
+                service_account, crm, iam, permissions, roles
+            )
+            logger.info(f"Creation of service account {email} succeeded? {satisfied}")
 
     assert service_account is not None, "Failed to create service account"
 
