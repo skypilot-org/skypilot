@@ -149,7 +149,7 @@ def get_store_prefix(storetype: StoreType) -> str:
     elif storetype == StoreType.R2:
         return 's3://'
     elif storetype == StoreType.OCI:
-        return 'oss://'
+        return 'oci://'
     elif storetype == StoreType.AZURE:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure Blob Storage is not supported yet.')
