@@ -84,6 +84,7 @@ FIREWALL_RULES_TEMPLATE = [
 # and hint users if not sufficient during sky check.
 VM_MINIMAL_PERMISSIONS = [
     "compute.disks.create",
+    "compute.disks.list",
     "compute.firewalls.create",
     "compute.firewalls.delete",
     "compute.firewalls.get",
@@ -98,6 +99,7 @@ VM_MINIMAL_PERMISSIONS = [
     "compute.networks.get",
     "compute.networks.list",
     "compute.networks.getEffectiveFirewalls",
+    "compute.globalOperations.get",
     "compute.subnetworks.use",
     "compute.subnetworks.list",
     "compute.subnetworks.useExternalIp",

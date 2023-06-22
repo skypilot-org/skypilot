@@ -232,6 +232,7 @@ If you would like to grant fine-grained minimal permissions to your users, you c
 .. code-block:: text
 
     compute.disks.create
+    compute.disks.list
     compute.firewalls.create
     compute.firewalls.delete
     compute.firewalls.get
@@ -240,12 +241,14 @@ If you would like to grant fine-grained minimal permissions to your users, you c
     compute.instances.get
     compute.instances.list
     compute.instances.setLabels
+    compute.instances.setMetadata
     compute.instances.setServiceAccount
     compute.instances.start
     compute.instances.stop
     compute.networks.get
     compute.networks.list
     compute.networks.getEffectiveFirewalls
+    compute.globalOperations.get
     compute.subnetworks.use
     compute.subnetworks.list
     compute.subnetworks.useExternalIp
@@ -261,12 +264,13 @@ If you would like to grant fine-grained minimal permissions to your users, you c
     resourcemanager.projects.get
     resourcemanager.projects.getIamPolicy
 
-4. [Optional] If the user need to access GCS buckets, you can additionally add the following permissions:
+4. **Optional**: If the user needs to access GCS buckets, you can additionally add the following permissions:
 
 .. code-block:: text
 
     storage.buckets.create
     storage.buckets.get
+    storage.buckets.delete
     storage.objects.create
     storage.objects.delete
     storage.objects.get
@@ -279,11 +283,13 @@ If you would like to grant fine-grained minimal permissions to your users, you c
     tpu.nodes.create
     tpu.nodes.delete
     tpu.nodes.list
+    tpu.nodes.get
+    tpu.nodes.update
     tpu.operations.get
 
 5. Click **Create** to create the role.
 6. Go back to the "IAM" tab and click on **GRANT ACCESS**.
-7. Fill in the email address of the user in the "Add principles", and select the ``minimal-skypilot-role`` in the "Assign roles" section. Click **Save**.
+7. Fill in the email address of the user in the “Add principals” section, and select ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
 
 
 .. image:: ../images/screenshots/gcp/create-iam.png
