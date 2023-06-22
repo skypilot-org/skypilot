@@ -13,9 +13,7 @@ if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
 
-_CREDENTIAL_FILES = [
-    'config',
-]
+_CREDENTIAL_PATH = '~/.kube/config'
 
 
 class KubernetesInstanceType:
@@ -192,7 +190,7 @@ class Kubernetes(clouds.Cloud):
             memory: Optional[str] = None,
             disk_tier: Optional[str] = None) -> Optional[str]:
         del disk_tier  # Unused.
-
+        # TODO - Allow fractional CPUs and memory
         instance_cpus = int(cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
         instance_mem = int(memory.strip('+')) if memory is not None else instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
         virtual_instance_type = KubernetesInstanceType(instance_cpus, instance_mem).name
@@ -302,22 +300,15 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        # TODO(romilb): Check credential validity using k8s api
-        if os.path.exists(os.path.expanduser('~/.kube/config')):
-            return True, None
+        if os.path.exists(os.path.expanduser(_CREDENTIAL_PATH)):
+            # Test using python API
+            return kubernetes_utils.check_credentials()
         else:
-            return False, 'Kubeconfig not found - ' \
-                          'check if ~/.kube/config exists.'
+            return False, 'Credentials not found - ' \
+                          f'check if {_CREDENTIAL_PATH} exists.'
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {}
-        # TODO(romilb): Fix the file mounts optimization
-        #  ('config' here clashes with azure config file)
-        # return {
-        #     f'~/.kube/{filename}': f'~/.kube/{filename}'
-        #     for filename in _CREDENTIAL_FILES
-        #     if os.path.exists(os.path.expanduser(f'~/.kube/{filename}'))
-        # }
+        return {_CREDENTIAL_PATH: _CREDENTIAL_PATH}
 
     def instance_type_exists(self, instance_type: str) -> bool:
         return KubernetesInstanceType.is_valid_instance_type(instance_type)
@@ -342,8 +333,8 @@ class Kubernetes(clouds.Cloud):
         # TODO(romilb): Implement this. For now, we return UP as the status.
         #  Assuming single node cluster.
         del tag_filters, region, zone, kwargs  # Unused.
-        return [status_lib.ClusterStatus.UP]
         # TODO(romilb): Change from default namespace to user-specified namespace
         # return kubernetes_utils.get_cluster_status(cluster_name=name, namespace='default')
+        return [status_lib.ClusterStatus.UP]
 
 
