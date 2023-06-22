@@ -397,24 +397,8 @@ def _is_permission_satisfied(
                 role_definition = iam.projects().roles().get(name=role).execute()
             except TypeError as e:
                 if "does not match the pattern" in str(e):
-                    # This is a pre-defined role, and cannot be checked with
-                    # iam.projects().roles().get() API, using the another API
-                    # to get the permissions.
-                    if all_role_permissions is None:
-                        all_role_permissions = (
-                            iam.permissions()
-                            .queryTestablePermissions(
-                                body={
-                                    "fullResourceName": f"//cloudresourcemanager.googleapis.com/projects/{project_id}"
-                                }
-                            )
-                            .execute()
-                        )
-                    permissions = [
-                        permission
-                        for permission in all_role_permissions["permissions"]
-                        if binding["role"] in permission["roles"]
-                    ]
+                    logger.info(f"_configure_iam_role: fail to check permission for built-in role {role}. skipped.")
+                    permissions = []                  
                 else:
                     raise
             else:
