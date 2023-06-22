@@ -80,8 +80,6 @@ FIREWALL_RULES_TEMPLATE = [
 ]
 
 # A list of permissions required to run SkyPilot on GCP.
-# This is not a complete list but still useful to check first
-# and hint users if not sufficient during sky check.
 VM_MINIMAL_PERMISSIONS = [
     "compute.disks.create",
     "compute.disks.list",
