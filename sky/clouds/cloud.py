@@ -470,15 +470,15 @@ class Cloud:
 
     @classmethod
     # pylint: disable=unused-argument
-    def check_quota_not_zero(cls,
-                             region: str,
-                             instance_type: str,
-                             use_spot: bool = False) -> bool:
+    def check_quota_available(cls,
+                              region: str,
+                              instance_type: str,
+                              use_spot: bool = False) -> bool:
         """
         Checks to ensure that a particular accelerator has a nonzero quota
         in a region.
 
-        (Currently, check_quota_not_zero is only implemented for AWS.)
+        (Currently, check_quota_available is only implemented for AWS.)
 
         The _retry_zones funtion in cloud_vm_ray_backend goes through different
         candidate regions and attempts to provision the requested instance_type
@@ -509,7 +509,7 @@ class Cloud:
         have an adequate quota.
 
         Design choice: We chose a just-in-time approach where
-        check_quota_not_zero is called immediately before a potential
+        check_quota_available is called immediately before a potential
         attempted provision, rather than checking all region quotas
         beforehand, storing them, and using those values on-demand. This is
         because, for example, _retry_zones may only need to go through one or

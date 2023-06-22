@@ -1335,24 +1335,24 @@ class RetryingVmProvisioner(object):
         # the instance type in the target region. If not, fail early
         # instead of trying to provision and failing later.
         try:
-            has_non_zero_quota = to_provision.cloud.check_quota_not_zero(
+            need_provision = to_provision.cloud.check_quota_available(
                 to_provision.region, to_provision.instance_type,
                 to_provision.use_spot)
 
         except Exception as e:  # pylint: disable=broad-except
-            has_non_zero_quota = True
-            logger.info(
-                f'Error occurred when trying to check quota. '
-                f'Proceeding assuming quotas are available. Error: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+            need_provision = True
+            logger.info(f'Error occurred when trying to check quota. '
+                        f'Proceeding assuming quotas are available. Error: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
 
-        if not has_non_zero_quota:
+        if not need_provision:
             # if quota is found to be zero, raise exception and skip to
             # the next region
             raise exceptions.ResourcesUnavailableError(
                 f'Found no quota for {to_provision.instance_type} in region '
-                f'{to_provision.region}. To request quotas, check the instruction: '
-                f'https://skypilot.readthedocs.io/en/latest/cloud-setup/quota.html.')
+                f'{to_provision.region}. To request quotas, check the instruction: '  # pylint: disable=line-too-long
+                f'https://skypilot.readthedocs.io/en/latest/cloud-setup/quota.html.'  # pylint: disable=line-too-long
+            )
 
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status):

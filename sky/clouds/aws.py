@@ -10,6 +10,9 @@ import time
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Any
 
+import boto3
+import botocore
+
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
@@ -416,13 +419,6 @@ class AWS(clouds.Cloud):
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
-        try:
-            # pylint: disable=import-outside-toplevel,unused-import
-            import boto3
-            import botocore
-        except ImportError:
-            raise ImportError('Fail to import dependencies for AWS.'
-                              'Try pip install "skypilot[aws]"') from None
 
         # Checks if the AWS CLI is installed properly
         proc = subprocess.run('aws --version',
@@ -696,14 +692,14 @@ class AWS(clouds.Cloud):
         }
 
     @classmethod
-    def check_quota_not_zero(cls,
-                             region: str,
-                             instance_type: str,
-                             use_spot: bool = False) -> bool:
+    def check_quota_available(cls,
+                              region: str,
+                              instance_type: str,
+                              use_spot: bool = False) -> bool:
         """
         Check if the quota is available for the requested instance_type
 
-        AWS-specific implmentation of check_quota_not_zero. The function works by
+        AWS-specific implmentation of check_quota_available. The function works by
         matching the instance_type to the corresponding AWS quota code, and then using
         the boto3 Python API to query the region for the specific quota code.
 
@@ -713,14 +709,6 @@ class AWS(clouds.Cloud):
             ImportError: if the dependencies for AWS are not able to be installed.
             botocore.exceptions.ClientError: error in Boto3 client request.
         """
-
-        try:
-            # pylint: disable=import-outside-toplevel
-            import boto3
-            import botocore
-        except ImportError:
-            raise ImportError('Fail to import dependencies for AWS.'
-                              'Try pip install "skypilot[aws]"') from None
 
         from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
 

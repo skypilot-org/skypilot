@@ -190,7 +190,7 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
                                                   zone=None)
 
     for region in candidate_regions:
-        if not AWS.check_quota_not_zero(
+        if not AWS.check_quota_available(
                 region=region.name, instance_type="p3.16xlarge", use_spot=True):
             return region.name
 
@@ -2225,13 +2225,9 @@ def test_aws_zero_quota_failover():
     if not region:
         return
 
-    test = Test(
-         'aws-zero-quota-failover', 
-         [
-            f'sky launch -y -c {name} --cloud aws --region {region} --gpus V100:8 --use-spot | grep "Found no quota"',
-         ],
-         f'sky down -y {name}'
-     )
+    test = Test('aws-zero-quota-failover', [
+        f'sky launch -y -c {name} --cloud aws --region {region} --gpus V100:8 --use-spot | grep "Found no quota"',
+    ], f'sky down -y {name}')
     run_one_test(test)
 
 
