@@ -250,6 +250,18 @@ class Azure(clouds.Cloud):
 
         def failover_disk_tier(instance_type: str,
                                disk_tier: Optional[str]) -> Optional[str]:
+            """Figure out the actual disk tier to be used
+
+            Check the disk_tier specified by the user with the instance type to
+            be used. If not valid, return None.
+            When the disk_tier is not specified, failover through the possible
+            disk tiers.
+
+            Returns:
+                The actual disk tier to be used. If None, the specified
+                configuration is not a valid combination, and should not be used
+                for launching a VM.
+            """
             if disk_tier is not None:
                 ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
                 return disk_tier if ok else None
@@ -261,8 +273,6 @@ class Azure(clouds.Cloud):
                     # No available disk_tier found the specified instance_type
                     return None
                 disk_tier = list(all_tiers)[0]
-            # The disk_tier specified by the user will be checked in the
-            # initialization of the Resources.
             return disk_tier
 
         if resources.use_spot:
