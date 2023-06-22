@@ -361,7 +361,7 @@ def _is_permission_satisfied(
     original_policy = copy.deepcopy(policy)
     already_configured = True
 
-    logger.info(f"Checking permissions for {email}...")
+    logger.info(f"_configure_iam_role: Checking permissions for {email}...")
 
     # Check the roles first, as checking the permission requires more API calls and
     # permissions.
@@ -469,13 +469,16 @@ def _configure_iam_role(config, crm, iam):
             account_id=DEFAULT_SERVICE_ACCOUNT_ID,
             project_id=config["provider"]["project_id"],
         )
-        logger.info(f"Fallback to service account: {email}")
+        logger.info(f"_configure_iam_role: Fallback to service account {email}")
 
         ray_service_account = _get_service_account(email, config, iam)
         ray_satisfied, _ = _is_permission_satisfied(
             ray_service_account, crm, iam, permissions, roles
         )
-        logger.info(f"Fallback to service account {email} succeeded? {ray_satisfied}")
+        logger.info(
+            "_configure_iam_role: "
+            f"Fallback to service account {email} succeeded? {ray_satisfied}"
+        )
 
         if ray_satisfied:
             service_account = ray_service_account
