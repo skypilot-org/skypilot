@@ -459,15 +459,18 @@ def _configure_iam_role(config, crm, iam):
             "_configure_iam_role: "
             "Creating new service account {}".format(SKYPILOT_SERVICE_ACCOUNT_ID)
         )
-        service_account = _create_service_account(
-            SKYPILOT_SERVICE_ACCOUNT_ID,
-            SKYPILOT_SERVICE_ACCOUNT_CONFIG,
-            config,
-            iam,
-        )
-
-        satisfied, policy = _is_permission_satisfied(service_account, crm, iam, permissions, roles)
-        logger.info(f'Creation of service account {service_account} succeeded? {satisfied}')
+        try:
+            service_account = _create_service_account(
+                SKYPILOT_SERVICE_ACCOUNT_ID,
+                SKYPILOT_SERVICE_ACCOUNT_CONFIG,
+                config,
+                iam,
+            )
+        except Exception as e:
+            logger.info(f'Creation of service account {SKYPILOT_SERVICE_ACCOUNT_ID} failed: {e}')
+        else:
+            satisfied, policy = _is_permission_satisfied(service_account, crm, iam, permissions, roles)
+            logger.info(f'Creation of service account {service_account} succeeded? {satisfied}')
 
     if not satisfied:
         logger.info(f'Fallback to {email}')
