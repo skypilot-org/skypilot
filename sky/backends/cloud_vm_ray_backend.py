@@ -723,6 +723,15 @@ class RetryingVmProvisioner(object):
                 logger.info('Skipping all regions due to disk size issue.')
                 self._blocked_resources.add(
                     launchable_resources.copy(region=None, zone=None))
+            elif ('Policy update access denied.' in httperror_str[0]):
+                logger.info('Skipping all regions due to service account not '
+                            'having the required permissions and the user '
+                            'account does not have enough permission to '
+                            'update it. Please contact your administrator and '
+                            'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp') # pylint: disable=line-too-long
+                self._blocked_resources.add(
+                    launchable_resources.copy(region=None, zone=None))
+
             else:
                 # Parse HttpError for unauthorized regions. Example:
                 # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
