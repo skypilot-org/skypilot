@@ -908,6 +908,7 @@ def _add_iam_policy_binding(service_account, required_permissions, roles, crm, i
 
     required_permissions = set(required_permissions)
     policy = crm.projects().getIamPolicy(resource=project_id, body={}).execute()
+    original_policy = copy.deepcopy(policy)
     already_configured = True
 
     # Check the roles first, as checking the permission requires more API calls and
@@ -917,6 +918,7 @@ def _add_iam_policy_binding(service_account, required_permissions, roles, crm, i
         for binding in policy["bindings"]:
             if binding["role"] == role:
                 if member_id not in binding["members"]:
+                    print(f'Role missing: {role}')
                     binding["members"].append(member_id)
                     already_configured = False
                 role_exists = True
@@ -937,7 +939,7 @@ def _add_iam_policy_binding(service_account, required_permissions, roles, crm, i
 
 
     all_role_permissions = None
-    for binding in policy["bindings"]:
+    for binding in original_policy["bindings"]:
         if member_id in binding["members"]:
             role = binding["role"]
             try:
