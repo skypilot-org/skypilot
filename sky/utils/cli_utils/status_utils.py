@@ -1,11 +1,13 @@
 """Utilities for sky status."""
+import re
 from typing import Any, Callable, Dict, List, Optional
+
 import click
 import colorama
 
 from sky import backends
-from sky import global_user_state
 from sky import spot
+from sky import status_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import log_utils
@@ -154,7 +156,7 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
         StatusColumn('STATUS',
                      _get_status_for_cost_report,
                      show_by_default=True),
-        StatusColumn('HOURLY_PRICE',
+        StatusColumn('COST/hr',
                      _get_price_for_cost_report,
                      show_by_default=True),
         StatusColumn('COST (est.)',
@@ -307,8 +309,7 @@ _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
 
 
-def _get_status(
-        cluster_record: _ClusterRecord) -> global_user_state.ClusterStatus:
+def _get_status(cluster_record: _ClusterRecord) -> status_lib.ClusterStatus:
     return cluster_record['status']
 
 
@@ -325,6 +326,14 @@ def _get_resources(cluster_record: _ClusterRecord) -> str:
         if (handle.launched_nodes is not None and
                 handle.launched_resources is not None):
             launched_resource_str = str(handle.launched_resources)
+            # accelerator_args is way too long.
+            # Convert from:
+            #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.5.0'}  # pylint: disable=line-too-long
+            # to:
+            #  GCP(n1-highmem-8, {'tpu-v2-8': 1}...)
+            pattern = ', accelerator_args={.*}'
+            launched_resource_str = re.sub(pattern, '...',
+                                           launched_resource_str)
             resources_str = (f'{handle.launched_nodes}x '
                              f'{launched_resource_str}')
     else:
@@ -341,14 +350,14 @@ def _get_zone(cluster_record: _ClusterRecord) -> str:
 
 def _get_autostop(cluster_record: _ClusterRecord) -> str:
     autostop_str = ''
-    separtion = ''
+    separation = ''
     if cluster_record['autostop'] >= 0:
         # TODO(zhwu): check the status of the autostop cluster.
         autostop_str = str(cluster_record['autostop']) + 'm'
-        separtion = ' '
+        separation = ' '
 
     if cluster_record['to_down']:
-        autostop_str += f'{separtion}(down)'
+        autostop_str += f'{separation}(down)'
     if autostop_str == '':
         autostop_str = '-'
     return autostop_str
@@ -357,7 +366,7 @@ def _get_autostop(cluster_record: _ClusterRecord) -> str:
 def _is_pending_autostop(cluster_record: _ClusterRecord) -> bool:
     # autostop < 0 means nothing scheduled.
     return cluster_record['autostop'] >= 0 and _get_status(
-        cluster_record) != global_user_state.ClusterStatus.STOPPED
+        cluster_record) != status_lib.ClusterStatus.STOPPED
 
 
 # ---- 'sky cost-report' helper functions below ----
@@ -397,7 +406,7 @@ def _get_price_for_cost_report(
     launched_resources = cluster_cost_report_record['resources']
 
     hourly_cost = (launched_resources.get_cost(3600) * launched_nodes)
-    price_str = f'$ {hourly_cost:.3f}'
+    price_str = f'$ {hourly_cost:.2f}'
     return price_str
 
 
@@ -408,4 +417,4 @@ def _get_estimated_cost_for_cost_report(
     if not cost:
         return '-'
 
-    return f'${cost:.3f}'
+    return f'$ {cost:.2f}'

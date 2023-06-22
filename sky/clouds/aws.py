@@ -3,20 +3,28 @@ import enum
 import functools
 import json
 import os
+import random
+import re
 import subprocess
+import time
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Any
 
 from sky import clouds
 from sky import exceptions
+from sky import sky_logging
+from sky import status_lib
 from sky.adaptors import aws
 from sky.clouds import service_catalog
+from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
+
+logger = sky_logging.init_logger(__name__)
 
 # This local file (under ~/.aws/) will be uploaded to remote nodes (any
 # cloud), if all of the following conditions hold:
@@ -44,14 +52,29 @@ DEFAULT_AMI_GB = 45
 class AWSIdentityType(enum.Enum):
     """AWS identity type.
 
-    The account type is determined by the current user identity,
-    based on `aws configure list`. We will check the existence of
-    the value in the output of `aws configure list` to determine
-    the account type.
+    The account type is determined by the current user identity, based on `aws
+    configure list`. We will check the existence of the value in the output of
+    `aws configure list` to determine the account type.
     """
+    #       Name                    Value             Type    Location
+    #       ----                    -----             ----    --------
+    #    profile                     1234              env    ...
+    # access_key     ****************abcd              sso
+    # secret_key     ****************abcd              sso
+    #     region                <not set>             None    None
     SSO = 'sso'
+
+    ENV = 'env'
+
     IAM_ROLE = 'iam-role'
-    STATIC = 'static'
+
+    #       Name                    Value             Type    Location
+    #       ----                    -----             ----    --------
+    #    profile                <not set>             None    None
+    # access_key     ****************abcd shared-credentials-file
+    # secret_key     ****************abcd shared-credentials-file
+    #     region                us-east-1      config-file    ~/.aws/config
+    SHARED_CREDENTIALS_FILE = 'shared-credentials-file'
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -74,6 +97,7 @@ class AWS(clouds.Cloud):
         'Run the following commands:'
         f'\n{_INDENT_PREFIX}  $ pip install boto3'
         f'\n{_INDENT_PREFIX}  $ aws configure'
+        f'\n{_INDENT_PREFIX}  $ aws configure list  # Ensure that this shows identity is set.'
         f'\n{_INDENT_PREFIX}For more info: '
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
     )
@@ -89,7 +113,7 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _sso_credentials_help_str(cls, expired: bool = False) -> str:
-        help_str = 'Run the following commands (must use aws v2 CLI):'
+        help_str = 'Run the following commands (must use AWS CLI v2):'
         if not expired:
             help_str += f'\n{cls._INDENT_PREFIX}  $ aws configure sso'
         help_str += (
@@ -468,6 +492,8 @@ class AWS(clouds.Cloud):
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
             return None
+        stdout = proc.stdout.decode()
+
         # We determine the identity type by looking at the output of
         # `aws configure list`. The output looks like:
         #   Name                   Value         Type    Location
@@ -478,12 +504,23 @@ class AWS(clouds.Cloud):
         #   region                 <not set>     None    None
         # We try to determine the identity type by looking for the
         # string "sso"/"iam-role" in the output, i.e. the "Type" column.
-        if AWSIdentityType.SSO.value in proc.stdout.decode():
+
+        def _is_access_key_of_type(type_str: str) -> bool:
+            # The dot (.) does not match line separators.
+            results = re.findall(fr'access_key.*{type_str}', stdout)
+            if len(results) > 1:
+                raise RuntimeError(
+                    f'Unexpected `aws configure list` output:\n{stdout}')
+            return len(results) == 1
+
+        if _is_access_key_of_type(AWSIdentityType.SSO.value):
             return AWSIdentityType.SSO
-        elif AWSIdentityType.IAM_ROLE.value in proc.stdout.decode():
+        elif _is_access_key_of_type(AWSIdentityType.IAM_ROLE.value):
             return AWSIdentityType.IAM_ROLE
+        elif _is_access_key_of_type(AWSIdentityType.ENV.value):
+            return AWSIdentityType.ENV
         else:
-            return AWSIdentityType.STATIC
+            return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
@@ -538,17 +575,25 @@ class AWS(clouds.Cloud):
             # 2. In the case where the multiple users belong to an organization,
             # those users will have different account id, so fallback works.
             user_ids = [user_info['UserId'], user_info['Account']]
-        except aws.botocore_exceptions().NoCredentialsError:
+        except aws.botocore_exceptions().NoCredentialsError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
-                    f'AWS credentials are not set. {cls._STATIC_CREDENTIAL_HELP_STR}'
+                    'AWS credentials are not set. '
+                    f'{cls._STATIC_CREDENTIAL_HELP_STR}\n'
+                    f'{cls._INDENT_PREFIX}Details: `aws sts '
+                    'get-caller-identity` failed with error:'
+                    f' {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
-        except aws.botocore_exceptions().ClientError:
+        except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'Failed to access AWS services with credentials. '
                     'Make sure that the access and secret keys are correct.'
-                    f' {cls._STATIC_CREDENTIAL_HELP_STR}') from None
+                    f' {cls._STATIC_CREDENTIAL_HELP_STR}\n'
+                    f'{cls._INDENT_PREFIX}Details: `aws sts '
+                    'get-caller-identity` failed with error:'
+                    f' {common_utils.format_exception(e, use_bracket=True)}.'
+                ) from None
         except aws.botocore_exceptions().InvalidConfigError as e:
             # pylint: disable=import-outside-toplevel
             import awscli
@@ -585,23 +630,29 @@ class AWS(clouds.Cloud):
         return user_ids
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        # TODO(skypilot): ~/.aws/credentials is required for users using multiple clouds.
-        # If this file does not exist, users can launch on AWS via AWS SSO or assumed IAM
-        # role (only when the user is on an AWS cluster) and assign IAM role to the cluster.
-        # However, if users launch clusters in a non-AWS cloud, those clusters do not
-        # understand AWS IAM role so will not be able to access private AWS EC2 resources
-        # and S3 buckets.
-
-        # The file should not be uploaded if the user is using SSO, as the credential
-        # file can be from a different account, and will make autopstop/autodown/spot
+        # The credentials file should not be uploaded if the user identity is
+        # not SHARED_CREDENTIALS_FILE, since we cannot be sure if the currently
+        # active user identity is the same as the one encoded in the credentials
+        # file.  If they are indeed different identities, then uploading the
+        # credential file to a launched node will make autostop/autodown/spot
         # controller misbehave.
-
-        # TODO(zhwu/zongheng): We can also avoid uploading the credential file for the
-        # cluster launched on AWS even if the user is using static credentials. We need
-        # to define a mechanism to find out the cloud provider of the cluster to be
-        # launched in this function and make sure the cluster will not be used for
-        # launching clusters in other clouds, e.g. spot controller.
-        if self._current_identity_type() != AWSIdentityType.STATIC:
+        #
+        # TODO(skypilot): ~/.aws/credentials is required for users using
+        # multiple clouds.  If this file does not exist, users can launch on AWS
+        # via AWS SSO or assumed IAM role (only when the user is on an AWS
+        # cluster) and assign IAM role to the cluster.  However, if users launch
+        # clusters in a non-AWS cloud, those clusters do not understand AWS IAM
+        # role so will not be able to access private AWS EC2 resources and S3
+        # buckets.
+        #
+        # TODO(zhwu/zongheng): We can also avoid uploading the credential file
+        # for the cluster launched on AWS even if the user is using static
+        # credentials. We need to define a mechanism to find out the cloud
+        # provider of the cluster to be launched in this function and make sure
+        # the cluster will not be used for launching clusters in other clouds,
+        # e.g. spot controller.
+        if self._current_identity_type(
+        ) != AWSIdentityType.SHARED_CREDENTIALS_FILE:
             return {}
         return {
             f'~/.aws/{filename}': f'~/.aws/{filename}'
@@ -643,3 +694,62 @@ class AWS(clouds.Cloud):
             'disk_throughput': tier2iops[tier] // 16,
             'custom_disk_perf': tier != 'low',
         }
+
+    @classmethod
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List['status_lib.ClusterStatus']:
+        del zone  # unused
+        status_map = {
+            'pending': status_lib.ClusterStatus.INIT,
+            'running': status_lib.ClusterStatus.UP,
+            # TODO(zhwu): stopping and shutting-down could occasionally fail
+            # due to internal errors of AWS. We should cover that case.
+            'stopping': status_lib.ClusterStatus.STOPPED,
+            'stopped': status_lib.ClusterStatus.STOPPED,
+            'shutting-down': None,
+            'terminated': None,
+        }
+
+        fitler_str = ' '.join(f'Name=tag:{key},Values={value}'
+                              for key, value in tag_filters.items())
+
+        retry_cnt = 0
+        while retry_cnt < 3:
+            query_cmd = ('aws ec2 describe-instances --filters '
+                         f'{fitler_str} '
+                         f'--region {region} '
+                         '--query "Reservations[].Instances[].State.Name" '
+                         '--output json')
+
+            returncode, stdout, stderr = log_lib.run_with_log(
+                query_cmd, '/dev/null', require_outputs=True, shell=True)
+            logger.debug(f'{query_cmd} returned {returncode}.\n'
+                         '**** STDOUT ****\n'
+                         f'{stdout}\n'
+                         '**** STDERR ****\n'
+                         f'{stderr}')
+
+            if (returncode != 0 and
+                    'Unable to locate credentials. You can configure credentials by '
+                    'running "aws configure"' in stdout + stderr):
+                retry_cnt += 1
+                time.sleep(random.uniform(0, 1) * 2)
+                continue
+            else:
+                break
+
+        if returncode != 0:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ClusterStatusFetchingError(
+                    f'Failed to query AWS cluster {name!r} status: '
+                    f'{stdout + stderr}')
+
+        original_statuses = json.loads(stdout.strip())
+
+        statuses = []
+        for s in original_statuses:
+            node_status = status_map[s]
+            if node_status is not None:
+                statuses.append(node_status)
+        return statuses

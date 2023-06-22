@@ -42,9 +42,9 @@ run: |
   worker_addr=`echo "$SKYPILOT_NODE_IPS" | sed -n 2p`
   echo Worker IP: $worker_addr
 
-  if [[ -z "$SKYPILOT_JOB_ID" ]]; then
-    echo "SKYPILOT_JOB_ID is not set"
+  if [[ -z "$SKYPILOT_TASK_ID" ]]; then
+    echo "SKYPILOT_TASK_ID is not set"
     exit 1
   else
-    echo "SKYPILOT_JOB_ID is set to ${SKYPILOT_JOB_ID}"
+    echo "SKYPILOT_TASK_ID is set to ${SKYPILOT_TASK_ID}"
   fi

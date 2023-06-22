@@ -65,8 +65,10 @@ def parse_readme(readme: str) -> str:
 
 install_requires = [
     'wheel',
-    # NOTE: ray 2.0.1 requires click<=8.0.4,>=7.0; We disable the
-    # shell completion for click<8.0 for backward compatibility.
+    # NOTE: ray requires click>=7.0. Also, click 8.1.x makes our rendered CLI
+    # docs display weird blockquotes.
+    # TODO(zongheng): investigate how to make click 8.1.x display nicely and
+    # remove the upper bound.
     'click<=8.0.4,>=7.0',
     # NOTE: required by awscli. To avoid ray automatically installing
     # the latest version.
@@ -84,30 +86,38 @@ install_requires = [
     # PrettyTable with version >=2.0.0 is required for the support of
     # `add_rows` method.
     'PrettyTable>=2.0.0',
-    # Lower local ray version is not fully supported, due to the
-    # autoscaler issues (also tracked in #537).
-    'ray[default]>=1.9.0,<=2.3.0',
+    # Lower version of ray will cause dependency conflict for
+    # click/grpcio/protobuf.
+    'ray[default]>=2.2.0,<=2.4.0',
     'rich',
     'tabulate',
-    'typing-extensions',
+    # Light weight requirement, can be replaced with "typing" once
+    # we deprecate Python 3.7 (this will take a while).
+    "typing_extensions; python_version < '3.8'",
     'filelock>=3.6.0',
-    # This is used by ray. The latest 1.44.0 will generate an error
-    # `Fork support is only compatible with the epoll1 and poll
-    # polling strategies`
-    'grpcio>=1.32.0,<=1.43.0',
+    # Adopted from ray's setup.py: https://github.com/ray-project/ray/blob/ray-2.4.0/python/setup.py
+    # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard fails to start when
+    # ray start is called (#2054).
+    # Tracking issue: https://github.com/ray-project/ray/issues/30984
+    "grpcio >= 1.32.0, <= 1.49.1, != 1.48.0; python_version < '3.10' and sys_platform == 'darwin'",  # noqa:E501
+    "grpcio >= 1.42.0, <= 1.49.1, != 1.48.0; python_version >= '3.10' and sys_platform == 'darwin'",  # noqa:E501
+    # Original issue: https://github.com/ray-project/ray/issues/33833
+    "grpcio >= 1.32.0, <= 1.51.3, != 1.48.0; python_version < '3.10' and sys_platform != 'darwin'",  # noqa:E501
+    "grpcio >= 1.42.0, <= 1.51.3, != 1.48.0; python_version >= '3.10' and sys_platform != 'darwin'",  # noqa:E501
     'packaging',
-    # The latest 4.21.1 will break ray. Enforce < 4.0.0 until Ray releases the
-    # fix.
-    # https://github.com/ray-project/ray/pull/25211
-    'protobuf<4.0.0',
+    # Adopted from ray's setup.py:
+    # https://github.com/ray-project/ray/blob/86fab1764e618215d8131e8e5068f0d493c77023/python/setup.py#L326
+    'protobuf >= 3.15.3, != 3.19.5',
     'psutil',
     'pulp',
 ]
 
-# NOTE: Change the templates/spot-controller.yaml.j2 file if any of the following
-# packages dependencies are changed.
+# NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
+# following packages dependencies are changed.
 aws_dependencies = [
-    # awscli>=1.27.10 is required for SSO support.
+    # NOTE: this installs CLI V1. To use AWS SSO (e.g., `aws sso login`), users
+    # should instead use CLI V2 which is not pip-installable. See
+    # https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html.
     'awscli',
     'boto3',
     # 'Crypto' module used in authentication.py for AWS.
@@ -128,7 +138,9 @@ extras_require: Dict[str, List[str]] = {
     'ibm': ['ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services'],
     'docker': ['docker'],
     'lambda': [],
-    'cloudflare': aws_dependencies
+    'cloudflare': aws_dependencies,
+    'scp': [],
+    'oci': ['oci'],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

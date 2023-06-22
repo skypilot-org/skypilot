@@ -94,7 +94,7 @@ class GcsCloudStorage(CloudStorage):
     # parellel workers on our end.
     # The gsutil command is part of the Google Cloud SDK, and we reuse
     # the installation logic here.
-    _GET_GSUTIL = gcp.GCLOUD_INSTALLATION_COMMAND
+    _GET_GSUTIL = gcp.GOOGLE_SDK_INSTALLATION_COMMAND
 
     _GSUTIL = ('GOOGLE_APPLICATION_CREDENTIALS='
                f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH} gsutil')
@@ -184,7 +184,9 @@ class R2CloudStorage(CloudStorage):
         endpoint_url = cloudflare.create_endpoint()
         if 'r2://' in source:
             source = source.replace('r2://', 's3://')
-        download_via_awscli = ('aws s3 sync --no-follow-symlinks '
+        download_via_awscli = ('AWS_SHARED_CREDENTIALS_FILE='
+                               f'{cloudflare.R2_CREDENTIALS_PATH} '
+                               'aws s3 sync --no-follow-symlinks '
                                f'{source} {destination} '
                                f'--endpoint {endpoint_url} '
                                f'--profile={cloudflare.R2_PROFILE_NAME}')
@@ -196,7 +198,9 @@ class R2CloudStorage(CloudStorage):
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
         endpoint_url = cloudflare.create_endpoint()
-        download_via_awscli = (f'aws s3 cp s3://{source} {destination} '
+        download_via_awscli = ('AWS_SHARED_CREDENTIALS_FILE='
+                               f'{cloudflare.R2_CREDENTIALS_PATH} '
+                               f'aws s3 cp s3://{source} {destination} '
                                f'--endpoint {endpoint_url} '
                                f'--profile={cloudflare.R2_PROFILE_NAME}')
 

@@ -294,31 +294,56 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     oslogin_enabled = project_oslogin.lower() == 'true'
     if oslogin_enabled:
-        # project.
         logger.info(
             f'OS Login is enabled for GCP project {project_id}. Running '
             'additional authentication steps.')
-        # Read the account information from the credential file, since the user
-        # should be set according the account, when the oslogin is enabled.
-        config_path = os.path.expanduser(clouds.gcp.GCP_CONFIG_PATH)
-        sky_backup_config_path = os.path.expanduser(
-            clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH)
-        assert os.path.exists(sky_backup_config_path), (
-            'GCP credential backup file '
-            f'{sky_backup_config_path!r} does not exist.')
 
-        with open(sky_backup_config_path, 'r') as infile:
-            for line in infile:
-                if line.startswith('account'):
-                    account = line.split('=')[1].strip()
-                    break
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        'GCP authentication failed, as the oslogin is enabled '
-                        f'but the file {config_path} does not contain the '
-                        'account information.')
-        config['auth']['ssh_user'] = account.replace('@', '_').replace('.', '_')
+        # Try to get the os-login user from `gcloud`, as this is the most
+        # accurate way to figure out how this gcp user is meant to log in.
+        proc = subprocess.run(
+            'gcloud compute os-login describe-profile --format yaml',
+            shell=True,
+            stdout=subprocess.PIPE,
+            check=False)
+        os_login_username = None
+        if proc.returncode == 0:
+            try:
+                profile = yaml.safe_load(proc.stdout)
+                username = profile['posixAccounts'][0]['username']
+                if username:
+                    os_login_username = username
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug('Failed to parse gcloud os-login profile.\n'
+                             f'{common_utils.format_exception(e)}')
+                pass
+
+        if os_login_username is None:
+            # As a fallback, read the account information from the credential
+            # file. This works most of the time, but fails if the user's
+            # os-login username is not a straightforward translation of their
+            # email address, for example because their email address changed
+            # within their google workspace after the os-login credentials
+            # were established.
+            config_path = os.path.expanduser(clouds.gcp.GCP_CONFIG_PATH)
+            sky_backup_config_path = os.path.expanduser(
+                clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH)
+            assert os.path.exists(sky_backup_config_path), (
+                'GCP credential backup file '
+                f'{sky_backup_config_path!r} does not exist.')
+
+            with open(sky_backup_config_path, 'r') as infile:
+                for line in infile:
+                    if line.startswith('account'):
+                        account = line.split('=')[1].strip()
+                        break
+                else:
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError(
+                            'GCP authentication failed, as the oslogin is '
+                            f'enabled but the file {config_path} does not '
+                            'contain the account information.')
+            os_login_username = account.replace('@', '_').replace('.', '_')
+        config['auth']['ssh_user'] = os_login_username
 
     config = _replace_cloud_init_ssh_info_in_config(config, public_key)
     # This function is for backward compatibility, as the user using the old
@@ -421,4 +446,36 @@ def setup_ibm_authentication(config):
     file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
     config['file_mounts'] = file_mounts
 
+    return config
+
+
+# Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
+def setup_oci_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r') as f:
+        public_key = f.read()
+
+    # Need to use ~ relative path because Ray uses the same
+    # path for finding the public key path on both local and head node.
+    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
+
+    file_mounts = config['file_mounts']
+    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
+    config['file_mounts'] = file_mounts
+
+    for node_type in config['available_node_types']:
+        config['available_node_types'][node_type]['node_config'][
+            'AuthorizedKey'] = public_key
+
+    return config
+
+
+def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    private_key_path, public_key_path = get_or_generate_keys()
+    config['auth']['ssh_private_key'] = private_key_path
+    config['auth']['ssh_public_key'] = public_key_path
+
+    file_mounts = config['file_mounts']
+    file_mounts[public_key_path] = public_key_path
+    config['file_mounts'] = file_mounts
     return config

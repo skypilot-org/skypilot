@@ -1,3 +1,5 @@
+.. _quickstart:
+
 ==========
 Quickstart
 ==========
@@ -157,7 +159,7 @@ After a task's execution,  use :code:`rsync` or :code:`scp` to download files (e
 
     $ rsync -Pavz mycluster:/remote/source /local/dest  # copy from remote VM
 
-For uploading files to the cluster, see :ref:`Syncing Code and Artifacts`.
+For uploading files to the cluster, see :ref:`Syncing Code and Artifacts <sync-code-artifacts>`.
 
 Stop/terminate a cluster
 =========================
@@ -173,8 +175,8 @@ Congratulations!  In this quickstart, you have launched a cluster, run a task, a
 
 Next steps:
 
-- Adapt :ref:`Tutorial: DNN Training` to start running your own project on SkyPilot!
+- Adapt :ref:`Tutorial: DNN Training <dnn-training>` to start running your own project on SkyPilot!
 - See the :ref:`Task YAML reference <yaml-spec>`, :ref:`CLI reference <cli>`, and `more examples <https://github.com/skypilot-org/skypilot/tree/master/examples>`_
 - To learn more, try out `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutorial>`_ in Jupyter notebooks
-- Try :ref:`Interactive Nodes` -- launch VMs in one command without a YAML file
+- Try :ref:`Interactive Nodes <interactive-nodes>` -- launch VMs in one command without a YAML file
 - Explore SkyPilot's unique features in the rest of the documentation

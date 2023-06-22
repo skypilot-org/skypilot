@@ -12,8 +12,10 @@ import colorama
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky import status_lib
 from sky.adaptors import azure
 from sky.clouds import service_catalog
+from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
@@ -245,6 +247,20 @@ class Azure(clouds.Cloud):
         }
 
     def get_feasible_launchable_resources(self, resources):
+
+        def failover_disk_tier(instance_type: str,
+                               disk_tier: Optional[str]) -> Optional[str]:
+            if disk_tier is None:
+                ok, _ = Azure.check_disk_tier(instance_type,
+                                              clouds.Cloud._DEFAULT_DISK_TIER)
+                if not ok:
+                    # Auto failover to low disk tier when disk tier
+                    # are not specified
+                    return 'low'
+            # The disk_tier specified by the user will be checked in the
+            # initialization of the Resources.
+            return disk_tier
+
         if resources.use_spot:
             # TODO(zhwu): our azure subscription offer ID does not support spot.
             # Need to support it.
@@ -252,23 +268,28 @@ class Azure(clouds.Cloud):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
-            resources = resources.copy(accelerators=None)
+            resources = resources.copy(
+                accelerators=None,
+                disk_tier=failover_disk_tier(resources.instance_type,
+                                             resources.disk_tier),
+            )
             return ([resources], [])
 
         def _make(instance_list):
             resource_list = []
             for instance_type in instance_list:
-                if Azure.check_disk_tier(instance_type, resources.disk_tier)[0]:
-                    r = resources.copy(
-                        cloud=Azure(),
-                        instance_type=instance_type,
-                        # Setting this to None as Azure doesn't separately bill /
-                        # attach the accelerators.  Billed as part of the VM type.
-                        accelerators=None,
-                        cpus=None,
-                        memory=None,
-                    )
-                    resource_list.append(r)
+                r = resources.copy(
+                    cloud=Azure(),
+                    instance_type=instance_type,
+                    disk_tier=failover_disk_tier(instance_type,
+                                                 resources.disk_tier),
+                    # Setting this to None as Azure doesn't separately bill /
+                    # attach the accelerators.  Billed as part of the VM type.
+                    accelerators=None,
+                    cpus=None,
+                    memory=None,
+                )
+                resource_list.append(r)
             return resource_list
 
         # Currently, handle a filter on accelerators only.
@@ -471,3 +492,80 @@ class Azure(clouds.Cloud):
             'low': 'Standard_LRS',
         }
         return tier2name[tier]
+
+    @classmethod
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List[status_lib.ClusterStatus]:
+        del zone  # unused
+        status_map = {
+            'VM starting': status_lib.ClusterStatus.INIT,
+            'VM running': status_lib.ClusterStatus.UP,
+            # 'VM stopped' in Azure means Stopped (Allocated), which still bills
+            # for the VM.
+            'VM stopping': status_lib.ClusterStatus.INIT,
+            'VM stopped': status_lib.ClusterStatus.INIT,
+            # 'VM deallocated' in Azure means Stopped (Deallocated), which does not
+            # bill for the VM.
+            'VM deallocating': status_lib.ClusterStatus.STOPPED,
+            'VM deallocated': status_lib.ClusterStatus.STOPPED,
+        }
+        tag_filter_str = ' '.join(
+            f'tags.\\"{k}\\"==\'{v}\'' for k, v in tag_filters.items())
+
+        query_node_id = (f'az vm list --query "[?{tag_filter_str}].id" -o json')
+        returncode, stdout, stderr = log_lib.run_with_log(query_node_id,
+                                                          '/dev/null',
+                                                          require_outputs=True,
+                                                          shell=True)
+        logger.debug(f'{query_node_id} returned {returncode}.\n'
+                     '**** STDOUT ****\n'
+                     f'{stdout}\n'
+                     '**** STDERR ****\n'
+                     f'{stderr}')
+        if returncode == 0:
+            if not stdout.strip():
+                return []
+            node_ids = json.loads(stdout.strip())
+            state_str = '[].powerState'
+            if len(node_ids) == 1:
+                state_str = 'powerState'
+            node_ids_str = '\t'.join(node_ids)
+            query_cmd = (
+                f'az vm show -d --ids {node_ids_str} --query "{state_str}" -o json'
+            )
+            returncode, stdout, stderr = log_lib.run_with_log(
+                query_cmd, '/dev/null', require_outputs=True, shell=True)
+            logger.debug(f'{query_cmd} returned {returncode}.\n'
+                         '**** STDOUT ****\n'
+                         f'{stdout}\n'
+                         '**** STDERR ****\n'
+                         f'{stderr}')
+
+        # NOTE: Azure cli should be handled carefully. The query command above
+        # takes about 1 second to run.
+        # An alternative is the following command, but it will take more than
+        # 20 seconds to run.
+        # query_cmd = (
+        #     f'az vm list --show-details --query "['
+        #     f'?tags.\\"ray-cluster-name\\" == \'{handle.cluster_name}\' '
+        #     '&& tags.\\"ray-node-type\\" == \'head\'].powerState" -o tsv'
+        # )
+
+        if returncode != 0:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ClusterStatusFetchingError(
+                    f'Failed to query Azure cluster {name!r} status: '
+                    f'{stdout + stderr}')
+
+        assert stdout.strip(), f'No status returned for {name!r}'
+
+        original_statuses_list = json.loads(stdout.strip())
+        if not isinstance(original_statuses_list, list):
+            original_statuses_list = [original_statuses_list]
+        statuses = []
+        for s in original_statuses_list:
+            node_status = status_map[s]
+            if node_status is not None:
+                statuses.append(node_status)
+        return statuses
