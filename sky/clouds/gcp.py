@@ -22,9 +22,10 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# Env var pointing to any service account key. If it exists, this path takes priority
-# over the DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH below, and will be
-# used instead for SkyPilot-launched instances. This is the same behavior as gcloud:
+# Env var pointing to any service account key. If it exists, this path takes
+# priority over the DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH below, and will be
+# used instead for SkyPilot-launched instances. This is the same behavior as
+# gcloud:
 # https://cloud.google.com/docs/authentication/provide-credentials-adc#local-key
 _GCP_APPLICATION_CREDENTIAL_ENV = 'GOOGLE_APPLICATION_CREDENTIALS'
 DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH: str = os.path.expanduser(
