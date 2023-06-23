@@ -250,15 +250,29 @@ class Azure(clouds.Cloud):
 
         def failover_disk_tier(instance_type: str,
                                disk_tier: Optional[str]) -> Optional[str]:
-            if disk_tier is None:
-                ok, _ = Azure.check_disk_tier(instance_type,
-                                              clouds.Cloud._DEFAULT_DISK_TIER)
-                if not ok:
-                    # Auto failover to low disk tier when disk tier
-                    # are not specified
-                    return 'low'
-            # The disk_tier specified by the user will be checked in the
-            # initialization of the Resources.
+            """Figure out the actual disk tier to be used
+
+            Check the disk_tier specified by the user with the instance type to
+            be used. If not valid, return None.
+            When the disk_tier is not specified, failover through the possible
+            disk tiers.
+
+            Returns:
+                The actual disk tier to be used. If None, the specified
+                configuration is not a valid combination, and should not be used
+                for launching a VM.
+            """
+            if disk_tier is not None:
+                ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
+                return disk_tier if ok else None
+            disk_tier = clouds.Cloud._DEFAULT_DISK_TIER
+            all_tiers = {'high', 'medium', 'low'}
+            while not Azure.check_disk_tier(instance_type, disk_tier)[0]:
+                all_tiers.remove(disk_tier)
+                if not all_tiers:
+                    # No available disk_tier found the specified instance_type
+                    return None
+                disk_tier = list(all_tiers)[0]
             return disk_tier
 
         if resources.use_spot:
@@ -278,11 +292,14 @@ class Azure(clouds.Cloud):
         def _make(instance_list):
             resource_list = []
             for instance_type in instance_list:
+                disk_tier = failover_disk_tier(instance_type,
+                                               resources.disk_tier)
+                if not disk_tier:
+                    continue
                 r = resources.copy(
                     cloud=Azure(),
                     instance_type=instance_type,
-                    disk_tier=failover_disk_tier(instance_type,
-                                                 resources.disk_tier),
+                    disk_tier=disk_tier,
                     # Setting this to None as Azure doesn't separately bill /
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
