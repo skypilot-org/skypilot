@@ -1691,10 +1691,11 @@ def _query_cluster_status_via_cloud_api(
         logger.debug(f'Terminating preempted TPU VM cluster {cluster_name}')
         backend = backends.CloudVmRayBackend()
         # Do not use refresh cluster status during teardown, as that will
-        # cause inifinite recursion by calling cluster status refresh
+        # cause infinite recursion by calling cluster status refresh
         # again.
-        # Post teardown cleanup be done later in this function, which will remove
-        # the cluster entry from the status table & the ssh config file.
+
+        # Post teardown cleanup be done later in this function, which will
+        # remove the cluster entry from the status table & the ssh config file.
         backend.teardown_no_lock(handle,
                                  terminate=True,
                                  purge=False,

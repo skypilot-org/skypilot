@@ -2528,7 +2528,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             status_lib.ClusterStatus.UP)
 
-        # For backward compatability and robustness of skylet, it is restarted
+        # For backward compatibility and robustness of skylet, it is restarted
         with log_utils.safe_rich_status('Updating remote skylet'):
             self.run_on_head(handle, _MAYBE_SKYLET_RESTART_CMD)
 
@@ -3397,11 +3397,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 query_cmd = (
                     f'aws ec2 describe-instances --region {region} --filters '
                     f'Name=tag:ray-cluster-name,Values={handle.cluster_name} '
-                    f'--query Reservations[].Instances[].InstanceId '
+                    '--query Reservations[].Instances[].InstanceId '
                     '--output text')
                 terminate_cmd = (
+                    f'VMS=$({query_cmd}) && [ -n "$VMS" ] && '
                     f'aws ec2 terminate-instances --region {region} '
-                    f'--instance-ids $({query_cmd})')
+                    '--instance-ids $VMS || echo "No instances to delete."')
             elif isinstance(cloud, clouds.GCP):
                 zone = config['provider']['availability_zone']
                 # TODO(wei-lin): refactor by calling functions of node provider
@@ -3416,9 +3417,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # If there are no instances, exit with 0 rather than causing
                     # the delete command to fail.
                     terminate_cmd = (
-                        f'NAMES=$({query_cmd}) && [ -n "$NAMES" ] && '
+                        f'VMS=$({query_cmd}) && [ -n "$VMS" ] && '
                         f'gcloud compute instances delete --zone={zone} --quiet'
-                        ' $NAMES || echo "No instances to delete."')
+                        ' $VMS || echo "No instances to delete."')
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(f'Unsupported cloud {cloud} for stopped '
