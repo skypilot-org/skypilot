@@ -4377,10 +4377,14 @@ def local_up():
         path_to_package = os.path.dirname(os.path.dirname(__file__))
         up_script_path = os.path.join(path_to_package, 'tests', 'kubernetes', 'kind',
                                                                               'create_cluster.sh')
-        subprocess.check_output('chmod +x {}'.format(up_script_path), shell=True)
-        subprocess.check_output(up_script_path, shell=True)
-    # Run sky check
-    sky_check.check()
+        subprocess_utils.run_no_outputs('chmod +x {}'.format(up_script_path))
+        # Get directory of script and run it from there
+        cwd = os.path.dirname(os.path.abspath(up_script_path))
+        # Run script and don't print output
+        subprocess_utils.run_no_outputs(up_script_path,
+                                        cwd=cwd)
+        # Run sky check
+        sky_check.check(quiet=True)
     click.echo('Local cluster created successfully. `sky launch` can now use Kubernetes to run tasks locally.')
 
 
@@ -4393,11 +4397,10 @@ def local_up():
         down_script_path = os.path.join(path_to_package, 'tests', 'kubernetes',
                                       'kind',
                                       'delete_cluster.sh')
-        subprocess.check_output('chmod +x {}'.format(down_script_path),
-                                shell=True)
-        subprocess.check_output(down_script_path, shell=True)
-    # Run sky check
-    sky_check.check()
+        subprocess_utils.run_no_outputs('chmod +x {}'.format(down_script_path))
+        subprocess_utils.run_no_outputs(down_script_path)
+        # Run sky check
+        sky_check.check(quiet=True)
     click.echo('Local cluster removed.')
 
 

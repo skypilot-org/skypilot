@@ -25,13 +25,15 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
     try:
         kubernetes.core_api().list_namespace()
         return True, None
-    except kubernetes.api_exception as e:
+    except kubernetes.api_exception() as e:
         # Check if the error is due to invalid credentials
         if e.status == 401:
             return False, 'Invalid credentials - do you have permission ' \
                           'to access the cluster?'
         else:
             return False, f'Failed to communicate with the cluster: {str(e)}'
+    except kubernetes.config_exception() as e:
+        return False, f'Invalid configuration file: {str(e)}'
     except Exception as e:
         return False, f'An error occurred: {str(e)}'
 

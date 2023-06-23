@@ -89,3 +89,8 @@ def custom_objects_api():
 @import_package
 def api_exception():
     return kubernetes.client.rest.ApiException
+
+
+@import_package
+def config_exception():
+    return kubernetes.config.config_exception.ConfigException
