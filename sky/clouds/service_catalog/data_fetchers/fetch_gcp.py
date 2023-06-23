@@ -140,7 +140,7 @@ def _get_unit_price(sku: Dict[str, Any]) -> float:
     return units + nanos
 
 
-@functools.lru_cache(maxsize=1)
+@functools.lru_cache(maxsize=None)
 def _get_all_zones() -> List[str]:
     zones_request = gcp_client.zones().list(project=project_id)
     zones = []
