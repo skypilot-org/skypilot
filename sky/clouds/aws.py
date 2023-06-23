@@ -722,7 +722,7 @@ class AWS(clouds.Cloud):
         try:
             response = client.get_service_quota(ServiceCode='ec2',
                                                 QuotaCode=quota_code)
-        except botocore.exceptions.ClientError:
+        except aws.botocore_exceptions().ClientError:
             # Botocore client connection not established, try provisioning anyways
             return True
 
