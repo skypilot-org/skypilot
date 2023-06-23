@@ -282,22 +282,26 @@ class SpotController:
 
     def event_callback_func(self, task_id: int, state: str, comment: str = ''):
 
-        event_callback = self._dag.tasks[task_id].event_callback
+        task = self._dag.tasks[task_id]
+        event_callback = task.event_callback
         if event_callback is None:
             return
         event_callback = event_callback.strip()
-
+        cluster_name = spot_utils.generate_spot_cluster_name(
+            task.name, self._job_id)
         logger.info(f'=== START: event callback for {state!r} ===')
         log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                 self._backend.run_timestamp,
                                 f'spot-callback-{self._job_id}-{task_id}.log')
-        result = run_bash_command_with_log(bash_command=event_callback,
-                                           log_path=log_path,
-                                           env_vars=dict(SKYPILOT_JOB_ID=str(
-                                               self._job_id),
-                                                         TASK_ID=str(task_id),
-                                                         JOB_STATUS=state,
-                                                         COMMENT=comment))
+        result = run_bash_command_with_log(
+            bash_command=event_callback,
+            log_path=log_path,
+            env_vars=dict(SKYPILOT_JOB_ID=str(self._job_id),
+                          TASK_ID=str(task_id),
+                          JOB_STATUS=state,
+                          CLUSTER_NAME=cluster_name,
+                          TASK_NAME=task.name,
+                          COMMENT=comment))
         logger.info(
             f'Bash:{event_callback},log_path:{log_path},result:{result}')
         logger.info(f'=== END: event callback for {state!r} ===')
