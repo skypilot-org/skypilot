@@ -128,14 +128,14 @@ def run_and_retry(
         retry_returncode: Optional[List[int]] = None,
         retry_stderrs: Optional[List[str]] = None) -> Tuple[int, str, str]:
     """Run a command and retry if it fails due to the specified reasons.
-    
+
     Args:
         cmd: The command to run.
         max_retry: The maximum number of retries.
         retry_returncode: The returncodes that should be retried.
         retry_stderr: The cmd needs to be retried if the stderr contains any of
             the strings in this list.
-    
+
     Returns:
         The returncode, stdout, and stderr of the command.
     """

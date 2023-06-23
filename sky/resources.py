@@ -23,7 +23,7 @@ _DEFAULT_DISK_SIZE_GB = 256
 class Resources:
     """Resources: compute requirements of Tasks.
 
-    Used: 
+    Used:
 
     * for representing resource requests for tasks/apps
     * as a "filter" to get concrete launchable instances
@@ -67,7 +67,8 @@ class Resources:
             sky.Resources(clouds.GCP(), 'n1-standard-16')
             sky.Resources(clouds.GCP(), 'n1-standard-8', 'V100')
 
-            # Specifying required resources; the system decides the cloud/instance
+            # Specifying required resources; the system decides the
+            cloud/instance
             # type. The below are equivalent:
             sky.Resources(accelerators='V100')
             sky.Resources(accelerators='V100:1')
@@ -82,7 +83,7 @@ class Resources:
             the ``+`` indicates that the task requires at least 2 CPUs.
           memory: the amount of memory in GiB required. If a
             str, must be a string of the form ``'16'`` or ``'16+'``, where
-            the ``+`` indicates that the task requires at least 16 GB of memory. 
+            the ``+`` indicates that the task requires at least 16 GB of memory.
           accelerators: the accelerators required. If a str, must be
             a string of the form ``'V100'`` or ``'V100:2'``, where the ``:2``
             indicates that the task requires 2 V100 GPUs. If a dict, must be a
@@ -93,16 +94,22 @@ class Resources:
             False.
           spot_recovery: the spot recovery strategy to use for the managed
             spot to recover the cluster from preemption. Refer to
-            `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/spot/recovery_strategy.py>`__
+            `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/spot/recovery_strategy.py>`__ # pylint: disable=line-too-long
             for more details.
           region: the region to use.
           zone: the zone to use.
           image_id: the image ID to use. If a str, must be a string
-            of the image id from the cloud, such as AWS: ``'ami-1234567890abcdef0'``,
-            GCP: ``'projects/my-project-id/global/images/my-image-name'``; Or, a image tag
-            provided by SkyPilot, such as AWS: ``'skypilot:gpu-ubuntu-2004'``. If a dict,
-            must be a dict mapping from region to image ID, such as
-            ``{'us-west1': 'ami-1234567890abcdef0', 'us-east1': 'ami-1234567890abcdef0'}``.
+            of the image id from the cloud, such as AWS:
+            ``'ami-1234567890abcdef0'``, GCP:
+            ``'projects/my-project-id/global/images/my-image-name'``;
+            Or, a image tag provided by SkyPilot, such as AWS:
+            ``'skypilot:gpu-ubuntu-2004'``. If a dict, must be a dict mapping
+            from region to image ID, such as:
+            .. code-block:: python
+              {
+                'us-west1': 'ami-1234567890abcdef0',
+                'us-east1': 'ami-1234567890abcdef0'
+            }
           disk_size: the size of the OS disk in GiB.
           disk_tier: the disk performance tier to use. If None, defaults to
             ``'medium'``.
