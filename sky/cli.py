@@ -4407,8 +4407,9 @@ def local_up():
                     stdout = e.stdout.decode('utf-8')
                     click.echo(f'Logs:\n{stdout}')
                 sys.exit(1)
-        # Run sky check
-        sky_check.check(quiet=True)
+    # Run sky check
+    with log_utils.safe_rich_status('Running sky check...'):
+        sky_check.check(quiet=True)s
     if cluster_created:
         # Get number of CPUs
         p = subprocess_utils.run('kubectl get nodes -o jsonpath=\'{.items[0].status.capacity.cpu}\'', capture_output=True)
@@ -4445,7 +4446,8 @@ def local_down():
                 if env_options.Options.SHOW_DEBUG_INFO.get():
                     stdout = e.stdout.decode('utf-8')
                     click.echo(f'Logs:\n{stdout}')
-        # Run sky check
+    # Run sky check
+    with log_utils.safe_rich_status('Running sky check...'):
         sky_check.check(quiet=True)
     if cluster_removed:
         click.echo('Local cluster removed.')
