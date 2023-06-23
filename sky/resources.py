@@ -642,6 +642,8 @@ class Resources:
                         'images.')
 
     def extract_docker_image(self) -> Optional[str]:
+        if self.image_id is None:
+            return None
         if len(self.image_id) == 1 and self.region in self.image_id:
             image_id = self.image_id[self.region]
             if image_id.startswith('docker:'):
