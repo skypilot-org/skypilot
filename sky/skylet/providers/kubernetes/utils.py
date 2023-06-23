@@ -40,7 +40,7 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
 
 def get_cluster_status(cluster_name: str, namespace: str) -> List[status_lib.ClusterStatus]:
     # Get all the pods with the label skypilot-cluster: <cluster_name>
-    pods = core_api().list_namespaced_pod(namespace, label_selector=f'skypilot-cluster={cluster_name}').items
+    pods = kubernetes.core_api().list_namespaced_pod(namespace, label_selector=f'skypilot-cluster={cluster_name}').items
 
     # Check if the pods are running or pending
     cluster_status = []

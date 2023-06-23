@@ -119,7 +119,7 @@ class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
-    _DEFAULT_NUM_VCPUS = 4
+    _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 1
     _REPR = 'Kubernetes'
     _regions: List[clouds.Region] = [clouds.Region('kubernetes')]

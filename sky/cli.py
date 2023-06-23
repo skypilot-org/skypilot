@@ -60,10 +60,11 @@ from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.utils import log_utils
+from sky.utils import log_utils, env_options
 from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import command_runner
+from sky.utils import kubernetes_utils
 from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -4373,35 +4374,81 @@ def local():
 @usage_lib.entrypoint
 def local_up():
     """Creates a local cluster."""
+    cluster_created = False
+    # Check if ~/.kube/config exists:
+    if os.path.exists(os.path.expanduser('~/.kube/config')):
+        # Check if kubeconfig is valid, `kind delete` leaves an empty kubeconfig
+        valid, reason = kubernetes_utils.check_credentials()
+        if valid or (not valid and 'Invalid configuration' not in reason):
+            # Could be a valid kubeconfig or a non-empty but non-functioning
+            # kubeconfig - check if user wants to overwrite it
+            prompt = 'Cluster config found at ~/.kube/config. Overwrite it?'
+            click.confirm(prompt, default=True, abort=True, show_default=True)
     with log_utils.safe_rich_status('Creating local cluster...'):
         path_to_package = os.path.dirname(os.path.dirname(__file__))
-        up_script_path = os.path.join(path_to_package, 'tests', 'kubernetes', 'kind',
-                                                                              'create_cluster.sh')
+        up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
+                                      'create_cluster.sh')
         subprocess_utils.run_no_outputs('chmod +x {}'.format(up_script_path))
         # Get directory of script and run it from there
         cwd = os.path.dirname(os.path.abspath(up_script_path))
         # Run script and don't print output
-        subprocess_utils.run_no_outputs(up_script_path,
-                                        cwd=cwd)
+        try:
+            subprocess_utils.run(up_script_path, cwd=cwd,
+                                 capture_output=True)
+            cluster_created = True
+        except subprocess.CalledProcessError as e:
+            # Check if return code is 100
+            if e.returncode == 100:
+                click.echo('\nLocal cluster already exists.')
+            else:
+                stderr = e.stderr.decode('utf-8')
+                click.echo(f'\nFailed to create local cluster. {stderr}')
+                if env_options.Options.SHOW_DEBUG_INFO.get():
+                    stdout = e.stdout.decode('utf-8')
+                    click.echo(f'Logs:\n{stdout}')
+                sys.exit(1)
         # Run sky check
         sky_check.check(quiet=True)
-    click.echo('Local cluster created successfully. `sky launch` can now use Kubernetes to run tasks locally.')
+    if cluster_created:
+        # Get number of CPUs
+        p = subprocess_utils.run('kubectl get nodes -o jsonpath=\'{.items[0].status.capacity.cpu}\'', capture_output=True)
+        num_cpus = int(p.stdout.decode('utf-8'))
+        if num_cpus < 2:
+            click.echo('Warning: Local cluster has less than 2 CPUs. '
+                       'This may cause issues with running tasks.')
+        click.echo('Local Kubernetes cluster created successfully with '
+                   f'{num_cpus} CPUs. `sky launch` can now run tasks locally.'
+                   '\nHint: To change the number of CPUs, change your docker '
+                   'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.')
 
 
 @local.command('down', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
-def local_up():
+def local_down():
     """Creates a local cluster."""
+    cluster_removed = False
     with log_utils.safe_rich_status('Removing local cluster...'):
         path_to_package = os.path.dirname(os.path.dirname(__file__))
-        down_script_path = os.path.join(path_to_package, 'tests', 'kubernetes',
-                                      'kind',
+        down_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
                                       'delete_cluster.sh')
         subprocess_utils.run_no_outputs('chmod +x {}'.format(down_script_path))
-        subprocess_utils.run_no_outputs(down_script_path)
+        try:
+            subprocess_utils.run(down_script_path, capture_output=True)
+            cluster_removed = True
+        except subprocess.CalledProcessError as e:
+            # Check if return code is 100
+            if e.returncode == 100:
+                click.echo('\nLocal cluster does not exist.')
+            else:
+                stderr = e.stderr.decode('utf-8')
+                click.echo(f'\nFailed to delete local cluster. {stderr}')
+                if env_options.Options.SHOW_DEBUG_INFO.get():
+                    stdout = e.stdout.decode('utf-8')
+                    click.echo(f'Logs:\n{stdout}')
         # Run sky check
         sky_check.check(quiet=True)
-    click.echo('Local cluster removed.')
+    if cluster_removed:
+        click.echo('Local cluster removed.')
 
 
 def main():
