@@ -718,7 +718,7 @@ class AWS(clouds.Cloud):
             # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
             return True
 
-        client = boto3.client('service-quotas', region_name=region)
+        client = aws.client('service-quotas', region_name=region)
         try:
             response = client.get_service_quota(ServiceCode='ec2',
                                                 QuotaCode=quota_code)
