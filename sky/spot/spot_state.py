@@ -296,7 +296,10 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
              run_timestamp, job_id, task_id))
 
 
-def set_starting(job_id: int, task_id: int):
+def set_starting(job_id: int,
+                 task_id: int,
+                 callback_func: Optional[Callable[[int, str, str],
+                                                  None]] = None):
     """Set the task to starting state."""
     logger.info('Launching the spot cluster...')
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -305,9 +308,15 @@ def set_starting(job_id: int, task_id: int):
             UPDATE spot SET status=(?)
             WHERE spot_job_id=(?) AND
             task_id=(?)""", (SpotStatus.STARTING.value, job_id, task_id))
+    if callback_func is not None:
+        callback_func(task_id, 'STARTING', '')
 
 
-def set_started(job_id: int, task_id: int, start_time: float):
+def set_started(job_id: int,
+                task_id: int,
+                start_time: float,
+                callback_func: Optional[Callable[[int, str, str],
+                                                 None]] = None):
     """Set the task to started state."""
     logger.info('Job started.')
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -317,6 +326,8 @@ def set_started(job_id: int, task_id: int, start_time: float):
             WHERE spot_job_id=(?) AND
             task_id=(?)""",
             (SpotStatus.RUNNING.value, start_time, start_time, job_id, task_id))
+    if callback_func is not None:
+        callback_func(task_id, 'RUNNING', f'start_at={start_time}')
 
 
 def set_recovering(job_id: int,
@@ -334,10 +345,16 @@ def set_recovering(job_id: int,
                 task_id=(?)""",
             (SpotStatus.RECOVERING.value, time.time(), job_id, task_id))
     if callback_func is not None:
-        callback_func(task_id, 'RECOVERING', '')
+        callback_func(
+            task_id, 'RECOVERING',
+            f'job_duration=job_duration+({time.time()})-last_recovered_at')
 
 
-def set_recovered(job_id: int, task_id: int, recovered_time: float):
+def set_recovered(job_id: int,
+                  task_id: int,
+                  recovered_time: float,
+                  callback_func: Optional[Callable[[int, str, str],
+                                                   None]] = None):
     """Set the task to recovered."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
@@ -348,6 +365,9 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float):
             task_id=(?)""",
             (SpotStatus.RUNNING.value, recovered_time, job_id, task_id))
     logger.info('==== Recovered. ====')
+    if callback_func is not None:
+        callback_func(task_id, 'RECOVERED',
+                      f'last_recovered_at: {recovered_time}')
 
 
 def set_succeeded(job_id: int,
@@ -365,7 +385,7 @@ def set_succeeded(job_id: int,
             AND end_at IS null""",
             (SpotStatus.SUCCEEDED.value, end_time, job_id, task_id))
     if callback_func is not None:
-        callback_func(task_id, 'SUCCEEDED', '')
+        callback_func(task_id, 'SUCCEEDED', 'end_at=({end_time})')
     logger.info('Job succeeded.')
 
 

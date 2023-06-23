@@ -115,7 +115,8 @@ class SpotController:
             # uninitialized columns.
             spot_state.set_started(self._job_id,
                                    task_id,
-                                   start_time=time.time())
+                                   start_time=time.time(),
+                                   callback_func=self.event_callback_func)
             spot_state.set_succeeded(self._job_id,
                                      task_id,
                                      end_time=time.time(),
@@ -143,13 +144,14 @@ class SpotController:
             cluster_name, self._backend, task, self._retry_until_up)
 
         logger.info('Started monitoring.')
-        spot_state.set_starting(self._job_id, task_id)
+        spot_state.set_starting(self._job_id, task_id, self.event_callback_func)
         remote_job_submitted_at = self._strategy_executor.launch()
         assert remote_job_submitted_at is not None, remote_job_submitted_at
 
         spot_state.set_started(self._job_id,
                                task_id,
-                               start_time=remote_job_submitted_at)
+                               start_time=remote_job_submitted_at,
+                               callback_func=self.event_callback_func)
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
@@ -275,7 +277,8 @@ class SpotController:
             recovered_time = self._strategy_executor.recover()
             spot_state.set_recovered(self._job_id,
                                      task_id,
-                                     recovered_time=recovered_time)
+                                     recovered_time=recovered_time,
+                                     callback_func=self.event_callback_func)
 
     def event_callback_func(self, task_id: int, state: str, comment: str = ''):
 
