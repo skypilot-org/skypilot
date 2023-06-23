@@ -656,13 +656,14 @@ class RetryingVmProvisioner(object):
                 exception_dict = ast.literal_eval(exception_str)
             except Exception as e:
                 if 'wait_ready timeout exceeded' in exception_str:
-                    # It's not clear we should block the current
-                    # resource/location, because this error seems to occur when
-                    # the provisioning process went through partially (e.g., for
-                    # spot, initial provisioning succeeded, but while waiting
-                    # for ssh/setting up it got preempted).
+                    # This error seems to occur when the provisioning process
+                    # went through partially (e.g., for spot, initial
+                    # provisioning succeeded, but while waiting for ssh/setting
+                    # up it got preempted).
                     logger.error('Got the following exception, continuing: '
                                  f'{exception_list[0]}')
+                    self._blocked_resources.add(
+                        launchable_resources.copy(zone=zone.name))
                     return
                 raise RuntimeError(
                     f'Failed to parse exception: {exception_str}') from e
