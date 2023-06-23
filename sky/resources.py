@@ -105,11 +105,14 @@ class Resources:
             Or, a image tag provided by SkyPilot, such as AWS:
             ``'skypilot:gpu-ubuntu-2004'``. If a dict, must be a dict mapping
             from region to image ID, such as:
+
             .. code-block:: python
+
               {
                 'us-west1': 'ami-1234567890abcdef0',
                 'us-east1': 'ami-1234567890abcdef0'
-            }
+              }
+
           disk_size: the size of the OS disk in GiB.
           disk_tier: the disk performance tier to use. If None, defaults to
             ``'medium'``.
