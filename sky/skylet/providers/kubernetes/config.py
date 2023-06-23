@@ -17,6 +17,7 @@ MEMORY_SIZE_UNITS = {
 
 log_prefix = "KubernetesNodeProvider: "
 
+
 class InvalidNamespaceError(ValueError):
 
     def __init__(self, field_name, namespace):
@@ -208,8 +209,8 @@ def _configure_namespace(provider_config):
         return namespace
 
     logger.info(log_prefix + not_found_msg(namespace_field, namespace))
-    namespace_config = kubernetes.client.V1Namespace(metadata=kubernetes.client.V1ObjectMeta(
-        name=namespace))
+    namespace_config = kubernetes.client.V1Namespace(
+        metadata=kubernetes.client.V1ObjectMeta(name=namespace))
     kubernetes.core_api().create_namespace(namespace_config)
     logger.info(log_prefix + created_msg(namespace_field, namespace))
     return namespace
@@ -325,7 +326,8 @@ def _configure_services(namespace, provider_config):
                 return
             else:
                 logger.info(log_prefix + updating_existing_msg("service", name))
-                kubernetes.core_api().patch_namespaced_service(name, namespace, service)
+                kubernetes.core_api().patch_namespaced_service(
+                    name, namespace, service)
         else:
             logger.info(log_prefix + not_found_msg("service", name))
             kubernetes.core_api().create_namespaced_service(namespace, service)

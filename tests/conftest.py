@@ -135,7 +135,8 @@ def pytest_collection_modifyitems(config, items):
     # launch API to one launch every 10 seconds.
     # We run Kubernetes tests serially because the Kubernetes cluster may have
     # limited resources (e.g., just 8 cpus).
-    serial_mark = pytest.mark.xdist_group(name=f'serial_{generic_cloud_keyword}')
+    serial_mark = pytest.mark.xdist_group(
+        name=f'serial_{generic_cloud_keyword}')
     # Handle generic tests
     if generic_cloud in ['lambda', 'kubernetes']:
         for item in items:

@@ -63,9 +63,10 @@ class KubernetesNodeProvider(NodeProvider):
 
         tag_filters[TAG_RAY_CLUSTER_NAME] = self.cluster_name
         label_selector = to_label_selector(tag_filters)
-        pod_list = kubernetes.core_api().list_namespaced_pod(self.namespace,
-                                                  field_selector=field_selector,
-                                                  label_selector=label_selector)
+        pod_list = kubernetes.core_api().list_namespaced_pod(
+            self.namespace,
+            field_selector=field_selector,
+            label_selector=label_selector)
 
         # Don't return pods marked for deletion,
         # i.e. pods with non-null metadata.DeletionTimestamp.
@@ -115,6 +116,7 @@ class KubernetesNodeProvider(NodeProvider):
         return pod.status.pod_ip
 
     def get_node_id(self, ip_address, use_internal_ip=True) -> str:
+
         def find_node_id():
             if use_internal_ip:
                 return self._internal_ip_cache.get(ip_address)
@@ -145,7 +147,8 @@ class KubernetesNodeProvider(NodeProvider):
                 return
             except kubernetes.api_exception() as e:
                 if e.status == 409:
-                    logger.info(kubernetes.log_prefix + "Caught a 409 error while setting"
+                    logger.info(kubernetes.log_prefix +
+                                "Caught a 409 error while setting"
                                 " node tags. Retrying...")
                     time.sleep(DELAY_BEFORE_TAG_RETRY)
                     continue
@@ -182,7 +185,8 @@ class KubernetesNodeProvider(NodeProvider):
                     "calling create_namespaced_pod (count={}).".format(count))
         new_nodes = []
         for _ in range(count):
-            pod = kubernetes.core_api().create_namespaced_pod(self.namespace, pod_spec)
+            pod = kubernetes.core_api().create_namespaced_pod(
+                self.namespace, pod_spec)
             new_nodes.append(pod)
 
         new_svcs = []
@@ -227,8 +231,8 @@ class KubernetesNodeProvider(NodeProvider):
                     "may be too slow to autoscale.")
             all_ready = True
             for node in new_nodes:
-                pod = kubernetes.core_api().read_namespaced_pod(node.metadata.name,
-                                                     self.namespace)
+                pod = kubernetes.core_api().read_namespaced_pod(
+                    node.metadata.name, self.namespace)
                 if pod.status.phase == "Pending":
                     # Check conditions for more detailed status
                     if pod.status.conditions is not None:
@@ -255,13 +259,16 @@ class KubernetesNodeProvider(NodeProvider):
             kubernetes.core_api().delete_namespaced_pod(node_id, self.namespace)
         except kubernetes.api_exception() as e:
             if e.status == 404:
-                logger.warning(config.log_prefix + f"Tried to delete pod {node_id},"
+                logger.warning(config.log_prefix +
+                               f"Tried to delete pod {node_id},"
                                " but the pod was not found (404).")
             else:
                 raise
         try:
-            kubernetes.core_api().delete_namespaced_service(node_id, self.namespace)
-            kubernetes.core_api().delete_namespaced_service(f'{node_id}-ssh', self.namespace)
+            kubernetes.core_api().delete_namespaced_service(
+                node_id, self.namespace)
+            kubernetes.core_api().delete_namespaced_service(
+                f'{node_id}-ssh', self.namespace)
         except kubernetes.api_exception():
             pass
         try:

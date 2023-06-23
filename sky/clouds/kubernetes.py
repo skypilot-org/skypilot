@@ -65,12 +65,14 @@ class KubernetesInstanceType:
         return bool(pattern.match(name))
 
     @classmethod
-    def _parse_instance_type(cls, name: str) -> Tuple[
-        float, float, Optional[float], Optional[str]]:
+    def _parse_instance_type(
+            cls,
+            name: str) -> Tuple[float, float, Optional[float], Optional[str]]:
         """Returns the cpus, memory, accelerator_count, and accelerator_type
         from the given name."""
         pattern = re.compile(
-            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_count>\d+)(?P<accelerator_type>\S+))?$')
+            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_count>\d+)(?P<accelerator_type>\S+))?$'
+        )
         match = pattern.match(name)
         if match:
             cpus = float(match.group('cpus'))
@@ -191,9 +193,13 @@ class Kubernetes(clouds.Cloud):
             disk_tier: Optional[str] = None) -> Optional[str]:
         del disk_tier  # Unused.
         # TODO - Allow fractional CPUs and memory
-        instance_cpus = int(cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
-        instance_mem = int(memory.strip('+')) if memory is not None else instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
-        virtual_instance_type = KubernetesInstanceType(instance_cpus, instance_mem).name
+        instance_cpus = int(
+            cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
+        instance_mem = int(
+            memory.strip('+')
+        ) if memory is not None else instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
+        virtual_instance_type = KubernetesInstanceType(instance_cpus,
+                                                       instance_mem).name
         return virtual_instance_type
 
     @classmethod
@@ -336,5 +342,3 @@ class Kubernetes(clouds.Cloud):
         # TODO(romilb): Change from default namespace to user-specified namespace
         # return kubernetes_utils.get_cluster_status(cluster_name=name, namespace='default')
         return [status_lib.ClusterStatus.UP]
-
-

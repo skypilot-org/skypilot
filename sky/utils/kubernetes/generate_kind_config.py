@@ -6,7 +6,7 @@ import textwrap
 def generate_kind_config(path: str,
                          port_start: int = 30000,
                          port_end: int = 32768,
-                         num_nodes = 1) -> None:
+                         num_nodes=1) -> None:
     """
     Generate a kind cluster config file with ports mapped from host to container
     Args:
@@ -41,18 +41,24 @@ def generate_kind_config(path: str,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generate a kind cluster '
-                                                 'config file with ports mapped'
-                                                 ' from host to container')
-    parser.add_argument('--path', type=str, default='/tmp/skypilot-kind.yaml',
+                                     'config file with ports mapped'
+                                     ' from host to container')
+    parser.add_argument('--path',
+                        type=str,
+                        default='/tmp/skypilot-kind.yaml',
                         help='Path to generate the config file at')
-    parser.add_argument('--port-start', type=int, default=30000,
+    parser.add_argument('--port-start',
+                        type=int,
+                        default=30000,
                         help='Port range start')
-    parser.add_argument('--port-end', type=int, default=32768,
+    parser.add_argument('--port-end',
+                        type=int,
+                        default=32768,
                         help='Port range end')
-    parser.add_argument('--num-nodes', type=int, default=1,
+    parser.add_argument('--num-nodes',
+                        type=int,
+                        default=1,
                         help='Number of nodes in the cluster')
     args = parser.parse_args()
-    generate_kind_config(args.path,
-                         args.port_start,
-                         args.port_end,
+    generate_kind_config(args.path, args.port_start, args.port_end,
                          args.num_nodes)

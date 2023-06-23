@@ -4409,7 +4409,7 @@ def local_up():
                 sys.exit(1)
     # Run sky check
     with log_utils.safe_rich_status('Running sky check...'):
-        sky_check.check(quiet=True)s
+        sky_check.check(quiet=True)
     if cluster_created:
         # Get number of CPUs
         p = subprocess_utils.run('kubectl get nodes -o jsonpath=\'{.items[0].status.capacity.cpu}\'', capture_output=True)
