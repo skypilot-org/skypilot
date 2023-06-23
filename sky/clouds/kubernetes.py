@@ -71,7 +71,7 @@ class KubernetesInstanceType:
         """Returns the cpus, memory, accelerator_count, and accelerator_type
         from the given name."""
         pattern = re.compile(
-            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_count>\d+)(?P<accelerator_type>\S+))?$'
+            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_count>\d+)(?P<accelerator_type>\S+))?$'  # pylint: disable=line-too-long
         )
         match = pattern.match(name)
         if match:
@@ -81,12 +81,16 @@ class KubernetesInstanceType:
             accelerator_type = match.group('accelerator_type')
             if accelerator_count:
                 accelerator_count = float(accelerator_count)
+                accelerator_type = str(accelerator_type)
+            else:
+                accelerator_count = None
+                accelerator_type = None
             return cpus, memory, accelerator_count, accelerator_type
         else:
             raise ValueError(f'Invalid instance name: {name}')
 
     @classmethod
-    def from_instance_type(cls, name: str) -> 'KubernetesInstanceName':
+    def from_instance_type(cls, name: str) -> 'KubernetesInstanceType':
         """Returns an instance name object from the given name."""
         if not cls.is_valid_instance_type(name):
             raise ValueError(f'Invalid instance name: {name}')
@@ -102,7 +106,7 @@ class KubernetesInstanceType:
                        cpus: float,
                        memory: float,
                        accelerator_count: float = 0,
-                       accelerator_type: str = '') -> 'KubernetesInstanceName':
+                       accelerator_type: str = '') -> 'KubernetesInstanceType':
         """Returns an instance name object from the given resources."""
         name = f'{cpus}CPU--{memory}GB'
         if accelerator_count > 0:
@@ -197,7 +201,8 @@ class Kubernetes(clouds.Cloud):
             cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
         instance_mem = int(
             memory.strip('+')
-        ) if memory is not None else instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
+        ) if memory is not None else \
+            instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
         virtual_instance_type = KubernetesInstanceType(instance_cpus,
                                                        instance_mem).name
         return virtual_instance_type
@@ -212,7 +217,7 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
-            cls, instance_type: str) -> Tuple[float, float]:
+            cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
         """Returns the #vCPUs and memory that the instance type offers."""
         k = KubernetesInstanceType.from_instance_type(instance_type)
         return k.cpus, k.memory
@@ -333,12 +338,11 @@ class Kubernetes(clouds.Cloud):
         #  supported by the cluster.
         return True
 
+    @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
         # TODO(romilb): Implement this. For now, we return UP as the status.
         #  Assuming single node cluster.
         del tag_filters, region, zone, kwargs  # Unused.
-        # TODO(romilb): Change from default namespace to user-specified namespace
-        # return kubernetes_utils.get_cluster_status(cluster_name=name, namespace='default')
         return [status_lib.ClusterStatus.UP]

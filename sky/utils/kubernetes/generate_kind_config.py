@@ -1,4 +1,7 @@
-# Generates a kind cluster config file with ports mapped from host to container
+"""Generates a kind cluster config file
+
+Maps specified ports from host to cluster container.
+"""
 import argparse
 import textwrap
 
@@ -24,7 +27,7 @@ def generate_kind_config(path: str,
       extraPortMappings:""")
     suffix = ''
     if num_nodes > 1:
-        for i in range(1, num_nodes):
+        for _ in range(1, num_nodes):
             suffix += """- role: worker\n"""
     with open(path, 'w') as f:
         f.write(preamble)
@@ -34,7 +37,7 @@ def generate_kind_config(path: str,
         hostPort: {port}
         listenAddress: "0.0.0.0"
         protocol: tcp""")
-        f.write("\n")
+        f.write('\n')
         if suffix:
             f.write(suffix)
 

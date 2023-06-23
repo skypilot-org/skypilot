@@ -4418,7 +4418,7 @@ def local_up():
             'Local Kubernetes cluster created successfully with '
             f'{num_cpus} CPUs. `sky launch` can now run tasks locally.'
             '\nHint: To change the number of CPUs, change your docker '
-            'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.'
+            'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.'  # pylint: disable=line-too-long
         )
 
 
