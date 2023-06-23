@@ -2,12 +2,12 @@
 .. _cloud-permissions-aws:
 
 AWS
----
+=====
 
 .. _cloud-permissions-aws-user-creation:
 
 Minimal Permissions
-~~~~~~~~~~~~~~~~~~~
+-----------------------
 
 For an AWS user to use SkyPilot, there are two parts of the permissions that needs to be set up:
 
@@ -15,7 +15,7 @@ For an AWS user to use SkyPilot, there are two parts of the permissions that nee
 2. **IAM role**: the IAM role is assigned to the EC2 instances created by SkyPilot, for the instance to access AWS resources, e.g., S3 bucket. It is shared by all the users under the same organization/root account. (If the user account has the permission to create IAM roles, SkyPilot can automatically create the role.)
 
 User Account
-^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~
 
 AWS accounts can be attached with a policy that limits the permissions of the account. Follow these steps to create an AWS user with the minimum permissions required by SkyPilot:
 
@@ -159,7 +159,7 @@ With the steps above you are almost ready to have the users in your organization
 
 
 IAM Role Creation
-^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~
 
 .. note::
 

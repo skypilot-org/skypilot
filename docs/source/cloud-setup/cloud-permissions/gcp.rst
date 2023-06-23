@@ -1,12 +1,12 @@
 .. _cloud-permissions-gcp:
 
 GCP
----
+=============
 
 .. _medium-permissions:
 
 Medium Permissions
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+-----------------------
 
 The easiest way to grant permissions to a user access your GCP project without the ``Owner`` role is to add the following roles to the user principals:
 
@@ -29,12 +29,12 @@ You can grant those accesses via the GCP's `IAM & Admin console <https://console
 
 
 Minimal Permissions
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+-----------------------
 
-The :ref:`Medium Permissions <medium-permissions>` assigns strong admin permissions to the user for some GCP services. It is fine for most users, but if you would like to grant fine-grained minimal permissions to your users in your organization/project, you can create a custom role with the permissions required by following the steps below:
+The :ref:`Medium Permissions <medium-permissions>` assigns strong admin permissions to the user for some GCP services. It is fine for most users, but if you would like to grant fine-grained minimal permissions to your users in your organization / project, you can create a custom role with the permissions required by following the steps below:
 
 User
-^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~
 
 1. Go to the GCP's `IAM & Admin console <https://console.cloud.google.com/iam-admin/roles>`__ and click on **Create Role**.
 
@@ -124,7 +124,7 @@ User
 .. _gcp-service-account-creation:
 
 Service Account
-^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~
 .. note::
 
     If you already have an service account under "Service Accounts" tab with the email starting with ``skypilot-v1@``, it is likely created by SkyPilot automatically, and you can skip this section.
