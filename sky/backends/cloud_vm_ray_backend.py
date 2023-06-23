@@ -655,6 +655,15 @@ class RetryingVmProvisioner(object):
             try:
                 exception_dict = ast.literal_eval(exception_str)
             except Exception as e:
+                if 'wait_ready timeout exceeded' in exception_str:
+                    # It's not clear we should block the current
+                    # resource/location, because this error seems to occur when
+                    # the provisioning process went through partially (e.g., for
+                    # spot, initial provisioning succeeded, but while waiting
+                    # for ssh/setting up it got preempted).
+                    logger.error('Got the following exception, continuing: '
+                                 f'{exception_list[0]}')
+                    return
                 raise RuntimeError(
                     f'Failed to parse exception: {exception_str}') from e
             # TPU VM returns a different structured response.
@@ -1123,8 +1132,9 @@ class RetryingVmProvisioner(object):
         def _get_previously_launched_zones() -> Optional[List[clouds.Zone]]:
             # When the cluster exists, the to_provision should have been set
             # to the previous cluster's resources.
-            zones = [clouds.Zone(name=to_provision.zone)
-                    ] if to_provision.zone is not None else None
+            zones = [
+                clouds.Zone(name=to_provision.zone),
+            ] if to_provision.zone is not None else None
             if zones is None:
                 # Reuse the zone field in the ray yaml as the
                 # prev_resources.zone field may not be set before the previous
