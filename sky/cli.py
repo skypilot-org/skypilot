@@ -4365,10 +4365,6 @@ def local():
     """SkyPilot local tools CLI."""
     pass
 
-@cli.group(cls=_NaturalOrderGroup, hidden=True)
-def local():
-    """SkyPilot local tools CLI."""
-    pass
 
 @local.command('up', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
@@ -4393,8 +4389,7 @@ def local_up():
         cwd = os.path.dirname(os.path.abspath(up_script_path))
         # Run script and don't print output
         try:
-            subprocess_utils.run(up_script_path, cwd=cwd,
-                                 capture_output=True)
+            subprocess_utils.run(up_script_path, cwd=cwd, capture_output=True)
             cluster_created = True
         except subprocess.CalledProcessError as e:
             # Check if return code is 100
@@ -4412,15 +4407,19 @@ def local_up():
         sky_check.check(quiet=True)
     if cluster_created:
         # Get number of CPUs
-        p = subprocess_utils.run('kubectl get nodes -o jsonpath=\'{.items[0].status.capacity.cpu}\'', capture_output=True)
+        p = subprocess_utils.run(
+            'kubectl get nodes -o jsonpath=\'{.items[0].status.capacity.cpu}\'',
+            capture_output=True)
         num_cpus = int(p.stdout.decode('utf-8'))
         if num_cpus < 2:
             click.echo('Warning: Local cluster has less than 2 CPUs. '
                        'This may cause issues with running tasks.')
-        click.echo('Local Kubernetes cluster created successfully with '
-                   f'{num_cpus} CPUs. `sky launch` can now run tasks locally.'
-                   '\nHint: To change the number of CPUs, change your docker '
-                   'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.')
+        click.echo(
+            'Local Kubernetes cluster created successfully with '
+            f'{num_cpus} CPUs. `sky launch` can now run tasks locally.'
+            '\nHint: To change the number of CPUs, change your docker '
+            'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.'
+        )
 
 
 @local.command('down', cls=_DocumentedCodeCommand)
@@ -4431,7 +4430,7 @@ def local_down():
     with log_utils.safe_rich_status('Removing local cluster...'):
         path_to_package = os.path.dirname(os.path.dirname(__file__))
         down_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
-                                      'delete_cluster.sh')
+                                        'delete_cluster.sh')
         subprocess_utils.run_no_outputs('chmod +x {}'.format(down_script_path))
         try:
             subprocess_utils.run(down_script_path, capture_output=True)

@@ -49,12 +49,9 @@ def get_cluster_status(cluster_name: str,
     cluster_status = []
     for pod in pods:
         if pod.status.phase == 'Running':
-            cluster_status.append(
-                status_lib.ClusterStatus(cluster_name,
-                                         status_lib.ClusterStatus.UP))
+            cluster_status.append(status_lib.ClusterStatus.UP)
         elif pod.status.phase == 'Pending':
             cluster_status.append(
-                status_lib.ClusterStatus(cluster_name,
-                                         status_lib.ClusterStatus.INIT))
+                status_lib.ClusterStatus.INIT)
     # If pods are not found, we don't add them to the return list
     return cluster_status
