@@ -19,9 +19,15 @@ def generate_kind_config(path: str,
         num_nodes: Number of nodes in the cluster
     """
 
-    preamble = textwrap.dedent("""
+    preamble = textwrap.dedent(f"""
     apiVersion: kind.x-k8s.io/v1alpha4
     kind: Cluster
+    kubeadmConfigPatches:
+    - |
+      kind: ClusterConfiguration
+      apiServer:
+        extraArgs:
+          "service-node-port-range": {port_start}-{port_end}
     nodes:
     - role: control-plane
       extraPortMappings:""")
@@ -31,7 +37,7 @@ def generate_kind_config(path: str,
             suffix += """- role: worker\n"""
     with open(path, 'w') as f:
         f.write(preamble)
-        for port in range(port_start, port_end):
+        for port in range(port_start, port_end+1):
             f.write(f"""
       - containerPort: {port}
         hostPort: {port}

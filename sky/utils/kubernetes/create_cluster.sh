@@ -1,8 +1,11 @@
 # Creates a local Kubernetes cluster using kind
 # Usage: ./create_cluster.sh
 # Invokes generate_kind_config.py to generate a kind-cluster.yaml with NodePort mappings
-# Be sure to have built the latest image before running this script
 set -e
+
+# Limit port range to speed up kind cluster creation
+PORT_RANGE_START=30000
+PORT_RANGE_END=30100
 
 # Check if docker is running
 if ! docker info > /dev/null 2>&1; then
@@ -22,16 +25,15 @@ if kind get clusters | grep -q skypilot; then
     exit 100
 fi
 
-# If /tmp/skypilot-kind.yaml is not present, generate it
-if [ ! -f /tmp/skypilot-kind.yaml ]; then
-    echo "Generating /tmp/skypilot-kind.yaml"
-    python -m sky.utils.kubernetes.generate_kind_config --path /tmp/skypilot-kind.yaml
-fi
+# Generate cluster YAML
+echo "Generating /tmp/skypilot-kind.yaml"
+python -m sky.utils.kubernetes.generate_kind_config --path /tmp/skypilot-kind.yaml --port-start ${PORT_RANGE_START} --port-end ${PORT_RANGE_END}
 
 kind create cluster --config /tmp/skypilot-kind.yaml --name skypilot
 
 # Load local skypilot image on to the cluster for faster startup
 echo "Loading local skypilot image on to the cluster"
+docker pull us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest
 kind load docker-image --name skypilot us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest
 
 # Print CPUs available on the local cluster
