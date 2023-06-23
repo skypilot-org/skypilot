@@ -1476,7 +1476,8 @@ class GcsStore(AbstractStore):
         copy_list = '\n'.join(
             os.path.abspath(os.path.expanduser(p)) for p in source_path_list)
         sync_command = (f'echo "{copy_list}" | '
-                        f'gsutil -m cp -e -n -r -I gs://{self.name}')
+                        'gsutil -m -o "GSUtil:parallel_process_count=1" '
+                        f'cp -e -n -r -I gs://{self.name}')
 
         with log_utils.safe_rich_status(
                 f'[bold cyan]Syncing '
@@ -1508,14 +1509,16 @@ class GcsStore(AbstractStore):
 
         def get_file_sync_command(base_dir_path, file_names):
             sync_format = '|'.join(file_names)
-            sync_command = (f'gsutil -m rsync -x \'^(?!{sync_format}$).*\' '
-                            f'{base_dir_path} gs://{self.name}')
+            sync_command = (
+                f'gsutil -m -o "GSUtil:parallel_process_count=1" rsync -x \'^(?!{sync_format}$).*\' '
+                f'{base_dir_path} gs://{self.name}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            sync_command = (f'gsutil -m rsync -r -x \'.git/*\' {src_dir_path} '
-                            f'gs://{self.name}/{dest_dir_name}')
+            sync_command = (
+                f'gsutil -m -o "GSUtil:parallel_process_count=1" rsync -r -x \'.git/*\' {src_dir_path} '
+                f'gs://{self.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
@@ -1678,8 +1681,9 @@ class GcsStore(AbstractStore):
                         bucket_name=bucket_name))
                 return False
             try:
-                remove_obj_command = ('gsutil -m rm -r'
-                                      f' gs://{bucket_name}')
+                remove_obj_command = (
+                    'gsutil -m -o "GSUtil:parallel_process_count=1" rm -r'
+                    f' gs://{bucket_name}')
                 subprocess.check_output(remove_obj_command.split(' '),
                                         stderr=subprocess.STDOUT)
                 return True
