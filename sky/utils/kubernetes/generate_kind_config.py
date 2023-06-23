@@ -37,7 +37,7 @@ def generate_kind_config(path: str,
             suffix += """- role: worker\n"""
     with open(path, 'w') as f:
         f.write(preamble)
-        for port in range(port_start, port_end+1):
+        for port in range(port_start, port_end + 1):
             f.write(f"""
       - containerPort: {port}
         hostPort: {port}

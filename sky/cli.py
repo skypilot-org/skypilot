@@ -4394,7 +4394,8 @@ def local_up():
         except subprocess.CalledProcessError as e:
             # Check if return code is 100
             if e.returncode == 100:
-                click.echo('\nLocal cluster already exists. Run `sky local down` to delete it.')
+                click.echo('\nLocal cluster already exists. '
+                           'Run `sky local down` to delete it.')
             else:
                 stderr = e.stderr.decode('utf-8')
                 click.echo(f'\nFailed to create local cluster. {stderr}')

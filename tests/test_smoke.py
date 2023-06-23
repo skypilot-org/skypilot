@@ -635,7 +635,7 @@ def test_gcp_stale_job_manual_restart():
 
 # ---------- Check Sky's environment variables; workdir. ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
-@pytest.mark.no_kubernetes # K8s does not support num_nodes > 1 yet
+@pytest.mark.no_kubernetes  # K8s does not support num_nodes > 1 yet
 def test_env_check(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -687,6 +687,7 @@ def test_scp_file_mounts():
     )
     run_one_test(test)
 
+
 @pytest.mark.kubernetes
 def test_kubernetes_file_mounts():
     name = _get_cluster_name()
@@ -702,6 +703,7 @@ def test_kubernetes_file_mounts():
         timeout=20 * 60,  # 20 mins
     )
     run_one_test(test)
+
 
 # ---------- storage ----------
 @pytest.mark.aws
