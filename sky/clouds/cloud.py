@@ -27,7 +27,7 @@ class CloudImplementationFeatures(enum.Enum):
     STOP = 'stop'
     AUTOSTOP = 'autostop'
     MULTI_NODE = 'multi-node'
-    CLONE_DISK_FROM_CLUSTER = 'migrate-disk'
+    CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
 
 
 class Region(collections.namedtuple('Region', ['name'])):
@@ -486,17 +486,34 @@ class Cloud:
         """
         raise NotImplementedError
 
+    # === Image related methods ===
+    # These three tmethods are used to create, move and delete images. They
+    # are currently only used in `sky launch --clone-disk-from` to clone a
+    # cluster's disk to launch a new cluster.
+    # It is not required to implement these methods for clouds that do not
+    # support `--clone-disk-from`. If not implemented,
+    # CloudImplementationFeatures.CLONE_DISK_FROM should be added to the
+    # cloud._cloud_unsupported_features().
+
     @classmethod
-    def create_image_from_cluster(cls, name: str, tag_filters: Dict[str, str],
-                                  region: Optional[str],
+    def create_image_from_cluster(cls, cluster_name: str,
+                                  tag_filters: Dict[str,
+                                                    str], region: Optional[str],
                                   zone: Optional[str]) -> str:
+        """Creates an image from the cluster.
+
+        Returns: the image ID.
+        """
         raise NotImplementedError
 
     @classmethod
     def maybe_move_image(cls, image_name: str, source_region: str,
                          target_region: str, source_zone: Optional[str],
                          target_zone: Optional[str]) -> str:
-        """Move an image if the target region cannot find it.
+        """Move an image if required.
+
+        If the image cannot be accessed in the target region, move the image
+        from the source region to the target region.
 
         Returns: the image ID in the target region.
         """
@@ -504,7 +521,10 @@ class Cloud:
 
     @classmethod
     def delete_image(cls, image_id: str, region: Optional[str]) -> None:
+        """Deletes the image with image_id in the region."""
         raise NotImplementedError
+
+    # === End of image related methods ===
 
     def __repr__(self):
         return self._REPR

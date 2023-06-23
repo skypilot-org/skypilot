@@ -732,7 +732,7 @@ def _launch_with_confirm(
     clone_source_str = ''
     if clone_disk_from is not None:
         clone_source_str = f' from the disk of {clone_disk_from!r}'
-        task, _ = backend_utils.check_clone_disk_and_override_task(
+        task, _ = backend_utils.check_can_clone_disk_and_override_task(
             clone_disk_from, cluster, task)
 
     with sky.Dag() as dag:
@@ -1277,7 +1277,7 @@ def cli():
     **_get_shell_complete_args(_complete_cluster_name),
     help=('[Experimental] Clone disk from an existing cluster to launch '
           'a new one. This is useful when the new cluster needs to have '
-          'the same data on the boot disk as the existing cluster.'))
+          'the same data on the boot disk as an existing cluster.'))
 @usage_lib.entrypoint
 def launch(
     entrypoint: List[str],

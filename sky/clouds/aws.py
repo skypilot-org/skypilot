@@ -709,7 +709,7 @@ class AWS(clouds.Cloud):
         returncode, stdout, stderr = subprocess_utils.run_and_retry(
             query_cmd,
             retry_returncode=[255],
-            retry_stderr=[
+            retry_stderrs=[
                 'Unable to locate credentials. You can configure credentials by '
                 'running "aws configure"'
             ])
@@ -751,12 +751,13 @@ class AWS(clouds.Cloud):
         return statuses
 
     @classmethod
-    def create_image_from_cluster(cls, name: str, tag_filters: Dict[str, str],
-                                  region: Optional[str],
+    def create_image_from_cluster(cls, cluster_name: str,
+                                  tag_filters: Dict[str,
+                                                    str], region: Optional[str],
                                   zone: Optional[str]) -> str:
         del zone  # unused
         assert region is not None, (tag_filters, region)
-        image_name = f'skypilot-{name}-{int(time.time())}'
+        image_name = f'skypilot-{cluster_name}-{int(time.time())}'
         returncode, stdout, stderr = cls._query_instance_property_and_retry(
             tag_filters, region, query='Reservations[].Instances[].InstanceId')
 
@@ -792,7 +793,7 @@ class AWS(clouds.Cloud):
             stream_logs=True)
 
         log_utils.force_update_rich_status(
-            f'Waiting for the source image {name!r} from {region} to be available on AWS.'
+            f'Waiting for the source image {cluster_name!r} from {region} to be available on AWS.'
         )
         # Wait for the image to be available
         wait_image_cmd = (

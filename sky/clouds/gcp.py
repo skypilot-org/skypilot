@@ -819,9 +819,11 @@ class GCP(clouds.Cloud):
         return status_list
 
     @classmethod
-    def create_image_from_cluster(cls, name: str, tag_filters: Dict[str, str],
-                                  region: Optional[str],
+    def create_image_from_cluster(cls, cluster_name: str,
+                                  tag_filters: Dict[str,
+                                                    str], region: Optional[str],
                                   zone: Optional[str]) -> str:
+        del region  # unused
         assert zone is not None
         label_filter_str = cls._label_filter_str(tag_filters)
         instance_name_cmd = ('gcloud compute instances list '
@@ -834,7 +836,7 @@ class GCP(clouds.Cloud):
         subprocess_utils.handle_returncode(
             returncode,
             instance_name_cmd,
-            error_msg=f'Failed to get instance name for {name!r}',
+            error_msg=f'Failed to get instance name for {cluster_name!r}',
             stderr=stderr,
             stream_logs=True)
         instance_names = json.loads(stdout)
@@ -845,7 +847,7 @@ class GCP(clouds.Cloud):
                     f' instance, but got multiple instances: {instance_names}')
         instance_name = instance_names[0]['name']
 
-        image_name = f'skypilot-{name}-{int(time.time())}'
+        image_name = f'skypilot-{cluster_name}-{int(time.time())}'
         create_image_cmd = (f'gcloud compute images create {image_name} '
                             f'--source-disk  {instance_name} '
                             f'--source-disk-zone {zone}')
@@ -857,7 +859,7 @@ class GCP(clouds.Cloud):
         subprocess_utils.handle_returncode(
             returncode,
             create_image_cmd,
-            error_msg=f'Failed to create image for {name!r}',
+            error_msg=f'Failed to create image for {cluster_name!r}',
             stderr=stderr,
             stream_logs=True)
 
@@ -871,7 +873,7 @@ class GCP(clouds.Cloud):
         subprocess_utils.handle_returncode(
             returncode,
             image_uri_cmd,
-            error_msg=f'Failed to get image uri for {name!r}',
+            error_msg=f'Failed to get image uri for {cluster_name!r}',
             stderr=stderr,
             stream_logs=True)
 

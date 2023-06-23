@@ -97,6 +97,7 @@ def _convert_to_dag(entrypoint: Any) -> 'sky.Dag':
 class Stage(enum.Enum):
     """Stages for a run of a sky.Task."""
     # TODO: rename actual methods to be consistent.
+    CLONE_DISK = enum.auto()
     OPTIMIZE = enum.auto()
     PROVISION = enum.auto()
     SYNC_WORKDIR = enum.auto()
@@ -105,6 +106,55 @@ class Stage(enum.Enum):
     PRE_EXEC = enum.auto()
     EXEC = enum.auto()
     DOWN = enum.auto()
+
+
+def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
+                                   cluster_name: Optional[str],
+                                   task: 'sky.Task') -> 'sky.Task':
+    if clone_disk_from is None:
+        return task
+    task, handle = backend_utils.check_can_clone_disk_and_override_task(
+        clone_disk_from, cluster_name, task)
+    original_cloud = handle.launched_resources.cloud
+    assert original_cloud is not None, handle.launched_resources
+    task_resources = list(task.resources)[0]
+
+    with log_utils.safe_rich_status('Creating image from source cluster '
+                                    f'{clone_disk_from!r}'):
+        image_id = original_cloud.create_image_from_cluster(
+            clone_disk_from,
+            backend_utils.tag_filter_for_cluster(clone_disk_from),
+            region=handle.launched_resources.region,
+            zone=handle.launched_resources.zone,
+        )
+        log_utils.force_update_rich_status(
+            f'Migrating image {image_id} to target region '
+            f'{task_resources.region}...')
+        source_region = handle.launched_resources.region
+        target_region = task_resources.region
+        assert source_region is not None, handle.launched_resources
+        assert target_region is not None, task_resources
+
+        image_id = original_cloud.maybe_move_image(
+            image_id,
+            source_region=source_region,
+            target_region=target_region,
+            source_zone=handle.launched_resources.zone,
+            target_zone=task_resources.zone,
+        )
+    logger.info(
+        f'{colorama.Fore.GREEN}'
+        f'Successfully created image {image_id!r} for {clone_disk_from!r} '
+        f'on {original_cloud}.{colorama.Style.RESET_ALL}\n'
+        'Overriding task\'s image_id.')
+    task_resources = task_resources.copy(image_id=image_id,
+                                         _is_image_managed=True)
+    task.set_resources(task_resources)
+    # Set the best_resources to None to trigger a re-optimization, so that
+    # the new task_resources is used.
+    task.best_resources = None
+    logger.debug(f'Overridden task resources: {task.resources}')
+    return task
 
 
 def _execute(
@@ -122,6 +172,7 @@ def _execute(
     detach_run: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
+    clone_disk_from: Optional[str] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
@@ -229,31 +280,34 @@ def _execute(
                 f'Backend {backend.NAME} does not support autostop, please try '
                 f'{backends.CloudVmRayBackend.NAME}')
 
-    if not cluster_exists:
-        if (Stage.PROVISION in stages and task.use_spot and
-                not _is_launched_by_spot_controller):
-            yellow = colorama.Fore.YELLOW
-            bold = colorama.Style.BRIGHT
-            reset = colorama.Style.RESET_ALL
-            logger.info(
-                f'{yellow}Launching an unmanaged spot task, which does not '
-                f'automatically recover from preemptions.{reset}\n{yellow}To '
-                'get automatic recovery, use managed spot instead: '
-                f'{reset}{bold}sky spot launch{reset} {yellow}or{reset} '
-                f'{bold}sky.spot_launch(){reset}.')
+    if (Stage.PROVISION in stages and task.use_spot and
+            not _is_launched_by_spot_controller and not cluster_exists):
+        yellow = colorama.Fore.YELLOW
+        bold = colorama.Style.BRIGHT
+        reset = colorama.Style.RESET_ALL
+        logger.info(
+            f'{yellow}Launching an unmanaged spot task, which does not '
+            f'automatically recover from preemptions.{reset}\n{yellow}To '
+            'get automatic recovery, use managed spot instead: '
+            f'{reset}{bold}sky spot launch{reset} {yellow}or{reset} '
+            f'{bold}sky.spot_launch(){reset}.')
 
-        if Stage.OPTIMIZE in stages:
-            if task.best_resources is None:
-                # TODO: fix this for the situation where number of requested
-                # accelerators is not an integer.
-                if isinstance(backend, backends.CloudVmRayBackend):
-                    # TODO: adding this check because docker backend on a
-                    # no-credential machine should not enter optimize(), which
-                    # would directly error out ('No cloud is enabled...').  Fix
-                    # by moving `sky check` checks out of optimize()?
-                    dag = sky.optimize(dag, minimize=optimize_target)
-                    task = dag.tasks[0]  # Keep: dag may have been deep-copied.
-                    assert task.best_resources is not None, task
+    if Stage.CLONE_DISK in stages:
+        task = _maybe_clone_disk_from_cluster(clone_disk_from, cluster_name,
+                                              task)
+
+    if Stage.OPTIMIZE in stages and not cluster_exists:
+        if task.best_resources is None:
+            # TODO: fix this for the situation where number of requested
+            # accelerators is not an integer.
+            if isinstance(backend, backends.CloudVmRayBackend):
+                # TODO: adding this check because docker backend on a
+                # no-credential machine should not enter optimize(), which
+                # would directly error out ('No cloud is enabled...').  Fix
+                # by moving `sky check` checks out of optimize()?
+                dag = sky.optimize(dag, minimize=optimize_target)
+                task = dag.tasks[0]  # Keep: dag may have been deep-copied.
+                assert task.best_resources is not None, task
 
     backend.register_info(dag=dag,
                           optimize_target=optimize_target,
@@ -264,7 +318,6 @@ def _execute(
         task.sync_storage_mounts()
 
     try:
-
         if Stage.PROVISION in stages:
             if handle is None:
                 handle = backend.provision(task,
@@ -430,55 +483,6 @@ def launch(
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.launch')
 
-    if clone_disk_from:
-        if isinstance(entrypoint, sky.Dag):
-            if len(entrypoint.tasks) > 1:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
-                        'Launching a DAG with clone_disk_from is not '
-                        'supported yet.')
-            else:
-                entrypoint = entrypoint.tasks[0]
-        assert isinstance(entrypoint, sky.Task), entrypoint
-        task, handle = backend_utils.check_clone_disk_and_override_task(
-            clone_disk_from, cluster_name, entrypoint)
-        original_cloud = handle.launched_resources.cloud
-        assert original_cloud is not None, handle.launched_resources
-        task_resources = list(task.resources)[0]
-
-        with log_utils.safe_rich_status('Creating image from source cluster '
-                                        f'{clone_disk_from!r}'):
-            image_id = original_cloud.create_image_from_cluster(
-                clone_disk_from,
-                backend_utils.tag_filter_for_cluster(clone_disk_from),
-                region=handle.launched_resources.region,
-                zone=handle.launched_resources.zone,
-            )
-            log_utils.force_update_rich_status(
-                f'Migrating image {image_id} to target region '
-                f'{task_resources.region}...')
-            source_region = handle.launched_resources.region
-            target_region = task_resources.region
-            assert source_region is not None, handle.launched_resources
-            assert target_region is not None, task_resources
-
-            image_id = original_cloud.maybe_move_image(
-                image_id,
-                source_region=source_region,
-                target_region=target_region,
-                source_zone=handle.launched_resources.zone,
-                target_zone=task_resources.zone,
-            )
-        sky_logging.print(
-            f'Image {image_id!r} for {clone_disk_from!r} created '
-            f'successfully on {original_cloud}. Overriding task\'s image_id.')
-        task_resources = task_resources.copy(image_id=image_id,
-                                             _is_image_managed=True)
-        task.set_resources(task_resources)
-        task.best_resources = None
-        logger.debug(f'Overridden task resources: {task.resources}')
-        entrypoint = task
-
     _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
@@ -493,6 +497,7 @@ def launch(
         detach_run=detach_run,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
+        clone_disk_from=clone_disk_from,
         _is_launched_by_spot_controller=_is_launched_by_spot_controller,
     )
 

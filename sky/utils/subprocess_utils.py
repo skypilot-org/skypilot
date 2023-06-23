@@ -126,7 +126,19 @@ def run_and_retry(
         cmd: str,
         max_retry: int = 3,
         retry_returncode: Optional[List[int]] = None,
-        retry_stderr: Optional[List[str]] = None) -> Tuple[int, str, str]:
+        retry_stderrs: Optional[List[str]] = None) -> Tuple[int, str, str]:
+    """Run a command and retry if it fails due to the specified reasons.
+    
+    Args:
+        cmd: The command to run.
+        max_retry: The maximum number of retries.
+        retry_returncode: The returncodes that should be retried.
+        retry_stderr: The cmd needs to be retried if the stderr contains any of
+            the strings in this list.
+    
+    Returns:
+        The returncode, stdout, and stderr of the command.
+    """
     retry_cnt = 0
     while True:
         returncode, stdout, stderr = log_lib.run_with_log(cmd,
@@ -140,11 +152,11 @@ def run_and_retry(
                 time.sleep(random.uniform(0, 1) * 2)
                 continue
 
-            if retry_stderr is None:
+            if retry_stderrs is None:
                 break
 
             need_retry = False
-            for retry_err in retry_stderr:
+            for retry_err in retry_stderrs:
                 if retry_err in stderr:
                     retry_cnt += 1
                     time.sleep(random.uniform(0, 1) * 2)
