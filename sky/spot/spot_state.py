@@ -327,7 +327,7 @@ def set_started(job_id: int,
             task_id=(?)""",
             (SpotStatus.RUNNING.value, start_time, start_time, job_id, task_id))
     if callback_func is not None:
-        callback_func(task_id, 'RUNNING', f'start_at={start_time}')
+        callback_func(task_id, 'RUNNING', f'Start at: {start_time}')
 
 
 def set_recovering(job_id: int,
@@ -345,9 +345,7 @@ def set_recovering(job_id: int,
                 task_id=(?)""",
             (SpotStatus.RECOVERING.value, time.time(), job_id, task_id))
     if callback_func is not None:
-        callback_func(
-            task_id, 'RECOVERING',
-            f'job_duration=job_duration+({time.time()})-last_recovered_at')
+        callback_func(task_id, 'RECOVERING', '')
 
 
 def set_recovered(job_id: int,
@@ -367,7 +365,7 @@ def set_recovered(job_id: int,
     logger.info('==== Recovered. ====')
     if callback_func is not None:
         callback_func(task_id, 'RECOVERED',
-                      f'last_recovered_at: {recovered_time}')
+                      f'Last recovered at: {recovered_time}')
 
 
 def set_succeeded(job_id: int,
@@ -385,7 +383,7 @@ def set_succeeded(job_id: int,
             AND end_at IS null""",
             (SpotStatus.SUCCEEDED.value, end_time, job_id, task_id))
     if callback_func is not None:
-        callback_func(task_id, 'SUCCEEDED', 'end_at=({end_time})')
+        callback_func(task_id, 'SUCCEEDED', f'End at: {end_time}')
     logger.info('Job succeeded.')
 
 
