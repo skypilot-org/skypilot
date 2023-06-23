@@ -10,9 +10,6 @@ import time
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Any
 
-import boto3
-import botocore
-
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
