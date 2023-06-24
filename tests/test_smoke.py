@@ -2362,6 +2362,16 @@ class TestStorageWithCredentials:
             store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}')
             storage_mult_obj.append(store_obj)
         yield storage_mult_obj
+        for storage_obj in storage_mult_obj:
+            handle = global_user_state.get_handle_from_storage_name(
+                storage_obj.name)
+            if handle:
+                # If handle exists, delete manually
+                # TODO(romilb): This is potentially risky - if the delete method has
+                # bugs, this can cause resource leaks. Ideally we should manually
+                # eject storage from global_user_state and delete the bucket using
+                # boto3 directly.
+                storage_obj.delete()
 
     @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):
@@ -2452,6 +2462,35 @@ class TestStorageWithCredentials:
     ])
     def test_multiple_buckets_creation_and_deletion(
             self, tmp_multiple_scratch_storage_obj, store_type):
+        # Staggering tests for each store type to prevent BucketDeleteError
+        # exception due to concurrent delete all
+        if store_type.value == 'S3':
+            time.sleep(0)
+        elif store_type.value == 'GCS':
+            time.sleep(10)
+            storage_obj_name = int(
+                subprocess.check_output(
+                    ["sky storage ls|wc -l"],
+                    shell=True).decode('utf-8').splitlines()[0]) - 1
+            while storage_obj_name > 0:
+                time.sleep(5)
+                storage_obj_name = int(
+                    subprocess.check_output(
+                        ["sky storage ls|wc -l"],
+                        shell=True).decode('utf-8').splitlines()[0]) - 1
+        elif store_type.value == 'R2':
+            time.sleep(20)
+            storage_obj_name = int(
+                subprocess.check_output(
+                    ["sky storage ls|wc -l"],
+                    shell=True).decode('utf-8').splitlines()[0]) - 1
+            while storage_obj_name > 0:
+                time.sleep(5)
+                storage_obj_name = int(
+                    subprocess.check_output(
+                        ["sky storage ls|wc -l"],
+                        shell=True).decode('utf-8').splitlines()[0]) - 1
+
         # Creates multiple new buckets(5 buckets) with a local source
         # and deletes them.
         storage_obj_name = []
@@ -2460,23 +2499,27 @@ class TestStorageWithCredentials:
             storage_obj_name.append(store_obj.name)
 
         # Run sky storage ls to check if all storage objects exists in the
-        # output
-        out = subprocess.check_output(["sky storage ls | awk '{print $1}'"],
-                                      shell=True)
-        assert all([
-            item in out.decode('utf-8').splitlines()
-            for item in storage_obj_name
-        ])
+        # output filtered by store type
+        out_all = subprocess.check_output(['sky', 'storage', 'ls'])
+        out = [
+            item.split()[0]
+            for item in out_all.decode('utf-8').splitlines()
+            if store_type.value in item
+        ]
+        assert all([item in out for item in storage_obj_name])
 
         # Run sky storage delete all to delete all storage objects
-        subprocess.check_output(["sky storage delete -a"], shell=True)
+        subprocess.check_output(['sky', 'storage', 'delete', '-a'])
 
-        # Run sky storage ls to check if all storage objects are deleted
-        out = subprocess.check_output(["sky storage ls"], shell=True)
-        assert all([
-            item not in out.decode('utf-8').splitlines()
-            for item in storage_obj_name
-        ])
+        # Run sky storage ls to check if all storage objects filtered by store
+        # type are deleted
+        out_all = subprocess.check_output(['sky', 'storage', 'ls'])
+        out = [
+            item.split()[0]
+            for item in out_all.decode('utf-8').splitlines()
+            if store_type.value in item
+        ]
+        assert all([item not in out for item in storage_obj_name])
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
