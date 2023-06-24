@@ -41,6 +41,7 @@ import pytest
 import sky
 from sky import global_user_state
 from sky.data import storage as storage_lib
+from sky.data import data_utils
 from sky.adaptors import cloudflare
 from sky.skylet import events
 from sky.utils import common_utils
@@ -2277,7 +2278,8 @@ class TestStorageWithCredentials:
             return f'aws s3 rb {url} --force'
         if store_type == storage_lib.StoreType.GCS:
             url = f'gs://{bucket_name}'
-            return f'gsutil -m -o "GSUtil:parallel_process_count=1" rm -r {url}'
+            return f'gsutil -m {data_utils.get_gsutil_platform_flags()}' \
+                   f'rm -r {url}'
         if store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             url = f's3://{bucket_name}'

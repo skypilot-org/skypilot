@@ -27,6 +27,7 @@ from sky import sky_logging
 from sky.adaptors import aws, gcp
 from sky.utils import log_utils
 from sky.utils import ux_utils
+from sky.data import data_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -139,7 +140,7 @@ def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
       s3_bucket_name: str; Name of the Amazon S3 Bucket
     """
-    sync_command = ('gsutil -m -o "GSUtil:parallel_process_count=1" '
+    sync_command = (f'gsutil -m {data_utils.get_gsutil_platform_flags()}'
                     f'rsync -rd gs://{gs_bucket_name} s3://{s3_bucket_name}')
 
     subprocess.call(sync_command, shell=True)

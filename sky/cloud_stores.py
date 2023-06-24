@@ -132,8 +132,9 @@ class GcsCloudStorage(CloudStorage):
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads a directory using gsutil."""
+
         download_via_gsutil = (
-            f'{self._GSUTIL} -m -o "GSUtil:parallel_process_count=1" '
+            f'{self._GSUTIL} -m {data_utils.get_gsutil_platform_flags()}'
             f'rsync -r {source} {destination}')
         all_commands = [self._GET_GSUTIL]
         all_commands.append(download_via_gsutil)
@@ -142,7 +143,7 @@ class GcsCloudStorage(CloudStorage):
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using gsutil."""
         download_via_gsutil = f'{self._GSUTIL} -m ' \
-                              '-o "GSUtil:parallel_process_count=1" ' \
+                              f'{data_utils.get_gsutil_platform_flags()}' \
                               f'cp {source} {destination}'
         all_commands = [self._GET_GSUTIL]
         all_commands.append(download_via_gsutil)

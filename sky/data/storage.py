@@ -1476,7 +1476,7 @@ class GcsStore(AbstractStore):
         copy_list = '\n'.join(
             os.path.abspath(os.path.expanduser(p)) for p in source_path_list)
         sync_command = (f'echo "{copy_list}" | '
-                        'gsutil -m -o "GSUtil:parallel_process_count=1" '
+                        f'gsutil -m {data_utils.get_gsutil_platform_flags()}'
                         f'cp -e -n -r -I gs://{self.name}')
 
         with log_utils.safe_rich_status(
@@ -1510,14 +1510,16 @@ class GcsStore(AbstractStore):
         def get_file_sync_command(base_dir_path, file_names):
             sync_format = '|'.join(file_names)
             sync_command = (
-                f'gsutil -m -o "GSUtil:parallel_process_count=1" rsync -x \'^(?!{sync_format}$).*\' '
+                f'gsutil -m {data_utils.get_gsutil_platform_flags()}'
+                f'rsync -x \'^(?!{sync_format}$).*\' '
                 f'{base_dir_path} gs://{self.name}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
             sync_command = (
-                f'gsutil -m -o "GSUtil:parallel_process_count=1" rsync -r -x \'.git/*\' {src_dir_path} '
+                f'gsutil -m {data_utils.get_gsutil_platform_flags()}'
+                f'rsync -r -x \'.git/*\' {src_dir_path} '
                 f'gs://{self.name}/{dest_dir_name}')
             return sync_command
 
@@ -1682,8 +1684,8 @@ class GcsStore(AbstractStore):
                 return False
             try:
                 remove_obj_command = (
-                    'gsutil -m -o "GSUtil:parallel_process_count=1" rm -r'
-                    f' gs://{bucket_name}')
+                    f'gsutil -m {data_utils.get_gsutil_platform_flags()}'
+                    f'rm -r gs://{bucket_name}')
                 subprocess.check_output(remove_obj_command.split(' '),
                                         stderr=subprocess.STDOUT)
                 return True

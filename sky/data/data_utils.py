@@ -3,6 +3,7 @@
 from multiprocessing import pool
 import os
 import subprocess
+import platform
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
 
@@ -192,6 +193,24 @@ def parallel_upload(source_path_list: List[str],
             run_upload_cli,
             zip(commands, [access_denied_message] * len(commands),
                 [bucket_name] * len(commands)))
+
+
+def get_gsutil_platform_flags() -> str:
+    """Returns platform-specific flags for gsutil.
+
+    Returns:
+        str; Platform-specific flags for gsutil. Includes a trailing space if it
+        is not empty.
+    """
+    if platform.system() == 'Darwin':
+        # Disable multiprocessing on Mac. Multithreading is still enabled.
+        # gsutil on Mac has a bug with multiprocessing that causes it to
+        # crash when uploading files. Related:
+        # https://bugs.python.org/issue33725
+        # https://github.com/GoogleCloudPlatform/gsutil/issues/464
+        return '-o "GSUtil:parallel_process_count=1" '
+    else:
+        return ''
 
 
 def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
