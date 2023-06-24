@@ -735,12 +735,13 @@ class RetryingVmProvisioner(object):
                     launchable_resources.copy(region=None, zone=None))
             elif ('Policy update access denied.' in httperror_str[0] or
                   'IAM_PERMISSION_DENIED' in httperror_str[0]):
-                logger.info('Skipping all regions due to service account not '
-                            'having the required permissions and the user '
-                            'account does not have enough permission to '
-                            'update it. Please contact your administrator and '
-                            'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp\n'
-                            f'Details: {httperror_str[0]}')  # pylint: disable=line-too-long
+                logger.info(
+                    'Skipping all regions due to service account not '
+                    'having the required permissions and the user '
+                    'account does not have enough permission to '
+                    'update it. Please contact your administrator and '
+                    'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp\n'  # pylint: disable=line-too-long
+                    f'Details: {httperror_str[0]}')
                 self._blocked_resources.add(
                     launchable_resources.copy(region=None, zone=None))
 
