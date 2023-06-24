@@ -3668,7 +3668,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     @timeline.event
     def _check_existing_cluster(
-            self, task: task_lib.Task, to_provision: resources_lib.Resources,
+            self, task: task_lib.Task,
+            to_provision: Optional[resources_lib.Resources],
             cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
         """Checks if the cluster exists and returns the provision config.
 
@@ -3678,6 +3679,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             exceptions.InvalidClusterNameError: If the cluster name is invalid.
             # TODO(zhwu): complete the list of exceptions.
         """
+        previous_handle = global_user_state.get_handle_from_cluster_name(
+            cluster_name)
         prev_cluster_status, handle = (
             backend_utils.refresh_cluster_status_handle(
                 cluster_name, acquire_per_cluster_status_lock=False))
@@ -3700,6 +3703,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         task_cloud = (resources.cloud
                       if resources.cloud is not None else clouds.Cloud)
         task_cloud.check_cluster_name_is_valid(cluster_name)
+
+        if to_provision is None:
+            logger.info(
+                f'The cluster {cluster_name!r} was autodowned or manually '
+                'terminated on the cloud console. Using the original resources '
+                'to provision a new cluster.')
+            # The cluster is recently terminated either by autostop or manually
+            # terminated on the cloud. We should use the original resources to
+            # provision the cluster.
+            assert isinstance(previous_handle,
+                              CloudVmRayResourceHandle), (previous_handle,
+                                                          cluster_name)
+            to_provision = previous_handle.launched_resources
+            self.check_resources_fit_cluster(previous_handle, task)
 
         cloud = to_provision.cloud
         if isinstance(cloud, clouds.Local):
