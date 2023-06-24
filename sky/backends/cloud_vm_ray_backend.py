@@ -1363,9 +1363,9 @@ class RetryingVmProvisioner(object):
             # if quota is found to be zero, raise exception and skip to
             # the next region
             if to_provision.use_spot:
-                instance_descriptor = "spot"
+                instance_descriptor = 'spot'
             else:
-                instance_descriptor = "on-demand"
+                instance_descriptor = 'on-demand'
             raise exceptions.ResourcesUnavailableError(
                 f'{colorama.Fore.YELLOW}Found no quota for '
                 f'{to_provision.instance_type} {instance_descriptor} '
