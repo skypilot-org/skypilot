@@ -25,9 +25,9 @@ import colorama
 from sky import clouds
 from sky import sky_logging
 from sky.adaptors import aws, gcp
+from sky.data import data_utils
 from sky.utils import log_utils
 from sky.utils import ux_utils
-from sky.data import data_utils
 
 logger = sky_logging.init_logger(__name__)
 

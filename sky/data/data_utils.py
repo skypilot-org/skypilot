@@ -2,8 +2,8 @@
 """
 from multiprocessing import pool
 import os
-import subprocess
 import platform
+import subprocess
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
 

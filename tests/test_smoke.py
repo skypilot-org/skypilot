@@ -40,8 +40,8 @@ import pytest
 
 import sky
 from sky import global_user_state
-from sky.data import storage as storage_lib
 from sky.data import data_utils
+from sky.data import storage as storage_lib
 from sky.adaptors import cloudflare
 from sky.skylet import events
 from sky.utils import common_utils
