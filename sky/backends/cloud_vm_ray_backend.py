@@ -1348,9 +1348,16 @@ class RetryingVmProvisioner(object):
         if not need_provision:
             # if quota is found to be zero, raise exception and skip to
             # the next region
+            if to_provision.use_spot:
+                instance_descriptor = "spot"
+            else:
+                instance_descriptor = "on-demand"
             raise exceptions.ResourcesUnavailableError(
-                f'Found no quota for {to_provision.instance_type} in region '
-                f'{to_provision.region}. To request quotas, check the instruction: '  # pylint: disable=line-too-long
+                f'{colorama.Fore.YELLOW}Found no quota for '
+                f'{to_provision.instance_type} {instance_descriptor} '
+                f'instances in region {to_provision.region}. '
+                f'{colorama.Style.RESET_ALL}'
+                f'To request quotas, check the instruction: '
                 f'https://skypilot.readthedocs.io/en/latest/cloud-setup/quota.html.'  # pylint: disable=line-too-long
             )
 
