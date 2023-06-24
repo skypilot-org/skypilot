@@ -370,7 +370,6 @@ def _is_permission_satisfied(
         for binding in policy["bindings"]:
             if binding["role"] == role:
                 if member_id not in binding["members"]:
-                    print(f"Role missing: {role}")
                     binding["members"].append(member_id)
                     already_configured = False
                 role_exists = True
@@ -389,7 +388,6 @@ def _is_permission_satisfied(
         # roles, so only call setIamPolicy if needed.
         return True, policy
 
-    all_role_permissions = None
     for binding in original_policy["bindings"]:
         if member_id in binding["members"]:
             role = binding["role"]
@@ -408,11 +406,10 @@ def _is_permission_satisfied(
             required_permissions -= set(permissions)
         if not required_permissions:
             break
-    logger.info(f"_configure_iam_role: missing permisisons {required_permissions}")
     if not required_permissions:
-        # All required permissions are already granted. We don't need to check
-        # the roles below.
+        # All required permissions are already granted.
         return True, policy
+    logger.info(f"_configure_iam_role: missing permisisons {required_permissions}")
 
     return False, policy
 
@@ -475,6 +472,8 @@ def _configure_iam_role(config, crm, iam):
                 "_configure_iam_role: "
                 "Creating new service account {}".format(SKYPILOT_SERVICE_ACCOUNT_ID)
             )
+            # SkyPilot: a GCP user without the permission to create a service
+            # account will fail here.
             service_account = _create_service_account(
                 SKYPILOT_SERVICE_ACCOUNT_ID,
                 SKYPILOT_SERVICE_ACCOUNT_CONFIG,
@@ -963,6 +962,9 @@ def _get_service_account(account, config, iam):
         service_account = iam.projects().serviceAccounts().get(name=full_name).execute()
     except errors.HttpError as e:
         if e.resp.status not in [403, 404]:
+            # SkyPilot: added 403, which means the service account doesn't exist,
+            # or not accessible by the current account, which is fine, as we do the
+            # fallback in the caller.
             raise
         service_account = None
 

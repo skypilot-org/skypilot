@@ -3,7 +3,14 @@
 GCP
 =============
 
-.. _medium-permissions:
+
+Generally, the administrator can choose among three "levels" of permissions, from the most permissive and least setup effort, to the least permissive and more setup effort:
+
+* Default: no setup, give users Owner-level permissions (i.e., you do not need to follow the instructions in this section)
+* :ref:`Medium <gcp-medium-permissions>`: easy setup, with a medium set of permissions
+* :ref:`Minimal <gcp-minimal-permissions>`: more setup, with the minimal set of permissions
+
+.. _gcp-medium-permissions:
 
 Medium Permissions
 -----------------------
@@ -25,18 +32,19 @@ Optionally, to use TPUs, add the following role:
 
   roles/tpu.admin
 
-You can grant those accesses via the GCP's `IAM & Admin console <https://console.cloud.google.com/iam-admin/iam>`__.
+You can grant those accesses via GCP's `IAM & Admin console <https://console.cloud.google.com/iam-admin/iam>`__.
 
+.. _gcp-minimal-permissions:
 
 Minimal Permissions
 -----------------------
 
-The :ref:`Medium Permissions <medium-permissions>` assigns strong admin permissions to the user for some GCP services. It is fine for most users, but if you would like to grant fine-grained minimal permissions to your users in your organization / project, you can create a custom role with the permissions required by following the steps below:
+The :ref:`Medium Permissions <medium-permissions>` assigns admin permissions for some GCP services to the user.  If you would like to grant finer-grained and more minimal permissions to your users in your organization / project, you can create a custom role by following the steps below:
 
 User
 ~~~~~~~~~~~~
 
-1. Go to the GCP's `IAM & Admin console <https://console.cloud.google.com/iam-admin/roles>`__ and click on **Create Role**.
+1. Go to GCP's `IAM & Admin console <https://console.cloud.google.com/iam-admin/roles>`__ and click on **Create Role**.
 
 .. image:: ../../images/screenshots/gcp/create-role.png
     :width: 80%
@@ -93,7 +101,7 @@ User
     storage.objects.get
     storage.objects.list
 
-5. **Optional**: If the user need to access TPU VMs, you can additionally add the following permissions (the following may not be exhaustive, please file an issue if you find any missing permissions):
+5. **Optional**: If the user needs to access TPU VMs, you can additionally add the following permissions (the following may not be exhaustive, please file an issue if you find any missing permissions):
 
 .. code-block:: text
 
@@ -118,7 +126,9 @@ User
 
 .. note::
 
-    Similar as the AWS, the user created with the above minimal permissions will not be able to create service accounts to be assigned to the instances. The admin need to follow the instruction :ref:`below <gcp-service-account-creation>` to create a service account shared by all the users in the project.
+    The user created with the above minimal permissions will not be able to create service accounts to be assigned to SkyPilot instances. 
+    
+    The admin needs to follow the :ref:`instruction below <gcp-service-account-creation>` to create a service account to be shared by all users in the project.
 
 
 .. _gcp-service-account-creation:

@@ -739,7 +739,8 @@ class RetryingVmProvisioner(object):
                             'having the required permissions and the user '
                             'account does not have enough permission to '
                             'update it. Please contact your administrator and '
-                            'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp')  # pylint: disable=line-too-long
+                            'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp\n'
+                            f'Details: {httperror_str[0]}')  # pylint: disable=line-too-long
                 self._blocked_resources.add(
                     launchable_resources.copy(region=None, zone=None))
 

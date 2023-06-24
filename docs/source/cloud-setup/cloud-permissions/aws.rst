@@ -9,10 +9,10 @@ AWS
 Minimal Permissions
 -----------------------
 
-For an AWS user to use SkyPilot, there are two parts of the permissions that needs to be set up:
+Minimizing AWS permissions should be set up in two places:
 
-1. **User Account**: the user account is the individual account of an user created by the administrator, which generates the credential for the setup in the :ref:`AWS Installation <aws-installation>` section.
-2. **IAM role**: the IAM role is assigned to the EC2 instances created by SkyPilot, for the instance to access AWS resources, e.g., S3 bucket. It is shared by all the users under the same organization/root account. (If the user account has the permission to create IAM roles, SkyPilot can automatically create the role.)
+1. **User Account**: the user account is the individual account of an user created by the administrator.
+2. **IAM role**: the IAM role is assigned to all EC2 instances created by SkyPilot, which is used by the instances to access AWS resources, e.g., read/write S3 buckets or create other EC2 nodes. The IAM role is shared by all users under the same organization/root account. (If a user account has the permission to create IAM roles, SkyPilot can automatically create the role.)
 
 User Account
 ~~~~~~~~~~~~~~~~~~
@@ -165,14 +165,14 @@ IAM Role Creation
 
     If you already have an IAM role called ``skypilot-v1`` in your AWS account, it is likely created by SkyPilot automatically, and you can skip this section.
 
-1. Click the "Roles" tab in the IAM console, and click on the **Create role**
+1. Click the "Roles" tab in the IAM console, and click on **Create role**.
 
 .. image:: ../../images/screenshots/aws/aws-add-role.png
     :width: 80%
     :align: center
     :alt: AWS Add Role
 
-2. Select the following entity and common use cases and Next
+2. Select the following entity and common use cases and click **Next**.
 
 .. image:: ../../images/screenshots/aws/aws-add-role-entity.png
     :width: 80%
@@ -181,5 +181,5 @@ IAM Role Creation
 
 3. Select the policy you created in step 4 in :ref:`User Creation <cloud-permissions-aws-user-creation>` (i.e. the previous step 6) and click on **Next: Tags**.
 4. **Optional**: If you would like to let the user access S3 buckets on the VM they created, you can additionally attach the s3 access permission to the IAM role, such as the "AmazonS3FullAccess" policy.
-5. Click **Next**, and name your role with "skypilot-v1" and Click **Create role**
+5. Click **Next**, and name your role "skypilot-v1". Click **Create role**.
 
