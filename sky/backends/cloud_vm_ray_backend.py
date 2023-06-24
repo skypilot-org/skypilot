@@ -2637,6 +2637,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Mounts all user files to the remote nodes."""
         self._execute_file_mounts(handle, all_file_mounts)
         self._execute_storage_mounts(handle, storage_mounts)
+        self._execute_storage_syncs(handle, storage_mounts)
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
@@ -3926,6 +3927,79 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
+
+
+    def _execute_storage_syncs(self, handle: CloudVmRayResourceHandle,
+                                storage_mounts: Dict[Path,
+                                                     storage_lib.Storage]):
+        """Executes storage mounts: installing mounting tools and mounting."""
+        # Process only mount mode objects here. COPY mode objects have been
+        # converted to regular copy file mounts and thus have been handled
+        # in the '__execute_file_mounts' method.
+        storage_mounts = {
+            path: storage_mount
+            for path, storage_mount in storage_mounts.items()
+            if storage_mount.mode == storage_lib.StorageMode.SYNC
+        }
+
+        if not storage_mounts:
+            return
+
+        cloud = handle.launched_resources.cloud
+        if isinstance(cloud, clouds.Local):
+            logger.warning(
+                f'{colorama.Fore.YELLOW}Sky On-prem does not support '
+                f'storage syncing. No action will be taken.{colorama.Style.RESET_ALL}')
+            return
+
+        fore = colorama.Fore
+        style = colorama.Style
+        plural = 's' if len(storage_mounts) > 1 else ''
+        logger.info(f'{fore.CYAN}Processing {len(storage_mounts)} '
+                    f'storage sync{plural}.{style.RESET_ALL}')
+        start = time.time()
+        ip_list = handle.external_ips()
+        assert ip_list is not None, 'external_ips is not cached in handle'
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml)
+        runners = command_runner.SSHCommandRunner.make_runner_list(
+            ip_list, **ssh_credentials)
+        log_path = os.path.join(self.log_dir, 'storage_syncs.log')
+
+        for dst, storage_obj in storage_mounts.items():
+            if not os.path.isabs(dst) and not dst.startswith('~/'):
+                dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
+            # Get the first store and use it to mount
+            store = list(storage_obj.stores.values())[0]
+            sync_cmd = store.sync_command(dst)
+            src_print = (storage_obj.source
+                         if storage_obj.source else storage_obj.name)
+            if isinstance(src_print, list):
+                src_print = ', '.join(src_print)
+            try:
+                backend_utils.parallel_data_transfer_to_nodes(
+                    runners,
+                    source=src_print,
+                    target=dst,
+                    cmd=sync_cmd,
+                    run_rsync=False,
+                    action_message='Storage Syncing',
+                    log_path=log_path,
+                )
+            except exceptions.CommandError as e:
+                if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:
+                    sync_path = (f'{colorama.Fore.RED}'
+                                  f'{colorama.Style.BRIGHT}{dst}'
+                                  f'{colorama.Style.RESET_ALL}')
+                    error_msg = (f'Sync path {sync_path} is non-empty.'
+                                 f' {sync_path} may be a standard unix '
+                                 f'path or may contain files from a previous'
+                                 f' task. To fix, change the mount path'
+                                 f' to an empty or non-existent path.')
+                    raise RuntimeError(error_msg) from None
+
+        end = time.time()
+        logger.debug(f'Storage Sync took {end - start} seconds.')
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,

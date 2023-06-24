@@ -109,6 +109,7 @@ class StoreType(enum.Enum):
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
+    SYNC = 'SYNC'
 
 
 def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
@@ -299,6 +300,9 @@ class AbstractStore:
         Args:
           mount_path: str; Mount path on remote server
         """
+        raise NotImplementedError
+    
+    def sync_command(self, sync_path: str) -> str:
         raise NotImplementedError
 
     def __deepcopy__(self, memo):
@@ -1203,6 +1207,9 @@ class S3Store(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
+    def sync_command(self, sync_path: str) -> str:
+        raise NotImplementedError
+
     def _create_s3_bucket(self,
                           bucket_name: str,
                           region='us-east-2') -> StorageHandle:
@@ -1617,6 +1624,11 @@ class GcsStore(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
 
+    def sync_command(self, sync_path: str) -> str:
+        sync_cmd = f'gsutil -m rsync -d {sync_path} gs://{self.bucket.name}'
+        return mounting_utils.get_syncing_command(sync_cmd, sync_path)
+
+
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
 
@@ -1964,6 +1976,9 @@ class R2Store(AbstractStore):
             f'{self.bucket.name} {mount_path}')
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
+
+    def sync_command(self, sync_path: str) -> str:
+        raise NotImplementedError
 
     def _create_r2_bucket(self,
                           bucket_name: str,
