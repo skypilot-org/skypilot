@@ -816,8 +816,8 @@ class GCP(clouds.Cloud):
                 'SUSPENDING': status_lib.ClusterStatus.STOPPED,
                 'SUSPENDED': status_lib.ClusterStatus.STOPPED,
             }
-            # TODO(zhwu): The status of the TPU attached to the cluster should also
-            # be checked, since TPUs are not part of the VMs.
+            # TODO(zhwu): The status of the TPU attached to the cluster should
+            # also be checked, since TPUs are not part of the VMs.
             query_cmd = ('gcloud compute instances list '
                          f'--filter="({label_filter_str})" '
                          '--format="value(status)"')
