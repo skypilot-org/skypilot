@@ -12,6 +12,7 @@ from sky.spot.recovery_strategy import SPOT_DEFAULT_STRATEGY
 from sky.spot.spot_utils import SpotCodeGen
 from sky.spot.spot_utils import SPOT_CONTROLLER_NAME
 from sky.spot.spot_utils import dump_job_table_cache
+from sky.spot.spot_utils import dump_spot_job_queue
 from sky.spot.spot_utils import load_job_table_cache
 from sky.spot.spot_utils import format_job_table
 from sky.spot.spot_utils import is_spot_controller_up
@@ -34,5 +35,6 @@ __all__ = [
     'load_job_table_cache',
     'format_job_table',
     'is_spot_controller_up',
+    'dump_spot_job_queue',
     'load_spot_job_queue',
 ]
