@@ -3547,7 +3547,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             cluster_name=handle.cluster_name,
                             stdout=tpu_stdout,
                             stderr=tpu_stderr))
-        if handle.launched_resources.is_image_managed:
+        if handle.launched_resources.is_image_managed and terminate:
+            # Delete the image when terminating the cluster and the image is
+            # created by SkyPilot (--clone-disk-from)
             logger.debug(f'Deleting image {handle.launched_resources.image_id}')
             cluster_resources = handle.launched_resources
             cluster_cloud = cluster_resources.cloud
