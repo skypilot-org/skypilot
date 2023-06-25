@@ -2124,7 +2124,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        storage_lib.StoreType.IBM,
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
@@ -2147,7 +2147,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        storage_lib.StoreType.IBM,
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
     def test_bucket_external_deletion(self, tmp_scratch_storage_obj,
@@ -2176,7 +2176,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        storage_lib.StoreType.IBM,
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
     def test_bucket_bulk_deletion(self, store_type):
@@ -2217,7 +2217,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('nonexist_bucket_url', [
         's3://{random_name}', 'gs://{random_name}',
-        'cos://us-east/{random_name}',
+        pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
         pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare)
     ])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
@@ -2295,7 +2295,9 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
-                              ('tmp_ibm_cos_bucket', storage_lib.StoreType.IBM),
+                              pytest.param('tmp_ibm_cos_bucket',
+                                           storage_lib.StoreType.IBM,
+                                           marks=pytest.mark.ibm),
                               pytest.param('tmp_awscli_bucket_r2',
                                            storage_lib.StoreType.R2,
                                            marks=pytest.mark.cloudflare)])
@@ -2340,7 +2342,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        storage_lib.StoreType.IBM,
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
@@ -2367,7 +2369,9 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('invalid_name_list, store_type',
                              [(AWS_INVALID_NAMES, storage_lib.StoreType.S3),
                               (GCS_INVALID_NAMES, storage_lib.StoreType.GCS),
-                              (IBM_INVALID_NAMES, storage_lib.StoreType.IBM),
+                              pytest.param(IBM_INVALID_NAMES,
+                                           storage_lib.StoreType.IBM,
+                                           marks=pytest.mark.ibm),
                               pytest.param(AWS_INVALID_NAMES,
                                            storage_lib.StoreType.R2,
                                            marks=pytest.mark.cloudflare)])
