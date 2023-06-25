@@ -3691,7 +3691,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             exceptions.InvalidClusterNameError: If the cluster name is invalid.
             # TODO(zhwu): complete the list of exceptions.
         """
-        previous_handle = global_user_state.get_handle_from_cluster_name(
+        handle_before_refresh = global_user_state.get_handle_from_cluster_name(
             cluster_name)
         prev_cluster_status, handle = (
             backend_utils.refresh_cluster_status_handle(
@@ -3722,13 +3722,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 'terminated on the cloud console. Using the original resources '
                 'to provision a new cluster.')
             # The cluster is recently terminated either by autostop or manually
-            # terminated on the cloud. We should use the original resources to
-            # provision the cluster.
-            assert isinstance(previous_handle,
-                              CloudVmRayResourceHandle), (previous_handle,
-                                                          cluster_name)
-            to_provision = previous_handle.launched_resources
-            self.check_resources_fit_cluster(previous_handle, task)
+            # terminated on the cloud. We should use the previously terminated
+            # resources to provision the cluster.
+            assert isinstance(
+                handle_before_refresh, CloudVmRayResourceHandle), (
+                    f'Trying to launch cluster {cluster_name!r} recently '
+                    'terminated  on the cloud, but the handle is not a '
+                    f'CloudVmRayResourceHandle ({handle_before_refresh}).')
+            to_provision = handle_before_refresh.launched_resources
+            self.check_resources_fit_cluster(handle_before_refresh, task)
 
         cloud = to_provision.cloud
         if isinstance(cloud, clouds.Local):
