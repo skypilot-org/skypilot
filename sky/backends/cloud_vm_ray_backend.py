@@ -3707,7 +3707,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if to_provision is None:
             logger.info(
                 f'The cluster {cluster_name!r} was autodowned or manually '
-                'terminated on the cloud console. Using the original resources '
+                'terminated on the cloud console. Using the same resources as the previously terminated one'
                 'to provision a new cluster.')
             # The cluster is recently terminated either by autostop or manually
             # terminated on the cloud. We should use the original resources to
