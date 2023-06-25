@@ -111,6 +111,7 @@ User
     tpu.nodes.get
     tpu.nodes.update
     tpu.operations.get
+
 6. **Optional**: To enable ``--clone-disk-from``, you need to have the following permissions for the role as well:
 
 .. code-block:: text

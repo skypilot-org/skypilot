@@ -103,7 +103,7 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
         ]
     }
 
-4. [Optional] To allow ``--clone-disk-from`` to work, you need to add the following permissions to the policy above as well.
+4. **Optional**: To allow ``--clone-disk-from`` to work, you need to add the following permissions to the policy above as well.
 
 .. code-block:: json
 
