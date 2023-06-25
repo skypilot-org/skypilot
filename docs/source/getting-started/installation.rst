@@ -111,7 +111,7 @@ Lambda Cloud
 IBM
 ~~~~~~~~~
 
-To access IBM's services, store the following fields in ``~/.ibm/credentials.yaml``:
+To access IBM's VPC service, store the following fields in ``~/.ibm/credentials.yaml``:
 
 .. code-block:: text
 
