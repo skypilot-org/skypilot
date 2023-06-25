@@ -17,9 +17,10 @@ if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
 # Pull the latest catalog every week.
-# GCP guarantees that the catalog is updated at most once per 30 days, so
-# we do not need to pull too frequently.
-_PULL_FREQUENCY_HOURS = 24 * 7
+# GCP guarantees that the catalog is updated at most once per 30 days, but
+# different VMs can be updated at different time. Thus, we pull the catalog
+# every 7 hours to make sure we have the latest information.
+_PULL_FREQUENCY_HOURS = 7
 
 _df = common.read_catalog('gcp/vms.csv',
                           pull_frequency_hours=_PULL_FREQUENCY_HOURS)
