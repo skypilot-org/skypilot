@@ -121,6 +121,10 @@ To access IBM's services, store the following fields in ``~/.ibm/credentials.yam
 - Create a new API key by following `this guide <https://www.ibm.com/docs/en/app-connect/container?topic=servers-creating-cloud-api-key>`_.
 - Obtain a resource group's ID from the `web console <https://cloud.ibm.com/account/resource-groups>`_.
 
+.. note::
+  Stock images aren't currently providing ML tools out of the box.
+  Create private images with the necessary tools (e.g. CUDA), by following the IBM segment in `this documentation <https://github.com/skypilot-org/skypilot/blob/master/docs/source/reference/yaml-spec.rst>`_.
+
 To access IBM's Cloud Object Storage (COS), append the following fields to the credentials file:
 
 .. code-block:: text
@@ -137,8 +141,7 @@ Follow the next steps to create/extract the above fields:
 Finally, install `rclone <https://rclone.org/>`_ via: ``curl https://rclone.org/install.sh | sudo bash``
 
 .. note::
-  Stock images aren't currently providing ML tools out of the box.
-  Create private images with the necessary tools (e.g. CUDA), by following the IBM segment in `this documentation <https://github.com/skypilot-org/skypilot/blob/master/docs/source/reference/yaml-spec.rst>`_. 
+  Currently, :code:`sky check` doesn't reflect the enablement of IBM COS, i.e., :code:`IBM: enabled` only guarantees the enablement of IBM VPC.
 
 Cloudflare R2
 ~~~~~~~~~~~~~~~~~~

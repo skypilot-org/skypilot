@@ -380,9 +380,9 @@ class IBM(clouds.Cloud):
         if not base_config:
             return (False, 'Missing credential file at '
                     f'{os.path.expanduser(CREDENTIAL_FILE)}.\n' + help_str)
-
+        # TODO(IBM) update when issue #1943 is resolved.
         if set(ibm_cos_fields) - set(base_config):
-            logger.error(f'{colorama.Fore.RED}IBM Storage is missing the '
+            logger.debug(f'{colorama.Fore.RED}IBM Storage is missing the '
                          'following fields in '
                          f'{os.path.expanduser(CREDENTIAL_FILE)} to function: '
                          f"""{", ".join(list(
