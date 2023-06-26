@@ -655,6 +655,16 @@ class RetryingVmProvisioner(object):
             try:
                 exception_dict = ast.literal_eval(exception_str)
             except Exception as e:
+                if 'wait_ready timeout exceeded' in exception_str:
+                    # This error seems to occur when the provisioning process
+                    # went through partially (e.g., for spot, initial
+                    # provisioning succeeded, but while waiting for ssh/setting
+                    # up it got preempted).
+                    logger.error('Got the following exception, continuing: '
+                                 f'{exception_list[0]}')
+                    self._blocked_resources.add(
+                        launchable_resources.copy(zone=zone.name))
+                    return
                 raise RuntimeError(
                     f'Failed to parse exception: {exception_str}') from e
             # TPU VM returns a different structured response.
@@ -696,10 +706,13 @@ class RetryingVmProvisioner(object):
                     # This code is returned when the VM is still STOPPING.
                     self._blocked_resources.add(
                         launchable_resources.copy(zone=zone.name))
-                elif code == 8:
+                elif code in [8, 9]:
                     # Error code 8 means TPU resources is out of
                     # capacity. Example:
                     # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # pylint: disable=line-too-long
+                    # Error code 9 means TPU resources is insufficient reserved
+                    # capacity. Example:
+                    # {'code': 9, 'message': 'Insufficient reserved capacity. Contact customer support to increase your reservation. [EID: 0x2f8bc266e74261a]'} # pylint: disable=line-too-long
                     self._blocked_resources.add(
                         launchable_resources.copy(zone=zone.name))
                 elif code == 'RESOURCE_NOT_FOUND':
@@ -720,6 +733,18 @@ class RetryingVmProvisioner(object):
                 logger.info('Skipping all regions due to disk size issue.')
                 self._blocked_resources.add(
                     launchable_resources.copy(region=None, zone=None))
+            elif ('Policy update access denied.' in httperror_str[0] or
+                  'IAM_PERMISSION_DENIED' in httperror_str[0]):
+                logger.info(
+                    'Skipping all regions due to service account not '
+                    'having the required permissions and the user '
+                    'account does not have enough permission to '
+                    'update it. Please contact your administrator and '
+                    'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp\n'  # pylint: disable=line-too-long
+                    f'Details: {httperror_str[0]}')
+                self._blocked_resources.add(
+                    launchable_resources.copy(region=None, zone=None))
+
             else:
                 # Parse HttpError for unauthorized regions. Example:
                 # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
@@ -1120,8 +1145,9 @@ class RetryingVmProvisioner(object):
         def _get_previously_launched_zones() -> Optional[List[clouds.Zone]]:
             # When the cluster exists, the to_provision should have been set
             # to the previous cluster's resources.
-            zones = [clouds.Zone(name=to_provision.zone)
-                    ] if to_provision.zone is not None else None
+            zones = [
+                clouds.Zone(name=to_provision.zone),
+            ] if to_provision.zone is not None else None
             if zones is None:
                 # Reuse the zone field in the ray yaml as the
                 # prev_resources.zone field may not be set before the previous
@@ -2515,7 +2541,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             status_lib.ClusterStatus.UP)
 
-        # For backward compatability and robustness of skylet, it is restarted
+        # For backward compatibility and robustness of skylet, it is restarted
         with log_utils.safe_rich_status('Updating remote skylet'):
             self.run_on_head(handle, _MAYBE_SKYLET_RESTART_CMD)
 
@@ -3278,6 +3304,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         config = common_utils.read_yaml(handle.cluster_yaml)
         cluster_name = handle.cluster_name
         use_tpu_vm = config['provider'].get('_has_tpus', False)
+
+        # Avoid possibly unbound warnings. Code below must overwrite these vars:
+        returncode = 0
+        stdout = ''
+        stderr = ''
+
         if terminate and isinstance(cloud, clouds.Azure):
             # Here we handle termination of Azure by ourselves instead of Ray
             # autoscaler.
@@ -3309,6 +3341,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 query=f'type:vpc AND tags:{cluster_name} AND region:{region}',
                 fields=['tags', 'region', 'type'],
                 limit=1000).get_result()['items']
+            vpc_id = None
             try:
                 # pylint: disable=line-too-long
                 vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(
@@ -3348,7 +3381,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
         # May, 2023 by Hysun: Allow terminate INIT cluster which may have
-        # some instances provisioning in backgroud but not completed.
+        # some instances provisioning in background but not completed.
         elif (isinstance(cloud, clouds.OCI) and terminate and
               prev_cluster_status in (status_lib.ClusterStatus.STOPPED,
                                       status_lib.ClusterStatus.INIT)):
@@ -3362,7 +3395,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             returncode = oci_query_helper.terminate_instances_by_tags(
                 {TAG_RAY_CLUSTER_NAME: cluster_name}, region)
 
-            # To avoid undefined local varaiables error.
+            # To avoid undefined local variables error.
             stdout = stderr = ''
         elif (terminate and
               (prev_cluster_status == status_lib.ClusterStatus.STOPPED or
@@ -3377,11 +3410,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 query_cmd = (
                     f'aws ec2 describe-instances --region {region} --filters '
                     f'Name=tag:ray-cluster-name,Values={handle.cluster_name} '
-                    f'--query Reservations[].Instances[].InstanceId '
+                    '--query Reservations[].Instances[].InstanceId '
                     '--output text')
                 terminate_cmd = (
+                    f'VMS=$({query_cmd}) && [ -n "$VMS" ] && '
                     f'aws ec2 terminate-instances --region {region} '
-                    f'--instance-ids $({query_cmd})')
+                    '--instance-ids $VMS || echo "No instances to delete."')
             elif isinstance(cloud, clouds.GCP):
                 zone = config['provider']['availability_zone']
                 # TODO(wei-lin): refactor by calling functions of node provider
@@ -3393,9 +3427,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     query_cmd = (f'gcloud compute instances list --filter='
                                  f'"(labels.ray-cluster-name={cluster_name})" '
                                  f'--zones={zone} --format=value\\(name\\)')
+                    # If there are no instances, exit with 0 rather than causing
+                    # the delete command to fail.
                     terminate_cmd = (
-                        f'gcloud compute instances delete --zone={zone}'
-                        f' --quiet $({query_cmd})')
+                        f'VMS=$({query_cmd}) && [ -n "$VMS" ] && '
+                        f'gcloud compute instances delete --zone={zone} --quiet'
+                        ' $VMS || echo "No instances to delete."')
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(f'Unsupported cloud {cloud} for stopped '
