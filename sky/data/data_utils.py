@@ -227,26 +227,24 @@ def add_gsutil_platform_flags(gsutil_cmd: str) -> str:
     cmd_parts = gsutil_cmd.split()
 
     # Check if the '-m' flag is in the command
-    if "-m" in cmd_parts:
+    if '-m' in cmd_parts:
         # Find the index of '-m' flag and
         # insert the platform-specific flag after it
-        index = cmd_parts.index("-m")
+        index = cmd_parts.index('-m')
         cmd_parts.insert(index + 1, disable_multiprocessing_flag)
 
     # Reconstruct the modified command
-    modified_gsutil_cmd = " ".join(cmd_parts)
+    modified_gsutil_cmd = ' '.join(cmd_parts)
 
     # Construct platform specific command using a bash one-liner
-    platform_specific_gsutil_cmd = (
-        """if [[ "$(uname)" == "Darwin" ]]; then """
-        f"""echo "{modified_gsutil_cmd}"; """
-        """else """
-        f"""echo "{gsutil_cmd}"; """
-        """fi"""
-    )
+    platform_specific_gsutil_cmd = ("""if [[ "$(uname)" == "Darwin" ]]; then """
+                                    f"""echo "{modified_gsutil_cmd}"; """
+                                    """else """
+                                    f"""echo "{gsutil_cmd}"; """
+                                    """fi""")
 
     # Add eval to correctly pass through the flag
-    platform_specific_gsutil_cmd = f"eval $({platform_specific_gsutil_cmd})"
+    platform_specific_gsutil_cmd = f'eval $({platform_specific_gsutil_cmd})'
 
     return platform_specific_gsutil_cmd
 

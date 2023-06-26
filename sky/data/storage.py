@@ -1510,19 +1510,17 @@ class GcsStore(AbstractStore):
 
         def get_file_sync_command(base_dir_path, file_names):
             sync_format = '|'.join(file_names)
-            sync_command = (
-                f'gsutil -m '
-                f'rsync -x \'^(?!{sync_format}$).*\' '
-                f'{base_dir_path} gs://{self.name}')
+            sync_command = (f'gsutil -m '
+                            f'rsync -x \'^(?!{sync_format}$).*\' '
+                            f'{base_dir_path} gs://{self.name}')
             sync_command = data_utils.add_gsutil_platform_flags(sync_command)
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            sync_command = (
-                f'gsutil -m '
-                f'rsync -r -x \'.git/*\' {src_dir_path} '
-                f'gs://{self.name}/{dest_dir_name}')
+            sync_command = (f'gsutil -m '
+                            f'rsync -r -x \'.git/*\' {src_dir_path} '
+                            f'gs://{self.name}/{dest_dir_name}')
             sync_command = data_utils.add_gsutil_platform_flags(sync_command)
             return sync_command
 
@@ -1686,10 +1684,10 @@ class GcsStore(AbstractStore):
                         bucket_name=bucket_name))
                 return False
             try:
-                remove_obj_command = (
-                    f'gsutil -m '
-                    f'rm -r gs://{bucket_name}')
-                remove_obj_command = data_utils.add_gsutil_platform_flags(remove_obj_command)
+                remove_obj_command = (f'gsutil -m '
+                                      f'rm -r gs://{bucket_name}')
+                remove_obj_command = data_utils.add_gsutil_platform_flags(
+                    remove_obj_command)
                 subprocess.check_output(remove_obj_command.split(' '),
                                         stderr=subprocess.STDOUT,
                                         shell=True)
