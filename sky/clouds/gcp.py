@@ -28,7 +28,7 @@ logger = sky_logging.init_logger(__name__)
 # gcloud:
 # https://cloud.google.com/docs/authentication/provide-credentials-adc#local-key
 _GCP_APPLICATION_CREDENTIAL_ENV = 'GOOGLE_APPLICATION_CREDENTIALS'
-DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH: str = os.path.expanduser(
+DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH: str = (
     '~/.config/gcloud/'
     'application_default_credentials.json')
 
