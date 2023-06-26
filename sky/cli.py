@@ -4446,10 +4446,10 @@ def local_down():
                 if env_options.Options.SHOW_DEBUG_INFO.get():
                     stdout = e.stdout.decode('utf-8')
                     click.echo(f'Logs:\n{stdout}')
-    # Run sky check
-    with log_utils.safe_rich_status('Running sky check...'):
-        sky_check.check(quiet=True)
     if cluster_removed:
+        # Run sky check
+        with log_utils.safe_rich_status('Running sky check...'):
+            sky_check.check(quiet=True)
         click.echo('Local cluster removed.')
 
 

@@ -15,16 +15,19 @@ def get_port(svc_name, namespace):
     return head_service.spec.ports[0].node_port
 
 
-def check_credentials() -> Tuple[bool, Optional[str]]:
+def check_credentials(timeout: int = 3) -> Tuple[bool, Optional[str]]:
     """
     Check if the credentials in kubeconfig file are valid
+
+    Args:
+        timeout (int): Timeout in seconds for the test API call
 
     Returns:
         bool: True if credentials are valid, False otherwise
         str: Error message if credentials are invalid, None otherwise
     """
     try:
-        kubernetes.core_api().list_namespace()
+        kubernetes.core_api().list_namespace(_request_timeout=timeout)
         return True, None
     except kubernetes.api_exception() as e:
         # Check if the error is due to invalid credentials
@@ -35,6 +38,10 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
             return False, f'Failed to communicate with the cluster: {str(e)}'
     except kubernetes.config_exception() as e:
         return False, f'Invalid configuration file: {str(e)}'
+    except kubernetes.max_retry_error():
+        return False, 'Failed to communicate with the cluster - timeout. ' \
+                      'Check if your cluster is running and your network ' \
+                      'is stable.'
     except Exception as e:
         return False, f'An error occurred: {str(e)}'
 

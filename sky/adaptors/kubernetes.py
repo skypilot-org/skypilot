@@ -7,6 +7,7 @@ from functools import wraps
 from sky.utils import ux_utils, env_options
 
 kubernetes = None
+urllib3 = None
 
 _configured = False
 _core_api = None
@@ -20,13 +21,16 @@ def import_package(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         global kubernetes
+        global urllib3
         if kubernetes is None:
             try:
                 import kubernetes as _kubernetes
+                import urllib3 as _urllib3
             except ImportError:
-                raise ImportError('Fail to import dependencies for Docker. '
+                raise ImportError('Fail to import dependencies for Kubernetes. '
                                   'See README for how to install it.') from None
             kubernetes = _kubernetes
+            urllib3 = _urllib3
         return func(*args, **kwargs)
 
     return wrapper
@@ -107,3 +111,8 @@ def api_exception():
 @import_package
 def config_exception():
     return kubernetes.config.config_exception.ConfigException
+
+
+@import_package
+def max_retry_error():
+    return urllib3.exceptions.MaxRetryError
