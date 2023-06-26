@@ -209,17 +209,14 @@ def add_gsutil_platform_flags(gsutil_cmd: str) -> str:
     is executed, rather than where the code is run. This is important when
     the command is run in a remote VM.
 
-    NOTE: The invoking command must use `eval` before the command to correctly
-        pass through the flag generated here.
-
     Args:
         gsutil_cmd (str): The gsutil command to which platform-specific
           flags will be added.
 
     Returns:
         str: Platform-specific command for running gsutil_cmd. Includes an if
-          conditional, and must be run with  `eval` before the command to
-          correctly pass through the flag generated here.
+          conditional, and is run with `eval` before the command to
+          correctly run the if conditional.
     """
     disable_multiprocessing_flag = '-o "GSUtil:parallel_process_count=1"'
 
@@ -243,7 +240,7 @@ def add_gsutil_platform_flags(gsutil_cmd: str) -> str:
                                     f"""echo "{gsutil_cmd}"; """
                                     """fi""")
 
-    # Add eval to correctly pass through the flag
+    # Add eval to evaluate the if statement and get the command
     platform_specific_gsutil_cmd = f'eval $({platform_specific_gsutil_cmd})'
 
     return platform_specific_gsutil_cmd
