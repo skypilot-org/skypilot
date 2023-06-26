@@ -714,8 +714,7 @@ class GCP(clouds.Cloud):
             raise exceptions.CloudUserIdentityError(
                 'Failed to get GCP project id. Please make sure you have '
                 'run the following: gcloud init; '
-                'gcloud auth application-default login'
-            )
+                'gcloud auth application-default login')
         return project_id
 
     @staticmethod
