@@ -4,6 +4,8 @@
 
 from functools import wraps
 
+from sky.utils import ux_utils, env_options
+
 kubernetes = None
 
 _configured = False
@@ -43,7 +45,17 @@ def _load_config():
     try:
         kubernetes.config.load_incluster_config()
     except kubernetes.config.config_exception.ConfigException:
-        kubernetes.config.load_kube_config()
+        try:
+            kubernetes.config.load_kube_config()
+        except kubernetes.config.config_exception.ConfigException as e:
+            with ux_utils.print_exception_no_traceback():
+                suffix = ''
+                if env_options.Options.SHOW_DEBUG_INFO.get():
+                    suffix += f' Error: {str(e)}'
+                raise ValueError('Failed to load Kubernetes configuration. '
+                                 f'Please check your kubeconfig file is it valid. {suffix}') from None
+
+
     _configured = True
 
 
