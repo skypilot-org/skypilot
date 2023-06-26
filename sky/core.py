@@ -24,6 +24,7 @@ from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import subprocess_utils
 from sky.utils.cli_utils import cost_utils
+from sky.status_lib import ClusterStatus
 
 logger = sky_logging.init_logger(__name__)
 
@@ -970,8 +971,8 @@ def spot_cost_report(refresh: bool, condensed: bool) -> List[Dict[str, Any]]:
         return []
 
     if (refresh and controller_status in [
-            global_user_state.ClusterStatus.STOPPED,
-            global_user_state.ClusterStatus.INIT
+            ClusterStatus.STOPPED,
+            ClusterStatus.INIT
     ]):
         print(f'{colorama.Fore.YELLOW}'
               'Restarting controller for latest status...'
@@ -979,7 +980,7 @@ def spot_cost_report(refresh: bool, condensed: bool) -> List[Dict[str, Any]]:
 
         handle = _start(spot.SPOT_CONTROLLER_NAME)
 
-    controller_status = global_user_state.ClusterStatus.UP
+    controller_status = ClusterStatus.UP
 
     if handle is None or handle.head_ip is None:
         raise exceptions.ClusterNotUpError('Spot controller is not up.',
