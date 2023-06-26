@@ -191,7 +191,7 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
 
     for region in candidate_regions:
         if not AWS.check_quota_available(
-                region=region.name, instance_type="p3.16xlarge", use_spot=True):
+                region=region.name, instance_type='p3.16xlarge', use_spot=True):
             return region.name
 
     return None

@@ -471,7 +471,7 @@ class AWS(clouds.Cloud):
                         cls._STATIC_CREDENTIAL_HELP_STR)
 
         # Fetch the AWS catalogs
-        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
+        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel
         # Trigger the fetch of the availability zones mapping.
         aws_catalog.get_default_instance_type()
         return True, hints
@@ -693,10 +693,9 @@ class AWS(clouds.Cloud):
                               region: str,
                               instance_type: str,
                               use_spot: bool = False) -> bool:
-        """
-        Check if the quota is available for the requested instance_type
+        """Check if AWS quota is available for `instance_type` in `region`.
 
-        AWS-specific implmentation of check_quota_available. The function works by
+        AWS-specific implementation of check_quota_available. The function works by
         matching the instance_type to the corresponding AWS quota code, and then using
         the boto3 Python API to query the region for the specific quota code.
 

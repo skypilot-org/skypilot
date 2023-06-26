@@ -474,19 +474,17 @@ class Cloud:
                               region: str,
                               instance_type: str,
                               use_spot: bool = False) -> bool:
-        """
-        Checks to ensure that a particular accelerator has a nonzero quota
-        in a region.
+        """Check if quota is available for `instance_type` in `region`.
 
         (Currently, check_quota_available is only implemented for AWS.)
 
-        The _retry_zones funtion in cloud_vm_ray_backend goes through different
+        The _retry_zones function in cloud_vm_ray_backend goes through different
         candidate regions and attempts to provision the requested instance_type
         accelerators in the region, until a successful provisioning happens
         or all regions with the requested accelerator have been looked at.
         Previously, SkyPilot would attempt to provision resources in all of
         these regions. However, many regions would have a zero quota or
-        inadequate quota, meaning these attempted provisionings were destined
+        inadequate quota, meaning these attempted provisions were destined
         to fail from the get-go.
 
         Checking the quota is substantially faster than attempting a failed
