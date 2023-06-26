@@ -2,7 +2,6 @@
 """
 from multiprocessing import pool
 import os
-import platform
 import subprocess
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
@@ -195,22 +194,61 @@ def parallel_upload(source_path_list: List[str],
                 [bucket_name] * len(commands)))
 
 
-def get_gsutil_platform_flags() -> str:
-    """Returns platform-specific flags for gsutil.
+def add_gsutil_platform_flags(gsutil_cmd: str) -> str:
+    """Adds platform-specific flags for gsutil.
+
+    In particular, we disable multiprocessing on Mac using
+    `-o "GSUtil:parallel_process_count=1"`. Multithreading is still enabled.
+    gsutil on Mac has a bug with multiprocessing that causes it to crash
+    when uploading files. Related issues:
+    https://bugs.python.org/issue33725
+    https://github.com/GoogleCloudPlatform/gsutil/issues/464
+
+    The flags are added by checking the platform using bash in a one-liner.
+    The platform check is done inline to have the flags match where the command
+    is executed, rather than where the code is run. This is important when
+    the command is run in a remote VM.
+
+    NOTE: The invoking command must use `eval` before the command to correctly
+        pass through the flag generated here.
+
+    Args:
+        gsutil_cmd (str): The gsutil command to which platform-specific
+          flags will be added.
 
     Returns:
-        str; Platform-specific flags for gsutil. Includes a trailing space if it
-        is not empty.
+        str: Platform-specific command for running gsutil_cmd. Includes an if
+          conditional, and must be run with  `eval` before the command to
+          correctly pass through the flag generated here.
     """
-    if platform.system() == 'Darwin':
-        # Disable multiprocessing on Mac. Multithreading is still enabled.
-        # gsutil on Mac has a bug with multiprocessing that causes it to
-        # crash when uploading files. Related:
-        # https://bugs.python.org/issue33725
-        # https://github.com/GoogleCloudPlatform/gsutil/issues/464
-        return '-o "GSUtil:parallel_process_count=1" '
-    else:
-        return ''
+    disable_multiprocessing_flag = '-o "GSUtil:parallel_process_count=1"'
+
+    # Split the input command into parts
+    cmd_parts = gsutil_cmd.split()
+
+    # Check if the '-m' flag is in the command
+    if "-m" in cmd_parts:
+        # Find the index of '-m' flag and
+        # insert the platform-specific flag after it
+        index = cmd_parts.index("-m")
+        cmd_parts.insert(index + 1, disable_multiprocessing_flag)
+
+    # Reconstruct the modified command
+    modified_gsutil_cmd = " ".join(cmd_parts)
+
+    # Construct platform specific command using a bash one-liner
+    platform_specific_gsutil_cmd = (
+        """if [[ "$(uname)" == "Darwin" ]]; then """
+        f"""echo "{modified_gsutil_cmd}"; """
+        """else """
+        f"""echo "{gsutil_cmd}"; """
+        """fi"""
+    )
+
+    # Add eval to correctly pass through the flag
+    platform_specific_gsutil_cmd = f"eval $({platform_specific_gsutil_cmd})"
+
+    return platform_specific_gsutil_cmd
 
 
 def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
