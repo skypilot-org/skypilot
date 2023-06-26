@@ -733,6 +733,18 @@ class RetryingVmProvisioner(object):
                 logger.info('Skipping all regions due to disk size issue.')
                 self._blocked_resources.add(
                     launchable_resources.copy(region=None, zone=None))
+            elif ('Policy update access denied.' in httperror_str[0] or
+                  'IAM_PERMISSION_DENIED' in httperror_str[0]):
+                logger.info(
+                    'Skipping all regions due to service account not '
+                    'having the required permissions and the user '
+                    'account does not have enough permission to '
+                    'update it. Please contact your administrator and '
+                    'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp\n'  # pylint: disable=line-too-long
+                    f'Details: {httperror_str[0]}')
+                self._blocked_resources.add(
+                    launchable_resources.copy(region=None, zone=None))
+
             else:
                 # Parse HttpError for unauthorized regions. Example:
                 # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
@@ -3698,7 +3710,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     @timeline.event
     def _check_existing_cluster(
-            self, task: task_lib.Task, to_provision: resources_lib.Resources,
+            self, task: task_lib.Task,
+            to_provision: Optional[resources_lib.Resources],
             cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
         """Checks if the cluster exists and returns the provision config.
 
@@ -3708,6 +3721,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             exceptions.InvalidClusterNameError: If the cluster name is invalid.
             # TODO(zhwu): complete the list of exceptions.
         """
+        handle_before_refresh = global_user_state.get_handle_from_cluster_name(
+            cluster_name)
         prev_cluster_status, handle = (
             backend_utils.refresh_cluster_status_handle(
                 cluster_name, acquire_per_cluster_status_lock=False))
@@ -3730,6 +3745,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         task_cloud = (resources.cloud
                       if resources.cloud is not None else clouds.Cloud)
         task_cloud.check_cluster_name_is_valid(cluster_name)
+
+        if to_provision is None:
+            logger.info(
+                f'The cluster {cluster_name!r} was autodowned or manually '
+                'terminated on the cloud console. Using the same resources '
+                'as the previously terminated one to provision a new cluster.')
+            # The cluster is recently terminated either by autostop or manually
+            # terminated on the cloud. We should use the previously terminated
+            # resources to provision the cluster.
+            assert isinstance(
+                handle_before_refresh, CloudVmRayResourceHandle), (
+                    f'Trying to launch cluster {cluster_name!r} recently '
+                    'terminated  on the cloud, but the handle is not a '
+                    f'CloudVmRayResourceHandle ({handle_before_refresh}).')
+            to_provision = handle_before_refresh.launched_resources
+            self.check_resources_fit_cluster(handle_before_refresh, task)
 
         cloud = to_provision.cloud
         if isinstance(cloud, clouds.Local):

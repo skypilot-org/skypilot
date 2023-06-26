@@ -107,7 +107,7 @@ Documentation
    :maxdepth: 1
    :caption: Cloud Admin and Usage
 
-   cloud-setup/cloud-permissions
+   cloud-setup/cloud-permissions/index
    cloud-setup/cloud-auth
    cloud-setup/quota
 
