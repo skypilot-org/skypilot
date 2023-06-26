@@ -253,7 +253,12 @@ def set_job_name(job_id: int, name: str):
             VALUES (?, ?)""", (job_id, name))
 
 
-def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
+def set_pending(job_id: int,
+                task_id: int,
+                task_name: str,
+                resources_str: str,
+                callback_func: Optional[Callable[[int, str, str],
+                                                 None]] = None):
     """Set the task to pending state."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
@@ -263,10 +268,18 @@ def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
             VALUES (?, ?, ?, ?, ?)""",
             (job_id, task_id, task_name, resources_str,
              SpotStatus.PENDING.value))
+    if callback_func is not None:
+        callback_func(task_id, 'PENDING',
+                      f'Task name: {task_name}, resources: {resources_str}')
 
 
-def set_submitted(job_id: int, task_id: int, run_timestamp: str,
-                  submit_time: float, resources_str: str):
+def set_submitted(job_id: int,
+                  task_id: int,
+                  run_timestamp: str,
+                  submit_time: float,
+                  resources_str: str,
+                  callback_func: Optional[Callable[[int, str, str],
+                                                   None]] = None):
     """Set the task to submitted.
 
     Args:
@@ -294,6 +307,10 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
             task_id=(?)""",
             (resources_str, submit_time, SpotStatus.SUBMITTED.value,
              run_timestamp, job_id, task_id))
+    if callback_func is not None:
+        callback_func(
+            task_id, 'SUBMITTED',
+            f'Resources: {resources_str}, submitted at: {submit_time}')
 
 
 def set_starting(job_id: int,
@@ -436,7 +453,9 @@ def set_failed(job_id: int,
     logger.info(failure_reason)
 
 
-def set_cancelling(job_id: int):
+def set_cancelling(job_id: int,
+                   callback_func: Optional[Callable[[int, str, str],
+                                                    None]] = None):
     """Set tasks in the job as cancelling, if they are in non-terminal states.
 
     task_id is not needed, because we expect the job should be cancelled
@@ -451,9 +470,13 @@ def set_cancelling(job_id: int):
             (SpotStatus.CANCELLING.value, time.time(), job_id))
         if rows.rowcount > 0:
             logger.info('Cancelling the job...')
+    if callback_func is not None:
+        callback_func(-1, 'CANCELLING', '')
 
 
-def set_cancelled(job_id: int):
+def set_cancelled(job_id: int,
+                  callback_func: Optional[Callable[[int, str, str],
+                                                   None]] = None):
     """Set tasks in the job as cancelled, if they are in CANCELLING state.
 
     The set_cancelling should be called before this function.
@@ -468,6 +491,8 @@ def set_cancelled(job_id: int):
              SpotStatus.CANCELLING.value))
         if rows.rowcount > 0:
             logger.info('Job cancelled.')
+    if callback_func is not None:
+        callback_func(-1, 'CANCELLED', '')
 
 
 # ======== utility functions ========

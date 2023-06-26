@@ -357,8 +357,10 @@ class SpotController:
             # affect the jobs in terminal states.
             # We need to call set_cancelling before set_cancelled to make sure
             # the table entries are correctly set.
-            spot_state.set_cancelling(self._job_id)
-            spot_state.set_cancelled(self._job_id)
+            spot_state.set_cancelling(self._job_id,
+                                      callback_func=self.event_callback_func)
+            spot_state.set_cancelled(self._job_id,
+                                     callback_func=self.event_callback_func)
 
 
 def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):
