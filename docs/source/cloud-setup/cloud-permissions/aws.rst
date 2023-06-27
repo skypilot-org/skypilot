@@ -103,7 +103,7 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
         ]
     }
 
-#. **Optional**: To enable ``--clone-disk-from``, you need to add the following permissions to the policy above as well.
+#. **Optional**: To enable ``sky launch --clone-disk-from``, you need to add the following permissions to the policy above as well.
 
 .. code-block:: json
 
