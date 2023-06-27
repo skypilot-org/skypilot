@@ -33,6 +33,7 @@ import signal
 import subprocess
 import sys
 import textwrap
+import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 import webbrowser
@@ -70,7 +71,6 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
 from sky.usage import usage_lib
-import time
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
@@ -3719,7 +3719,7 @@ def spot_dashboard(port: Optional[int]):
     click.secho('Checking if spot controller is up...', fg='yellow')
     hint = (
         'Dashboard is not available if spot controller is not up. Run a spot '
-        'job first, or use `sky start` to bring up an existing controller.')
+        'job first.')
     _, handle = spot_lib.is_spot_controller_up(stopped_message=hint,
                                                non_existent_message=hint)
     if handle is None:
