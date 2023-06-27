@@ -33,6 +33,11 @@ sky launch -c vLLM-serve -s serve.yaml
 (task, pid=7431) Running on public URL: https://a8531352b74d74c7d2.gradio.live
 ```
 
+<p align="center">
+    <img src="https://imgur.com/KW9FKRT.gif" alt="Demo"/>
+</p>
+
+
 3. [Optional] Try other GPUs:
 ```bash
 sky launch -c vicuna-serve-v100 -s serve.yaml --gpus V100

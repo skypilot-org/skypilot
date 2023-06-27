@@ -15,14 +15,16 @@ setup: |
   pip list | grep vllm || pip install .
   pip install gradio
 
-  echo "Downloading model..."
-  python3 -u -c "from transformers import AutoModelForCausalLM; AutoModelForCausalLM.from_pretrained('${MODEL_NAME}')"
 
 run: |
   conda activate vllm
+  echo "Downloading model..."
+  python3 -u -c "from transformers import AutoModelForCausalLM; AutoModelForCausalLM.from_pretrained('${MODEL_NAME}')"
 
   echo 'Starting vllm api server...'
   python -m vllm.entrypoints.api_server --model $MODEL_NAME &
+
+  sleep 10
 
   echo 'Starting gradio server...'
   python vllm/examples/gradio_webserver.py
