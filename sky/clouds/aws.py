@@ -696,7 +696,7 @@ class AWS(clouds.Cloud):
         }
 
     @classmethod
-    def _query_instance_property_and_retry(
+    def _query_instance_property_with_retries(
         cls,
         tag_filters: Dict[str, str],
         region: str,
@@ -705,8 +705,8 @@ class AWS(clouds.Cloud):
         filter_str = ' '.join(f'Name=tag:{key},Values={value}'
                               for key, value in tag_filters.items())
         query_cmd = (f'aws ec2 describe-instances --filters {filter_str} '
-                     f'--region {region} --query {query} --output json')
-        returncode, stdout, stderr = subprocess_utils.run_and_retry(
+                     f'--region {region} --query "{query}" --output json')
+        returncode, stdout, stderr = subprocess_utils.run_with_retries(
             query_cmd,
             retry_returncode=[255],
             retry_stderrs=[
@@ -732,7 +732,7 @@ class AWS(clouds.Cloud):
         }
 
         assert region is not None, (tag_filters, region)
-        returncode, stdout, stderr = cls._query_instance_property_and_retry(
+        returncode, stdout, stderr = cls._query_instance_property_with_retries(
             tag_filters, region, query='Reservations[].Instances[].State.Name')
 
         if returncode != 0:
@@ -758,7 +758,7 @@ class AWS(clouds.Cloud):
         del zone  # unused
         assert region is not None, (tag_filters, region)
         image_name = f'skypilot-{cluster_name}-{int(time.time())}'
-        returncode, stdout, stderr = cls._query_instance_property_and_retry(
+        returncode, stdout, stderr = cls._query_instance_property_with_retries(
             tag_filters, region, query='Reservations[].Instances[].InstanceId')
 
         subprocess_utils.handle_returncode(
@@ -772,14 +772,14 @@ class AWS(clouds.Cloud):
         if len(instance_ids) != 1:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
-                    f'More than one instance found: '
-                    f'{stdout + stderr}')
+                    'Only support creating image from single '
+                    f'instance, but got: {instance_ids}')
 
         instance_id = instance_ids[0]
         create_image_cmd = (
             f'aws ec2 create-image --region {region} --instance-id {instance_id} '
             f'--name {image_name} --output text')
-        returncode, image_id, stderr = subprocess_utils.run_and_retry(
+        returncode, image_id, stderr = subprocess_utils.run_with_retries(
             create_image_cmd,
             retry_returncode=[255],
         )
@@ -799,7 +799,7 @@ class AWS(clouds.Cloud):
         wait_image_cmd = (
             f'aws ec2 wait image-available --region {region} --image-ids {image_id}'
         )
-        returncode, stdout, stderr = subprocess_utils.run_and_retry(
+        returncode, stdout, stderr = subprocess_utils.run_with_retries(
             wait_image_cmd,
             retry_returncode=[255],
         )
@@ -826,7 +826,7 @@ class AWS(clouds.Cloud):
                           f'--source-image-id {image_id} '
                           f'--source-region {source_region} '
                           f'--region {target_region} --output text')
-        returncode, target_image_id, stderr = subprocess_utils.run_and_retry(
+        returncode, target_image_id, stderr = subprocess_utils.run_with_retries(
             copy_image_cmd,
             retry_returncode=[255],
         )
@@ -845,7 +845,7 @@ class AWS(clouds.Cloud):
         wait_image_cmd = (
             f'aws ec2 wait image-available --region {target_region} '
             f'--image-ids {target_image_id}')
-        subprocess_utils.run_and_retry(
+        subprocess_utils.run_with_retries(
             wait_image_cmd,
             max_retry=5,
             retry_returncode=[255],
@@ -870,7 +870,7 @@ class AWS(clouds.Cloud):
         assert region is not None, (image_id, region)
         delete_image_cmd = (f'aws ec2 deregister-image --region {region} '
                             f'--image-id {image_id}')
-        returncode, _, stderr = subprocess_utils.run_and_retry(
+        returncode, _, stderr = subprocess_utils.run_with_retries(
             delete_image_cmd,
             retry_returncode=[255],
         )

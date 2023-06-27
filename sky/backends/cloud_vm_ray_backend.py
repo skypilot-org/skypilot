@@ -3547,9 +3547,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             cluster_name=handle.cluster_name,
                             stdout=tpu_stdout,
                             stderr=tpu_stderr))
-        if handle.launched_resources.is_image_managed and terminate:
-            # Delete the image when terminating the cluster and the image is
-            # created by SkyPilot (--clone-disk-from)
+        if (terminate and handle.launched_resources.is_image_managed is True):
+            # Delete the image when terminating a "cloned" cluster, i.e.,
+            # whose image is created by SkyPilot (--clone-disk-from)
             logger.debug(f'Deleting image {handle.launched_resources.image_id}')
             cluster_resources = handle.launched_resources
             cluster_cloud = cluster_resources.cloud
@@ -3561,8 +3561,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 cluster_cloud.delete_image(image_id,
                                            handle.launched_resources.region)
             except exceptions.CommandError as e:
-                logger.debug(
-                    f'Failed to delete image {image_id}: '
+                logger.warning(
+                    f'Failed to delete cloned image {image_id}. Please '
+                    'remove it manually to avoid image leakage. Details: '
                     f'{common_utils.format_exception(e, use_bracket=True)}')
 
         # The cluster file must exist because the cluster_yaml will only

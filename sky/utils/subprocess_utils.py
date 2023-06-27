@@ -122,7 +122,7 @@ def kill_children_processes(first_pid_to_kill: Optional[int] = None,
             pass
 
 
-def run_and_retry(
+def run_with_retries(
         cmd: str,
         max_retry: int = 3,
         retry_returncode: Optional[List[int]] = None,

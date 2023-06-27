@@ -487,7 +487,7 @@ class Cloud:
         raise NotImplementedError
 
     # === Image related methods ===
-    # These three tmethods are used to create, move and delete images. They
+    # These three methods are used to create, move and delete images. They
     # are currently only used in `sky launch --clone-disk-from` to clone a
     # cluster's disk to launch a new cluster.
     # It is not required to implement these methods for clouds that do not

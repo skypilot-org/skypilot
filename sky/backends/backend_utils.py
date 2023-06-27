@@ -1725,6 +1725,7 @@ def check_can_clone_disk_and_override_task(
         The task to use and the resource handle of the source cluster.
 
     Raises:
+        ValueError: If the source cluster does not exist.
         exceptions.NotSupportedError: If the source cluster is not valid or the
             task is not compatible to clone disk from the source cluster.
     """
@@ -1742,8 +1743,9 @@ def check_can_clone_disk_and_override_task(
     if source_cluster_status != status_lib.ClusterStatus.STOPPED:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
-                f'Cannot clone disk from cluster {source_cluster_status!r}. Please stop the '
-                f'cluster first: sky stop {cluster_name}.')
+                f'Cannot clone disk from cluster {cluster_name!r} '
+                f'({source_cluster_status!r}). Please stop the '
+                f'cluster first: sky stop {cluster_name}')
 
     if target_cluster_name is not None:
         target_cluster_status, _ = refresh_cluster_status_handle(
@@ -1752,15 +1754,19 @@ def check_can_clone_disk_and_override_task(
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
                     f'The target cluster {target_cluster_name!r} already exists. Cloning '
-                    'disk is only supported when creating a new cluster.')
+                    'disk is only supported when creating a new cluster. To fix: specify '
+                    'a new target cluster name.')
 
     assert len(task.resources) == 1, task.resources
     task_resources = list(task.resources)[0]
     if handle.launched_resources.disk_size > task_resources.disk_size:
         # The target cluster's disk should be at least as large as the source.
         with ux_utils.print_exception_no_traceback():
+            target_cluster_name_str = f' {target_cluster_name!r}'
+            if target_cluster_name is None:
+                target_cluster_name_str = ''
             raise exceptions.NotSupportedError(
-                f'The target cluster {target_cluster_name!r} should have a disk size '
+                f'The target cluster {target_cluster_name_str} should have a disk size '
                 f'of at least {handle.launched_resources.disk_size} GB to clone the '
                 f'disk from {cluster_name!r}.')
     override_param = {}

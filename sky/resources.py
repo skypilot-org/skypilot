@@ -339,7 +339,7 @@ class Resources:
         return self._disk_tier
 
     @property
-    def is_image_managed(self) -> Optional[str]:
+    def is_image_managed(self) -> Optional[bool]:
         return self._is_image_managed
 
     def _set_cpus(

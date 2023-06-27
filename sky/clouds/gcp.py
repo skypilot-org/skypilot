@@ -829,7 +829,7 @@ class GCP(clouds.Cloud):
         instance_name_cmd = ('gcloud compute instances list '
                              f'--filter="({label_filter_str})" '
                              '--format="json(name)"')
-        returncode, stdout, stderr = subprocess_utils.run_and_retry(
+        returncode, stdout, stderr = subprocess_utils.run_with_retries(
             instance_name_cmd,
             retry_returncode=[255],
         )
@@ -844,7 +844,7 @@ class GCP(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
                     'Only support creating image from single '
-                    f' instance, but got multiple instances: {instance_names}')
+                    f'instance, but got: {instance_names}')
         instance_name = instance_names[0]['name']
 
         image_name = f'skypilot-{cluster_name}-{int(time.time())}'
@@ -852,7 +852,7 @@ class GCP(clouds.Cloud):
                             f'--source-disk  {instance_name} '
                             f'--source-disk-zone {zone}')
         logger.debug(create_image_cmd)
-        subprocess_utils.run_and_retry(
+        subprocess_utils.run_with_retries(
             create_image_cmd,
             retry_returncode=[255],
         )
@@ -865,7 +865,7 @@ class GCP(clouds.Cloud):
 
         image_uri_cmd = (f'gcloud compute images describe {image_name} '
                          '--format="get(selfLink)"')
-        returncode, stdout, stderr = subprocess_utils.run_and_retry(
+        returncode, stdout, stderr = subprocess_utils.run_with_retries(
             image_uri_cmd,
             retry_returncode=[255],
         )
@@ -895,7 +895,7 @@ class GCP(clouds.Cloud):
         del region  # Unused.
         image_name = image_id.rpartition('/')[2]
         delete_image_cmd = f'gcloud compute images delete {image_name} --quiet'
-        returncode, _, stderr = subprocess_utils.run_and_retry(
+        returncode, _, stderr = subprocess_utils.run_with_retries(
             delete_image_cmd,
             retry_returncode=[255],
         )
