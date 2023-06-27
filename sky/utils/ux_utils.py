@@ -38,6 +38,6 @@ def print_exception_no_traceback():
         yield
     else:
         original_tracelimit = getattr(sys, 'tracebacklimit', 1000)
-        # sys.tracebacklimit = 0
+        sys.tracebacklimit = 0
         yield
         sys.tracebacklimit = original_tracelimit
