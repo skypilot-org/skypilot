@@ -249,55 +249,6 @@ def parallel_upload(source_path_list: List[str],
                 [bucket_name] * len(commands)))
 
 
-def parallel_upload_rclone(
-        source_path_list: List[str],
-        sync_command_generator: Callable[[str, str], str],
-        bucket_name: str,
-        access_denied_message: str,
-        create_dirs: bool = False,
-        max_concurrent_uploads: Optional[int] = None) -> None:
-    """Helper function to run parallel uploads for a list of paths.
-
-    Used by cos store to run rsync commands in parallel by
-    providing appropriate command generators.
-
-    Args:
-        source_path_list: List of paths to local files or directories
-        filesync_command_generator: Callable that generates rsync command
-            for a list of files belonging to the same dir.
-        dirsync_command_generator: Callable that generates rsync command
-            for a directory.
-        access_denied_message: Message to intercept from the underlying
-            upload utility when permissions are insufficient. Used in
-            exception handling.
-        create_dirs: If the local_path is a directory and this is set to
-            False, the contents of the directory are directly uploaded to
-            root of the bucket. If the local_path is a directory and this is
-            set to True, the directory is created in the bucket root and
-            contents are uploaded to it.
-        max_concurrent_uploads: Maximum number of concurrent threads to use
-            to upload files.
-    """
-    # Generate rclone rsync command for files and dirs
-    commands = []
-
-    for path in source_path_list:
-        path = os.path.expanduser(path)
-        if os.path.isdir(path) and create_dirs:
-            dest_dir_name = os.path.basename(path)
-        else:
-            dest_dir_name = ''
-        sync_command = sync_command_generator(path, dest_dir_name)
-        commands.append(sync_command)
-
-    # Run commands in parallel
-    with pool.ThreadPool(processes=max_concurrent_uploads) as p:
-        p.starmap(
-            run_upload_cli,
-            zip(commands, [access_denied_message] * len(commands),
-                [bucket_name] * len(commands)))
-
-
 def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
     # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
     # to a log file.

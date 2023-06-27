@@ -2290,9 +2290,9 @@ class IBMCosStore(AbstractStore):
                 contents are uploaded to it.
         """
 
-        def get_sync_command(src_dir_path, dest_dir_name) -> str:
-            """returns an rclone command that copies files in
-              'from src_dir_path' to 'dest_dir_name'.
+        def get_dir_sync_command(src_dir_path, dest_dir_name) -> str:
+            """returns an rclone command that copies a complete folder
+              from 'src_dir_path' to bucket/'dest_dir_name'.
 
             `rclone copy` copies files from source path to target.
             files with identical names at won't be copied over, unless
@@ -2300,19 +2300,44 @@ class IBMCosStore(AbstractStore):
             works similarly to `aws sync` (without --delete).
 
             Args:
-                src_dir_path (str): source path from which to copy files.
-                dest_dir_name (str): target path where files are copied to.
+                src_dir_path (str): local source path from which to copy files.
+                dest_dir_name (str): remote target path files are copied to.
 
             Returns:
-                str: bash command using rcolne to sync files
+                str: bash command using rclone to sync files. Executed remotely.
             """
+
             # .git directory is excluded from the sync
-            # wrapping src_dir_path with "" to support sources
-            # containing spaces.
+            # wrapping src_dir_path with "" to support path with spaces
             sync_command = (
                 'rclone copy --exclude ".git/*" '
                 f'"{src_dir_path}" '
                 f'{self.bucket_rclone_profile}:{self.name}/{dest_dir_name}')
+            return sync_command
+
+        def get_file_sync_command(base_dir_path, file_names) -> str:
+            """returns an rclone command that copies files: 'file_names'
+               from base directory: `base_dir_path` to bucket.
+
+            `rclone copy` copies files from source path to target.
+            files with identical names at won't be copied over, unless
+            their modification date is more recent.
+            works similarly to `aws sync` (without --delete).
+
+            Args:
+                base_dir_path (str): local path from which to copy files.
+                file_names (List): specific file names to copy.
+
+            Returns:
+                str: bash command using rclone to sync files
+            """
+
+            # wrapping file_name with "" to support spaces
+            includes = ' '.join(
+                [f'--include "{file_name}"' for file_name in file_names])
+            sync_command = ('rclone copy '
+                            f'{includes} "{base_dir_path}" '
+                            f'{self.bucket_rclone_profile}:{self.name}')
             return sync_command
 
         # Generate message for upload
@@ -2325,9 +2350,10 @@ class IBMCosStore(AbstractStore):
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to '
                 f'[green]cos://{self.region}/{self.name}/[/]'):
-            data_utils.parallel_upload_rclone(
+            data_utils.parallel_upload(
                 source_path_list,
-                get_sync_command,
+                get_file_sync_command,
+                get_dir_sync_command,
                 self.name,
                 self._ACCESS_DENIED_MESSAGE,
                 create_dirs=create_dirs,
