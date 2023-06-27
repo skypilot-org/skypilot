@@ -5,6 +5,7 @@ from click import testing as cli_testing
 
 import sky
 import sky.cli as cli
+CLOUDS_TO_TEST = ['aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci']
 
 
 def test_infer_gpunode_type():
@@ -87,6 +88,7 @@ def test_show_gpus():
     -> sky show-gpus :4
     -> sky show-gpus V100:0
     -> sky show-gpus V100:-2
+    -> sky show-gpus --cloud aws --region us-west-1
     -> sky show-gpus --cloud lambda
     -> sky show-gpus --cloud lambda --all
     -> sky show-gpus V100:4 --cloud lambda
@@ -115,19 +117,19 @@ def test_show_gpus():
                                ['--cloud', 'aws', '--region', 'us-west-1'])
     assert not result.exit_code
 
-    for c in ['aws', 'azure', 'ibm', 'gcp', 'lambda']:
-        result = cli_runner.invoke(cli.show_gpus, ['--cloud', c])
+    for cloud in CLOUDS_TO_TEST:
+        result = cli_runner.invoke(cli.show_gpus, ['--cloud', cloud])
         assert not result.exit_code
 
-        result = cli_runner.invoke(cli.show_gpus, ['--cloud', c, '--all'])
+        result = cli_runner.invoke(cli.show_gpus, ['--cloud', cloud, '--all'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(cli.show_gpus, ['V100', '--cloud', c])
+        result = cli_runner.invoke(cli.show_gpus, ['V100', '--cloud', cloud])
         assert not result.exit_code
 
-        result = cli_runner.invoke(cli.show_gpus, ['V100:4', '--cloud', c])
+        result = cli_runner.invoke(cli.show_gpus, ['V100:4', '--cloud', cloud])
         assert not result.exit_code
 
         result = cli_runner.invoke(cli.show_gpus,
-                                   ['V100:4', '--cloud', c, '--all'])
+                                   ['V100:4', '--cloud', cloud, '--all'])
         assert isinstance(result.exception, SystemExit)

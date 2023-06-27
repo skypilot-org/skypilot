@@ -1,5 +1,5 @@
 import sky
-
+CLOUDS_TO_TEST = ['AWS', 'GCP', 'IBM', 'Azure', 'Lambda', 'OCI', 'scp']
 
 def test_list_accelerators():
     result = sky.list_accelerators()
@@ -41,8 +41,8 @@ def test_list_accelerators_name_quantity_filter():
             all_accelerators.append(
                 (instance.accelerator_name, instance.accelerator_count))
     assert all([
-        item[0].__contains__('V100') and item[1] == 4
-        for item in all_accelerators
+        name.__contains__('V100') and quantity == 4
+        for name, quantity in all_accelerators
     ])
 
 
@@ -56,10 +56,9 @@ def test_list_accelerators_positive_quantity_filter():
 
 
 def test_list_accelerators_name_clouds_filter():
-    clouds = ['AWS', 'GCP', 'IBM', 'Azure', 'Lambda']
 
-    for i in range(len(clouds)):
-        result = sky.list_accelerators(clouds=clouds[i].lower(),
+    for cloud in CLOUDS_TO_TEST:
+        result = sky.list_accelerators(clouds=cloud.lower(),
                                        name_filter='V100')
         all_accelerators = []
         for res in result.values():
@@ -67,16 +66,15 @@ def test_list_accelerators_name_clouds_filter():
                 all_accelerators.append(
                     (instance.accelerator_name, instance.cloud))
         assert all([
-            item[0].__contains__('V100') and item[1] == clouds[i]
-            for item in all_accelerators
+            name.__contains__('V100') and acc_cloud == cloud
+            for name, acc_cloud in all_accelerators
         ])
 
 
 def test_list_accelerators_name_quantity_clouds_filter():
-    clouds = ['AWS', 'GCP', 'IBM', 'Azure', 'Lambda']
 
-    for i in range(len(clouds)):
-        result = sky.list_accelerators(clouds=clouds[i].lower(),
+    for cloud in CLOUDS_TO_TEST:
+        result = sky.list_accelerators(clouds=cloud.lower(),
                                        name_filter='A100',
                                        quantity_filter=4)
         all_accelerators = []
@@ -86,6 +84,6 @@ def test_list_accelerators_name_quantity_clouds_filter():
                     (instance.accelerator_name, instance.cloud,
                      instance.accelerator_count))
         assert all([
-            item[0].__contains__('A100') and item[1] == clouds[i] and
-            item[2] == 4 for item in all_accelerators
+            name.__contains__('A100') and acc_cloud == cloud and
+            quantity == 4 for name, acc_cloud, quantity in all_accelerators
         ])
