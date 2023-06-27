@@ -3,21 +3,28 @@ import enum
 import functools
 import json
 import os
+import random
 import re
 import subprocess
+import time
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Any
 
 from sky import clouds
 from sky import exceptions
+from sky import sky_logging
+from sky import status_lib
 from sky.adaptors import aws
 from sky.clouds import service_catalog
+from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
+
+logger = sky_logging.init_logger(__name__)
 
 # This local file (under ~/.aws/) will be uploaded to remote nodes (any
 # cloud), if all of the following conditions hold:
@@ -90,6 +97,7 @@ class AWS(clouds.Cloud):
         'Run the following commands:'
         f'\n{_INDENT_PREFIX}  $ pip install boto3'
         f'\n{_INDENT_PREFIX}  $ aws configure'
+        f'\n{_INDENT_PREFIX}  $ aws configure list  # Ensure that this shows identity is set.'
         f'\n{_INDENT_PREFIX}For more info: '
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
     )
@@ -105,7 +113,7 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _sso_credentials_help_str(cls, expired: bool = False) -> str:
-        help_str = 'Run the following commands (must use aws v2 CLI):'
+        help_str = 'Run the following commands (must use AWS CLI v2):'
         if not expired:
             help_str += f'\n{cls._INDENT_PREFIX}  $ aws configure sso'
         help_str += (
@@ -408,13 +416,6 @@ class AWS(clouds.Cloud):
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
-        try:
-            # pylint: disable=import-outside-toplevel,unused-import
-            import boto3
-            import botocore
-        except ImportError:
-            raise ImportError('Fail to import dependencies for AWS.'
-                              'Try pip install "skypilot[aws]"') from None
 
         # Checks if the AWS CLI is installed properly
         proc = subprocess.run('aws --version',
@@ -470,7 +471,7 @@ class AWS(clouds.Cloud):
                         cls._STATIC_CREDENTIAL_HELP_STR)
 
         # Fetch the AWS catalogs
-        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
+        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel
         # Trigger the fetch of the availability zones mapping.
         aws_catalog.get_default_instance_type()
         return True, hints
@@ -567,17 +568,25 @@ class AWS(clouds.Cloud):
             # 2. In the case where the multiple users belong to an organization,
             # those users will have different account id, so fallback works.
             user_ids = [user_info['UserId'], user_info['Account']]
-        except aws.botocore_exceptions().NoCredentialsError:
+        except aws.botocore_exceptions().NoCredentialsError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
-                    f'AWS credentials are not set. {cls._STATIC_CREDENTIAL_HELP_STR}'
+                    'AWS credentials are not set. '
+                    f'{cls._STATIC_CREDENTIAL_HELP_STR}\n'
+                    f'{cls._INDENT_PREFIX}Details: `aws sts '
+                    'get-caller-identity` failed with error:'
+                    f' {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
-        except aws.botocore_exceptions().ClientError:
+        except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'Failed to access AWS services with credentials. '
                     'Make sure that the access and secret keys are correct.'
-                    f' {cls._STATIC_CREDENTIAL_HELP_STR}') from None
+                    f' {cls._STATIC_CREDENTIAL_HELP_STR}\n'
+                    f'{cls._INDENT_PREFIX}Details: `aws sts '
+                    'get-caller-identity` failed with error:'
+                    f' {common_utils.format_exception(e, use_bracket=True)}.'
+                ) from None
         except aws.botocore_exceptions().InvalidConfigError as e:
             # pylint: disable=import-outside-toplevel
             import awscli
@@ -678,3 +687,103 @@ class AWS(clouds.Cloud):
             'disk_throughput': tier2iops[tier] // 16,
             'custom_disk_perf': tier != 'low',
         }
+
+    @classmethod
+    def check_quota_available(cls,
+                              region: str,
+                              instance_type: str,
+                              use_spot: bool = False) -> bool:
+        """Check if AWS quota is available for `instance_type` in `region`.
+
+        AWS-specific implementation of check_quota_available. The function works by
+        matching the instance_type to the corresponding AWS quota code, and then using
+        the boto3 Python API to query the region for the specific quota code.
+
+        Returns:
+            False if the quota is found to be zero, and True otherwise.
+        Raises:
+            ImportError: if the dependencies for AWS are not able to be installed.
+            botocore.exceptions.ClientError: error in Boto3 client request.
+        """
+
+        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
+
+        quota_code = aws_catalog.get_quota_code(instance_type, use_spot)
+
+        if quota_code is None:
+            # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
+            return True
+
+        client = aws.client('service-quotas', region_name=region)
+        try:
+            response = client.get_service_quota(ServiceCode='ec2',
+                                                QuotaCode=quota_code)
+        except aws.botocore_exceptions().ClientError:
+            # Botocore client connection not established, try provisioning anyways
+            return True
+
+        if response['Quota']['Value'] == 0:
+            # Quota found to be zero, do not try provisioning
+            return False
+
+        # Quota found to be greater than zero, try provisioning
+        return True
+
+    @classmethod
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List['status_lib.ClusterStatus']:
+        del zone  # unused
+        status_map = {
+            'pending': status_lib.ClusterStatus.INIT,
+            'running': status_lib.ClusterStatus.UP,
+            # TODO(zhwu): stopping and shutting-down could occasionally fail
+            # due to internal errors of AWS. We should cover that case.
+            'stopping': status_lib.ClusterStatus.STOPPED,
+            'stopped': status_lib.ClusterStatus.STOPPED,
+            'shutting-down': None,
+            'terminated': None,
+        }
+
+        fitler_str = ' '.join(f'Name=tag:{key},Values={value}'
+                              for key, value in tag_filters.items())
+
+        retry_cnt = 0
+        while retry_cnt < 3:
+            query_cmd = ('aws ec2 describe-instances --filters '
+                         f'{fitler_str} '
+                         f'--region {region} '
+                         '--query "Reservations[].Instances[].State.Name" '
+                         '--output json')
+
+            returncode, stdout, stderr = log_lib.run_with_log(
+                query_cmd, '/dev/null', require_outputs=True, shell=True)
+            logger.debug(f'{query_cmd} returned {returncode}.\n'
+                         '**** STDOUT ****\n'
+                         f'{stdout}\n'
+                         '**** STDERR ****\n'
+                         f'{stderr}')
+
+            if (returncode != 0 and
+                    'Unable to locate credentials. You can configure credentials by '
+                    'running "aws configure"' in stdout + stderr):
+                retry_cnt += 1
+                time.sleep(random.uniform(0, 1) * 2)
+                continue
+            else:
+                break
+
+        if returncode != 0:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ClusterStatusFetchingError(
+                    f'Failed to query AWS cluster {name!r} status: '
+                    f'{stdout + stderr}')
+
+        original_statuses = json.loads(stdout.strip())
+
+        statuses = []
+        for s in original_statuses:
+            node_status = status_map[s]
+            if node_status is not None:
+                statuses.append(node_status)
+        return statuses

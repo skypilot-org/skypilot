@@ -1,7 +1,7 @@
 .. _cli:
 
 Command Line Interface
-==========================
+======================
 
 Core CLI
 ---------
@@ -97,8 +97,8 @@ Storage CLI
    :prog: sky storage delete
    :nested: full
 
-Utils: ``show-gpus``, ``check``
----------------------------------------
+Utils: ``show-gpus``/``check``/``cost-report``
+-------------------------------------------------
 
 
 .. click:: sky.cli:show_gpus
@@ -107,4 +107,8 @@ Utils: ``show-gpus``, ``check``
 
 .. click:: sky.cli:check
    :prog: sky check
+   :nested: full
+
+.. click:: sky.cli:cost_report
+   :prog: sky cost-report
    :nested: full

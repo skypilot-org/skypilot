@@ -19,10 +19,6 @@ Example usage:
   # Tear down all existing clusters.
   >> sky down -a
 
-TODO:
-- Add support for local Docker backend.  Currently this module is very coupled
-  with CloudVmRayBackend, as seen by the many use of ray commands.
-
 NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
@@ -33,11 +29,14 @@ import functools
 import multiprocessing
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import textwrap
+import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
+import webbrowser
 
 import click
 import colorama
@@ -48,11 +47,12 @@ import sky
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
+from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
-from sky import core
+from sky import status_lib
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
 from sky.benchmark import benchmark_state
@@ -63,6 +63,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import log_utils
 from sky.utils import common_utils
+from sky.utils import dag_utils
 from sky.utils import command_runner
 from sky.utils import schemas
 from sky.utils import subprocess_utils
@@ -755,14 +756,14 @@ def _launch_with_confirm(
                 prompt = f'Initializing local cluster{cluster_str}. Proceed?'
             else:
                 prompt = f'Launching a new cluster{cluster_str}. Proceed?'
-        elif maybe_status == global_user_state.ClusterStatus.STOPPED:
+        elif maybe_status == status_lib.ClusterStatus.STOPPED:
             prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
         if prompt is not None:
             confirm_shown = True
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
     if node_type is not None:
-        if maybe_status != global_user_state.ClusterStatus.UP:
+        if maybe_status != status_lib.ClusterStatus.UP:
             click.secho(f'Setting up interactive node {cluster}...',
                         fg='yellow')
 
@@ -776,7 +777,7 @@ def _launch_with_confirm(
     elif not confirm_shown:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
 
-    if node_type is None or maybe_status != global_user_state.ClusterStatus.UP:
+    if node_type is None or maybe_status != status_lib.ClusterStatus.UP:
         # No need to sky.launch again when interactive node is already up.
         sky.launch(
             dag,
@@ -935,7 +936,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     try:
         with open(entrypoint, 'r') as f:
             try:
-                config = yaml.safe_load(f)
+                config = list(yaml.safe_load_all(f))[0]
                 if isinstance(config, str):
                     # 'sky exec cluster ./my_script.sh'
                     is_yaml = False
@@ -967,7 +968,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     return is_yaml, config
 
 
-def _make_task_from_entrypoint_with_overrides(
+def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: List[str],
     *,
     name: Optional[str] = None,
@@ -988,7 +989,13 @@ def _make_task_from_entrypoint_with_overrides(
     env: Optional[List[Tuple[str, str]]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
-) -> sky.Task:
+) -> Union[sky.Task, sky.Dag]:
+    """Creates a task or a dag from an entrypoint with overrides.
+
+    Returns:
+        A dag iff the entrypoint is YAML and contains more than 1 task.
+        Otherwise, a task.
+    """
     entrypoint = ' '.join(entrypoint)
     is_yaml, yaml_config = _check_yaml(entrypoint)
     entrypoint: Optional[str]
@@ -1004,18 +1011,6 @@ def _make_task_from_entrypoint_with_overrides(
             click.secho('Task from command: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
 
-    if is_yaml:
-        assert entrypoint is not None
-        usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-        task = sky.Task.from_yaml(entrypoint)
-    else:
-        task = sky.Task(name='sky-cmd', run=entrypoint)
-        task.set_resources({sky.Resources()})
-
-    # Override.
-    if workdir is not None:
-        task.workdir = workdir
-
     if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
         cloud = 'local'
 
@@ -1030,6 +1025,30 @@ def _make_task_from_entrypoint_with_overrides(
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier)
+
+    if is_yaml:
+        assert entrypoint is not None
+        usage_lib.messages.usage.update_user_task_yaml(entrypoint)
+        dag = dag_utils.load_chain_dag_from_yaml(entrypoint)
+        if len(dag.tasks) > 1:
+            # When the dag has more than 1 task. It is unclear how to
+            # override the params for the dag. So we just ignore the
+            # override params.
+            if override_params:
+                click.secho(
+                    f'WARNING: override params {override_params} are ignored, '
+                    'since the yaml file contains multiple tasks.',
+                    fg='yellow')
+            return dag
+        task = sky.Task.from_yaml(entrypoint)
+    else:
+        task = sky.Task(name='sky-cmd', run=entrypoint)
+        task.set_resources({sky.Resources()})
+
+    # Override.
+    if workdir is not None:
+        task.workdir = workdir
+
     # Spot launch specific.
     if spot_recovery is not None:
         if spot_recovery.lower() == 'none':
@@ -1291,7 +1310,7 @@ def launch(
             'support for spot instances on Azure. Please file '
             'an issue if you need this feature.')
 
-    task = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         cluster=cluster,
@@ -1310,6 +1329,12 @@ def launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
     )
+    if isinstance(task_or_dag, sky.Dag):
+        raise click.UsageError(
+            'YAML specifies a DAG which is only supported by '
+            '`sky spot launch`. `sky launch` supports a '
+            'single task only.')
+    task = task_or_dag
 
     backend: backends.Backend
     if backend_name == backends.LocalDockerBackend.NAME:
@@ -1439,7 +1464,7 @@ def exec(
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
 
-    task = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         cluster=cluster,
@@ -1456,6 +1481,11 @@ def exec(
         num_nodes=num_nodes,
         env=env,
     )
+
+    if isinstance(task_or_dag, sky.Dag):
+        raise click.UsageError('YAML specifies a DAG, while `sky exec` '
+                               'supports a single task only.')
+    task = task_or_dag
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
@@ -1497,20 +1527,19 @@ def _get_spot_jobs(
         num_in_progress_jobs = len(spot_jobs)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
-        if controller_status == global_user_state.ClusterStatus.INIT:
+        if controller_status == status_lib.ClusterStatus.INIT:
             msg = ('Controller\'s latest status is INIT; jobs '
                    'will not be shown until it becomes UP.')
         else:
-            assert controller_status in [
-                None, global_user_state.ClusterStatus.STOPPED
-            ]
+            assert controller_status in [None, status_lib.ClusterStatus.STOPPED]
             msg = 'No in progress jobs.'
             if controller_status is None:
                 msg += (f' (See: {colorama.Style.BRIGHT}sky spot -h'
                         f'{colorama.Style.RESET_ALL})')
-    except RuntimeError:
+    except RuntimeError as e:
         msg = ('Failed to query spot jobs due to connection '
-               'issues. Try again later.')
+               'issues. Try again later. '
+               f'Details: {common_utils.format_exception(e, use_bracket=True)}')
     except Exception as e:  # pylint: disable=broad-except
         msg = ('Failed to query spot jobs: '
                f'{common_utils.format_exception(e, use_bracket=True)}')
@@ -1682,7 +1711,9 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                     f'* {job_info}To see all spot jobs: {colorama.Style.BRIGHT}'
                     f'sky spot queue{colorama.Style.RESET_ALL}')
 
-        if num_pending_autostop > 0:
+        if num_pending_autostop > 0 and not refresh:
+            # Don't print this hint if there's no pending autostop or user has
+            # already passed --refresh.
             plural_and_verb = ' has'
             if num_pending_autostop > 1:
                 plural_and_verb = 's have'
@@ -1714,12 +1745,12 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     means if the cluster is UP, successive calls to cost-report will show
     increasing price.
 
-    The estimated cost is calculated based on the local cache of the cluster
-    status, and may not be accurate for:
+    This CLI is experimental. The estimated cost is calculated based on the
+    local cache of the cluster status, and may not be accurate for:
 
-      - clusters with autostop/use_spot set; or
+    - Clusters with autostop/use_spot set; or
 
-      - clusters that were terminated/stopped on the cloud console.
+    - Clusters that were terminated/stopped on the cloud console.
     """
     cluster_records = core.cost_report()
 
@@ -2184,7 +2215,7 @@ def autostop(
     help=
     ('Autodown the cluster: tear down the cluster after specified minutes of '
      'idle time after all jobs finish (successfully or abnormally). Requires '
-     ' --idle-minutes-to-autostop to be set.'),
+     '--idle-minutes-to-autostop to be set.'),
 )
 @click.option(
     '--retry-until-up',
@@ -2299,8 +2330,7 @@ def start(
             #      INIT state cluster due to head_ip not being cached).
             #
             #      This can be replicated by adding `exit 1` to Task.setup.
-            if (not force and
-                    cluster_status == global_user_state.ClusterStatus.UP):
+            if (not force and cluster_status == status_lib.ClusterStatus.UP):
                 # An UP cluster; skipping 'sky start' because:
                 #  1. For a really up cluster, this has no effects (ray up -y
                 #    --no-restart) anyway.
@@ -2315,8 +2345,8 @@ def start(
                 continue
 
             assert force or cluster_status in (
-                global_user_state.ClusterStatus.INIT,
-                global_user_state.ClusterStatus.STOPPED), cluster_status
+                status_lib.ClusterStatus.INIT,
+                status_lib.ClusterStatus.STOPPED), cluster_status
             to_start.append(name)
     if not to_start:
         return
@@ -2445,7 +2475,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
         click.echo('Managed spot controller has already been torn down.')
         return
 
-    if cluster_status == global_user_state.ClusterStatus.INIT:
+    if cluster_status == status_lib.ClusterStatus.INIT:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.RED}Tearing down the spot controller while '
@@ -2462,7 +2492,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
            '\n * All logs and status information of the spot '
            'jobs (output of `sky spot queue`) will be lost.')
     click.echo(msg)
-    if cluster_status == global_user_state.ClusterStatus.UP:
+    if cluster_status == status_lib.ClusterStatus.UP:
         with log_utils.safe_rich_status(
                 '[bold cyan]Checking for in-progress spot jobs[/]'):
             try:
@@ -2480,7 +2510,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
         non_terminal_jobs = [
             job for job in spot_jobs if not job['status'].is_terminal()
         ]
-        if (cluster_status == global_user_state.ClusterStatus.UP and
+        if (cluster_status == status_lib.ClusterStatus.UP and
                 non_terminal_jobs):
             job_table = spot_lib.format_job_table(non_terminal_jobs,
                                                   show_all=False)
@@ -3353,9 +3383,9 @@ def spot():
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
 @click.option(
-    '--retry-until-up',
-    '-r',
-    default=True,
+    '--retry-until-up/--no-retry-until-up',
+    '-r/-no-r',
+    default=None,
     is_flag=True,
     required=False,
     help=('(Default: True; this flag is deprecated and will be removed in a '
@@ -3407,10 +3437,7 @@ def spot_launch(
 
       sky spot launch 'echo hello!'
     """
-    if name is None:
-        name = backend_utils.generate_cluster_name()
-
-    task = _make_task_from_entrypoint_with_overrides(
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
         workdir=workdir,
@@ -3429,30 +3456,49 @@ def spot_launch(
         disk_tier=disk_tier,
         spot_recovery=spot_recovery,
     )
+    # Deprecation.
+    if retry_until_up is not None:
+        flag_str = '--retry-until-up'
+        if not retry_until_up:
+            flag_str = '--no-retry-until-up'
+        click.secho(
+            f'Flag {flag_str} is deprecated and will be removed in a '
+            'future release (managed spot jobs will always be retried). '
+            'Please file an issue if this does not work for you.',
+            fg='yellow')
+    else:
+        retry_until_up = True
+
+    if not isinstance(task_or_dag, sky.Dag):
+        assert isinstance(task_or_dag, sky.Task), task_or_dag
+        with sky.Dag() as dag:
+            dag.add(task_or_dag)
+            dag.name = task_or_dag.name
+    else:
+        dag = task_or_dag
+
+    if name is not None:
+        dag.name = name
+
+    dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
     if not yes:
-        prompt = f'Launching a new spot task {name!r}. Proceed?'
+        prompt = f'Launching a new spot job {dag.name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    # We try our best to validate the cluster name before we launch the task.
-    # If the cloud is not specified, this will only validate the cluster name
-    # against the regex, and the cloud-specific validation will be done by
-    # the spot controller when actually launching the spot cluster.
-    resources = list(task.resources)[0]
-    task_cloud = (resources.cloud
-                  if resources.cloud is not None else clouds.Cloud)
-    task_cloud.check_cluster_name_is_valid(name)
+    for task in dag.tasks:
+        # We try our best to validate the cluster name before we launch the
+        # task. If the cloud is not specified, this will only validate the
+        # cluster name against the regex, and the cloud-specific validation will
+        # be done by the spot controller when actually launching the spot
+        # cluster.
+        resources = list(task.resources)[0]
+        task_cloud = (resources.cloud
+                      if resources.cloud is not None else clouds.Cloud)
+        task_cloud.check_cluster_name_is_valid(name)
 
-    # Deprecation.
-    if not retry_until_up:
-        click.secho(
-            'Flag --retry-until-up is deprecated and will be removed in a '
-            'future release (defaults to True). Please file an issue if this '
-            'does not work for you.',
-            fg='yellow')
-
-    sky.spot_launch(task,
+    sky.spot_launch(dag,
                     name,
                     detach_run=detach_run,
                     retry_until_up=retry_until_up)
@@ -3651,6 +3697,63 @@ def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     except exceptions.ClusterNotUpError:
         # Hint messages already printed by the call above.
         sys.exit(1)
+
+
+@spot.command('dashboard', cls=_DocumentedCodeCommand)
+@click.option(
+    '--port',
+    '-p',
+    default=None,
+    type=int,
+    required=False,
+    help=('Local port to use for the dashboard. If None, a free port is '
+          'automatically chosen.'))
+@usage_lib.entrypoint
+def spot_dashboard(port: Optional[int]):
+    """Opens a dashboard for spot jobs (needs controller to be UP)."""
+    # TODO(zongheng): ideally, the controller/dashboard server should expose the
+    # API perhaps via REST. Then here we would (1) not have to use SSH to try to
+    # see if the controller is UP first, which is slow; (2) not have to run SSH
+    # port forwarding first (we'd just launch a local dashboard which would make
+    # REST API calls to the controller dashboard server).
+    click.secho('Checking if spot controller is up...', fg='yellow')
+    hint = (
+        'Dashboard is not available if spot controller is not up. Run a spot '
+        'job first.')
+    _, handle = spot_lib.is_spot_controller_up(stopped_message=hint,
+                                               non_existent_message=hint)
+    if handle is None:
+        sys.exit(1)
+    # SSH forward a free local port to remote's dashboard port.
+    remote_port = constants.SPOT_DASHBOARD_REMOTE_PORT
+    if port is None:
+        free_port = common_utils.find_free_port(remote_port)
+    else:
+        free_port = port
+    ssh_command = (f'ssh -qNL {free_port}:localhost:{remote_port} '
+                   f'{spot_lib.SPOT_CONTROLLER_NAME}')
+    click.echo('Forwarding port: ', nl=False)
+    click.secho(f'{ssh_command}', dim=True)
+
+    with subprocess.Popen(ssh_command, shell=True,
+                          start_new_session=True) as ssh_process:
+        time.sleep(3)  # Added delay for ssh_command to initialize.
+        webbrowser.open(f'http://localhost:{free_port}')
+        click.secho(
+            f'Dashboard is now available at: http://127.0.0.1:{free_port}',
+            fg='green')
+        try:
+            ssh_process.wait()
+        except KeyboardInterrupt:
+            # When user presses Ctrl-C in terminal, exits the previous ssh
+            # command so that <free local port> is freed up.
+            try:
+                os.killpg(os.getpgid(ssh_process.pid), signal.SIGTERM)
+            except ProcessLookupError:
+                # This happens if spot controller is auto-stopped.
+                pass
+        finally:
+            click.echo('Exiting.')
 
 
 # ==============================

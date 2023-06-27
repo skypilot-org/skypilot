@@ -31,12 +31,22 @@ SkyPilot abstracts away cloud infra burden:
 
 SkyPilot cuts your cloud costs:
 
-* :ref:`Managed Spot <Managed Spot Jobs>`: **3x cost savings** using spot VMs, with auto-recovery from preemptions
-* :ref:`Autostop <Auto-stopping>`: hands-free cleanup of idle clusters
-* :ref:`Benchmark <Benchmark: Find the Best Hardware for Your Jobs>`: find best VM types for your jobs
+* :ref:`Managed Spot <spot-jobs>`: **3x cost savings** using spot VMs, with auto-recovery from preemptions
+* :ref:`Autostop <auto-stop>`: hands-free cleanup of idle clusters
+* :ref:`Benchmark <benchmark-overview>`: find best VM types for your jobs
 * Optimizer: **2x cost savings** by auto-picking best prices across zones/regions/clouds
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
+
+.. raw:: html
+
+   <p align="center">
+   <picture>
+      <a href="https://skypilot.readthedocs.io/en/latest/getting-started/installation.html">
+      <img alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png" width=80%></a>
+   </picture>
+   </p>
+
 
 **More information**
 
@@ -86,12 +96,21 @@ Documentation
    :maxdepth: 1
    :caption: User Guides
 
-   reference/local/index
+   examples/docker-containers
    examples/iterative-dev-project
    reference/interactive-nodes
-   reference/quota
-   reference/logging
    reference/faq
+   reference/logging
+   reference/local/index
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Cloud Admin and Usage
+
+   cloud-setup/cloud-permissions/index
+   cloud-setup/cloud-auth
+   cloud-setup/quota
+
 
 .. toctree::
    :maxdepth: 1
