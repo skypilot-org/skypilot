@@ -1,5 +1,7 @@
 import sky
+
 CLOUDS_TO_TEST = ['AWS', 'GCP', 'IBM', 'Azure', 'Lambda', 'OCI', 'scp']
+
 
 def test_list_accelerators():
     result = sky.list_accelerators()
@@ -58,8 +60,7 @@ def test_list_accelerators_positive_quantity_filter():
 def test_list_accelerators_name_clouds_filter():
 
     for cloud in CLOUDS_TO_TEST:
-        result = sky.list_accelerators(clouds=cloud.lower(),
-                                       name_filter='V100')
+        result = sky.list_accelerators(clouds=cloud.lower(), name_filter='V100')
         all_accelerators = []
         for res in result.values():
             for instance in res:
@@ -84,6 +85,6 @@ def test_list_accelerators_name_quantity_clouds_filter():
                     (instance.accelerator_name, instance.cloud,
                      instance.accelerator_count))
         assert all([
-            name.__contains__('A100') and acc_cloud == cloud and
-            quantity == 4 for name, acc_cloud, quantity in all_accelerators
+            name.__contains__('A100') and acc_cloud == cloud and quantity == 4
+            for name, acc_cloud, quantity in all_accelerators
         ])

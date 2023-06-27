@@ -5,6 +5,7 @@ from click import testing as cli_testing
 
 import sky
 import sky.cli as cli
+
 CLOUDS_TO_TEST = ['aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci']
 
 
