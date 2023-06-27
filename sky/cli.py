@@ -3040,9 +3040,8 @@ def show_gpus(
     instances. There may be multiple regions with the same lowest price.
     """
     # validation for the --cloud kubernetes
-    if cloud ==  'kubernetes':
-        raise click.UsageError(
-            'Kubernetes does not have a service catalog.')
+    if cloud == 'kubernetes':
+        raise click.UsageError('Kubernetes does not have a service catalog.')
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(

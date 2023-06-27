@@ -271,7 +271,7 @@ class Kubernetes(clouds.Cloud):
             'region': region.name,
             'cpus': str(cpus),
             'memory': str(mem),
-            'timeout': self.TIMEOUT,
+            'timeout': str(self.TIMEOUT),
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
         }
 

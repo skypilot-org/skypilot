@@ -21,9 +21,10 @@ log_prefix = 'KubernetesNodeProvider: '
 class InvalidNamespaceError(ValueError):
 
     def __init__(self, field_name, namespace):
-        self.message = (f'Namespace of {field_name} config does not match provided '
-                        f'namespace "{namespace}". Either set it to {namespace} or remove the '
-                        'field')
+        self.message = (
+            f'Namespace of {field_name} config does not match provided '
+            f'namespace "{namespace}". Either set it to {namespace} or remove the '
+            'field')
 
     def __str__(self):
         return self.message
@@ -101,9 +102,8 @@ def fillout_resources_kubernetes(config):
             config['available_node_types'][node_type]['resources'])
         config['available_node_types'][node_type][
             'resources'] = autodetected_resources
-        logger.debug(
-            f'Updating the resources of node type {node_type} '
-            f'to include {autodetected_resources}.')
+        logger.debug(f'Updating the resources of node type {node_type} '
+                     f'to include {autodetected_resources}.')
     return config
 
 
@@ -284,8 +284,7 @@ def _configure_autoscaler_role_binding(namespace, provider_config):
         elif subject['namespace'] != namespace:
             subject_name = subject['name']
             raise InvalidNamespaceError(
-                binding_field + f' subject {subject_name}',
-                namespace)
+                binding_field + f' subject {subject_name}', namespace)
 
     name = binding['metadata']['name']
     field_selector = f'metadata.name={name}'
