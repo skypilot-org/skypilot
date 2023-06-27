@@ -627,7 +627,7 @@ class Storage(object):
         def validate_name(name):
             """ Checks for validating the storage name.
 
-            Checks if the name starts the s3, gcs, r2, oci prefix and raise
+            Checks if the name starts the s3, gcs, r2, or oci prefix and raise
             error if it does. Store specific validation checks (e.g., S3
             specific rules) happen in the corresponding store class.
             """
