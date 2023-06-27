@@ -70,6 +70,7 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
 from sky.usage import usage_lib
+import time
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
@@ -3736,6 +3737,7 @@ def spot_dashboard(port: Optional[int]):
 
     with subprocess.Popen(ssh_command, shell=True,
                           start_new_session=True) as ssh_process:
+        time.sleep(5)  # Added delay for ssh_command to initialize.
         webbrowser.open(f'http://localhost:{free_port}')
         click.secho(
             f'Dashboard is now available at: http://127.0.0.1:{free_port}',
