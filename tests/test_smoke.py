@@ -181,6 +181,22 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
         raise Exception(f'test failed: less {log_file.name}')
 
 
+def get_aws_region_for_quota_failover() -> Optional[str]:
+
+    candidate_regions = AWS.regions_with_offering(instance_type='p3.16xlarge',
+                                                  accelerators=None,
+                                                  use_spot=True,
+                                                  region=None,
+                                                  zone=None)
+
+    for region in candidate_regions:
+        if not AWS.check_quota_available(
+                region=region.name, instance_type='p3.16xlarge', use_spot=True):
+            return region.name
+
+    return None
+
+
 # ---------- Dry run: 2 Tasks in a chain. ----------
 def test_example_app():
     test = Test(
@@ -2197,6 +2213,26 @@ def test_azure_disk_tier():
             timeout=20 * 60,  # 20 mins  (it takes around ~12 mins)
         )
         run_one_test(test)
+
+
+# ------ Testing Zero Quota Failover ------
+@pytest.mark.aws
+def test_aws_zero_quota_failover():
+
+    name = _get_cluster_name()
+    region = get_aws_region_for_quota_failover()
+
+    if not region:
+        return
+
+    test = Test(
+        'aws-zero-quota-failover',
+        [
+            f'sky launch -y -c {name} --cloud aws --region {region} --gpus V100:8 --use-spot | grep "Found no quota"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
 
 
 # ------- Testing user ray cluster --------

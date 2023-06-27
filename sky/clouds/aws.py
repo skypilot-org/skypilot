@@ -416,13 +416,6 @@ class AWS(clouds.Cloud):
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
-        try:
-            # pylint: disable=import-outside-toplevel,unused-import
-            import boto3
-            import botocore
-        except ImportError:
-            raise ImportError('Fail to import dependencies for AWS.'
-                              'Try pip install "skypilot[aws]"') from None
 
         # Checks if the AWS CLI is installed properly
         proc = subprocess.run('aws --version',
@@ -478,7 +471,7 @@ class AWS(clouds.Cloud):
                         cls._STATIC_CREDENTIAL_HELP_STR)
 
         # Fetch the AWS catalogs
-        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
+        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel
         # Trigger the fetch of the availability zones mapping.
         aws_catalog.get_default_instance_type()
         return True, hints
@@ -694,6 +687,47 @@ class AWS(clouds.Cloud):
             'disk_throughput': tier2iops[tier] // 16,
             'custom_disk_perf': tier != 'low',
         }
+
+    @classmethod
+    def check_quota_available(cls,
+                              region: str,
+                              instance_type: str,
+                              use_spot: bool = False) -> bool:
+        """Check if AWS quota is available for `instance_type` in `region`.
+
+        AWS-specific implementation of check_quota_available. The function works by
+        matching the instance_type to the corresponding AWS quota code, and then using
+        the boto3 Python API to query the region for the specific quota code.
+
+        Returns:
+            False if the quota is found to be zero, and True otherwise.
+        Raises:
+            ImportError: if the dependencies for AWS are not able to be installed.
+            botocore.exceptions.ClientError: error in Boto3 client request.
+        """
+
+        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
+
+        quota_code = aws_catalog.get_quota_code(instance_type, use_spot)
+
+        if quota_code is None:
+            # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
+            return True
+
+        client = aws.client('service-quotas', region_name=region)
+        try:
+            response = client.get_service_quota(ServiceCode='ec2',
+                                                QuotaCode=quota_code)
+        except aws.botocore_exceptions().ClientError:
+            # Botocore client connection not established, try provisioning anyways
+            return True
+
+        if response['Quota']['Value'] == 0:
+            # Quota found to be zero, do not try provisioning
+            return False
+
+        # Quota found to be greater than zero, try provisioning
+        return True
 
     @classmethod
     def _query_instance_property_with_retries(

@@ -1357,6 +1357,36 @@ class RetryingVmProvisioner(object):
             to_provision, 'region should have been set by the optimizer.')
         region = clouds.Region(to_provision.region)
 
+        # Optimization - check if user has non-zero quota for
+        # the instance type in the target region. If not, fail early
+        # instead of trying to provision and failing later.
+        try:
+            need_provision = to_provision.cloud.check_quota_available(
+                to_provision.region, to_provision.instance_type,
+                to_provision.use_spot)
+
+        except Exception as e:  # pylint: disable=broad-except
+            need_provision = True
+            logger.info(f'Error occurred when trying to check quota. '
+                        f'Proceeding assuming quotas are available. Error: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
+
+        if not need_provision:
+            # if quota is found to be zero, raise exception and skip to
+            # the next region
+            if to_provision.use_spot:
+                instance_descriptor = 'spot'
+            else:
+                instance_descriptor = 'on-demand'
+            raise exceptions.ResourcesUnavailableError(
+                f'{colorama.Fore.YELLOW}Found no quota for '
+                f'{to_provision.instance_type} {instance_descriptor} '
+                f'instances in region {to_provision.region}. '
+                f'{colorama.Style.RESET_ALL}'
+                f'To request quotas, check the instruction: '
+                f'https://skypilot.readthedocs.io/en/latest/cloud-setup/quota.html.'  # pylint: disable=line-too-long
+            )
+
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status):
             # Filter out zones that are blocked, if any.

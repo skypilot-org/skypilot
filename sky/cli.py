@@ -33,6 +33,7 @@ import signal
 import subprocess
 import sys
 import textwrap
+import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 import webbrowser
@@ -3741,7 +3742,7 @@ def spot_dashboard(port: Optional[int]):
     click.secho('Checking if spot controller is up...', fg='yellow')
     hint = (
         'Dashboard is not available if spot controller is not up. Run a spot '
-        'job first, or use `sky start` to bring up an existing controller.')
+        'job first.')
     _, handle = spot_lib.is_spot_controller_up(stopped_message=hint,
                                                non_existent_message=hint)
     if handle is None:
@@ -3759,6 +3760,7 @@ def spot_dashboard(port: Optional[int]):
 
     with subprocess.Popen(ssh_command, shell=True,
                           start_new_session=True) as ssh_process:
+        time.sleep(3)  # Added delay for ssh_command to initialize.
         webbrowser.open(f'http://localhost:{free_port}')
         click.secho(
             f'Dashboard is now available at: http://127.0.0.1:{free_port}',
