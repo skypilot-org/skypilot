@@ -44,32 +44,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
     <script
         src="https://cdnjs.cloudflare.com/ajax/libs/moment-timezone/0.5.33/moment-timezone-with-data.min.js"></script>
-    <script>
-        function filterByStatus() {
-            var select, filter, table, tr, td, i;
-            select = document.getElementById("statusFilter");
-            filter = select.value.toUpperCase();
-            table = document.getElementById("spotTable");
-            tr = table.getElementsByTagName("tr");
-            
-            for (i = 1; i < tr.length; i++) {
-                td = tr[i].getElementsByTagName("td")[8];
-                if (td) {
-                    tr[i].style.display = "none";
-                    if (filter === "") {
-                        tr[i].style.display = "";
-                    }
-                    var span = td.getElementsByTagName("span");
-                    if (span) {
-                        var txtValue = span[0].textContent;
-                        if (txtValue.toUpperCase() === filter) {
-                            tr[i].style.display = "";
-                        } 
-                    }
-                }
-            }
-        }
-    </script>
 </head>
 
 <body>
@@ -91,7 +65,7 @@
                     {% for column in columns %}
                     {% if column == "Status" %}
                     <th>
-                        <select id="statusFilter" onchange="filterByStatus()">
+                        <select id="statusFilter" onchange="filterByStatus(this)">
                             <option value="">All Status</option>
                             <option value="RUNNING">RUNNING</option>
                             <option value="PENDING">PENDING</option>
@@ -184,20 +158,30 @@
         handleAutoRefresh();
     </script>
     <script>
-        function filterStatus(status) {
-            var rows = document.querySelectorAll("#spot-jobs-table tbody tr");
-            rows.forEach(function (row) {
-                var statusCell = row.querySelector("td:nth-child(9)");
-
-                if (status === '' || statusCell.textContent === status) {
-                    row.style.display = "";
-                } else {
-                    row.style.display = "none";
+        function filterByStatus(select) {
+            var filter, table, tr, td, i;
+            filter = select.value.toUpperCase();
+            table = document.getElementById("spotTable");
+            tr = table.getElementsByTagName("tr");
+            
+            for (i = 1; i < tr.length; i++) {
+                td = tr[i].getElementsByTagName("td")[8];
+                if (td) {
+                    tr[i].style.display = "none";
+                    if (filter === "") {
+                        tr[i].style.display = "";
+                    }
+                    var span = td.getElementsByTagName("span");
+                    if (span) {
+                        var txtValue = span[0].textContent;
+                        if (txtValue.toUpperCase() === filter) {
+                            tr[i].style.display = "";
+                        } 
+                    }
                 }
-            });
+            }
         }
     </script>
-
 </body>
 
 </html>
