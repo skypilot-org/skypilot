@@ -1766,7 +1766,7 @@ def check_can_clone_disk_and_override_task(
             if target_cluster_name is None:
                 target_cluster_name_str = ''
             raise exceptions.NotSupportedError(
-                f'The target cluster {target_cluster_name_str} should have a disk size '
+                f'The target cluster{target_cluster_name_str} should have a disk size '
                 f'of at least {handle.launched_resources.disk_size} GB to clone the '
                 f'disk from {cluster_name!r}.')
     override_param = {}
