@@ -28,15 +28,21 @@ logger = sky_logging.init_logger(__name__)
 # gcloud:
 # https://cloud.google.com/docs/authentication/provide-credentials-adc#local-key
 _GCP_APPLICATION_CREDENTIAL_ENV = 'GOOGLE_APPLICATION_CREDENTIALS'
-DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH: str = os.path.expanduser(
+# NOTE: do not expanduser() on this path. It's used as a destination path on the
+# remote cluster.
+DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH: str = (
     '~/.config/gcloud/'
     'application_default_credentials.json')
 
 # TODO(wei-lin): config_default may not be the config in use.
 # See: https://github.com/skypilot-org/skypilot/pull/1539
+# NOTE: do not expanduser() on this path. It's used as a destination path on the
+# remote cluster.
 GCP_CONFIG_PATH = '~/.config/gcloud/configurations/config_default'
 # Do not place the backup under the gcloud config directory, as ray
 # autoscaler can overwrite that directory on the remote nodes.
+# NOTE: do not expanduser() on this path. It's used as a destination path on the
+# remote cluster.
 GCP_CONFIG_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
 
 # Minimum set of files under ~/.config/gcloud that grant GCP access.
@@ -48,6 +54,8 @@ _CREDENTIAL_FILES = [
     'active_config',
 ]
 
+# NOTE: do not expanduser() on this path. It's used as a destination path on the
+# remote cluster.
 _GCLOUD_INSTALLATION_LOG = '~/.sky/logs/gcloud_installation.log'
 _GCLOUD_VERSION = '424.0.0'
 # Need to be run with /bin/bash
@@ -705,7 +713,8 @@ class GCP(clouds.Cloud):
         if project_id is None:
             raise exceptions.CloudUserIdentityError(
                 'Failed to get GCP project id. Please make sure you have '
-                'run: gcloud init')
+                'run the following: gcloud init; '
+                'gcloud auth application-default login')
         return project_id
 
     @staticmethod
