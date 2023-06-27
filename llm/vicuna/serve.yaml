@@ -15,19 +15,19 @@ setup: |
   pip install git+https://github.com/lm-sys/FastChat.git
 
   echo "Downloading model..."
-  python3 -u -c "from transformers import AutoModelForCausalLM; AutoModelForCausalLM.from_pretrained('lmsys/vicuna-${MODEL_SIZE}b-v1.3')"
+  python -u -c "from transformers import AutoModelForCausalLM; AutoModelForCausalLM.from_pretrained('lmsys/vicuna-${MODEL_SIZE}b-v1.3')"
 
 run: |
   conda activate chatbot
   
   echo 'Starting controller...'
-  python3 -m fastchat.serve.controller > ~/controller.log 2>&1 &
+  python -m fastchat.serve.controller > ~/controller.log 2>&1 &
   sleep 10
   echo 'Starting model worker...'
-  python3 -m fastchat.serve.model_worker --model-path lmsys/vicuna-${MODEL_SIZE}b-v1.3 > ~/model_worker.log 2>&1 &
+  python -m fastchat.serve.model_worker --model-path lmsys/vicuna-${MODEL_SIZE}b-v1.3 > ~/model_worker.log 2>&1 &
   sleep 20
   echo 'Starting gradio server...'
-  python3 -m fastchat.serve.gradio_web_server --share | tee ~/gradio.log
+  python -m fastchat.serve.gradio_web_server --share | tee ~/gradio.log
 
 envs:
   MODEL_SIZE: 7

@@ -1,6 +1,5 @@
 resources:
-  accelerators: A100
-  disk_tier: high
+  accelerators: A100-80GB:8
 
 setup: |
   conda activate vllm
@@ -19,10 +18,12 @@ setup: |
 run: |
   conda activate vllm
   echo "Downloading model..."
-  python3 -u -c "from transformers import AutoModelForCausalLM; AutoModelForCausalLM.from_pretrained('${MODEL_NAME}')"
+  python -u -c "from transformers import AutoModelForCausalLM; AutoModelForCausalLM.from_pretrained('${MODEL_NAME}')"
 
   echo 'Starting vllm api server...'
-  python -m vllm.entrypoints.api_server --model $MODEL_NAME &
+  python -m vllm.entrypoints.api_server \
+    --model $MODEL_NAME \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE &
 
   sleep 10
 
@@ -30,4 +31,4 @@ run: |
   python vllm/examples/gradio_webserver.py
 
 envs:
-  MODEL_NAME: lmsys/vicuna-7b-v1.3
+  MODEL_NAME: lmsys/vicuna-13b-v1.3

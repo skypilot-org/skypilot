@@ -23,7 +23,7 @@ See the vLLM SkyPilot YAML for [serving](serve.yaml).
 
 1. Start the serving the Vicuna-7B model on a single A100 GPU:
 ```bash
-sky launch -c vLLM-serve -s serve.yaml
+sky launch -c vllm-serve -s serve.yaml
 ```
 2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to chat with Vicuna.
 ```
@@ -38,12 +38,7 @@ sky launch -c vLLM-serve -s serve.yaml
 </p>
 
 
-3. [Optional] Try other GPUs:
+3. [Optional] Serve the 7B model instead of the default 13B and use less GPU:
 ```bash
-sky launch -c vicuna-serve-v100 -s serve.yaml --gpus V100
-```
-
-4. [Optional] Serve the 13B model instead of the default 7B:
-```bash
-sky launch -c vicuna-serve -s serve.yaml --env MODEL_NAME=lmsys/vicuna-13b-v1.3
+sky launch -c vicuna-vllm -s serve.yaml --gpus A100:1 --env MODEL_NAME=lmsys/vicuna-7b-v1.3
 ```
