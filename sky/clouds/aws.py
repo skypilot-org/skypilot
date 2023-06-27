@@ -142,7 +142,7 @@ class AWS(clouds.Cloud):
             for r in regions:
                 assert r.zones is not None, r
                 r.set_zones([z for z in r.zones if z.name == zone])
-        regions = [r for r in regions if r.zones]
+            regions = [r for r in regions if r.zones]
         return regions
 
     @classmethod
