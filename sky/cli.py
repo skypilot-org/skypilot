@@ -3065,7 +3065,7 @@ def show_gpus(
         if accelerator_str is None:
             result = service_catalog.list_accelerator_counts(
                 gpus_only=True,
-                clouds=cloud.lower(),
+                clouds=cloud,
                 region_filter=region,
             )
             # "Common" GPUs
@@ -3119,7 +3119,7 @@ def show_gpus(
                                                    name_filter=name,
                                                    quantity_filter=quantity,
                                                    region_filter=region,
-                                                   clouds=cloud.lower())
+                                                   clouds=cloud)
         if len(result) == 0:
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
