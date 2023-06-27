@@ -39,7 +39,7 @@ You can grant those accesses via GCP's `IAM & Admin console <https://console.clo
 Minimal Permissions
 -----------------------
 
-The :ref:`Medium Permissions <medium-permissions>` assigns admin permissions for some GCP services to the user.  If you would like to grant finer-grained and more minimal permissions to your users in your organization / project, you can create a custom role by following the steps below:
+The :ref:`Medium Permissions <gcp-medium-permissions>` assigns admin permissions for some GCP services to the user.  If you would like to grant finer-grained and more minimal permissions to your users in your organization / project, you can create a custom role by following the steps below:
 
 User
 ~~~~~~~~~~~~
