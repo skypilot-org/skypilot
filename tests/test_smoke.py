@@ -2456,41 +2456,13 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.xdist_group('multiple_bucket_deletion')
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
     def test_multiple_buckets_creation_and_deletion(
             self, tmp_multiple_scratch_storage_obj, store_type):
-        # Staggering tests for each store type to prevent BucketDeleteError
-        # exception due to concurrent delete all
-        if store_type.value == 'S3':
-            time.sleep(0)
-        elif store_type.value == 'GCS':
-            time.sleep(10)
-            storage_obj_name = int(
-                subprocess.check_output(
-                    ["sky storage ls|wc -l"],
-                    shell=True).decode('utf-8').splitlines()[0]) - 1
-            while storage_obj_name > 0:
-                time.sleep(5)
-                storage_obj_name = int(
-                    subprocess.check_output(
-                        ["sky storage ls|wc -l"],
-                        shell=True).decode('utf-8').splitlines()[0]) - 1
-        elif store_type.value == 'R2':
-            time.sleep(20)
-            storage_obj_name = int(
-                subprocess.check_output(
-                    ["sky storage ls|wc -l"],
-                    shell=True).decode('utf-8').splitlines()[0]) - 1
-            while storage_obj_name > 0:
-                time.sleep(5)
-                storage_obj_name = int(
-                    subprocess.check_output(
-                        ["sky storage ls|wc -l"],
-                        shell=True).decode('utf-8').splitlines()[0]) - 1
-
         # Creates multiple new buckets(5 buckets) with a local source
         # and deletes them.
         storage_obj_name = []
