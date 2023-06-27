@@ -58,7 +58,6 @@ class Resources:
         All fields are optional.  ``Resources.is_launchable`` decides whether
         the Resources is fully specified to launch an instance.
 
-
         Examples:
           .. code-block:: python
 
