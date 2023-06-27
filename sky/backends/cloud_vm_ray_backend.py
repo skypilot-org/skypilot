@@ -3327,7 +3327,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'It might be because the cluster\'s head node has already '
                     'been terminated. It is fine to skip this.')
             if terminate:
-                provision_api.terminate_instances(repr(cloud), region, cluster_name)
+                provision_api.terminate_instances(repr(cloud), region,
+                                                  cluster_name)
             else:
                 provision_api.stop_instances(repr(cloud), region, cluster_name)
 
