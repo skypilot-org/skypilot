@@ -65,15 +65,15 @@
                     {% for column in columns %}
                     {% if column == "Status" %}
                     <th>
-                        <select id="statusFilter" onchange="filterByStatus(this)">
+                        <select id="statusFilter" onchange="filterByStatus(this.value)">
                             <option value="">All Status</option>
-                            <option value="RUNNING">RUNNING</option>
-                            <option value="PENDING">PENDING</option>
                             <option value="SUBMITTED">SUBMITTED</option>
-                            <option value="RECOVERING">RECOVERING</option>
-                            <option value="CANCELLING">CANCELLING</option>
+                            <option value="PENDING">PENDING</option>
                             <option value="STARTING">STARTING</option>
+                            <option value="RUNNING">RUNNING</option>
+                            <option value="RECOVERING">RECOVERING</option>
                             <option value="SUCCEEDED">SUCCEEDED</option>
+                            <option value="CANCELLING">CANCELLING</option>
                             <option value="CANCELLED">CANCELLED</option>
                             <option value="FAILED">FAILED</option>
                         </select>
@@ -158,28 +158,25 @@
         handleAutoRefresh();
     </script>
     <script>
-        function filterByStatus(select) {
-            var filter, table, tr, td, i;
-            filter = select.value.toUpperCase();
-            table = document.getElementById("spotTable");
-            tr = table.getElementsByTagName("tr");
+        function filterByStatus(status) {
+            var table = document.getElementById("spotTable");
+            var rows = table.getElementsByTagName("tr");
             
-            for (i = 1; i < tr.length; i++) {
-                td = tr[i].getElementsByTagName("td")[8];
-                if (td) {
-                    tr[i].style.display = "none";
-                    if (filter === "") {
-                        tr[i].style.display = "";
+            for (row of rows) {
+                var statusCell = row.getElementsByTagName("td")[8];
+                if (statusCell) {
+                    row.style.display = "none";
+                    if (status === "") {
+                        row.style.display = "";
                     }
-                    var span = td.getElementsByTagName("span");
+                    var span = statusCell.getElementsByTagName("span");
                     if (span) {
-                        var txtValue = span[0].textContent;
-                        if (txtValue.toUpperCase() === filter) {
-                            tr[i].style.display = "";
+                        if (span[0].textContent === status) {
+                            row.style.display = "";
                         } 
                     }
                 }
-            }
+            };
         }
     </script>
 </body>
