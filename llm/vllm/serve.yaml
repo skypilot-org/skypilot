@@ -1,0 +1,33 @@
+resources:
+  accelerators: A100
+  # Note: The disk_tier option is not offered in skypilot<=0.2.5, we need
+  # to install SkyPilot from source.
+  disk_tier: high
+
+setup: |
+  conda activate vllm
+  if [ $? -ne 0 ]; then
+    conda create -n vllm python=3.9 -y
+    conda activate vllm
+  fi
+
+  git clone https://github.com/vllm-project/vllm.git || true
+
+  cd vllm
+  pip list | grep vllm || pip install .
+  pip install gradio
+
+  echo "Downloading model..."
+  python3 -u -c "from transformers import AutoModelForCausalLM; AutoModelForCausalLM.from_pretrained('${MODEL_NAME}')"
+
+run: |
+  conda activate vllm
+
+  echo 'Starting vllm api server...'
+  python -m vllm.entrypoints.api_server --model $MODEL_NAME &
+
+  echo 'Starting gradio server...'
+  python vllm/examples/gradio_webserver.py
+
+envs:
+  MODEL_NAME: lmsys/vicuna-7b-v1.3
