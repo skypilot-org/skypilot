@@ -3737,7 +3737,7 @@ def spot_dashboard(port: Optional[int]):
 
     with subprocess.Popen(ssh_command, shell=True,
                           start_new_session=True) as ssh_process:
-        time.sleep(5)  # Added delay for ssh_command to initialize.
+        time.sleep(3)  # Added delay for ssh_command to initialize.
         webbrowser.open(f'http://localhost:{free_port}')
         click.secho(
             f'Dashboard is now available at: http://127.0.0.1:{free_port}',
