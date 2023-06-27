@@ -763,6 +763,8 @@ def test_gcp_storage_mounts():
 @pytest.mark.kubernetes
 def test_kubernetes_storage_mounts():
     # Tests bucket mounting on k8s, assuming S3 is configured.
+    # This test will fail if run on non x86_64 architecture, since goofys is
+    # built for x86_64 only.
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(

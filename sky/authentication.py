@@ -19,7 +19,8 @@ import yaml
 from sky import clouds
 from sky import sky_logging
 from sky.adaptors import gcp, ibm
-from sky.utils import common_utils, env_options
+from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.skylet.providers.lambda_cloud import lambda_utils
@@ -467,7 +468,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             logger.warning(
                 f'Key {key_label} already exists in the cluster, using it...')
             pass
-        elif any([err in output for err in ['connection refused', 'timeout']]):
+        elif any(err in output for err in ['connection refused', 'timeout']):
             with ux_utils.print_exception_no_traceback():
                 raise ConnectionError(
                     'Failed to connect to the cluster. Check if your '

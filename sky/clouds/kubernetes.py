@@ -125,6 +125,10 @@ class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
+
+    # TODO(romilb): Make the timeout configurable.
+    TIMEOUT = 60  # Timeout for resource provisioning
+
     _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 1
     _REPR = 'Kubernetes'
@@ -196,7 +200,9 @@ class Kubernetes(clouds.Cloud):
             memory: Optional[str] = None,
             disk_tier: Optional[str] = None) -> Optional[str]:
         del disk_tier  # Unused.
-        # TODO - Allow fractional CPUs and memory
+        # TODO(romilb): Allow fractional CPUs and memory
+        # We strip '+' from resource requests since Kubernetes can provision
+        # exactly the requested resources.
         instance_cpus = int(
             cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
         instance_mem = int(
@@ -259,15 +265,14 @@ class Kubernetes(clouds.Cloud):
         # We fetch the default values for the instance type in that case.
         cpus, mem = self.get_vcpus_mem_from_instance_type(
             resources.instance_type)
-        # TODO(romilb): Allow fractional resources here
-        # cpus = int(cpus)
-        # mem = int(mem)
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
             'cpus': str(cpus),
-            'memory': str(mem)
+            'memory': str(mem),
+            'timeout': self.TIMEOUT,
+            'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
         }
 
     def get_feasible_launchable_resources(self,

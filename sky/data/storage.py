@@ -1196,7 +1196,6 @@ class S3Store(AbstractStore):
                        'releases/download/0.24.0-romilb-upstream/goofys '
                        '-O /usr/local/bin/goofys && '
                        'sudo chmod +x /usr/local/bin/goofys')
-        install_cmd = ('exit 1')
         mount_cmd = ('goofys -o allow_other '
                      f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
                      f'--type-cache-ttl {self._TYPE_CACHE_TTL} '

@@ -56,9 +56,10 @@ def _load_config():
                 suffix = ''
                 if env_options.Options.SHOW_DEBUG_INFO.get():
                     suffix += f' Error: {str(e)}'
-                raise ValueError('Failed to load Kubernetes configuration. '
-                                 f'Please check your kubeconfig file is it valid. {suffix}') from None
-
+                raise ValueError(
+                    'Failed to load Kubernetes configuration. '
+                    f'Please check your kubeconfig file is it valid. {suffix}'
+                ) from None
 
     _configured = True
 

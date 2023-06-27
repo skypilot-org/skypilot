@@ -60,11 +60,12 @@ from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.utils import log_utils, env_options
 from sky.utils import common_utils
-from sky.utils import dag_utils
 from sky.utils import command_runner
+from sky.utils import dag_utils
+from sky.utils import env_options
 from sky.utils import kubernetes_utils
+from sky.utils import log_utils
 from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -3038,6 +3039,10 @@ def show_gpus(
     type is the lowest across all regions for both on-demand and spot
     instances. There may be multiple regions with the same lowest price.
     """
+    # validation for the --cloud kubernetes
+    if cloud ==  'kubernetes':
+        raise click.UsageError(
+            'Kubernetes does not have a service catalog.')
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(

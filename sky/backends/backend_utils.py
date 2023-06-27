@@ -860,8 +860,8 @@ def write_cluster_config(
     k8s_image = None
     ssh_key_secret_name = None
     if isinstance(cloud, clouds.Kubernetes):
+        # TODO(romilb): Make this read from image id in the task
         k8s_image = cloud.IMAGE
-        ssh_key_secret_name = cloud.SKY_SSH_KEY_SECRET_NAME
 
     ip_list = None
     auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}

@@ -23,6 +23,8 @@ provider:
     # TODO(romilb): Make this configurable.
     namespace: default
 
+    timeout: {{timeout}}
+
     # ServiceAccount created by the autoscaler for the head node pod that it
     # runs in. If this field isn't provided, the head pod config below must
     # contain a user-created service account with the proper permissions.
@@ -120,7 +122,7 @@ available_node_types:
     max_workers: {{num_nodes - 1}}
     # User-specified custom resources for use by Ray. Object with string keys and integer values.
     # (Ray detects CPU and GPU from pod spec resource requests and limits, so no need to fill those here.)
-    resources: {"example-resource-a": 1, "example-resource-b": 2}
+    # resources: {"example-resource-a": 1, "example-resource-b": 2}
     node_config:
       apiVersion: v1
       kind: Pod
@@ -135,7 +137,7 @@ available_node_types:
         volumes:
         - name: secret-volume
           secret:
-            secretName: {{ssh_key_secret_name}}
+            secretName: {{k8s_ssh_key_secret_name}}
         - name: dshm
           emptyDir:
             medium: Memory
@@ -165,7 +167,7 @@ available_node_types:
             name: dshm
           - mountPath: /dev/fuse    # Required for fuse mounting
             name: dev-fuse
-          securityContext:          # Required for FUSE mounting, but may be a security risk
+          securityContext:          # Required for FUSE mounting. TODO(romilb) - evaluate security risk
             privileged: true
           resources:
             requests:
@@ -206,7 +208,7 @@ available_node_types:
         volumes:
         - name: secret-volume
           secret:
-            secretName: {{ssh_key_secret_name}}
+            secretName: {{k8s_ssh_key_secret_name}}
         - name: dshm
           emptyDir:
             medium: Memory
@@ -260,7 +262,6 @@ available_node_types:
               memory: {{memory}}G
 
 setup_commands:
-  # TODO(romilb): Clean up setup commands which are irrelevant to k8s.
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Create ~/.ssh/config file in case the file does not exist in the image.
   # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
