@@ -3038,13 +3038,15 @@ def show_gpus(
     type is the lowest across all regions for both on-demand and spot
     instances. There may be multiple regions with the same lowest price.
     """
+    # Convert to lowercase preventing case-based errors
+    cloud_lowercase = cloud.lower() if cloud else None
     # validation for the --region flag
-    if region is not None and cloud is None:
+    if region is not None and cloud_lowercase is None:
         raise click.UsageError(
             'The --region flag is only valid when the --cloud flag is set.')
     # This will validate 'cloud' and raise if not found.
-    clouds.CLOUD_REGISTRY.from_str(cloud)
-    service_catalog.validate_region_zone(region, None, clouds=cloud)
+    clouds.CLOUD_REGISTRY.from_str(cloud_lowercase)
+    service_catalog.validate_region_zone(region, None, clouds=cloud_lowercase)
     show_all = all
     if show_all and accelerator_str is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
@@ -3065,7 +3067,7 @@ def show_gpus(
         if accelerator_str is None:
             result = service_catalog.list_accelerator_counts(
                 gpus_only=True,
-                clouds=cloud,
+                clouds=cloud_lowercase,
                 region_filter=region,
             )
             # "Common" GPUs
@@ -3119,7 +3121,7 @@ def show_gpus(
                                                    name_filter=name,
                                                    quantity_filter=quantity,
                                                    region_filter=region,
-                                                   clouds=cloud)
+                                                   clouds=cloud_lowercase)
         if len(result) == 0:
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
@@ -3128,7 +3130,7 @@ def show_gpus(
             yield 'to show available accelerators.'
             return
 
-        if cloud is None or cloud.lower() == 'gcp':
+        if cloud_lowercase is None or cloud_lowercase == 'gcp':
             yield '*NOTE*: for most GCP accelerators, '
             yield 'INSTANCE_TYPE == (attachable) means '
             yield 'the host VM\'s cost is not included.\n\n'
