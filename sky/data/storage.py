@@ -2188,7 +2188,7 @@ class OciStore(AbstractStore):
             if not re.match(pattern, name):
                 _raise_no_traceback_name_error(
                     f'Invalid store name: name {name} can only contain '
-                    'upper or lower case letters, numeric characters, dashes '
+                    'upper or lower case letters, numeric characters, hyphens '
                     '(-), underscores (_), and dots (.). Spaces are not '
                     'allowed. Names must start and end with a number or '
                     'letter.')
