@@ -44,7 +44,32 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
     <script
         src="https://cdnjs.cloudflare.com/ajax/libs/moment-timezone/0.5.33/moment-timezone-with-data.min.js"></script>
-
+    <script>
+        function filterByStatus() {
+            var select, filter, table, tr, td, i;
+            select = document.getElementById("statusFilter");
+            filter = select.value.toUpperCase();
+            table = document.getElementById("spotTable");
+            tr = table.getElementsByTagName("tr");
+            
+            for (i = 1; i < tr.length; i++) {
+                td = tr[i].getElementsByTagName("td")[8];
+                if (td) {
+                    tr[i].style.display = "none";
+                    if (filter === "") {
+                        tr[i].style.display = "";
+                    }
+                    var span = td.getElementsByTagName("span");
+                    if (span) {
+                        var txtValue = span[0].textContent;
+                        if (txtValue.toUpperCase() === filter) {
+                            tr[i].style.display = "";
+                        } 
+                    }
+                }
+            }
+        }
+    </script>
 </head>
 
 <body>
@@ -60,11 +85,28 @@
             </div>
         </header>
 
-        <table class="table table-hover table-hover-selected fixed-header-table">
+        <table class="table table-hover table-hover-selected fixed-header-table" id="spotTable">
             <thead>
                 <tr>
                     {% for column in columns %}
+                    {% if column == "Status" %}
+                    <th>
+                        <select id="statusFilter" onchange="filterByStatus()">
+                            <option value="">All Status</option>
+                            <option value="RUNNING">RUNNING</option>
+                            <option value="PENDING">PENDING</option>
+                            <option value="SUBMITTED">SUBMITTED</option>
+                            <option value="RECOVERING">RECOVERING</option>
+                            <option value="CANCELLING">CANCELLING</option>
+                            <option value="STARTING">STARTING</option>
+                            <option value="SUCCEEDED">SUCCEEDED</option>
+                            <option value="CANCELLED">CANCELLED</option>
+                            <option value="FAILED">FAILED</option>
+                        </select>
+                    </th>
+                    {% else %}
                     <th>{{ column }}</th>
+                    {% endif %}
                     {% endfor %}
                 </tr>
             </thead>
