@@ -552,6 +552,46 @@ def test_gcp_image_id_dict_zone():
 
 
 @pytest.mark.aws
+def test_clone_disk_aws():
+    name = _get_cluster_name()
+    test = Test(
+        'clone_disk_aws',
+        [
+            f'sky launch -y -c {name} --cloud aws --region us-east-2 --retry-until-up "echo hello > ~/user_file.txt"',
+            f'sky launch --clone-disk-from {name} -y -c {name}-clone && exit 1 || true',
+            f'sky stop {name} -y',
+            'sleep 60',
+            f'sky launch --clone-disk-from {name} -y -c {name}-clone --cloud aws -d --region us-west-2 "cat ~/user_file.txt | grep hello"',
+            f'sky launch --clone-disk-from {name} -y -c {name}-clone-2 --cloud aws -d --region us-east-2 "cat ~/user_file.txt | grep hello"',
+            f'sky logs {name}-clone 1 --status',
+            f'sky logs {name}-clone-2 1 --status',
+        ],
+        f'sky down -y {name} {name}-clone {name}-clone-2',
+        timeout=30 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_clone_disk_gcp():
+    name = _get_cluster_name()
+    test = Test(
+        'clone_disk_gcp',
+        [
+            f'sky launch -y -c {name} --cloud gcp --zone us-east1-b --retry-until-up "echo hello > ~/user_file.txt"',
+            f'sky launch --clone-disk-from {name} -y -c {name}-clone && exit 1 || true',
+            f'sky stop {name} -y',
+            f'sky launch --clone-disk-from {name} -y -c {name}-clone --cloud gcp --zone us-central1-a "cat ~/user_file.txt | grep hello"',
+            f'sky launch --clone-disk-from {name} -y -c {name}-clone-2 --cloud gcp --zone us-east1-b "cat ~/user_file.txt | grep hello"',
+            f'sky logs {name}-clone 1 --status',
+            f'sky logs {name}-clone-2 1 --status',
+        ],
+        f'sky down -y {name} {name}-clone {name}-clone-2',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.aws
 def test_image_no_conda():
     name = _get_cluster_name()
     test = Test(
@@ -1284,7 +1324,7 @@ def test_azure_start_stop():
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             'sleep 200',
-            f's=$(sky status -r {name}) | echo $s && echo $s | grep "INIT\|STOPPED"'
+            f's=$(sky status -r {name}) && echo $s && echo $s | grep "INIT\|STOPPED"'
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # 30 mins

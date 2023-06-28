@@ -1662,6 +1662,13 @@ def check_owner_identity(cluster_name: str) -> None:
                 f'is {current_user_identity!r}.')
 
 
+def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
+    """Returns a tag filter for the cluster."""
+    return {
+        'ray-cluster-name': cluster_name,
+    }
+
+
 def _query_cluster_status_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
 ) -> List[status_lib.ClusterStatus]:
@@ -1680,7 +1687,7 @@ def _query_cluster_status_via_cloud_api(
 
     # Query the cloud provider.
     node_statuses = handle.launched_resources.cloud.query_status(
-        cluster_name, {'ray-cluster-name': cluster_name}, region, zone,
+        cluster_name, tag_filter_for_cluster(cluster_name), region, zone,
         **kwargs)
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
     # TODO(wei-lin): handle multi-node cases.
@@ -1702,6 +1709,95 @@ def _query_cluster_status_via_cloud_api(
                                  post_teardown_cleanup=False,
                                  refresh_cluster_status=False)
     return node_statuses
+
+
+def check_can_clone_disk_and_override_task(
+    cluster_name: str, target_cluster_name: Optional[str], task: 'task_lib.Task'
+) -> Tuple['task_lib.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']:
+    """Check if the task is compatible to clone disk from the source cluster.
+
+    Args:
+        cluster_name: The name of the cluster to clone disk from.
+        target_cluster_name: The name of the target cluster.
+        task: The task to check.
+
+    Returns:
+        The task to use and the resource handle of the source cluster.
+
+    Raises:
+        ValueError: If the source cluster does not exist.
+        exceptions.NotSupportedError: If the source cluster is not valid or the
+            task is not compatible to clone disk from the source cluster.
+    """
+    source_cluster_status, handle = refresh_cluster_status_handle(cluster_name)
+    if source_cluster_status is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Cannot find cluster {cluster_name!r} to clone disk from.')
+
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                f'Cannot clone disk from a non-cloud cluster {cluster_name!r}.')
+
+    if source_cluster_status != status_lib.ClusterStatus.STOPPED:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                f'Cannot clone disk from cluster {cluster_name!r} '
+                f'({source_cluster_status!r}). Please stop the '
+                f'cluster first: sky stop {cluster_name}')
+
+    if target_cluster_name is not None:
+        target_cluster_status, _ = refresh_cluster_status_handle(
+            target_cluster_name)
+        if target_cluster_status is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'The target cluster {target_cluster_name!r} already exists. Cloning '
+                    'disk is only supported when creating a new cluster. To fix: specify '
+                    'a new target cluster name.')
+
+    assert len(task.resources) == 1, task.resources
+    task_resources = list(task.resources)[0]
+    if handle.launched_resources.disk_size > task_resources.disk_size:
+        # The target cluster's disk should be at least as large as the source.
+        with ux_utils.print_exception_no_traceback():
+            target_cluster_name_str = f' {target_cluster_name!r}'
+            if target_cluster_name is None:
+                target_cluster_name_str = ''
+            raise exceptions.NotSupportedError(
+                f'The target cluster{target_cluster_name_str} should have a disk size '
+                f'of at least {handle.launched_resources.disk_size} GB to clone the '
+                f'disk from {cluster_name!r}.')
+    override_param = {}
+    original_cloud = handle.launched_resources.cloud
+    assert original_cloud is not None, handle.launched_resources
+    if task_resources.cloud is None:
+        override_param['cloud'] = original_cloud
+    else:
+        if not original_cloud.is_same_cloud(task_resources.cloud):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot clone disk across cloud from {original_cloud} to '
+                    f'{task_resources.cloud}.')
+    original_cloud.check_features_are_supported(
+        {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
+
+    if task_resources.region is None:
+        override_param['region'] = handle.launched_resources.region
+
+    if override_param:
+        logger.info(
+            f'No cloud/region specified for the task. Using the same region '
+            f'as source cluster {cluster_name!r}: '
+            f'{handle.launched_resources.cloud}'
+            f'({handle.launched_resources.region}).')
+        task_resources = task_resources.copy(**override_param)
+        task.set_resources({task_resources})
+        # Reset the best_resources to triger re-optimization
+        # later, so that the new task_resources will be used.
+        task.best_resources = None
+    return task, handle
 
 
 def _update_cluster_status_no_lock(

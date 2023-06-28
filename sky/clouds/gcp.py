@@ -15,6 +15,7 @@ from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.skylet import log_lib
 from sky.utils import common_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -116,7 +117,7 @@ class GCP(clouds.Cloud):
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return dict()
+        return {}
 
     @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:
@@ -747,6 +748,10 @@ class GCP(clouds.Cloud):
         return tier2name[tier]
 
     @classmethod
+    def _label_filter_str(cls, tag_filters: Dict[str, str]) -> str:
+        return ' '.join(f'labels.{k}={v}' for k, v in tag_filters.items())
+
+    @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
@@ -756,8 +761,7 @@ class GCP(clouds.Cloud):
         from sky.utils import tpu_utils  # pylint: disable=import-outside-toplevel
         use_tpu_vm = kwargs.pop('use_tpu_vm', False)
 
-        label_filter_str = ' '.join(
-            f'labels.{k}={v}' for k, v in tag_filters.items())
+        label_filter_str = cls._label_filter_str(tag_filters)
         if use_tpu_vm:
             # TPU VM's state definition is different from compute VM
             # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#State # pylint: disable=line-too-long
@@ -822,3 +826,91 @@ class GCP(clouds.Cloud):
             status_list.append(status)
 
         return status_list
+
+    @classmethod
+    def create_image_from_cluster(cls, cluster_name: str,
+                                  tag_filters: Dict[str,
+                                                    str], region: Optional[str],
+                                  zone: Optional[str]) -> str:
+        del region  # unused
+        assert zone is not None
+        label_filter_str = cls._label_filter_str(tag_filters)
+        instance_name_cmd = ('gcloud compute instances list '
+                             f'--filter="({label_filter_str})" '
+                             '--format="json(name)"')
+        returncode, stdout, stderr = subprocess_utils.run_with_retries(
+            instance_name_cmd,
+            retry_returncode=[255],
+        )
+        subprocess_utils.handle_returncode(
+            returncode,
+            instance_name_cmd,
+            error_msg=f'Failed to get instance name for {cluster_name!r}',
+            stderr=stderr,
+            stream_logs=True)
+        instance_names = json.loads(stdout)
+        if len(instance_names) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    'Only support creating image from single '
+                    f'instance, but got: {instance_names}')
+        instance_name = instance_names[0]['name']
+
+        image_name = f'skypilot-{cluster_name}-{int(time.time())}'
+        create_image_cmd = (f'gcloud compute images create {image_name} '
+                            f'--source-disk  {instance_name} '
+                            f'--source-disk-zone {zone}')
+        logger.debug(create_image_cmd)
+        subprocess_utils.run_with_retries(
+            create_image_cmd,
+            retry_returncode=[255],
+        )
+        subprocess_utils.handle_returncode(
+            returncode,
+            create_image_cmd,
+            error_msg=f'Failed to create image for {cluster_name!r}',
+            stderr=stderr,
+            stream_logs=True)
+
+        image_uri_cmd = (f'gcloud compute images describe {image_name} '
+                         '--format="get(selfLink)"')
+        returncode, stdout, stderr = subprocess_utils.run_with_retries(
+            image_uri_cmd,
+            retry_returncode=[255],
+        )
+
+        subprocess_utils.handle_returncode(
+            returncode,
+            image_uri_cmd,
+            error_msg=f'Failed to get image uri for {cluster_name!r}',
+            stderr=stderr,
+            stream_logs=True)
+
+        image_uri = stdout.strip()
+        image_id = image_uri.partition('projects/')[2]
+        image_id = 'projects/' + image_id
+        return image_id
+
+    @classmethod
+    def maybe_move_image(cls, image_id: str, source_region: str,
+                         target_region: str, source_zone: Optional[str],
+                         target_zone: Optional[str]) -> str:
+        del source_region, target_region, source_zone, target_zone  # Unused.
+        # GCP images are global, so no need to move.
+        return image_id
+
+    @classmethod
+    def delete_image(cls, image_id: str, region: Optional[str]) -> None:
+        del region  # Unused.
+        image_name = image_id.rpartition('/')[2]
+        delete_image_cmd = f'gcloud compute images delete {image_name} --quiet'
+        returncode, _, stderr = subprocess_utils.run_with_retries(
+            delete_image_cmd,
+            retry_returncode=[255],
+        )
+        subprocess_utils.handle_returncode(
+            returncode,
+            delete_image_cmd,
+            error_msg=f'Failed to delete image {image_name!r}',
+            stderr=stderr,
+            stream_logs=True)

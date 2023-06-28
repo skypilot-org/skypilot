@@ -724,12 +724,21 @@ def _launch_with_confirm(
     retry_until_up: bool = False,
     no_setup: bool = False,
     node_type: Optional[str] = None,
+    clone_disk_from: Optional[str] = None,
 ):
     """Launch a cluster with a Task."""
-    with sky.Dag() as dag:
-        dag.add(task)
     if cluster is None:
         cluster = backend_utils.generate_cluster_name()
+
+    clone_source_str = ''
+    if clone_disk_from is not None:
+        clone_source_str = f' from the disk of {clone_disk_from!r}'
+        task, _ = backend_utils.check_can_clone_disk_and_override_task(
+            clone_disk_from, cluster, task)
+
+    with sky.Dag() as dag:
+        dag.add(task)
+
     maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
     if maybe_status is None:
         # Show the optimize log before the prompt if the cluster does not exist.
@@ -755,7 +764,9 @@ def _launch_with_confirm(
             if onprem_utils.check_if_local_cloud(cluster):
                 prompt = f'Initializing local cluster{cluster_str}. Proceed?'
             else:
-                prompt = f'Launching a new cluster{cluster_str}. Proceed?'
+                prompt = (
+                    f'Launching a new cluster{cluster_str}{clone_source_str}. '
+                    'Proceed?')
         elif maybe_status == status_lib.ClusterStatus.STOPPED:
             prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
         if prompt is not None:
@@ -791,6 +802,7 @@ def _launch_with_confirm(
             down=down,
             retry_until_up=retry_until_up,
             no_setup=no_setup,
+            clone_disk_from=clone_disk_from,
         )
 
 
@@ -1258,6 +1270,15 @@ def cli():
               default=False,
               required=False,
               help='Skip setup phase when (re-)launching cluster.')
+@click.option(
+    '--clone-disk-from',
+    '--clone',
+    default=None,
+    type=str,
+    **_get_shell_complete_args(_complete_cluster_name),
+    help=('[Experimental] Clone disk from an existing cluster to launch '
+          'a new one. This is useful when the new cluster needs to have '
+          'the same data on the boot disk as an existing cluster.'))
 @usage_lib.entrypoint
 def launch(
     entrypoint: List[str],
@@ -1286,6 +1307,7 @@ def launch(
     retry_until_up: bool,
     yes: bool,
     no_setup: bool,
+    clone_disk_from: Optional[str],
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
@@ -1355,7 +1377,8 @@ def launch(
                          idle_minutes_to_autostop=idle_minutes_to_autostop,
                          down=down,
                          retry_until_up=retry_until_up,
-                         no_setup=no_setup)
+                         no_setup=no_setup,
+                         clone_disk_from=clone_disk_from)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
