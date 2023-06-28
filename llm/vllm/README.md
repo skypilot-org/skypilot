@@ -21,11 +21,11 @@ See the vLLM SkyPilot YAML for [serving](serve.yaml).
 
 ## Serve a model with vLLM by yourself with SkyPilot
 
-1. Start the serving the LlaMA-66B model on 8 A100 GPUs:
+1. Start the serving the LLaMA-66B model on 8 A100 GPUs:
 ```bash
 sky launch -c vllm-serve -s serve.yaml
 ```
-2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to chat with LlaMA.
+2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to chat with LLaMA.
 ```
 (task, pid=7431) Running on public URL: https://a8531352b74d74c7d2.gradio.live
 ```
