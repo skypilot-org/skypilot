@@ -560,7 +560,7 @@ def test_clone_disk_aws():
             f'sky launch -y -c {name} --cloud aws --region us-east-2 --retry-until-up "echo hello > ~/user_file.txt"',
             f'sky launch --clone-disk-from {name} -y -c {name}-clone && exit 1 || true',
             f'sky stop {name} -y',
-            'sleep 10',
+            'sleep 20',
             f'sky launch --clone-disk-from {name} -y -c {name}-clone --cloud aws --region us-west-2 "cat ~/user_file.txt | grep hello"',
             f'sky launch --clone-disk-from {name} -y -c {name}-clone-2 --cloud aws --region us-east-2 "cat ~/user_file.txt | grep hello"',
             f'sky logs {name}-clone 1 --status',
