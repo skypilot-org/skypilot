@@ -15,7 +15,7 @@ from sky import task as task_mod
 
 from ray.autoscaler._private.cli_logger import cli_logger
 from ray.autoscaler._private.command_runner import DockerCommandRunner
-from ray.autoscaler._private.docker import docker_start_cmds
+from ray.autoscaler._private.docker import check_docker_running_cmd
 
 logger = sky_logging.init_logger(__name__)
 
@@ -262,11 +262,71 @@ def bash_codegen(workdir_name: str,
     return script_contents
 
 
-class SkyDockerCommandRunner(DockerCommandRunner):
-    """A DockerCommandRunner that install rsync before running init.
+def docker_start_cmds(
+    user,
+    image,
+    mount_dict,
+    container_name,
+    user_options,
+    cluster_name,
+    home_directory,
+    docker_cmd,
+):
+    """Generating docker start command without --rm."""
+    del user  # unused
 
-    The code is borowed from
+    # pylint: disable=import-outside-toplevel
+    from ray.autoscaler.sdk import get_docker_host_mount_location
+
+    docker_mount_prefix = get_docker_host_mount_location(cluster_name)
+    mount = {f'{docker_mount_prefix}/{dst}': dst for dst in mount_dict}
+
+    mount_flags = ' '.join([
+        '-v {src}:{dest}'.format(src=k,
+                                 dest=v.replace('~/', home_directory + '/'))
+        for k, v in mount.items()
+    ])
+
+    # for click, used in ray cli
+    env_vars = {'LC_ALL': 'C.UTF-8', 'LANG': 'C.UTF-8'}
+    env_flags = ' '.join(
+        ['-e {name}={val}'.format(name=k, val=v) for k, v in env_vars.items()])
+
+    user_options_str = ' '.join(user_options)
+    docker_run = [
+        docker_cmd,
+        'run',
+        '--name {}'.format(container_name),
+        '-d',
+        '-it',
+        mount_flags,
+        env_flags,
+        user_options_str,
+        '--net=host',
+        image,
+        'bash',
+    ]
+    return ' '.join(docker_run)
+
+
+class SkyDockerCommandRunner(DockerCommandRunner):
+    """A DockerCommandRunner that
+        1. install rsync before running init;
+        2. reimplement docker stop to save the container after the host VM
+           is shut down.
+
+    The code is borrowed from
     `ray.autoscaler._private.command_runner.DockerCommandRunner`."""
+
+    def _check_container_exited(self) -> bool:
+        if self.initialized:
+            return True
+        output = (self.ssh_command_runner.run(
+            check_docker_running_cmd(self.container_name, self.docker_cmd),
+            with_output=True,
+        ).decode('utf-8').strip())
+        return 'false' in output.lower(
+        ) and 'no such object' not in output.lower()
 
     def run_init(self, *, as_head: bool, file_mounts: Dict[str, str],
                  sync_run_yet: bool):
@@ -279,6 +339,12 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             self.docker_config.get('image'))
 
         self._check_docker_installed()
+
+        if self._check_container_exited():
+            self.initialized = True
+            self.run(f'docker start {self.container_name}', run_env='host')
+            return True
+
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +
                                     'pull_before_run is specified')
@@ -305,6 +371,9 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                 specific_image, cleaned_bind_mounts)
             if requires_re_init:
                 self.run(f'{self.docker_cmd} stop {self.container_name}',
+                         run_env='host')
+                # Manualy rm here since --rm is not specified
+                self.run(f'{self.docker_cmd} rm {self.container_name}',
                          run_env='host')
 
         if (not container_running) or requires_re_init:
@@ -335,11 +404,6 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             user_docker_run_options = self.docker_config.get(
                 'run_options', []) + self.docker_config.get(
                     f'{"head" if as_head else "worker"}_run_options', [])
-
-            # Setup workdir mount for stop-start recovery
-            container_workdir = os.path.join(home_directory, 'sky_workdir')
-            user_docker_run_options += [f'-v ~/sky_workdir:{container_workdir}']
-
             start_command = docker_start_cmds(
                 self.ssh_command_runner.ssh_user,
                 specific_image,
@@ -356,8 +420,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
 
         self.run('apt-get update; apt-get install -y rsync')
         # Copy local authorized_keys to docker container
-        from sky.backends import docker_utils
-        container_name = docker_utils.DEFAULT_DOCKER_CONTAINER_NAME
+        container_name = DEFAULT_DOCKER_CONTAINER_NAME
         self.run(
             'rsync -e "docker exec -i" -avz ~/.ssh/authorized_keys '
             f'{container_name}:/tmp/host_ssh_authorized_keys',
