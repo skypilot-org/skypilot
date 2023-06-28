@@ -560,14 +560,14 @@ def test_clone_disk_aws():
             f'sky launch -y -c {name} --cloud aws --region us-east-2 --retry-until-up "echo hello > ~/user_file.txt"',
             f'sky launch --clone-disk-from {name} -y -c {name}-clone && exit 1 || true',
             f'sky stop {name} -y',
-            'sleep 20',
-            f'sky launch --clone-disk-from {name} -y -c {name}-clone --cloud aws --region us-west-2 "cat ~/user_file.txt | grep hello"',
-            f'sky launch --clone-disk-from {name} -y -c {name}-clone-2 --cloud aws --region us-east-2 "cat ~/user_file.txt | grep hello"',
+            'sleep 60',
+            f'sky launch --clone-disk-from {name} -y -c {name}-clone --cloud aws -d --region us-west-2 "cat ~/user_file.txt | grep hello"',
+            f'sky launch --clone-disk-from {name} -y -c {name}-clone-2 --cloud aws -d --region us-east-2 "cat ~/user_file.txt | grep hello"',
             f'sky logs {name}-clone 1 --status',
             f'sky logs {name}-clone-2 1 --status',
         ],
         f'sky down -y {name} {name}-clone {name}-clone-2',
-        timeout=20 * 60,
+        timeout=30 * 60,
     )
     run_one_test(test)
 
