@@ -30,4 +30,4 @@ run: |
   python vllm/examples/gradio_webserver.py
 
 envs:
-  MODEL_NAME: lmsys/vicuna-13b-v1.3
+  MODEL_NAME: decapoda-research/llama-65b-hf

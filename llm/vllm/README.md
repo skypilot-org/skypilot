@@ -21,15 +21,12 @@ See the vLLM SkyPilot YAML for [serving](serve.yaml).
 
 ## Serve a model with vLLM by yourself with SkyPilot
 
-1. Start the serving the Vicuna-7B model on a single A100 GPU:
+1. Start the serving the LlaMA-66B model on 8 A100 GPUs:
 ```bash
 sky launch -c vllm-serve -s serve.yaml
 ```
-2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to chat with Vicuna.
+2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to chat with LlaMA.
 ```
-(task, pid=7431) Running on local URL:  http://localhost:8001
-(task, pid=7431) INFO 06-27 02:22:33 llm_engine.py:59] Initializing an LLM engine with config: model='lmsys/vicuna-7b-v1.3', dtype=torch.float16, use_dummy_weights=False, download_dir=None, use_np_weights=False, tensor_parallel_size=1, seed=0)
-(task, pid=7431) INFO 06-27 02:22:33 tokenizer_utils.py:30] Using the LLaMA fast tokenizer in 'hf-internal-testing/llama-tokenizer' to avoid potential protobuf errors.
 (task, pid=7431) Running on public URL: https://a8531352b74d74c7d2.gradio.live
 ```
 
@@ -38,7 +35,7 @@ sky launch -c vllm-serve -s serve.yaml
 </p>
 
 
-3. [Optional] Serve the 7B model instead of the default 13B and use less GPU:
+3. [Optional] Serve the 13B model instead of the default 66B and use less GPU:
 ```bash
-sky launch -c vicuna-vllm -s serve.yaml --gpus A100:1 --env MODEL_NAME=lmsys/vicuna-7b-v1.3
+sky launch -c vllm-serve -s serve.yaml --gpus A100:1 --env MODEL_NAME=decapoda-research/llama-13b-hf
 ```
