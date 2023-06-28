@@ -2392,6 +2392,28 @@ class TestStorageWithCredentials:
         yield from self.yield_storage_object(name=tmp_bucket_name)
 
     @pytest.fixture
+    def tmp_multiple_scratch_storage_obj(self):
+        # Creates a list of 5 storage objects with no source to create
+        # multiple scratch storages.
+        # Stores for each object in the list must be added in the test.
+        storage_mult_obj = []
+        for _ in range(5):
+            timestamp = str(time.time()).replace('.', '')
+            store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}')
+            storage_mult_obj.append(store_obj)
+        yield storage_mult_obj
+        for storage_obj in storage_mult_obj:
+            handle = global_user_state.get_handle_from_storage_name(
+                storage_obj.name)
+            if handle:
+                # If handle exists, delete manually
+                # TODO(romilb): This is potentially risky - if the delete method has
+                # bugs, this can cause resource leaks. Ideally we should manually
+                # eject storage from global_user_state and delete the bucket using
+                # boto3 directly.
+                storage_obj.delete()
+
+    @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):
         # Creates a temporary storage object. Stores must be added in the test.
         yield from self.yield_storage_object(name=tmp_bucket_name,
@@ -2487,6 +2509,43 @@ class TestStorageWithCredentials:
         # Run sky storage ls to check if storage object is deleted
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
+
+    @pytest.mark.xdist_group('multiple_bucket_deletion')
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
+    def test_multiple_buckets_creation_and_deletion(
+            self, tmp_multiple_scratch_storage_obj, store_type):
+        # Creates multiple new buckets(5 buckets) with a local source
+        # and deletes them.
+        storage_obj_name = []
+        for store_obj in tmp_multiple_scratch_storage_obj:
+            store_obj.add_store(store_type)
+            storage_obj_name.append(store_obj.name)
+
+        # Run sky storage ls to check if all storage objects exists in the
+        # output filtered by store type
+        out_all = subprocess.check_output(['sky', 'storage', 'ls'])
+        out = [
+            item.split()[0]
+            for item in out_all.decode('utf-8').splitlines()
+            if store_type.value in item
+        ]
+        assert all([item in out for item in storage_obj_name])
+
+        # Run sky storage delete all to delete all storage objects
+        subprocess.check_output(['sky', 'storage', 'delete', '-a'])
+
+        # Run sky storage ls to check if all storage objects filtered by store
+        # type are deleted
+        out_all = subprocess.check_output(['sky', 'storage', 'ls'])
+        out = [
+            item.split()[0]
+            for item in out_all.decode('utf-8').splitlines()
+            if store_type.value in item
+        ]
+        assert all([item not in out for item in storage_obj_name])
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,

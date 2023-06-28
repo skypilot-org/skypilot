@@ -3250,8 +3250,7 @@ def storage_delete(names: List[str], all: bool):  # pylint: disable=redefined-bu
     else:
         names = _get_glob_storages(names)
 
-    for name in names:
-        sky.storage_delete(name)
+    subprocess_utils.run_in_parallel(sky.storage_delete, names)
 
 
 @cli.group(cls=_NaturalOrderGroup)
