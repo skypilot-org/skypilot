@@ -34,7 +34,7 @@ def stop_instances(region: str,
     """See sky/provision/__init__.py"""
     ec2 = aws.resource(
         'ec2',
-        region=region,
+        region_name=region,
         config=config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}))
     filters = [
         {
@@ -64,7 +64,7 @@ def terminate_instances(region: str,
     """See sky/provision/__init__.py"""
     ec2 = aws.resource(
         'ec2',
-        region=region,
+        region_name=region,
         config=config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}))
     filters = [
         {
