@@ -566,6 +566,7 @@ def test_clone_disk_aws():
             f'sky logs {name}-clone-2 1 --status',
         ],
         f'sky down -y {name} {name}-clone {name}-clone-2',
+        timeout=20 * 60,
     )
     run_one_test(test)
 
