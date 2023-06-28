@@ -21,7 +21,7 @@ See the vLLM SkyPilot YAML for [serving](serve.yaml).
 
 ## Serve a model with vLLM by yourself with SkyPilot
 
-1. Start the serving the LLaMA-66B model on 8 A100 GPUs:
+1. Start the serving the LLaMA-65B model on 8 A100 GPUs:
 ```bash
 sky launch -c vllm-serve -s serve.yaml
 ```
@@ -35,7 +35,7 @@ sky launch -c vllm-serve -s serve.yaml
 </p>
 
 
-3. [Optional] Serve the 13B model instead of the default 66B and use less GPU:
+3. [Optional] Serve the 13B model instead of the default 65B and use less GPU:
 ```bash
 sky launch -c vllm-serve -s serve.yaml --gpus A100:1 --env MODEL_NAME=decapoda-research/llama-13b-hf
 ```
