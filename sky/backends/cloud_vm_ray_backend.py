@@ -2911,6 +2911,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{backend_utils.RESET_BOLD}'
                     '\nTo view all spot jobs:\t\t'
                     f'{backend_utils.BOLD}sky spot queue'
+                    f'{backend_utils.RESET_BOLD}'
+                    '\nTo view the spot job dashboard:\t'
+                    f'{backend_utils.BOLD}sky spot dashboard'
                     f'{backend_utils.RESET_BOLD}')
             else:
                 logger.info(f'{fore.CYAN}Job ID: '
