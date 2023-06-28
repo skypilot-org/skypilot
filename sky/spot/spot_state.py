@@ -12,7 +12,7 @@ import colorama
 from sky import sky_logging
 from sky.utils import db_utils
 
-CallbackType = Callable[[int, str, str], None]
+CallbackType = Callable[[int, int, str, str], None]
 
 logger = sky_logging.init_logger(__name__)
 
@@ -270,7 +270,7 @@ def set_pending(job_id: int,
             (job_id, task_id, task_name, resources_str,
              SpotStatus.PENDING.value))
     if callback_func is not None:
-        callback_func(task_id, 'PENDING',
+        callback_func(job_id, task_id, 'PENDING',
                       f'Task name: {task_name}, resources: {resources_str}')
 
 
@@ -309,7 +309,7 @@ def set_submitted(job_id: int,
              run_timestamp, job_id, task_id))
     if callback_func is not None:
         callback_func(
-            task_id, 'SUBMITTED',
+            job_id, task_id, 'SUBMITTED',
             f'Resources: {resources_str}, submitted at: {submit_time}')
 
 
@@ -325,7 +325,7 @@ def set_starting(job_id: int,
             WHERE spot_job_id=(?) AND
             task_id=(?)""", (SpotStatus.STARTING.value, job_id, task_id))
     if callback_func is not None:
-        callback_func(task_id, 'STARTING', '')
+        callback_func(job_id, task_id, 'STARTING', '')
 
 
 def set_started(job_id: int,
@@ -342,7 +342,7 @@ def set_started(job_id: int,
             task_id=(?)""",
             (SpotStatus.RUNNING.value, start_time, start_time, job_id, task_id))
     if callback_func is not None:
-        callback_func(task_id, 'RUNNING', f'Start at: {start_time}')
+        callback_func(job_id, task_id, 'RUNNING', f'Start at: {start_time}')
 
 
 def set_recovering(job_id: int,
@@ -359,7 +359,7 @@ def set_recovering(job_id: int,
                 task_id=(?)""",
             (SpotStatus.RECOVERING.value, time.time(), job_id, task_id))
     if callback_func is not None:
-        callback_func(task_id, 'RECOVERING', '')
+        callback_func(job_id, task_id, 'RECOVERING', '')
 
 
 def set_recovered(job_id: int,
@@ -377,7 +377,7 @@ def set_recovered(job_id: int,
             (SpotStatus.RUNNING.value, recovered_time, job_id, task_id))
     logger.info('==== Recovered. ====')
     if callback_func is not None:
-        callback_func(task_id, 'RECOVERED',
+        callback_func(job_id, task_id, 'RECOVERED',
                       f'Last recovered at: {recovered_time}')
 
 
@@ -395,7 +395,7 @@ def set_succeeded(job_id: int,
             AND end_at IS null""",
             (SpotStatus.SUCCEEDED.value, end_time, job_id, task_id))
     if callback_func is not None:
-        callback_func(task_id, 'SUCCEEDED', f'End at: {end_time}')
+        callback_func(job_id, task_id, 'SUCCEEDED', f'End at: {end_time}')
     logger.info('Job succeeded.')
 
 
@@ -444,7 +444,7 @@ def set_failed(job_id: int,
             WHERE spot_job_id=(?){task_str} AND end_at IS null""",
             (*list(fields_to_set.values()), job_id))
     if callback_func is not None and task_id is not None:
-        callback_func(task_id, 'FAILED', failure_reason)
+        callback_func(job_id, task_id, 'FAILED', failure_reason)
     logger.info(failure_reason)
 
 
@@ -465,7 +465,7 @@ def set_cancelling(job_id: int, callback_func: Optional[CallbackType] = None):
             logger.info('Cancelling the job...')
             if callback_func is not None:
                 # Specific task_id not provided, first task is used.
-                callback_func(0, 'CANCELLING', '')
+                callback_func(job_id, 0, 'CANCELLING', '')
 
 
 def set_cancelled(job_id: int, callback_func: Optional[CallbackType] = None):
@@ -485,7 +485,7 @@ def set_cancelled(job_id: int, callback_func: Optional[CallbackType] = None):
             logger.info('Job cancelled.')
             if callback_func is not None:
                 # Specific task_id not provided, first task is used.
-                callback_func(0, 'CANCELLED', '')
+                callback_func(job_id, 0, 'CANCELLED', '')
 
 
 # ======== utility functions ========
