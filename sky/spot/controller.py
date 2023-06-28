@@ -1,13 +1,15 @@
 """Controller: handles the life cycle of a managed spot cluster (job)."""
 import argparse
 import multiprocessing
+import os
 import pathlib
 import time
 import traceback
 import typing
 from typing import Tuple
+
 import filelock
-import os
+
 from sky import exceptions
 from sky import sky_logging
 from sky import status_lib
@@ -282,22 +284,28 @@ class SpotController:
 
     def event_callback_func(self, task_id: int, state: str, comment: str = ''):
 
+        job_id = self._job_id
         task = self._dag.tasks[task_id]
         event_callback = task.event_callback
         if event_callback is None:
             return
         event_callback = event_callback.strip()
-        cluster_name = spot_utils.generate_spot_cluster_name(
-            task.name, self._job_id)
+        cluster_name = spot_utils.generate_spot_cluster_name(task.name, job_id)
         logger.info(f'=== START: event callback for {state!r} ===')
         log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                 self._backend.run_timestamp,
-                                f'spot-callback-{self._job_id}-{task_id}.log')
+                                f'spot-callback-{job_id}-{task_id}.log')
         result = run_bash_command_with_log(
             bash_command=event_callback,
             log_path=log_path,
-            env_vars=dict(SKYPILOT_JOB_ID=str(self._job_id),
+            env_vars=dict(SKYPILOT_JOB_ID=str(
+                task.envs[constants.TASK_ID_ENV_VAR_DEPRECATED]),
+                          SKYPILOT_TASK_ID=str(
+                              task.envs[constants.TASK_ID_ENV_VAR_DEPRECATED]),
+                          SKYPILOT_TASK_IDS=str(
+                              task.envs[constants.TASK_ID_LIST_ENV_VAR]),
                           TASK_ID=str(task_id),
+                          JOB_ID=str(job_id),
                           JOB_STATUS=state,
                           CLUSTER_NAME=cluster_name,
                           TASK_NAME=task.name,

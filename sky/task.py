@@ -82,7 +82,7 @@ class Task:
         num_nodes: Optional[int] = None,
         # Advanced:
         docker_image: Optional[str] = None,
-        event_callback: str = '',
+        event_callback: Optional[str] = None,
     ):
         """Initializes a Task.
 
