@@ -68,6 +68,40 @@ def _is_valid_env_var(name: str) -> bool:
     return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
 
 
+def _fill_in_env_vars_in_storage_config(
+        storage_config: Dict[str, str], task_envs: Dict[str,
+                                                        str]) -> Dict[str, str]:
+    """Detects env vars in storage_config and fills them with task.envs.
+
+    This func tries to replace two fields  in storage_config: 'source'
+    and 'name'.
+
+    Env vars of the following forms are detected:
+        - ${ENV}
+        - $ENV
+        - ${ENV:default}
+    where <ENV> must appear in task.envs.
+
+    Example:
+        {'mode': 'MOUNT', 'name': '${GSBUCKET}', 'store': 'gcs'}
+        -> {mode: 'MOUNT', name: 'mybucket', store: 'gcs'}
+    """
+
+    def _substitute_env_vars(target: str, envs: Dict[str, str]) -> str:
+        for key, value in envs.items():
+            pattern = r'\$\{?(' + key + r')\}?'
+            env_var_pattern = re.compile(pattern)
+            target = env_var_pattern.sub(value, target)
+        return target
+
+    fields_to_fill_in = ('name', 'source')
+    for field in fields_to_fill_in:
+        if field in storage_config:
+            storage_config[field] = _substitute_env_vars(
+                storage_config[field], task_envs)
+    return storage_config
+
+
 class Task:
     """Task: a computation to be run on the cloud."""
 
@@ -272,7 +306,12 @@ class Task:
             assert mount_path, \
                 'Storage mount path cannot be empty.'
             try:
-                storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
+                print(storage[1])
+                storage_config = _fill_in_env_vars_in_storage_config(
+                    storage[1], task.envs)
+                print(storage_config)
+                storage_obj = storage_lib.Storage.from_yaml_config(
+                    storage_config)
             except exceptions.StorageSourceError as e:
                 # Patch the error message to include the mount path, if included
                 e.args = (e.args[0].replace('<destination_path>',
@@ -669,6 +708,14 @@ class Task:
         task_storage_mounts = self.storage_mounts if self.storage_mounts else {}
         task_storage_mounts.update(storage_mounts)
         return self.set_storage_mounts(task_storage_mounts)
+
+    def fill_env_vars_in_storage_mounts(self) -> None:
+        """Updates self.storage_mounts with self.envs."""
+        new_storage_mounts = {}
+        for mnt_path, storage in self.storage_mounts.items():
+            new_storage_mounts[mnt_path] = _fill_in_env_vars_in_storage_config(
+                storage.to_yaml_config(), self.envs)
+        self.update_storage_mounts(new_storage_mounts)
 
     def get_preferred_store_type(self) -> storage_lib.StoreType:
         # TODO(zhwu, romilb): The optimizer should look at the source and

@@ -622,7 +622,7 @@ class GCP(clouds.Cloud):
         # be modified on the remote cluster by ray causing authentication
         # problems. The backup file will be updated to the remote cluster
         # whenever the original file is not empty and will be applied
-        # appropriately on the remote cluster when neccessary.
+        # appropriately on the remote cluster when necessary.
         if (os.path.exists(os.path.expanduser(GCP_CONFIG_PATH)) and
                 os.path.getsize(os.path.expanduser(GCP_CONFIG_PATH)) > 0):
             subprocess.run(f'cp {GCP_CONFIG_PATH} {GCP_CONFIG_SKY_BACKUP_PATH}',

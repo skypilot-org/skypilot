@@ -337,6 +337,7 @@ def _execute(
                 backend.sync_workdir(handle, task.workdir)
 
         if Stage.SYNC_FILE_MOUNTS in stages:
+            task.fill_env_vars_in_storage_mounts()
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
 
