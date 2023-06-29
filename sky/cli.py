@@ -948,7 +948,11 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     try:
         with open(entrypoint, 'r') as f:
             try:
-                config = list(yaml.safe_load_all(f))[0]
+                config = list(yaml.safe_load_all(f))
+                if config:
+                    config = config[0]
+                else:
+                    config = {}
                 if isinstance(config, str):
                     # 'sky exec cluster ./my_script.sh'
                     is_yaml = False
@@ -1041,7 +1045,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if is_yaml:
         assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-        dag = dag_utils.load_chain_dag_from_yaml(entrypoint)
+        dag = dag_utils.load_chain_dag_from_yaml(entrypoint, env_overrides=env)
         if len(dag.tasks) > 1:
             # When the dag has more than 1 task. It is unclear how to
             # override the params for the dag. So we just ignore the
@@ -1052,7 +1056,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     'since the yaml file contains multiple tasks.',
                     fg='yellow')
             return dag
-        task = sky.Task.from_yaml(entrypoint)
+        assert len(dag.tasks) == 1, (
+            f'If you see this, please file an issue; tasks: {dag.tasks}')
+        task = dag.tasks[0]
     else:
         task = sky.Task(name='sky-cmd', run=entrypoint)
         task.set_resources({sky.Resources()})

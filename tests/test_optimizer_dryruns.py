@@ -9,31 +9,38 @@ from sky import clouds
 from sky import exceptions
 
 
-def _test_parse_cpus(spec, expected_cpus):
+def _test_parse_task_yaml(spec: str, test_fn):
+    """Tests parsing a task from a YAML spec and running a test_fn."""
     with tempfile.NamedTemporaryFile('w') as f:
         f.write(spec)
         f.flush()
         with sky.Dag():
             task = sky.Task.from_yaml(f.name)
-            assert list(task.resources)[0].cpus == expected_cpus
+            test_fn(task)
+
+
+def _test_parse_cpus(spec, expected_cpus):
+
+    def test_fn(task):
+        assert list(task.resources)[0].cpus == expected_cpus
+
+    _test_parse_task_yaml(spec, test_fn)
 
 
 def _test_parse_memory(spec, expected_memory):
-    with tempfile.NamedTemporaryFile('w') as f:
-        f.write(spec)
-        f.flush()
-        with sky.Dag():
-            task = sky.Task.from_yaml(f.name)
-            assert list(task.resources)[0].memory == expected_memory
+
+    def test_fn(task):
+        assert list(task.resources)[0].memory == expected_memory
+
+    _test_parse_task_yaml(spec, test_fn)
 
 
 def _test_parse_accelerators(spec, expected_accelerators):
-    with tempfile.NamedTemporaryFile('w') as f:
-        f.write(spec)
-        f.flush()
-        with sky.Dag():
-            task = sky.Task.from_yaml(f.name)
-            assert list(task.resources)[0].accelerators == expected_accelerators
+
+    def test_fn(task):
+        assert list(task.resources)[0].accelerators == expected_accelerators
+
+    _test_parse_task_yaml(spec, test_fn)
 
 
 # Monkey-patching is required because in the test environment, no cloud is
@@ -547,3 +554,24 @@ def test_invalid_num_nodes():
                 task = sky.Task()
                 task.num_nodes = invalid_value
             assert 'num_nodes should be a positive int' in str(e.value)
+
+
+def test_parse_empty_yaml():
+    spec = textwrap.dedent("""\
+        """)
+
+    def test_fn(task):
+        assert task.to_yaml_config == {}
+
+    _test_parse_task_yaml(spec, test_fn)
+
+
+def test_parse_name_only_yaml():
+    spec = textwrap.dedent("""\
+        name: test_task
+        """)
+
+    def test_fn(task):
+        assert task.name == 'test_task'
+
+    _test_parse_task_yaml(spec, test_fn)

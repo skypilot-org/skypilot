@@ -69,8 +69,8 @@ def _is_valid_env_var(name: str) -> bool:
 
 
 def _fill_in_env_vars_in_storage_config(
-        storage_config: Dict[str, str], task_envs: Dict[str,
-                                                        str]) -> Dict[str, str]:
+        storage_config: Dict[str, Any], task_envs: Dict[str,
+                                                        str]) -> Dict[str, Any]:
     """Detects env vars in storage_config and fills them with task.envs.
 
     This func tries to replace two fields  in storage_config: 'source'
@@ -79,7 +79,6 @@ def _fill_in_env_vars_in_storage_config(
     Env vars of the following forms are detected:
         - ${ENV}
         - $ENV
-        - ${ENV:default}
     where <ENV> must appear in task.envs.
 
     Example:
@@ -87,11 +86,17 @@ def _fill_in_env_vars_in_storage_config(
         -> {mode: 'MOUNT', name: 'mybucket', store: 'gcs'}
     """
 
-    def _substitute_env_vars(target: str, envs: Dict[str, str]) -> str:
+    # TODO(zongheng): support ${ENV:-default}?
+    def _substitute_env_vars(target: Union[str, List[str]],
+                             envs: Dict[str, str]) -> Union[str, List[str]]:
         for key, value in envs.items():
-            pattern = r'\$\{?(' + key + r')\}?'
+            pattern = r'\$\{?\b' + key + r'\b\}?'
             env_var_pattern = re.compile(pattern)
-            target = env_var_pattern.sub(value, target)
+            if isinstance(target, str):
+                target = env_var_pattern.sub(value, target)
+            else:
+                # source: [/local/path, /local/path2]
+                target = [env_var_pattern.sub(value, t) for t in target]
         return target
 
     fields_to_fill_in = ('name', 'source')
@@ -265,7 +270,19 @@ class Task:
                         f'a symlink to a directory). {self.workdir} not found.')
 
     @staticmethod
-    def from_yaml_config(config: Dict[str, Any]) -> 'Task':
+    def from_yaml_config(
+        config: Dict[str, Any],
+        env_overrides: Optional[List[Tuple[str, str]]] = None,
+    ) -> 'Task':
+        if env_overrides is not None:
+            # We must override env vars before constructing the Task, because
+            # the Storage object creation is eager and it (its name/source
+            # fields) may depend on env vars. The eagerness / how we construct
+            # Task's from entrypoint (YAML, CLI args) should be fixed (FIXME).
+            new_envs = config.get('envs', {})
+            new_envs.update(env_overrides)
+            config['envs'] = new_envs
+
         backend_utils.validate_schema(config, schemas.get_task_schema(),
                                       'Invalid task YAML: ')
 
@@ -303,13 +320,10 @@ class Task:
         all_storages = fm_storages
         for storage in all_storages:
             mount_path = storage[0]
-            assert mount_path, \
-                'Storage mount path cannot be empty.'
+            assert mount_path, 'Storage mount path cannot be empty.'
             try:
-                print(storage[1])
                 storage_config = _fill_in_env_vars_in_storage_config(
                     storage[1], task.envs)
-                print(storage_config)
                 storage_obj = storage_lib.Storage.from_yaml_config(
                     storage_config)
             except exceptions.StorageSourceError as e:
@@ -713,8 +727,9 @@ class Task:
         """Updates self.storage_mounts with self.envs."""
         new_storage_mounts = {}
         for mnt_path, storage in self.storage_mounts.items():
-            new_storage_mounts[mnt_path] = _fill_in_env_vars_in_storage_config(
-                storage.to_yaml_config(), self.envs)
+            new_storage_mounts[mnt_path] = storage_lib.Storage.from_yaml_config(
+                _fill_in_env_vars_in_storage_config(storage.to_yaml_config(),
+                                                    self.envs))
         self.update_storage_mounts(new_storage_mounts)
 
     def get_preferred_store_type(self) -> storage_lib.StoreType:
