@@ -966,7 +966,10 @@ class Resources:
         if config.get('use_spot') is not None:
             resources_fields['use_spot'] = config.pop('use_spot')
         if config.get('spot_recovery') is not None:
-            resources_fields['spot_recovery'] = config.pop('spot_recovery')
+            spot_recovery = config.pop('spot_recovery')
+            if spot_recovery.strip().lower() == 'none':
+                spot_recovery = None
+            resources_fields['spot_recovery'] = spot_recovery
         if config.get('disk_size') is not None:
             resources_fields['disk_size'] = int(config.pop('disk_size'))
         if config.get('region') is not None:
