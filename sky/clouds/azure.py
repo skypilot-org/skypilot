@@ -171,7 +171,7 @@ class Azure(clouds.Cloud):
             instance_type, use_spot, 'azure')
 
         if region is not None:
-            regions = [r for r in regions if r.name == region]
+            regions = [r for r in regions if r.name.lower() == region.lower()]
         return regions
 
     @classmethod
