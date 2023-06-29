@@ -162,9 +162,11 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
 
     print('Getting price df')
     df['merge_name'] = df['armSkuName']
-    # Use lower case for the Region, as for westus3, the SKU API returns WestUS3.
+    # Use lower case for the Region, as for westus3, the SKU API returns 
+    # WestUS3.
     # This is inconsistent with the region name used in the pricing API, and
-    # keeping the case does not
+    # the case does not matter for launching instances, so we can safely
+    # discard the case.
     df['Region'] = df['armRegionName'].str.lower()
     df['is_promo'] = df['skuName'].str.endswith(' Low Priority')
     df.rename(columns={
