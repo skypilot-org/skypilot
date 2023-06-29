@@ -1,6 +1,6 @@
 import tempfile
 import textwrap
-from typing import List
+from typing import Callable, List, Optional
 
 import pytest
 
@@ -9,14 +9,15 @@ from sky import clouds
 from sky import exceptions
 
 
-def _test_parse_task_yaml(spec: str, test_fn):
+def _test_parse_task_yaml(spec: str, test_fn: Optional[Callable] = None):
     """Tests parsing a task from a YAML spec and running a test_fn."""
     with tempfile.NamedTemporaryFile('w') as f:
         f.write(spec)
         f.flush()
         with sky.Dag():
             task = sky.Task.from_yaml(f.name)
-            test_fn(task)
+            if test_fn is not None:
+                test_fn(task)
 
 
 def _test_parse_cpus(spec, expected_cpus):
@@ -575,3 +576,26 @@ def test_parse_name_only_yaml():
         assert task.name == 'test_task'
 
     _test_parse_task_yaml(spec, test_fn)
+
+
+def test_parse_invalid_envs_yaml(monkeypatch):
+    spec = textwrap.dedent("""\
+        envs:
+          hello world: 1  # invalid key
+          123: val  # invalid key
+          good_key: val
+        """)
+    with pytest.raises(ValueError) as e:
+        _test_parse_task_yaml(spec)
+    assert '\'123\', \'hello world\' do not match any of the regexes' in str(
+        e.value)
+
+
+def test_parse_valid_envs_yaml(monkeypatch):
+    spec = textwrap.dedent("""\
+        envs:
+          hello_world: 1
+          HELLO: val
+          GOOD123: 123
+        """)
+    _test_parse_task_yaml(spec)

@@ -282,6 +282,13 @@ class Task:
             new_envs = config.get('envs', {})
             new_envs.update(env_overrides)
             config['envs'] = new_envs
+        # More robust handling for 'envs': explicitly convert keys and values to
+        # str, since users may pass '123' as values which will get parsed as
+        # int causing validate_schema() to fail.
+        if config.get('envs', None) is not None:
+            config['envs'] = {
+                str(k): str(v) for k, v in config['envs'].items()
+            }
 
         backend_utils.validate_schema(config, schemas.get_task_schema(),
                                       'Invalid task YAML: ')
