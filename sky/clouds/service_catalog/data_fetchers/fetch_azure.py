@@ -162,34 +162,38 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
 
     print('Getting price df')
     df['merge_name'] = df['armSkuName']
+    df['merge_region'] = df['armRegionName'].str.lower()
     df['is_promo'] = df['skuName'].str.endswith(' Low Priority')
     df.rename(columns={
         'armSkuName': 'InstanceType',
-        'armRegionName': 'Region',
     },
               inplace=True)
     demand_df = df[~df['skuName'].str.contains(' Spot')][[
-        'is_promo', 'InstanceType', 'Region', 'unitPrice'
+        'is_promo', 'InstanceType', 'merge_region', 'unitPrice'
     ]]
     spot_df = df[df['skuName'].str.contains(' Spot')][[
-        'is_promo', 'InstanceType', 'Region', 'unitPrice'
+        'is_promo', 'InstanceType', 'merge_region', 'unitPrice'
     ]]
-    demand_df.set_index(['InstanceType', 'Region', 'is_promo'], inplace=True)
-    spot_df.set_index(['InstanceType', 'Region', 'is_promo'], inplace=True)
+
+    demand_df.set_index(['InstanceType', 'merge_region', 'is_promo'], inplace=True)
+    spot_df.set_index(['InstanceType', 'merge_region', 'is_promo'], inplace=True)
 
     demand_df = demand_df.rename(columns={'unitPrice': 'Price'})
+    print(demand_df)
     spot_df = spot_df.rename(columns={'unitPrice': 'SpotPrice'})
 
     print('Getting sku df')
     df_sku['is_promo'] = df_sku['name'].str.endswith('_Promo')
     df_sku.rename(columns={'name': 'InstanceType'}, inplace=True)
+
     df_sku['merge_name'] = df_sku['InstanceType'].str.replace('_Promo', '')
+    df_sku['merge_region'] = df_sku['Region'].str.lower()
 
     print('Joining')
     df = df_sku.join(demand_df,
-                     on=['merge_name', 'Region', 'is_promo'],
+                     on=['merge_name', 'merge_region', 'is_promo'],
                      how='left')
-    df = df.join(spot_df, on=['merge_name', 'Region', 'is_promo'], how='left')
+    df = df.join(spot_df, on=['merge_name', 'merge_region', 'is_promo'], how='left')
 
     def get_capabilities(row):
         gpu_name = None
