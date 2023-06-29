@@ -183,7 +183,6 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
                       inplace=True)
 
     demand_df = demand_df.rename(columns={'unitPrice': 'Price'})
-    print(demand_df)
     spot_df = spot_df.rename(columns={'unitPrice': 'SpotPrice'})
 
     print('Getting sku df')
