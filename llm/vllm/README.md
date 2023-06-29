@@ -31,7 +31,7 @@ sky launch -c vllm-serve -s serve.yaml
 ```
 
 <p align="center">
-    <img src="https://imgur.com/KW9FKRT.gif" alt="Demo"/>
+    <img src="https://imgur.com/YUaqWrJ.gif" alt="Demo"/>
 </p>
 
 
