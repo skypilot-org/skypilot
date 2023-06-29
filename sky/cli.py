@@ -941,19 +941,23 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
         entrypoint: Path to a YAML file.
     """
     is_yaml = True
-    config = None
+    config: Optional[List[Dict[str, Any]]] = None
+    result = None
     shell_splits = shlex.split(entrypoint)
-    yaml_file_provided = len(shell_splits) == 1 and \
-        (shell_splits[0].endswith('yaml') or shell_splits[0].endswith('.yml'))
+    yaml_file_provided = (len(shell_splits) == 1 and
+                          (shell_splits[0].endswith('yaml') or
+                           shell_splits[0].endswith('.yml')))
     try:
         with open(entrypoint, 'r') as f:
             try:
                 config = list(yaml.safe_load_all(f))
                 if config:
-                    config = config[0]
+                    # FIXME(zongheng): in a chain DAG YAML it only returns the
+                    # first section. OK for downstream but is weird.
+                    result = config[0]
                 else:
-                    config = {}
-                if isinstance(config, str):
+                    result = {}
+                if isinstance(result, str):
                     # 'sky exec cluster ./my_script.sh'
                     is_yaml = False
             except yaml.YAMLError as e:
@@ -981,7 +985,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
                 f'{entrypoint!r} looks like a yaml path but {invalid_reason}\n'
                 'It will be treated as a command to be run remotely. Continue?',
                 abort=True)
-    return is_yaml, config
+    return is_yaml, result
 
 
 def _make_task_or_dag_from_entrypoint_with_overrides(
