@@ -193,6 +193,7 @@ def event_callback_func(job_id: int, task_id: int, state: str, comment: str,
     logger.info(f'Bash:{event_callback},log_path:{log_path},result:{result}')
     logger.info(f'=== END: event callback for {state!r} ===')
 
+
 # ======== user functions ========
 
 
