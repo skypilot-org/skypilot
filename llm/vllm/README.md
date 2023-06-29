@@ -25,7 +25,7 @@ See the vLLM SkyPilot YAML for [serving](serve.yaml).
 ```bash
 sky launch -c vllm-serve -s serve.yaml
 ```
-2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to chat with LLaMA.
+2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to use the LLaMA model to do the text completion.
 ```
 (task, pid=7431) Running on public URL: https://a8531352b74d74c7d2.gradio.live
 ```
