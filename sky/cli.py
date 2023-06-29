@@ -1063,10 +1063,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
 
     # Spot launch specific.
     if spot_recovery is not None:
-        if spot_recovery.lower() == 'none':
-            override_params['spot_recovery'] = None
-        else:
-            override_params['spot_recovery'] = spot_recovery
+        override_params['spot_recovery'] = spot_recovery
 
     assert len(task.resources) == 1
     old_resources = list(task.resources)[0]
