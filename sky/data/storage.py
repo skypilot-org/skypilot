@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
 
 import colorama
+import threading
+import concurrent.futures
 
 from sky import clouds
 from sky.adaptors import aws
@@ -2203,25 +2205,25 @@ class IBMCosStore(AbstractStore):
             bucket_name (str): name of IBM COS bucket
 
         Returns:
-            str: region of bucket if bucket exists.
+            str: region of bucket if bucket exists, else empty string.
         """
-        # optimize search time for existing buckets.
-        if self.region in self.REGIONS:
-            self.REGIONS.remove(self.region)
-            self.REGIONS.insert(0, self.region)
-        for region_scanned in self.REGIONS:
+
+        boto3_client_lock = threading.Lock()
+
+        def _get_bucket_region(region):
             try:
-                # only way to change searched region
-                # is to reinitialize a client with a new region
-                tmp_client = ibm.get_cos_client(region_scanned)
+                # thread lock is needed. Although boto3.client is thread safe,
+                # creating a session() (default session) indirectly through it,
+                # isn't thread safe.
+                with boto3_client_lock:
+                    # reinitialize a client to search in different regions
+                    tmp_client = ibm.get_cos_client(region)
                 tmp_client.head_bucket(Bucket=bucket_name)
-                logger.debug(
-                    f'bucket {bucket_name} was found in {region_scanned}')
-                return region_scanned
+                return region
             except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # pylint: disable=line-too-long
                 if e.response['Error']['Code'] == '404':
                     logger.debug(f'bucket {bucket_name} was not found '
-                                 f'in {region_scanned}')
+                                 f'in {region}')
                 elif e.response['Error']['Code'] == '403':
                     command = f'rclone lsd {self.name}: '
                     with ux_utils.print_exception_no_traceback():
@@ -2231,6 +2233,26 @@ class IBMCosStore(AbstractStore):
                             f' To debug, consider running `{command}`.') from e
                 else:
                     raise e
+            return ''
+
+        # optimize search time for existing buckets,
+        # by starting with default region.
+        if self.region in self.REGIONS:
+            self.REGIONS.remove(self.region)
+            self.REGIONS.insert(0, self.region)
+
+        # concurrently check whether a bucket exists in each region
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = []
+            for region_scanned in self.REGIONS:
+                future = executor.submit(_get_bucket_region, region_scanned)
+                futures.append(future)
+
+            for future in concurrent.futures.as_completed(futures):
+                region = future.result()
+                if region:
+                    logger.debug(f'bucket {bucket_name} was found in {region}')
+                    return region
         return ''
 
     def upload(self):
