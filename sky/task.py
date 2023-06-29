@@ -91,10 +91,15 @@ def _fill_in_env_vars_in_file_mounts(
     """
     # TODO(zongheng): support ${ENV:-default}?
     file_mounts_str = json.dumps(file_mounts)
-    for key, value in task_envs.items():
-        pattern = r'\$\{?\b' + key + r'\b\}?'
-        env_var_pattern = re.compile(pattern)
-        file_mounts_str = env_var_pattern.sub(value, file_mounts_str)
+
+    def replace_var(match):
+        var_name = match.group(1)
+        # If the variable isn't in the dictionary, return it unchanged
+        return task_envs.get(var_name, match.group(0))
+
+    # Pattern for valid env var names in bash.
+    pattern = r'\$\{?\b([a-zA-Z_][a-zA-Z0-9_]*)\b\}?'
+    file_mounts_str = re.sub(pattern, replace_var, file_mounts_str)
     return json.loads(file_mounts_str)
 
 
