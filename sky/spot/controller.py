@@ -1,7 +1,6 @@
 """Controller: handles the life cycle of a managed spot cluster (job)."""
 import argparse
 import multiprocessing
-import os
 import pathlib
 import time
 import traceback
@@ -17,10 +16,10 @@ from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.skylet.log_lib import run_bash_command_with_log
 from sky.spot import recovery_strategy
 from sky.spot import spot_state
 from sky.spot import spot_utils
+from sky.spot.spot_utils import event_callback_func
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
@@ -40,41 +39,6 @@ def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
     dag_name = dag.name
     assert dag_name is not None, dag
     return dag, dag_name
-
-
-def event_callback_func(job_id: int, task_id: int, state: str, comment: str,
-                        task: 'sky.Task'):
-    """Run event callback for the task."""
-
-    event_callback = task.event_callback
-    if event_callback is None:
-        return
-    event_callback = event_callback.strip()
-    cluster_name = spot_utils.generate_spot_cluster_name(
-        task.name, job_id) if task.name else None
-    logger.info(f'=== START: event callback for {state!r} ===')
-    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
-                            f'spot-callback-{job_id}-{task_id}.log')
-    result = run_bash_command_with_log(
-        bash_command=event_callback,
-        log_path=log_path,
-        env_vars=dict(
-            SKYPILOT_JOB_ID=str(
-                task.envs.get(constants.TASK_ID_ENV_VAR_DEPRECATED, 'N.A.')),
-            SKYPILOT_TASK_ID=str(
-                task.envs.get(constants.TASK_ID_ENV_VAR_DEPRECATED, 'N.A.')),
-            SKYPILOT_TASK_IDS=str(
-                task.envs.get(constants.TASK_ID_LIST_ENV_VAR, 'N.A.')),
-            TASK_ID=str(task_id),
-            JOB_ID=str(job_id),
-            JOB_STATUS=state,
-            CLUSTER_NAME=cluster_name or '',
-            TASK_NAME=task.name or '',
-            # TODO(MaoZiming): Future event type Job or Spot.
-            EVENT_TYPE='Spot',
-            COMMENT=comment))
-    logger.info(f'Bash:{event_callback},log_path:{log_path},result:{result}')
-    logger.info(f'=== END: event callback for {state!r} ===')
 
 
 class SpotController:

@@ -436,7 +436,7 @@ def set_failed(
             {set_str}
             WHERE spot_job_id=(?){task_str} AND end_at IS null""",
             (*list(fields_to_set.values()), job_id))
-    if callback_func is not None and task_id and task:
+    if callback_func and task and task_id:
         callback_func(job_id, task_id, 'FAILED', failure_reason, task)
     logger.info(failure_reason)
 
