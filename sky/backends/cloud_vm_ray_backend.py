@@ -3323,10 +3323,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # even when the command was executed successfully.
                 self.run_on_head(handle, 'ray stop --force')
             except RuntimeError:
-                logger.warning(
-                    'Failed to take down Ray autoscaler on the head node. '
-                    'It might be because the cluster\'s head node has already '
-                    'been terminated. It is fine to skip this.')
+                # This error is expected if the previous cluster status is
+                # INIT/STOPPED.
+                if prev_cluster_status == status_lib.ClusterStatus.UP:
+                    logger.warning(
+                        'Failed to take down Ray autoscaler on the head node. '
+                        'It might be because the cluster\'s head node has '
+                        'already been terminated. It is fine to skip this.')
             if terminate:
                 provision_api.terminate_instances(repr(cloud), region,
                                                   cluster_name)
