@@ -16,7 +16,8 @@ def load_chain_dag_from_yaml(
     Has special handling for an initial section in YAML that contains only the
     'name' field, which is the DAG name.
 
-    Returns: a chain Dag with 0 or more tasks.
+    Returns: a chain Dag with 1 or more tasks (an empty entrypoint would create
+      a trivial task).
     """
     configs = common_utils.read_yaml_all(path)
     dag_name = None

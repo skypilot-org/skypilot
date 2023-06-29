@@ -4,7 +4,7 @@
 # Run all tests except for AWS and Lambda Cloud
 # > pytest tests/test_smoke.py
 #
-# Terminate failed clusetrs after test finishes
+# Terminate failed clusters after test finishes
 # > pytest tests/test_smoke.py --terminate-on-failure
 #
 # Re-run last failed tests

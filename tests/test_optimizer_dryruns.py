@@ -561,7 +561,7 @@ def test_parse_empty_yaml():
         """)
 
     def test_fn(task):
-        assert task.to_yaml_config == {}
+        assert task.num_nodes == 1
 
     _test_parse_task_yaml(spec, test_fn)
 

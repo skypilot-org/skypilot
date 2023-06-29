@@ -73,8 +73,8 @@ def _fill_in_env_vars_in_storage_config(
                                                         str]) -> Dict[str, Any]:
     """Detects env vars in storage_config and fills them with task.envs.
 
-    This func tries to replace two fields  in storage_config: 'source'
-    and 'name'.
+    This func tries to replace two fields in storage_config: 'source' and
+    'name'.
 
     Env vars of the following forms are detected:
         - ${ENV}
