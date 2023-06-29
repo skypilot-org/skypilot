@@ -288,11 +288,9 @@ class Task:
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
-        print(config['file_mounts'])
         if config.get('file_mounts') is not None:
             config['file_mounts'] = _fill_in_env_vars_in_file_mounts(
                 config['file_mounts'], config.get('envs', {}))
-        print('after\n', config['file_mounts'])
 
         task = Task(
             config.pop('name', None),
@@ -330,11 +328,7 @@ class Task:
             mount_path = storage[0]
             assert mount_path, 'Storage mount path cannot be empty.'
             try:
-                # storage_config = _fill_in_env_vars_in_storage_config(
-                #     storage[1], task.envs)
-                storage_config = storage[1]
-                storage_obj = storage_lib.Storage.from_yaml_config(
-                    storage_config)
+                storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
             except exceptions.StorageSourceError as e:
                 # Patch the error message to include the mount path, if included
                 e.args = (e.args[0].replace('<destination_path>',
