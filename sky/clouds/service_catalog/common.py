@@ -469,8 +469,8 @@ def list_accelerators_impl(
                                                    regex=True)]
     if region_filter is not None:
         df = df[df['Region'].str.contains(region_filter,
-                                                  case=case_sensitive,
-                                                  regex=True)]
+                                          case=case_sensitive,
+                                          regex=True)]
     df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
     if quantity_filter is not None:
         df = df[df['AcceleratorCount'] == quantity_filter]
