@@ -164,7 +164,7 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
     df['merge_name'] = df['armSkuName']
     # Use lower case for the Region, as for westus3, the SKU API returns WestUS3.
     # This is inconsistent with the region name used in the pricing API, and
-    # keeping the case does not 
+    # keeping the case does not
     df['Region'] = df['armRegionName'].str.lower()
     df['is_promo'] = df['skuName'].str.endswith(' Low Priority')
     df.rename(columns={
@@ -177,10 +177,8 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
         'is_promo', 'InstanceType', 'Region', 'unitPrice'
     ]]
 
-    demand_df.set_index(['InstanceType', 'Region', 'is_promo'],
-                        inplace=True)
-    spot_df.set_index(['InstanceType', 'Region', 'is_promo'],
-                      inplace=True)
+    demand_df.set_index(['InstanceType', 'Region', 'is_promo'], inplace=True)
+    spot_df.set_index(['InstanceType', 'Region', 'is_promo'], inplace=True)
 
     demand_df = demand_df.rename(columns={'unitPrice': 'Price'})
     spot_df = spot_df.rename(columns={'unitPrice': 'SpotPrice'})
