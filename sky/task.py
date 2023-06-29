@@ -1,5 +1,6 @@
 """Task: a coarse-grained stage in an application."""
 import inspect
+import json
 import os
 import re
 import typing
@@ -68,43 +69,33 @@ def _is_valid_env_var(name: str) -> bool:
     return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
 
 
-def _fill_in_env_vars_in_storage_config(
-        storage_config: Dict[str, Any], task_envs: Dict[str,
-                                                        str]) -> Dict[str, Any]:
-    """Detects env vars in storage_config and fills them with task.envs.
+def _fill_in_env_vars_in_file_mounts(
+    file_mounts: Dict[str, Any],
+    task_envs: Dict[str, str],
+) -> Dict[str, Any]:
+    """Detects env vars in file_mounts and fills them with task_envs.
 
-    This func tries to replace two fields in storage_config: 'source' and
-    'name'.
+    Use cases of env vars in file_mounts:
+    - dst/src paths; e.g.,
+        /model_path/llama-${SIZE}b: s3://llama-weights/llama-${SIZE}b
+    - storage's name (bucket name)
+    - storage's source (local path)
+
+    We simply dump file_mounts into a json string, and replace env vars using
+    regex. This should be safe as file_mounts has been schema-validated.
 
     Env vars of the following forms are detected:
         - ${ENV}
         - $ENV
     where <ENV> must appear in task.envs.
-
-    Example:
-        {'mode': 'MOUNT', 'name': '${GSBUCKET}', 'store': 'gcs'}
-        -> {mode: 'MOUNT', name: 'mybucket', store: 'gcs'}
     """
-
     # TODO(zongheng): support ${ENV:-default}?
-    def _substitute_env_vars(target: Union[str, List[str]],
-                             envs: Dict[str, str]) -> Union[str, List[str]]:
-        for key, value in envs.items():
-            pattern = r'\$\{?\b' + key + r'\b\}?'
-            env_var_pattern = re.compile(pattern)
-            if isinstance(target, str):
-                target = env_var_pattern.sub(value, target)
-            else:
-                # source: [/local/path, /local/path2]
-                target = [env_var_pattern.sub(value, t) for t in target]
-        return target
-
-    fields_to_fill_in = ('name', 'source')
-    for field in fields_to_fill_in:
-        if field in storage_config:
-            storage_config[field] = _substitute_env_vars(
-                storage_config[field], task_envs)
-    return storage_config
+    file_mounts_str = json.dumps(file_mounts)
+    for key, value in task_envs.items():
+        pattern = r'\$\{?\b' + key + r'\b\}?'
+        env_var_pattern = re.compile(pattern)
+        file_mounts_str = env_var_pattern.sub(value, file_mounts_str)
+    return json.loads(file_mounts_str)
 
 
 class Task:
@@ -277,21 +268,31 @@ class Task:
         if env_overrides is not None:
             # We must override env vars before constructing the Task, because
             # the Storage object creation is eager and it (its name/source
-            # fields) may depend on env vars. The eagerness / how we construct
-            # Task's from entrypoint (YAML, CLI args) should be fixed (FIXME).
+            # fields) may depend on env vars.
+            #
+            # FIXME(zongheng): The eagerness / how we construct Task's from
+            # entrypoint (YAML, CLI args) should be fixed.
             new_envs = config.get('envs', {})
             new_envs.update(env_overrides)
             config['envs'] = new_envs
+
         # More robust handling for 'envs': explicitly convert keys and values to
-        # str, since users may pass '123' as values which will get parsed as
-        # int causing validate_schema() to fail.
-        if config.get('envs', None) is not None:
-            config['envs'] = {
-                str(k): str(v) for k, v in config['envs'].items()
-            }
+        # str, since users may pass '123' as keys/values which will get parsed
+        # as int causing validate_schema() to fail.
+        envs = config.get('envs')
+        if envs is not None and isinstance(envs, dict):
+            config['envs'] = {str(k): str(v) for k, v in envs.items()}
 
         backend_utils.validate_schema(config, schemas.get_task_schema(),
                                       'Invalid task YAML: ')
+
+        # Fill in any Task.envs into file_mounts (src/dst paths, storage
+        # name/source).
+        print(config['file_mounts'])
+        if config.get('file_mounts') is not None:
+            config['file_mounts'] = _fill_in_env_vars_in_file_mounts(
+                config['file_mounts'], config.get('envs', {}))
+        print('after\n', config['file_mounts'])
 
         task = Task(
             config.pop('name', None),
@@ -329,8 +330,9 @@ class Task:
             mount_path = storage[0]
             assert mount_path, 'Storage mount path cannot be empty.'
             try:
-                storage_config = _fill_in_env_vars_in_storage_config(
-                    storage[1], task.envs)
+                # storage_config = _fill_in_env_vars_in_storage_config(
+                #     storage[1], task.envs)
+                storage_config = storage[1]
                 storage_obj = storage_lib.Storage.from_yaml_config(
                     storage_config)
             except exceptions.StorageSourceError as e:
@@ -709,7 +711,7 @@ class Task:
 
         Different from set_storage_mounts(), this function updates into the
         existing storage_mounts (calls ``dict.update()``), rather than
-        overwritting it.
+        overwriting it.
 
         This should be called before provisioning in order to take effect.
 
@@ -729,15 +731,6 @@ class Task:
         task_storage_mounts = self.storage_mounts if self.storage_mounts else {}
         task_storage_mounts.update(storage_mounts)
         return self.set_storage_mounts(task_storage_mounts)
-
-    def fill_env_vars_in_storage_mounts(self) -> None:
-        """Updates self.storage_mounts with self.envs."""
-        new_storage_mounts = {}
-        for mnt_path, storage in self.storage_mounts.items():
-            new_storage_mounts[mnt_path] = storage_lib.Storage.from_yaml_config(
-                _fill_in_env_vars_in_storage_config(storage.to_yaml_config(),
-                                                    self.envs))
-        self.update_storage_mounts(new_storage_mounts)
 
     def get_preferred_store_type(self) -> storage_lib.StoreType:
         # TODO(zhwu, romilb): The optimizer should look at the source and
