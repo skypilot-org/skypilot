@@ -200,6 +200,7 @@ def validate_region_zone_impl(
                     raise ValueError(error_msg)
                 error_msg += candidate_strs
                 raise ValueError(error_msg)
+        validated_region = filter_df['Region'].unique()[0]
 
     if zone is not None:
         maybe_region_df = filter_df
