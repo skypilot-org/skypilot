@@ -172,13 +172,12 @@ Find more commands that manage the lifecycle of clusters in the :ref:`CLI refere
 Scaling out
 =========================
 
-So far, we have used the `serverful` CLIs of SkyPilot, where the notion of clusters is central.
-This is useful for development since it is convenient to log into a cluster and perform debugging.
-
+So far, we have used SkyPilot's CLI to submit work to and interact with a single cluster.
 When you are ready to scale out (e.g., run 10s or 100s of jobs), SkyPilot supports two options:
 
-- Queue jobs on a cluster (see :ref:`Job Queue <job-queue>`); or
-- Use :ref:`Managed Spot Jobs <spot-jobs>`, which is a `serverless` style API where clusters are not directly exposed.
+- Queue jobs on one or more clusters with ``sky exec`` (see :ref:`Job Queue <job-queue>`); or
+- Use :ref:`Managed Spot Jobs <spot-jobs>` to run on auto-managed spot instances
+  (users need not interact with the underlying clusters)
 
 Managed spot jobs run on much cheaper spot instances, with automatic preemption recovery. Try it out with:
 
