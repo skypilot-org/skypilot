@@ -1,12 +1,12 @@
 # vLLM: Easy, Fast, and Cheap LLM Serving with PagedAttention
 
 <p align="center">
-    <img src="https://imgur.com/wzEByNQ.png" alt="vLLM"/>
+    <img src="https://imgur.com/yxtzPEu.png" alt="vLLM"/>
 </p>
 
 This README contains instructions to run a demo for vLLM, an open-source library for fast LLM inference and serving, which improves the throughput compared to HuggingFace by **up to 24x**.
 
-* [Blog post](https://vllm.ai/)
+* [Blog post](https://blog.skypilot.co/serving-llm-24x-faster-on-the-cloud-with-vllm-and-skypilot/)
 * [Repo](https://github.com/vllm-project/vllm)
 
 ## Prerequisites
@@ -25,13 +25,13 @@ See the vLLM SkyPilot YAML for [serving](serve.yaml).
 ```bash
 sky launch -c vllm-serve -s serve.yaml
 ```
-2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to chat with LLaMA.
+2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to use the LLaMA model to do the text completion.
 ```
 (task, pid=7431) Running on public URL: https://a8531352b74d74c7d2.gradio.live
 ```
 
 <p align="center">
-    <img src="https://imgur.com/KW9FKRT.gif" alt="Demo"/>
+    <img src="https://imgur.com/YUaqWrJ.gif" alt="Demo"/>
 </p>
 
 
