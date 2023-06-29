@@ -1,7 +1,7 @@
 # vLLM: Easy, Fast, and Cheap LLM Serving with PagedAttention
 
 <p align="center">
-    <img src="https://imgur.com/5CBbTaw.png" alt="vLLM"/>
+    <img src="https://imgur.com/yxtzPEu.png" alt="vLLM"/>
 </p>
 
 This README contains instructions to run a demo for vLLM, an open-source library for fast LLM inference and serving, which improves the throughput compared to HuggingFace by **up to 24x**.
