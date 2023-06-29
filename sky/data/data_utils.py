@@ -284,8 +284,8 @@ def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
 
 def get_cos_regions() -> List[str]:
     return [
-        'us-south', 'us-east', 'eu-de', 'eu-gb', 'ca-tor', 'au-syd', 'br-sao',
-        'jp-osa', 'jp-tok'
+        'us-south', 'us-east', 'eu-de', 'eu-gb', 'eu-es', 'ca-tor', 'au-syd',
+        'br-sao', 'jp-osa', 'jp-tok'
     ]
 
 
