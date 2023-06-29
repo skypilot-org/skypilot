@@ -128,7 +128,8 @@ class Resources:
         self._use_spot = use_spot if use_spot is not None else False
         self._spot_recovery = None
         if spot_recovery is not None:
-            self._spot_recovery = spot_recovery.upper()
+            if spot_recovery.strip().lower() != 'none':
+                self._spot_recovery = spot_recovery.upper()
 
         if disk_size is not None:
             if round(disk_size) != disk_size:
@@ -966,10 +967,7 @@ class Resources:
         if config.get('use_spot') is not None:
             resources_fields['use_spot'] = config.pop('use_spot')
         if config.get('spot_recovery') is not None:
-            spot_recovery = config.pop('spot_recovery')
-            if spot_recovery.strip().lower() == 'none':
-                spot_recovery = None
-            resources_fields['spot_recovery'] = spot_recovery
+            resources_fields['spot_recovery'] = config.pop('spot_recovery')
         if config.get('disk_size') is not None:
             resources_fields['disk_size'] = int(config.pop('disk_size'))
         if config.get('region') is not None:
