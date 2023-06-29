@@ -23,7 +23,7 @@ US_REGIONS = [
     'westcentralus',
     'westus',
     'westus2',
-    # 'WestUS3',   # WestUS3 pricing table is broken as of 2021/11.
+    'westus3',
 ]
 
 # Exclude the following regions as they do not have ProductName in the
@@ -101,7 +101,7 @@ def get_sku_df(region_set: Set[str]) -> pd.DataFrame:
     print('Fetching SKU list')
     # To get a complete list, --all option is necessary.
     proc = subprocess.run(
-        'az vm list-skus --all',
+        'az vm list-skus --all --resource-type virtualMachines -o json',
         shell=True,
         check=True,
         stdout=subprocess.PIPE,
@@ -112,13 +112,12 @@ def get_sku_df(region_set: Set[str]) -> pd.DataFrame:
     for item in items:
         # zones = item['locationInfo'][0]['zones']
         region = item['locations'][0]
-        if region not in region_set:
+        if region.lower() not in region_set:
             continue
         item['Region'] = region
         filtered_items.append(item)
 
     df = pd.DataFrame(filtered_items)
-    df = df[(df['resourceType'] == 'virtualMachines')]
     return df
 
 
