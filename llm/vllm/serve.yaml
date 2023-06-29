@@ -1,6 +1,9 @@
 resources:
   accelerators: A100-80GB:8
 
+envs:
+  MODEL_NAME: decapoda-research/llama-65b-hf
+
 setup: |
   conda activate vllm
   if [ $? -ne 0 ]; then
@@ -28,6 +31,3 @@ run: |
 
   echo 'Starting gradio server...'
   python vllm/examples/gradio_webserver.py
-
-envs:
-  MODEL_NAME: decapoda-research/llama-65b-hf

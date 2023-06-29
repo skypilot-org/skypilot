@@ -4,7 +4,7 @@
     <img src="https://imgur.com/wzEByNQ.png" alt="vLLM"/>
 </p>
 
-This README contains instructions to run a demo for vLLM, an open-source library for fast LLM inference and serving, which improves the through put of the HuggingFace model by **24x**.
+This README contains instructions to run a demo for vLLM, an open-source library for fast LLM inference and serving, which improves the throughput compared to HuggingFace by **up to 24x**.
 
 * [Blog post](https://vllm.ai/)
 * [Repo](https://github.com/vllm-project/vllm)
@@ -19,7 +19,7 @@ See the vLLM SkyPilot YAML for [serving](serve.yaml).
 
 
 
-## Serve a model with vLLM by yourself with SkyPilot
+## Serve a model with vLLM, launched on the cloud by SkyPilot
 
 1. Start the serving the LLaMA-65B model on 8 A100 GPUs:
 ```bash
@@ -35,7 +35,7 @@ sky launch -c vllm-serve -s serve.yaml
 </p>
 
 
-3. [Optional] Serve the 13B model instead of the default 65B and use less GPU:
+3. **Optional**: Serve the 13B model instead of the default 65B and use less GPU:
 ```bash
 sky launch -c vllm-serve -s serve.yaml --gpus A100:1 --env MODEL_NAME=decapoda-research/llama-13b-hf
 ```
