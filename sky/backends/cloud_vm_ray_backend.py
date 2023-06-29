@@ -3318,10 +3318,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # re-launch the worker nodes, during the termination of the
             # cluster.
             try:
-                return_code = self.run_on_head(handle, 'ray stop --force')
+                # We do not check the return code, since Ray returns
+                # non-zero return code when calling Ray stop,
+                # even when the command was executed successfully.
+                self.run_on_head(handle, 'ray stop --force')
             except RuntimeError:
-                return_code = 255
-            if not return_code:
                 logger.warning(
                     'Failed to take down Ray autoscaler on the head node. '
                     'It might be because the cluster\'s head node has already '
