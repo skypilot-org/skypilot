@@ -162,21 +162,24 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
 
     print('Getting price df')
     df['merge_name'] = df['armSkuName']
-    df['merge_region'] = df['armRegionName'].str.lower()
+    # Use lower case for the Region, as for westus3, the SKU API returns WestUS3.
+    # This is inconsistent with the region name used in the pricing API, and
+    # keeping the case does not 
+    df['Region'] = df['armRegionName'].str.lower()
     df['is_promo'] = df['skuName'].str.endswith(' Low Priority')
     df.rename(columns={
         'armSkuName': 'InstanceType',
     }, inplace=True)
     demand_df = df[~df['skuName'].str.contains(' Spot')][[
-        'is_promo', 'InstanceType', 'merge_region', 'unitPrice'
+        'is_promo', 'InstanceType', 'Region', 'unitPrice'
     ]]
     spot_df = df[df['skuName'].str.contains(' Spot')][[
-        'is_promo', 'InstanceType', 'merge_region', 'unitPrice'
+        'is_promo', 'InstanceType', 'Region', 'unitPrice'
     ]]
 
-    demand_df.set_index(['InstanceType', 'merge_region', 'is_promo'],
+    demand_df.set_index(['InstanceType', 'Region', 'is_promo'],
                         inplace=True)
-    spot_df.set_index(['InstanceType', 'merge_region', 'is_promo'],
+    spot_df.set_index(['InstanceType', 'Region', 'is_promo'],
                       inplace=True)
 
     demand_df = demand_df.rename(columns={'unitPrice': 'Price'})
@@ -188,15 +191,13 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
     df_sku.rename(columns={'name': 'InstanceType'}, inplace=True)
 
     df_sku['merge_name'] = df_sku['InstanceType'].str.replace('_Promo', '')
-    df_sku['merge_region'] = df_sku['Region'].str.lower()
+    df_sku['Region'] = df_sku['Region'].str.lower()
 
     print('Joining')
     df = df_sku.join(demand_df,
-                     on=['merge_name', 'merge_region', 'is_promo'],
+                     on=['merge_name', 'Region', 'is_promo'],
                      how='left')
-    df = df.join(spot_df,
-                 on=['merge_name', 'merge_region', 'is_promo'],
-                 how='left')
+    df = df.join(spot_df, on=['merge_name', 'Region', 'is_promo'], how='left')
 
     def get_capabilities(row):
         gpu_name = None
