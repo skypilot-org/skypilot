@@ -172,8 +172,8 @@ def get_task_schema():
                 'required': [],
                 'patternProperties': {
                     # Checks env keys are valid env var names.
-                    "^[a-zA-Z_][a-zA-Z0-9_]*$": {
-                        "type": "string"
+                    '^[a-zA-Z_][a-zA-Z0-9_]*$': {
+                        'type': 'string'
                     }
                 },
                 'additionalProperties': False,
