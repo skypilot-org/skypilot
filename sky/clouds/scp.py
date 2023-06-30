@@ -42,7 +42,9 @@ class SCP(clouds.Cloud):
     # MULTI_NODE: Multi-node is not supported by the implementation yet.
     _MULTI_NODE = 'Multi-node is not supported by the SCP Cloud yet.'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.MULTI_NODE: _MULTI_NODE
+        clouds.CloudImplementationFeatures.MULTI_NODE: _MULTI_NODE,
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+            (f'Migrating disk is not supported in {_REPR}.'),
     }
 
     _INDENT_PREFIX = '    '
