@@ -1256,12 +1256,15 @@ def parallel_data_transfer_to_nodes(
                                             log_path=log_path,
                                             stream_logs=stream_logs,
                                             require_outputs=True)
-            subprocess_utils.handle_returncode(
-                rc,
-                cmd, ('Failed to run command before rsync '
-                      f'{origin_source} -> {target}. '
-                      'Ensure that the network is stable, then retry.'),
-                stderr=stdout + stderr)
+            err_msg = ('Failed to run command before rsync '
+                       f'{origin_source} -> {target}. '
+                       'Ensure that the network is stable, then retry.')
+            if log_path != os.devnull:
+                err_msg += f' See logs in {log_path}'
+            subprocess_utils.handle_returncode(rc,
+                                               cmd,
+                                               err_msg,
+                                               stderr=stdout + stderr)
 
         if run_rsync:
             assert source is not None
