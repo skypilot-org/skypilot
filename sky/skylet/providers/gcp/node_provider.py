@@ -302,7 +302,7 @@ class GCPNodeProvider(NodeProvider):
                             "under `provider` in the cluster configuration)"
                         ),
                     )
-                    result = resource.stop_instance(node_id=node_id)
+                    resource.stop_instance(node_id=node_id)
 
                     # Check if the instance is actually stopped.
                     # GCP does not fully stop an instance even after
@@ -327,7 +327,7 @@ class GCPNodeProvider(NodeProvider):
                             "STOPPING status."
                         )
                 else:
-                    result = resource.delete_instance(
+                    resource.delete_instance(
                         node_id=node_id,
                     )
             except googleapiclient.errors.HttpError as http_error:
