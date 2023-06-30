@@ -110,6 +110,7 @@ install_requires = [
     'protobuf >= 3.15.3, != 3.19.5',
     'psutil',
     'pulp',
+    'pydantic<2.0'
 ]
 
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
