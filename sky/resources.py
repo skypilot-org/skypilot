@@ -67,7 +67,7 @@ class Resources:
             sky.Resources(clouds.GCP(), 'n1-standard-8', 'V100')
 
             # Specifying required resources; the system decides the
-            cloud/instance
+            # cloud/instance
             # type. The below are equivalent:
             sky.Resources(accelerators='V100')
             sky.Resources(accelerators='V100:1')
