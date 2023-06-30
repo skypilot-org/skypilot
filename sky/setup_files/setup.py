@@ -110,7 +110,7 @@ install_requires = [
     'protobuf >= 3.15.3, != 3.19.5',
     'psutil',
     'pulp',
-    # Ray has an issue with pydantic>2.0.0. See
+    # Ray job has an issue with pydantic>2.0.0, due to API changes of pydantic. See
     # https://github.com/ray-project/ray/issues/36990
     'pydantic<2.0'
 ]
