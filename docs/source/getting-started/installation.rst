@@ -53,8 +53,11 @@ If you already have cloud access set up on your local machine, run ``sky check``
 
 Otherwise, configure access to at least one cloud, then run ``sky check``:
 
+.. _aws-installation:
+
 Amazon Web Services (AWS)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 
 To get the **AWS access key** required by :code:`aws configure`, please go to the `AWS IAM Management Console <https://us-east-1.console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials>`_ and click on the "Access keys" dropdown (detailed instructions `here <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`__). The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
 
@@ -69,6 +72,8 @@ To get the **AWS access key** required by :code:`aws configure`, please go to th
 To use AWS IAM Identity Center (AWS SSO), see :ref:`here<aws-sso>` for instructions.
 
 **Optional**: To create a new AWS user with minimal permissions for SkyPilot, see :ref:`AWS User Creation <cloud-permissions-aws>`.
+
+.. _installation-gcp:
 
 Google Cloud Platform (GCP)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

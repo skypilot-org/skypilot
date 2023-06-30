@@ -1362,11 +1362,10 @@ class GcsStore(AbstractStore):
         if not _is_storage_cloud_enabled(str(clouds.GCP())):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
-                    'Storage \'store: gcs\' specified, but ' \
-                    'GCP access is disabled. To fix, enable '\
-                    'GCP by running `sky check`. '\
-                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
-                    )
+                    'Storage \'store: gcs\' specified, but '
+                    'GCP access is disabled. To fix, enable '
+                    'GCP by running `sky check`. '
+                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.')  # pylint: disable=line-too-long
 
     @classmethod
     def validate_name(cls, name) -> str:
