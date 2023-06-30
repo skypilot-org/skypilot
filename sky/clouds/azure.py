@@ -277,9 +277,10 @@ class Azure(clouds.Cloud):
                     # No available disk_tier found the specified instance_type
                     return (False, None)
                 disk_tier = list(all_tiers)[0]
-            return (True, disk_tier
-                   ) if disk_tier != clouds.Cloud._DEFAULT_DISK_TIER else (True,
-                                                                           None)
+            if disk_tier != clouds.Cloud._DEFAULT_DISK_TIER:
+                return True, disk_tier
+            else:
+                return True, None
 
         if resources.use_spot:
             # TODO(zhwu): our azure subscription offer ID does not support spot.
