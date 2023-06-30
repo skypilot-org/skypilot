@@ -4,7 +4,7 @@
 # Run all tests except for AWS and Lambda Cloud
 # > pytest tests/test_smoke.py
 #
-# Terminate failed clusetrs after test finishes
+# Terminate failed clusters after test finishes
 # > pytest tests/test_smoke.py --terminate-on-failure
 #
 # Re-run last failed tests
@@ -733,6 +733,28 @@ def test_scp_file_mounts():
         'SCP_using_file_mounts',
         test_commands,
         f'sky down -y {name}',
+        timeout=20 * 60,  # 20 mins
+    )
+    run_one_test(test)
+
+
+def test_using_file_mounts_with_env_vars(generic_cloud: str):
+    name = _get_cluster_name()
+    test_commands = [
+        *storage_setup_commands,
+        (f'sky launch -y -c {name} --cpus 2+ --cloud {generic_cloud} '
+         'examples/using_file_mounts_with_env_vars.yaml'),
+        f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        # Override with --env:
+        (f'sky launch -y -c {name}-2 --cpus 2+ --cloud {generic_cloud} '
+         'examples/using_file_mounts_with_env_vars.yaml '
+         '--env MY_LOCAL_PATH=tmpfile'),
+        f'sky logs {name}-2 1 --status',  # Ensure the job succeeded.
+    ]
+    test = Test(
+        'using_file_mounts_with_env_vars',
+        test_commands,
+        f'sky down -y {name} {name}-2',
         timeout=20 * 60,  # 20 mins
     )
     run_one_test(test)

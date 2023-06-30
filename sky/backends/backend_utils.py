@@ -2502,17 +2502,28 @@ def validate_schema(obj, schema, err_msg_prefix=''):
         validator.SchemaValidator(schema).validate(obj)
     except jsonschema.ValidationError as e:
         if e.validator == 'additionalProperties':
-            err_msg = err_msg_prefix + 'The following fields are invalid:'
-            known_fields = set(e.schema.get('properties', {}).keys())
-            for field in e.instance:
-                if field not in known_fields:
-                    most_similar_field = difflib.get_close_matches(
-                        field, known_fields, 1)
-                    if most_similar_field:
-                        err_msg += (f'\nInstead of {field!r}, did you mean '
-                                    f'{most_similar_field[0]!r}?')
-                    else:
-                        err_msg += f'\nFound unsupported field {field!r}.'
+            if tuple(e.schema_path) == ('properties', 'envs',
+                                        'additionalProperties'):
+                # Hack. Here the error is Task.envs having some invalid keys. So
+                # we should not print "unsupported field".
+                #
+                # This will print something like:
+                # 'hello world' does not match any of the regexes: <regex>
+                err_msg = (err_msg_prefix +
+                           'The `envs` field contains invalid keys:\n' +
+                           e.message)
+            else:
+                err_msg = err_msg_prefix + 'The following fields are invalid:'
+                known_fields = set(e.schema.get('properties', {}).keys())
+                for field in e.instance:
+                    if field not in known_fields:
+                        most_similar_field = difflib.get_close_matches(
+                            field, known_fields, 1)
+                        if most_similar_field:
+                            err_msg += (f'\nInstead of {field!r}, did you mean '
+                                        f'{most_similar_field[0]!r}?')
+                        else:
+                            err_msg += f'\nFound unsupported field {field!r}.'
         else:
             # Example e.json_path value: '$.resources'
             err_msg = (err_msg_prefix + e.message +

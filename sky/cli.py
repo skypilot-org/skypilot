@@ -941,15 +941,23 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
         entrypoint: Path to a YAML file.
     """
     is_yaml = True
-    config = None
+    config: Optional[List[Dict[str, Any]]] = None
+    result = None
     shell_splits = shlex.split(entrypoint)
-    yaml_file_provided = len(shell_splits) == 1 and \
-        (shell_splits[0].endswith('yaml') or shell_splits[0].endswith('.yml'))
+    yaml_file_provided = (len(shell_splits) == 1 and
+                          (shell_splits[0].endswith('yaml') or
+                           shell_splits[0].endswith('.yml')))
     try:
         with open(entrypoint, 'r') as f:
             try:
-                config = list(yaml.safe_load_all(f))[0]
-                if isinstance(config, str):
+                config = list(yaml.safe_load_all(f))
+                if config:
+                    # FIXME(zongheng): in a chain DAG YAML it only returns the
+                    # first section. OK for downstream but is weird.
+                    result = config[0]
+                else:
+                    result = {}
+                if isinstance(result, str):
                     # 'sky exec cluster ./my_script.sh'
                     is_yaml = False
             except yaml.YAMLError as e:
@@ -977,7 +985,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
                 f'{entrypoint!r} looks like a yaml path but {invalid_reason}\n'
                 'It will be treated as a command to be run remotely. Continue?',
                 abort=True)
-    return is_yaml, config
+    return is_yaml, result
 
 
 def _make_task_or_dag_from_entrypoint_with_overrides(
@@ -1041,7 +1049,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if is_yaml:
         assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-        dag = dag_utils.load_chain_dag_from_yaml(entrypoint)
+        dag = dag_utils.load_chain_dag_from_yaml(entrypoint, env_overrides=env)
         if len(dag.tasks) > 1:
             # When the dag has more than 1 task. It is unclear how to
             # override the params for the dag. So we just ignore the
@@ -1052,7 +1060,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     'since the yaml file contains multiple tasks.',
                     fg='yellow')
             return dag
-        task = sky.Task.from_yaml(entrypoint)
+        assert len(dag.tasks) == 1, (
+            f'If you see this, please file an issue; tasks: {dag.tasks}')
+        task = dag.tasks[0]
     else:
         task = sky.Task(name='sky-cmd', run=entrypoint)
         task.set_resources({sky.Resources()})
