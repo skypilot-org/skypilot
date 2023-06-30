@@ -338,7 +338,6 @@ class GCPNodeProvider(NodeProvider):
                     )
                 else:
                     raise http_error from None
-            return result
 
     @_retry
     def _get_node(self, node_id: str) -> GCPNode:
