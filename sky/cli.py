@@ -1052,7 +1052,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     'since the yaml file contains multiple tasks.',
                     fg='yellow')
             return dag
-        task = sky.Task.from_yaml(entrypoint)
+        task = dag.tasks[0]
     else:
         task = sky.Task(name='sky-cmd', run=entrypoint)
         task.set_resources({sky.Resources()})
