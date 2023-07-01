@@ -262,9 +262,7 @@ def set_job_name(job_id: int, name: str):
 def set_pending(job_id: int,
                 task_id: int,
                 task_name: str,
-                resources_str: str,
-                task: Optional['sky.Task'] = None,
-                callback_func: Optional[CallbackType] = None):
+                resources_str: str):
     """Set the task to pending state."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
@@ -274,10 +272,6 @@ def set_pending(job_id: int,
             VALUES (?, ?, ?, ?, ?)""",
             (job_id, task_id, task_name, resources_str,
              SpotStatus.PENDING.value))
-    if task and callback_func:
-        callback_func(job_id, task_id, 'PENDING',
-                      f'Task name: {task_name}, resources: {resources_str}',
-                      task)
 
 
 def set_submitted(job_id: int, task_id: int, run_timestamp: str,
