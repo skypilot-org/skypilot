@@ -103,7 +103,7 @@ def _replace_cloud_init_ssh_info_in_config(config: Dict[str, Any],
 def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r') as f:
-        public_key = f.read()
+        public_key = f.read().strip()
     config = _replace_cloud_init_ssh_info_in_config(config, public_key)
     return config
 

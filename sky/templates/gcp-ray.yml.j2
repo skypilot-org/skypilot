@@ -189,8 +189,11 @@ setup_commands:
   # Line 'which conda ..': some images (TPU VM) do not install conda by
   # default. 'source ~/.bashrc' is needed so conda takes effect for the next
   # commands.
-  # Line 'pip3 list | ..': Install the correct version of ray[default] if it is not. The 'python3 -c "import ray"' is to check the integrity of the
-  # installed ray package. The integrity check is needed because the reboot of the machine during the ray installation may cause the corruption.
+  # Line 'pip3 list | ..': Ensure only one Ray version (which is our ray_version) is installed,
+  # regardless of if the image comes pre-installed with another Ray version. The
+  # 'python3 -c "import ray"' is to check the integrity of the installed ray package. The integrity
+  # check is needed because the reboot of the machine during the ray installation may cause the
+  # corruption.
   # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
