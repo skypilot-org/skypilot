@@ -179,7 +179,7 @@ def event_callback_func(job_id: int, task_id: int, state: str, comment: str,
             SKYPILOT_JOB_ID=str(
                 task.envs.get(constants.TASK_ID_ENV_VAR_DEPRECATED, 'N.A.')),
             SKYPILOT_TASK_ID=str(
-                task.envs.get(constants.TASK_ID_ENV_VAR_DEPRECATED, 'N.A.')),
+                task.envs.get(constants.TASK_ID_ENV_VAR, 'N.A.')),
             SKYPILOT_TASK_IDS=str(
                 task.envs.get(constants.TASK_ID_LIST_ENV_VAR, 'N.A.')),
             TASK_ID=str(task_id),
