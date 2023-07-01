@@ -2376,8 +2376,9 @@ class TestStorageWithCredentials:
             return f'aws s3 rb {url} --force'
         if store_type == storage_lib.StoreType.GCS:
             url = f'gs://{bucket_name}'
+            gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             return data_utils.add_gsutil_platform_flags(
-                f'gsutil -m rm -r {url}')
+                f'{alias_gen};{gsutil_alias} rm -r {url}')
         if store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             url = f's3://{bucket_name}'

@@ -194,8 +194,10 @@ def parallel_upload(source_path_list: List[str],
                 [bucket_name] * len(commands)))
 
 
-def add_gsutil_platform_flags(gsutil_cmd: str) -> str:
-    """Adds platform-specific flags for gsutil.
+def get_gsutil_command() -> Tuple[str, str]:
+    """Gets the alias'd command for gsutil and a command to define the alias.
+
+    This is required for applying platform-specific flags to gsutil.
 
     In particular, we disable multiprocessing on Mac using
     `-o "GSUtil:parallel_process_count=1"`. Multithreading is still enabled.
@@ -209,41 +211,21 @@ def add_gsutil_platform_flags(gsutil_cmd: str) -> str:
     is executed, rather than where the code is run. This is important when
     the command is run in a remote VM.
 
-    Args:
-        gsutil_cmd (str): The gsutil command to which platform-specific
-          flags will be added.
-
     Returns:
-        str: Platform-specific command for running gsutil_cmd. Includes an if
-          conditional, and is run with `eval` before the command to
-          correctly run the if conditional.
+        Tuple[str, str] : (gsutil_alias, command to generate the alias)
+        The command to generate alias must be run before using the alias. E.g.,
+        ```
+        gsutil_alias, alias_gen = get_gsutil_command()
+        cmd_to_run = f'{alias_gen}; {gsutil_alias} cp ...'
+        ```
     """
+    gsutil_alias = 'skypilot_gsutil'
     disable_multiprocessing_flag = '-o "GSUtil:parallel_process_count=1"'
 
-    # Split the input command into parts
-    cmd_parts = gsutil_cmd.split()
-
-    # Check if the '-m' flag is in the command
-    if '-m' in cmd_parts:
-        # Find the index of '-m' flag and
-        # insert the platform-specific flag after it
-        index = cmd_parts.index('-m')
-        cmd_parts.insert(index + 1, disable_multiprocessing_flag)
-
-    # Reconstruct the modified command
-    modified_gsutil_cmd = ' '.join(cmd_parts)
-
-    # Construct platform specific command using a bash one-liner
-    platform_specific_gsutil_cmd = ("""if [[ "$(uname)" == "Darwin" ]]; then """
-                                    f"""echo "{modified_gsutil_cmd}"; """
-                                    """else """
-                                    f"""echo "{gsutil_cmd}"; """
-                                    """fi""")
-
-    # Add eval to evaluate the if statement and get the command
-    platform_specific_gsutil_cmd = f'eval $({platform_specific_gsutil_cmd})'
-
-    return platform_specific_gsutil_cmd
+    alias_gen = ('[[ "$(uname)" == "Darwin" ]] && alias '
+           f'{gsutil_alias}="gsutil -m {disable_multiprocessing_flag!r}" || '
+           f'alias {gsutil_alias}="gsutil -m"')
+    return gsutil_alias, alias_gen
 
 
 def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
