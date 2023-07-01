@@ -57,15 +57,12 @@ available_node_types:
             diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
       metadata:
         items:
+          - key: ssh-keys
+            value: |
+              skypilot:ssh_user:skypilot:ssh_public_key_content
           - key: user-data
             value: |
               #cloud-config
-              users:
-                - name: skypilot:ssh_user
-                  shell: /bin/bash
-                  sudo: ALL=(ALL) NOPASSWD:ALL
-                  ssh_authorized_keys:
-                    - skypilot:ssh_public_key_content
               write_files:
                 - path: /etc/apt/apt.conf.d/20auto-upgrades
                   content: |
@@ -125,15 +122,12 @@ available_node_types:
             diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
       metadata:
         items:
+          - key: ssh-keys
+            value: |
+              skypilot:ssh_user:skypilot:ssh_public_key_content
           - key: user-data
             value: |
               #cloud-config
-              users:
-                - name: skypilot:ssh_user
-                  shell: /bin/bash
-                  sudo: ALL=(ALL) NOPASSWD:ALL
-                  ssh_authorized_keys:
-                    - skypilot:ssh_public_key_content
               write_files:
                 - path: /etc/apt/apt.conf.d/20auto-upgrades
                   content: |
