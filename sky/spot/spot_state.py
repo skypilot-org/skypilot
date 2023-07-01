@@ -16,7 +16,7 @@ from sky.utils import db_utils
 if typing.TYPE_CHECKING:
     import sky
 
-CallbackType = Callable[[int, int, str, str, 'sky.Task'], None]
+CallbackType = Callable[[int, int, str, 'sky.Task'], None]
 
 logger = sky_logging.init_logger(__name__)
 
@@ -259,10 +259,7 @@ def set_job_name(job_id: int, name: str):
             VALUES (?, ?)""", (job_id, name))
 
 
-def set_pending(job_id: int,
-                task_id: int,
-                task_name: str,
-                resources_str: str):
+def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
     """Set the task to pending state."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
@@ -304,9 +301,7 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
             task_id=(?)""",
             (resources_str, submit_time, SpotStatus.SUBMITTED.value,
              run_timestamp, job_id, task_id))
-    callback_func(job_id, task_id, 'SUBMITTED',
-                  f'Resources: {resources_str}, submitted at: {submit_time}',
-                  task)
+    callback_func(job_id, task_id, 'SUBMITTED', task)
 
 
 def set_starting(job_id: int, task_id: int, task: 'sky.Task',
@@ -319,7 +314,7 @@ def set_starting(job_id: int, task_id: int, task: 'sky.Task',
             UPDATE spot SET status=(?)
             WHERE spot_job_id=(?) AND
             task_id=(?)""", (SpotStatus.STARTING.value, job_id, task_id))
-    callback_func(job_id, task_id, 'STARTING', '', task)
+    callback_func(job_id, task_id, 'STARTING', task)
 
 
 def set_started(job_id: int, task_id: int, start_time: float, task: 'sky.Task',
@@ -333,7 +328,7 @@ def set_started(job_id: int, task_id: int, start_time: float, task: 'sky.Task',
             WHERE spot_job_id=(?) AND
             task_id=(?)""",
             (SpotStatus.RUNNING.value, start_time, start_time, job_id, task_id))
-    callback_func(job_id, task_id, 'RUNNING', f'Start at: {start_time}', task)
+    callback_func(job_id, task_id, 'RUNNING', task)
 
 
 def set_recovering(job_id: int, task_id: int, task: 'sky.Task',
@@ -348,7 +343,7 @@ def set_recovering(job_id: int, task_id: int, task: 'sky.Task',
                 WHERE spot_job_id=(?) AND
                 task_id=(?)""",
             (SpotStatus.RECOVERING.value, time.time(), job_id, task_id))
-    callback_func(job_id, task_id, 'RECOVERING', '', task)
+    callback_func(job_id, task_id, 'RECOVERING', task)
 
 
 def set_recovered(job_id: int, task_id: int, recovered_time: float,
@@ -363,8 +358,7 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float,
             task_id=(?)""",
             (SpotStatus.RUNNING.value, recovered_time, job_id, task_id))
     logger.info('==== Recovered. ====')
-    callback_func(job_id, task_id, 'RECOVERED',
-                  f'Last recovered at: {recovered_time}', task)
+    callback_func(job_id, task_id, 'RECOVERED', task)
 
 
 def set_succeeded(job_id: int, task_id: int, end_time: float, task: 'sky.Task',
@@ -379,7 +373,7 @@ def set_succeeded(job_id: int, task_id: int, end_time: float, task: 'sky.Task',
             AND end_at IS null""",
             (SpotStatus.SUCCEEDED.value, end_time, job_id, task_id))
 
-    callback_func(job_id, task_id, 'SUCCEEDED', f'End at: {end_time}', task)
+    callback_func(job_id, task_id, 'SUCCEEDED', task)
     logger.info('Job succeeded.')
 
 
@@ -431,7 +425,7 @@ def set_failed(
             WHERE spot_job_id=(?){task_str} AND end_at IS null""",
             (*list(fields_to_set.values()), job_id))
     if callback_func and task and task_id:
-        callback_func(job_id, task_id, 'FAILED', failure_reason, task)
+        callback_func(job_id, task_id, 'FAILED', task)
     logger.info(failure_reason)
 
 
@@ -451,7 +445,7 @@ def set_cancelling(job_id: int, task: 'sky.Task', callback_func: CallbackType):
         if rows.rowcount > 0:
             logger.info('Cancelling the job...')
             # Specific task_id not provided, first task is used.
-            callback_func(job_id, 0, 'CANCELLING', '', task)
+            callback_func(job_id, 0, 'CANCELLING', task)
 
 
 def set_cancelled(job_id: int, task: 'sky.Task', callback_func: CallbackType):
@@ -470,7 +464,7 @@ def set_cancelled(job_id: int, task: 'sky.Task', callback_func: CallbackType):
         if rows.rowcount > 0:
             logger.info('Job cancelled.')
             # Specific task_id not provided, first task is used.
-            callback_func(job_id, 0, 'CANCELLED', '', task)
+            callback_func(job_id, 0, 'CANCELLED', task)
 
 
 # ======== utility functions ========

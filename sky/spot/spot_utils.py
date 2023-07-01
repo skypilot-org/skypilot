@@ -159,7 +159,7 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
     return float(stdout)
 
 
-def event_callback_func(job_id: int, task_id: int, state: str, comment: str,
+def event_callback_func(job_id: int, task_id: int, state: str,
                         task: 'sky.Task'):
     """Run event callback for the task."""
 
@@ -188,8 +188,7 @@ def event_callback_func(job_id: int, task_id: int, state: str, comment: str,
             CLUSTER_NAME=cluster_name or '',
             TASK_NAME=task.name or '',
             # TODO(MaoZiming): Future event type Job or Spot.
-            EVENT_TYPE='Spot',
-            COMMENT=comment))
+            EVENT_TYPE='Spot'))
     logger.info(f'Bash:{event_callback},log_path:{log_path},result:{result}')
     logger.info(f'=== END: event callback for {state!r} ===')
 
