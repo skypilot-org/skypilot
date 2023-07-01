@@ -11,7 +11,14 @@ from sky.clouds import Azure
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
-_df = common.read_catalog('azure/vms.csv')
+# The frequency of pulling the latest catalog from the cloud provider.
+# Though the catalog update is manual in our skypilot-catalog repo, we
+# still want to pull the latest catalog periodically to make sure the
+# user is using the latest catalog.
+_PULL_FREQUENCY_HOURS = 7
+
+_df = common.read_catalog('azure/vms.csv',
+                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 # We will select from the following three instance families:
 _DEFAULT_INSTANCE_FAMILY = [

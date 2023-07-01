@@ -182,7 +182,11 @@ def read_yaml(path) -> Dict[str, Any]:
 def read_yaml_all(path: str) -> List[Dict[str, Any]]:
     with open(path, 'r') as f:
         config = yaml.safe_load_all(f)
-        return list(config)
+        configs = list(config)
+        if not configs:
+            # Empty YAML file.
+            return [{}]
+        return configs
 
 
 def dump_yaml(path, config) -> None:

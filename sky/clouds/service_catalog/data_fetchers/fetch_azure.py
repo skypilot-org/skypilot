@@ -23,7 +23,7 @@ US_REGIONS = [
     'westcentralus',
     'westus',
     'westus2',
-    # 'WestUS3',   # WestUS3 pricing table is broken as of 2021/11.
+    'westus3',
 ]
 
 # Exclude the following regions as they do not have ProductName in the
@@ -101,7 +101,7 @@ def get_sku_df(region_set: Set[str]) -> pd.DataFrame:
     print('Fetching SKU list')
     # To get a complete list, --all option is necessary.
     proc = subprocess.run(
-        'az vm list-skus --all',
+        'az vm list-skus --all --resource-type virtualMachines -o json',
         shell=True,
         check=True,
         stdout=subprocess.PIPE,
@@ -112,13 +112,12 @@ def get_sku_df(region_set: Set[str]) -> pd.DataFrame:
     for item in items:
         # zones = item['locationInfo'][0]['zones']
         region = item['locations'][0]
-        if region not in region_set:
+        if region.lower() not in region_set:
             continue
         item['Region'] = region
         filtered_items.append(item)
 
     df = pd.DataFrame(filtered_items)
-    df = df[(df['resourceType'] == 'virtualMachines')]
     return df
 
 
@@ -163,18 +162,23 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
 
     print('Getting price df')
     df['merge_name'] = df['armSkuName']
+    # Use lower case for the Region, as for westus3, the SKU API returns
+    # WestUS3.
+    # This is inconsistent with the region name used in the pricing API, and
+    # the case does not matter for launching instances, so we can safely
+    # discard the case.
+    df['Region'] = df['armRegionName'].str.lower()
     df['is_promo'] = df['skuName'].str.endswith(' Low Priority')
     df.rename(columns={
         'armSkuName': 'InstanceType',
-        'armRegionName': 'Region',
-    },
-              inplace=True)
+    }, inplace=True)
     demand_df = df[~df['skuName'].str.contains(' Spot')][[
         'is_promo', 'InstanceType', 'Region', 'unitPrice'
     ]]
     spot_df = df[df['skuName'].str.contains(' Spot')][[
         'is_promo', 'InstanceType', 'Region', 'unitPrice'
     ]]
+
     demand_df.set_index(['InstanceType', 'Region', 'is_promo'], inplace=True)
     spot_df.set_index(['InstanceType', 'Region', 'is_promo'], inplace=True)
 
@@ -184,7 +188,9 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
     print('Getting sku df')
     df_sku['is_promo'] = df_sku['name'].str.endswith('_Promo')
     df_sku.rename(columns={'name': 'InstanceType'}, inplace=True)
+
     df_sku['merge_name'] = df_sku['InstanceType'].str.replace('_Promo', '')
+    df_sku['Region'] = df_sku['Region'].str.lower()
 
     print('Joining')
     df = df_sku.join(demand_df,

@@ -15,6 +15,7 @@ from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.skylet import log_lib
 from sky.utils import common_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -22,35 +23,40 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH: str = os.path.expanduser(
+# Env var pointing to any service account key. If it exists, this path takes
+# priority over the DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH below, and will be
+# used instead for SkyPilot-launched instances. This is the same behavior as
+# gcloud:
+# https://cloud.google.com/docs/authentication/provide-credentials-adc#local-key
+_GCP_APPLICATION_CREDENTIAL_ENV = 'GOOGLE_APPLICATION_CREDENTIALS'
+# NOTE: do not expanduser() on this path. It's used as a destination path on the
+# remote cluster.
+DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH: str = (
     '~/.config/gcloud/'
     'application_default_credentials.json')
 
 # TODO(wei-lin): config_default may not be the config in use.
 # See: https://github.com/skypilot-org/skypilot/pull/1539
+# NOTE: do not expanduser() on this path. It's used as a destination path on the
+# remote cluster.
 GCP_CONFIG_PATH = '~/.config/gcloud/configurations/config_default'
 # Do not place the backup under the gcloud config directory, as ray
 # autoscaler can overwrite that directory on the remote nodes.
+# NOTE: do not expanduser() on this path. It's used as a destination path on the
+# remote cluster.
 GCP_CONFIG_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
-
-# A list of permissions required to run SkyPilot on GCP.
-# This is not a complete list but still useful to check first
-# and hint users if not sufficient during sky check.
-GCP_PREMISSION_CHECK_LIST = [
-    'compute.projects.get',
-    'iam.serviceAccounts.actAs',
-]
 
 # Minimum set of files under ~/.config/gcloud that grant GCP access.
 _CREDENTIAL_FILES = [
     'credentials.db',
-    'application_default_credentials.json',
     'access_tokens.db',
     'configurations',
     'legacy_credentials',
     'active_config',
 ]
 
+# NOTE: do not expanduser() on this path. It's used as a destination path on the
+# remote cluster.
 _GCLOUD_INSTALLATION_LOG = '~/.sky/logs/gcloud_installation.log'
 _GCLOUD_VERSION = '424.0.0'
 # Need to be run with /bin/bash
@@ -116,7 +122,7 @@ class GCP(clouds.Cloud):
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return dict()
+        return {}
 
     @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:
@@ -478,6 +484,24 @@ class GCP(clouds.Cloud):
                                                                 clouds='gcp')
 
     @classmethod
+    def _find_application_key_path(cls) -> str:
+        # Check the application default credentials in the environment variable.
+        # If the file does not exist, fallback to the default path.
+        application_key_path = os.environ.get(_GCP_APPLICATION_CREDENTIAL_ENV,
+                                              None)
+        if application_key_path is not None:
+            if not os.path.isfile(os.path.expanduser(application_key_path)):
+                raise FileNotFoundError(
+                    f'{_GCP_APPLICATION_CREDENTIAL_ENV}={application_key_path},'
+                    ' but the file does not exist.')
+            return application_key_path
+        if (not os.path.isfile(
+                os.path.expanduser(DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH))):
+            # Fallback to the default application credential path.
+            raise FileNotFoundError(DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH)
+        return DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
+
+    @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
@@ -492,10 +516,12 @@ class GCP(clouds.Cloud):
             for file in [
                     '~/.config/gcloud/access_tokens.db',
                     '~/.config/gcloud/credentials.db',
-                    '~/.config/gcloud/application_default_credentials.json'
             ]:
                 if not os.path.isfile(os.path.expanduser(file)):
                     raise FileNotFoundError(file)
+
+            cls._find_application_key_path()
+
             # Check the installation of google-cloud-sdk.
             _run_output('gcloud --version')
 
@@ -507,7 +533,7 @@ class GCP(clouds.Cloud):
         except (auth.exceptions.DefaultCredentialsError,
                 subprocess.CalledProcessError,
                 exceptions.CloudUserIdentityError, FileNotFoundError,
-                ImportError):
+                ImportError) as e:
             # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
                 'GCP tools are not installed or credentials are not set. '
@@ -522,6 +548,7 @@ class GCP(clouds.Cloud):
                 '  $ gcloud auth application-default login\n    '
                 'For more info: '
                 'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
+                f'\nDetails: {common_utils.format_exception(e, use_bracket=True)}'
             )
 
         # Check APIs.
@@ -574,25 +601,27 @@ class GCP(clouds.Cloud):
         # pylint: disable=import-outside-toplevel,unused-import
         import googleapiclient.discovery
         import google.auth
+        from sky.skylet.providers.gcp import constants
 
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
         credentials, project = google.auth.default()
         service = googleapiclient.discovery.build('cloudresourcemanager',
                                                   'v1',
                                                   credentials=credentials)
-        permissions = {'permissions': GCP_PREMISSION_CHECK_LIST}
+        permissions = {'permissions': constants.VM_MINIMAL_PERMISSIONS}
         request = service.projects().testIamPermissions(resource=project,
                                                         body=permissions)
         ret_permissions = request.execute().get('permissions', [])
-        if len(ret_permissions) < len(GCP_PREMISSION_CHECK_LIST):
-            diffs = set(GCP_PREMISSION_CHECK_LIST).difference(
-                set(ret_permissions))
+
+        diffs = set(constants.VM_MINIMAL_PERMISSIONS).difference(
+            set(ret_permissions))
+        if len(diffs) > 0:
             identity_str = identity[0] if identity else None
             return False, (
                 'The following permissions are not enabled for the current '
                 f'GCP identity ({identity_str}):\n    '
                 f'{diffs}\n    '
-                'For more details, visit: https://skypilot.readthedocs.io/en/latest/reference/faq.html#what-are-the-required-iam-permissons-on-gcp-for-skypilot')  # pylint: disable=line-too-long
+                'For more details, visit: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp')  # pylint: disable=line-too-long
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
@@ -600,7 +629,7 @@ class GCP(clouds.Cloud):
         # be modified on the remote cluster by ray causing authentication
         # problems. The backup file will be updated to the remote cluster
         # whenever the original file is not empty and will be applied
-        # appropriately on the remote cluster when neccessary.
+        # appropriately on the remote cluster when necessary.
         if (os.path.exists(os.path.expanduser(GCP_CONFIG_PATH)) and
                 os.path.getsize(os.path.expanduser(GCP_CONFIG_PATH)) > 0):
             subprocess.run(f'cp {GCP_CONFIG_PATH} {GCP_CONFIG_SKY_BACKUP_PATH}',
@@ -618,6 +647,10 @@ class GCP(clouds.Cloud):
             f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
             for filename in _CREDENTIAL_FILES
         }
+        # Upload the application key path to the default path, so that
+        # autostop and GCS can be accessed on the remote cluster.
+        credentials[DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH] = (
+            self._find_application_key_path())
         credentials[GCP_CONFIG_SKY_BACKUP_PATH] = GCP_CONFIG_SKY_BACKUP_PATH
         return credentials
 
@@ -688,7 +721,8 @@ class GCP(clouds.Cloud):
         if project_id is None:
             raise exceptions.CloudUserIdentityError(
                 'Failed to get GCP project id. Please make sure you have '
-                'run: gcloud init')
+                'run the following: gcloud init; '
+                'gcloud auth application-default login')
         return project_id
 
     @staticmethod
@@ -721,6 +755,10 @@ class GCP(clouds.Cloud):
         return tier2name[tier]
 
     @classmethod
+    def _label_filter_str(cls, tag_filters: Dict[str, str]) -> str:
+        return ' '.join(f'labels.{k}={v}' for k, v in tag_filters.items())
+
+    @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
@@ -730,8 +768,7 @@ class GCP(clouds.Cloud):
         from sky.utils import tpu_utils  # pylint: disable=import-outside-toplevel
         use_tpu_vm = kwargs.pop('use_tpu_vm', False)
 
-        label_filter_str = ' '.join(
-            f'labels.{k}={v}' for k, v in tag_filters.items())
+        label_filter_str = cls._label_filter_str(tag_filters)
         if use_tpu_vm:
             # TPU VM's state definition is different from compute VM
             # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#State # pylint: disable=line-too-long
@@ -767,8 +804,8 @@ class GCP(clouds.Cloud):
                 'SUSPENDING': status_lib.ClusterStatus.STOPPED,
                 'SUSPENDED': status_lib.ClusterStatus.STOPPED,
             }
-            # TODO(zhwu): The status of the TPU attached to the cluster should also
-            # be checked, since TPUs are not part of the VMs.
+            # TODO(zhwu): The status of the TPU attached to the cluster should
+            # also be checked, since TPUs are not part of the VMs.
             query_cmd = ('gcloud compute instances list '
                          f'--filter="({label_filter_str})" '
                          '--format="value(status)"')
@@ -796,3 +833,91 @@ class GCP(clouds.Cloud):
             status_list.append(status)
 
         return status_list
+
+    @classmethod
+    def create_image_from_cluster(cls, cluster_name: str,
+                                  tag_filters: Dict[str,
+                                                    str], region: Optional[str],
+                                  zone: Optional[str]) -> str:
+        del region  # unused
+        assert zone is not None
+        label_filter_str = cls._label_filter_str(tag_filters)
+        instance_name_cmd = ('gcloud compute instances list '
+                             f'--filter="({label_filter_str})" '
+                             '--format="json(name)"')
+        returncode, stdout, stderr = subprocess_utils.run_with_retries(
+            instance_name_cmd,
+            retry_returncode=[255],
+        )
+        subprocess_utils.handle_returncode(
+            returncode,
+            instance_name_cmd,
+            error_msg=f'Failed to get instance name for {cluster_name!r}',
+            stderr=stderr,
+            stream_logs=True)
+        instance_names = json.loads(stdout)
+        if len(instance_names) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    'Only support creating image from single '
+                    f'instance, but got: {instance_names}')
+        instance_name = instance_names[0]['name']
+
+        image_name = f'skypilot-{cluster_name}-{int(time.time())}'
+        create_image_cmd = (f'gcloud compute images create {image_name} '
+                            f'--source-disk  {instance_name} '
+                            f'--source-disk-zone {zone}')
+        logger.debug(create_image_cmd)
+        subprocess_utils.run_with_retries(
+            create_image_cmd,
+            retry_returncode=[255],
+        )
+        subprocess_utils.handle_returncode(
+            returncode,
+            create_image_cmd,
+            error_msg=f'Failed to create image for {cluster_name!r}',
+            stderr=stderr,
+            stream_logs=True)
+
+        image_uri_cmd = (f'gcloud compute images describe {image_name} '
+                         '--format="get(selfLink)"')
+        returncode, stdout, stderr = subprocess_utils.run_with_retries(
+            image_uri_cmd,
+            retry_returncode=[255],
+        )
+
+        subprocess_utils.handle_returncode(
+            returncode,
+            image_uri_cmd,
+            error_msg=f'Failed to get image uri for {cluster_name!r}',
+            stderr=stderr,
+            stream_logs=True)
+
+        image_uri = stdout.strip()
+        image_id = image_uri.partition('projects/')[2]
+        image_id = 'projects/' + image_id
+        return image_id
+
+    @classmethod
+    def maybe_move_image(cls, image_id: str, source_region: str,
+                         target_region: str, source_zone: Optional[str],
+                         target_zone: Optional[str]) -> str:
+        del source_region, target_region, source_zone, target_zone  # Unused.
+        # GCP images are global, so no need to move.
+        return image_id
+
+    @classmethod
+    def delete_image(cls, image_id: str, region: Optional[str]) -> None:
+        del region  # Unused.
+        image_name = image_id.rpartition('/')[2]
+        delete_image_cmd = f'gcloud compute images delete {image_name} --quiet'
+        returncode, _, stderr = subprocess_utils.run_with_retries(
+            delete_image_cmd,
+            retry_returncode=[255],
+        )
+        subprocess_utils.handle_returncode(
+            returncode,
+            delete_image_cmd,
+            error_msg=f'Failed to delete image {image_name!r}',
+            stderr=stderr,
+            stream_logs=True)
