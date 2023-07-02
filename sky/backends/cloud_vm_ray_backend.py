@@ -2408,19 +2408,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 prev_cluster_status=None)
             if not dryrun:  # dry run doesn't need to check existing cluster.
                 # When rsync is not installed in the user's machine, Ray will
-                # silently retry to up the node for _MAX_RAY_UP_RETRY number of times
-                # This is time consuming so we fail early.
+                # silently retry to up the node for _MAX_RAY_UP_RETRY number
+                # of times. This is time consuming so we fail early.
                 try:
                     subprocess.run('rsync --version',
-                                shell=True,
-                                check=True,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+                                   shell=True,
+                                   check=True,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE)
                 except subprocess.CalledProcessError as e:
                     with ux_utils.print_exception_no_traceback():
                         raise RuntimeError(
-                            '`rsync` is required for provisioning and it is not '
-                            'installed. For Debian/Ubuntu system, install it with:\n'
+                            '`rsync` is required for provisioning and'
+                            ' it is not installed. For Debian/Ubuntu system, '
+                            'install it with:\n'
                             '  $ sudo apt install rsync') from e
 
                 # Try to launch the exiting cluster first
