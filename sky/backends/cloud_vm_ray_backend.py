@@ -3757,9 +3757,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # (2) launch again.
                 # If we don't refresh the state of the cluster and reset it back
                 # to STOPPED, our failover logic will consider it as an abnormal
-                # cluster after hitting resources capacity limit on the cloud, and
-                # will start failover. This is not desired, because the user may
-                # want to keep the data on the disk of that cluster.
+                # cluster after hitting resources capacity limit on the cloud,
+                # and will start failover. This is not desired, because the user
+                # may want to keep the data on the disk of that cluster.
                 force_refresh={status_lib.ClusterStatus.INIT},
                 acquire_per_cluster_status_lock=False,
             ))
