@@ -1336,6 +1336,22 @@ class RetryingVmProvisioner(object):
         prev_cluster_status: Optional[status_lib.ClusterStatus],
     ):
         """The provision retry loop."""
+        # When rsync is not installed in the user's machine, Ray will
+        # silently retry to up the node for _MAX_RAY_UP_RETRY number of times
+        # This is time consuming so we fail early.
+        try:
+            subprocess.run('rsync --version',
+                           shell=True,
+                           check=True,
+                           stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE)
+        except subprocess.CalledProcessError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'rsync is required for provisioning and it is not '
+                    'installed. Please run the following command:\n'
+                    '    $ sudo apt-get install rsync') from e
+
         style = colorama.Style
         fore = colorama.Fore
         # Get log_path name
