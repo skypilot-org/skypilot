@@ -749,7 +749,7 @@ def is_spot_controller_up(
           identity.
     """
     try:
-        # Set force_refresh=False to make sure the refresh only happens when the
+        # Set force_refresh=None to make sure the refresh only happens when the
         # controller is INIT/UP. This optimization avoids unnecessary costly
         # refresh when the controller is already stopped. This optimization is
         # based on the assumption that the user will not start the controller
