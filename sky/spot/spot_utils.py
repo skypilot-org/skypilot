@@ -755,7 +755,7 @@ def is_spot_controller_up(
         # based on the assumption that the user will not start the controller
         # manually from the cloud console.
         controller_status, handle = backend_utils.refresh_cluster_status_handle(
-            SPOT_CONTROLLER_NAME, force_refresh=False)
+            SPOT_CONTROLLER_NAME)
     except exceptions.ClusterStatusFetchingError as e:
         # We do not catch the exceptions related to the cluster owner identity
         # mismatch, please refer to the comment in
