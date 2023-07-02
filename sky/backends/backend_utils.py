@@ -2047,7 +2047,7 @@ def _update_cluster_status(
 def _refresh_cluster_record(
         cluster_name: str,
         *,
-        force_refresh: bool = False,
+        force_refresh: Optional[Set[status_lib.ClusterStatus]] = None,
         acquire_per_cluster_status_lock: bool = True
 ) -> Optional[Dict[str, Any]]:
     """Refresh the cluster, and return the possibly updated record.
@@ -2058,8 +2058,9 @@ def _refresh_cluster_record(
 
     Args:
         cluster_name: The name of the cluster.
-        force_refresh: if True, refresh the cluster status even if it may be
-            skipped. Otherwise (the default), only refresh if the cluster:
+        force_refresh: if specified, refresh the cluster in the specified status
+            even if it may be skipped. Otherwise (the default), only refresh if
+            the cluster:
                 1. is a spot cluster, or
                 2. is a non-spot cluster, is not STOPPED, and autostop is set.
         acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
@@ -2089,7 +2090,9 @@ def _refresh_cluster_record(
         use_spot = handle.launched_resources.use_spot
         has_autostop = (record['status'] != status_lib.ClusterStatus.STOPPED and
                         record['autostop'] >= 0)
-        if force_refresh or has_autostop or use_spot:
+        force_refresh_for_cluster = (force_refresh is not None and
+                                     record['status'] in force_refresh)
+        if force_refresh_for_cluster or has_autostop or use_spot:
             record = _update_cluster_status(
                 cluster_name,
                 acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
@@ -2100,7 +2103,7 @@ def _refresh_cluster_record(
 def refresh_cluster_status_handle(
     cluster_name: str,
     *,
-    force_refresh: bool = False,
+    force_refresh: Optional[Set[status_lib.ClusterStatus]] = None,
     acquire_per_cluster_status_lock: bool = True,
 ) -> Tuple[Optional[status_lib.ClusterStatus],
            Optional[backends.ResourceHandle]]:
@@ -2331,7 +2334,7 @@ def get_clusters(
         try:
             record = _refresh_cluster_record(
                 cluster_name,
-                force_refresh=True,
+                force_refresh=set(status_lib.ClusterStatus),
                 acquire_per_cluster_status_lock=True)
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.CloudUserIdentityError,

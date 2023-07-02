@@ -3746,7 +3746,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             cluster_name)
         prev_cluster_status, handle = (
             backend_utils.refresh_cluster_status_handle(
-                cluster_name, acquire_per_cluster_status_lock=False))
+                cluster_name,
+                # We force refresh for the init status to determine the actual
+                # state of a previous cluster in INIT state.
+                #
+                # This is important for the case, where an existing is
+                # transitioned into INIT state due to key interruption during
+                # launching, with the following steps:
+                # (1) launch, after answering prompt immediately ctrl-c;
+                # (2) launch again.
+                # If we don't refresh the state of the cluster and reset it back
+                # to STOPPED, our failover logic will consider it as an abnormal
+                # cluster after hitting resources capacity limit on the cloud, and
+                # will start failover. This is not desired, because the user may
+                # want to keep the data on the disk of that cluster.
+                force_refresh={status_lib.ClusterStatus.INIT},
+                acquire_per_cluster_status_lock=False,
+            ))
         if prev_cluster_status is not None:
             assert handle is not None
             # Cluster already exists.
