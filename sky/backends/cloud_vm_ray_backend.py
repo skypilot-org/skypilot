@@ -1348,9 +1348,9 @@ class RetryingVmProvisioner(object):
         except subprocess.CalledProcessError as e:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
-                    'rsync is required for provisioning and it is not '
-                    'installed. Please run the following command:\n'
-                    '    $ sudo apt-get install rsync') from e
+                    '`rsync` is required for provisioning and it is not '
+                    'installed. For Debian/Ubuntu system, install it with:\n'
+                    '  $ sudo apt install rsync') from e
 
         style = colorama.Style
         fore = colorama.Fore
