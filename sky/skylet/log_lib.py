@@ -191,76 +191,72 @@ def run_with_log(
                           start_new_session=True,
                           shell=shell,
                           **kwargs) as proc:
-        try:
-            # The proc can be defunct if the python program is killed. Here we
-            # open a new subprocess to gracefully kill the proc, SIGTERM
-            # and then SIGKILL the process group.
-            # Adapted from ray/dashboard/modules/job/job_manager.py#L154
-            parent_pid = os.getpid()
-            daemon_script = os.path.join(
-                os.path.dirname(os.path.abspath(job_lib.__file__)),
-                'subprocess_daemon.py')
-            daemon_cmd = [
-                'python3',
-                daemon_script,
-                '--parent-pid',
-                str(parent_pid),
-                '--proc-pid',
-                str(proc.pid),
-            ]
-            # Bool use_sudo is true in the Sky On-prem case.
-            # In this case, subprocess_daemon.py should run on the root user
-            # and the Ray job id should be passed for daemon to poll for
-            # job status (as `ray job stop` does not work in the
-            # multitenant case).
-            if use_sudo:
-                daemon_cmd.insert(0, 'sudo')
-                daemon_cmd.extend(['--local-ray-job-id', str(ray_job_id)])
-            subprocess.Popen(
-                daemon_cmd,
-                start_new_session=True,
-                # Suppress output
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                # Disable input
-                stdin=subprocess.DEVNULL,
-            )
-            stdout = ''
-            stderr = ''
+        # The proc can be defunct if the python program is killed. Here we
+        # open a new subprocess to gracefully kill the proc, SIGTERM
+        # and then SIGKILL the process group.
+        # Adapted from ray/dashboard/modules/job/job_manager.py#L154
+        parent_pid = os.getpid()
+        daemon_script = os.path.join(
+            os.path.dirname(os.path.abspath(job_lib.__file__)),
+            'subprocess_daemon.py')
+        daemon_cmd = [
+            'python3',
+            daemon_script,
+            '--parent-pid',
+            str(parent_pid),
+            '--proc-pid',
+            str(proc.pid),
+        ]
+        # Bool use_sudo is true in the Sky On-prem case.
+        # In this case, subprocess_daemon.py should run on the root user
+        # and the Ray job id should be passed for daemon to poll for
+        # job status (as `ray job stop` does not work in the
+        # multitenant case).
+        if use_sudo:
+            daemon_cmd.insert(0, 'sudo')
+            daemon_cmd.extend(['--local-ray-job-id', str(ray_job_id)])
+        subprocess.Popen(
+            daemon_cmd,
+            start_new_session=True,
+            # Suppress output
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            # Disable input
+            stdin=subprocess.DEVNULL,
+        )
+        stdout = ''
+        stderr = ''
 
-            if process_stream:
-                if skip_lines is None:
-                    skip_lines = []
-                # Skip these lines caused by `-i` option of bash. Failed to
-                # find other way to turn off these two warning.
-                # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
-                # `ssh -T -i -tt` still cause the problem.
-                skip_lines += [
-                    'bash: cannot set terminal process group',
-                    'bash: no job control in this shell',
-                ]
-                # We need this even if the log_path is '/dev/null' to ensure the
-                # progress bar is shown.
-                # NOTE: Lines are printed only when '\r' or '\n' is found.
-                args = _ProcessingArgs(
-                    log_path=log_path,
-                    stream_logs=stream_logs,
-                    start_streaming_at=start_streaming_at,
-                    end_streaming_at=end_streaming_at,
-                    skip_lines=skip_lines,
-                    line_processor=line_processor,
-                    # Replace CRLF when the output is logged to driver by ray.
-                    replace_crlf=with_ray,
-                    streaming_prefix=streaming_prefix,
-                )
-                stdout, stderr = process_subprocess_stream(proc, args)
-            proc.wait()
-            if require_outputs:
-                return proc.returncode, stdout, stderr
-            return proc.returncode
-        except KeyboardInterrupt:
-            os.killpg(proc.pid, signal.SIGINT)
-            raise
+        if process_stream:
+            if skip_lines is None:
+                skip_lines = []
+            # Skip these lines caused by `-i` option of bash. Failed to
+            # find other way to turn off these two warning.
+            # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
+            # `ssh -T -i -tt` still cause the problem.
+            skip_lines += [
+                'bash: cannot set terminal process group',
+                'bash: no job control in this shell',
+            ]
+            # We need this even if the log_path is '/dev/null' to ensure the
+            # progress bar is shown.
+            # NOTE: Lines are printed only when '\r' or '\n' is found.
+            args = _ProcessingArgs(
+                log_path=log_path,
+                stream_logs=stream_logs,
+                start_streaming_at=start_streaming_at,
+                end_streaming_at=end_streaming_at,
+                skip_lines=skip_lines,
+                line_processor=line_processor,
+                # Replace CRLF when the output is logged to driver by ray.
+                replace_crlf=with_ray,
+                streaming_prefix=streaming_prefix,
+            )
+            stdout, stderr = process_subprocess_stream(proc, args)
+        proc.wait()
+        if require_outputs:
+            return proc.returncode, stdout, stderr
+        return proc.returncode
 
 
 def make_task_bash_script(codegen: str,
