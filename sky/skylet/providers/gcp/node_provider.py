@@ -304,7 +304,7 @@ class GCPNodeProvider(NodeProvider):
                         "under `provider` in the cluster configuration)"
                     ),
                 )
-                result = resource.stop_instance(node_id=node_id)
+                resource.stop_instance(node_id=node_id)
 
                 # Check if the instance is actually stopped.
                 # GCP does not fully stop an instance even after
@@ -329,7 +329,7 @@ class GCPNodeProvider(NodeProvider):
                         "STOPPING status."
                     )
             else:
-                result = resource.delete_instance(
+                resource.delete_instance(
                     node_id=node_id,
                 )
         except googleapiclient.errors.HttpError as http_error:
@@ -338,24 +338,21 @@ class GCPNodeProvider(NodeProvider):
                     f"Tried to delete the node with id {node_id} "
                     "but it was already gone."
                 )
-                result = None
             else:
                 raise http_error from None
-        return result
 
     @_retry
     def terminate_node(self, node_id: str):
         with self.lock:
-            return self._thread_unsafe_terminate_node(node_id)
+            self._thread_unsafe_terminate_node(node_id)
 
     def terminate_nodes(self, node_ids: List[str]):
         if not node_ids:
             return None
 
         with self.lock, concurrent.futures.ThreadPoolExecutor() as executor:
-            result = executor.map(self._thread_unsafe_terminate_node, node_ids)
+            executor.map(self._thread_unsafe_terminate_node, node_ids)
 
-        return list(result)
 
     @_retry
     def _get_node(self, node_id: str) -> GCPNode:
