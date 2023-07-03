@@ -310,9 +310,9 @@ class Kubernetes(clouds.Cloud):
                 return (_make([default_instance_type]), [])
 
         assert len(accelerators) == 1, resources
+        # If GPUs are requested, return an empty list.
         # TODO(romilb): Add GPU support.
-        raise NotImplementedError('GPUs are not supported for Kubernetes '
-                                  'clusters yet.')
+        return ([], [])
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
