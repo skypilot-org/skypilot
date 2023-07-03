@@ -2359,7 +2359,7 @@ class OciStore(AbstractStore):
                     f'in the same compartment with the sky compute instances.')
             return bucket, False
         except oci.service_exception() as e:
-            if e.status == 404:
+            if e.status == 404: # Not Found
                 if isinstance(self.source,
                               str) and self.source.startswith('oci://'):
                     with ux_utils.print_exception_no_traceback():
@@ -2375,12 +2375,21 @@ class OciStore(AbstractStore):
                         return bucket, True
                     else:
                         return None, False
-            elif e.status == 401:
+            elif e.status == 401: # Unauthorized
+                # AccessDenied error for buckets that are private and not owned by
+                # user.
+                command = (f'oci os object list --namespace-name {self.namespace} '
+                           f'--bucket-name {self.name}')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
-                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-                            name=self.name)) from e
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) + 
+                        f' To debug, consider running `{command}`.') from e
             else:
+                # Unknown / unexpected error happened. This might happen when 
+                # Object storage service itself functions not normal (e.g.
+                # maintainance event causes internal server error or request timeout); 
+                # or API call frequency exceeds limit (which would not be the case for
+                # SkyPilot calls to OCI because the No. of calls are not too many).
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
                         'Failed to connect to OCI bucket {self.name}') from e
