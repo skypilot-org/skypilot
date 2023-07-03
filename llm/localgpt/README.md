@@ -26,7 +26,7 @@ sky launch -c localgpt localgpt.yaml
 
 3. Run `ssh -L 5111:localhost:5111 localgpt` in a new terminal window to forward the port 5111 to your local machine. Keep this terminal running.
 
-4. Open http://localhost:5111 in your browser. Click on upload file to upload a document. Once the document has been ingested, you can chat with it, ask questions, and summarize it.
+4. Open http://localhost:5111 in your browser. Click on upload file to upload a document. Once the document has been ingested, you can chat with it, ask questions, and summarize it. For example, in the gif below, we use the SkyPilot [NSDI 2023 paper](https://www.usenix.org/system/files/nsdi23-yang-zongheng.pdf) to ask questions about how SkyPilot works.
 
 <p align="center">
     <img src="https://i.imgur.com/0mz6DOL.gif" alt="LocalGPT demo"/>
