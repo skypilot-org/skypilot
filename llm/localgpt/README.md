@@ -22,7 +22,7 @@ See the [SkyPilot YAML for localGPT](localgpt.yaml).
 sky launch -c localgpt localgpt.yaml
 ```
 
-2. Once you see `INFO:werkzeug:Press CTRL+C to quit`, you can safely Ctrl+C from the sky launch window.
+2. Once you see `INFO:werkzeug:Press CTRL+C to quit`, you can safely Ctrl+C from the `sky launch` command.
 
 3. Run `ssh -L 5111:localhost:5111 localgpt` in a new terminal window to forward the port 5111 to your local machine. Keep this terminal running.
 
