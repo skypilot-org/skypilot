@@ -260,8 +260,8 @@ def run_with_log(
             return proc.returncode
         except KeyboardInterrupt:
             # Send SIGINT to the process directly, otherwise, the underlying
-            # process will only killed after the python program exits, causing
-            # the stream handling stuck at `readline`.
+            # process will only be killed after the python program exits,
+            # causing the stream handling stuck at `readline`.
             os.killpg(proc.pid, signal.SIGINT)
             raise
 
