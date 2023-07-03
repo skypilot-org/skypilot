@@ -3750,7 +3750,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # We force refresh for the init status to determine the actual
                 # state of a previous cluster in INIT state.
                 #
-                # This is important for the case, where an existing is
+                # This is important for the case, where an existing cluster is
                 # transitioned into INIT state due to key interruption during
                 # launching, with the following steps:
                 # (1) launch, after answering prompt immediately ctrl-c;
