@@ -1684,11 +1684,12 @@ class GcsStore(AbstractStore):
                 return False
             try:
                 gsutil_alias, alias_gen = data_utils.get_gsutil_command()
-                remove_obj_command = (f'{alias_gen}; {gsutil_alias} '
+                remove_obj_command = (f'{alias_gen};{gsutil_alias} '
                                       f'rm -r gs://{bucket_name}')
-                subprocess.check_output(remove_obj_command.split(' '),
+                subprocess.check_output(remove_obj_command,
                                         stderr=subprocess.STDOUT,
-                                        shell=True)
+                                        shell=True,
+                                        executable='/bin/bash')
                 return True
             except subprocess.CalledProcessError as e:
                 logger.error(e.output)
