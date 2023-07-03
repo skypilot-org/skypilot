@@ -1863,7 +1863,7 @@ def _update_cluster_status_no_lock(
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
             # Check if ray cluster status is healthy.
-            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
+            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml, handle.docker_user)
             runner = command_runner.SSHCommandRunner(external_ips[0],
                                                      **ssh_credentials)
             rc, output, _ = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,

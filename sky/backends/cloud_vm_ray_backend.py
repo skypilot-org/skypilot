@@ -1596,7 +1596,7 @@ class RetryingVmProvisioner(object):
         This is a workaround for Ray Autoscaler where `ray up` does not
         run setup or launch ray cluster on TPU VM Pod nodes.
         """
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml, cluster_handle.docker_user)
         all_ips = cluster_handle.external_ips(use_cached_ips=False)
         num_tpu_devices = tpu_utils.get_num_tpu_devices(
             cluster_handle.launched_resources)
