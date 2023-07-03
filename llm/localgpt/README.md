@@ -1,4 +1,4 @@
-# Chat with your documents with LocalGPT and SkyPilot
+# Chat with your documents using LocalGPT and SkyPilot
 
 <p align="center">
     <img src="https://i.imgur.com/k1IuhtV.png" alt="Logo" width="400"/>
