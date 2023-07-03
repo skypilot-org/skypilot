@@ -56,19 +56,6 @@
                     {
                         "name": "SSH",
                         "properties": {
-                            "priority": 1001,
-                            "protocol": "TCP",
-                            "access": "Allow",
-                            "direction": "Inbound",
-                            "sourceAddressPrefix": "*",
-                            "sourcePortRange": "*",
-                            "destinationAddressPrefix": "*",
-                            "destinationPortRange": "22"
-                        }
-                    },
-                    {
-                        "name": "SSH-DOCKER",
-                        "properties": {
                             "priority": 1000,
                             "protocol": "TCP",
                             "access": "Allow",
@@ -76,7 +63,7 @@
                             "sourceAddressPrefix": "*",
                             "sourcePortRange": "*",
                             "destinationAddressPrefix": "*",
-                            "destinationPortRange": "10022"
+                            "destinationPortRange": "22"
                         }
                     }
                 ]

@@ -31,17 +31,6 @@ FIREWALL_RULES_REQUIRED = [
         ],
         "sourceRanges": ["0.0.0.0/0"],
     },
-    # Allow ssh connection to docker container from anywhere.
-    {
-        "direction": "INGRESS",
-        "allowed": [
-            {
-                "IPProtocol": "tcp",
-                "ports": ["10022"],
-            }
-        ],
-        "sourceRanges": ["0.0.0.0/0"],
-    },
 ]
 # Template when creating firewall rules for a new VPC.
 FIREWALL_RULES_TEMPLATE = [
@@ -70,21 +59,6 @@ FIREWALL_RULES_TEMPLATE = [
             {
                 "IPProtocol": "tcp",
                 "ports": ["22"],
-            }
-        ],
-        "sourceRanges": ["0.0.0.0/0"],
-    },
-    {
-        "name": "{VPC_NAME}-allow-docker-ssh",
-        "description": "Allows TCP connections from any source to docker container inside any instance on the network using port 10022.",
-        "network": "projects/{PROJ_ID}/global/networks/{VPC_NAME}",
-        "selfLink": "projects/{PROJ_ID}/global/firewalls/{VPC_NAME}-allow-docker-ssh",
-        "direction": "INGRESS",
-        "priority": 65534,
-        "allowed": [
-            {
-                "IPProtocol": "tcp",
-                "ports": ["10022"],
             }
         ],
         "sourceRanges": ["0.0.0.0/0"],
