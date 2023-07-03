@@ -3760,7 +3760,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # cluster after hitting resources capacity limit on the cloud,
                 # and will start failover. This is not desired, because the user
                 # may want to keep the data on the disk of that cluster.
-                force_refresh={status_lib.ClusterStatus.INIT},
+                force_refresh_statuses={status_lib.ClusterStatus.INIT},
                 acquire_per_cluster_status_lock=False,
             ))
         if prev_cluster_status is not None:

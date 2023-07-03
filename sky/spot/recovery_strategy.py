@@ -183,7 +183,7 @@ class StrategyExecutor:
                 cluster_status, _ = (
                     backend_utils.refresh_cluster_status_handle(
                         self.cluster_name,
-                        force_refresh=set(status_lib.ClusterStatus)))
+                        force_refresh_statuses=set(status_lib.ClusterStatus)))
             except Exception as e:  # pylint: disable=broad-except
                 # If any unexpected error happens, retry the job checking
                 # loop.

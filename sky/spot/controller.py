@@ -201,7 +201,8 @@ class SpotController:
             # determine whether the cluster is preempted.
             (cluster_status,
              handle) = backend_utils.refresh_cluster_status_handle(
-                 cluster_name, force_refresh=set(status_lib.ClusterStatus))
+                 cluster_name,
+                 force_refresh_statuses=set(status_lib.ClusterStatus))
 
             if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster is (partially) preempted. It can be down, INIT
