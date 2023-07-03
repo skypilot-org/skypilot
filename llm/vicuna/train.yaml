@@ -2,8 +2,6 @@ resources:
   accelerators: A100-80GB:8
   disk_size: 1000
   use_spot: true
-  # Note: The disk_tier option is not offered in skypilot<=0.2.5, we need
-  # to install SkyPilot from source.
   disk_tier: high
 
 num_nodes: 1

@@ -59,7 +59,9 @@ class Azure(clouds.Cloud):
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return dict()
+        return {
+            clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {cls._REPR}.',
+        }
 
     @classmethod
     def _max_cluster_name_length(cls) -> int:
@@ -248,18 +250,37 @@ class Azure(clouds.Cloud):
 
     def get_feasible_launchable_resources(self, resources):
 
-        def failover_disk_tier(instance_type: str,
-                               disk_tier: Optional[str]) -> Optional[str]:
-            if disk_tier is None:
-                ok, _ = Azure.check_disk_tier(instance_type,
-                                              clouds.Cloud._DEFAULT_DISK_TIER)
-                if not ok:
-                    # Auto failover to low disk tier when disk tier
-                    # are not specified
-                    return 'low'
-            # The disk_tier specified by the user will be checked in the
-            # initialization of the Resources.
-            return disk_tier
+        def failover_disk_tier(
+                instance_type: str,
+                disk_tier: Optional[str]) -> Tuple[bool, Optional[str]]:
+            """Figure out the actual disk tier to be used
+
+            Check the disk_tier specified by the user with the instance type to
+            be used. If not valid, return False.
+            When the disk_tier is not specified, failover through the possible
+            disk tiers.
+
+            Returns:
+                A tuple of a boolean value and an optional string to represent the
+                instance_type to use. If the boolean value is False, the specified
+                configuration is not a valid combination, and should not be used
+                for launching a VM.
+            """
+            if disk_tier is not None:
+                ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
+                return (True, disk_tier) if ok else (False, None)
+            disk_tier = clouds.Cloud._DEFAULT_DISK_TIER
+            all_tiers = {'high', 'medium', 'low'}
+            while not Azure.check_disk_tier(instance_type, disk_tier)[0]:
+                all_tiers.remove(disk_tier)
+                if not all_tiers:
+                    # No available disk_tier found the specified instance_type
+                    return (False, None)
+                disk_tier = list(all_tiers)[0]
+            if disk_tier != clouds.Cloud._DEFAULT_DISK_TIER:
+                return True, disk_tier
+            else:
+                return True, None
 
         if resources.use_spot:
             # TODO(zhwu): our azure subscription offer ID does not support spot.
@@ -278,11 +299,14 @@ class Azure(clouds.Cloud):
         def _make(instance_list):
             resource_list = []
             for instance_type in instance_list:
+                ok, disk_tier = failover_disk_tier(instance_type,
+                                                   resources.disk_tier)
+                if not ok:
+                    continue
                 r = resources.copy(
                     cloud=Azure(),
                     instance_type=instance_type,
-                    disk_tier=failover_disk_tier(instance_type,
-                                                 resources.disk_tier),
+                    disk_tier=disk_tier,
                     # Setting this to None as Azure doesn't separately bill /
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
@@ -527,6 +551,8 @@ class Azure(clouds.Cloud):
             if not stdout.strip():
                 return []
             node_ids = json.loads(stdout.strip())
+            if not node_ids:
+                return []
             state_str = '[].powerState'
             if len(node_ids) == 1:
                 state_str = 'powerState'

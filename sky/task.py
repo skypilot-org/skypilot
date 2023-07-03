@@ -1,5 +1,6 @@
 """Task: a coarse-grained stage in an application."""
 import inspect
+import json
 import os
 import re
 import typing
@@ -66,6 +67,40 @@ def _is_valid_name(name: str) -> bool:
 def _is_valid_env_var(name: str) -> bool:
     """Checks if the task environment variable name is valid."""
     return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
+
+
+def _fill_in_env_vars_in_file_mounts(
+    file_mounts: Dict[str, Any],
+    task_envs: Dict[str, str],
+) -> Dict[str, Any]:
+    """Detects env vars in file_mounts and fills them with task_envs.
+
+    Use cases of env vars in file_mounts:
+    - dst/src paths; e.g.,
+        /model_path/llama-${SIZE}b: s3://llama-weights/llama-${SIZE}b
+    - storage's name (bucket name)
+    - storage's source (local path)
+
+    We simply dump file_mounts into a json string, and replace env vars using
+    regex. This should be safe as file_mounts has been schema-validated.
+
+    Env vars of the following forms are detected:
+        - ${ENV}
+        - $ENV
+    where <ENV> must appear in task.envs.
+    """
+    # TODO(zongheng): support ${ENV:-default}?
+    file_mounts_str = json.dumps(file_mounts)
+
+    def replace_var(match):
+        var_name = match.group(1)
+        # If the variable isn't in the dictionary, return it unchanged
+        return task_envs.get(var_name, match.group(0))
+
+    # Pattern for valid env var names in bash.
+    pattern = r'\$\{?\b([a-zA-Z_][a-zA-Z0-9_]*)\b\}?'
+    file_mounts_str = re.sub(pattern, replace_var, file_mounts_str)
+    return json.loads(file_mounts_str)
 
 
 class Task:
@@ -231,9 +266,36 @@ class Task:
                         f'a symlink to a directory). {self.workdir} not found.')
 
     @staticmethod
-    def from_yaml_config(config: Dict[str, Any]) -> 'Task':
+    def from_yaml_config(
+        config: Dict[str, Any],
+        env_overrides: Optional[List[Tuple[str, str]]] = None,
+    ) -> 'Task':
+        if env_overrides is not None:
+            # We must override env vars before constructing the Task, because
+            # the Storage object creation is eager and it (its name/source
+            # fields) may depend on env vars.
+            #
+            # FIXME(zongheng): The eagerness / how we construct Task's from
+            # entrypoint (YAML, CLI args) should be fixed.
+            new_envs = config.get('envs', {})
+            new_envs.update(env_overrides)
+            config['envs'] = new_envs
+
+        # More robust handling for 'envs': explicitly convert keys and values to
+        # str, since users may pass '123' as keys/values which will get parsed
+        # as int causing validate_schema() to fail.
+        envs = config.get('envs')
+        if envs is not None and isinstance(envs, dict):
+            config['envs'] = {str(k): str(v) for k, v in envs.items()}
+
         backend_utils.validate_schema(config, schemas.get_task_schema(),
                                       'Invalid task YAML: ')
+
+        # Fill in any Task.envs into file_mounts (src/dst paths, storage
+        # name/source).
+        if config.get('file_mounts') is not None:
+            config['file_mounts'] = _fill_in_env_vars_in_file_mounts(
+                config['file_mounts'], config.get('envs', {}))
 
         task = Task(
             config.pop('name', None),
@@ -269,8 +331,7 @@ class Task:
         all_storages = fm_storages
         for storage in all_storages:
             mount_path = storage[0]
-            assert mount_path, \
-                'Storage mount path cannot be empty.'
+            assert mount_path, 'Storage mount path cannot be empty.'
             try:
                 storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
             except exceptions.StorageSourceError as e:
@@ -649,7 +710,7 @@ class Task:
 
         Different from set_storage_mounts(), this function updates into the
         existing storage_mounts (calls ``dict.update()``), rather than
-        overwritting it.
+        overwriting it.
 
         This should be called before provisioning in order to take effect.
 
