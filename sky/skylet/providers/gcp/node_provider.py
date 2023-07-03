@@ -353,7 +353,6 @@ class GCPNodeProvider(NodeProvider):
         with self.lock, concurrent.futures.ThreadPoolExecutor() as executor:
             executor.map(self._thread_unsafe_terminate_node, node_ids)
 
-
     @_retry
     def _get_node(self, node_id: str) -> GCPNode:
         self.non_terminated_nodes({})  # Side effect: updates cache
