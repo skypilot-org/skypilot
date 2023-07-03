@@ -2058,7 +2058,7 @@ def _refresh_cluster_record(
 
     Args:
         cluster_name: The name of the cluster.
-        force_refresh_statuses: if specified, refresh the cluster has one of
+        force_refresh_statuses: if specified, refresh the cluster if it has one of
             the specified statuses. Additionally, clusters satisfying the
             following conditions will always be refreshed no matter the
             argument is specified or not:
