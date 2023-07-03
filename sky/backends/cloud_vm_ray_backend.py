@@ -2422,7 +2422,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             '`rsync` is required for provisioning and'
                             ' it is not installed. For Debian/Ubuntu system, '
                             'install it with:\n'
-                            '  $ sudo apt install rsync') from e
+                            '  $ sudo apt install rsync') from None
 
                 # Try to launch the exiting cluster first
                 to_provision_config = self._check_existing_cluster(
