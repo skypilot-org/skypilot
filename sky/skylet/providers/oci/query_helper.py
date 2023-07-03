@@ -57,7 +57,7 @@ class oci_query_helper:
 
     @classmethod
     def terminate_instances_by_tags(cls, tag_filters, region) -> int:
-        logger.info(f"Terminate instance by tags: {tag_filters}")
+        logger.debug(f"Terminate instance by tags: {tag_filters}")
         insts = cls.query_instances_by_tags(tag_filters, region)
         fail_count = 0
         for inst in insts:
@@ -73,7 +73,7 @@ class oci_query_helper:
                 traceback.print_exc()
 
         if fail_count == 0:
-            logger.info(f"Instance teardown result: OK")
+            logger.debug(f"Instance teardown result: OK")
         else:
             logger.warn(f"Instance teardown result: {fail_count} failed!")
 
@@ -131,7 +131,10 @@ class oci_query_helper:
             return skypilot_compartment
 
         # If not specified, we try to find the one skypilot-compartment
-        root = oci_adaptor.get_oci_config(region)['tenancy']
+        # Pass-in a profile parameter so that multiple profile in oci
+        # config file is supported (2023/06/09).
+        root = oci_adaptor.get_oci_config(region,
+                                          oci_conf.get_profile())['tenancy']
         list_compartments_response = oci_adaptor.get_identity_client(
             region,
             oci_conf.get_profile()).list_compartments(compartment_id=root,

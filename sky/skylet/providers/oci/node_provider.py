@@ -166,18 +166,6 @@ class OCINodeProvider(NodeProvider):
             TAG_RAY_USER_NODE_TYPE,
         ]
         filters = {tag: tags[tag] for tag in VALIDITY_TAGS if tag in tags}
-        running_nodes = self.running_nodes(filters)
-        if len(running_nodes) > 0:
-            logger.info(
-                f"Running nodes found {len(running_nodes)}: {list(running_nodes)}. "
-                " Reuse existing running nodes. ")
-            count -= len(running_nodes)
-
-        if count <= 0:
-            logger.info(
-                f"No need to create new node since there are enough running nodes"
-            )
-            return
 
         # Starting stopped nodes if cache_stopped_nodes=True
         if self.cache_stopped_nodes:
@@ -302,7 +290,8 @@ class OCINodeProvider(NodeProvider):
                 TAG_RAY_CLUSTER_NAME: self.cluster_name,
                 "sky_spot_flag": str(node_config["Preemptible"]).lower(),
             }
-            batch_id = datetime.now().strftime("%Y%m%d%H%M%S")
+            # Use UTC time so that header & worker nodes use same rule
+            batch_id = datetime.utcnow().strftime("%Y%m%d%H%M%S")
             node_type = tags[TAG_RAY_NODE_KIND]
 
             oci_query_helper.subscribe_image(
@@ -324,11 +313,22 @@ class OCINodeProvider(NodeProvider):
                     display_name=
                     f"{self.cluster_name}_{node_type}_{batch_id}_{seq}",
                     freeform_tags=vm_tags,
-                    image_id=node_config["ImageId"],
                     metadata={
                         "ssh_authorized_keys": node_config["AuthorizedKey"]
                     },
-                    subnet_id=vcn,
+                    source_details=oci_adaptor.get_oci(
+                    ).core.models.InstanceSourceViaImageDetails(
+                        source_type="image",
+                        image_id=node_config["ImageId"],
+                        boot_volume_size_in_gbs=node_config["BootVolumeSize"],
+                        boot_volume_vpus_per_gb=int(
+                            node_config["BootVolumePerf"]),
+                    ),
+                    create_vnic_details=oci_adaptor.get_oci(
+                    ).core.models.CreateVnicDetails(
+                        assign_public_ip=True,
+                        subnet_id=vcn,
+                    ),
                     shape_config=machine_shape_config,
                     preemptible_instance_config=preempitible_config,
                 ))

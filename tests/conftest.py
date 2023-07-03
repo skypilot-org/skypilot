@@ -63,9 +63,14 @@ def pytest_addoption(parser):
         'cloud in the list of the clouds to be run.')
 
     parser.addoption('--terminate-on-failure',
+                     dest='terminate_on_failure',
                      action='store_true',
-                     default=False,
+                     default=True,
                      help='Terminate test VMs on failure.')
+    parser.addoption('--no-terminate-on-failure',
+                     dest='terminate_on_failure',
+                     action='store_false',
+                     help='Do not terminate test VMs on failure.')
 
 
 def pytest_configure(config):
@@ -184,6 +189,9 @@ def enable_all_clouds(monkeypatch):
         prefix='tmp_backup_config_default', delete=False)
     monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
                         config_file_backup.name)
+    monkeypatch.setattr(
+        'sky.clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH',
+        config_file_backup.name)
     monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
 
 

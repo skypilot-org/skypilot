@@ -7,7 +7,6 @@ History:
 import logging
 import os
 from sky import skypilot_config
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +40,36 @@ class oci_conf:
 
     MAX_RETRY_COUNT = 3
     RETRY_INTERVAL_BASE_SECONDS = 5
+
+    # Map SkyPilot disk_tier to OCI VPU (Volume Performance Units) for Boot Volume.
+    # Tested with fio, bs=(R) 64.0KiB-64.0KiB, (W) 64.0KiB-64.0KiB, (T) 64.0KiB-64.0KiB
+    # -----------vpu=10------------
+    # Use --numjobs=2 in fio command
+    # read: IOPS=1932, BW=121MiB/s (127MB/s)(4096MiB/33904msec)
+    # write: IOPS=2007, BW=125MiB/s (132MB/s)(4096MiB/32642msec)
+    DISK_TIER_LOW = 10
+    # -----------vpu=30------------
+    # Use --numjobs=4 in fio command
+    # read: IOPS=3104, BW=194MiB/s (203MB/s)(4096MiB/21113msec)
+    # write: IOPS=3079, BW=192MiB/s (202MB/s)(4096MiB/21280msec)
+    DISK_TIER_MEDIUM = 30
+    # -----------vpu=90------------
+    # Use --numjobs=8 in fio command
+    # read: IOPS=5843, BW=365MiB/s (383MB/s)(8192MiB/22429msec)
+    # write: IOPS=5833, BW=365MiB/s (382MB/s)(8192MiB/22469msec);
+    # -----------vpu=100------------
+    # Use --numjobs=8 in fio command
+    # read: IOPS=6698, BW=419MiB/s (439MB/s)(8192MiB/19568msec)
+    # write: IOPS=6707, BW=419MiB/s (440MB/s)(8192MiB/19540msec)
+    DISK_TIER_HIGH = 100
+
+    # disk_tier to OCI VPU mapping
+    BOOT_VOLUME_VPU = {
+        None: DISK_TIER_MEDIUM,  # Default to medium
+        "low": DISK_TIER_LOW,
+        "medium": DISK_TIER_MEDIUM,
+        "high": DISK_TIER_HIGH,
+    }
 
     @classmethod
     def get_compartment(cls, region):

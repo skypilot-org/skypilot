@@ -11,6 +11,7 @@ from sky.utils import log_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from sky import status_lib
     from sky import resources
 
 
@@ -26,6 +27,7 @@ class CloudImplementationFeatures(enum.Enum):
     STOP = 'stop'
     AUTOSTOP = 'autostop'
     MULTI_NODE = 'multi-node'
+    CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
 
 
 class Region(collections.namedtuple('Region', ['name'])):
@@ -466,6 +468,115 @@ class Cloud:
             exceptions.NotSupportedError: If the disk tier is not supported.
         """
         raise NotImplementedError
+
+    @classmethod
+    # pylint: disable=unused-argument
+    def check_quota_available(cls,
+                              region: str,
+                              instance_type: str,
+                              use_spot: bool = False) -> bool:
+        """Check if quota is available for `instance_type` in `region`.
+
+        (Currently, check_quota_available is only implemented for AWS.)
+
+        The _retry_zones function in cloud_vm_ray_backend goes through different
+        candidate regions and attempts to provision the requested instance_type
+        accelerators in the region, until a successful provisioning happens
+        or all regions with the requested accelerator have been looked at.
+        Previously, SkyPilot would attempt to provision resources in all of
+        these regions. However, many regions would have a zero quota or
+        inadequate quota, meaning these attempted provisions were destined
+        to fail from the get-go.
+
+        Checking the quota is substantially faster than attempting a failed
+        provision (~1 second vs 30+ seconds) so this function attempts to
+        check the resource quota and return False if it is found to be zero,
+        or True otherwise. If False is returned, _retry_zones will not attempt
+        a provision in the region, saving time.
+
+        We are only checking for a nonzero quota, instead of also factoring in
+        quota utilization because many cloud providers' APIs don't have a
+        built-in command for checking the real-time utilization. Checking
+        real-time utilization is a more difficult endeavor that involves
+        monitoring etc., so we are holding off on that for now.
+
+        If for at any point the function fails, whether it's because we can't
+        import the necessary dependencies or a query using a cloud provider's
+        API fails, we will return True, because we cannot conclusively say the
+        relevant quota is zero in these cases, and we don't want to
+        preemptively exclude regions from an attempted provision if they may
+        have an adequate quota.
+
+        Design choice: We chose a just-in-time approach where
+        check_quota_available is called immediately before a potential
+        attempted provision, rather than checking all region quotas
+        beforehand, storing them, and using those values on-demand. This is
+        because, for example, _retry_zones may only need to go through one or
+        a few regions before a successful region, and running a query to check
+        *every* region's quota beforehand would cause an unnecessary delay.
+
+        Returns:
+            False if the quota is found to be zero, and true otherwise.
+        """
+
+        return True
+
+    @classmethod
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List['status_lib.ClusterStatus']:
+        """Queries the latest status of the cluster from the cloud.
+
+        The global_user_state caches the status of the clusters, but the
+        actual status of the clusters may change on the cloud, e.g., the
+        autostop happens, or the user manually stops the cluster. This
+        method queries the cloud to get the latest cluster status.
+
+        Returns:
+            A list of ClusterStatus representing the status of all the
+            alive nodes in the cluster.
+        """
+        raise NotImplementedError
+
+    # === Image related methods ===
+    # These three methods are used to create, move and delete images. They
+    # are currently only used in `sky launch --clone-disk-from` to clone a
+    # cluster's disk to launch a new cluster.
+    # It is not required to implement these methods for clouds that do not
+    # support `--clone-disk-from`. If not implemented,
+    # CloudImplementationFeatures.CLONE_DISK_FROM should be added to the
+    # cloud._cloud_unsupported_features().
+
+    @classmethod
+    def create_image_from_cluster(cls, cluster_name: str,
+                                  tag_filters: Dict[str,
+                                                    str], region: Optional[str],
+                                  zone: Optional[str]) -> str:
+        """Creates an image from the cluster.
+
+        Returns: the image ID.
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def maybe_move_image(cls, image_name: str, source_region: str,
+                         target_region: str, source_zone: Optional[str],
+                         target_zone: Optional[str]) -> str:
+        """Move an image if required.
+
+        If the image cannot be accessed in the target region, move the image
+        from the source region to the target region.
+
+        Returns: the image ID in the target region.
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def delete_image(cls, image_id: str, region: Optional[str]) -> None:
+        """Deletes the image with image_id in the region."""
+        raise NotImplementedError
+
+    # === End of image related methods ===
 
     def __repr__(self):
         return self._REPR

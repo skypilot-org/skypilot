@@ -1,7 +1,7 @@
 .. _yaml-spec:
 
 Task YAML
-==================
+=========
 
 SkyPilot provides an intuitive YAML interface to specify a task (resource requirements, setup commands, run commands, file mounts, storage mounts, and so on).
 

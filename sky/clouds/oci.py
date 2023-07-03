@@ -13,8 +13,11 @@ import logging
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky.clouds import service_catalog
 from sky import exceptions
+from sky import status_lib
+from sky.clouds import service_catalog
+from sky.utils import common_utils
+from sky.utils import ux_utils
 from sky.adaptors import oci as oci_adaptor
 from sky.skylet.providers.oci.config import oci_conf
 
@@ -23,6 +26,8 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 logger = logging.getLogger(__name__)
+
+_tenancy_prefix = None
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -40,7 +45,10 @@ class OCI(clouds.Cloud):
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return dict()
+        return {
+            clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+                (f'Migrating disk is not supported in {cls._REPR}.'),
+        }
 
     @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:
@@ -227,13 +235,40 @@ class OCI(clouds.Cloud):
             if zones is not None:
                 zone = zones[0].name
 
+        global _tenancy_prefix
+        if _tenancy_prefix is None:
+            try:
+                identity_client = oci_adaptor.get_identity_client(
+                    region=region.name, profile=oci_conf.get_profile())
+
+                ad_list = identity_client.list_availability_domains(
+                    compartment_id=oci_adaptor.get_oci_config(
+                        profile=oci_conf.get_profile())['tenancy']).data
+
+                first_ad = ad_list[0]
+                _tenancy_prefix = str(first_ad.name).split(':')[0]
+            except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
+                    oci_adaptor.get_oci().exceptions.InvalidConfig) as e:
+                # This should only happen in testing where oci config is
+                # monkeypatched. In real use, if the OCI config is not
+                # valid, the 'sky check' would fail (OCI disabled).
+                logger.debug(f'It is OK goes here when testing: {str(e)}')
+                pass
+
+        # Disk performane: Volume Performance Units.
+        vpu = self.get_vpu_from_disktier(
+            cpus=None if cpus is None else float(cpus),
+            disk_tier=resources.disk_tier)
+
         return {
             'instance_type': instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
-            'cpus': cpus,
+            'cpus': str(cpus),
             'memory': resources.memory,
-            'zone': zone,
+            'disk_size': resources.disk_size,
+            'vpu': str(vpu),
+            'zone': f'{_tenancy_prefix}:{zone}',
             'image': image_id,
             'app_catalog_listing_id': listing_id,
             'resource_version': res_ver,
@@ -339,19 +374,27 @@ class OCI(clouds.Cloud):
         try:
             user = oci_adaptor.get_identity_client(
                 region=None, profile=oci_conf.get_profile()).get_user(
-                    oci_adaptor.get_oci_config()['user']).data
+                    oci_adaptor.get_oci_config(
+                        profile=oci_conf.get_profile())['user']).data
             del user
             # TODO[Hysun]: More privilege check can be added
             return True, None
-        except oci_adaptor.service_exception():
-            return False, (f'OCI credential is not correctly set. '
-                           f'Check the credential file at {conf_file}\n'
-                           f'{cls._INDENT_PREFIX}{credential_help_str}')
+        except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
+                oci_adaptor.get_oci().exceptions.InvalidConfig,
+                oci_adaptor.service_exception()) as e:
+            return False, (
+                f'OCI credential is not correctly set. '
+                f'Check the credential file at {conf_file}\n'
+                f'{cls._INDENT_PREFIX}{credential_help_str}\n'
+                f'{cls._INDENT_PREFIX}Error details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
         oci_cfg_file = oci_adaptor.get_config_file()
-        oci_cfg = oci_adaptor.get_oci_config()
+        # Pass-in a profile parameter so that multiple profile in oci
+        # config file is supported (2023/06/09).
+        oci_cfg = oci_adaptor.get_oci_config(profile=oci_conf.get_profile())
         api_key_file = oci_cfg[
             'key_file'] if 'key_file' in oci_cfg else 'BadConf'
         sky_cfg_file = oci_conf.get_sky_user_config_file()
@@ -459,3 +502,78 @@ class OCI(clouds.Cloud):
         raise exceptions.ResourcesUnavailableError(
             'ERR: No image found in catalog for region '
             f'{region_name}. Try update your default image_id settings.')
+
+    @classmethod
+    def check_disk_tier_enabled(cls, instance_type: str,
+                                disk_tier: str) -> None:
+        # All the disk_tier are supported for any instance_type
+        del instance_type, disk_tier  # unused
+
+    def get_vpu_from_disktier(self, cpus: Optional[float],
+                              disk_tier: Optional[str]) -> int:
+        vpu = oci_conf.BOOT_VOLUME_VPU[disk_tier]
+        if cpus is None:
+            return vpu
+
+        if cpus <= 2:
+            vpu = oci_conf.DISK_TIER_LOW if disk_tier is None else vpu
+            if vpu > oci_conf.DISK_TIER_LOW:
+                # If only 1 OCPU is configured, best to use the OCI default
+                # VPU (10) for the boot volume. Even if the VPU is configured
+                # to higher value (no error to launch the instance), we cannot
+                # fully achieve its IOPS/throughput performance.
+                logger.warning(
+                    f'Automatically set the VPU to {oci_conf.DISK_TIER_LOW}'
+                    f' as only 2x vCPU is configured.')
+                vpu = oci_conf.DISK_TIER_LOW
+        elif cpus < 8:
+            # If less than 4 OCPU is configured, best not to set the disk_tier
+            # to 'high' (vpu=100). Even if the disk_tier is configured to high
+            # (no error to launch the instance), we cannot fully achieve its
+            # IOPS/throughput performance.
+            if vpu > oci_conf.DISK_TIER_MEDIUM:
+                logger.warning(
+                    f'Automatically set the VPU to {oci_conf.DISK_TIER_MEDIUM}'
+                    f' as less than 8x vCPU is configured.')
+                vpu = oci_conf.DISK_TIER_MEDIUM
+        return vpu
+
+    @classmethod
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List[status_lib.ClusterStatus]:
+        del zone, kwargs  # Unused.
+        # Check the lifecycleState definition from the page
+        # https://docs.oracle.com/en-us/iaas/api/#/en/iaas/latest/Instance/
+        status_map = {
+            'PROVISIONING': status_lib.ClusterStatus.INIT,
+            'STARTING': status_lib.ClusterStatus.INIT,
+            'RUNNING': status_lib.ClusterStatus.UP,
+            'STOPPING': status_lib.ClusterStatus.STOPPED,
+            'STOPPED': status_lib.ClusterStatus.STOPPED,
+            'TERMINATED': None,
+            'TERMINATING': None,
+        }
+
+        # pylint: disable=import-outside-toplevel
+        from sky.skylet.providers.oci.query_helper import oci_query_helper
+
+        status_list = []
+        try:
+            vms = oci_query_helper.query_instances_by_tags(
+                tag_filters=tag_filters, region=region)
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ClusterStatusFetchingError(
+                    f'Failed to query OCI cluster {name!r} status. '
+                    'Details: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
+
+        for node in vms:
+            vm_status = node.lifecycle_state
+            if vm_status in status_map:
+                sky_status = status_map[vm_status]
+                if sky_status is not None:
+                    status_list.append(sky_status)
+
+        return status_list

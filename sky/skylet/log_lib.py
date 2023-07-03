@@ -2,9 +2,10 @@
 
 This is a remote utility module that provides logging functionality.
 """
+import copy
 import io
+import multiprocessing.pool
 import os
-import selectors
 import subprocess
 import sys
 import time
@@ -26,84 +27,101 @@ _SKY_LOG_TAILING_GAP_SECONDS = 0.2
 logger = sky_logging.init_logger(__name__)
 
 
-def process_subprocess_stream(
-    proc,
-    log_path: str,
-    stream_logs: bool,
-    start_streaming_at: str = '',
-    end_streaming_at: Optional[str] = None,
-    skip_lines: Optional[List[str]] = None,
-    replace_crlf: bool = False,
-    line_processor: Optional[log_utils.LineProcessor] = None,
-    streaming_prefix: Optional[str] = None,
-) -> Tuple[str, str]:
-    """Redirect the process's filtered stdout/stderr to both stream and file"""
-    if line_processor is None:
-        line_processor = log_utils.LineProcessor()
+class _ProcessingArgs:
+    """Arguments for processing logs."""
 
-    sel = selectors.DefaultSelector()
-    out_io = io.TextIOWrapper(proc.stdout,
+    def __init__(self,
+                 log_path: str,
+                 stream_logs: bool,
+                 start_streaming_at: str = '',
+                 end_streaming_at: Optional[str] = None,
+                 skip_lines: Optional[List[str]] = None,
+                 replace_crlf: bool = False,
+                 line_processor: Optional[log_utils.LineProcessor] = None,
+                 streaming_prefix: Optional[str] = None) -> None:
+        self.log_path = log_path
+        self.stream_logs = stream_logs
+        self.start_streaming_at = start_streaming_at
+        self.end_streaming_at = end_streaming_at
+        self.skip_lines = skip_lines
+        self.replace_crlf = replace_crlf
+        self.line_processor = line_processor
+        self.streaming_prefix = streaming_prefix
+
+
+def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
+    """Process the stream of a process."""
+    out_io = io.TextIOWrapper(io_stream,
                               encoding='utf-8',
                               newline='',
-                              errors='replace')
-    sel.register(out_io, selectors.EVENT_READ)
-    if proc.stderr is not None:
-        err_io = io.TextIOWrapper(proc.stderr,
-                                  encoding='utf-8',
-                                  newline='',
-                                  errors='replace')
-        sel.register(err_io, selectors.EVENT_READ)
-
-    stdout = ''
-    stderr = ''
-
-    if streaming_prefix is None:
-        streaming_prefix = ''
+                              errors='replace',
+                              write_through=True)
 
     start_streaming_flag = False
     end_streaming_flag = False
-    with line_processor:
-        with open(log_path, 'a') as fout:
-            while len(sel.get_map()) > 0:
-                events = sel.select()
-                for key, _ in events:
-                    line = key.fileobj.readline()
-                    if not line:
-                        # Unregister the io when EOF reached
-                        sel.unregister(key.fileobj)
-                        continue
-                    # TODO(zhwu,gmittal): Put replace_crlf, skip_lines, and
-                    # start_streaming_at logic in processor.process_line(line)
-                    if replace_crlf and line.endswith('\r\n'):
-                        # Replace CRLF with LF to avoid ray logging to the same
-                        # line due to separating lines with '\n'.
-                        line = line[:-2] + '\n'
-                    if (skip_lines is not None and
-                            any(skip in line for skip in skip_lines)):
-                        continue
-                    if start_streaming_at in line:
-                        start_streaming_flag = True
-                    if (end_streaming_at is not None and
-                            end_streaming_at in line):
-                        # Keep executing the loop, only stop streaming.
-                        # E.g., this is used for `sky bench` to hide the
-                        # redundant messages of `sky launch` while
-                        # saving them in log files.
-                        end_streaming_flag = True
-                    if key.fileobj is out_io:
-                        stdout += line
-                        out_stream = sys.stdout
-                    else:
-                        stderr += line
-                        out_stream = sys.stderr
-                    if (stream_logs and start_streaming_flag and
-                            not end_streaming_flag):
-                        out_stream.write(streaming_prefix + line)
-                        out_stream.flush()
-                    if log_path != '/dev/null':
-                        fout.write(line)
-                        fout.flush()
-                    line_processor.process_line(line)
+    streaming_prefix = args.streaming_prefix if args.streaming_prefix else ''
+    line_processor = (log_utils.LineProcessor()
+                      if args.line_processor is None else args.line_processor)
+
+    out = []
+    with open(args.log_path, 'a') as fout:
+        with line_processor:
+            while True:
+                line = out_io.readline()
+                if not line:
+                    break
+                # start_streaming_at logic in processor.process_line(line)
+                if args.replace_crlf and line.endswith('\r\n'):
+                    # Replace CRLF with LF to avoid ray logging to the same
+                    # line due to separating lines with '\n'.
+                    line = line[:-2] + '\n'
+                if (args.skip_lines is not None and
+                        any(skip in line for skip in args.skip_lines)):
+                    continue
+                if args.start_streaming_at in line:
+                    start_streaming_flag = True
+                if (args.end_streaming_at is not None and
+                        args.end_streaming_at in line):
+                    # Keep executing the loop, only stop streaming.
+                    # E.g., this is used for `sky bench` to hide the
+                    # redundant messages of `sky launch` while
+                    # saving them in log files.
+                    end_streaming_flag = True
+                if (args.stream_logs and start_streaming_flag and
+                        not end_streaming_flag):
+                    print(streaming_prefix + line,
+                          end='',
+                          file=out_stream,
+                          flush=True)
+                if args.log_path != '/dev/null':
+                    fout.write(line)
+                    fout.flush()
+                line_processor.process_line(line)
+                out.append(line)
+    return ''.join(out)
+
+
+def process_subprocess_stream(proc, args: _ProcessingArgs) -> Tuple[str, str]:
+    """Redirect the process's filtered stdout/stderr to both stream and file"""
+    if proc.stderr is not None:
+        # Asyncio does not work as the output processing can be executed in a
+        # different thread.
+        # selectors is possible to handle the multiplexing of stdout/stderr,
+        # but it introduces buffering making the output not streaming.
+        with multiprocessing.pool.ThreadPool(processes=1) as pool:
+            err_args = copy.copy(args)
+            err_args.line_processor = None
+            stderr_fut = pool.apply_async(_handle_io_stream,
+                                          args=(proc.stderr, sys.stderr,
+                                                err_args))
+            # Do not launch a thread for stdout as the rich.status does not
+            # work in a thread, which is used in
+            # log_utils.RayUpLineProcessor.
+            stdout = _handle_io_stream(proc.stdout, sys.stdout, args)
+            stderr = stderr_fut.get()
+    else:
+        stdout = _handle_io_stream(proc.stdout, sys.stdout, args)
+        stderr = ''
     return stdout, stderr
 
 
@@ -133,8 +151,8 @@ def run_with_log(
         stream_logs: Whether to stream the logs to stdout/stderr.
         require_outputs: Whether to return the stdout/stderr of the command.
         process_stream: Whether to post-process the stdout/stderr of the
-          command. If enabled, lines are printed only when '\r' or '\n' is
-          found.
+            command, such as replacing or skipping lines on the fly. If
+            enabled, lines are printed only when '\r' or '\n' is found.
         ray_job_id: The id for a ray job.
         use_sudo: Whether to use sudo to create log_path.
 
@@ -222,10 +240,9 @@ def run_with_log(
             # We need this even if the log_path is '/dev/null' to ensure the
             # progress bar is shown.
             # NOTE: Lines are printed only when '\r' or '\n' is found.
-            stdout, stderr = process_subprocess_stream(
-                proc,
-                log_path,
-                stream_logs,
+            args = _ProcessingArgs(
+                log_path=log_path,
+                stream_logs=stream_logs,
                 start_streaming_at=start_streaming_at,
                 end_streaming_at=end_streaming_at,
                 skip_lines=skip_lines,
@@ -234,6 +251,7 @@ def run_with_log(
                 replace_crlf=with_ray,
                 streaming_prefix=streaming_prefix,
             )
+            stdout, stderr = process_subprocess_stream(proc, args)
         proc.wait()
         if require_outputs:
             return proc.returncode, stdout, stderr
@@ -314,14 +332,16 @@ def run_bash_command_with_log(bash_command: str,
         else:
             subprocess_cmd = inner_command
 
-        return run_with_log(subprocess_cmd,
-                            log_path,
-                            ray_job_id=job_lib.make_ray_job_id(
-                                job_id, job_owner),
-                            stream_logs=stream_logs,
-                            with_ray=with_ray,
-                            use_sudo=use_sudo,
-                            shell=True)
+        return run_with_log(
+            subprocess_cmd,
+            log_path,
+            ray_job_id=job_lib.make_ray_job_id(job_id, job_owner),
+            stream_logs=stream_logs,
+            with_ray=with_ray,
+            use_sudo=use_sudo,
+            # Disable input to avoid blocking.
+            stdin=subprocess.DEVNULL,
+            shell=True)
 
 
 def _follow_job_logs(file,
