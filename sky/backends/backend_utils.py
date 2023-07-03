@@ -1237,17 +1237,16 @@ def ssh_credential_from_yaml(cluster_yaml: str,
     """Returns ssh_user, ssh_private_key and ssh_control name."""
     config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
-    ssh_user = docker_user if docker_user else auth_section['ssh_user'].strip()
+    ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
-    from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
     return {
         'ssh_user': ssh_user,
         'ssh_private_key': ssh_private_key,
         'ssh_control_name': ssh_control_name,
         'ssh_proxy_command': ssh_proxy_command,
-        'port': docker_utils.DEFAULT_DOCKER_PORT if docker_user else '22'
+        'docker_user': docker_user or '',
     }
 
 
@@ -1863,7 +1862,8 @@ def _update_cluster_status_no_lock(
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
             # Check if ray cluster status is healthy.
-            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml, handle.docker_user)
+            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
+                                                       handle.docker_user)
             runner = command_runner.SSHCommandRunner(external_ips[0],
                                                      **ssh_credentials)
             rc, output, _ = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,

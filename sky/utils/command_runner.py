@@ -122,7 +122,7 @@ class SSHCommandRunner:
         ssh_private_key: str,
         ssh_control_name: Optional[str] = '__default__',
         ssh_proxy_command: Optional[str] = None,
-        port: Optional[str] = '22',
+        docker_user: Optional[str] = None,
     ):
         """Initialize SSHCommandRunner.
 
@@ -144,14 +144,25 @@ class SSHCommandRunner:
                 public IPs using a "jump server".
             port: The port to use for ssh.
         """
-        self.ip = ip
-        self.ssh_user = ssh_user
         self.ssh_private_key = ssh_private_key
         self.ssh_control_name = (
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
-        self._ssh_proxy_command = ssh_proxy_command
-        self.port = port
+        if docker_user:
+            self.ip = 'localhost'
+            self.ssh_user = docker_user
+            assert ssh_proxy_command is None, (
+                'ssh_proxy_command is not supported if docker is used')
+            self._ssh_proxy_command = lambda ssh: ' '.join(
+                ssh + ssh_options_list(ssh_private_key, None
+                                      ) + ['-W', '%h:%p', f'{ssh_user}@{ip}'])
+            from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
+            self.port = docker_utils.DEFAULT_DOCKER_PORT
+        else:
+            self.ip = ip
+            self.ssh_user = ssh_user
+            self._ssh_proxy_command = ssh_proxy_command
+            self.port = '22'
 
     @staticmethod
     def make_runner_list(
@@ -160,12 +171,12 @@ class SSHCommandRunner:
         ssh_private_key: str,
         ssh_control_name: Optional[str] = None,
         ssh_proxy_command: Optional[str] = None,
-        port: Optional[str] = '22',
+        docker_user: Optional[str] = None,
     ) -> List['SSHCommandRunner']:
         """Helper function for creating runners with the same ssh credentials"""
         return [
             SSHCommandRunner(ip, ssh_user, ssh_private_key, ssh_control_name,
-                             ssh_proxy_command, port) for ip in ip_list
+                             ssh_proxy_command, docker_user) for ip in ip_list
         ]
 
     def _ssh_base_command(self, *, ssh_mode: SshMode,
@@ -184,10 +195,14 @@ class SSHCommandRunner:
                 logger.info(
                     f'Forwarding port {local} to port {remote} on localhost.')
                 ssh += ['-L', f'{remote}:localhost:{local}']
+        if callable(self._ssh_proxy_command):
+            ssh_proxy_command = self._ssh_proxy_command(ssh)
+        else:
+            ssh_proxy_command = self._ssh_proxy_command
         return ssh + ssh_options_list(
             self.ssh_private_key,
             self.ssh_control_name,
-            ssh_proxy_command=self._ssh_proxy_command,
+            ssh_proxy_command=ssh_proxy_command,
             port=self.port,
         ) + [f'{self.ssh_user}@{self.ip}']
 
@@ -338,11 +353,15 @@ class SSHCommandRunner:
                     RSYNC_EXCLUDE_OPTION.format(
                         str(resolved_source / GIT_EXCLUDE)))
 
+        if callable(self._ssh_proxy_command):
+            ssh_proxy_command = self._ssh_proxy_command(['ssh'])
+        else:
+            ssh_proxy_command = self._ssh_proxy_command
         ssh_options = ' '.join(
             ssh_options_list(
                 self.ssh_private_key,
                 self.ssh_control_name,
-                ssh_proxy_command=self._ssh_proxy_command,
+                ssh_proxy_command=ssh_proxy_command,
                 port=self.port,
             ))
         rsync_command.append(f'-e "ssh {ssh_options}"')
