@@ -3758,11 +3758,29 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             exceptions.InvalidClusterNameError: If the cluster name is invalid.
             # TODO(zhwu): complete the list of exceptions.
         """
-        handle_before_refresh = global_user_state.get_handle_from_cluster_name(
-            cluster_name)
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        handle_before_refresh = None if record is None else record['handle']
+        status_before_refresh = None if record is None else record['status']
+
         prev_cluster_status, handle = (
             backend_utils.refresh_cluster_status_handle(
-                cluster_name, acquire_per_cluster_status_lock=False))
+                cluster_name,
+                # We force refresh for the init status to determine the actual
+                # state of a previous cluster in INIT state.
+                #
+                # This is important for the case, where an existing cluster is
+                # transitioned into INIT state due to key interruption during
+                # launching, with the following steps:
+                # (1) launch, after answering prompt immediately ctrl-c;
+                # (2) launch again.
+                # If we don't refresh the state of the cluster and reset it back
+                # to STOPPED, our failover logic will consider it as an abnormal
+                # cluster after hitting resources capacity limit on the cloud,
+                # and will start failover. This is not desired, because the user
+                # may want to keep the data on the disk of that cluster.
+                force_refresh_statuses={status_lib.ClusterStatus.INIT},
+                acquire_per_cluster_status_lock=False,
+            ))
         if prev_cluster_status is not None:
             assert handle is not None
             # Cluster already exists.
@@ -3784,10 +3802,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         task_cloud.check_cluster_name_is_valid(cluster_name)
 
         if to_provision is None:
-            logger.info(
-                f'The cluster {cluster_name!r} was autodowned or manually '
-                'terminated on the cloud console. Using the same resources '
-                'as the previously terminated one to provision a new cluster.')
             # The cluster is recently terminated either by autostop or manually
             # terminated on the cloud. We should use the previously terminated
             # resources to provision the cluster.
@@ -3796,6 +3810,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'Trying to launch cluster {cluster_name!r} recently '
                     'terminated  on the cloud, but the handle is not a '
                     f'CloudVmRayResourceHandle ({handle_before_refresh}).')
+            status_before_refresh_str = None
+            if status_before_refresh is not None:
+                status_before_refresh_str = status_before_refresh.value
+
+            logger.info(
+                f'The cluster {cluster_name!r} (status: '
+                f'{status_before_refresh_str}) was not found on the cloud: it '
+                'may be autodowned, manually terminated, or its launch never '
+                'succeeded. Provisioning a new cluster by using the same '
+                'resources as its original launch.')
             to_provision = handle_before_refresh.launched_resources
             self.check_resources_fit_cluster(handle_before_refresh, task)
 
