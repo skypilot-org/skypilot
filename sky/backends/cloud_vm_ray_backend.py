@@ -3323,8 +3323,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # even when the command was executed successfully.
                 self.run_on_head(handle, 'ray stop --force')
             except RuntimeError:
-                # This error is expected if the previous cluster status is
-                # INIT/STOPPED.
+                # This error is expected if the previous cluster IP is
+                # failed to be found,
+                # i.e., the cluster is already stopped/terminated.
                 if prev_cluster_status == status_lib.ClusterStatus.UP:
                     logger.warning(
                         'Failed to take down Ray autoscaler on the head node. '
