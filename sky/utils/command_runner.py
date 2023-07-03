@@ -142,7 +142,9 @@ class SSHCommandRunner:
             ssh_proxy_command: Optional, the value to pass to '-o
                 ProxyCommand'. Useful for communicating with clusters without
                 public IPs using a "jump server".
-            port: The port to use for ssh.
+            docker_user: The docker user to use for ssh. If specified, the
+                command will be run inside a docker container which have a ssh
+                server running at port docker_utils.DEFAULT_DOCKER_PORT.
         """
         self.ssh_private_key = ssh_private_key
         self.ssh_control_name = (
