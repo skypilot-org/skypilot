@@ -399,7 +399,7 @@ class SSHConfigHelper(object):
     @classmethod
     def _get_generated_config(cls, autogen_comment: str, host_name: str,
                               ip: str, username: str, ssh_key_path: str,
-                              proxy_command: Optional[str]):
+                              port: str, proxy_command: Optional[str]):
         if proxy_command is not None:
             proxy = f'ProxyCommand {proxy_command}'
         else:
@@ -421,7 +421,7 @@ class SSHConfigHelper(object):
               StrictHostKeyChecking no
               UserKnownHostsFile=/dev/null
               GlobalKnownHostsFile=/dev/null
-              Port 22
+              Port {port}
               {proxy}
             """.rstrip())
         codegen = codegen + '\n'
@@ -434,6 +434,7 @@ class SSHConfigHelper(object):
         cluster_name: str,
         ips: List[str],
         auth_config: Dict[str, str],
+        docker_user: Optional[str] = None,
     ):
         """Add authentication information for cluster to local SSH config file.
 
@@ -451,14 +452,16 @@ class SSHConfigHelper(object):
               node.
             auth_config: read_yaml(handle.cluster_yaml)['auth']
         """
-        username = auth_config['ssh_user']
+        username = docker_user or auth_config['ssh_user']
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
                                f'{cluster_name}` to remove)')
         overwrite = False
         overwrite_begin_idx = None
-        ip = ips[0]
+        ip = 'localhost' if docker_user else ips[0]
+        from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
+        port = docker_utils.DEFAULT_DOCKER_PORT if docker_user else '22'
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
         if os.path.exists(config_path):
@@ -490,8 +493,16 @@ class SSHConfigHelper(object):
             os.chmod(config_path, 0o644)
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
+        if docker_user is not None:
+            if proxy_command is not None:
+                raise ValueError(
+                    'ssh_proxy_command is not supported if docker is used')
+            proxy_command = ' '.join(
+                ['ssh'] + command_runner.ssh_options_list(key_path, None) +
+                ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ips[0]}'])
         codegen = cls._get_generated_config(sky_autogen_comment, host_name, ip,
-                                            username, key_path, proxy_command)
+                                            username, key_path, port,
+                                            proxy_command)
 
         # Add (or overwrite) the new config.
         if overwrite:
@@ -516,7 +527,7 @@ class SSHConfigHelper(object):
 
         if len(ips) > 1:
             SSHConfigHelper._add_multinode_config(cluster_name, ips[1:],
-                                                  auth_config)
+                                                  auth_config, docker_user)
 
     @classmethod
     def _add_multinode_config(
@@ -524,8 +535,9 @@ class SSHConfigHelper(object):
         cluster_name: str,
         external_worker_ips: List[str],
         auth_config: Dict[str, str],
+        docker_user: Optional[str] = None,
     ):
-        username = auth_config['ssh_user']
+        username = docker_user or auth_config['ssh_user']
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
@@ -534,6 +546,8 @@ class SSHConfigHelper(object):
         # Ensure stableness of the aliases worker-<i> by sorting based on
         # public IPs.
         external_worker_ips = list(sorted(external_worker_ips))
+        from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
+        port = docker_utils.DEFAULT_DOCKER_PORT if docker_user else '22'
 
         overwrites = [False] * len(external_worker_ips)
         overwrite_begin_idxs: List[Optional[int]] = [None
@@ -579,11 +593,24 @@ class SSHConfigHelper(object):
             config = f.readlines()
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
+        if docker_user is not None:
+            if proxy_command is not None:
+                raise ValueError(
+                    'ssh_proxy_command is not supported if docker is used')
+            proxy_command_generator = lambda ip: ' '.join(
+                ['ssh'] + command_runner.ssh_options_list(key_path, None) +
+                ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ip}'])
 
         # Check if ~/.ssh/config contains existing names
         host_lines = [f'Host {c_name}' for c_name in worker_names]
         for i, line in enumerate(config):
             if line.strip() in host_lines:
+                if docker_user is not None:
+                    raise ValueError(
+                        f'Host name {worker_names[i]} already exists in '
+                        '~/.ssh/config and docker is used, therefore '
+                        'we cannot use ip address to identify the host. '
+                        'Please use a different cluster name.')
                 idx = host_lines.index(line.strip())
                 prev_line = config[i - 1] if i > 0 else ''
                 logger.warning(f'{cls.ssh_conf_path} contains '
@@ -592,7 +619,7 @@ class SSHConfigHelper(object):
                 logger.warning(f'Using {host_name} to identify host instead.')
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, host_name, external_worker_ips[idx],
-                    username, key_path, proxy_command)
+                    username, key_path, port, proxy_command)
 
         # All workers go to SKY_USER_FILE_PATH/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
@@ -603,16 +630,24 @@ class SSHConfigHelper(object):
                     host_name = worker_names[idx]
                     overwrites[idx] = True
                     overwrite_begin_idxs[idx] = i - 1
+                ip = external_worker_ips[
+                    idx] if docker_user is None else 'localhost'
+                if docker_user is not None:
+                    proxy_command = proxy_command_generator(
+                        external_worker_ips[idx])
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, host_name, external_worker_ips[idx],
-                    username, key_path, proxy_command)
+                    sky_autogen_comment, host_name, ip, username, key_path,
+                    port, proxy_command)
 
         # This checks if all codegens have been created.
         for idx, ip in enumerate(external_worker_ips):
+            if docker_user is not None:
+                proxy_command = proxy_command_generator(ip)
             if not codegens[idx]:
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, worker_names[idx], ip, username,
-                    key_path, proxy_command)
+                    sky_autogen_comment, worker_names[idx],
+                    ip if docker_user is None else 'localhost', username,
+                    key_path, port, proxy_command)
 
         for idx in range(len(external_worker_ips)):
             # Add (or overwrite) the new config.
@@ -646,6 +681,7 @@ class SSHConfigHelper(object):
         cluster_name: str,
         ip: str,
         auth_config: Dict[str, str],
+        docker_user: Optional[str] = None,
     ):
         """Remove authentication information for cluster from local SSH config.
 
@@ -668,8 +704,16 @@ class SSHConfigHelper(object):
         # Scan the config for the cluster name.
         for i, line in enumerate(config):
             next_line = config[i + 1] if i + 1 < len(config) else ''
-            if (line.strip() == f'HostName {ip}' and
-                    next_line.strip() == f'User {username}'):
+            if docker_user is None:
+                found = (line.strip() == f'HostName {ip}' and
+                         next_line.strip() == f'User {username}')
+            else:
+                found = (line.strip() == 'HostName localhost' and
+                         next_line.strip() == f'User {docker_user}')
+                proxy_command_line = config[i +
+                                            9] if i + 9 < len(config) else ''
+                found = found and (ip in proxy_command_line)
+            if found:
                 start_line_idx = i - 1
                 break
 
