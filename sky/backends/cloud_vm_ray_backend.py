@@ -27,6 +27,7 @@ from sky import clouds
 from sky import cloud_stores
 from sky import exceptions
 from sky import global_user_state
+from sky import provision as provision_api
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import optimizer
@@ -3343,6 +3344,36 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         stdout = ''
         stderr = ''
 
+        # Use the new provisioner for AWS.
+        if isinstance(cloud, clouds.AWS):
+            region = config['provider']['region']
+            # Stop the ray autoscaler first to avoid the head node trying to
+            # re-launch the worker nodes, during the termination of the
+            # cluster.
+            try:
+                # We do not check the return code, since Ray returns
+                # non-zero return code when calling Ray stop,
+                # even when the command was executed successfully.
+                self.run_on_head(handle, 'ray stop --force')
+            except RuntimeError:
+                # This error is expected if the previous cluster IP is
+                # failed to be found,
+                # i.e., the cluster is already stopped/terminated.
+                if prev_cluster_status == status_lib.ClusterStatus.UP:
+                    logger.warning(
+                        'Failed to take down Ray autoscaler on the head node. '
+                        'It might be because the cluster\'s head node has '
+                        'already been terminated. It is fine to skip this.')
+            if terminate:
+                provision_api.terminate_instances(repr(cloud), region,
+                                                  cluster_name)
+            else:
+                provision_api.stop_instances(repr(cloud), region, cluster_name)
+
+            if post_teardown_cleanup:
+                self.post_teardown_cleanup(handle, terminate, purge)
+            return
+
         if terminate and isinstance(cloud, clouds.Azure):
             # Here we handle termination of Azure by ourselves instead of Ray
             # autoscaler.
@@ -3434,22 +3465,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
               (prev_cluster_status == status_lib.ClusterStatus.STOPPED or
                use_tpu_vm)):
             # For TPU VMs, gcloud CLI is used for VM termination.
-            if isinstance(cloud, clouds.AWS):
-                # TODO(zhwu): Room for optimization. We can move these cloud
-                # specific handling to the cloud class.
-                # The stopped instance on AWS will not be correctly terminated
-                # due to ray's bug.
-                region = config['provider']['region']
-                query_cmd = (
-                    f'aws ec2 describe-instances --region {region} --filters '
-                    f'Name=tag:ray-cluster-name,Values={handle.cluster_name} '
-                    '--query Reservations[].Instances[].InstanceId '
-                    '--output text')
-                terminate_cmd = (
-                    f'VMS=$({query_cmd}) && [ -n "$VMS" ] && '
-                    f'aws ec2 terminate-instances --region {region} '
-                    '--instance-ids $VMS || echo "No instances to delete."')
-            elif isinstance(cloud, clouds.GCP):
+            if isinstance(cloud, clouds.GCP):
                 zone = config['provider']['availability_zone']
                 # TODO(wei-lin): refactor by calling functions of node provider
                 # that uses Python API rather than CLI
