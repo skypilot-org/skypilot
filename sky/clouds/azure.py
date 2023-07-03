@@ -250,32 +250,37 @@ class Azure(clouds.Cloud):
 
     def get_feasible_launchable_resources(self, resources):
 
-        def failover_disk_tier(instance_type: str,
-                               disk_tier: Optional[str]) -> Optional[str]:
+        def failover_disk_tier(
+                instance_type: str,
+                disk_tier: Optional[str]) -> Tuple[bool, Optional[str]]:
             """Figure out the actual disk tier to be used
 
             Check the disk_tier specified by the user with the instance type to
-            be used. If not valid, return None.
+            be used. If not valid, return False.
             When the disk_tier is not specified, failover through the possible
             disk tiers.
 
             Returns:
-                The actual disk tier to be used. If None, the specified
+                A tuple of a boolean value and an optional string to represent the
+                instance_type to use. If the boolean value is False, the specified
                 configuration is not a valid combination, and should not be used
                 for launching a VM.
             """
             if disk_tier is not None:
                 ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
-                return disk_tier if ok else None
+                return (True, disk_tier) if ok else (False, None)
             disk_tier = clouds.Cloud._DEFAULT_DISK_TIER
             all_tiers = {'high', 'medium', 'low'}
             while not Azure.check_disk_tier(instance_type, disk_tier)[0]:
                 all_tiers.remove(disk_tier)
                 if not all_tiers:
                     # No available disk_tier found the specified instance_type
-                    return None
+                    return (False, None)
                 disk_tier = list(all_tiers)[0]
-            return disk_tier
+            if disk_tier != clouds.Cloud._DEFAULT_DISK_TIER:
+                return True, disk_tier
+            else:
+                return True, None
 
         if resources.use_spot:
             # TODO(zhwu): our azure subscription offer ID does not support spot.
@@ -294,9 +299,9 @@ class Azure(clouds.Cloud):
         def _make(instance_list):
             resource_list = []
             for instance_type in instance_list:
-                disk_tier = failover_disk_tier(instance_type,
-                                               resources.disk_tier)
-                if not disk_tier:
+                ok, disk_tier = failover_disk_tier(instance_type,
+                                                   resources.disk_tier)
+                if not ok:
                     continue
                 r = resources.copy(
                     cloud=Azure(),
