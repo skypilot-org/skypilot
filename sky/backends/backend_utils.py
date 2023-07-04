@@ -2580,3 +2580,24 @@ def run_command_and_handle_ssh_failure(runner: command_runner.SSHCommandRunner,
                                        failure_message,
                                        stderr=stderr)
     return stdout
+
+
+def check_rsync_installed() -> None:
+    """Checks if rsync is installed.
+
+    Raises:
+        RuntimeError: if rsync is not installed in the machine.
+    """
+    try:
+        subprocess.run('rsync --version',
+                       shell=True,
+                       check=True,
+                       stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                '`rsync` is required for provisioning and'
+                ' it is not installed. For Debian/Ubuntu system, '
+                'install it with:\n'
+                '  $ sudo apt install rsync') from None

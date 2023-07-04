@@ -2398,7 +2398,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # When rsync is not installed in the user's machine, Ray will
         # silently retry to up the node for _MAX_RAY_UP_RETRY number
         # of times. This is time consuming so we fail early.
-        CloudVmRayBackend._check_rsync_installed()
+        backend_utils.check_rsync_installed()
         # Check if the cluster is owned by the current user. Raise
         # exceptions.ClusterOwnerIdentityMismatchError
         backend_utils.check_owner_identity(cluster_name)
@@ -4171,24 +4171,3 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 executable='python3',
                                 detach_run=detach_run,
                                 spot_dag=task.spot_dag)
-
-    @staticmethod
-    def _check_rsync_installed() -> None:
-        """Checks if rsync is installed.
-
-        Raises:
-            RuntimeError: if rsync is not installed in the machine.
-        """
-        try:
-            subprocess.run('rsync --version',
-                           shell=True,
-                           check=True,
-                           stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE)
-        except subprocess.CalledProcessError:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    '`rsync` is required for provisioning and'
-                    ' it is not installed. For Debian/Ubuntu system, '
-                    'install it with:\n'
-                    '  $ sudo apt install rsync') from None
