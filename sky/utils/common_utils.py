@@ -182,7 +182,11 @@ def read_yaml(path) -> Dict[str, Any]:
 def read_yaml_all(path: str) -> List[Dict[str, Any]]:
     with open(path, 'r') as f:
         config = yaml.safe_load_all(f)
-        return list(config)
+        configs = list(config)
+        if not configs:
+            # Empty YAML file.
+            return [{}]
+        return configs
 
 
 def dump_yaml(path, config) -> None:
@@ -378,3 +382,21 @@ def remove_file_if_exists(path: str):
 def is_wsl() -> bool:
     """Detect if running under Windows Subsystem for Linux (WSL)."""
     return 'microsoft' in platform.uname()[3].lower()
+
+
+def find_free_port(start_port: int) -> int:
+    """Finds first free local port starting with 'start_port'.
+
+    Returns: a free local port.
+
+    Raises:
+      OSError: If no free ports are available.
+    """
+    for port in range(start_port, 65535):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(('', port))
+                return port
+            except OSError:
+                pass
+    raise OSError('No free ports available.')

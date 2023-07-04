@@ -58,7 +58,15 @@ Task
 -----------------
 
 .. autoclass:: sky.Task
-    :members:
-    :exclude-members: estimate_runtime, get_cloud_to_remote_file_mounts, get_inputs_cloud, get_local_to_remote_file_mounts, set_time_estimator, sync_storage_mounts, to_yaml_config
+  :members:
+  :exclude-members: estimate_runtime, get_cloud_to_remote_file_mounts, get_inputs_cloud, get_local_to_remote_file_mounts, set_time_estimator, sync_storage_mounts, to_yaml_config
 
-    .. automethod:: __init__
+  .. automethod:: __init__
+
+
+Resources
+-----------------
+
+.. autoclass:: sky.Resources
+  
+  .. automethod:: __init__

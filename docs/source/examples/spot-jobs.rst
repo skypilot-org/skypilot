@@ -47,7 +47,7 @@ We can launch it with the following:
 
   # Assume your working directory is under `~/transformers`.
   # To make this example work, please run the following command:
-  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.18.0
+  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.30.1
   workdir: ~/transformers
 
   setup: |
@@ -122,7 +122,7 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
 
   # Assume your working directory is under `~/transformers`.
   # To make this example work, please run the following command:
-  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.18.0
+  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.30.1
   workdir: ~/transformers
 
   file_mounts:
