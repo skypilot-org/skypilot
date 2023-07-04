@@ -1,0 +1,14 @@
+file_mounts:
+  /s3:
+    name: romil-debug-parq
+    store: s3
+    mode: MOUNT
+
+workdir: .
+
+setup: |
+  pip install pyarrow
+  pip install fastparquet
+
+run: |
+  python parquet_test.py --path /s3/huge.parquet --size 2000
