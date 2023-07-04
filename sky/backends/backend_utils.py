@@ -605,21 +605,20 @@ class SSHConfigHelper(object):
         host_lines = [f'Host {c_name}' for c_name in worker_names]
         for i, line in enumerate(config):
             if line.strip() in host_lines:
-                if docker_user is not None:
-                    raise ValueError(
-                        f'Host name {worker_names[i]} already exists in '
-                        '~/.ssh/config and docker is used, therefore '
-                        'we cannot use ip address to identify the host. '
-                        'Please use a different cluster name.')
                 idx = host_lines.index(line.strip())
                 prev_line = config[i - 1] if i > 0 else ''
                 logger.warning(f'{cls.ssh_conf_path} contains '
                                f'host named {worker_names[idx]}.')
                 host_name = external_worker_ips[idx]
                 logger.warning(f'Using {host_name} to identify host instead.')
+                ip = external_worker_ips[
+                    idx] if docker_user is None else 'localhost'
+                if docker_user is not None:
+                    proxy_command = proxy_command_generator(
+                        external_worker_ips[idx])
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, host_name, external_worker_ips[idx],
-                    username, key_path, port, proxy_command)
+                    sky_autogen_comment, host_name, ip, username, key_path,
+                    port, proxy_command)
 
         # All workers go to SKY_USER_FILE_PATH/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
