@@ -153,8 +153,9 @@ class SSHCommandRunner:
         if docker_user:
             self.ip = 'localhost'
             self.ssh_user = docker_user
-            assert ssh_proxy_command is None, (
-                'ssh_proxy_command is not supported if docker is used')
+            if ssh_proxy_command is not None:
+                raise ValueError(
+                    'ssh_proxy_command is not supported if docker is used')
             self._ssh_proxy_command = lambda ssh: ' '.join(
                 ssh + ssh_options_list(ssh_private_key, None
                                       ) + ['-W', '%h:%p', f'{ssh_user}@{ip}'])
