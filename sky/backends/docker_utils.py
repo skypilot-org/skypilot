@@ -419,14 +419,18 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             docker_run_executed = True
 
         # Setup Commands.
-        # Most of docker images are using root as default user, so we set an alias
-        # for sudo to empty string, so any sudo in the following commands won't fail.
+        # Most of docker images are using root as default user, so we set an
+        # alias for sudo to empty string, so any sudo in the following commands
+        # won't fail.
         # Disable apt-get from asking user input during installation.
-        # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai  #pylint: disable=line-too-long
-        self.run('echo \'[ "$(whoami)" == "root" ] && alias sudo=""\' >> ~/.bashrc;'
-                 'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;')
+        # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai  # pylint: disable=line-too-long
+        self.run(
+            'echo \'[ "$(whoami)" == "root" ] && alias sudo=""\' >> ~/.bashrc;'
+            'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;')
         # Install dependencies.
-        self.run('sudo apt-get update; sudo apt-get install -y rsync curl wget patch openssh-server;')
+        self.run(
+            'sudo apt-get update; sudo apt-get install -y rsync curl wget patch openssh-server;'
+        )
         # Copy local authorized_keys to docker container.
         container_name = DEFAULT_DOCKER_CONTAINER_NAME
         self.run(
@@ -439,7 +443,8 @@ class SkyDockerCommandRunner(DockerCommandRunner):
         # container.
         # Last command here is to eliminate the error
         # `mesg: ttyname failed: inappropriate ioctl for device`.
-        # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  #pylint: disable=line-too-long
+        # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
+        # pylint: disable=anomalous-backslash-in-string
         self.run(
             f'sudo sed -i "s/#Port 22/Port {DEFAULT_DOCKER_PORT}/" /etc/ssh/sshd_config;'
             'mkdir -p ~/.ssh;'
