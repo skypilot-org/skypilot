@@ -115,7 +115,6 @@ initialization_commands: []
 # Increment the following for catching performance bugs easier:
 #   current num items (num SSH connections): 1
 setup_commands:
-  # Line echo 'export DEBIAN_FRONTEND=noninteractive': Disable apt-get from asking user input during installation. https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Create ~/.ssh/config file in case the file does not exist in the image.
   # Make sure python3 & pip3 are available on this image.
@@ -124,16 +123,8 @@ setup_commands:
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
-  {%- if use_docker %}
-  - echo '[ "$(whoami)" == "root" ] && alias sudo=""' >> ~/.bashrc;
-    echo 'export DEBIAN_FRONTEND=noninteractive' >> ~/.bashrc;
-  {%- endif %}
   - function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
-    {%- if use_docker %}
-    source ~/.bashrc;
-    sudo apt-get update;
-    sudo apt-get install -y curl wget patch openssh-server;
-    {%- else %}
+    {%- if not use_docker %}
     sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;
     sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
@@ -159,12 +150,6 @@ setup_commands:
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
-    {%- if use_docker %}
-    sudo sed -i 's/#Port 22/Port {{docker_port}}/' /etc/ssh/sshd_config;
-    sudo service ssh start;
-    cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;
-    sudo sed -i 's/mesg n/tty -s \&\& mesg n/' ~/.profile;
-    {%- endif %}
 
 # Command to start ray on the head node. You don't need to change this.
 # NOTE: these are very performance-sensitive. Each new item opens/closes an SSH

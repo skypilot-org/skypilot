@@ -986,7 +986,6 @@ def write_cluster_config(
                 'docker_image': docker_image,
                 'docker_container_name':
                     docker_utils.DEFAULT_DOCKER_CONTAINER_NAME,
-                'docker_port': docker_utils.DEFAULT_DOCKER_PORT,
 
                 # Azure only:
                 'azure_subscription_id': azure_subscription_id,

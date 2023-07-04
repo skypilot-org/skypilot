@@ -311,8 +311,8 @@ def docker_start_cmds(
 
 class SkyDockerCommandRunner(DockerCommandRunner):
     """A DockerCommandRunner that
-        1. install rsync before running init;
-        2. reimplement docker stop to save the container after the host VM
+        1. Run some custom setup commands;
+        2. Reimplement docker stop to save the container after the host VM
            is shut down.
 
     The code is borrowed from
@@ -418,13 +418,34 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             self.run(start_command, run_env='host')
             docker_run_executed = True
 
-        self.run('apt-get update; apt-get install -y rsync')
-        # Copy local authorized_keys to docker container
+        # Setup Commands.
+        # Most of docker images are using root as default user, so we set an alias
+        # for sudo to empty string, so any sudo in the following commands won't fail.
+        # Disable apt-get from asking user input during installation.
+        # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai  #pylint: disable=line-too-long
+        self.run('echo \'[ "$(whoami)" == "root" ] && alias sudo=""\' >> ~/.bashrc;'
+                 'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;')
+        # Install dependencies.
+        self.run('sudo apt-get update; sudo apt-get install -y rsync curl wget patch openssh-server;')
+        # Copy local authorized_keys to docker container.
         container_name = DEFAULT_DOCKER_CONTAINER_NAME
         self.run(
             'rsync -e "docker exec -i" -avz ~/.ssh/authorized_keys '
             f'{container_name}:/tmp/host_ssh_authorized_keys',
             run_env='host')
+        # Change the default port of sshd from 22 to DEFAULT_DOCKER_PORT.
+        # Append the host VM's authorized_keys to the container's authorized_keys.
+        # This allows any machine that can ssh into the host VM to ssh into the
+        # container.
+        # Last command here is to eliminate the error
+        # `mesg: ttyname failed: inappropriate ioctl for device`.
+        # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  #pylint: disable=line-too-long
+        self.run(
+            f'sudo sed -i "s/#Port 22/Port {DEFAULT_DOCKER_PORT}/" /etc/ssh/sshd_config;'
+            'mkdir -p ~/.ssh;'
+            'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
+            'sudo service ssh start;'
+            'sudo sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;')
 
         # Explicitly copy in ray bootstrap files.
         for mount in bootstrap_mounts:
