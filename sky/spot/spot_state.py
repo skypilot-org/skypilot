@@ -429,7 +429,8 @@ def set_failed(
     logger.info(failure_reason)
 
 
-def set_cancelling(job_id: int, task: 'sky.Task', callback_func: CallbackType):
+def set_cancelling(job_id: int, task_id: int, task: 'sky.Task',
+                   callback_func: CallbackType):
     """Set tasks in the job as cancelling, if they are in non-terminal states.
 
     task_id is not needed, because we expect the job should be cancelled
@@ -444,11 +445,11 @@ def set_cancelling(job_id: int, task: 'sky.Task', callback_func: CallbackType):
             (SpotStatus.CANCELLING.value, time.time(), job_id))
         if rows.rowcount > 0:
             logger.info('Cancelling the job...')
-            # Specific task_id not provided, first task is used.
-            callback_func(job_id, 0, 'CANCELLING', task)
+            callback_func(job_id, task_id, 'CANCELLING', task)
 
 
-def set_cancelled(job_id: int, task: 'sky.Task', callback_func: CallbackType):
+def set_cancelled(job_id: int, task_id: int, task: 'sky.Task',
+                  callback_func: CallbackType):
     """Set tasks in the job as cancelled, if they are in CANCELLING state.
 
     The set_cancelling should be called before this function.
@@ -463,8 +464,7 @@ def set_cancelled(job_id: int, task: 'sky.Task', callback_func: CallbackType):
              SpotStatus.CANCELLING.value))
         if rows.rowcount > 0:
             logger.info('Job cancelled.')
-            # Specific task_id not provided, first task is used.
-            callback_func(job_id, 0, 'CANCELLED', task)
+            callback_func(job_id, task_id, 'CANCELLED', task)
 
 
 # ======== utility functions ========

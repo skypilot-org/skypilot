@@ -19,7 +19,6 @@ from sky.skylet import job_lib
 from sky.spot import recovery_strategy
 from sky.spot import spot_state
 from sky.spot import spot_utils
-from sky.spot.spot_utils import event_callback_func
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
@@ -118,12 +117,13 @@ class SpotController:
                                    task_id=task_id,
                                    start_time=time.time(),
                                    task=task,
-                                   callback_func=event_callback_func)
-            spot_state.set_succeeded(job_id=self._job_id,
-                                     task_id=task_id,
-                                     end_time=time.time(),
-                                     task=task,
-                                     callback_func=event_callback_func)
+                                   callback_func=spot_utils.event_callback_func)
+            spot_state.set_succeeded(
+                job_id=self._job_id,
+                task_id=task_id,
+                end_time=time.time(),
+                task=task,
+                callback_func=spot_utils.event_callback_func)
             return True
         usage_lib.messages.usage.update_task_id(task_id)
         task_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
@@ -138,7 +138,7 @@ class SpotController:
             submitted_at,
             resources_str=backend_utils.get_task_resources_str(task),
             task=task,
-            callback_func=event_callback_func)
+            callback_func=spot_utils.event_callback_func)
         logger.info(
             f'Submitted spot job {self._job_id} (task: {task_id}, name: '
             f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
@@ -149,8 +149,10 @@ class SpotController:
             cluster_name, self._backend, task, self._retry_until_up)
 
         logger.info('Started monitoring.')
-        spot_state.set_starting(self._job_id, task_id, task,
-                                event_callback_func)
+        spot_state.set_starting(job_id=self._job_id,
+                                task_id=task_id,
+                                task=task,
+                                callback_func=spot_utils.event_callback_func)
         remote_job_submitted_at = self._strategy_executor.launch()
         assert remote_job_submitted_at is not None, remote_job_submitted_at
 
@@ -158,7 +160,7 @@ class SpotController:
                                task_id=task_id,
                                start_time=remote_job_submitted_at,
                                task=task,
-                               callback_func=event_callback_func)
+                               callback_func=spot_utils.event_callback_func)
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
@@ -181,11 +183,12 @@ class SpotController:
                                                         cluster_name,
                                                         get_end_time=True)
                 # The job is done.
-                spot_state.set_succeeded(self._job_id,
-                                         task_id,
-                                         end_time=end_time,
-                                         task=task,
-                                         callback_func=event_callback_func)
+                spot_state.set_succeeded(
+                    self._job_id,
+                    task_id,
+                    end_time=end_time,
+                    task=task,
+                    callback_func=spot_utils.event_callback_func)
                 logger.info(
                     f'Spot job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the spot cluster {cluster_name}.')
@@ -251,13 +254,14 @@ class SpotController:
                         'To see the details, run: '
                         f'sky spot logs --controller {self._job_id}')
 
-                    spot_state.set_failed(self._job_id,
-                                          task_id,
-                                          failure_type=spot_status_to_set,
-                                          failure_reason=failure_reason,
-                                          end_time=end_time,
-                                          task=task,
-                                          callback_func=event_callback_func)
+                    spot_state.set_failed(
+                        self._job_id,
+                        task_id,
+                        failure_type=spot_status_to_set,
+                        failure_reason=failure_reason,
+                        end_time=end_time,
+                        task=task,
+                        callback_func=spot_utils.event_callback_func)
                     return False
                 # Although the cluster is healthy, we fail to access the
                 # job status. Try to recover the job (will not restart the
@@ -279,14 +283,18 @@ class SpotController:
 
             # Try to recover the spot jobs, when the cluster is preempted
             # or the job status is failed to be fetched.
-            spot_state.set_recovering(self._job_id, task_id, task,
-                                      event_callback_func)
+            spot_state.set_recovering(
+                job_id=self._job_id,
+                task_id=task_id,
+                task=task,
+                callback_func=spot_utils.event_callback_func)
             recovered_time = self._strategy_executor.recover()
-            spot_state.set_recovered(self._job_id,
-                                     task_id,
-                                     recovered_time=recovered_time,
-                                     task=task,
-                                     callback_func=event_callback_func)
+            spot_state.set_recovered(
+                self._job_id,
+                task_id,
+                recovered_time=recovered_time,
+                task=task,
+                callback_func=spot_utils.event_callback_func)
 
     def run(self):
         """Run controller logic and handle exceptions."""
@@ -311,7 +319,7 @@ class SpotController:
                 failure_type=spot_state.SpotStatus.FAILED_PRECHECKS,
                 failure_reason=failure_reason,
                 task=self._dag.tasks[task_id],
-                callback_func=event_callback_func)
+                callback_func=spot_utils.event_callback_func)
         except exceptions.SpotJobReachedMaxRetriesError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
@@ -324,7 +332,7 @@ class SpotController:
                 failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE,
                 failure_reason=common_utils.format_exception(e),
                 task=self._dag.tasks[task_id],
-                callback_func=event_callback_func)
+                callback_func=spot_utils.event_callback_func)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.error(traceback.format_exc())
             msg = ('Unexpected error occurred: '
@@ -336,18 +344,22 @@ class SpotController:
                 failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
                 failure_reason=msg,
                 task=self._dag.tasks[task_id],
-                callback_func=event_callback_func)
+                callback_func=spot_utils.event_callback_func)
         finally:
             # This will set all unfinished tasks to CANCELLING, and will not
             # affect the jobs in terminal states.
             # We need to call set_cancelling before set_cancelled to make sure
             # the table entries are correctly set.
-            spot_state.set_cancelling(self._job_id,
-                                      task=self._dag.tasks[task_id],
-                                      callback_func=event_callback_func)
-            spot_state.set_cancelled(self._job_id,
-                                     task=self._dag.tasks[task_id],
-                                     callback_func=event_callback_func)
+            spot_state.set_cancelling(
+                job_id=self._job_id,
+                task_id=task_id,
+                task=self._dag.tasks[task_id],
+                callback_func=spot_utils.event_callback_func)
+            spot_state.set_cancelled(
+                job_id=self._job_id,
+                task_id=task_id,
+                task=self._dag.tasks[task_id],
+                callback_func=spot_utils.event_callback_func)
 
 
 def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):
@@ -431,14 +443,14 @@ def start(job_id, dag_yaml, retry_until_up):
             _handle_signal(job_id)
             time.sleep(1)
     except exceptions.SpotUserCancelledError:
-        logger.info(f'Cancelling spot job {job_id}...')
         dag, _ = _get_dag_and_name(dag_yaml)
-        first_task_id = 0
-        first_task = dag.tasks[first_task_id]
-
+        task_id, _ = (spot_state.get_latest_task_id_status(job_id))
+        logger.info(
+            f'Cancelling spot job, job_id: {job_id}, task_id: {task_id}')
         spot_state.set_cancelling(job_id=job_id,
-                                  task=first_task,
-                                  callback_func=event_callback_func)
+                                  task_id=task_id,
+                                  task=dag.tasks[task_id],
+                                  callback_func=spot_utils.event_callback_func)
         cancelling = True
     finally:
         if controller_process is not None:
@@ -464,9 +476,11 @@ def start(job_id, dag_yaml, retry_until_up):
         logger.info(f'Spot cluster of job {job_id} has been cleaned up.')
 
         if cancelling:
-            spot_state.set_cancelled(job_id=job_id,
-                                     task=first_task,
-                                     callback_func=event_callback_func)
+            spot_state.set_cancelled(
+                job_id=job_id,
+                task_id=task_id,
+                task=dag.tasks[task_id],
+                callback_func=spot_utils.event_callback_func)
 
         # We should check job status after 'set_cancelled', otherwise
         # the job status is not terminal.
