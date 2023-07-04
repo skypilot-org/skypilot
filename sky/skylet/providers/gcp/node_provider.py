@@ -289,69 +289,59 @@ class GCPNodeProvider(NodeProvider):
                 )
             return result_dict
 
-    def _thread_unsafe_terminate_node(self, node_id: str):
-        # Assumes the global lock is held for the duration of this operation.
-        # The lock may be held by a different thread if in `terminate_nodes()` case.
-        logger.info("NodeProvider: {}: Terminating node".format(node_id))
-        resource = self._get_resource_depending_on_node_name(node_id)
-        try:
-            if self.cache_stopped_nodes:
-                cli_logger.print(
-                    f"Stopping instance {node_id} "
-                    + cf.dimmed(
-                        "(to terminate instead, "
-                        "set `cache_stopped_nodes: False` "
-                        "under `provider` in the cluster configuration)"
-                    ),
-                )
-                resource.stop_instance(node_id=node_id)
-
-                # Check if the instance is actually stopped.
-                # GCP does not fully stop an instance even after
-                # the stop operation is finished.
-                for _ in range(MAX_POLLS_STOP):
-                    instance = resource.get_instance(node_id=node_id)
-                    if instance.is_stopped():
-                        logger.info(f"Instance {node_id} is stopped.")
-                        break
-                    elif instance.is_stopping():
-                        time.sleep(POLL_INTERVAL)
-                    else:
-                        raise RuntimeError(
-                            f"Unexpected instance status." " Details: {instance}"
-                        )
-
-                if instance.is_stopping():
-                    raise RuntimeError(
-                        f"Maximum number of polls: "
-                        f"{MAX_POLLS_STOP} reached. "
-                        f"Instance {node_id} is still in "
-                        "STOPPING status."
-                    )
-            else:
-                resource.delete_instance(
-                    node_id=node_id,
-                )
-        except googleapiclient.errors.HttpError as http_error:
-            if http_error.resp.status == 404:
-                logger.warning(
-                    f"Tried to delete the node with id {node_id} "
-                    "but it was already gone."
-                )
-            else:
-                raise http_error from None
-
     @_retry
     def terminate_node(self, node_id: str):
         with self.lock:
-            self._thread_unsafe_terminate_node(node_id)
+            resource = self._get_resource_depending_on_node_name(node_id)
+            try:
+                if self.cache_stopped_nodes:
+                    cli_logger.print(
+                        f"Stopping instance {node_id} "
+                        + cf.dimmed(
+                            "(to terminate instead, "
+                            "set `cache_stopped_nodes: False` "
+                            "under `provider` in the cluster configuration)"
+                        ),
+                    )
+                    result = resource.stop_instance(node_id=node_id)
 
-    def terminate_nodes(self, node_ids: List[str]):
-        if not node_ids:
-            return None
+                    # Check if the instance is actually stopped.
+                    # GCP does not fully stop an instance even after
+                    # the stop operation is finished.
+                    for _ in range(MAX_POLLS_STOP):
+                        instance = resource.get_instance(node_id=node_id)
+                        if instance.is_stopped():
+                            logger.info(f"Instance {node_id} is stopped.")
+                            break
+                        elif instance.is_stopping():
+                            time.sleep(POLL_INTERVAL)
+                        else:
+                            raise RuntimeError(
+                                f"Unexpected instance status." " Details: {instance}"
+                            )
 
-        with self.lock, concurrent.futures.ThreadPoolExecutor() as executor:
-            executor.map(self._thread_unsafe_terminate_node, node_ids)
+                    if instance.is_stopping():
+                        raise RuntimeError(
+                            f"Maximum number of polls: "
+                            f"{MAX_POLLS_STOP} reached. "
+                            f"Instance {node_id} is still in "
+                            "STOPPING status."
+                        )
+                else:
+                    result = resource.delete_instance(
+                        node_id=node_id,
+                    )
+            except googleapiclient.errors.HttpError as http_error:
+                if http_error.resp.status == 404:
+                    logger.warning(
+                        f"Tried to delete the node with id {node_id} "
+                        "but it was already gone."
+                    )
+                    result = None
+                else:
+                    raise http_error from None
+
+        return result
 
     @_retry
     def _get_node(self, node_id: str) -> GCPNode:
