@@ -35,7 +35,8 @@ def format_storage_table(storages: List[Dict[str, Any]]) -> str:
             # CLOUDS
             ', '.join([s.value for s in row['store']]),
             # COMMAND
-            status_utils.truncate_long_string(row['last_use'], status_utils.COMMAND_TRUNC_LENGTH),
+            status_utils.truncate_long_string(
+                row['last_use'], status_utils.COMMAND_TRUNC_LENGTH),
             # STATUS
             row['status'].value,
         ])
