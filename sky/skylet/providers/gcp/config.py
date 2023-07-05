@@ -672,7 +672,8 @@ def _check_firewall_rules(vpc_name, config, compute):
         source2rules: Dict[Tuple[str, str], Dict[str, Set[int]]] = {}
         source2allowed_list: Dict[Tuple[str, str], List[Dict[str, str]]] = {}
         for rule in rules:
-            # Disable the rule if it is not apply to all VMs
+            # Rules applied to specific VM (targetTags) may not work for the
+            # current VM, so should be skipped.
             # See https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.networks.html#getEffectiveFirewalls # pylint: disable=line-too-long
             if rule.get("targetTags", None) is not None:
                 continue
