@@ -215,10 +215,7 @@ class Resources:
 
         image_id = ''
         if self.image_id is not None:
-            docker_image = self.extract_docker_image()
-            if docker_image is not None:
-                image_id = f', docker_image={docker_image}'
-            elif None in self.image_id:
+            if None in self.image_id:
                 image_id = f', image_id={self.image_id[None]}'
             else:
                 image_id = f', image_id={self.image_id!r}'
@@ -725,6 +722,7 @@ class Resources:
             return
 
         if self.extract_docker_image() is not None:
+            # TODO(tian): validate the docker image exists / of reasonable size
             return
 
         if self.cloud is None:
@@ -990,10 +988,6 @@ class Resources:
             resources_fields['zone'] = config.pop('zone')
         if config.get('image_id') is not None:
             resources_fields['image_id'] = config.pop('image_id')
-            if not (isinstance(resources_fields['image_id'], str) and
-                    resources_fields['image_id'].startswith('docker:')):
-                logger.warning('image_id in resources is experimental. It only '
-                               'supports AWS/GCP/IBM/OCI')
         if config.get('disk_tier') is not None:
             resources_fields['disk_tier'] = config.pop('disk_tier')
         if config.get('_is_image_managed') is not None:

@@ -348,9 +348,12 @@ class AWS(clouds.Cloud):
         else:
             custom_resources = None
 
-        image_id = self._get_image_id(
-            None if r.extract_docker_image() else r.image_id, region_name,
-            r.instance_type)
+        if r.extract_docker_image():
+            image_id_to_use = None
+        else:
+            image_id_to_use = r.image_id
+        image_id = self._get_image_id(image_id_to_use, region_name,
+                                      r.instance_type)
 
         return {
             'instance_type': r.instance_type,
