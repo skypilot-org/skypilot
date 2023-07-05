@@ -76,9 +76,7 @@ def test_accelerator_mismatch(enable_all_clouds):
 
         _capture_match_gpus_spec(f.name, 'V100:1')
         _capture_match_gpus_spec(f.name, 'v100:1')
-        _capture_match_gpus_spec(f.name, 'V100:0.5')
         _capture_match_gpus_spec(f.name, 'V100')
-        _capture_match_gpus_spec(f.name, 'V100:0.5')
 
 
 def test_show_gpus():

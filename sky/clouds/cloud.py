@@ -562,6 +562,7 @@ class Cloud:
         Returns:
             False if the quota is found to be zero, and true otherwise.
         """
+        del region, instance_type, use_spot  # unused
 
         return True
 

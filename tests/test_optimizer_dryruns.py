@@ -367,7 +367,16 @@ def test_instance_type_matches_accelerators(monkeypatch):
                            sky.GCP(),
                            instance_type='n1-standard-2',
                            accelerators='V100')
-    # Partial use: Instance has 8 V100s, while the task needs 1 of them.
+
+    _test_resources_launch(monkeypatch,
+                           sky.GCP(),
+                           instance_type='n1-standard-8',
+                           accelerators='tpu-v3-8')
+    _test_resources_launch(monkeypatch,
+                           sky.GCP(),
+                           instance_type='a2-highgpu-1g',
+                           accelerators='a100')
+
     _test_resources_launch(monkeypatch,
                            sky.AWS(),
                            instance_type='p3.16xlarge',
@@ -627,3 +636,16 @@ def test_parse_valid_envs_yaml(monkeypatch):
           GOOD123: 123
         """)
     _test_parse_task_yaml(spec)
+
+
+def test_invalid_accelerators_regions(enable_all_clouds, monkeypatch):
+    task = sky.Task(run='echo hi')
+    task.set_resources(
+        sky.Resources(
+            sky.AWS(),
+            accelerators='A100:8',
+            region='us-west-1',
+        ))
+    with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+        sky.launch(task, cluster_name='should-fail', dryrun=True)
+        assert 'No launchable resource found for' in str(e.value), str(e.value)
