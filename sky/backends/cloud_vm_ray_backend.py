@@ -3919,7 +3919,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle.cluster_yaml)
 
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, **ssh_credentials)
+            ip_list, port_list=None, **ssh_credentials)
 
         def _setup_tpu_name_on_node(
                 runner: command_runner.SSHCommandRunner) -> None:

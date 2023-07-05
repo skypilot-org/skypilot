@@ -20,7 +20,6 @@ from sky import clouds
 from sky import sky_logging
 from sky.adaptors import gcp, ibm
 from sky.utils import common_utils
-from sky.utils import env_options
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.skylet.providers.lambda_cloud import lambda_utils
