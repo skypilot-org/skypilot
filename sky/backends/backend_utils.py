@@ -459,9 +459,12 @@ class SSHConfigHelper(object):
                                f'{cluster_name}` to remove)')
         overwrite = False
         overwrite_begin_idx = None
-        ip = 'localhost' if docker_user else ips[0]
-        from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
-        port = docker_utils.DEFAULT_DOCKER_PORT if docker_user else '22'
+        ip = ips[0]
+        port = '22'
+        if docker_user:
+            ip = 'localhost'
+            from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
+            port = docker_utils.DEFAULT_DOCKER_PORT
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
         if os.path.exists(config_path):
