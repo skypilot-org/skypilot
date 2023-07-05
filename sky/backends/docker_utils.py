@@ -153,26 +153,6 @@ def _execute_build(tag, context_path):
         raise
 
 
-def get_docker_user(ip: str, cluster_config_file: str) -> str:
-    """Find docker container username."""
-    # pylint: disable=import-outside-toplevel
-    from sky.backends import backend_utils
-    from sky.utils import command_runner
-    ssh_credentials = backend_utils.ssh_credential_from_yaml(
-        cluster_config_file)
-    runner = command_runner.SSHCommandRunner(ip, **ssh_credentials)
-    whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
-        f'sudo docker exec {DEFAULT_DOCKER_CONTAINER_NAME} whoami',
-        stream_logs=False,
-        require_outputs=True)
-    assert whoami_returncode == 0, (
-        f'Failed to get docker container user. Return '
-        f'code: {whoami_returncode}, Error: {whoami_stderr}')
-    docker_user = whoami_stdout.strip()
-    logger.debug(f'Docker container user: {docker_user}')
-    return docker_user
-
-
 def build_dockerimage(task: task_mod.Task,
                       tag: str) -> Tuple[str, Dict[str, str]]:
     """

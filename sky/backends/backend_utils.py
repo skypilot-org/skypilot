@@ -38,6 +38,7 @@ from sky import skypilot_config
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky import status_lib
+from sky.backends import docker_utils
 from sky.backends import onprem_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -463,7 +464,6 @@ class SSHConfigHelper(object):
         port = '22'
         if docker_user:
             ip = 'localhost'
-            from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
             port = docker_utils.DEFAULT_DOCKER_PORT
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
@@ -555,7 +555,6 @@ class SSHConfigHelper(object):
         external_worker_ips = list(sorted(external_worker_ips))
         port = '22'
         if docker_user:
-            from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
             port = docker_utils.DEFAULT_DOCKER_PORT
 
         overwrites = [False] * len(external_worker_ips)
@@ -958,7 +957,6 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
     )
 
-    from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
     docker_image = to_provision.extract_docker_image()
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
@@ -1186,6 +1184,23 @@ def _count_healthy_nodes_from_ray(output: str,
     return ready_head, ready_workers
 
 
+def get_docker_user(ip: str, cluster_config_file: str) -> str:
+    """Find docker container username."""
+    ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
+    runner = command_runner.SSHCommandRunner(ip, **ssh_credentials)
+    container_name = docker_utils.DEFAULT_DOCKER_CONTAINER_NAME
+    whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
+        f'sudo docker exec {container_name} whoami',
+        stream_logs=False,
+        require_outputs=True)
+    assert whoami_returncode == 0, (
+        f'Failed to get docker container user. Return '
+        f'code: {whoami_returncode}, Error: {whoami_stderr}')
+    docker_user = whoami_stdout.strip()
+    logger.debug(f'Docker container user: {docker_user}')
+    return docker_user
+
+
 @timeline.event
 def wait_until_ray_cluster_ready(
     cluster_config_file: str,
@@ -1214,8 +1229,7 @@ def wait_until_ray_cluster_ready(
 
     docker_user = None
     if use_docker:
-        from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
-        docker_user = docker_utils.get_docker_user(head_ip, cluster_config_file)
+        docker_user = get_docker_user(head_ip, cluster_config_file)
 
     if num_nodes <= 1:
         return True, docker_user
