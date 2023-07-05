@@ -3,6 +3,7 @@ from typing import Any, Dict, List
 
 from sky import sky_logging
 from sky.utils import log_utils
+from sky.utils.cli_utils import status_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -34,7 +35,7 @@ def format_storage_table(storages: List[Dict[str, Any]]) -> str:
             # CLOUDS
             ', '.join([s.value for s in row['store']]),
             # COMMAND
-            row['last_use'],
+            status_utils.truncate_long_string(row['last_use'], status_utils.COMMAND_TRUNC_LENGTH),
             # STATUS
             row['status'].value,
         ])
