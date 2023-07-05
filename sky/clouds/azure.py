@@ -288,11 +288,14 @@ class Azure(clouds.Cloud):
             return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
+            ok, disk_tier = failover_disk_tier(resources.instance_type,
+                                               resources.disk_tier)
+            if not ok:
+                return ([], [])
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
             resources = resources.copy(
                 accelerators=None,
-                disk_tier=failover_disk_tier(resources.instance_type,
-                                             resources.disk_tier),
+                disk_tier=disk_tier,
             )
             return ([resources], [])
 
