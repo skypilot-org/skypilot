@@ -1184,7 +1184,8 @@ def wait_until_ray_cluster_ready(
     """Wait until the ray cluster is set up on VMs or in containers.
 
     Returns:  whether the entire ray cluster is ready, and docker username
-    if launched with docker."""
+    if launched with docker.
+    """
     # Manually fetching head ip instead of using `ray exec` to avoid the bug
     # that `ray exec` fails to connect to the head node after some workers
     # launched especially for Azure.
