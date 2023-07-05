@@ -712,6 +712,8 @@ def test_file_mounts(generic_cloud: str):
     extra_flags = ''
     if generic_cloud in 'kubernetes':
         # Kubernetes does not support multi-node
+        # NOTE: This test will fail if you have a Kubernetes cluster running on
+        #  arm64 (e.g., Apple Silicon) since goofys does not work on arm64.
         extra_flags = '--num-nodes 1'
     test_commands = [
         *storage_setup_commands,

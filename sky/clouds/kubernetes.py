@@ -206,6 +206,10 @@ class Kubernetes(clouds.Cloud):
             disk_tier: Optional[str] = None) -> Optional[str]:
         del disk_tier  # Unused.
         # TODO(romilb): Allow fractional CPUs and memory
+        # TODO(romilb): We should check the maximum number of CPUs and memory
+        #  that can be requested, and return None if the requested resources
+        #  exceed the maximum. This may require thought about how to handle
+        #  autoscaling clusters.
         # We strip '+' from resource requests since Kubernetes can provision
         # exactly the requested resources.
         instance_cpus = int(
@@ -278,7 +282,8 @@ class Kubernetes(clouds.Cloud):
             'memory': str(mem),
             'timeout': str(self.TIMEOUT),
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
-            'skypilot_k8s_image': self.SKYPILOT_K8S_IMAGE,
+            # TODO(romilb): Allow user to specify custom images
+            'image_id': self.IMAGE,
         }
 
     def get_feasible_launchable_resources(self,
