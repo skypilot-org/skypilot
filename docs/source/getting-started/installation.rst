@@ -132,7 +132,7 @@ To access IBM's Cloud Object Storage (COS), append the following fields to the c
   access_key_id: <access_key_id>
   secret_access_key: <secret_key_id>
 
-Follow the next steps to create/extract the above fields:
+To get :code:`access_key_id` and :code:`secret_access_key` use the IBM web console:
 
 1. Create/Select a COS instance from the `web console <https://cloud.ibm.com/objectstorage/>`__.
 2. From "Service Credentials" tab, click "New Credential" and toggle "Include HMAC Credential".
@@ -141,7 +141,7 @@ Follow the next steps to create/extract the above fields:
 Finally, install `rclone <https://rclone.org/>`_ via: ``curl https://rclone.org/install.sh | sudo bash``
 
 .. note::
-  Currently, :code:`sky check` doesn't reflect the enablement of IBM COS, i.e., :code:`IBM: enabled` only guarantees the enablement of IBM VPC.
+  :code:`sky check` does not reflect IBM COS's enabled status. :code:`IBM: enabled` only guarantees that IBM VM instances are enabled.
 
 Cloudflare R2
 ~~~~~~~~~~~~~~~~~~
