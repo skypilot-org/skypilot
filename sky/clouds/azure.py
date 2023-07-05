@@ -247,7 +247,7 @@ class Azure(clouds.Cloud):
         cloud_init_setup_commands = base64.b64encode(
             textwrap.dedent("""\
             #cloud-config
-                runcmd:
+            runcmd:
                 - sed -i 's/#Banner none/Banner none/' /etc/ssh/sshd_config
                 - echo '\\nif [ ! -f "/tmp/__restarted" ]; then\\n  sudo systemctl restart ssh\\n  sleep 2\\n  touch /tmp/__restarted\\nfi' >> /home/azureuser/.bashrc
             """).encode('utf-8')).decode('utf-8')
