@@ -1507,13 +1507,13 @@ class GcsStore(AbstractStore):
 
         def get_file_sync_command(base_dir_path, file_names):
             sync_format = '|'.join(file_names)
-            sync_command = (f'gsutil -m rsync -ex \'^(?!{sync_format}$).*\' '
+            sync_command = (f'gsutil -m rsync -e -x \'^(?!{sync_format}$).*\' '
                             f'{base_dir_path} gs://{self.name}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            sync_command = (f'gsutil -m rsync -erx \'.git/*\' {src_dir_path} '
+            sync_command = (f'gsutil -m rsync -e -r -x \'.git/*\' {src_dir_path} '
                             f'gs://{self.name}/{dest_dir_name}')
             return sync_command
 
