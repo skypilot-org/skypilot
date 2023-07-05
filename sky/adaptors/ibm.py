@@ -136,7 +136,6 @@ def get_cos_client(region: str = 'us-east'):
 
 @import_package
 def get_cos_resource(region: str = 'us-east'):
-    # pylint: disable=line-too-long
     access_key_id, secret_access_key = get_hmac_keys()
     return ibm_boto3.resource(  # type: ignore[union-attr]
         's3',
