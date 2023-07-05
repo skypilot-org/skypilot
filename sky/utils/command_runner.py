@@ -10,6 +10,7 @@ from typing import List, Optional, Tuple, Union
 
 from sky import sky_logging
 from sky.utils import common_utils, subprocess_utils
+from sky.skylet import constants
 from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -144,7 +145,7 @@ class SSHCommandRunner:
                 public IPs using a "jump server".
             docker_user: The docker user to use for ssh. If specified, the
                 command will be run inside a docker container which have a ssh
-                server running at port docker_utils.DEFAULT_DOCKER_PORT.
+                server running at port sky.skylet.constants.DEFAULT_DOCKER_PORT.
         """
         self.ssh_private_key = ssh_private_key
         self.ssh_control_name = (
@@ -159,8 +160,7 @@ class SSHCommandRunner:
             self._ssh_proxy_command = lambda ssh: ' '.join(
                 ssh + ssh_options_list(ssh_private_key, None
                                       ) + ['-W', '%h:%p', f'{ssh_user}@{ip}'])
-            from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
-            self.port = docker_utils.DEFAULT_DOCKER_PORT
+            self.port = constants.DEFAULT_DOCKER_PORT
         else:
             self.ip = ip
             self.ssh_user = ssh_user

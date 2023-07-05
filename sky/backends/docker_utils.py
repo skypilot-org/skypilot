@@ -12,6 +12,7 @@ import colorama
 from sky.adaptors import docker
 from sky import sky_logging
 from sky import task as task_mod
+from sky.skylet import constants
 
 from ray.autoscaler._private.cli_logger import cli_logger
 from ray.autoscaler._private.command_runner import DockerCommandRunner
@@ -31,10 +32,6 @@ RUN apt-get update && apt-get -y install sudo
 DOCKERFILE_SETUPCMD = """RUN {setup_command}"""
 DOCKERFILE_COPYCMD = """COPY {copy_command}"""
 DOCKERFILE_RUNCMD = """CMD {run_command}"""
-
-# Docker default options
-DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
-DEFAULT_DOCKER_PORT = '10022'
 
 CONDA_SETUP_PREFIX = '. $(conda info --base)/etc/profile.d/conda.sh 2> ' \
                      '/dev/null || true '
@@ -411,12 +408,14 @@ class SkyDockerCommandRunner(DockerCommandRunner):
         self.run(
             'sudo apt-get update; sudo apt-get install -y rsync curl wget patch openssh-server;'
         )
+
         # Copy local authorized_keys to docker container.
-        container_name = DEFAULT_DOCKER_CONTAINER_NAME
+        container_name = constants.DEFAULT_DOCKER_CONTAINER_NAME
         self.run(
             'rsync -e "docker exec -i" -avz ~/.ssh/authorized_keys '
             f'{container_name}:/tmp/host_ssh_authorized_keys',
             run_env='host')
+
         # Change the default port of sshd from 22 to DEFAULT_DOCKER_PORT.
         # Append the host VM's authorized_keys to the container's authorized_keys.
         # This allows any machine that can ssh into the host VM to ssh into the
@@ -424,13 +423,13 @@ class SkyDockerCommandRunner(DockerCommandRunner):
         # Last command here is to eliminate the error
         # `mesg: ttyname failed: inappropriate ioctl for device`.
         # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
+        port = constants.DEFAULT_DOCKER_PORT
         # pylint: disable=anomalous-backslash-in-string
-        self.run(
-            f'sudo sed -i "s/#Port 22/Port {DEFAULT_DOCKER_PORT}/" /etc/ssh/sshd_config;'
-            'mkdir -p ~/.ssh;'
-            'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
-            'sudo service ssh start;'
-            'sudo sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;')
+        self.run(f'sudo sed -i "s/#Port 22/Port {port}/" /etc/ssh/sshd_config;'
+                 'mkdir -p ~/.ssh;'
+                 'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
+                 'sudo service ssh start;'
+                 'sudo sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;')
 
         # Explicitly copy in ray bootstrap files.
         for mount in bootstrap_mounts:

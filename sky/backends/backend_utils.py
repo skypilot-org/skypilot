@@ -38,7 +38,6 @@ from sky import skypilot_config
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky import status_lib
-from sky.backends import docker_utils
 from sky.backends import onprem_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -464,7 +463,7 @@ class SSHConfigHelper(object):
         port = '22'
         if docker_user:
             ip = 'localhost'
-            port = docker_utils.DEFAULT_DOCKER_PORT
+            port = constants.DEFAULT_DOCKER_PORT
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
         if os.path.exists(config_path):
@@ -555,7 +554,7 @@ class SSHConfigHelper(object):
         external_worker_ips = list(sorted(external_worker_ips))
         port = '22'
         if docker_user:
-            port = docker_utils.DEFAULT_DOCKER_PORT
+            port = constants.DEFAULT_DOCKER_PORT
 
         overwrites = [False] * len(external_worker_ips)
         overwrite_begin_idxs: List[Optional[int]] = [None
@@ -891,8 +890,8 @@ def write_cluster_config(
     # the ResourcesUnavailableError is overly used. Also, it would be better to
     # move the check out of this function, i.e. the caller should be responsible
     # for the validation.
-    resources_vars = cloud.make_deploy_resources_variables(
-        to_provision, region, zones)
+    # TODO(tian): Move more cloud agnostic vars to resources.py.
+    resources_vars = to_provision.make_deploy_variables(region, zones)
     config_dict = {}
 
     azure_subscription_id = None
@@ -957,8 +956,6 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
     )
 
-    docker_image = to_provision.extract_docker_image()
-
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -993,16 +990,6 @@ def write_cluster_config(
                 'ssh_proxy_command': ssh_proxy_command,
                 # User-supplied instance tags.
                 'instance_tags': instance_tags,
-
-                # Docker config
-                # docker_image: the image name used to pull the image, e.g.
-                #   ubuntu:latest.
-                # docker_container_name: the name of the container. Default to
-                #   `sky_container`.
-                'use_docker': docker_image is not None,
-                'docker_image': docker_image,
-                'docker_container_name':
-                    docker_utils.DEFAULT_DOCKER_CONTAINER_NAME,
 
                 # Azure only:
                 'azure_subscription_id': azure_subscription_id,
@@ -1188,7 +1175,7 @@ def get_docker_user(ip: str, cluster_config_file: str) -> str:
     """Find docker container username."""
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
     runner = command_runner.SSHCommandRunner(ip, **ssh_credentials)
-    container_name = docker_utils.DEFAULT_DOCKER_CONTAINER_NAME
+    container_name = constants.DEFAULT_DOCKER_CONTAINER_NAME
     whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
         f'sudo docker exec {container_name} whoami',
         stream_logs=False,
