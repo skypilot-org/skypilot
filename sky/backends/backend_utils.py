@@ -499,7 +499,11 @@ class SSHConfigHelper(object):
         if docker_user is not None:
             if proxy_command is not None:
                 raise ValueError(
-                    'ssh_proxy_command is not supported if docker is used')
+                    'ssh_proxy_command is not supported when docker image is specified '
+                    f'(ssh_proxy_command: {ssh_proxy_command}). Please remove the '
+                    'proxy setup in `~/.sky/config.yaml` or replace the `image_id` with '
+                    'non-docker image, such as \'skypilot:skypilot:gpu-ubuntu-2004\''
+                )
             proxy_command = ' '.join(
                 ['ssh'] + command_runner.ssh_options_list(key_path, None) +
                 ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ips[0]}'])
