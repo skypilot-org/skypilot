@@ -500,7 +500,7 @@ class SSHConfigHelper(object):
             if proxy_command is not None:
                 raise ValueError(
                     'ssh_proxy_command is not supported when docker image is specified '
-                    f'(ssh_proxy_command: {ssh_proxy_command}). Please remove the '
+                    f'(ssh_proxy_command: {proxy_command}). Please remove the '
                     'proxy setup in `~/.sky/config.yaml` or replace the `image_id` with '
                     'non-docker image, such as \'skypilot:skypilot:gpu-ubuntu-2004\''
                 )
@@ -553,8 +553,10 @@ class SSHConfigHelper(object):
         # Ensure stableness of the aliases worker-<i> by sorting based on
         # public IPs.
         external_worker_ips = list(sorted(external_worker_ips))
-        from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
-        port = docker_utils.DEFAULT_DOCKER_PORT if docker_user else '22'
+        port = '22'
+        if docker_user:
+            from sky.backends import docker_utils  # pylint: disable=import-outside-toplevel
+            port = docker_utils.DEFAULT_DOCKER_PORT
 
         overwrites = [False] * len(external_worker_ips)
         overwrite_begin_idxs: List[Optional[int]] = [None
@@ -618,9 +620,9 @@ class SSHConfigHelper(object):
                                f'host named {worker_names[idx]}.')
                 host_name = external_worker_ips[idx]
                 logger.warning(f'Using {host_name} to identify host instead.')
-                ip = external_worker_ips[
-                    idx] if docker_user is None else 'localhost'
+                ip = external_worker_ips[idx]
                 if docker_user is not None:
+                    ip = 'localhost'
                     proxy_command = proxy_command_generator(
                         external_worker_ips[idx])
                 codegens[idx] = cls._get_generated_config(
@@ -636,9 +638,9 @@ class SSHConfigHelper(object):
                     host_name = worker_names[idx]
                     overwrites[idx] = True
                     overwrite_begin_idxs[idx] = i - 1
-                ip = external_worker_ips[
-                    idx] if docker_user is None else 'localhost'
+                ip = external_worker_ips[idx]
                 if docker_user is not None:
+                    ip = 'localhost'
                     proxy_command = proxy_command_generator(
                         external_worker_ips[idx])
                 codegens[idx] = cls._get_generated_config(
@@ -648,11 +650,11 @@ class SSHConfigHelper(object):
         # This checks if all codegens have been created.
         for idx, ip in enumerate(external_worker_ips):
             if docker_user is not None:
+                ip = 'localhost'
                 proxy_command = proxy_command_generator(ip)
             if not codegens[idx]:
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, worker_names[idx],
-                    ip if docker_user is None else 'localhost', username,
+                    sky_autogen_comment, worker_names[idx], ip, username,
                     key_path, port, proxy_command)
 
         for idx in range(len(external_worker_ips)):
@@ -716,9 +718,20 @@ class SSHConfigHelper(object):
             else:
                 found = (line.strip() == 'HostName localhost' and
                          next_line.strip() == f'User {docker_user}')
-                proxy_command_line = config[i +
-                                            9] if i + 9 < len(config) else ''
-                found = found and (ip in proxy_command_line)
+                if found:
+                    # Find the line starting with ProxyCommand
+                    proxy_command_line = None
+                    for idx in range(i, len(config)):
+                        # Stop if we reach an empty line, which means a new host
+                        if len(config[idx].strip()) == 0:
+                            break
+                        if config[idx].strip().startswith('ProxyCommand'):
+                            proxy_command_line = config[idx].strip()
+                            break
+                    if proxy_command_line is None:
+                        found = False
+                    else:
+                        found = found and (ip in proxy_command_line)
             if found:
                 start_line_idx = i - 1
                 break
