@@ -2082,7 +2082,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     - (optional) Launched resources
     - (optional) If TPU(s) are managed, a path to a deletion script.
     """
-    _VERSION = 3
+    _VERSION = 4
 
     def __init__(self,
                  *,
@@ -2193,13 +2193,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             head_port = backend_utils.get_head_ssh_port(
                 self, use_cache=False, max_attempts=max_attempts)
             # TODO(romilb): Multinode doesn't work with Kubernetes yet.
-            worker_ports = [22] * self.launched_nodes
+            worker_ports = [22] * (self.launched_nodes - 1)
             ports = [head_port] + worker_ports
         else:
             # Use port 22 for other clouds
-            ext_ips = self.external_ips()
-            assert ext_ips is not None, ext_ips
-            ports = [22] * len(ext_ips)
+            ports = [22] * self.launched_nodes
         self.stable_ssh_ports = ports
 
     def _update_stable_cluster_ips(self, max_attempts: int = 1) -> None:
@@ -2297,7 +2295,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     @property
     def head_ssh_port(self):
         external_ssh_ports = self.external_ssh_ports()
-        if external_ssh_ports is not None:
+        if external_ssh_ports:
             return external_ssh_ports[0]
         return None
 
@@ -2313,11 +2311,16 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if version < 3:
             head_ip = state.pop('head_ip', None)
             state['stable_internal_external_ips'] = None
+        if version < 4:
+            # Version 4 adds self.external_ssh_ports for Kubernetes support
+            head_ssh_port = state.pop('head_ssh_port', None)
+            state['stable_ssh_ports'] = None
 
         self.__dict__.update(state)
 
-        # Because the _update_stable_cluster_ips function uses the handle,
-        # we call it on the current instance after the state is updated
+        # Because the _update_stable_cluster_ips and _update_stable_ssh_ports
+        # functions use the handle, we call it on the current instance
+        # after the state is updated.
         if version < 3 and head_ip is not None:
             try:
                 self._update_stable_cluster_ips()
@@ -2325,6 +2328,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # This occurs when an old cluster from was autostopped,
                 # so the head IP in the database is not updated.
                 pass
+        if version < 4 and head_ssh_port is not None:
+            self._update_stable_ssh_ports()
 
         self._update_cluster_region()
 
@@ -2595,7 +2600,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     ssh_credentials = backend_utils.ssh_credential_from_yaml(
                         handle.cluster_yaml)
                     runners = command_runner.SSHCommandRunner.make_runner_list(
-                        ip_list, **ssh_credentials, port_list=ssh_port_list)
+                        ip_list, port_list=ssh_port_list, **ssh_credentials)
 
                     def _get_zone(runner):
                         retry_count = 0
@@ -3282,7 +3287,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, **ssh_credentials, port_list=ssh_port_list)
+            ip_list, port_list=ssh_port_list, **ssh_credentials)
 
         def _rsync_down(args) -> None:
             """Rsync down logs from remote nodes.
@@ -3914,7 +3919,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle.cluster_yaml)
 
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, **ssh_credentials, port_list=None)
+            ip_list, **ssh_credentials)
 
         def _setup_tpu_name_on_node(
                 runner: command_runner.SSHCommandRunner) -> None:

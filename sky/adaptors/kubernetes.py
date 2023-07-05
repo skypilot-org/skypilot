@@ -2,7 +2,7 @@
 
 # pylint: disable=import-outside-toplevel
 
-from functools import wraps
+import functools
 
 from sky.utils import ux_utils, env_options
 
@@ -18,7 +18,7 @@ _custom_objects_api = None
 
 def import_package(func):
 
-    @wraps(func)
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         global kubernetes
         global urllib3

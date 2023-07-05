@@ -589,6 +589,7 @@ class SSHConfigHelper(object):
                                f'host named {worker_names[idx]}.')
                 host_name = external_worker_ips[idx]
                 logger.warning(f'Using {host_name} to identify host instead.')
+                # TODO(romilb): Update port number when k8s supports multinode
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment,
                     host_name,
@@ -607,6 +608,7 @@ class SSHConfigHelper(object):
                     host_name = worker_names[idx]
                     overwrites[idx] = True
                     overwrite_begin_idxs[idx] = i - 1
+                # TODO(romilb): Update port number when k8s supports multinode
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment,
                     host_name,
@@ -857,12 +859,6 @@ def write_cluster_config(
     assert cluster_name is not None
     credentials = sky_check.get_cloud_credential_file_mounts()
 
-    k8s_image = None
-    ssh_key_secret_name = None
-    if isinstance(cloud, clouds.Kubernetes):
-        # TODO(romilb): Make this read from image id in the task
-        k8s_image = cloud.IMAGE
-
     ip_list = None
     auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
     if isinstance(cloud, clouds.Local):
@@ -955,10 +951,6 @@ def write_cluster_config(
 
                 # GCP only:
                 'gcp_project_id': gcp_project_id,
-
-                # Kubernetes only:
-                'skypilot_k8s_image': k8s_image,
-                'ssh_key_secret_name': ssh_key_secret_name,
 
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
@@ -1617,7 +1609,7 @@ def get_head_ssh_port(
     head_ssh_port = 22
     if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
         return head_ssh_port
-    elif isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+    else:
         if use_cache and handle.head_ssh_port is not None:
             head_ssh_port = handle.head_ssh_port
         else:

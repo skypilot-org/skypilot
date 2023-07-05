@@ -72,12 +72,10 @@ def bootstrap_kubernetes(config):
 
 
 def fillout_resources_kubernetes(config):
-    """Fills CPU and GPU resources by reading pod spec of each available node
-    type.
+    """Fills CPU and GPU resources in the ray cluster config.
 
     For each node type and each of CPU/GPU, looks at container's resources
-    and limits, takes min of the two. The result is rounded up, as Ray does
-    not currently support fractional CPU.
+    and limits, takes min of the two.
     """
     if 'available_node_types' not in config:
         return config
@@ -117,6 +115,7 @@ def get_autodetected_resources(container_data):
         for resource_name in ['cpu', 'gpu']
     }
 
+    # TODO(romilb): Update this to allow fractional resources.
     memory_limits = get_resource(container_resources, 'memory')
     node_type_resources['memory'] = int(memory_limits)
 

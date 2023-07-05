@@ -461,24 +461,20 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         subprocess.check_output(cmd, stderr=subprocess.STDOUT, shell=True)
     except subprocess.CalledProcessError as e:
         output = e.output.decode('utf-8')
-        suffix = ''
-        if env_options.Options.SHOW_DEBUG_INFO.get():
-            suffix = f' Error message: {output}'
+        suffix = f'\nError message: {output}'
         if 'already exists' in output:
             logger.warning(
                 f'Key {key_label} already exists in the cluster, using it...')
-            pass
         elif any(err in output for err in ['connection refused', 'timeout']):
             with ux_utils.print_exception_no_traceback():
                 raise ConnectionError(
                     'Failed to connect to the cluster. Check if your '
                     'cluster is running, your kubeconfig is correct '
-                    'and you can connect to it using '
+                    'and you can connect to it using: '
                     f'kubectl get namespaces.{suffix}') from e
         else:
-            if suffix:
-                logger.error(suffix)
-            raise e
+            logger.error(suffix)
+            raise
 
     # Need to use ~ relative path because Ray uses the same
     # path for finding the public key path on both local and head node.

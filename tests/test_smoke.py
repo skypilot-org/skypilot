@@ -744,23 +744,6 @@ def test_scp_file_mounts():
     run_one_test(test)
 
 
-@pytest.mark.kubernetes
-def test_kubernetes_file_mounts():
-    name = _get_cluster_name()
-    test_commands = [
-        *storage_setup_commands,
-        f'sky launch -y -c {name} --cloud kubernetes --num-nodes 1 examples/using_file_mounts.yaml',
-        f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-    ]
-    test = Test(
-        'kubernetes_using_file_mounts',
-        test_commands,
-        f'sky down -y {name}',
-        timeout=20 * 60,  # 20 mins
-    )
-    run_one_test(test)
-
-
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
     name = _get_cluster_name()
     test_commands = [
