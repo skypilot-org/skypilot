@@ -34,7 +34,7 @@
 - [March, 2023] Serve your own LLaMA LLM chatbot (not finetuned) on any cloud: [**example**](./llm/llama-chatbots/), [**repo**](https://github.com/skypilot-org/sky-llama)
 ----
 
-SkyPilot is a framework for running LLMs, AI, and Batch jobs on any cloud, offering maximum cost savings, highest GPU availability, and managed execution.
+SkyPilot is a framework for running LLMs, AI, and batch jobs on any cloud, offering maximum cost savings, highest GPU availability, and managed execution.
 
 SkyPilot **abstracts away cloud infra burdens**:
 - Launch jobs & clusters on any cloud 
