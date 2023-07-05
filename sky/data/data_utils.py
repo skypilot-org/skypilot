@@ -1,12 +1,14 @@
 """Miscellaneous Utils for Sky Data
 """
 from multiprocessing import pool
+import concurrent.futures
 import os
 import subprocess
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
 import re
 import textwrap
+import threading
 from filelock import FileLock
 from enum import Enum
 
@@ -137,27 +139,65 @@ def verify_r2_bucket(name: str) -> bool:
     return bucket in r2.buckets.all()
 
 
-def verify_cos_bucket(name: str) -> bool:
+def verify_ibm_cos_bucket(name: str) -> bool:
     """Helper method that checks if the cos bucket exists
 
     Args:
       name: str; Name of a COS Bucket (without cos://region/ prefix)
     """
-    for region in get_cos_regions():
+    return get_ibm_cos_bucket_region(name) != ''
+
+
+def get_ibm_cos_bucket_region(bucket_name: str) -> str:
+    """
+    Returns the region of the bucket if exists,
+        otherwise returns empty string.
+
+    Args:
+        bucket_name (str): name of IBM COS bucket.
+
+    Raises:
+        exceptions.StorageBucketGetError if failed to connect to bucket.
+
+    Returns:
+        str: region of bucket if bucket exists, else empty string.
+    """
+    boto3_client_lock = threading.Lock()
+
+    def _get_bucket_region(region):
         try:
-            # only way to change searched region
-            # is to reinitialize a client with a new region
-            tmp_client = ibm.get_cos_client(region)
-            tmp_client.head_bucket(Bucket=name)
-            logger.debug(f'bucket was found in {region}')
-            return True
-        # pylint: disable=line-too-long
-        except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr]
+            # thread lock is needed. Although boto3.client is thread safe,
+            # creating a session() (default session) indirectly through it,
+            # isn't thread safe.
+            with boto3_client_lock:
+                # reinitialize a client to search in different regions
+                tmp_client = ibm.get_cos_client(region)
+            tmp_client.head_bucket(Bucket=bucket_name)
+            return region
+        except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # pylint: disable=line-too-long
             if e.response['Error']['Code'] == '404':
-                logger.debug(f'bucket was not found in {region}')
+                logger.debug(f'bucket {bucket_name} was not found '
+                             f'in {region}')
+            # Failed to connect to bucket, e.g. owned by different user
+            elif e.response['Error']['Code'] == '403':
+                raise exceptions.StorageBucketGetError()
             else:
                 raise e
-    return False
+        return ''
+
+    # concurrently check whether a bucket exists in each region
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = []
+        for region_scanned in get_cos_regions():
+            future = executor.submit(_get_bucket_region, region_scanned)
+            futures.append(future)
+
+        for future in concurrent.futures.as_completed(futures):
+            region = future.result()
+            if region:
+                logger.debug(f'bucket {bucket_name} was found in {region}')
+                return region
+    return ''
 
 
 def is_cloud_store_url(url):
@@ -308,8 +348,9 @@ class Rclone():
         IBM = 'sky-ibm-'
 
     @staticmethod
-    def get_rclone_bucket_profile(bucket_name: str, cloud: RcloneClouds) -> str:
-        """returns rclone profile name for specified bucket
+    def generate_rclone_bucket_profile_name(bucket_name: str,
+                                            cloud: RcloneClouds) -> str:
+        """Returns rclone profile name for specified bucket
 
         Args:
             bucket_name (str): name of bucket
@@ -326,8 +367,7 @@ class Rclone():
     @staticmethod
     def get_rclone_config(bucket_name: str, cloud: RcloneClouds,
                           region: str) -> str:
-
-        bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
+        bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
             bucket_name, cloud)
         if cloud is Rclone.RcloneClouds.IBM:
             access_key_id, secret_access_key = ibm.get_hmac_keys()
@@ -351,7 +391,7 @@ class Rclone():
     @staticmethod
     def store_rclone_config(bucket_name: str, cloud: RcloneClouds,
                             region: str) -> str:
-        """creates a configuration files for rclone - used for
+        """Creates a configuration files for rclone - used for
         bucket syncing and mounting """
 
         rclone_config_path = Rclone._RCLONE_ABS_CONFIG_PATH
@@ -363,13 +403,13 @@ class Rclone():
                            shell=True,
                            check=True,
                            stdout=subprocess.PIPE)
-        except subprocess.CalledProcessError as e:
+        except subprocess.CalledProcessError:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageError(
                     'rclone wasn\'t detected. '
                     'Consider installing via: '
                     '"curl https://rclone.org/install.sh '
-                    '| sudo bash" ') from e
+                    '| sudo bash" ') from None
 
         # create ~/.config/rclone/ if doesn't exist
         os.makedirs(os.path.dirname(rclone_config_path), exist_ok=True)
@@ -395,9 +435,9 @@ class Rclone():
 
     @staticmethod
     def get_region_from_rclone(bucket_name: str, cloud: RcloneClouds) -> str:
-        """returns region field of the specified bucket in rclone.conf
+        """Returns region field of the specified bucket in rclone.conf
          if bucket exists, else empty string"""
-        bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
+        bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
             bucket_name, cloud)
         with open(Rclone._RCLONE_ABS_CONFIG_PATH) as file:
             bucket_profile_found = False
@@ -417,8 +457,8 @@ class Rclone():
 
     @staticmethod
     def delete_rclone_bucket_profile(bucket_name: str, cloud: RcloneClouds):
-        """deletes specified bucket profile for rclone.conf"""
-        bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
+        """Deletes specified bucket profile for rclone.conf"""
+        bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
             bucket_name, cloud)
         rclone_config_path = Rclone._RCLONE_ABS_CONFIG_PATH
 
@@ -439,9 +479,9 @@ class Rclone():
     @staticmethod
     def _remove_bucket_profile_rclone(bucket_name: str,
                                       cloud: RcloneClouds) -> List[str]:
-        """returns rclone profiles without profiles matching
+        """Returns rclone profiles without profiles matching
           [profile_prefix+bucket_name]"""
-        bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
+        bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
             bucket_name, cloud)
         rclone_config_path = Rclone._RCLONE_ABS_CONFIG_PATH
 

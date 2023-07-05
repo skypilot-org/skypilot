@@ -254,7 +254,7 @@ class IBMCosCloudStorage(CloudStorage):
     def _get_rclone_sync_command(self, source: str, destination: str):
         bucket_name, data_path, bucket_region = data_utils.split_cos_path(
             source)
-        bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
+        bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
             bucket_name, Rclone.RcloneClouds.IBM)
         data_path_in_bucket = bucket_name + data_path
         rclone_config_data = Rclone.get_rclone_config(bucket_name,
@@ -281,6 +281,8 @@ class IBMCosCloudStorage(CloudStorage):
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file from 'source' bucket to remote vm
           at 'destination' using rclone."""
+
+        # underlying rclone command is the same for dirs and files.
         return self.make_sync_dir_command(source, destination)
 
 

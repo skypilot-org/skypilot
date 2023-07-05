@@ -750,7 +750,7 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
 def test_ibm_storage_mounts():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
-    bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
+    bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
         storage_name, Rclone.RcloneClouds.IBM)
     template_str = pathlib.Path(
         'tests/test_yamls/test_ibm_cos_storage_mounting.yaml').read_text()
@@ -1974,7 +1974,7 @@ class TestStorageWithCredentials:
             url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
         if store_type == storage_lib.StoreType.IBM:
-            bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
+            bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
                 bucket_name, Rclone.RcloneClouds.IBM)
             return f'rclone purge {bucket_rclone_profile}:{bucket_name} && rclone config delete {bucket_rclone_profile}'
 
@@ -2000,7 +2000,7 @@ class TestStorageWithCredentials:
                 url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
         if store_type == storage_lib.StoreType.IBM:
-            bucket_rclone_profile = Rclone.get_rclone_bucket_profile(
+            bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
                 bucket_name, Rclone.RcloneClouds.IBM)
             return f'rclone ls {bucket_rclone_profile}:{bucket_name}/{suffix}'
 
@@ -2276,9 +2276,10 @@ class TestStorageWithCredentials:
             storage_obj = storage_lib.Storage(source=nonexist_bucket_url.format(
                 random_name=nonexist_bucket_name))
 
-    @pytest.mark.parametrize(
-        'private_bucket',
-        [f's3://imagenet', f'gs://imagenet', 'cos://us-east/bucket1'])
+    @pytest.mark.parametrize('private_bucket', [
+        f's3://imagenet', f'gs://imagenet',
+        pytest.param('cos://us-east/bucket1', marks=pytest.mark.ibm)
+    ])
     def test_private_bucket(self, private_bucket):
         # Attempts to access private buckets not belonging to the user.
         # These buckets are known to be private, but may need to be updated if

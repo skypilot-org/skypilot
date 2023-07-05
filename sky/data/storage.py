@@ -9,8 +9,6 @@ from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
 
 import colorama
-import threading
-import concurrent.futures
 
 from sky import clouds
 from sky.adaptors import aws
@@ -22,12 +20,12 @@ from sky.utils import schemas
 from sky.data import data_transfer
 from sky.data import data_utils
 from sky.data import mounting_utils
+from sky.data.data_utils import Rclone
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.utils import log_utils
 from sky.utils import ux_utils
-from sky.data.data_utils import Rclone
 
 if typing.TYPE_CHECKING:
     import boto3  # type: ignore
@@ -949,7 +947,7 @@ class S3Store(AbstractStore):
                 assert self.name == data_utils.split_cos_path(self.source)[0], (
                     'COS Bucket is specified as path, the name should be '
                     'the same as COS bucket.')
-                assert data_utils.verify_cos_bucket(self.name), (
+                assert data_utils.verify_ibm_cos_bucket(self.name), (
                     f'Source specified as {self.source}, a COS bucket. ',
                     'COS Bucket should exist.')
         # Validate name
@@ -1345,7 +1343,7 @@ class GcsStore(AbstractStore):
                     )[0], (
                         'COS Bucket is specified as path, the name should be '
                         'the same as COS bucket.')
-                    assert data_utils.verify_cos_bucket(self.name), (
+                    assert data_utils.verify_ibm_cos_bucket(self.name), (
                         f'Source specified as {self.source}, a COS bucket. ',
                         'COS Bucket should exist.')
         # Validate name
@@ -1766,9 +1764,10 @@ class R2Store(AbstractStore):
                 assert self.name == data_utils.split_cos_path(self.source)[0], (
                     'IBM COS Bucket is specified as path, the name should be '
                     'the same as COS bucket.')
-                assert data_utils.verify_cos_bucket(self.name), (
+                assert data_utils.verify_ibm_cos_bucket(self.name), (
                     f'Source specified as {self.source}, a COS bucket. ',
                     'COS Bucket should exist.')
+        # Validate name
         self.name = S3Store.validate_name(self.name)
         # Check if the storage is enabled
         enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
@@ -2083,7 +2082,6 @@ class IBMCosStore(AbstractStore):
     """IBMCosStore inherits from Storage Object and represents the backend
     for COS buckets.
     """
-    REGIONS = data_utils.get_cos_regions()
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
 
     def __init__(self,
@@ -2097,7 +2095,8 @@ class IBMCosStore(AbstractStore):
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
         self.bucket_rclone_profile = \
-          Rclone.get_rclone_bucket_profile(self.name, Rclone.RcloneClouds.IBM)
+          Rclone.generate_rclone_bucket_profile_name(
+            self.name, Rclone.RcloneClouds.IBM)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -2195,65 +2194,6 @@ class IBMCosStore(AbstractStore):
             # set the is_sky_managed property.
             # If is_sky_managed is specified, then we take no action.
             self.is_sky_managed = is_new_bucket
-
-    def get_bucket_region(self, bucket_name: str) -> str:
-        """
-        returns the region of the bucket if exists,
-         otherwise returns empty string.
-
-        Args:
-            bucket_name (str): name of IBM COS bucket
-
-        Returns:
-            str: region of bucket if bucket exists, else empty string.
-        """
-
-        boto3_client_lock = threading.Lock()
-
-        def _get_bucket_region(region):
-            try:
-                # thread lock is needed. Although boto3.client is thread safe,
-                # creating a session() (default session) indirectly through it,
-                # isn't thread safe.
-                with boto3_client_lock:
-                    # reinitialize a client to search in different regions
-                    tmp_client = ibm.get_cos_client(region)
-                tmp_client.head_bucket(Bucket=bucket_name)
-                return region
-            except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # pylint: disable=line-too-long
-                if e.response['Error']['Code'] == '404':
-                    logger.debug(f'bucket {bucket_name} was not found '
-                                 f'in {region}')
-                elif e.response['Error']['Code'] == '403':
-                    command = f'rclone lsd {self.name}: '
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageBucketGetError(
-                            _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-                                name=self.name) +
-                            f' To debug, consider running `{command}`.') from e
-                else:
-                    raise e
-            return ''
-
-        # optimize search time for existing buckets,
-        # by starting with default region.
-        if self.region in self.REGIONS:
-            self.REGIONS.remove(self.region)
-            self.REGIONS.insert(0, self.region)
-
-        # concurrently check whether a bucket exists in each region
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            futures = []
-            for region_scanned in self.REGIONS:
-                future = executor.submit(_get_bucket_region, region_scanned)
-                futures.append(future)
-
-            for future in concurrent.futures.as_completed(futures):
-                region = future.result()
-                if region:
-                    logger.debug(f'bucket {bucket_name} was found in {region}')
-                    return region
-        return ''
 
     def upload(self):
         """Uploads files from local machine to bucket.
@@ -2389,7 +2329,17 @@ class IBMCosStore(AbstractStore):
           StorageHandle(str): bucket name
           bool: indicates whether a new bucket was created.
         """
-        bucket_region = self.get_bucket_region(self.name)
+
+        bucket_profile_name = Rclone.RcloneClouds.IBM.value + self.name
+        try:
+            bucket_region = data_utils.get_ibm_cos_bucket_region(self.name)
+        except exceptions.StorageBucketGetError as e:
+            with ux_utils.print_exception_no_traceback():
+                command = f'rclone lsd {bucket_profile_name}: '
+                raise exceptions.StorageBucketGetError(
+                    _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
+                    f' To debug, consider running `{command}`.') from e
+
         try:
             uri_region = data_utils.split_cos_path(
                 self.source)[2]  # type: ignore
