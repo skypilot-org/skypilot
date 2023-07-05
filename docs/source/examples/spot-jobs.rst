@@ -28,7 +28,7 @@ Task YAML
 
 To launch a spot job, you can simply reuse your task YAML (recommended to test it with :code:`sky launch` first).
 For example, we found the BERT fine-tuning YAML works with :code:`sky launch`, and want to
-launch it with SkyPilot managed spot jobs. 
+launch it with SkyPilot managed spot jobs.
 
 We can launch it with the following:
 
@@ -41,7 +41,7 @@ We can launch it with the following:
 
   # bert_qa.yaml
   name: bert_qa
-  
+
   resources:
     accelerators: V100:1
 
@@ -161,8 +161,8 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
 
 
 
-As HuggingFace has built-in support for periodically checkpointing, we only need to pass the highlighted arguments for setting up 
-the output directory and frequency of checkpointing (see more 
+As HuggingFace has built-in support for periodically checkpointing, we only need to pass the highlighted arguments for setting up
+the output directory and frequency of checkpointing (see more
 on `Huggingface API <https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments.save_steps>`_).
 You may also refer to another example `here <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`__ for periodically checkpointing with PyTorch.
 
@@ -221,6 +221,22 @@ Cancel a spot job:
   If any failure happens for a spot job, you can check :code:`sky spot queue -a` for the brief reason
   of the failure. For more details, it would be helpful to check :code:`sky spot logs --controller <job_id>`.
 
+Dashboard
+-----------
+
+Use ``sky spot dashboard`` to open a dashboard to see all jobs:
+
+.. code-block:: console
+
+  $ sky spot dashboard
+
+This automatically opens a browser tab to show the dashboard:
+
+.. image:: ../images/spot-dashboard.png
+
+The UI shows the same information as the CLI ``sky spot queue -a``. The UI is
+especially useful when there are many in-progress jobs to monitor, which the
+terminal-based CLI may need more than one page to display.
 
 Real-world examples
 -------------------------
@@ -234,13 +250,13 @@ Spot controller
 -------------------------------
 
 The spot controller is a small on-demand CPU VM running in the cloud that manages all spot jobs of a user.
-It is automatically launched when the first managed spot job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all spot jobs finish and no new spot job is submitted in that duration). 
-Thus, **no user action is needed** to manage its lifecycle. 
+It is automatically launched when the first managed spot job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all spot jobs finish and no new spot job is submitted in that duration).
+Thus, **no user action is needed** to manage its lifecycle.
 
 You can see the controller with :code:`sky status` and refresh its status by using the :code:`-r/--refresh` flag.
 
-While the cost of the spot controller is negligible (~$0.4/hour when running and less than $0.004/hour when stopped), 
-you can still tear it down manually with 
+While the cost of the spot controller is negligible (~$0.4/hour when running and less than $0.004/hour when stopped),
+you can still tear it down manually with
 :code:`sky down <spot-controller-name>`, where the ``<spot-controller-name>`` can be found in the output of :code:`sky status`.
 
 .. note::
