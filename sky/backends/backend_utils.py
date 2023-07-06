@@ -399,17 +399,24 @@ class SSHConfigHelper(object):
     @classmethod
     def _get_generated_config(cls, autogen_comment: str, host_name: str,
                               ip: str, username: str, ssh_key_path: str,
-                              port: str, proxy_command: Optional[str]):
+                              port: str, proxy_command: Optional[str],
+                              docker_proxy_command: Optional[str]):
         if proxy_command is not None:
             proxy = f'ProxyCommand {proxy_command}'
         else:
             proxy = ''
+        if docker_proxy_command is not None:
+            docker_proxy = f'ProxyCommand {docker_proxy_command}'
+        else:
+            docker_proxy = ''
         # StrictHostKeyChecking=no skips the host key check for the first
         # time. UserKnownHostsFile=/dev/null and GlobalKnownHostsFile/dev/null
         # prevent the host key from being added to the known_hosts file and
         # always return an empty file for known hosts, making the ssh think
         # this is a first-time connection, and thus skipping the host key
         # check.
+        # Put the docker proxy command first. For details, see the comment in
+        # sky.utils.command_runner.ssh_options_list.
         codegen = textwrap.dedent(f"""\
             {autogen_comment}
             Host {host_name}
@@ -422,6 +429,7 @@ class SSHConfigHelper(object):
               UserKnownHostsFile=/dev/null
               GlobalKnownHostsFile=/dev/null
               Port {port}
+              {docker_proxy}
               {proxy}
             """.rstrip())
         codegen = codegen + '\n'
@@ -495,20 +503,14 @@ class SSHConfigHelper(object):
             os.chmod(config_path, 0o644)
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
+        docker_proxy_command = None
         if docker_user is not None:
-            if proxy_command is not None:
-                raise ValueError(
-                    'ssh_proxy_command is not supported when docker image is specified '
-                    f'(ssh_proxy_command: {proxy_command}). Please remove the '
-                    'proxy setup in `~/.sky/config.yaml` or replace the `image_id` with '
-                    'non-docker image, such as \'skypilot:skypilot:gpu-ubuntu-2004\''
-                )
-            proxy_command = ' '.join(
+            docker_proxy_command = ' '.join(
                 ['ssh'] + command_runner.ssh_options_list(key_path, None) +
                 ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ips[0]}'])
         codegen = cls._get_generated_config(sky_autogen_comment, host_name, ip,
                                             username, key_path, port,
-                                            proxy_command)
+                                            proxy_command, docker_proxy_command)
 
         # Add (or overwrite) the new config.
         if overwrite:
@@ -601,10 +603,7 @@ class SSHConfigHelper(object):
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
         if docker_user is not None:
-            if proxy_command is not None:
-                raise ValueError(
-                    'ssh_proxy_command is not supported if docker is used')
-            proxy_command_generator = lambda ip: ' '.join(
+            docker_proxy_command_generator = lambda ip: ' '.join(
                 ['ssh'] + command_runner.ssh_options_list(key_path, None) +
                 ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ip}'])
 
@@ -619,13 +618,14 @@ class SSHConfigHelper(object):
                 host_name = external_worker_ips[idx]
                 logger.warning(f'Using {host_name} to identify host instead.')
                 ip = external_worker_ips[idx]
+                docker_proxy_command = None
                 if docker_user is not None:
                     ip = 'localhost'
-                    proxy_command = proxy_command_generator(
+                    docker_proxy_command = docker_proxy_command_generator(
                         external_worker_ips[idx])
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, host_name, ip, username, key_path,
-                    port, proxy_command)
+                    port, proxy_command, docker_proxy_command)
 
         # All workers go to SKY_USER_FILE_PATH/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
@@ -639,21 +639,21 @@ class SSHConfigHelper(object):
                 ip = external_worker_ips[idx]
                 if docker_user is not None:
                     ip = 'localhost'
-                    proxy_command = proxy_command_generator(
+                    docker_proxy_command = docker_proxy_command_generator(
                         external_worker_ips[idx])
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, host_name, ip, username, key_path,
-                    port, proxy_command)
+                    port, proxy_command, docker_proxy_command)
 
         # This checks if all codegens have been created.
         for idx, ip in enumerate(external_worker_ips):
             if docker_user is not None:
                 ip = 'localhost'
-                proxy_command = proxy_command_generator(ip)
+                docker_proxy_command = docker_proxy_command_generator(ip)
             if not codegens[idx]:
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, worker_names[idx], ip, username,
-                    key_path, port, proxy_command)
+                    key_path, port, proxy_command, docker_proxy_command)
 
         for idx in range(len(external_worker_ips)):
             # Add (or overwrite) the new config.

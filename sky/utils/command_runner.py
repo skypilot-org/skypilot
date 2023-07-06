@@ -45,6 +45,7 @@ def ssh_options_list(ssh_private_key: Optional[str],
                      ssh_control_name: Optional[str],
                      *,
                      ssh_proxy_command: Optional[str] = None,
+                     docker_ssh_proxy_command: Optional[str] = None,
                      timeout: int = 30,
                      port: int = 22) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
@@ -88,6 +89,11 @@ def ssh_options_list(ssh_private_key: Optional[str],
         ssh_private_key,
     ] if ssh_private_key is not None else []
 
+    docker_proxy_command = [
+        '-o',
+        f'ProxyCommand={docker_ssh_proxy_command}',
+    ] if docker_ssh_proxy_command is not None else []
+
     if ssh_proxy_command is not None:
         logger.debug(f'--- Proxy: {ssh_proxy_command} ---')
         arg_dict.update({
@@ -95,7 +101,16 @@ def ssh_options_list(ssh_private_key: Optional[str],
             # must quote this value.
             'ProxyCommand': shlex.quote(ssh_proxy_command),
         })
-    return ssh_key_option + [
+
+    # If two proxy commands are specified, e.g.
+    # ssh -o ProxyCommand=cmd1 -o ProxyCommand=cmd2 ...
+    # then ssh will first ssh into the host using cmd2 (the later one) and then
+    # ssh from cmd2 host to the target host using cmd1. So, we put the docker
+    # proxy command at the beginning. This way, ssh will first establish a
+    # connection to the user-specified proxy host and then proceed to ssh from
+    # the proxy host to the docker host VM, and finally, ssh into the docker
+    # container.
+    return ssh_key_option + docker_proxy_command + [
         x for y in (['-o', f'{k}={v}']
                     for k, v in arg_dict.items()
                     if v is not None) for x in y
@@ -151,21 +166,19 @@ class SSHCommandRunner:
         self.ssh_control_name = (
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
+        self._ssh_proxy_command = ssh_proxy_command
         if docker_user:
             self.ip = 'localhost'
             self.ssh_user = docker_user
-            if ssh_proxy_command is not None:
-                raise ValueError(
-                    'ssh_proxy_command is not supported if docker is used')
-            self._ssh_proxy_command = lambda ssh: ' '.join(
+            self.port = constants.DEFAULT_DOCKER_PORT
+            self._docker_ssh_proxy_command = lambda ssh: ' '.join(
                 ssh + ssh_options_list(ssh_private_key, None
                                       ) + ['-W', '%h:%p', f'{ssh_user}@{ip}'])
-            self.port = constants.DEFAULT_DOCKER_PORT
         else:
             self.ip = ip
             self.ssh_user = ssh_user
-            self._ssh_proxy_command = ssh_proxy_command
             self.port = '22'
+            self._docker_ssh_proxy_command = None
 
     @staticmethod
     def make_runner_list(
@@ -198,14 +211,15 @@ class SSHCommandRunner:
                 logger.info(
                     f'Forwarding port {local} to port {remote} on localhost.')
                 ssh += ['-L', f'{remote}:localhost:{local}']
-        if callable(self._ssh_proxy_command):
-            ssh_proxy_command = self._ssh_proxy_command(ssh)
+        if self._docker_ssh_proxy_command is not None:
+            docker_ssh_proxy_command = self._docker_ssh_proxy_command(ssh)
         else:
-            ssh_proxy_command = self._ssh_proxy_command
+            docker_ssh_proxy_command = None
         return ssh + ssh_options_list(
             self.ssh_private_key,
             self.ssh_control_name,
-            ssh_proxy_command=ssh_proxy_command,
+            ssh_proxy_command=self._ssh_proxy_command,
+            docker_ssh_proxy_command=docker_ssh_proxy_command,
             port=self.port,
         ) + [f'{self.ssh_user}@{self.ip}']
 
@@ -356,15 +370,16 @@ class SSHCommandRunner:
                     RSYNC_EXCLUDE_OPTION.format(
                         str(resolved_source / GIT_EXCLUDE)))
 
-        if callable(self._ssh_proxy_command):
-            ssh_proxy_command = self._ssh_proxy_command(['ssh'])
+        if self._docker_ssh_proxy_command is not None:
+            docker_ssh_proxy_command = self._docker_ssh_proxy_command(['ssh'])
         else:
-            ssh_proxy_command = self._ssh_proxy_command
+            docker_ssh_proxy_command = None
         ssh_options = ' '.join(
             ssh_options_list(
                 self.ssh_private_key,
                 self.ssh_control_name,
-                ssh_proxy_command=ssh_proxy_command,
+                ssh_proxy_command=self._ssh_proxy_command,
+                docker_ssh_proxy_command=docker_ssh_proxy_command,
                 port=self.port,
             ))
         rsync_command.append(f'-e "ssh {ssh_options}"')
