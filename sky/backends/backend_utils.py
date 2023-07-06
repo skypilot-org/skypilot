@@ -719,17 +719,16 @@ class SSHConfigHelper(object):
                 if found:
                     # Find the line starting with ProxyCommand
                     proxy_command_line = None
+                    found = False
                     for idx in range(i, len(config)):
                         # Stop if we reach an empty line, which means a new host
                         if len(config[idx].strip()) == 0:
                             break
                         if config[idx].strip().startswith('ProxyCommand'):
                             proxy_command_line = config[idx].strip()
-                            break
-                    if proxy_command_line is None:
-                        found = False
-                    else:
-                        found = found and (ip in proxy_command_line)
+                            if ip in proxy_command_line:
+                                found = True
+                                break
             if found:
                 start_line_idx = i - 1
                 break
