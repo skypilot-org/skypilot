@@ -1325,6 +1325,7 @@ def launch(
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
     """
+    backend_utils.check_network_connection()
     backend_utils.check_cluster_name_not_reserved(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
