@@ -415,8 +415,14 @@ class SSHConfigHelper(object):
         # always return an empty file for known hosts, making the ssh think
         # this is a first-time connection, and thus skipping the host key
         # check.
-        # Put the docker proxy command first. For details, see the comment in
-        # sky.utils.command_runner.ssh_options_list.
+        # Put the docker proxy command first. If two proxy commands are
+        # specified, e.g. ssh -o ProxyCommand=cmd1 -o ProxyCommand=cmd2 ...
+        # then ssh will first ssh into the host using cmd2 (the later one) and
+        # then ssh from cmd2 host to the target host using cmd1. So, we put the
+        # docker proxy command at the beginning. This way, ssh will first
+        # establish a connection to the user-specified proxy host and then
+        # proceed to ssh from the proxy host to the docker host VM,
+        # and finally, ssh into the docker container.
         codegen = textwrap.dedent(f"""\
             {autogen_comment}
             Host {host_name}
