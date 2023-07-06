@@ -1513,8 +1513,9 @@ class GcsStore(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            sync_command = (f'gsutil -m rsync -e -r -x \'.git/*\' {src_dir_path} '
-                            f'gs://{self.name}/{dest_dir_name}')
+            sync_command = (
+                f'gsutil -m rsync -e -r -x \'.git/*\' {src_dir_path} '
+                f'gs://{self.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
