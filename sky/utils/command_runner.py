@@ -91,7 +91,7 @@ def ssh_options_list(ssh_private_key: Optional[str],
 
     docker_proxy_command = [
         '-o',
-        f'ProxyCommand={docker_ssh_proxy_command}',
+        f'ProxyCommand={shlex.quote(docker_ssh_proxy_command)}',
     ] if docker_ssh_proxy_command is not None else []
 
     if ssh_proxy_command is not None:
