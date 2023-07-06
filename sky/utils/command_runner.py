@@ -167,7 +167,7 @@ class SSHCommandRunner:
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
-        if docker_user:
+        if docker_user is not None:
             self.ip = 'localhost'
             self.ssh_user = docker_user
             self.port = constants.DEFAULT_DOCKER_PORT

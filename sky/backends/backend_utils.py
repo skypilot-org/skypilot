@@ -475,7 +475,7 @@ class SSHConfigHelper(object):
         overwrite_begin_idx = None
         ip = ips[0]
         port = '22'
-        if docker_user:
+        if docker_user is not None:
             ip = 'localhost'
             port = constants.DEFAULT_DOCKER_PORT
 
@@ -561,7 +561,7 @@ class SSHConfigHelper(object):
         # public IPs.
         external_worker_ips = list(sorted(external_worker_ips))
         port = '22'
-        if docker_user:
+        if docker_user is not None:
             port = constants.DEFAULT_DOCKER_PORT
 
         overwrites = [False] * len(external_worker_ips)
@@ -724,7 +724,6 @@ class SSHConfigHelper(object):
                          next_line.strip() == f'User {docker_user}')
                 if found:
                     # Find the line starting with ProxyCommand
-                    proxy_command_line = None
                     found = False
                     for idx in range(i, len(config)):
                         # Stop if we reach an empty line, which means a new host
