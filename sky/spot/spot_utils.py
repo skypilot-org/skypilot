@@ -159,11 +159,10 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
     return float(stdout)
 
 
-def event_callback_func(job_id: int, task_id: int, state: str,
-                        task: 'sky.Task'):
+def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
     """Run event callback for the task."""
 
-    def callback_func():
+    def callback_func(state: str):
         event_callback = task.event_callback if task else None
         if event_callback is None or task is None:
             return

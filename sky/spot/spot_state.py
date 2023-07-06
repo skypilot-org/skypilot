@@ -16,7 +16,7 @@ from sky.utils import db_utils
 if typing.TYPE_CHECKING:
     import sky
 
-CallbackType = Callable[[], None]
+CallbackType = Callable[[str], None]
 
 logger = sky_logging.init_logger(__name__)
 
@@ -301,7 +301,7 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
             task_id=(?)""",
             (resources_str, submit_time, SpotStatus.SUBMITTED.value,
              run_timestamp, job_id, task_id))
-    callback_func()
+    callback_func('SUBMITTED')
 
 
 def set_starting(job_id: int, task_id: int, callback_func: CallbackType):
@@ -313,7 +313,7 @@ def set_starting(job_id: int, task_id: int, callback_func: CallbackType):
             UPDATE spot SET status=(?)
             WHERE spot_job_id=(?) AND
             task_id=(?)""", (SpotStatus.STARTING.value, job_id, task_id))
-    callback_func()
+    callback_func('STARTING')
 
 
 def set_started(job_id: int, task_id: int, start_time: float,
@@ -327,7 +327,7 @@ def set_started(job_id: int, task_id: int, start_time: float,
             WHERE spot_job_id=(?) AND
             task_id=(?)""",
             (SpotStatus.RUNNING.value, start_time, start_time, job_id, task_id))
-    callback_func()
+    callback_func('STARTED')
 
 
 def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
@@ -341,7 +341,7 @@ def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
                 WHERE spot_job_id=(?) AND
                 task_id=(?)""",
             (SpotStatus.RECOVERING.value, time.time(), job_id, task_id))
-    callback_func()
+    callback_func('RECOVERING')
 
 
 def set_recovered(job_id: int, task_id: int, recovered_time: float,
@@ -356,7 +356,7 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float,
             task_id=(?)""",
             (SpotStatus.RUNNING.value, recovered_time, job_id, task_id))
     logger.info('==== Recovered. ====')
-    callback_func()
+    callback_func('RECOVERED')
 
 
 def set_succeeded(job_id: int, task_id: int, end_time: float,
@@ -371,7 +371,7 @@ def set_succeeded(job_id: int, task_id: int, end_time: float,
             AND end_at IS null""",
             (SpotStatus.SUCCEEDED.value, end_time, job_id, task_id))
 
-    callback_func()
+    callback_func('SUCCEEDED')
     logger.info('Job succeeded.')
 
 
@@ -422,7 +422,7 @@ def set_failed(
             WHERE spot_job_id=(?){task_str} AND end_at IS null""",
             (*list(fields_to_set.values()), job_id))
     if callback_func:
-        callback_func()
+        callback_func('FAILED')
     logger.info(failure_reason)
 
 
@@ -441,7 +441,7 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
             (SpotStatus.CANCELLING.value, time.time(), job_id))
         if rows.rowcount > 0:
             logger.info('Cancelling the job...')
-            callback_func()
+            callback_func('CANCELLING')
 
 
 def set_cancelled(job_id: int, callback_func: CallbackType):
@@ -459,7 +459,7 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
              SpotStatus.CANCELLING.value))
         if rows.rowcount > 0:
             logger.info('Job cancelled.')
-            callback_func()
+            callback_func('CANCELLED')
 
 
 # ======== utility functions ========
