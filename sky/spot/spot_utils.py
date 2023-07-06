@@ -163,34 +163,39 @@ def event_callback_func(job_id: int, task_id: int, state: str,
                         task: 'sky.Task'):
     """Run event callback for the task."""
 
-    event_callback = task.event_callback if task else None
-    if event_callback is None or task is None:
-        return
-    event_callback = event_callback.strip()
-    cluster_name = generate_spot_cluster_name(task.name,
-                                              job_id) if task.name else None
-    logger.info(f'=== START: event callback for {state!r} ===')
-    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, 'spot_event',
-                            f'spot-callback-{job_id}-{task_id}.log')
-    result = run_bash_command_with_log(
-        bash_command=event_callback,
-        log_path=log_path,
-        env_vars=dict(
-            SKYPILOT_JOB_ID=str(
-                task.envs.get(constants.TASK_ID_ENV_VAR_DEPRECATED, 'N.A.')),
-            SKYPILOT_TASK_ID=str(
-                task.envs.get(constants.TASK_ID_ENV_VAR, 'N.A.')),
-            SKYPILOT_TASK_IDS=str(
-                task.envs.get(constants.TASK_ID_LIST_ENV_VAR, 'N.A.')),
-            TASK_ID=str(task_id),
-            JOB_ID=str(job_id),
-            JOB_STATUS=state,
-            CLUSTER_NAME=cluster_name or '',
-            TASK_NAME=task.name or '',
-            # TODO(MaoZiming): Future event type Job or Spot.
-            EVENT_TYPE='Spot'))
-    logger.info(f'Bash:{event_callback},log_path:{log_path},result:{result}')
-    logger.info(f'=== END: event callback for {state!r} ===')
+    def callback_func():
+        event_callback = task.event_callback if task else None
+        if event_callback is None or task is None:
+            return
+        event_callback = event_callback.strip()
+        cluster_name = generate_spot_cluster_name(task.name,
+                                                  job_id) if task.name else None
+        logger.info(f'=== START: event callback for {state!r} ===')
+        log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, 'spot_event',
+                                f'spot-callback-{job_id}-{task_id}.log')
+        result = run_bash_command_with_log(
+            bash_command=event_callback,
+            log_path=log_path,
+            env_vars=dict(
+                SKYPILOT_JOB_ID=str(
+                    task.envs.get(constants.TASK_ID_ENV_VAR_DEPRECATED,
+                                  'N.A.')),
+                SKYPILOT_TASK_ID=str(
+                    task.envs.get(constants.TASK_ID_ENV_VAR, 'N.A.')),
+                SKYPILOT_TASK_IDS=str(
+                    task.envs.get(constants.TASK_ID_LIST_ENV_VAR, 'N.A.')),
+                TASK_ID=str(task_id),
+                JOB_ID=str(job_id),
+                JOB_STATUS=state,
+                CLUSTER_NAME=cluster_name or '',
+                TASK_NAME=task.name or '',
+                # TODO(MaoZiming): Future event type Job or Spot.
+                EVENT_TYPE='Spot'))
+        logger.info(
+            f'Bash:{event_callback},log_path:{log_path},result:{result}')
+        logger.info(f'=== END: event callback for {state!r} ===')
+
+    return callback_func
 
 
 # ======== user functions ========
