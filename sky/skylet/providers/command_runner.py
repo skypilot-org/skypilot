@@ -9,6 +9,7 @@ from ray.autoscaler._private.cli_logger import cli_logger
 from ray.autoscaler._private.command_runner import DockerCommandRunner
 from ray.autoscaler._private.docker import check_docker_running_cmd
 
+
 def docker_start_cmds(
     user,
     image,

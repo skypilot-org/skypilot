@@ -16,6 +16,7 @@ from sky.skylet.providers.azure.config import (
     get_azure_sdk_function,
 )
 from sky.skylet.providers.command_runner import SkyDockerCommandRunner
+
 from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import (
