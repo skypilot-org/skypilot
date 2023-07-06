@@ -348,7 +348,7 @@ class AWS(clouds.Cloud):
         else:
             custom_resources = None
 
-        if r.extract_docker_image():
+        if r.extract_docker_image() is not None:
             image_id_to_use = None
         else:
             image_id_to_use = r.image_id
