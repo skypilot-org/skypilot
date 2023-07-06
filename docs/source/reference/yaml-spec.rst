@@ -143,7 +143,7 @@ Available fields:
       # Uses SkyPilot Storage to create a S3 bucket named sky-dataset, uploads the
       # contents of /local/path/datasets to the bucket, and marks the bucket
       # as persistent (it will not be deleted after the completion of this task).
-      # Symlink contents are directly copied, but not their target data.
+      # Symlinks and their contents are NOT copied.
       #
       # Mounts the bucket at /datasets-storage on every node of the cluster.
       /datasets-storage:
