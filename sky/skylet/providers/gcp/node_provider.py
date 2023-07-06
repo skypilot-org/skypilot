@@ -12,7 +12,7 @@ from sky.skylet.providers.gcp.config import (
     construct_clients_from_provider_config,
     get_node_type,
 )
-from sky.backends.docker_utils import SkyDockerCommandRunner
+from sky.skylet.providers.command_runner import SkyDockerCommandRunner
 
 from ray.autoscaler.tags import (
     TAG_RAY_LAUNCH_CONFIG,

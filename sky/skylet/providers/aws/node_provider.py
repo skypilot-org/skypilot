@@ -24,7 +24,7 @@ from sky.skylet.providers.aws.utils import (
     resource_cache,
     client_cache,
 )
-from sky.backends.docker_utils import SkyDockerCommandRunner
+from sky.skylet.providers.command_runner import SkyDockerCommandRunner
 from ray.autoscaler._private.cli_logger import cli_logger, cf
 from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler._private.constants import BOTO_MAX_RETRIES, BOTO_CREATE_MAX_RETRIES
