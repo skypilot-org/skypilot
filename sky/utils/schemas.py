@@ -150,6 +150,9 @@ def get_task_schema():
             'workdir': {
                 'type': 'string',
             },
+            'event_callback': {
+                'type': 'string',
+            },
             'num_nodes': {
                 'type': 'integer',
             },
