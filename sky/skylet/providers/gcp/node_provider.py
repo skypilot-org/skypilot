@@ -1,4 +1,3 @@
-import concurrent.futures
 import logging
 import time
 import copy
@@ -292,6 +291,7 @@ class GCPNodeProvider(NodeProvider):
     @_retry
     def terminate_node(self, node_id: str):
         with self.lock:
+            result = None
             resource = self._get_resource_depending_on_node_name(node_id)
             try:
                 if self.cache_stopped_nodes:
@@ -337,7 +337,6 @@ class GCPNodeProvider(NodeProvider):
                         f"Tried to delete the node with id {node_id} "
                         "but it was already gone."
                     )
-                    result = None
                 else:
                     raise http_error from None
 
