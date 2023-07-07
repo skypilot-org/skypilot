@@ -164,8 +164,17 @@ For uploading files to the cluster, see :ref:`Syncing Code and Artifacts <sync-c
 Stop/terminate a cluster
 =========================
 
-When you are done, run :code:`sky stop mycluster` to stop the cluster. To
-terminate a cluster instead, run :code:`sky down mycluster`.
+When you are done, stop the cluster with:
+
+.. code-block:: console
+
+  $ sky stop mycluster
+
+To terminate a cluster instead, run:
+
+.. code-block:: console
+
+  $ sky down mycluster
 
 Find more commands that manage the lifecycle of clusters in the :ref:`CLI reference <cli>`.
 
