@@ -12,13 +12,14 @@ You can specify environment variables to be made available to a task in two ways
 - The ``envs`` field (dict) in a :ref:`task YAML <yaml-spec>`
 - The ``--env`` flag in the ``sky launch/exec`` :ref:`CLI <cli>` (takes precedence over the above)
 
-The ``file_mounts``, ``setup``, and ``run`` sections of a task YAML file can then access these variables via the ``${MYVAR}`` syntax.
+The ``file_mounts``, ``setup``, and ``run`` sections of a task YAML can access the variables via the ``${MYVAR}`` syntax.
 
 Using in ``file_mounts``
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: yaml
 
+    # Sets default values for some variables; can be overridden by --env.
     envs:
       MY_BUCKET: skypilot-temp-gcs-test
       MY_LOCAL_PATH: tmp-workdir
@@ -39,15 +40,11 @@ The values of these variables are filled in by SkyPilot at task YAML parse time.
 
 Read more at `examples/using_file_mounts_with_env_vars.yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/using_file_mounts_with_env_vars.yaml>`_.
 
-Using in ``setup``
+Using in ``setup`` and ``run``
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-All user-specified environment variables are exported to a task's ``setup`` commands.
+All user-specified environment variables are exported to a task's ``setup`` and ``run`` commands (i.e., accessible when they are being run).
 
-Using in ``run``
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-All user-specified environment variables are exported to a task's execution (i.e., while its ``run`` commands are running).
 For example, this is useful for passing secrets to the task (see below).
 
 Passing secrets
@@ -73,7 +70,7 @@ it available in your current shell, then using ``--env`` to pass it to SkyPilot:
 SkyPilot environment variables
 ------------------------------------------------------------------
 
-SkyPilot exports these environment variables for a task's execution (``run`` commands):
+SkyPilot exports these environment variables for a task's execution (while ``run`` commands are running):
 
 .. list-table::
    :widths: 20 70 10
