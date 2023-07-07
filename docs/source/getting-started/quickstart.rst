@@ -164,13 +164,13 @@ For uploading files to the cluster, see :ref:`Syncing Code and Artifacts <sync-c
 Stop/terminate a cluster
 =========================
 
-When you are done, stop the cluster with:
+When you are done, stop the cluster with :code:`sky stop`:
 
 .. code-block:: console
 
   $ sky stop mycluster
 
-To terminate a cluster instead, run:
+To terminate a cluster instead, run :code:`sky down`:
 
 .. code-block:: console
 
