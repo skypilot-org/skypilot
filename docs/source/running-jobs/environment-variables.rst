@@ -45,7 +45,22 @@ Using in ``setup`` and ``run``
 
 All user-specified environment variables are exported to a task's ``setup`` and ``run`` commands (i.e., accessible when they are being run).
 
-For example, this is useful for passing secrets to the task (see below).
+For example, this is useful for passing secrets (see below) or passing configurations:
+
+.. code-block:: yaml
+
+    # Sets default values for some variables; can be overridden by --env.
+    envs:
+      MODEL_NAME: decapoda-research/llama-65b-hf
+
+    run: |
+      python train.py --model_name ${MODEL_NAME} <other args>
+
+.. code-block:: console
+
+    $ sky launch --env MODEL_NAME=huggyllama/llama-7b task.yaml  # Override.
+
+See complete examples at `llm/vllm/serve.yaml <https://github.com/skypilot-org/skypilot/blob/596c1415b5039adec042594f45b342374e5e6a00/llm/vllm/serve.yaml#L4-L5>`_ and `llm/vicuna/train.yaml <https://github.com/skypilot-org/skypilot/blob/596c1415b5039adec042594f45b342374e5e6a00/llm/vicuna/train.yaml#L111-L116>`_.
 
 Passing secrets
 ~~~~~~~~~~~~~~~~~~~~~~~~
