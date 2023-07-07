@@ -22,29 +22,32 @@
 
 
 <h3 align="center">
-    Run jobs on any cloud, easily and cost effectively
+    Run LLMs and AI on Any Cloud
 </h3>
 
 ----
 :fire: *News* :fire:
+- [June, 2023] Serving LLM **24x Faster On the Cloud** with vLLM and SkyPilot: [**example**](./llm/vllm/), [**blog post**](https://blog.skypilot.co/serving-llm-24x-faster-on-the-cloud-with-vllm-and-skypilot/)
 - [June, 2023] [**Two new clouds supported**](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html): Samsung SCP and Oracle OCI!
 - [April, 2023] **[**SkyPilot YAMLs released**](./llm/vicuna/) for finetuning & serving the Vicuna model with a single command**!
 - [March, 2023] **[Vicuna LLM chatbot](https://lmsys.org/blog/2023-03-30-vicuna/) trained** [**using SkyPilot**](./llm/vicuna/) **for $300 on spot instances!** 
-- [March, 2023] *Serve* your own LLaMA LLM chatbot (not finetuned) on any cloud: [**example**](./llm/llama-chatbots/), [**repo**](https://github.com/skypilot-org/sky-llama)
+- [March, 2023] Serve your own LLaMA LLM chatbot (not finetuned) on any cloud: [**example**](./llm/llama-chatbots/), [**repo**](https://github.com/skypilot-org/sky-llama)
 ----
 
-SkyPilot is a framework for easily and cost effectively running ML workloads[^1] on any cloud. 
+SkyPilot is a framework for running LLMs, AI, and batch jobs on any cloud, offering maximum cost savings, highest GPU availability, and managed execution.
 
-SkyPilot abstracts away the cloud infra burden:
-- Launch jobs & clusters on any cloud (AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI)
-- Find scarce resources across zones/regions/clouds
-- Queue jobs & use cloud object stores
+SkyPilot **abstracts away cloud infra burdens**:
+- Launch jobs & clusters on any cloud 
+- Easy scale-out: queue and run many jobs, automatically managed
+- Easy access to object stores (S3, GCS, R2)
 
-SkyPilot cuts your cloud costs:
-* [Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html): **3x cost savings** using spot VMs, with auto-recovery from preemptions
+SkyPilot **maximizes GPU availability for your jobs**:
+* Provision in all zones/regions/clouds you have access to ([the _Sky_](https://arxiv.org/abs/2205.07147)), with automatic failover
+
+SkyPilot **cuts your cloud costs**:
+* [Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html): 3-6x cost savings using spot VMs, with auto-recovery from preemptions
+* Optimizer: 2x cost savings by auto-picking the cheapest VM/zone/region/cloud
 * [Autostop](https://skypilot.readthedocs.io/en/latest/reference/auto-stop.html): hands-free cleanup of idle clusters 
-* [Benchmark](https://skypilot.readthedocs.io/en/latest/reference/benchmark/index.html): find best VM types for your jobs
-* Optimizer: **2x cost savings** by auto-picking best prices across zones/regions/clouds
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes. 
 
@@ -52,6 +55,8 @@ Install with pip or [from source](https://skypilot.readthedocs.io/en/latest/gett
 ```
 pip install "skypilot[aws,gcp,azure,ibm,oci,scp,lambda]"  # choose your clouds
 ```
+
+Current supported providers (AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI, Cloudflare):
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-dark.png">
@@ -142,6 +147,3 @@ For general discussions, join us on the [SkyPilot Slack](http://slack.skypilot.c
 
 ## Contributing
 We welcome and value all contributions to the project! Please refer to [CONTRIBUTING](CONTRIBUTING.md) for how to get involved.
-
-<!-- Footnote -->
-[^1]: While SkyPilot is currently targeted at machine learning workloads, it supports and has been used for other general batch workloads. We're excited to hear about your use case and how we can better support your requirements; please join us in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)!

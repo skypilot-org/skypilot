@@ -53,8 +53,11 @@ If you already have cloud access set up on your local machine, run ``sky check``
 
 Otherwise, configure access to at least one cloud, then run ``sky check``:
 
+.. _aws-installation:
+
 Amazon Web Services (AWS)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 
 To get the **AWS access key** required by :code:`aws configure`, please go to the `AWS IAM Management Console <https://us-east-1.console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials>`_ and click on the "Access keys" dropdown (detailed instructions `here <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`__). The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
 
@@ -258,11 +261,11 @@ Quick alternative: trying in Docker
 ------------------------------------------------------
 
 As a **quick alternative to installing SkyPilot on your laptop**, we also provide a Docker image with SkyPilot and
-its dependencies installed for users to quickly try out SkyPilot. You can simply run:
+its AWS and GCP dependencies installed for users to quickly try out SkyPilot. You can simply run:
 
 .. code-block:: console
 
-  $ docker run -td --name sky --rm -v "$HOME/.sky:/root/.sky:rw" -v "$HOME/.aws:/root/.aws:rw" -v "$HOME/.config/gcloud:/root/.config/gcloud:rw" -v "$HOME/.azure:/root/.azure:rw" public.ecr.aws/a9w6z7w5/sky:latest
+  $ docker run -td --name sky --rm -v "$HOME/.sky:/root/.sky:rw" -v "$HOME/.aws:/root/.aws:rw" -v "$HOME/.config/gcloud:/root/.config/gcloud:rw" berkeleyskypilot/skypilot:latest
   $ docker exec -it sky /bin/bash
 
 If your cloud CLIs are already setup, your credentials will be mounted to the

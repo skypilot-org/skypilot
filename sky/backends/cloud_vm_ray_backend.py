@@ -27,6 +27,7 @@ from sky import clouds
 from sky import cloud_stores
 from sky import exceptions
 from sky import global_user_state
+from sky import provision as provision_api
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import optimizer
@@ -655,6 +656,16 @@ class RetryingVmProvisioner(object):
             try:
                 exception_dict = ast.literal_eval(exception_str)
             except Exception as e:
+                if 'wait_ready timeout exceeded' in exception_str:
+                    # This error seems to occur when the provisioning process
+                    # went through partially (e.g., for spot, initial
+                    # provisioning succeeded, but while waiting for ssh/setting
+                    # up it got preempted).
+                    logger.error('Got the following exception, continuing: '
+                                 f'{exception_list[0]}')
+                    self._blocked_resources.add(
+                        launchable_resources.copy(zone=zone.name))
+                    return
                 raise RuntimeError(
                     f'Failed to parse exception: {exception_str}') from e
             # TPU VM returns a different structured response.
@@ -723,6 +734,18 @@ class RetryingVmProvisioner(object):
                 logger.info('Skipping all regions due to disk size issue.')
                 self._blocked_resources.add(
                     launchable_resources.copy(region=None, zone=None))
+            elif ('Policy update access denied.' in httperror_str[0] or
+                  'IAM_PERMISSION_DENIED' in httperror_str[0]):
+                logger.info(
+                    'Skipping all regions due to service account not '
+                    'having the required permissions and the user '
+                    'account does not have enough permission to '
+                    'update it. Please contact your administrator and '
+                    'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp\n'  # pylint: disable=line-too-long
+                    f'Details: {httperror_str[0]}')
+                self._blocked_resources.add(
+                    launchable_resources.copy(region=None, zone=None))
+
             else:
                 # Parse HttpError for unauthorized regions. Example:
                 # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
@@ -1123,8 +1146,9 @@ class RetryingVmProvisioner(object):
         def _get_previously_launched_zones() -> Optional[List[clouds.Zone]]:
             # When the cluster exists, the to_provision should have been set
             # to the previous cluster's resources.
-            zones = [clouds.Zone(name=to_provision.zone)
-                    ] if to_provision.zone is not None else None
+            zones = [
+                clouds.Zone(name=to_provision.zone),
+            ] if to_provision.zone is not None else None
             if zones is None:
                 # Reuse the zone field in the ray yaml as the
                 # prev_resources.zone field may not be set before the previous
@@ -1333,6 +1357,36 @@ class RetryingVmProvisioner(object):
         assert to_provision.region is not None, (
             to_provision, 'region should have been set by the optimizer.')
         region = clouds.Region(to_provision.region)
+
+        # Optimization - check if user has non-zero quota for
+        # the instance type in the target region. If not, fail early
+        # instead of trying to provision and failing later.
+        try:
+            need_provision = to_provision.cloud.check_quota_available(
+                to_provision.region, to_provision.instance_type,
+                to_provision.use_spot)
+
+        except Exception as e:  # pylint: disable=broad-except
+            need_provision = True
+            logger.info(f'Error occurred when trying to check quota. '
+                        f'Proceeding assuming quotas are available. Error: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
+
+        if not need_provision:
+            # if quota is found to be zero, raise exception and skip to
+            # the next region
+            if to_provision.use_spot:
+                instance_descriptor = 'spot'
+            else:
+                instance_descriptor = 'on-demand'
+            raise exceptions.ResourcesUnavailableError(
+                f'{colorama.Fore.YELLOW}Found no quota for '
+                f'{to_provision.instance_type} {instance_descriptor} '
+                f'instances in region {to_provision.region}. '
+                f'{colorama.Style.RESET_ALL}'
+                f'To request quotas, check the instruction: '
+                f'https://skypilot.readthedocs.io/en/latest/cloud-setup/quota.html.'  # pylint: disable=line-too-long
+            )
 
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status):
@@ -2338,10 +2392,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 (e.g., cluster name invalid) or a region/zone throwing
                 resource unavailability.
             exceptions.CommandError: any ssh command error.
+            RuntimeErorr: raised when 'rsync' is not installed.
             # TODO(zhwu): complete the list of exceptions.
         """
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.
+        # When rsync is not installed in the user's machine, Ray will
+        # silently retry to up the node for _MAX_RAY_UP_RETRY number
+        # of times. This is time consuming so we fail early.
+        backend_utils.check_rsync_installed()
         # Check if the cluster is owned by the current user. Raise
         # exceptions.ClusterOwnerIdentityMismatchError
         backend_utils.check_owner_identity(cluster_name)
@@ -2518,7 +2577,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             status_lib.ClusterStatus.UP)
 
-        # For backward compatability and robustness of skylet, it is restarted
+        # For backward compatibility and robustness of skylet, it is restarted
         with log_utils.safe_rich_status('Updating remote skylet'):
             self.run_on_head(handle, _MAYBE_SKYLET_RESTART_CMD)
 
@@ -2858,6 +2917,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{backend_utils.RESET_BOLD}'
                     '\nTo view all spot jobs:\t\t'
                     f'{backend_utils.BOLD}sky spot queue'
+                    f'{backend_utils.RESET_BOLD}'
+                    '\nTo view the spot job dashboard:\t'
+                    f'{backend_utils.BOLD}sky spot dashboard'
                     f'{backend_utils.RESET_BOLD}')
             else:
                 logger.info(f'{fore.CYAN}Job ID: '
@@ -3281,6 +3343,42 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         config = common_utils.read_yaml(handle.cluster_yaml)
         cluster_name = handle.cluster_name
         use_tpu_vm = config['provider'].get('_has_tpus', False)
+
+        # Avoid possibly unbound warnings. Code below must overwrite these vars:
+        returncode = 0
+        stdout = ''
+        stderr = ''
+
+        # Use the new provisioner for AWS.
+        if isinstance(cloud, clouds.AWS):
+            region = config['provider']['region']
+            # Stop the ray autoscaler first to avoid the head node trying to
+            # re-launch the worker nodes, during the termination of the
+            # cluster.
+            try:
+                # We do not check the return code, since Ray returns
+                # non-zero return code when calling Ray stop,
+                # even when the command was executed successfully.
+                self.run_on_head(handle, 'ray stop --force')
+            except RuntimeError:
+                # This error is expected if the previous cluster IP is
+                # failed to be found,
+                # i.e., the cluster is already stopped/terminated.
+                if prev_cluster_status == status_lib.ClusterStatus.UP:
+                    logger.warning(
+                        'Failed to take down Ray autoscaler on the head node. '
+                        'It might be because the cluster\'s head node has '
+                        'already been terminated. It is fine to skip this.')
+            if terminate:
+                provision_api.terminate_instances(repr(cloud), region,
+                                                  cluster_name)
+            else:
+                provision_api.stop_instances(repr(cloud), region, cluster_name)
+
+            if post_teardown_cleanup:
+                self.post_teardown_cleanup(handle, terminate, purge)
+            return
+
         if terminate and isinstance(cloud, clouds.Azure):
             # Here we handle termination of Azure by ourselves instead of Ray
             # autoscaler.
@@ -3312,6 +3410,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 query=f'type:vpc AND tags:{cluster_name} AND region:{region}',
                 fields=['tags', 'region', 'type'],
                 limit=1000).get_result()['items']
+            vpc_id = None
             try:
                 # pylint: disable=line-too-long
                 vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(
@@ -3351,7 +3450,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
         # May, 2023 by Hysun: Allow terminate INIT cluster which may have
-        # some instances provisioning in backgroud but not completed.
+        # some instances provisioning in background but not completed.
         elif (isinstance(cloud, clouds.OCI) and terminate and
               prev_cluster_status in (status_lib.ClusterStatus.STOPPED,
                                       status_lib.ClusterStatus.INIT)):
@@ -3365,27 +3464,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             returncode = oci_query_helper.terminate_instances_by_tags(
                 {TAG_RAY_CLUSTER_NAME: cluster_name}, region)
 
-            # To avoid undefined local varaiables error.
+            # To avoid undefined local variables error.
             stdout = stderr = ''
         elif (terminate and
               (prev_cluster_status == status_lib.ClusterStatus.STOPPED or
                use_tpu_vm)):
             # For TPU VMs, gcloud CLI is used for VM termination.
-            if isinstance(cloud, clouds.AWS):
-                # TODO(zhwu): Room for optimization. We can move these cloud
-                # specific handling to the cloud class.
-                # The stopped instance on AWS will not be correctly terminated
-                # due to ray's bug.
-                region = config['provider']['region']
-                query_cmd = (
-                    f'aws ec2 describe-instances --region {region} --filters '
-                    f'Name=tag:ray-cluster-name,Values={handle.cluster_name} '
-                    f'--query Reservations[].Instances[].InstanceId '
-                    '--output text')
-                terminate_cmd = (
-                    f'aws ec2 terminate-instances --region {region} '
-                    f'--instance-ids $({query_cmd})')
-            elif isinstance(cloud, clouds.GCP):
+            if isinstance(cloud, clouds.GCP):
                 zone = config['provider']['availability_zone']
                 # TODO(wei-lin): refactor by calling functions of node provider
                 # that uses Python API rather than CLI
@@ -3396,9 +3481,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     query_cmd = (f'gcloud compute instances list --filter='
                                  f'"(labels.ray-cluster-name={cluster_name})" '
                                  f'--zones={zone} --format=value\\(name\\)')
+                    # If there are no instances, exit with 0 rather than causing
+                    # the delete command to fail.
                     terminate_cmd = (
-                        f'gcloud compute instances delete --zone={zone}'
-                        f' --quiet $({query_cmd})')
+                        f'VMS=$({query_cmd}) && [ -n "$VMS" ] && '
+                        f'gcloud compute instances delete --zone={zone} --quiet'
+                        ' $VMS || echo "No instances to delete."')
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(f'Unsupported cloud {cloud} for stopped '
@@ -3513,6 +3601,24 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             cluster_name=handle.cluster_name,
                             stdout=tpu_stdout,
                             stderr=tpu_stderr))
+        if (terminate and handle.launched_resources.is_image_managed is True):
+            # Delete the image when terminating a "cloned" cluster, i.e.,
+            # whose image is created by SkyPilot (--clone-disk-from)
+            logger.debug(f'Deleting image {handle.launched_resources.image_id}')
+            cluster_resources = handle.launched_resources
+            cluster_cloud = cluster_resources.cloud
+            image_dict = cluster_resources.image_id
+            assert cluster_cloud is not None, cluster_resources
+            assert image_dict is not None and len(image_dict) == 1
+            image_id = list(image_dict.values())[0]
+            try:
+                cluster_cloud.delete_image(image_id,
+                                           handle.launched_resources.region)
+            except exceptions.CommandError as e:
+                logger.warning(
+                    f'Failed to delete cloned image {image_id}. Please '
+                    'remove it manually to avoid image leakage. Details: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.
@@ -3646,7 +3752,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     @timeline.event
     def _check_existing_cluster(
-            self, task: task_lib.Task, to_provision: resources_lib.Resources,
+            self, task: task_lib.Task,
+            to_provision: Optional[resources_lib.Resources],
             cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
         """Checks if the cluster exists and returns the provision config.
 
@@ -3656,9 +3763,29 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             exceptions.InvalidClusterNameError: If the cluster name is invalid.
             # TODO(zhwu): complete the list of exceptions.
         """
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        handle_before_refresh = None if record is None else record['handle']
+        status_before_refresh = None if record is None else record['status']
+
         prev_cluster_status, handle = (
             backend_utils.refresh_cluster_status_handle(
-                cluster_name, acquire_per_cluster_status_lock=False))
+                cluster_name,
+                # We force refresh for the init status to determine the actual
+                # state of a previous cluster in INIT state.
+                #
+                # This is important for the case, where an existing cluster is
+                # transitioned into INIT state due to key interruption during
+                # launching, with the following steps:
+                # (1) launch, after answering prompt immediately ctrl-c;
+                # (2) launch again.
+                # If we don't refresh the state of the cluster and reset it back
+                # to STOPPED, our failover logic will consider it as an abnormal
+                # cluster after hitting resources capacity limit on the cloud,
+                # and will start failover. This is not desired, because the user
+                # may want to keep the data on the disk of that cluster.
+                force_refresh_statuses={status_lib.ClusterStatus.INIT},
+                acquire_per_cluster_status_lock=False,
+            ))
         if prev_cluster_status is not None:
             assert handle is not None
             # Cluster already exists.
@@ -3678,6 +3805,28 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         task_cloud = (resources.cloud
                       if resources.cloud is not None else clouds.Cloud)
         task_cloud.check_cluster_name_is_valid(cluster_name)
+
+        if to_provision is None:
+            # The cluster is recently terminated either by autostop or manually
+            # terminated on the cloud. We should use the previously terminated
+            # resources to provision the cluster.
+            assert isinstance(
+                handle_before_refresh, CloudVmRayResourceHandle), (
+                    f'Trying to launch cluster {cluster_name!r} recently '
+                    'terminated  on the cloud, but the handle is not a '
+                    f'CloudVmRayResourceHandle ({handle_before_refresh}).')
+            status_before_refresh_str = None
+            if status_before_refresh is not None:
+                status_before_refresh_str = status_before_refresh.value
+
+            logger.info(
+                f'The cluster {cluster_name!r} (status: '
+                f'{status_before_refresh_str}) was not found on the cloud: it '
+                'may be autodowned, manually terminated, or its launch never '
+                'succeeded. Provisioning a new cluster by using the same '
+                'resources as its original launch.')
+            to_provision = handle_before_refresh.launched_resources
+            self.check_resources_fit_cluster(handle_before_refresh, task)
 
         cloud = to_provision.cloud
         if isinstance(cloud, clouds.Local):
@@ -3926,6 +4075,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  f' task. To fix, change the mount path'
                                  f' to an empty or non-existent path.')
                     raise RuntimeError(error_msg) from None
+                else:
+                    # Strip the command (a big heredoc) from the exception
+                    raise exceptions.CommandError(
+                        e.returncode, command='to mount',
+                        error_msg=e.error_msg) from None
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')

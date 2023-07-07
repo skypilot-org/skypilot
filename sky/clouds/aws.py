@@ -3,7 +3,6 @@ import enum
 import functools
 import json
 import os
-import random
 import re
 import subprocess
 import time
@@ -16,8 +15,9 @@ from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import aws
 from sky.clouds import service_catalog
-from sky.skylet import log_lib
 from sky.utils import common_utils
+from sky.utils import log_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -416,13 +416,6 @@ class AWS(clouds.Cloud):
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
-        try:
-            # pylint: disable=import-outside-toplevel,unused-import
-            import boto3
-            import botocore
-        except ImportError:
-            raise ImportError('Fail to import dependencies for AWS.'
-                              'Try pip install "skypilot[aws]"') from None
 
         # Checks if the AWS CLI is installed properly
         proc = subprocess.run('aws --version',
@@ -478,7 +471,7 @@ class AWS(clouds.Cloud):
                         cls._STATIC_CREDENTIAL_HELP_STR)
 
         # Fetch the AWS catalogs
-        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
+        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel
         # Trigger the fetch of the availability zones mapping.
         aws_catalog.get_default_instance_type()
         return True, hints
@@ -696,6 +689,67 @@ class AWS(clouds.Cloud):
         }
 
     @classmethod
+    def check_quota_available(cls,
+                              region: str,
+                              instance_type: str,
+                              use_spot: bool = False) -> bool:
+        """Check if AWS quota is available for `instance_type` in `region`.
+
+        AWS-specific implementation of check_quota_available. The function works by
+        matching the instance_type to the corresponding AWS quota code, and then using
+        the boto3 Python API to query the region for the specific quota code.
+
+        Returns:
+            False if the quota is found to be zero, and True otherwise.
+        Raises:
+            ImportError: if the dependencies for AWS are not able to be installed.
+            botocore.exceptions.ClientError: error in Boto3 client request.
+        """
+
+        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
+
+        quota_code = aws_catalog.get_quota_code(instance_type, use_spot)
+
+        if quota_code is None:
+            # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
+            return True
+
+        client = aws.client('service-quotas', region_name=region)
+        try:
+            response = client.get_service_quota(ServiceCode='ec2',
+                                                QuotaCode=quota_code)
+        except aws.botocore_exceptions().ClientError:
+            # Botocore client connection not established, try provisioning anyways
+            return True
+
+        if response['Quota']['Value'] == 0:
+            # Quota found to be zero, do not try provisioning
+            return False
+
+        # Quota found to be greater than zero, try provisioning
+        return True
+
+    @classmethod
+    def _query_instance_property_with_retries(
+        cls,
+        tag_filters: Dict[str, str],
+        region: str,
+        query: str,
+    ) -> Tuple[int, str, str]:
+        filter_str = ' '.join(f'Name=tag:{key},Values={value}'
+                              for key, value in tag_filters.items())
+        query_cmd = (f'aws ec2 describe-instances --filters {filter_str} '
+                     f'--region {region} --query "{query}" --output json')
+        returncode, stdout, stderr = subprocess_utils.run_with_retries(
+            query_cmd,
+            retry_returncode=[255],
+            retry_stderrs=[
+                'Unable to locate credentials. You can configure credentials by '
+                'running "aws configure"'
+            ])
+        return returncode, stdout, stderr
+
+    @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
@@ -711,33 +765,9 @@ class AWS(clouds.Cloud):
             'terminated': None,
         }
 
-        fitler_str = ' '.join(f'Name=tag:{key},Values={value}'
-                              for key, value in tag_filters.items())
-
-        retry_cnt = 0
-        while retry_cnt < 3:
-            query_cmd = ('aws ec2 describe-instances --filters '
-                         f'{fitler_str} '
-                         f'--region {region} '
-                         '--query "Reservations[].Instances[].State.Name" '
-                         '--output json')
-
-            returncode, stdout, stderr = log_lib.run_with_log(
-                query_cmd, '/dev/null', require_outputs=True, shell=True)
-            logger.debug(f'{query_cmd} returned {returncode}.\n'
-                         '**** STDOUT ****\n'
-                         f'{stdout}\n'
-                         '**** STDERR ****\n'
-                         f'{stderr}')
-
-            if (returncode != 0 and
-                    'Unable to locate credentials. You can configure credentials by '
-                    'running "aws configure"' in stdout + stderr):
-                retry_cnt += 1
-                time.sleep(random.uniform(0, 1) * 2)
-                continue
-            else:
-                break
+        assert region is not None, (tag_filters, region)
+        returncode, stdout, stderr = cls._query_instance_property_with_retries(
+            tag_filters, region, query='Reservations[].Instances[].State.Name')
 
         if returncode != 0:
             with ux_utils.print_exception_no_traceback():
@@ -753,3 +783,134 @@ class AWS(clouds.Cloud):
             if node_status is not None:
                 statuses.append(node_status)
         return statuses
+
+    @classmethod
+    def create_image_from_cluster(cls, cluster_name: str,
+                                  tag_filters: Dict[str,
+                                                    str], region: Optional[str],
+                                  zone: Optional[str]) -> str:
+        del zone  # unused
+        assert region is not None, (tag_filters, region)
+        image_name = f'skypilot-{cluster_name}-{int(time.time())}'
+        returncode, stdout, stderr = cls._query_instance_property_with_retries(
+            tag_filters, region, query='Reservations[].Instances[].InstanceId')
+
+        subprocess_utils.handle_returncode(
+            returncode,
+            '',
+            error_msg='Failed to find the source cluster on AWS.',
+            stderr=stderr,
+            stream_logs=False)
+
+        instance_ids = json.loads(stdout.strip())
+        if len(instance_ids) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    'Only support creating image from single '
+                    f'instance, but got: {instance_ids}')
+
+        instance_id = instance_ids[0]
+        create_image_cmd = (
+            f'aws ec2 create-image --region {region} --instance-id {instance_id} '
+            f'--name {image_name} --output text')
+        returncode, image_id, stderr = subprocess_utils.run_with_retries(
+            create_image_cmd,
+            retry_returncode=[255],
+        )
+        image_id = image_id.strip()
+        subprocess_utils.handle_returncode(
+            returncode,
+            create_image_cmd,
+            error_msg=
+            f'Failed to create image from the source instance {instance_id}.',
+            stderr=stderr,
+            stream_logs=True)
+
+        log_utils.force_update_rich_status(
+            f'Waiting for the source image {cluster_name!r} from {region} to be available on AWS.'
+        )
+        # Wait for the image to be available
+        wait_image_cmd = (
+            f'aws ec2 wait image-available --region {region} --image-ids {image_id}'
+        )
+        returncode, stdout, stderr = subprocess_utils.run_with_retries(
+            wait_image_cmd,
+            retry_returncode=[255],
+        )
+        subprocess_utils.handle_returncode(
+            returncode,
+            wait_image_cmd,
+            error_msg=
+            f'The source image {image_id!r} creation fails to complete.',
+            stderr=stderr,
+            stream_logs=True)
+        sky_logging.print(
+            f'The source image {image_id!r} is created successfully.')
+        return image_id
+
+    @classmethod
+    def maybe_move_image(cls, image_id: str, source_region: str,
+                         target_region: str, source_zone: Optional[str],
+                         target_zone: Optional[str]) -> str:
+        del source_zone, target_zone  # unused
+        if source_region == target_region:
+            return image_id
+        image_name = f'skypilot-cloned-from-{source_region}-{image_id}'
+        copy_image_cmd = (f'aws ec2 copy-image --name {image_name} '
+                          f'--source-image-id {image_id} '
+                          f'--source-region {source_region} '
+                          f'--region {target_region} --output text')
+        returncode, target_image_id, stderr = subprocess_utils.run_with_retries(
+            copy_image_cmd,
+            retry_returncode=[255],
+        )
+        target_image_id = target_image_id.strip()
+        subprocess_utils.handle_returncode(
+            returncode,
+            copy_image_cmd,
+            error_msg=
+            f'Failed to copy image {image_id!r} from {source_region} to {target_region}.',
+            stderr=stderr,
+            stream_logs=True)
+
+        log_utils.force_update_rich_status(
+            f'Waiting for the target image {target_image_id!r} on {target_region} to be '
+            'available on AWS.')
+        wait_image_cmd = (
+            f'aws ec2 wait image-available --region {target_region} '
+            f'--image-ids {target_image_id}')
+        subprocess_utils.run_with_retries(
+            wait_image_cmd,
+            max_retry=5,
+            retry_returncode=[255],
+        )
+        subprocess_utils.handle_returncode(
+            returncode,
+            wait_image_cmd,
+            error_msg=
+            f'The target image {target_image_id!r} creation fails to complete.',
+            stderr=stderr,
+            stream_logs=True)
+
+        sky_logging.print(
+            f'The target image {target_image_id!r} is created successfully.')
+
+        log_utils.force_update_rich_status('Deleting the source image.')
+        cls.delete_image(image_id, source_region)
+        return target_image_id
+
+    @classmethod
+    def delete_image(cls, image_id: str, region: Optional[str]) -> None:
+        assert region is not None, (image_id, region)
+        delete_image_cmd = (f'aws ec2 deregister-image --region {region} '
+                            f'--image-id {image_id}')
+        returncode, _, stderr = subprocess_utils.run_with_retries(
+            delete_image_cmd,
+            retry_returncode=[255],
+        )
+        subprocess_utils.handle_returncode(
+            returncode,
+            delete_image_cmd,
+            error_msg=f'Failed to delete image {image_id!r} on {region}.',
+            stderr=stderr,
+            stream_logs=True)
