@@ -8,7 +8,8 @@ from sky.utils.cli_utils import status_utils
 logger = sky_logging.init_logger(__name__)
 
 
-def format_storage_table(storages: List[Dict[str, Any]], show_all: bool = False) -> str:
+def format_storage_table(storages: List[Dict[str, Any]],
+                         show_all: bool = False) -> str:
     """Format the storage table for display.
 
     Args:

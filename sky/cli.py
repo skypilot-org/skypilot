@@ -3241,6 +3241,7 @@ def storage():
               required=False,
               help='Show all information in full.')
 @usage_lib.entrypoint
+# pylint: disable=redefined-builtin
 def storage_ls(all: bool):
     """List storage objects managed by SkyPilot."""
     storages = sky.storage_ls()
