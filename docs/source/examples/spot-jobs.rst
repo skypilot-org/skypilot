@@ -106,6 +106,8 @@ The :code:`MOUNT` mode in :ref:`SkyPilot Storage <sky-storage>` ensures the chec
 Note that the application code should save program checkpoints periodically and reload those states when the job is restarted.
 This is typically achieved by reloading the latest checkpoint at the beginning of your program.
 
+.. _spot-jobs-end-to-end:
+
 An end-to-end example
 ---------------------
 
