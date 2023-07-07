@@ -1371,8 +1371,18 @@ class RetryingVmProvisioner(object):
             logger.info(f'Error occurred when trying to check quota. '
                         f'Proceeding assuming quotas are available. Error: '
                         f'{common_utils.format_exception(e, use_bracket=True)}')
+        
+        should_provision = True
+        if to_provision.cloud.is_same_cloud(clouds.GCP()) and to_provision.accelerators:
+            try:
+                should_provision = to_provision.cloud.check_quota_available_from_accelerator(
+                    to_provision.region, list(to_provision.accelerators.keys())[0],
+                    to_provision.use_spot
+                )
+            except Exception as e:
+                logger.info("error")
 
-        if not need_provision:
+        if not need_provision or not should_provision:
             # if quota is found to be zero, raise exception and skip to
             # the next region
             if to_provision.use_spot:

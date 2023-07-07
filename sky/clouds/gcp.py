@@ -750,6 +750,40 @@ class GCP(clouds.Cloud):
     @classmethod
     def _label_filter_str(cls, tag_filters: Dict[str, str]) -> str:
         return ' '.join(f'labels.{k}={v}' for k, v in tag_filters.items())
+    
+    @classmethod
+    def check_quota_available_from_accelerator(cls,
+                                               region: str,
+                                               accelerator: str,
+                                               use_spot: bool = False) -> bool:
+        
+        from sky.clouds.service_catalog import gcp_catalog
+
+        quota_code = gcp_catalog.get_quota_code(accelerator, use_spot)
+
+        if quota_code is None:
+            # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
+            return True
+        
+        try:
+            command = f'gcloud compute regions describe {region} |grep -B 1 "{quota_code}" | awk \'/limit/ {{print; exit}}\''
+            print(command)
+            proc = subprocess_utils.run(
+                    cmd=command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE)
+
+        except subprocess.CalledProcessError as e:
+            print(f"Command failed with exit code {e.returncode}")
+        
+        out = proc.stdout.decode()
+        last_number = out.split("limit:")[-1].strip()
+        last_number_int = int(float(last_number))
+
+        if last_number_int == 0:
+            return False
+        # Quota found to be greater than zero, try provisioning
+        return True
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],

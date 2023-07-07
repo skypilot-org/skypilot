@@ -27,6 +27,9 @@ _df = common.read_catalog('gcp/vms.csv',
 _image_df = common.read_catalog('gcp/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
+_quotas_df = common.read_catalog('gcp/accelerator_quota_mapping.csv',
+                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)                           
+
 _TPU_REGIONS = [
     'us-central1',
     'europe-west4',
@@ -162,6 +165,23 @@ def _closest_power_of_two(x: int) -> int:
     if _is_power_of_two(x):
         return x
     return 1 << ((x - 1).bit_length() - 1)
+
+def get_quota_code(accelerator: str, use_spot: bool) -> Optional[str]:
+    # Get the quota code from the accelerator instance type
+    # This will be used in the botocore command to check for
+    # a non-zero quota
+
+    if use_spot:
+        spot_header = 'SpotInstanceCode'
+    else:
+        spot_header = 'OnDemandInstanceCode'
+    try:
+        quota_code = _quotas_df.loc[_quotas_df['Accelerator'] == accelerator,
+                                    spot_header].values[0]
+        return quota_code
+
+    except IndexError:
+        return None
 
 
 def instance_type_exists(instance_type: str) -> bool:
