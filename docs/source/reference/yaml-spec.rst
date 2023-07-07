@@ -112,7 +112,7 @@ Available fields:
       #   image_id: skypilot:k80-ubuntu-2004
       #   image_id: skypilot:gpu-ubuntu-1804
       #   image_id: skypilot:k80-ubuntu-1804
-      # It is also possible to specify a per-region image id (failover will only go through the regions sepcified as keys; 
+      # It is also possible to specify a per-region image id (failover will only go through the regions sepcified as keys;
       # useful when you have the custom images in multiple regions):
       #   image_id:
       #     us-east-1: ami-0729d913a335efca7
@@ -131,6 +131,16 @@ Available fields:
       # https://www.ibm.com/cloud/blog/use-ibm-packer-plugin-to-create-custom-images-on-ibm-cloud-vpc-infrastructure
       # To use a more limited but easier to manage tool:
       # https://github.com/IBM/vpc-img-inst
+
+    # Environment variables (optional). These values can be accessed in the
+    # `file_mounts`, `setup`, and `run` sections below.
+    #
+    # Values set here can be overridden by a CLI flag:
+    # `sky launch/exec --env ENV=val` (if ENV is present).
+    envs:
+      MY_BUCKET: skypilot-temp-gcs-test
+      MY_LOCAL_PATH: tmp-workdir
+      MODEL_SIZE: 13b
 
     file_mounts:
       # Uses rsync to sync local files/directories to all nodes of the cluster.
@@ -156,6 +166,12 @@ Available fields:
       # Copies a cloud object store URI to the cluster. Can be private buckets.
       /datasets-s3: s3://my-awesome-dataset
 
+      # Demoing env var usage.
+      /checkpoint/${MODEL_SIZE}: ~/${MY_LOCAL_PATH}
+      /mydir:
+        name: ${MY_BUCKET}  # Name of the bucket.
+        mode: MOUNT
+
     # Setup script (optional) to execute on every `sky launch`.
     # This is executed before the 'run' commands.
     #
@@ -170,3 +186,6 @@ Available fields:
     run: |
       echo "Beginning task."
       python train.py
+
+      # Demoing env var usage.
+      echo Env var MODEL_SIZE has value: ${MODEL_SIZE}
