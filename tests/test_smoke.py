@@ -928,7 +928,7 @@ def test_job_queue(generic_cloud: str):
 def test_job_queue_with_docker(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
-        'job_queue',
+        'job_queue_with_docker',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} examples/job_queue/cluster_docker.yaml',
             f'sky exec {name} -n {name}-1 -d examples/job_queue/job_docker.yaml',
@@ -1155,6 +1155,25 @@ def test_ibm_job_queue_multinode():
             f'sky logs {name} 5 --status',
             f'sky logs {name} 6 --status',
             f'sky logs {name} 7 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Docker with preinstalled package. ----------
+@pytest.mark.no_lambda_cloud  # Doesn't support Lambda Cloud for now
+@pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
+@pytest.mark.no_scp  # Doesn't support SCP for now
+@pytest.mark.no_oci  # Doesn't support OCI for now
+def test_docker_preinstalled_package(generic_cloud: str):
+    name = _get_cluster_name()
+    test = Test(
+        'docker_with_preinstalled_package',
+        [
+            f'sky launch -y -c {name} --cloud {generic_cloud} --image-id docker:nginx',
+            f'sky exec {name} "nginx -V" | grep SUCCEEDED',
+            f'sky exec {name} whoami | grep root',
         ],
         f'sky down -y {name}',
     )
