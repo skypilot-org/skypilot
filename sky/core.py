@@ -506,7 +506,7 @@ def queue(cluster_name: str,
 
     backend = backend_utils.get_backend_from_handle(handle)
     all_jobs = not skip_finished
-    username: Optional[str] = handle.docker_user or getpass.getuser()
+    username: Optional[str] = getpass.getuser()
     if all_users:
         username = None
     code = job_lib.JobLibCodeGen.get_job_queue(username, all_jobs)

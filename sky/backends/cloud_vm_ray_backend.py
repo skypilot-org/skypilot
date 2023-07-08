@@ -2852,8 +2852,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
-        ray_job_id = job_lib.make_ray_job_id(job_id,
-                                             ssh_credentials['ssh_user'])
+        ray_job_id = job_lib.make_ray_job_id(
+            job_id, handle.docker_user or ssh_credentials['ssh_user'])
         if isinstance(handle.launched_resources.cloud, clouds.Local):
             # Ray Multitenancy is unsupported.
             # (Git Issue) https://github.com/ray-project/ray/issues/6800
@@ -3001,7 +3001,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _add_job(self, handle: CloudVmRayResourceHandle,
                  job_name: Optional[str], resources_str: str) -> int:
-        username = handle.docker_user or getpass.getuser()
+        username = getpass.getuser()
         code = job_lib.JobLibCodeGen.add_job(job_name, username,
                                              self.run_timestamp, resources_str)
         returncode, job_id_str, stderr = self.run_on_head(handle,
