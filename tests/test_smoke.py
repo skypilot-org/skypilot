@@ -920,6 +920,37 @@ def test_job_queue(generic_cloud: str):
     run_one_test(test)
 
 
+# ---------- Job Queue with Docker. ----------
+@pytest.mark.no_lambda_cloud  # Doesn't support Lambda Cloud for now
+@pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
+@pytest.mark.no_scp  # Doesn't support SCP for now
+@pytest.mark.no_oci  # Doesn't support OCI for now
+def test_job_queue_with_docker(generic_cloud: str):
+    name = _get_cluster_name()
+    test = Test(
+        'job_queue',
+        [
+            f'sky launch -y -c {name} --cloud {generic_cloud} examples/job_queue/cluster_docker.yaml',
+            f'sky exec {name} -n {name}-1 -d examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-2 -d examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-3 -d examples/job_queue/job_docker.yaml',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep PENDING',
+            f'sky cancel -y {name} 2',
+            'sleep 5',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep RUNNING',
+            f'sky cancel -y {name} 3',
+            f'sky exec {name} --gpus T4:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus T4:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky logs {name} 4 --status',
+            f'sky logs {name} 5 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 @pytest.mark.lambda_cloud
 def test_lambda_job_queue():
     name = _get_cluster_name()
