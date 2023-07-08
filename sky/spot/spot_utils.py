@@ -2,6 +2,7 @@
 import collections
 import enum
 import json
+import os
 import pathlib
 import shlex
 import time
@@ -18,7 +19,9 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
+from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.skylet.log_lib import run_bash_command_with_log
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.spot import spot_state
@@ -26,6 +29,7 @@ from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag as dag_lib
+    import sky
 
 logger = sky_logging.init_logger(__name__)
 
@@ -153,6 +157,44 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
                                        stdout + stderr)
     stdout = common_utils.decode_payload(stdout)
     return float(stdout)
+
+
+def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
+    """Run event callback for the task."""
+
+    def callback_func(state: str):
+        event_callback = task.event_callback if task else None
+        if event_callback is None or task is None:
+            return
+        event_callback = event_callback.strip()
+        cluster_name = generate_spot_cluster_name(task.name,
+                                                  job_id) if task.name else None
+        logger.info(f'=== START: event callback for {state!r} ===')
+        log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, 'spot_event',
+                                f'spot-callback-{job_id}-{task_id}.log')
+        result = run_bash_command_with_log(
+            bash_command=event_callback,
+            log_path=log_path,
+            env_vars=dict(
+                SKYPILOT_JOB_ID=str(
+                    task.envs.get(constants.TASK_ID_ENV_VAR_DEPRECATED,
+                                  'N.A.')),
+                SKYPILOT_TASK_ID=str(
+                    task.envs.get(constants.TASK_ID_ENV_VAR, 'N.A.')),
+                SKYPILOT_TASK_IDS=str(
+                    task.envs.get(constants.TASK_ID_LIST_ENV_VAR, 'N.A.')),
+                TASK_ID=str(task_id),
+                JOB_ID=str(job_id),
+                JOB_STATUS=state,
+                CLUSTER_NAME=cluster_name or '',
+                TASK_NAME=task.name or '',
+                # TODO(MaoZiming): Future event type Job or Spot.
+                EVENT_TYPE='Spot'))
+        logger.info(
+            f'Bash:{event_callback},log_path:{log_path},result:{result}')
+        logger.info(f'=== END: event callback for {state!r} ===')
+
+    return callback_func
 
 
 # ======== user functions ========
