@@ -1,4 +1,5 @@
 """Runner for commands to be executed on the cluster."""
+import collections
 import getpass
 import enum
 import hashlib
@@ -89,31 +90,32 @@ def ssh_options_list(ssh_private_key: Optional[str],
         ssh_private_key,
     ] if ssh_private_key is not None else []
 
-    docker_proxy_command = [
-        '-o',
-        f'ProxyCommand={shlex.quote(docker_ssh_proxy_command)}',
-    ] if docker_ssh_proxy_command is not None else []
+    arg_dict = {k: [v] for k, v in arg_dict.items()}
+    arg_dict = collections.defaultdict(list, arg_dict)
 
     if ssh_proxy_command is not None:
         logger.debug(f'--- Proxy: {ssh_proxy_command} ---')
-        arg_dict.update({
-            # Due to how log_lib.run_with_log() works (using shell=True) we
-            # must quote this value.
-            'ProxyCommand': shlex.quote(ssh_proxy_command),
-        })
+        # Due to how log_lib.run_with_log() works (using shell=True) we
+        # must quote this value.
+        arg_dict['ProxyCommand'].append(shlex.quote(ssh_proxy_command))
 
-    # If two proxy commands are specified, e.g.
-    # ssh -o ProxyCommand=cmd1 -o ProxyCommand=cmd2 ...
-    # then ssh will first ssh into the host using cmd2 (the later one) and then
-    # ssh from cmd2 host to the target host using cmd1. So, we put the docker
-    # proxy command at the beginning. This way, ssh will first establish a
-    # connection to the user-specified proxy host and then proceed to ssh from
-    # the proxy host to the docker host VM, and finally, ssh into the docker
-    # container.
-    return ssh_key_option + docker_proxy_command + [
+    if docker_ssh_proxy_command is not None:
+        logger.debug(f'--- Docker SSH Proxy: {docker_ssh_proxy_command} ---')
+        # If two proxy commands are specified, e.g.
+        # ssh -o ProxyCommand=cmd1 -o ProxyCommand=cmd2 ...
+        # then ssh will first ssh into the host using cmd2 (the later one) and
+        # then ssh from cmd2 host to the target host using cmd1. So, we put the
+        # docker proxy command at the beginning. This way, ssh will first
+        # establish a connection to the user-specified proxy host and then
+        # proceed to ssh from the proxy host to the docker host VM, and
+        # finally, ssh into the docker container.
+        arg_dict['ProxyCommand'].insert(0,
+                                        shlex.quote(docker_ssh_proxy_command))
+
+    return ssh_key_option + [
         x for y in (['-o', f'{k}={v}']
-                    for k, v in arg_dict.items()
-                    if v is not None) for x in y
+                    for k, lv in arg_dict.items()
+                    for v in lv) for x in y
     ]
 
 
