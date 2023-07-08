@@ -68,7 +68,8 @@ class SkyDockerCommandRunner(DockerCommandRunner):
            is shut down.
 
     The code is borrowed from
-    `ray.autoscaler._private.command_runner.DockerCommandRunner`."""
+    `ray.autoscaler._private.command_runner.DockerCommandRunner`.
+    """
 
     def _check_container_exited(self) -> bool:
         if self.initialized:
@@ -95,6 +96,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
         if self._check_container_exited():
             self.initialized = True
             self.run(f'docker start {self.container_name}', run_env='host')
+            self.run('sudo service ssh start')
             return True
 
         if self.docker_config.get('pull_before_run', True):
