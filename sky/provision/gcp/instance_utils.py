@@ -177,7 +177,7 @@ class GCPComputeInstance(GCPInstance):
             raise Exception(result['error'])
 
         if result['status'] == 'DONE':
-            logger.info('wait_for_compute_zone_operation: '
+            logger.debug('wait_for_compute_zone_operation: '
                         f'Operation {operation["name"]} finished.')
             return True
         return False
