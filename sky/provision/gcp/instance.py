@@ -1,9 +1,9 @@
 """GCP instance provisioning."""
+import collections
 import time
-from typing import Dict, List, Any, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
 from sky import sky_logging
-from sky.adaptors import gcp
 from sky.provision.gcp import instance_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -16,34 +16,50 @@ POLL_INTERVAL = 5
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 
-_NEED_TO_STOP_STATES = [
-    'PROVISIONING',
-    'STAGING',
-    'RUNNING',
-]
-_NON_STOPPED_STATES = _NEED_TO_STOP_STATES + ['STOPPING']
 
-_NEED_TO_TERMINATE_STATES = _NON_STOPPED_STATES + [
-    'TERMINATED',  # Stopped instances are in this state
-]
+def _filter_instances(
+    project_id: str,
+    zone: str,
+    label_filters: Dict[str, str],
+    status_filters_fn: Callable[[Type[instance_utils.GCPInstance]], List[str]],
+    included_instances: Optional[List[str]] = None,
+    excluded_instances: Optional[List[str]] = None,
+    handlers: Optional[Iterable[Type[instance_utils.GCPInstance]]] = None,
+    use_tpu_vm: bool = False,
+) -> Dict[Type[instance_utils.GCPInstance], List[str]]:
+    """Filter instances using all instance handlers."""
+    instances = set()
+    if handlers is None:
+        handlers = instance_utils.GCP_INSTANCE_HANDLERS
+    for instance_handler in handlers:
+        instances |= set(
+            instance_handler.filter(project_id, zone, label_filters,
+                                    status_filters_fn(instance_handler),
+                                    included_instances, excluded_instances))
+    handler_to_instances = collections.defaultdict(list)
+    for instance in instances:
+        handler = instance_utils.instance_to_handler(instance, use_tpu_vm)
+        handler_to_instances[handler].append(instance)
+    return handler_to_instances
 
 
 def _wait_for_operations(
-    instance_handler,
-    operations: List[dict],
+    handlers_to_operations: Dict[Type[instance_utils.GCPInstance], List[dict]],
     project_id: str,
     zone: str,
 ) -> None:
     """Poll for compute zone operation until finished."""
     total_polls = 0
-    for operation in operations:
-        logger.debug('wait_for_compute_zone_operation: '
-                     f'Waiting for operation {operation["name"]} to finish...')
-        while total_polls < MAX_POLLS:
-            if instance_handler.wait_for_operation(project_id, zone, operation):
-                break
-            time.sleep(POLL_INTERVAL)
-            total_polls += 1
+    for handler, operations in handlers_to_operations.items():
+        for operation in operations:
+            logger.debug(
+                'wait_for_compute_zone_operation: '
+                f'Waiting for operation {operation["name"]} to finish...')
+            while total_polls < MAX_POLLS:
+                if handler.wait_for_operation(operation, project_id, zone):
+                    break
+                time.sleep(POLL_INTERVAL)
+                total_polls += 1
 
 
 def stop_instances(
@@ -55,31 +71,38 @@ def stop_instances(
     assert provider_config is not None, cluster_name
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
-    instance_handler = instance_utils.GCPComputeInstance
     name_filter = {TAG_RAY_CLUSTER_NAME: cluster_name}
-    instances = instance_handler.filter(project_id, zone, name_filter,
-                                        _NEED_TO_STOP_STATES,
-                                        included_instances, excluded_instances)
-    operations = []
-    for instance in instances:
-        operations.append(instance_handler.stop(project_id, zone, instance))
-    _wait_for_operations(instance_handler, operations, project_id, zone)
+    handler_to_instances = _filter_instances(
+        project_id, zone, name_filter,
+        lambda handler: handler.NEED_TO_STOP_STATES, included_instances,
+        excluded_instances)
+    all_instances = [
+        i for instances in handler_to_instances.values() for i in instances
+    ]
+
+    operations = collections.defaultdict(list)
+    for handler, instances in handler_to_instances.items():
+        for instance in instances:
+            operations[handler].append(handler.stop(project_id, zone, instance))
+    _wait_for_operations(operations, project_id, zone)
     # Check if the instance is actually stopped.
     # GCP does not fully stop an instance even after
     # the stop operation is finished.
     for _ in range(MAX_POLLS_STOP):
-        instances = instance_handler.filter(project_id,
-                                            zone,
-                                            name_filter,
-                                            _NON_STOPPED_STATES,
-                                            included_instances=instances)
-        if not instances:
+        handler_to_instances = _filter_instances(
+            project_id,
+            zone,
+            name_filter,
+            lambda handler: handler.NON_STOPPED_STATES,
+            included_instances=all_instances,
+            handlers=handler_to_instances.keys())
+        if not handler_to_instances:
             break
         time.sleep(POLL_INTERVAL)
     else:
         raise RuntimeError(f'Maximum number of polls: '
                            f'{MAX_POLLS_STOP} reached. '
-                           f'Instance {instances} is still not in '
+                           f'Instance {all_instances} is still not in '
                            'STOPPED status.')
 
 
@@ -94,15 +117,16 @@ def terminate_instances(
     assert provider_config is not None, cluster_name
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
-    instance_handler = instance_utils.GCPComputeInstance
     name_filter = {TAG_RAY_CLUSTER_NAME: cluster_name}
-    instances = instance_handler.filter(project_id, zone, name_filter,
-                                        _NEED_TO_TERMINATE_STATES,
-                                        included_instances, excluded_instances)
-    operations = []
-    for instance in instances:
-        operations.append(instance_handler.terminate(project_id, zone,
-                                                     instance))
-    _wait_for_operations(instance_handler, operations, project_id, zone)
+    handler_to_instances = _filter_instances(
+        project_id, zone, name_filter,
+        lambda handler: handler.NEED_TO_TERMINATE_STATES, included_instances,
+        excluded_instances)
+    operations = collections.defaultdict(list)
+    for handler, instances in handler_to_instances.items():
+        for instance in instances:
+            operations[handler].append(
+                handler.terminate(project_id, zone, instance))
+    _wait_for_operations(operations, project_id, zone)
     # We don't wait for the instances to be terminated, as it can take a long
     # time (same as what we did in ray's node_provider).

@@ -1,4 +1,4 @@
-import enum
+"""Utilities for GCP instances."""
 from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
@@ -6,23 +6,33 @@ from sky.adaptors import gcp
 
 logger = sky_logging.init_logger(__name__)
 
-TPU_VERSION = "v2alpha"  # change once v2 is stable
+TPU_VERSION = 'v2alpha'  # change once v2 is stable
 
-def instance_to_handler(instance: str, provider_config: Dict[str, Any]):
-    instance_type = instance.split("-")[-1]
+
+def instance_to_handler(instance: str, use_tpu_vm: bool):
+    instance_type = instance.split('-')[-1]
     if instance_type == 'compute':
         return GCPComputeInstance
     elif instance_type == 'tpu':
-        use_tpu_vm = provider_config.get('_has_tpu', False)
         if use_tpu_vm:
             return GCPTPUVMInstance
         else:
             return GCPTPUInstance
     else:
-        raise ValueError(f"Unknown instance type: {instance_type}")
+        raise ValueError(f'Unknown instance type: {instance_type}')
+
+
+GCP_INSTANCE_HANDLERS = set()
 
 
 class GCPInstance:
+    """Base class for GCP instance handlers."""
+    NEED_TO_STOP_STATES: List[str] = []
+    NON_STOPPED_STATES: List[str] = []
+    NEED_TO_TERMINATE_STATES: List[str] = []
+
+    def __init_subclass__(cls) -> None:
+        GCP_INSTANCE_HANDLERS.add(cls)
 
     @classmethod
     def stop(
@@ -60,8 +70,17 @@ class GCPInstance:
         raise NotImplementedError
 
 
-
 class GCPComputeInstance(GCPInstance):
+    """Instance handler for GCP compute instances."""
+    NEED_TO_STOP_STATES = [
+        'PROVISIONING',
+        'STAGING',
+        'RUNNING',
+    ]
+
+    NON_STOPPED_STATES = NEED_TO_STOP_STATES + ['STOPPING']
+
+    NEED_TO_TERMINATE_STATES = NON_STOPPED_STATES + ['TERMINATED']
 
     @classmethod
     def stop(
@@ -174,32 +193,37 @@ class GCPComputeInstance(GCPInstance):
 
 
 class GCPTPUInstance(GCPInstance):
+    """Instance handler for GCP TPU node."""
+    NEED_TO_STOP_STATES = [
+        'CREATING',
+        'STARTING',
+        'READY',
+        'RESTARTING',
+    ]
+
+    NON_STOPPED_STATES = NEED_TO_STOP_STATES + ['STOPPING']
+
+    NEED_TO_TERMINATE_STATES = NON_STOPPED_STATES + ['STOPPED']
+
     # TODO(zhwu): implement TPU node
     @classmethod
-    def wait_for_operation(cls, operation: dict, project_id: str, zone: str) -> bool:
+    def wait_for_operation(cls, operation: dict, project_id: str,
+                           zone: str) -> bool:
         """Poll for TPU operation until finished."""
         tpu = gcp.build(
-            "tpu",
+            'tpu',
             TPU_VERSION,
             credentials=None,
             cache_discovery=False,
-            discoveryServiceUrl="https://tpu.googleapis.com/$discovery/rest"
-        )
-        result = (
-            tpu.projects()
-            .locations()
-            .operations()
-            .get(name=f"{operation['name']}")
-            .execute()
-        )
-        if "error" in result:
-            raise Exception(result["error"])
+            discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest')
+        result = (tpu.projects().locations().operations().get(
+            name=str(operation['name'])).execute())
+        if 'error' in result:
+            raise Exception(result['error'])
 
-        if "response" in result:
-            logger.debug(
-                "wait_for_tpu_operation: "
-                f"Operation {operation['name']} finished."
-            )
+        if 'response' in result:
+            logger.debug('wait_for_tpu_operation: '
+                         f'Operation {operation["name"]} finished.')
             return True
         return False
 
@@ -227,10 +251,10 @@ class GCPTPUInstance(GCPInstance):
             # SKY: Catch HttpError when accessing unauthorized region.
             # Return empty list instead of raising exception to not break
             # ray down.
-            logger.warning(f"googleapiclient.errors.HttpError: {e.reason}")
+            logger.warning(f'googleapiclient.errors.HttpError: {e.reason}')
             return []
 
-        instances = response.get("nodes", [])
+        instances = response.get('nodes', [])
 
         # filter_expr cannot be passed directly to API
         # so we need to filter the results ourselves
@@ -239,7 +263,6 @@ class GCPTPUInstance(GCPInstance):
         label_filters = label_filters or {}
 
         def filter_instance(instance) -> bool:
-
             labels = instance.get('labels', {})
             if label_filters:
                 for key, value in label_filters.items():
@@ -263,6 +286,33 @@ class GCPTPUInstance(GCPInstance):
             instances = [i for i in instances if i not in excluded_instances]
 
         return instances
+
+    @classmethod
+    def stop(cls, project_id: str, zone: str, instance: str) -> dict:
+        """Stop a TPU node."""
+        path = f'projects/{project_id}/locations/{zone}/nodes/{instance}'
+        tpu = gcp.build(
+            'tpu',
+            TPU_VERSION,
+            credentials=None,
+            cache_discovery=False,
+            discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest')
+        operation = tpu.projects().locations().nodes().stop(name=path).execute()
+        return operation
+
+    @classmethod
+    def terminate(cls, project_id: str, zone: str, instance: str) -> dict:
+        """Terminate a TPU node."""
+        path = f'projects/{project_id}/locations/{zone}/nodes/{instance}'
+        tpu = gcp.build(
+            'tpu',
+            TPU_VERSION,
+            credentials=None,
+            cache_discovery=False,
+            discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest')
+        operation = tpu.projects().locations().nodes().delete(
+            name=path).execute()
+        return operation
 
 
 class GCPTPUVMInstance(GCPInstance):
