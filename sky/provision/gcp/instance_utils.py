@@ -296,7 +296,6 @@ class GCPTPUVMInstance(GCPInstance):
     @classmethod
     def terminate(cls, project_id: str, zone: str, instance: str) -> dict:
         """Terminate a TPU node."""
-        path = f'projects/{project_id}/locations/{zone}/nodes/{instance}'
         tpu = gcp.build(
             'tpu',
             TPU_VERSION,
