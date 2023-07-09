@@ -248,8 +248,18 @@ class Azure(clouds.Cloud):
             textwrap.dedent("""\
             #cloud-config
             runcmd:
-                - sed -i 's/#Banner none/Banner none/' /etc/ssh/sshd_config
-                - echo '\\nif [ ! -f "/tmp/__restarted" ]; then\\n  sudo systemctl restart ssh\\n  sleep 2\\n  touch /tmp/__restarted\\nfi' >> /home/azureuser/.bashrc
+              - sed -i 's/#Banner none/Banner none/' /etc/ssh/sshd_config
+              - echo '\\nif [ ! -f "/tmp/__restarted" ]; then\\n  sudo systemctl restart ssh\\n  sleep 2\\n  touch /tmp/__restarted\\nfi' >> /home/azureuser/.bashrc
+            write_files:
+              - path: /etc/apt/apt.conf.d/20auto-upgrades
+                content: |
+                  APT::Periodic::Update-Package-Lists "0";
+                  APT::Periodic::Download-Upgradeable-Packages "0";
+                  APT::Periodic::AutocleanInterval "0";
+                  APT::Periodic::Unattended-Upgrade "0";
+              - path: /etc/apt/apt.conf.d/10cloudinit-disable
+                content: |
+                  APT::Periodic::Enable "0";
             """).encode('utf-8')).decode('utf-8')
         return {
             'instance_type': r.instance_type,

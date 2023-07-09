@@ -115,7 +115,6 @@ initialization_commands: []
 # Increment the following for catching performance bugs easier:
 #   current num items (num SSH connections): 1
 setup_commands:
-  # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Create ~/.ssh/config file in case the file does not exist in the image.
   # Make sure python3 & pip3 are available on this image.
   # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
@@ -123,19 +122,7 @@ setup_commands:
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
-  - function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
-    {%- if not use_docker %}
-    sudo systemctl stop unattended-upgrades || true;
-    sudo systemctl disable unattended-upgrades || true;
-    sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
-    {%- endif %}
-    p=$(mylsof "/var/lib/dpkg/lock-frontend"); echo "$p";
-    sudo kill -9 `echo "$p" | tail -n 1` || true;
-    sudo rm /var/lib/dpkg/lock-frontend;
-    sudo pkill -9 dpkg;
-    sudo pkill -9 apt-get;
-    sudo dpkg --configure --force-overwrite -a;
-    mkdir -p ~/.ssh; touch ~/.ssh/config;
+  - mkdir -p ~/.ssh; touch ~/.ssh/config;
     which conda > /dev/null 2>&1 || (wget -nc https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b && eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true);
     source ~/.bashrc;
     pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
