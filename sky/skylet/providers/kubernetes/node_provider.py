@@ -2,12 +2,12 @@ import copy
 import logging
 import time
 from typing import Dict
-from urllib.parse import urlparse
 from uuid import uuid4
 
 from sky.adaptors import kubernetes
 from sky.skylet.providers.kubernetes import get_head_ssh_port
 from sky.skylet.providers.kubernetes import config
+from sky.skylet.providers.kubernetes import utils
 from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler._private.cli_logger import cli_logger
 from ray.autoscaler.node_provider import NodeProvider
@@ -97,17 +97,7 @@ class KubernetesNodeProvider(NodeProvider):
         return pod.metadata.labels
 
     def external_ip(self, node_id):
-        # Return the IP address of the first node with an external IP
-        nodes = kubernetes.core_api().list_node().items
-        for node in nodes:
-            if node.status.addresses:
-                for address in node.status.addresses:
-                    if address.type == 'ExternalIP':
-                        return address.address
-        # If no external IP is found, use the API server IP
-        api_host = kubernetes.core_api().api_client.configuration.host
-        parsed_url = urlparse(api_host)
-        return parsed_url.hostname
+        return utils.get_external_ip()
 
     def external_port(self, node_id):
         # Extract the NodePort of the head node's SSH service

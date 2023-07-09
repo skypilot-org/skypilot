@@ -196,6 +196,10 @@ class Kubernetes(clouds.Cloud):
         return kubernetes_utils.get_port(svc_name, namespace)
 
     @classmethod
+    def get_external_ip(cls) -> str:
+        return kubernetes_utils.get_external_ip()
+
+    @classmethod
     def get_default_instance_type(
             cls,
             cpus: Optional[str] = None,

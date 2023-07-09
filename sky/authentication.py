@@ -578,23 +578,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     ssh_jump_port = clouds.Kubernetes.get_port('sshjump-3695cc76', 'default')
 
-    # TODO (weit) this identical to k8s provider method
-    def _external_ip():
-        #
-        # Return the IP address of the first node with an external IP
-        nodes = kubernetes.core_api().list_node().items
-        for node in nodes:
-            if node.status.addresses:
-                for address in node.status.addresses:
-                    if address.type == "ExternalIP":
-                        return address.address
-        # If no external IP is found, use the API server IP
-        api_host = kubernetes.core_api().api_client.configuration.host
-        parsed_url = urlparse(api_host)
-        return parsed_url.hostname
-
     config['auth']['ssh_proxy_command'] = \
         'ssh -tt -i {privkey} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -p {ingress} -W %h:%p sky@{ipaddress}'.format(
-        privkey=PRIVATE_SSH_KEY_PATH, ingress=ssh_jump_port, ipaddress=_external_ip())
+        privkey=PRIVATE_SSH_KEY_PATH, ingress=ssh_jump_port, ipaddress=clouds.Kubernetes.get_external_ip())
 
     return config
