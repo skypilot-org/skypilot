@@ -154,8 +154,11 @@ def add_or_update_cluster(cluster_name: str,
 
     # if this is the cluster init or we are starting after a stop
     if not usage_intervals or usage_intervals[-1][-1] is not None:
-        assert cluster_launched_at is not None, (cluster_name, is_launch,
-                                                 usage_intervals)
+        if cluster_launched_at is None:
+            # This could happen when the cluster is launched manually on the
+            # cloud console. In this case, we will use the current time as the
+            # cluster launched time.
+            cluster_launched_at = int(time.time())
         usage_intervals.append((cluster_launched_at, None))
 
     if requested_resources:
