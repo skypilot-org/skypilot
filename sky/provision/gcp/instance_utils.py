@@ -6,23 +6,17 @@ from sky.adaptors import gcp
 
 logger = sky_logging.init_logger(__name__)
 
-TPU_VERSION = 'v2alpha'  # change once v2 is stable
+TPU_VERSION = 'v2'
 
 
-def instance_to_handler(instance: str, use_tpu_vm: bool):
+def instance_to_handler(instance: str):
     instance_type = instance.split('-')[-1]
     if instance_type == 'compute':
         return GCPComputeInstance
     elif instance_type == 'tpu':
-        if use_tpu_vm:
-            return GCPTPUVMInstance
-        else:
-            return GCPTPUInstance
+        return GCPTPUVMInstance
     else:
         raise ValueError(f'Unknown instance type: {instance_type}')
-
-
-GCP_INSTANCE_HANDLERS = set()
 
 
 class GCPInstance:
@@ -30,9 +24,6 @@ class GCPInstance:
     NEED_TO_STOP_STATES: List[str] = []
     NON_STOPPED_STATES: List[str] = []
     NEED_TO_TERMINATE_STATES: List[str] = []
-
-    def __init_subclass__(cls) -> None:
-        GCP_INSTANCE_HANDLERS.add(cls)
 
     @classmethod
     def stop(
@@ -192,7 +183,7 @@ class GCPComputeInstance(GCPInstance):
         return False
 
 
-class GCPTPUInstance(GCPInstance):
+class GCPTPUVMInstance(GCPInstance):
     """Instance handler for GCP TPU node."""
     NEED_TO_STOP_STATES = [
         'CREATING',
@@ -313,8 +304,3 @@ class GCPTPUInstance(GCPInstance):
         operation = tpu.projects().locations().nodes().delete(
             name=path).execute()
         return operation
-
-
-class GCPTPUVMInstance(GCPInstance):
-    # TODO(zhwu): implement TPU VM
-    pass

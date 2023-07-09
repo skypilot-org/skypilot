@@ -18,19 +18,16 @@ TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 
 
 def _filter_instances(
+    handlers: Iterable[Type[instance_utils.GCPInstance]],
     project_id: str,
     zone: str,
     label_filters: Dict[str, str],
     status_filters_fn: Callable[[Type[instance_utils.GCPInstance]], List[str]],
     included_instances: Optional[List[str]] = None,
     excluded_instances: Optional[List[str]] = None,
-    handlers: Optional[Iterable[Type[instance_utils.GCPInstance]]] = None,
-    use_tpu_vm: bool = False,
 ) -> Dict[Type[instance_utils.GCPInstance], List[str]]:
     """Filter instances using all instance handlers."""
     instances = set()
-    if handlers is None:
-        handlers = instance_utils.GCP_INSTANCE_HANDLERS
     for instance_handler in handlers:
         instances |= set(
             instance_handler.filter(project_id, zone, label_filters,
@@ -38,7 +35,7 @@ def _filter_instances(
                                     included_instances, excluded_instances))
     handler_to_instances = collections.defaultdict(list)
     for instance in instances:
-        handler = instance_utils.instance_to_handler(instance, use_tpu_vm)
+        handler = instance_utils.instance_to_handler(instance)
         handler_to_instances[handler].append(instance)
     return handler_to_instances
 
@@ -72,10 +69,23 @@ def stop_instances(
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
     name_filter = {TAG_RAY_CLUSTER_NAME: cluster_name}
+
+    handlers: List[Type[instance_utils.GCPInstance]] = [
+        instance_utils.GCPComputeInstance
+    ]
+    use_tpu_vms = provider_config.get('use_tpu_vms', False)
+    if use_tpu_vms:
+        handlers.append(instance_utils.GCPTPUVMInstance)
+
     handler_to_instances = _filter_instances(
-        project_id, zone, name_filter,
-        lambda handler: handler.NEED_TO_STOP_STATES, included_instances,
-        excluded_instances)
+        handlers,
+        project_id,
+        zone,
+        name_filter,
+        lambda handler: handler.NEED_TO_STOP_STATES,
+        included_instances,
+        excluded_instances,
+    )
     all_instances = [
         i for instances in handler_to_instances.values() for i in instances
     ]
@@ -90,12 +100,13 @@ def stop_instances(
     # the stop operation is finished.
     for _ in range(MAX_POLLS_STOP):
         handler_to_instances = _filter_instances(
+            handler_to_instances.keys(),
             project_id,
             zone,
             name_filter,
             lambda handler: handler.NON_STOPPED_STATES,
             included_instances=all_instances,
-            handlers=handler_to_instances.keys())
+        )
         if not handler_to_instances:
             break
         time.sleep(POLL_INTERVAL)
@@ -118,8 +129,15 @@ def terminate_instances(
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
     name_filter = {TAG_RAY_CLUSTER_NAME: cluster_name}
+    handlers: List[Type[instance_utils.GCPInstance]] = [
+        instance_utils.GCPComputeInstance
+    ]
+    use_tpu_vms = provider_config.get('use_tpu_vms', False)
+    if use_tpu_vms:
+        handlers.append(instance_utils.GCPTPUVMInstance)
+
     handler_to_instances = _filter_instances(
-        project_id, zone, name_filter,
+        handlers, project_id, zone, name_filter,
         lambda handler: handler.NEED_TO_TERMINATE_STATES, included_instances,
         excluded_instances)
     operations = collections.defaultdict(list)
