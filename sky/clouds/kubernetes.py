@@ -125,6 +125,7 @@ class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
+    SKY_SSH_JUMP_NAME = f'sshjump-{common_utils.get_user_hash()}'
 
     # TODO(romilb): Make the timeout configurable.
     TIMEOUT = 60  # Timeout for resource provisioning
@@ -146,6 +147,7 @@ class Kubernetes(clouds.Cloud):
 
     IMAGE = 'us-central1-docker.pkg.dev/' \
             'skypilot-375900/skypilotk8s/skypilot:latest'
+    SSH_JUMP_IMAGE = '172.31.3.13:5000/sshjumphost:latest'
 
     @classmethod
     def _cloud_unsupported_features(

@@ -17,7 +17,7 @@ provider:
     module: sky.skylet.providers.kubernetes.KubernetesNodeProvider
 
     # Use False if running from outside of k8s cluster
-    use_internal_ips: false
+    use_internal_ips: true
 
     # Namespace to use for all resources created.
     # TODO(romilb): Make this configurable.
@@ -79,7 +79,6 @@ provider:
             skypilot-cluster: {{cluster_name}}
           name: {{cluster_name}}-ray-head-ssh
         spec:
-          type: NodePort
           selector:
             component: {{cluster_name}}-ray-head
           ports:
