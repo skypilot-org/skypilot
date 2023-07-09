@@ -564,22 +564,38 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                     'port': 22,
                     'targetPort': 22
                 }
-            ]            
+            ]
          }
     }
 
-    # TODO (weit) namespace
     try:
         kubernetes.core_api().create_namespaced_pod('default', _to_sshjump_pod_spec(name=sshjump_name, secret=key_label, image=sshjump_image))
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.warning(
+                f'SSH Jump Host {sshjump_name} already exists in the cluster, using it...')
+        else:
+            raise
+    else:
+        logger.info(
+            f'Creating SSH Jump Host {sshjump_name} in the cluster...')
+    try:
         kubernetes.core_api().create_namespaced_service('default', _to_sshjump_service_spec(name=sshjump_name))
-    except:
-        # TODO (weit) handle error
-        pass
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.warning(
+                f'SSH Jump Service {sshjump_name} already exists in the cluster, using it...')
+        else:
+            raise
+    else:
+        logger.info(
+            f'Creating SSH Jump Service {sshjump_name} in the cluster...')
 
-    ssh_jump_port = clouds.Kubernetes.get_port('sshjump-3695cc76', 'default')
+    ssh_jump_port = clouds.Kubernetes.get_port(sshjump_name, 'default')
+    ssh_jump_ip = clouds.Kubernetes.get_external_ip()
 
     config['auth']['ssh_proxy_command'] = \
         'ssh -tt -i {privkey} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -p {ingress} -W %h:%p sky@{ipaddress}'.format(
-        privkey=PRIVATE_SSH_KEY_PATH, ingress=ssh_jump_port, ipaddress=clouds.Kubernetes.get_external_ip())
+        privkey=PRIVATE_SSH_KEY_PATH, ingress=ssh_jump_port, ipaddress=ssh_jump_ip)
 
     return config
