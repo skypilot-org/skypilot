@@ -180,7 +180,7 @@ class GCPComputeInstance(GCPInstance):
 
         if result['status'] == 'DONE':
             logger.debug('wait_for_compute_zone_operation: '
-                        f'Operation {operation["name"]} finished.')
+                         f'Operation {operation["name"]} finished.')
             return True
         return False
 
@@ -289,7 +289,8 @@ class GCPTPUVMInstance(GCPInstance):
             credentials=None,
             cache_discovery=False,
             discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest')
-        operation = tpu.projects().locations().nodes().stop(name=instance).execute()
+        operation = tpu.projects().locations().nodes().stop(
+            name=instance).execute()
         return operation
 
     @classmethod

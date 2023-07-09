@@ -134,7 +134,7 @@ def terminate_instances(
     handlers: List[Type[instance_utils.GCPInstance]] = [
         instance_utils.GCPComputeInstance
     ]
-    use_tpu_vms = provider_config.get('use_tpu_vms', False)
+    use_tpu_vms = provider_config.get('_has_tpus', False)
     if use_tpu_vms:
         handlers.append(instance_utils.GCPTPUVMInstance)
 
