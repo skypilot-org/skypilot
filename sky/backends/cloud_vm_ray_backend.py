@@ -3350,8 +3350,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         stderr = ''
 
         # Use the new provisioner for AWS.
-        if isinstance(cloud, clouds.AWS):
-            region = config['provider']['region']
+        if isinstance(cloud, (clouds.AWS)) or (isinstance(cloud, clouds.GCP) and
+                                               not use_tpu_vm):
             # Stop the ray autoscaler first to avoid the head node trying to
             # re-launch the worker nodes, during the termination of the
             # cluster.
@@ -3370,10 +3370,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'It might be because the cluster\'s head node has '
                         'already been terminated. It is fine to skip this.')
             if terminate:
-                provision_api.terminate_instances(repr(cloud), region,
-                                                  cluster_name)
+                provision_api.terminate_instances(
+                    repr(cloud),
+                    cluster_name,
+                    provider_config=config['provider'])
             else:
-                provision_api.stop_instances(repr(cloud), region, cluster_name)
+                provision_api.stop_instances(repr(cloud),
+                                             cluster_name,
+                                             provider_config=config['provider'])
 
             if post_teardown_cleanup:
                 self.post_teardown_cleanup(handle, terminate, purge)
