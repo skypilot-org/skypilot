@@ -1,5 +1,5 @@
 """Utilities for GCP instances."""
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import gcp
