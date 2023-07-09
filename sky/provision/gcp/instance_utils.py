@@ -152,7 +152,7 @@ class GCPComputeInstance(GCPInstance):
             project=project_id,
             filter=filter_expr,
             zone=zone,
-        ).excute())
+        ).execute())
         instances = response.get('items', [])
         instances = [i['name'] for i in instances]
         if included_instances:
