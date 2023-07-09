@@ -28,6 +28,7 @@ def _filter_instances(
 ) -> Dict[Type[instance_utils.GCPInstance], List[str]]:
     """Filter instances using all instance handlers."""
     instances = set()
+    logger.debug(f'handlers: {handlers}')
     for instance_handler in handlers:
         instances |= set(
             instance_handler.filter(project_id, zone, label_filters,
@@ -37,6 +38,7 @@ def _filter_instances(
     for instance in instances:
         handler = instance_utils.instance_to_handler(instance)
         handler_to_instances[handler].append(instance)
+    logger.debug(f'handler_to_instances: {handler_to_instances}')
     return handler_to_instances
 
 
@@ -73,7 +75,7 @@ def stop_instances(
     handlers: List[Type[instance_utils.GCPInstance]] = [
         instance_utils.GCPComputeInstance
     ]
-    use_tpu_vms = provider_config.get('use_tpu_vms', False)
+    use_tpu_vms = provider_config.get('_has_tpus', False)
     if use_tpu_vms:
         handlers.append(instance_utils.GCPTPUVMInstance)
 
