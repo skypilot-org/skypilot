@@ -2052,7 +2052,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     - (optional) Docker user name
     - (optional) If TPU(s) are managed, a path to a deletion script.
     """
-    _VERSION = 3
+    _VERSION = 4
 
     def __init__(self,
                  *,
@@ -2268,6 +2268,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if version < 3:
             head_ip = state.pop('head_ip', None)
             state['stable_internal_external_ips'] = None
+        if version < 4:
+            state['docker_user'] = None
 
         self.__dict__.update(state)
 
