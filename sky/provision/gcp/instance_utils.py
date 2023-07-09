@@ -6,6 +6,8 @@ from sky.adaptors import gcp
 
 logger = sky_logging.init_logger(__name__)
 
+# Using v2 according to
+# https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#create-curl # pylint: disable=line-too-long
 TPU_VERSION = 'v2'
 
 
@@ -281,14 +283,13 @@ class GCPTPUVMInstance(GCPInstance):
     @classmethod
     def stop(cls, project_id: str, zone: str, instance: str) -> dict:
         """Stop a TPU node."""
-        path = f'projects/{project_id}/locations/{zone}/nodes/{instance}'
         tpu = gcp.build(
             'tpu',
             TPU_VERSION,
             credentials=None,
             cache_discovery=False,
             discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest')
-        operation = tpu.projects().locations().nodes().stop(name=path).execute()
+        operation = tpu.projects().locations().nodes().stop(name=instance).execute()
         return operation
 
     @classmethod
@@ -302,5 +303,5 @@ class GCPTPUVMInstance(GCPInstance):
             cache_discovery=False,
             discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest')
         operation = tpu.projects().locations().nodes().delete(
-            name=path).execute()
+            name=instance).execute()
         return operation
