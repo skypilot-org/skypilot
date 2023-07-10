@@ -1,7 +1,9 @@
+import base64
 import copy
 import json
 import logging
 import os
+import textwrap
 import time
 from functools import partial
 from typing import Dict, List, Set, Tuple
@@ -309,6 +311,8 @@ def bootstrap_gcp(config):
     config = _configure_iam_role(config, crm, iam)
     config = _configure_key_pair(config, compute)
     config = _configure_subnet(config, compute)
+    config = _configure_cloud_init(config)
+    print('DEBUG HERE', config)
 
     return config
 
@@ -838,6 +842,70 @@ def _configure_subnet(config, compute):
             node_config["networkConfig"] = copy.deepcopy(default_interfaces)[0]
             node_config["networkConfig"].pop("accessConfigs")
 
+    return config
+
+
+def _configure_cloud_init(config):
+    """Configure cloud-init for the cluster."""
+    config = copy.deepcopy(config)
+    
+    node_configs = [
+        node_type["node_config"]
+        for node_type in config["available_node_types"].values()
+    ]
+    
+    cloud_init_encoded_script = base64.b64encode(
+        textwrap.dedent("""\
+        #cloud-config
+        write_files:
+          - path: /etc/apt/apt.conf.d/20auto-upgrades
+            content: |
+              APT::Periodic::Update-Package-Lists "0";
+              APT::Periodic::Download-Upgradeable-Packages "0";
+              APT::Periodic::AutocleanInterval "0";
+              APT::Periodic::Unattended-Upgrade "0";
+          - path: /etc/apt/apt.conf.d/10cloudinit-disable
+            content: |
+              APT::Periodic::Enable "0";
+          - path: /tmp/test.lol
+            content: |
+              This is a test file.
+        """).encode('utf-8')).decode('utf-8')
+    
+    # https://blog.woohoosvcs.com/2019/11/cloud-init-on-google-compute-engine/  # pylint: disable=line-too-long
+    start_up_encoded_script = base64.b64encode(
+        textwrap.dedent("""\
+        #!/bin/bash
+        
+        echo "Running startup script" > /tmp/startup.log
+
+        if ! type cloud-init > /dev/null 2>&1 ; then
+            sleep 30
+            apt-get update
+            apt-get install -y cloud-init
+
+            if [ $? == 0 ]; then
+                systemctl enable cloud-init
+            fi
+
+            reboot
+        fi
+        """).encode('utf-8')).decode('utf-8')
+    
+    for node_config in node_configs:
+        node_config['metadata'] = {
+            'items':[
+                {
+                    'key': 'user-data',
+                    'value': cloud_init_encoded_script
+                },
+                {
+                    'key': 'startup-script',
+                    'value': start_up_encoded_script
+                },
+            ]
+        }
+    
     return config
 
 
