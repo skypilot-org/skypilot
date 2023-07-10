@@ -707,7 +707,8 @@ def dump_spot_cost(condensed: bool) -> str:
             cluster_report['name'] = get_job_name_from_spot_cluster_name(
                 cluster_name)
 
-            if cluster_report['num_recoveries'] > 0:
+            if 'num_recoveries' in cluster_report and cluster_report[
+                    'num_recoveries'] > 0:
                 cluster_report['resources'] = '-'
                 cluster_report['num_nodes'] = '-'
                 cluster_report['zone'] = '-'
@@ -760,6 +761,11 @@ def format_cost_table(reports: List[Dict[str, Any]], all: bool) -> str:
 
         cost = report['total_cost']
 
+        num_recoveries = 0
+
+        if 'num_recoveries' in report:
+            num_recoveries = report['num_recoveries']
+
         cost_str = f'${cost:.3f}'
         duration_str = duration
 
@@ -772,7 +778,7 @@ def format_cost_table(reports: List[Dict[str, Any]], all: bool) -> str:
         values = [
             report['job_id'],
             report['name'],
-            report['num_recoveries'],
+            num_recoveries,
             report['resources'],
             report['num_nodes'],
             report['zone'],

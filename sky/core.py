@@ -970,10 +970,8 @@ def spot_cost_report(refresh: bool, condensed: bool) -> List[Dict[str, Any]]:
     if controller_status is None:
         return []
 
-    if (refresh and controller_status in [
-            ClusterStatus.STOPPED,
-            ClusterStatus.INIT
-    ]):
+    if (refresh and
+            controller_status in [ClusterStatus.STOPPED, ClusterStatus.INIT]):
         print(f'{colorama.Fore.YELLOW}'
               'Restarting controller for latest status...'
               f'{colorama.Style.RESET_ALL}')

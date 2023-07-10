@@ -3650,14 +3650,12 @@ _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 
 
 @spot.command('cost-report', cls=_DocumentedCodeCommand)
-@click.option(
-    '--all',
-    '-a',
-    default=False,
-    is_flag=True,
-    required=False,
-    help='Display all rows of spot cost report table.'
-)
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Display all rows of spot cost report table.')
 @click.option(
     '--refresh',
     '-r',
@@ -3671,7 +3669,7 @@ _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
               default=False,
               is_flag=True,
               required=False,
-              help='If true,  breakdown of spot job preemptions.')
+              help='If true, do not show breakdown of spot job preemptions.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def spot_cost_report(all: bool, refresh: bool, condensed: bool):
