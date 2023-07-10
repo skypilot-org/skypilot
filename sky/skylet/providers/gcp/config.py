@@ -868,9 +868,6 @@ def _configure_cloud_init(config):
           - path: /etc/apt/apt.conf.d/10cloudinit-disable
             content: |
               APT::Periodic::Enable "0";
-          - path: /tmp/test.lol
-            content: |
-              This is a test file.
         """
         ).encode("utf-8")
     ).decode("utf-8")
