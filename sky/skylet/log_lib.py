@@ -262,7 +262,12 @@ def run_with_log(
             # Send SIGINT to the process directly, otherwise, the underlying
             # process will only be killed after the python program exits,
             # causing the stream handling stuck at `readline`.
-            os.killpg(proc.pid, signal.SIGINT)
+            try:
+                os.killpg(proc.pid, signal.SIGINT)
+            except Exception:  # pylint: disable=broad-except
+                # The killing is ok to fail, as the proc might be finished
+                # already.
+                pass
             raise
 
 
