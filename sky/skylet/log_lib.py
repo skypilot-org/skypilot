@@ -260,14 +260,10 @@ def run_with_log(
                 return proc.returncode, stdout, stderr
             return proc.returncode
         except KeyboardInterrupt:
-            # Send SIGINT to the process directly, otherwise, the underlying
+            # Kill the subprocess directly, otherwise, the underlying
             # process will only be killed after the python program exits,
             # causing the stream handling stuck at `readline`.
-            if sys.platform == 'win32':
-                subprocess_utils.kill_children_processes(
-                    sig=signal.CTRL_C_EVENT)
-            else:
-                subprocess_utils.kill_children_processes(sig=signal.SIGINT)
+            subprocess_utils.kill_children_processes()
             raise
 
 
