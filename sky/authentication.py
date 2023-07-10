@@ -361,11 +361,7 @@ def setup_oci_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     with open(public_key_path, 'r') as f:
         public_key = f.read()
 
-    for node_type in config['available_node_types']:
-        config['available_node_types'][node_type]['node_config'][
-            'AuthorizedKey'] = public_key
-
-    return config
+    return _replace_ssh_info_in_config(config, public_key)
 
 
 def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
