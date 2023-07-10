@@ -60,6 +60,8 @@ _JOB_CANCELLED_MESSAGE = (
 # for a long time.
 _FINAL_SPOT_STATUS_WAIT_TIMEOUT_SECONDS = 20
 
+_NUM_SPOT_COST_REPORT_ROWS_TO_SHOW = 5
+
 
 class UserSignal(enum.Enum):
     """The signal to be sent to the user."""
@@ -559,6 +561,8 @@ def format_job_table(
         jobs[task['job_id']].append(task)
 
     for job_id, job_tasks in jobs.items():
+        print(job_id, job_tasks)
+
         if len(job_tasks) > 1:
             # Aggregate the tasks into a new row in the table.
             job_name = job_tasks[0]['job_name']
@@ -721,7 +725,7 @@ def load_spot_cost_report(payload: str) -> List[Dict[str, Any]]:
     return cost_report
 
 
-def format_cost_table(reports: List[Dict[str, Any]]) -> str:
+def format_cost_table(reports: List[Dict[str, Any]], all: bool) -> str:
     """Show all spot costs."""
     columns = [
         'JOB ID',
@@ -738,6 +742,12 @@ def format_cost_table(reports: List[Dict[str, Any]]) -> str:
     cost_table = log_utils.create_table(columns)
 
     empty_row = ['' for _ in range(len(columns))]
+
+    num_main_rows = 0
+
+    num_main_rows_to_show = _NUM_SPOT_COST_REPORT_ROWS_TO_SHOW
+    if all:
+        num_main_rows_to_show = len(reports)
 
     for i, report in enumerate(reports):
         # The job['job_duration'] is already calculated in
@@ -771,10 +781,14 @@ def format_cost_table(reports: List[Dict[str, Any]]) -> str:
             cost_str,
         ]
 
-        if i > 0 and is_main_row:
+        if i > 0 and is_main_row and num_main_rows < num_main_rows_to_show:
             cost_table.add_row(empty_row)
 
-        cost_table.add_row(values)
+        if num_main_rows < num_main_rows_to_show:
+            cost_table.add_row(values)
+
+        if is_main_row:
+            num_main_rows += 1
 
     return str(cost_table)
 

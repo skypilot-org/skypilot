@@ -3651,6 +3651,14 @@ _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 
 @spot.command('cost-report', cls=_DocumentedCodeCommand)
 @click.option(
+    '--all',
+    '-a',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Display all rows of spot cost report table.'
+)
+@click.option(
     '--refresh',
     '-r',
     default=False,
@@ -3666,7 +3674,7 @@ _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
               help='If true,  breakdown of spot job preemptions.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def spot_cost_report(refresh: bool, condensed: bool):
+def spot_cost_report(all: bool, refresh: bool, condensed: bool):
     """Show cost report of managed spot jobs.
     """
     click.secho('Fetching managed spot job costs...', fg='yellow')
@@ -3687,7 +3695,7 @@ def spot_cost_report(refresh: bool, condensed: bool):
     if not cost_table:
         cost_table = no_costs_found_str
     else:
-        cost_table = spot_lib.format_cost_table(cost_table)
+        cost_table = spot_lib.format_cost_table(cost_table, all)
 
     click.echo(f'Managed spot jobs:\n{cost_table}')
 
