@@ -3971,7 +3971,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
             # Get the first store and use it to mount
             store = list(storage_obj.stores.values())[0]
-            sync_cmd = store.sync_command(dst)
+            sync_cmd = store.csync_command(dst)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
