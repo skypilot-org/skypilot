@@ -3606,7 +3606,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 elif purge:
                     logger.warning(
                         _TEARDOWN_PURGE_WARNING.format(
-                            reason='stopping/terminating TPU'))
+                            reason='stopping/terminating TPU',
+                            details=tpu_stderr))
                 else:
                     raise RuntimeError(
                         _TEARDOWN_FAILURE_MESSAGE.format(
