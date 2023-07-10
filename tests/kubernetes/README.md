@@ -7,16 +7,19 @@ This directory contains useful scripts and notes for developing SkyPilot on Kube
 We maintain a container image that has all basic SkyPilot dependencies installed. 
 This image is hosted at `us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest`.
 
-To build this image locally and optionally push to the SkyPilot registry, run:
+An additional container image is being used for sshjump host.
+This image is hosted at `us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/sshjump:latest`.
+
+To build these images locally and optionally push to the SkyPilot registry, run:
 ```bash
-# Build and load image locally
+# Build and load images locally
 ./build_image.sh
-# Build and push image (CAREFUL - this will push to the SkyPilot registry!)
+# Build and push images (CAREFUL - this will push to the SkyPilot registry!)
 ./build_image.sh -p
 ```
 
 ## Running a local development cluster
-We use (kind)[https://kind.sigs.k8s.io/] to run a local Kubernetes cluster 
+We use [kind](https://kind.sigs.k8s.io/) to run a local Kubernetes cluster 
 for development.
 
 ```bash 
