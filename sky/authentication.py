@@ -1,6 +1,9 @@
 """Module to enable a single SkyPilot key for all VMs in each cloud.
 
-The `setup_<cloud>_authentication` functions will be called after the ray
+The `setup_<cloud>_authentication` functions will be called on every new cluster provision request. 
+
+Specifically, after the ray yaml template file `<cloud>-ray.yml.j2` is filled in with resource specific
+information, these functions are called with the filled in ray yaml config as input,
 yaml template file `<cloud>-ray.yml.j2` is filled in with resource specific
 information. The functions will take the filled in ray yaml config as input,
 1. Replace the placeholders in the ray yaml file `skypilot:ssh_user` and
