@@ -9,7 +9,7 @@ information. The functions will take the filled in ray yaml config as input,
 2. Setup the `authorized_keys` on the remote VM with the public key content,
    by cloud-init or directly using cloud provider's API.
 
-The public key should not be uploaded to the `~/.ssh/sky-key.pub` on the
+The local machine's public key should not be uploaded to the `~/.ssh/sky-key.pub` on the
 remote VM, because it will cause private/public key pair mismatch when the
 user tries to launch new VM from that remote VM using SkyPilot, e.g., the
 node is used as a spot controller. (Lambda cloud is an exception, due to
