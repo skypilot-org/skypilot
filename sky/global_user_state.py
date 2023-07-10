@@ -158,6 +158,8 @@ def add_or_update_cluster(cluster_name: str,
             # This could happen when the cluster is restarted manually on the
             # cloud console. In this case, we will use the current time as the
             # cluster launched time.
+            # TODO(zhwu): We should use the time when the cluster is restarted
+            # to be more accurate.
             cluster_launched_at = int(time.time())
         usage_intervals.append((cluster_launched_at, None))
 
