@@ -20,6 +20,7 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import log_utils
+from sky.utils import subprocess_utils
 
 _SKY_LOG_WAITING_GAP_SECONDS = 1
 _SKY_LOG_WAITING_MAX_RETRY = 5
@@ -262,12 +263,11 @@ def run_with_log(
             # Send SIGINT to the process directly, otherwise, the underlying
             # process will only be killed after the python program exits,
             # causing the stream handling stuck at `readline`.
-            try:
-                os.killpg(proc.pid, signal.SIGINT)
-            except Exception:  # pylint: disable=broad-except
-                # The killing is ok to fail, as the proc might be finished
-                # already.
-                pass
+            if sys.platform == 'win32':
+                subprocess_utils.kill_children_processes(
+                    sig=signal.CTRL_C_EVENT)
+            else:
+                subprocess_utils.kill_children_processes(sig=signal.SIGINT)
             raise
 
 
