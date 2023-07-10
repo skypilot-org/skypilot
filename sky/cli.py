@@ -223,7 +223,8 @@ def _interactive_node_cli_command(cli_func):
                              help=('OS disk size in GBs.'))
     disk_tier = click.option('--disk-tier',
                              default=None,
-                             type=str,
+                             type=click.Choice(['low', 'medium', 'high'],
+                                               case_sensitive=False),
                              required=False,
                              help=('OS disk tier. Could be one of "low", '
                                    '"medium", "high". Default: medium'))
@@ -1207,7 +1208,7 @@ def cli():
 @click.option(
     '--disk-tier',
     default=None,
-    type=str,
+    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
     required=False,
     help=(
         'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
@@ -2977,7 +2978,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
               '-v',
               is_flag=True,
               default=False,
-              help='Show details of all clouds.')
+              help='Show the activated account for each cloud.')
 @usage_lib.entrypoint
 def check(verbose: bool):  # pylint: disable=redefined-builtin
     """Check which clouds are available to use.
@@ -3374,7 +3375,7 @@ def spot():
 @click.option(
     '--disk-tier',
     default=None,
-    type=str,
+    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
     required=False,
     help=(
         'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
@@ -3833,7 +3834,7 @@ def bench():
 @click.option(
     '--disk-tier',
     default=None,
-    type=str,
+    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
     required=False,
     help=(
         'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
