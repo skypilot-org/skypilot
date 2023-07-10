@@ -655,7 +655,8 @@ class SSHConfigHelper(object):
         for idx, ip in enumerate(external_worker_ips):
             if docker_user is not None:
                 ip = 'localhost'
-                docker_proxy_command = docker_proxy_command_generator(ip)
+                docker_proxy_command = docker_proxy_command_generator(
+                    external_worker_ips[idx])
             if not codegens[idx]:
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, worker_names[idx], ip, username,
