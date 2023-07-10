@@ -1,23 +1,25 @@
 """Module to enable a single SkyPilot key for all VMs in each cloud.
 
-The `setup_<cloud>_authentication` functions will be called on every new cluster provision request. 
+The `setup_<cloud>_authentication` functions will be called on every cluster
+provisioning request.
 
-Specifically, after the ray yaml template file `<cloud>-ray.yml.j2` is filled in with resource specific
-information, these functions are called with the filled in ray yaml config as input,
-yaml template file `<cloud>-ray.yml.j2` is filled in with resource specific
-information. The functions will take the filled in ray yaml config as input,
+Specifically, after the ray yaml template file `<cloud>-ray.yml.j2` is filled in
+with resource specific information, these functions are called with the filled
+in ray yaml config as input, yaml template file `<cloud>-ray.yml.j2` is filled
+in with resource specific information. The functions will take the filled in ray
+yaml config as input,
 1. Replace the placeholders in the ray yaml file `skypilot:ssh_user` and
    `skypilot:ssh_public_key_content` with the actual username and public key
    content, i.e., `_replace_ssh_info_in_config`.
 2. Setup the `authorized_keys` on the remote VM with the public key content,
    by cloud-init or directly using cloud provider's API.
 
-The local machine's public key should not be uploaded to the `~/.ssh/sky-key.pub` on the
-remote VM, because it will cause private/public key pair mismatch when the
-user tries to launch new VM from that remote VM using SkyPilot, e.g., the
-node is used as a spot controller. (Lambda cloud is an exception, due to
-the limitation of the cloud provider. See the comments in
-setup_lambda_authentication)
+The local machine's public key should not be uploaded to the
+`~/.ssh/sky-key.pub` on the remote VM, because it will cause private/public
+key pair mismatch when the user tries to launch new VM from that remote VM
+using SkyPilot, e.g., the node is used as a spot controller. (Lambda cloud
+is an exception, due to the limitation of the cloud provider. See the
+comments in setup_lambda_authentication)
 """
 import copy
 import functools
