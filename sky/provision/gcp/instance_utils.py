@@ -73,8 +73,6 @@ class GCPComputeInstance(GCPInstance):
 
     NON_STOPPED_STATES = NEED_TO_STOP_STATES + ['STOPPING']
 
-    NEED_TO_TERMINATE_STATES = NON_STOPPED_STATES + ['TERMINATED']
-
     @classmethod
     def stop(
         cls,
@@ -195,8 +193,6 @@ class GCPTPUVMInstance(GCPInstance):
     ]
 
     NON_STOPPED_STATES = NEED_TO_STOP_STATES + ['STOPPING']
-
-    NEED_TO_TERMINATE_STATES = NON_STOPPED_STATES + ['STOPPED']
 
     # TODO(zhwu): implement TPU node
     @classmethod
