@@ -1,4 +1,21 @@
-"""Module to enable a single SkyPilot key for all VMs in each cloud."""
+"""Module to enable a single SkyPilot key for all VMs in each cloud.
+
+The `setup_<cloud>_authentication` functions will be called after the ray
+yaml template file `<cloud>-ray.yml.j2` is filled in with resource specific
+information. The functions will take the filled in ray yaml config as input,
+1. Replace the placeholders in the ray yaml file `skypilot:ssh_user` and
+   `skypilot:ssh_public_key_content` with the actual username and public key
+   content, i.e., `_replace_ssh_info_in_config`.
+2. Setup the `authorized_keys` on the remote VM with the public key content,
+   by cloud-init or directly using cloud provider's API.
+
+The public key should not be uploaded to the `~/.ssh/sky-key.pub` on the
+remote VM, because it will cause private/public key pair mismatch when the
+user tries to launch new VM from that remote VM using SkyPilot, e.g., the
+node is used as a spot controller. (Lambda cloud is an exception, due to
+the limitation of the cloud provider. See the comments in
+setup_lambda_authentication)
+"""
 import copy
 import functools
 import os
@@ -242,9 +259,6 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             subprocess_utils.handle_returncode(proc.returncode, enable_ssh_cmd,
                                                'Failed to enable ssh port.',
                                                proc.stderr.decode('utf-8'))
-    # TODO(zhwu): Use cloud init to add ssh public key, to avoid the permission
-    # issue. A blocker is that the cloud init is not installed in the debian
-    # image by default.
     return _replace_ssh_info_in_config(config, public_key)
 
 
@@ -272,6 +286,10 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # path for finding the public key path on both local and head node.
     config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
 
+    # TODO(zhwu): we need to avoid uploading the public ssh key to the
+    # nodes, as that will cause problem when the node is used as spot
+    # controller, i.e., the public and private key on the node may
+    # not match.
     file_mounts = config['file_mounts']
     file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
     config['file_mounts'] = file_mounts

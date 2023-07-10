@@ -78,7 +78,6 @@ User
     compute.subnetworks.list
     compute.subnetworks.useExternalIp
     compute.projects.get
-    compute.projects.setCommonInstanceMetadata
     compute.zoneOperations.get
     iam.roles.get
     iam.serviceAccounts.actAs

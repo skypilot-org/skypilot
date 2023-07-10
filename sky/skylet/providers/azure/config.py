@@ -137,5 +137,5 @@ def _configure_resource_group(config):
 def _configure_key_pair(config):
     # SkyPilot: The original checks and configurations are no longer
     # needed, since we have already set them up in the upper level
-    # SkyPilot codes.
+    # SkyPilot codes. See sky/templates/azure-ray.yml.j2
     return config
