@@ -612,6 +612,7 @@ class SSHConfigHelper(object):
             docker_proxy_command_generator = lambda ip: ' '.join(
                 ['ssh'] + command_runner.ssh_options_list(key_path, None) +
                 ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ip}'])
+        docker_proxy_command = None
 
         # Check if ~/.ssh/config contains existing names
         host_lines = [f'Host {c_name}' for c_name in worker_names]
@@ -624,7 +625,6 @@ class SSHConfigHelper(object):
                 host_name = external_worker_ips[idx]
                 logger.warning(f'Using {host_name} to identify host instead.')
                 ip = external_worker_ips[idx]
-                docker_proxy_command = None
                 if docker_user is not None:
                     ip = 'localhost'
                     docker_proxy_command = docker_proxy_command_generator(
