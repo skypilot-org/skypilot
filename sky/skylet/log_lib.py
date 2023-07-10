@@ -6,7 +6,6 @@ import copy
 import io
 import multiprocessing.pool
 import os
-import signal
 import subprocess
 import sys
 import time
