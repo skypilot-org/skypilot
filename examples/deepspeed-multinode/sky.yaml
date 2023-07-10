@@ -1,0 +1,80 @@
+# Example: a distributed DeepSpeed job (DeepSpeed-Chat) on 2 VMs.
+#
+# This takes care constructing a "hostfile" to pass to DeepSpeed.
+#
+# Usage:
+#
+#   $ sky launch sky.yaml -r --down -c ds
+#
+#   # After the job starts running, log into the two nodes and check gpustat:
+#
+#   $ ssh ds
+#   $ gpustat -i
+#
+#   $ ssh ds-worker1
+#   $ gpustat -i
+
+resources:
+  accelerators: T4:1  # AWS, Azure, GCP
+  # accelerators: A100:1  # GCP, Lambda
+  # accelerators: A100-80GB:1  # Azure, GCP, SCP
+num_nodes: 2
+
+setup: |
+  set -ex
+  git clone https://github.com/microsoft/DeepSpeedExamples.git || true
+  cd DeepSpeedExamples
+  git checkout d7c42b4f34df91035e7ed3e0c51500bb53d0bc71
+
+  conda create -n deepspeed python=3.8 -y
+  source activate deepspeed
+
+  pip install deepspeed
+
+  cd applications/DeepSpeed-Chat
+  pip install -r requirements.txt
+
+  # Required by DeepSpeed in multi-node settings.
+  sudo apt-get -y install pdsh
+
+file_mounts:
+  # Required for DeepSpeed's passwordless SSH (run commands on nodes).
+  ~/.ssh/id_rsa: ~/.ssh/sky-key
+
+run: |
+  cd DeepSpeedExamples
+  source activate deepspeed
+
+  # Launch on the first node only
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+
+    # Prepare a hostfile.
+    HOSTFILE_PATH=/tmp/hostfile.${SKYPILOT_TASK_ID}
+    python3 -c "import os;n_gpus=os.environ['SKYPILOT_NUM_GPUS_PER_NODE'];print('\n'.join([f'{ip} slots={n_gpus}' for ip in os.environ['SKYPILOT_NODE_IPS'].splitlines()]))" > ${HOSTFILE_PATH}
+    echo "*******************************************"
+    echo "Hostfile: ${HOSTFILE_PATH}"
+    cat ${HOSTFILE_PATH}
+    echo "*******************************************"
+
+    # Option 1:
+    # If you don't expect two SkyPilot jobs to run concurrently:
+    #    Move HOSTFILE_PATH to /job/hostfile; no command change needed.
+    sudo mkdir -p /job; sudo chmod 777 /job; mv ${HOSTFILE_PATH} /job/hostfile
+
+    # Option 2:
+    # Otherwise, change your DeepSpeed launch command to add one argument:
+    #    --hostfile $HOSTFILE_PATH
+    # Reference: https://huggingface.co/docs/transformers/main_classes/deepspeed#the-deepspeed-launcher
+
+    ################ Your launch command goes here ################
+
+    cd applications/DeepSpeed-Chat/training/step1_supervised_finetuning/
+    bash training_scripts/single_node/run_1.3b_lora.sh &
+
+    # This will initialize DeepSpeed correctly too, but then device OOM will
+    # occur. To run it, 'accelerators' likely needs to change to A100-80GB.
+    # bash training_scripts/multi_node/run_66b.sh &
+
+    sleep 3
+    tail -f output/training.log
+  fi
