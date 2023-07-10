@@ -2973,13 +2973,13 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
 
 @cli.command()
-@click.option('--all',
-              '-a',
+@click.option('--verbose',
+              '-v',
               is_flag=True,
               default=False,
               help='Show details of all clouds.')
 @usage_lib.entrypoint
-def check(all: bool):  # pylint: disable=redefined-builtin
+def check(verbose: bool):  # pylint: disable=redefined-builtin
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
@@ -2989,7 +2989,7 @@ def check(all: bool):  # pylint: disable=redefined-builtin
     The enabled clouds are cached and form the "search space" to be considered
     for each task.
     """
-    sky_check.check(show_all=all)
+    sky_check.check(verbose=verbose)
 
 
 @cli.command()
