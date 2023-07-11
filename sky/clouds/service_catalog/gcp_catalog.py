@@ -75,6 +75,20 @@ _A100_INSTANCE_TYPE_DICTS = {
     }
 }
 
+# gpu count -> [vm types]
+_L4_INSTANCE_TYPE_DICT = {
+    1: [
+        'g2-standard-4',
+        'g2-standard-8',
+        'g2-standard-12',
+        'g2-standard-16',
+        'g2-standard-32',
+    ],
+    2: ['g2-standard-24'],
+    4: ['g2-standard-48'],
+    8: ['g2-standard-96'],
+}
+
 # Number of CPU cores per GPU based on the AWS setting.
 # GCP A100 has its own instance type mapping.
 # Refer to sky/clouds/service_catalog/gcp_catalog.py
@@ -246,6 +260,21 @@ def get_instance_type_for_accelerator(
             return None, []
         return [instance_type], []
 
+    if acc_name == 'L4':
+        # If L4 is used, host VM type must be G2
+        # https://cloud.google.com/compute/docs/gpus#l4-gpus
+
+        df = _df[_df['InstanceType'].notna()]
+        possible_instances = _L4_INSTANCE_TYPE_DICT[acc_count]
+        df = df[df['InstanceType'].isin(possible_instances)]
+
+        # Check the cpus and memory specified by the user.
+        instance_type = common.get_instance_type_for_cpus_mem_impl(
+            df, cpus, memory)
+        if instance_type is None:
+            return None, []
+        return [instance_type], []
+
     if acc_name not in _NUM_ACC_TO_NUM_CPU:
         acc_name = 'DEFAULT'
 
@@ -345,19 +374,21 @@ def list_accelerators(
     for acc_name, acc_info in results.items():
         if (acc_name.startswith('tpu') or
                 acc_name in _NUM_ACC_TO_MAX_CPU_AND_MEMORY or
-                acc_name in _A100_INSTANCE_TYPE_DICTS):
+                acc_name in _A100_INSTANCE_TYPE_DICTS or
+                acc_name == 'L4'):
             new_results[acc_name] = acc_info
             new_results[acc_name] = acc_info
     results = new_results
 
     a100_infos = results.get('A100', []) + results.get('A100-80GB', [])
-    if not a100_infos:
+    l4_infos = results.get('L4', [])
+    if not a100_infos and not l4_infos:
         return results
 
+    new_infos = defaultdict(list)
     # Unlike other GPUs that can be attached to different sizes of N1 VMs,
     # A100 GPUs can only be attached to fixed-size A2 VMs.
     # Thus, we can show their exact cost including the host VM prices.
-    new_infos = defaultdict(list)
     for info in a100_infos:
         assert pd.isna(info.instance_type) and pd.isna(info.memory), a100_infos
         a100_host_vm_type = _A100_INSTANCE_TYPE_DICTS[info.accelerator_name][
@@ -384,6 +415,35 @@ def list_accelerators(
                 price=info.price + vm_price,
                 spot_price=info.spot_price + vm_spot_price,
             ))
+
+    # L4 GPUs are similar: they can only be attached to G2 VMs
+    for info in l4_infos:
+        assert pd.isna(info.instance_type) and pd.isna(info.memory), l4_infos
+        vm_types = _L4_INSTANCE_TYPE_DICT.get(info.accelerator_count, [])
+        for vm_type in vm_types:
+            # they should be in catalog
+            df = _df[_df['InstanceType'] == vm_type]
+            cpu_count = df['vCPUs'].iloc[0]
+            memory = df['MemoryGiB'].iloc[0]
+            vm_price = common.get_hourly_cost_impl(_df,
+                                               vm_type,
+                                               use_spot=False,
+                                               region=None,
+                                               zone=None)
+            vm_spot_price = common.get_hourly_cost_impl(_df,
+                                                        vm_type,
+                                                        use_spot=True,
+                                                        region=None,
+                                                        zone=None)
+            new_infos[info.accelerator_name].append(
+                info._replace(
+                    instance_type=vm_type,
+                    cpu_count=cpu_count,
+                    memory=memory,
+                    price=info.price + vm_price,
+                    spot_price=info.spot_price + vm_spot_price,
+                ))
+
     results.update(new_infos)
     return results
 
@@ -414,6 +474,13 @@ def check_host_accelerator_compatibility(
                     'A2 instance types should be used with A100 GPUs. '
                     'Either use other instance types or specify the '
                     'accelerators as A100.')
+
+        elif instance_type.startswith('g2'):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    'G2 instance types should be used with L4 GPUs. '
+                    'Either use other instance types or specify the '
+                    'accelerators as L4.')
         return
 
     acc = list(accelerators.items())
@@ -445,6 +512,17 @@ def check_host_accelerator_compatibility(
                     f'A100 GPUs cannot be attached to {instance_type}. '
                     f'Use A2 machines instead. Please refer to '
                     'https://cloud.google.com/compute/docs/gpus#a100-gpus')
+        return
+
+    # Treat L4 as a special case.
+    if acc_name == 'L4':
+        # L4 must be attached to G2 instance type.
+        if not instance_type.startswith('g2-'):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    f'L4 GPUs cannot be attached to {instance_type}. '
+                    f'Use G2 machines instead. Please refer to '
+                    'https://cloud.google.com/compute/docs/gpus#l4-gpus')
         return
 
     # Other GPUs must be attached to N1 machines.
