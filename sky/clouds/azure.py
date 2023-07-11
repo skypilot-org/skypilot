@@ -445,6 +445,13 @@ class Azure(clouds.Cloud):
         return [f'{account_email} [subscription_id={project_id}]']
 
     @classmethod
+    def get_current_user_identity_str(cls) -> Optional[str]:
+        user_identity = cls.get_current_user_identity()
+        if user_identity is None:
+            return None
+        return user_identity[0]
+
+    @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
         if dryrun:
             return 'dryrun-project-id'

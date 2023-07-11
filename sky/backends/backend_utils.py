@@ -63,7 +63,8 @@ logger = sky_logging.init_logger(__name__)
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
-IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
+# Exclude subnet mask from IP address regex.
+IP_ADDR_REGEX = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?!/\d{1,2})\b'
 SKY_REMOTE_PATH = '~/.sky/wheels'
 SKY_USER_FILE_PATH = '~/.sky/generated'
 
@@ -1637,6 +1638,9 @@ def check_owner_identity(cluster_name: str) -> None:
         for i, (owner,
                 current) in enumerate(zip(owner_identity,
                                           current_user_identity)):
+            # Clean up the owner identiy for the backslash and newlines, caused
+            # by the cloud CLI output, e.g. gcloud.
+            owner = owner.replace('\n', '').replace('\\', '')
             if owner == current:
                 if i != 0:
                     logger.warning(
