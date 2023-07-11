@@ -752,10 +752,23 @@ class GCP(clouds.Cloud):
         return ' '.join(f'labels.{k}={v}' for k, v in tag_filters.items())
     
     @classmethod
-    def check_quota_available_from_accelerator(cls,
-                                               region: str,
-                                               accelerator: str,
-                                               use_spot: bool = False) -> bool:
+    def check_quota_available(cls,
+                              region: str,
+                              instance_type: Optional[str],
+                              accelerator: Optional[str],
+                              use_spot: bool = False) -> bool:
+        
+        """Check if GCP quota is available for `accelerator` in `region`.
+
+        GCP-specific implementation of check_quota_available. The function works by
+        matching the `accelerator` to the a corresponding GCP keyword, and then using
+        the GCP CLI commands to query for the specific quota.
+
+        Returns:
+            False if the quota is found to be zero, and True otherwise.
+        Raises:
+            CalledProcessError: error with the GCP CLI command.
+        """
         
         from sky.clouds.service_catalog import gcp_catalog
 

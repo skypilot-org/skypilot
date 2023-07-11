@@ -691,7 +691,8 @@ class AWS(clouds.Cloud):
     @classmethod
     def check_quota_available(cls,
                               region: str,
-                              instance_type: str,
+                              instance_type: Optional[str],
+                              accelerator: Optional[str],
                               use_spot: bool = False) -> bool:
         """Check if AWS quota is available for `instance_type` in `region`.
 

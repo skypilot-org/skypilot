@@ -473,20 +473,19 @@ class Cloud:
     # pylint: disable=unused-argument
     def check_quota_available(cls,
                               region: str,
-                              instance_type: str,
+                              instance_type: Optional[str],
+                              accelerator: Optional[str],
                               use_spot: bool = False) -> bool:
         """Check if quota is available for `instance_type` in `region`.
 
-        (Currently, check_quota_available is only implemented for AWS.)
-
         The _retry_zones function in cloud_vm_ray_backend goes through different
-        candidate regions and attempts to provision the requested instance_type
-        accelerators in the region, until a successful provisioning happens
-        or all regions with the requested accelerator have been looked at.
-        Previously, SkyPilot would attempt to provision resources in all of
-        these regions. However, many regions would have a zero quota or
-        inadequate quota, meaning these attempted provisions were destined
-        to fail from the get-go.
+        candidate regions and attempts to provision the requested
+        `instance_type` or `accelerator` accelerators in the region, until
+        a successful provisioning happens or all regions with the requested 
+        accelerator have been looked at. Previously, SkyPilot would attempt 
+        to provision resources in all of these regions. However, many regions 
+        would have a zero quota or inadequate quota, meaning these attempted 
+        provisions were destined to fail from the get-go.
 
         Checking the quota is substantially faster than attempting a failed
         provision (~1 second vs 30+ seconds) so this function attempts to
@@ -519,14 +518,6 @@ class Cloud:
             False if the quota is found to be zero, and true otherwise.
         """
 
-        return True
-
-    @classmethod
-    # pylint: disable=unused-argument
-    def check_quota_available_from_accelerator(cls,
-                                               region: str,
-                                               instance_type: str,
-                                               use_spot: bool = False) -> bool:
         return True
 
     @classmethod
