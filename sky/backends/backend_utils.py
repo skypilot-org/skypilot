@@ -798,6 +798,7 @@ def _replace_yaml_dicts(
 def write_cluster_config(
         to_provision: 'resources.Resources',
         num_nodes: int,
+        allowed_rules: List[Tuple[str, str]],
         cluster_config_template: str,
         cluster_name: str,
         local_wheel_path: pathlib.Path,
@@ -906,6 +907,7 @@ def write_cluster_config(
             **{
                 'cluster_name': cluster_name,
                 'num_nodes': num_nodes,
+                'allowed_rules': allowed_rules,
                 'disk_size': to_provision.disk_size,
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the

@@ -21,6 +21,12 @@ provider:
   # AWSNodeProvider.
   vpc_name: {{vpc_name}}
 {% endif %}
+{%- if allowed_rules %}
+  allowed_rules:
+{%- for r0, r1 in allowed_rules %}
+    - [{{r0}}, {{r1}}]
+{%- endfor %}
+{%- endif %}
   use_internal_ips: {{use_internal_ips}}
   # Disable launch config check for worker nodes as it can cause resource
   # leakage.

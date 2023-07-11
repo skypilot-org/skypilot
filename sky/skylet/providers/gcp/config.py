@@ -13,7 +13,6 @@ from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient import discovery, errors
 
-from sky import skypilot_config
 from sky.skylet.providers.gcp.node import (
     MAX_POLLS,
     POLL_INTERVAL,
@@ -623,12 +622,13 @@ def _configure_key_pair(config, compute):
     return config
 
 
-def _get_required_rules():
+def _get_required_rules(config):
     """Returns the required firewall rules."""
     default_rules = FIREWALL_RULES_REQUIRED.copy()
-    ports = skypilot_config.get_nested(("ports",), [])
-    for p in ports:
-        protocol, port = p.split(":")
+    allowed_rules = config["provider"].get("allowed_rules", [])
+    for r in allowed_rules:
+        protocol, port = r[0], str(r[1])
+        # Not set targetTags here to avoid filtered by _merge_and_refine_rule
         default_rules.append(
             {
                 "direction": "INGRESS",
@@ -646,7 +646,7 @@ def _get_required_rules():
 
 def _check_firewall_rules(vpc_name, config, compute):
     """Check if the firewall rules in the VPC are sufficient."""
-    required_rules = _get_required_rules()
+    required_rules = _get_required_rules(config)
 
     operation = compute.networks().getEffectiveFirewalls(
         project=config["provider"]["project_id"], network=vpc_name
@@ -696,9 +696,14 @@ def _check_firewall_rules(vpc_name, config, compute):
         for rule in rules:
             # Rules applied to specific VM (targetTags) may not work for the
             # current VM, so should be skipped.
+            # Filter by targetTags == ['cluster_name']
             # See https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.networks.html#getEffectiveFirewalls # pylint: disable=line-too-long
-            if rule.get("targetTags", None) is not None:
-                continue
+            tags = rule.get("targetTags", None)
+            if tags is not None:
+                if len(tags) != 1:
+                    continue
+                if tags[0] != config["cluster_name"]:
+                    continue
             direction = rule.get("direction", "")
             sources = rule.get("sourceRanges", [])
             allowed = rule.get("allowed", [])
@@ -749,18 +754,21 @@ def _check_firewall_rules(vpc_name, config, compute):
     return True
 
 
-def _get_filewall_rules_template():
+def _get_filewall_rules_template(config):
     """Returns the firewall rules template."""
     default_template = FIREWALL_RULES_TEMPLATE.copy()
-    ports = skypilot_config.get_nested(("ports",), [])
-    for p in ports:
-        protocol, port = p.split(":")
+    allowed_rules = config["provider"].get("allowed_rules", [])
+    for r in allowed_rules:
+        protocol, port = r[0], str(r[1])
+        suffix = (
+            f"-allow-user-specified-ports-{config['cluster_name']}-{protocol}-{port}"
+        )
         default_template.append(
             {
-                "name": "{VPC_NAME}" + f"-allow-user-specified-ports-{protocol}-{port}",
-                "description": f"Allow user-specified port {port} with {protocol} protocol",
+                "name": "{VPC_NAME}" + suffix,
+                "description": f"Allow user-specified port {port} with {protocol} protocol for cluster {config['cluster_name']}",
                 "network": "projects/{PROJ_ID}/global/networks/{VPC_NAME}",
-                "selfLink": "projects/{PROJ_ID}/global/firewalls/{VPC_NAME}-allow-custom",
+                "selfLink": "projects/{PROJ_ID}/global/firewalls/{VPC_NAME}" + suffix,
                 "direction": "INGRESS",
                 "priority": 65534,
                 "allowed": [
@@ -770,9 +778,61 @@ def _get_filewall_rules_template():
                     },
                 ],
                 "sourceRanges": ["0.0.0.0/0"],
+                "targetTags": [config["cluster_name"]],
             }
         )
     return default_template
+
+
+def _is_same_rule(template, existing, PROJ_ID, VPC_NAME):
+    # TODO(tian): simplify this function
+    if existing["disabled"]:
+        return False
+    if existing["name"] != template["name"].format(VPC_NAME=VPC_NAME):
+        return False
+    if not existing["network"].endswith(
+        template["network"].format(PROJ_ID=PROJ_ID, VPC_NAME=VPC_NAME)
+    ):
+        return False
+    if not existing["selfLink"].endswith(
+        template["selfLink"].format(PROJ_ID=PROJ_ID, VPC_NAME=VPC_NAME)
+    ):
+        return False
+    if existing["direction"] != template["direction"]:
+        return False
+    if existing["priority"] != template["priority"]:
+        return False
+    if len(existing["allowed"]) != len(template["allowed"]):
+        return False
+    cmp = lambda x: x["IPProtocol"]
+    for ea, ta in zip(
+        sorted(existing["allowed"], key=cmp), sorted(template["allowed"], key=cmp)
+    ):
+        if ea["IPProtocol"] != ta["IPProtocol"]:
+            return False
+        if "ports" in ea and "ports" not in ta:
+            return False
+        if "ports" not in ea and "ports" in ta:
+            return False
+        if "ports" in ea and "ports" in ta:
+            if sorted(ea["ports"]) != sorted(ta["ports"]):
+                return False
+    if len(existing["sourceRanges"]) != len(template["sourceRanges"]):
+        return False
+    for es, ts in zip(
+        sorted(existing["sourceRanges"]), sorted(template["sourceRanges"])
+    ):
+        if es != ts:
+            return False
+    if "sourceTags" not in existing:
+        # If sourceTags is empty, it apply to all instances in the network
+        return True
+    if len(existing["targetTags"]) != len(template["targetTags"]):
+        return False
+    for et, tt in zip(existing["targetTags"], template["targetTags"]):
+        if et != tt:
+            return False
+    return True
 
 
 def get_usable_vpc(config):
@@ -805,7 +865,10 @@ def get_usable_vpc(config):
             break
 
     if usable_vpc_name is None:
-        logger.info(f"Creating a default VPC network, {SKYPILOT_VPC_NAME}...")
+        st = time.time()
+        logger.info(
+            f"Creating or updating a default VPC network, {SKYPILOT_VPC_NAME}..."
+        )
 
         proj_id = config["provider"]["project_id"]
         # Create a SkyPilot VPC network if it doesn't exist
@@ -819,7 +882,8 @@ def get_usable_vpc(config):
             _create_vpcnet(config, compute, body)
 
         # Create firewall rules
-        for rule in _get_filewall_rules_template():
+        opertaions = []
+        for rule in _get_filewall_rules_template(config):
             # Query firewall rule by its name (unique in a project).
             # If the rule already exists, delete it first.
             rule_name = rule["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
@@ -827,7 +891,20 @@ def get_usable_vpc(config):
                 config, compute, filter=f"(name={rule_name})"
             )
             if len(rule_list) > 0:
+                if len(rule_list) == 1 and _is_same_rule(
+                    rule, rule_list[0], proj_id, SKYPILOT_VPC_NAME
+                ):
+                    logger.info(f"Firewall rule {rule_name} already exists.")
+                    continue
+                logger.info(
+                    f"Firewall rule {rule_name} has a different "
+                    "definition. Deleting and recreating..."
+                )
+                logger.info(f"Template:\n{rule}")
+                logger.info(f"Eixsting:\n{rule_list[0]}")
                 _delete_firewall_rule(config, compute, rule_name)
+            else:
+                logger.info(f"Creating firewall rule {rule_name}...")
 
             body = rule.copy()
             body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
@@ -837,10 +914,15 @@ def get_usable_vpc(config):
             body["selfLink"] = body["selfLink"].format(
                 PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME
             )
-            _create_firewall_rule(config, compute, body)
+            op = _create_firewall_rule_submit(config, compute, body)
+            opertaions.append(op)
+        for op in opertaions:
+            _create_firewall_rule_wait(config, compute, op)
 
         usable_vpc_name = SKYPILOT_VPC_NAME
         logger.info(f"A VPC network {SKYPILOT_VPC_NAME} created.")
+        ed = time.time()
+        logger.info(f"Time to create a VPC network: {ed-st:.5f} sec")
 
     return usable_vpc_name
 
@@ -877,6 +959,7 @@ def _configure_subnet(config, compute):
                     "type": "ONE_TO_ONE_NAT",
                 }
             ],
+            "tags": {"items": [config["cluster_name"]]},
         }
     ]
 
@@ -894,12 +977,16 @@ def _configure_subnet(config, compute):
     return config
 
 
-def _create_firewall_rule(config, compute, body):
+def _create_firewall_rule_submit(config, compute, body):
     operation = (
         compute.firewalls()
         .insert(project=config["provider"]["project_id"], body=body)
         .execute()
     )
+    return operation
+
+
+def _create_firewall_rule_wait(config, compute, operation):
     response = wait_for_compute_global_operation(
         config["provider"]["project_id"], operation, compute
     )

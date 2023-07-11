@@ -17,6 +17,12 @@ provider:
   cache_stopped_nodes: True
   # The GCP project ID.
   project_id: {{gcp_project_id}}
+{%- if allowed_rules %}
+  allowed_rules:
+{%- for r0, r1 in allowed_rules %}
+    - [{{r0}}, {{r1}}]
+{%- endfor %}
+{%- endif %}
 {%- if tpu_vm %}
   _has_tpus: True
 {%- endif %}

@@ -115,6 +115,7 @@ class Task:
         envs: Optional[Dict[str, str]] = None,
         workdir: Optional[str] = None,
         num_nodes: Optional[int] = None,
+        allowed_rules: Optional[List[Tuple[str, str]]] = None,
         # Advanced:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
@@ -169,6 +170,10 @@ class Task:
             setup/run command, where ``run`` can either be a str, meaning all
             nodes get the same command, or a lambda, with the semantics
             documented above.
+          allowed_rules: A list of (rule_name, port) tuples, where each tuple
+            specifies a rule and a port number.  rule_name can be one of
+            [tcp, udp]; port is an string of integer.  If None, only default
+            rules are allowed.
           docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
@@ -187,6 +192,7 @@ class Task:
         # Ignore type error due to a mypy bug.
         # https://github.com/python/mypy/issues/3004
         self.num_nodes = num_nodes  # type: ignore
+        self.allowed_rules = allowed_rules or []
 
         self.inputs = None
         self.outputs = None
@@ -293,6 +299,31 @@ class Task:
         backend_utils.validate_schema(config, schemas.get_task_schema(),
                                       'Invalid task YAML: ')
 
+        allowed_rules = config.pop('allowed_rules', None)
+
+        def _parse_rule(rule_str: str) -> Tuple[str, str]:
+            po_and_port = rule_str.split(':')
+            if len(po_and_port) != 2:
+                raise ValueError(
+                    f'Invalid rule {rule_str}. Must be in the form of '
+                    f'<protocol>:<port>.')
+            protocol, port = po_and_port
+            if protocol not in ['tcp', 'udp']:
+                raise ValueError(
+                    f'Invalid protocol {protocol}. Must be either tcp or udp.')
+            try:
+                int(port)
+            except ValueError as e:
+                raise ValueError(
+                    f'Invalid port {port}. Must be an integer.') from e
+            return protocol, port
+
+        parsed_rules = []
+        if allowed_rules is not None:
+            for rule in allowed_rules:
+                protocol, port = _parse_rule(rule)
+                parsed_rules.append((protocol, port))
+
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
         if config.get('file_mounts') is not None:
@@ -305,6 +336,7 @@ class Task:
             workdir=config.pop('workdir', None),
             setup=config.pop('setup', None),
             num_nodes=config.pop('num_nodes', None),
+            allowed_rules=parsed_rules,
             envs=config.pop('envs', None),
             event_callback=config.pop('event_callback', None),
         )
@@ -882,6 +914,7 @@ class Task:
             resources = list(self.resources)[0]
             add_if_not_none('resources', resources.to_yaml_config())
         add_if_not_none('num_nodes', self.num_nodes)
+        add_if_not_none('allowed_rules', self.allowed_rules)
 
         if self.inputs is not None:
             add_if_not_none('inputs',

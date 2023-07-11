@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import boto3
 import botocore
 
-from sky import skypilot_config
 from sky.skylet.providers.aws.cloudwatch.cloudwatch_helper import (
     CloudwatchHelper as cwh,
 )
@@ -863,8 +862,12 @@ def _check_ami(config):
 
 
 def _upsert_security_groups(config, node_types):
+    st = time.time()
+    logger.info("Creating security groups...")
     security_groups = _get_or_create_vpc_security_groups(config, node_types)
     _upsert_security_group_rules(config, security_groups)
+    ed = time.time()
+    logger.info(f"Security groups created in {ed-st:.5f} seconds.")
 
     return security_groups
 
@@ -996,14 +999,18 @@ def _update_inbound_rules(target_security_group, sgids, config):
     extended_rules = (
         config["provider"].get("security_group", {}).get("IpPermissions", [])
     )
-    ip_permissions = _create_default_inbound_rules(sgids, extended_rules)
+    user_specified_rules = _retrieve_user_specified_rules(
+        config["provider"].get("allowed_rules", [])
+    )
+    ip_permissions = _create_default_inbound_rules(
+        sgids, user_specified_rules, extended_rules
+    )
     target_security_group.authorize_ingress(IpPermissions=ip_permissions)
 
 
-def _create_default_inbound_rules(sgids, extended_rules=None):
+def _create_default_inbound_rules(sgids, user_specified_rules, extended_rules=None):
     if extended_rules is None:
         extended_rules = []
-    user_specified_rules = _retrieve_user_specified_rules
     intracluster_rules = _create_default_intracluster_inbound_rules(sgids)
     ssh_rules = _create_default_ssh_inbound_rules()
     merged_rules = itertools.chain(
@@ -1015,12 +1022,10 @@ def _create_default_inbound_rules(sgids, extended_rules=None):
     return list(merged_rules)
 
 
-def _retrieve_user_specified_rules():
+def _retrieve_user_specified_rules(allowed_rules):
     rules = []
-    ports = skypilot_config.get_nested(("ports",), [])
-    for p in ports:
-        protocol, port = p.split(":")
-        port = int(port)
+    for r in allowed_rules:
+        protocol, port = r[0], r[1]
         rules.append(
             {
                 "FromPort": port,
