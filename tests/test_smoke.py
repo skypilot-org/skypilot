@@ -190,8 +190,27 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
                                                   zone=None)
 
     for region in candidate_regions:
-        if not AWS.check_quota_available(
-                region=region.name, instance_type='p3.16xlarge', use_spot=True):
+        if not AWS.check_quota_available(region=region.name, 
+                                         instance_type='p3.16xlarge', 
+                                         accelerator=None, 
+                                         use_spot=True):
+            return region.name
+
+    return None
+
+def get_gcp_region_for_quota_failover() -> Optional[str]:
+
+    candidate_regions = GCP.regions_with_offering(instance_type=None,
+                                                  accelerators={'A100':1},
+                                                  use_spot=True,
+                                                  region=None,
+                                                  zone=None)
+
+    for region in candidate_regions:
+        if not GCP.check_quota_available(region=region.name,
+                                         instance_type=None,
+                                         accelerator='A100',
+                                         use_spot=True):
             return region.name
 
     return None
@@ -2291,6 +2310,24 @@ def test_aws_zero_quota_failover():
         'aws-zero-quota-failover',
         [
             f'sky launch -y -c {name} --cloud aws --region {region} --gpus V100:8 --use-spot | grep "Found no quota"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+@pytest.mark.gcp
+def test_gcp_zero_quota_failover():
+
+    name = _get_cluster_name()
+    region = get_gcp_region_for_quota_failover()
+
+    if not region:
+        return
+
+    test = Test(
+        'gcp-zero-quota-failover',
+        [
+            f'sky launch -y -c {name} --cloud gcp --region {region} --gpus A100:1 --use-spot | grep "Found no quota"',
         ],
         f'sky down -y {name}',
     )
