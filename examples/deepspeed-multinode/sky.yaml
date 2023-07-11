@@ -38,7 +38,11 @@ setup: |
     pip install -r requirements.txt
 
     # Required by DeepSpeed in multi-node settings.
-    sudo apt-get -y install pdsh
+    #
+    # NOTE(skypilot): DeepSpeed uses `pdsh` to log into each node and calls
+    # `ninja --version`; so it has to be installed system-wide rather than in
+    # the above 'deepspeed' conda env.
+    sudo apt-get -y install pdsh ninja-build
   fi
 
 file_mounts:
