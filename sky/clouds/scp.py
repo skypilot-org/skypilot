@@ -9,6 +9,7 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import status_lib
 from sky.clouds import service_catalog
 from sky.skylet.providers.scp import scp_utils
 from sky import exceptions
@@ -41,7 +42,9 @@ class SCP(clouds.Cloud):
     # MULTI_NODE: Multi-node is not supported by the implementation yet.
     _MULTI_NODE = 'Multi-node is not supported by the SCP Cloud yet.'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.MULTI_NODE: _MULTI_NODE
+        clouds.CloudImplementationFeatures.MULTI_NODE: _MULTI_NODE,
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+            (f'Migrating disk is not supported in {_REPR}.'),
     }
 
     _INDENT_PREFIX = '    '
@@ -333,3 +336,31 @@ class SCP(clouds.Cloud):
                         f'Input: {resources.disk_size}')
             return False, []
         return True, [resources]
+
+    @classmethod
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List[status_lib.ClusterStatus]:
+        del tag_filters, region, zone, kwargs  # Unused.
+
+        # TODO: Multi-node is not supported yet.
+
+        status_map = {
+            'CREATING': status_lib.ClusterStatus.INIT,
+            'EDITING': status_lib.ClusterStatus.INIT,
+            'RUNNING': status_lib.ClusterStatus.UP,
+            'STARTING': status_lib.ClusterStatus.INIT,
+            'RESTARTING': status_lib.ClusterStatus.INIT,
+            'STOPPING': status_lib.ClusterStatus.STOPPED,
+            'STOPPED': status_lib.ClusterStatus.STOPPED,
+            'TERMINATING': None,
+            'TERMINATED': None,
+        }
+        status_list = []
+        vms = scp_utils.SCPClient().list_instances()
+        for node in vms:
+            if node['virtualServerName'] == name:
+                node_status = status_map[node['virtualServerState']]
+                if node_status is not None:
+                    status_list.append(node_status)
+        return status_list

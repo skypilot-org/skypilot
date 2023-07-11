@@ -5,6 +5,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
+from sky import status_lib
 from sky.clouds import service_catalog
 from sky.skylet.providers.lambda_cloud import lambda_utils
 
@@ -34,6 +35,7 @@ class Lambda(clouds.Cloud):
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {_REPR}.',
     }
 
     @classmethod
@@ -263,3 +265,24 @@ class Lambda(clouds.Cloud):
                                 disk_tier: str) -> None:
         raise exceptions.NotSupportedError(
             'Lambda does not support disk tiers.')
+
+    @classmethod
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List[status_lib.ClusterStatus]:
+        status_map = {
+            'booting': status_lib.ClusterStatus.INIT,
+            'active': status_lib.ClusterStatus.UP,
+            'unhealthy': status_lib.ClusterStatus.INIT,
+            'terminated': None,
+        }
+        # TODO(ewzeng): filter by hash_filter_string to be safe
+        status_list = []
+        vms = lambda_utils.LambdaCloudClient().list_instances()
+        possible_names = [f'{name}-head', f'{name}-worker']
+        for node in vms:
+            if node.get('name') in possible_names:
+                node_status = status_map[node['status']]
+                if node_status is not None:
+                    status_list.append(node_status)
+        return status_list

@@ -95,25 +95,32 @@ install_requires = [
     # we deprecate Python 3.7 (this will take a while).
     "typing_extensions; python_version < '3.8'",
     'filelock>=3.6.0',
-    # Adopted from ray's setup.py:
+    # Adopted from ray's setup.py: https://github.com/ray-project/ray/blob/ray-2.4.0/python/setup.py
+    # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard fails to start when
+    # ray start is called (#2054).
     # Tracking issue: https://github.com/ray-project/ray/issues/30984
-    "grpcio >= 1.32.0, <= 1.49.1; python_version < '3.10' and sys_platform == 'darwin'",  # noqa:E501
-    "grpcio >= 1.42.0, <= 1.49.1; python_version >= '3.10' and sys_platform == 'darwin'",  # noqa:E501
+    "grpcio >= 1.32.0, <= 1.49.1, != 1.48.0; python_version < '3.10' and sys_platform == 'darwin'",  # noqa:E501
+    "grpcio >= 1.42.0, <= 1.49.1, != 1.48.0; python_version >= '3.10' and sys_platform == 'darwin'",  # noqa:E501
     # Original issue: https://github.com/ray-project/ray/issues/33833
-    "grpcio >= 1.32.0, <= 1.51.3; python_version < '3.10' and sys_platform != 'darwin'",  # noqa:E501
-    "grpcio >= 1.42.0, <= 1.51.3; python_version >= '3.10' and sys_platform != 'darwin'",  # noqa:E501
+    "grpcio >= 1.32.0, <= 1.51.3, != 1.48.0; python_version < '3.10' and sys_platform != 'darwin'",  # noqa:E501
+    "grpcio >= 1.42.0, <= 1.51.3, != 1.48.0; python_version >= '3.10' and sys_platform != 'darwin'",  # noqa:E501
     'packaging',
     # Adopted from ray's setup.py:
     # https://github.com/ray-project/ray/blob/86fab1764e618215d8131e8e5068f0d493c77023/python/setup.py#L326
     'protobuf >= 3.15.3, != 3.19.5',
     'psutil',
     'pulp',
+    # Ray job has an issue with pydantic>2.0.0, due to API changes of pydantic. See
+    # https://github.com/ray-project/ray/issues/36990
+    'pydantic<2.0'
 ]
 
-# NOTE: Change the templates/spot-controller.yaml.j2 file if any of the following
-# packages dependencies are changed.
+# NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
+# following packages dependencies are changed.
 aws_dependencies = [
-    # awscli>=1.27.10 is required for SSO support.
+    # NOTE: this installs CLI V1. To use AWS SSO (e.g., `aws sso login`), users
+    # should instead use CLI V2 which is not pip-installable. See
+    # https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html.
     'awscli',
     'boto3',
     # 'Crypto' module used in authentication.py for AWS.
@@ -136,6 +143,7 @@ extras_require: Dict[str, List[str]] = {
     'lambda': [],
     'cloudflare': aws_dependencies,
     'scp': [],
+    'oci': ['oci'],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

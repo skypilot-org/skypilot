@@ -6,7 +6,6 @@ Concepts:
 - Cluster handle: (non-user facing) an opaque backend handle for us to
   interact with a cluster.
 """
-import enum
 import json
 import os
 import pathlib
@@ -17,8 +16,7 @@ import typing
 from typing import Any, Dict, List, Tuple, Optional, Set
 import uuid
 
-import colorama
-
+from sky import status_lib
 from sky import clouds
 from sky.adaptors import cloudflare
 from sky.data import storage as storage_lib
@@ -118,52 +116,6 @@ def create_table(cursor, conn):
 _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
 
 
-class ClusterStatus(enum.Enum):
-    """Cluster status as recorded in table 'clusters'."""
-    # NOTE: these statuses are as recorded in our local cache, the table
-    # 'clusters'.  The actual cluster state may be different (e.g., an UP
-    # cluster getting killed manually by the user or the cloud provider).
-
-    # Initializing.  This means a backend.provision() call has started but has
-    # not successfully finished. The cluster may be undergoing setup, may have
-    # failed setup, may be live or down.
-    INIT = 'INIT'
-
-    # The cluster is recorded as up.  This means a backend.provision() has
-    # previously succeeded.
-    UP = 'UP'
-
-    # Stopped.  This means a `sky stop` call has previously succeeded.
-    STOPPED = 'STOPPED'
-
-    def colored_str(self):
-        color = _STATUS_TO_COLOR[self]
-        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
-
-
-_STATUS_TO_COLOR = {
-    ClusterStatus.INIT: colorama.Fore.BLUE,
-    ClusterStatus.UP: colorama.Fore.GREEN,
-    ClusterStatus.STOPPED: colorama.Fore.YELLOW,
-}
-
-
-class StorageStatus(enum.Enum):
-    """Storage status as recorded in table 'storage'."""
-
-    # Initializing and uploading storage
-    INIT = 'INIT'
-
-    # Initialization failed
-    INIT_FAILED = 'INIT_FAILED'
-
-    # Failed to Upload to Cloud
-    UPLOAD_FAILED = 'UPLOAD_FAILED'
-
-    # Finished uploading, in terminal state
-    READY = 'READY'
-
-
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle',
                           requested_resources: Optional[Set[Any]],
@@ -184,7 +136,9 @@ def add_or_update_cluster(cluster_name: str,
     handle = pickle.dumps(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None
     last_use = common_utils.get_pretty_entry_point() if is_launch else None
-    status = ClusterStatus.UP if ready else ClusterStatus.INIT
+    status = status_lib.ClusterStatus.INIT
+    if ready:
+        status = status_lib.ClusterStatus.UP
 
     # TODO (sumanth): Cluster history table will have multiple entries
     # when the cluster failover through multiple regions (one entry per region).
@@ -200,8 +154,13 @@ def add_or_update_cluster(cluster_name: str,
 
     # if this is the cluster init or we are starting after a stop
     if not usage_intervals or usage_intervals[-1][-1] is not None:
-        assert cluster_launched_at is not None, (cluster_name, is_launch,
-                                                 usage_intervals)
+        if cluster_launched_at is None:
+            # This could happen when the cluster is restarted manually on the
+            # cloud console. In this case, we will use the current time as the
+            # cluster launched time.
+            # TODO(zhwu): We should use the time when the cluster is restarted
+            # to be more accurate.
+            cluster_launched_at = int(time.time())
         usage_intervals.append((cluster_launched_at, None))
 
     if requested_resources:
@@ -264,10 +223,10 @@ def add_or_update_cluster(cluster_name: str,
             status.value,
             # autostop
             cluster_name,
-            ClusterStatus.STOPPED.value,
+            status_lib.ClusterStatus.STOPPED.value,
             # to_down
             cluster_name,
-            ClusterStatus.STOPPED.value,
+            status_lib.ClusterStatus.STOPPED.value,
             # metadata
             cluster_name,
             # owner
@@ -348,7 +307,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
             'UPDATE clusters SET handle=(?), status=(?) '
             'WHERE name=(?)', (
                 pickle.dumps(handle),
-                ClusterStatus.STOPPED.value,
+                status_lib.ClusterStatus.STOPPED.value,
                 cluster_name,
             ))
     _DB.conn.commit()
@@ -371,7 +330,8 @@ def get_glob_cluster_names(cluster_name: str) -> List[str]:
     return [row[0] for row in rows]
 
 
-def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
+def set_cluster_status(cluster_name: str,
+                       status: status_lib.ClusterStatus) -> None:
     _DB.cursor.execute('UPDATE clusters SET status=(?) WHERE name=(?)', (
         status.value,
         cluster_name,
@@ -563,7 +523,7 @@ def get_cluster_from_name(
             'launched_at': launched_at,
             'handle': pickle.loads(handle),
             'last_use': last_use,
-            'status': ClusterStatus[status],
+            'status': status_lib.ClusterStatus[status],
             'autostop': autostop,
             'to_down': bool(to_down),
             'owner': _load_owner(owner),
@@ -588,7 +548,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'launched_at': launched_at,
             'handle': pickle.loads(handle),
             'last_use': last_use,
-            'status': ClusterStatus[status],
+            'status': status_lib.ClusterStatus[status],
             'autostop': autostop,
             'to_down': bool(to_down),
             'owner': _load_owner(owner),
@@ -625,7 +585,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
         ) = row[:6]
 
         if status is not None:
-            status = ClusterStatus[status]
+            status = status_lib.ClusterStatus[status]
 
         record = {
             'name': name,
@@ -690,13 +650,13 @@ def set_enabled_clouds(enabled_clouds: List[str]) -> None:
 
 def add_or_update_storage(storage_name: str,
                           storage_handle: 'Storage.StorageMetadata',
-                          storage_status: StorageStatus):
+                          storage_status: status_lib.StorageStatus):
     storage_launched_at = int(time.time())
     handle = pickle.dumps(storage_handle)
     last_use = common_utils.get_pretty_entry_point()
 
     def status_check(status):
-        return status in StorageStatus
+        return status in status_lib.StorageStatus
 
     if not status_check(storage_status):
         raise ValueError(f'Error in updating global state. Storage Status '
@@ -713,7 +673,8 @@ def remove_storage(storage_name: str):
     _DB.conn.commit()
 
 
-def set_storage_status(storage_name: str, status: StorageStatus) -> None:
+def set_storage_status(storage_name: str,
+                       status: status_lib.StorageStatus) -> None:
     _DB.cursor.execute('UPDATE storage SET status=(?) WHERE name=(?)', (
         status.value,
         storage_name,
@@ -725,12 +686,12 @@ def set_storage_status(storage_name: str, status: StorageStatus) -> None:
         raise ValueError(f'Storage {storage_name} not found.')
 
 
-def get_storage_status(storage_name: str) -> Optional[StorageStatus]:
+def get_storage_status(storage_name: str) -> Optional[status_lib.StorageStatus]:
     assert storage_name is not None, 'storage_name cannot be None'
     rows = _DB.cursor.execute('SELECT status FROM storage WHERE name=(?)',
                               (storage_name,))
     for (status,) in rows:
-        return StorageStatus[status]
+        return status_lib.StorageStatus[status]
     return None
 
 
@@ -783,6 +744,6 @@ def get_storage() -> List[Dict[str, Any]]:
             'launched_at': launched_at,
             'handle': pickle.loads(handle),
             'last_use': last_use,
-            'status': StorageStatus[status],
+            'status': status_lib.StorageStatus[status],
         })
     return records

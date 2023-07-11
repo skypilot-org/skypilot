@@ -14,6 +14,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot
+from sky import status_lib
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -168,12 +169,12 @@ def _start(
         cluster_name)
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
-    if not force and cluster_status == global_user_state.ClusterStatus.UP:
+    if not force and cluster_status == status_lib.ClusterStatus.UP:
         sky_logging.print(f'Cluster {cluster_name!r} is already up.')
         return handle
     assert force or cluster_status in (
-        global_user_state.ClusterStatus.INIT,
-        global_user_state.ClusterStatus.STOPPED), cluster_status
+        status_lib.ClusterStatus.INIT,
+        status_lib.ClusterStatus.STOPPED), cluster_status
 
     backend = backend_utils.get_backend_from_handle(handle)
     if not isinstance(backend, backends.CloudVmRayBackend):
@@ -560,6 +561,7 @@ def cancel(
         cluster_name, operation_str='Cancelling jobs')
 
     # Check the status of the cluster.
+    handle = None
     try:
         handle = backend_utils.check_cluster_available(
             cluster_name,
@@ -572,10 +574,14 @@ def cancel(
                 isinstance(e.handle, backends.CloudVmRayResourceHandle)), e
         if (e.handle is None or e.handle.head_ip is None):
             raise
+        handle = e.handle
         # Even if the cluster is not UP, we can still try to cancel the job if
         # the head node is still alive. This is useful when a spot cluster's
         # worker node is preempted, but we can still cancel the job on the head
         # node.
+
+    assert handle is not None, (
+        f'handle for cluster {cluster_name!r} should not be None')
 
     backend = backend_utils.get_backend_from_handle(handle)
 
@@ -776,8 +782,7 @@ def spot_queue(refresh: bool,
     controller_status, handle = spot.is_spot_controller_up(stop_msg)
 
     if (refresh and controller_status in [
-            global_user_state.ClusterStatus.STOPPED,
-            global_user_state.ClusterStatus.INIT
+            status_lib.ClusterStatus.STOPPED, status_lib.ClusterStatus.INIT
     ]):
         sky_logging.print(f'{colorama.Fore.YELLOW}'
                           'Restarting controller for latest status...'
@@ -787,7 +792,7 @@ def spot_queue(refresh: bool,
             '[cyan] Checking spot jobs - restarting '
             'controller[/]')
         handle = _start(spot.SPOT_CONTROLLER_NAME)
-        controller_status = global_user_state.ClusterStatus.UP
+        controller_status = status_lib.ClusterStatus.UP
         log_utils.force_update_rich_status('[cyan] Checking spot jobs[/]')
 
     if handle is None or handle.head_ip is None:
@@ -821,7 +826,13 @@ def spot_queue(refresh: bool,
 
     jobs = spot.load_spot_job_queue(job_table_payload)
     if skip_finished:
-        jobs = list(filter(lambda job: not job['status'].is_terminal(), jobs))
+        # Filter out the finished jobs. If a multi-task job is partially
+        # finished, we will include all its tasks.
+        non_finished_tasks = list(
+            filter(lambda job: not job['status'].is_terminal(), jobs))
+        non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
+        jobs = list(
+            filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
     return jobs
 
 
@@ -903,7 +914,7 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
         f'`sky start {spot.SPOT_CONTROLLER_NAME}`.')
     if handle is None or handle.head_ip is None:
         msg = 'All jobs finished.'
-        if controller_status == global_user_state.ClusterStatus.INIT:
+        if controller_status == status_lib.ClusterStatus.INIT:
             msg = ''
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(msg,

@@ -1,5 +1,4 @@
 """skylet events"""
-import getpass
 import math
 import os
 import re
@@ -53,20 +52,12 @@ class SkyletEvent:
         raise NotImplementedError
 
 
-class JobUpdateEvent(SkyletEvent):
-    """Skylet event for updating job status."""
+class JobSchedulerEvent(SkyletEvent):
+    """Skylet event for scheduling jobs"""
     EVENT_INTERVAL_SECONDS = 300
 
-    # Only update status of the jobs after this many seconds of job submission,
-    # to avoid race condition with `ray job` to make sure it job has been
-    # correctly updated.
-    # TODO(zhwu): This number should be tuned based on heuristics.
-    _SUBMITTED_GAP_SECONDS = 60
-
     def _run(self):
-        job_owner = getpass.getuser()
-        job_lib.update_status(job_owner,
-                              submitted_gap_sec=self._SUBMITTED_GAP_SECONDS)
+        job_lib.scheduler.schedule_step()
 
 
 class SpotJobUpdateEvent(SkyletEvent):

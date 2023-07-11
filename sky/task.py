@@ -1,5 +1,6 @@
 """Task: a coarse-grained stage in an application."""
 import inspect
+import json
 import os
 import re
 import typing
@@ -68,6 +69,40 @@ def _is_valid_env_var(name: str) -> bool:
     return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
 
 
+def _fill_in_env_vars_in_file_mounts(
+    file_mounts: Dict[str, Any],
+    task_envs: Dict[str, str],
+) -> Dict[str, Any]:
+    """Detects env vars in file_mounts and fills them with task_envs.
+
+    Use cases of env vars in file_mounts:
+    - dst/src paths; e.g.,
+        /model_path/llama-${SIZE}b: s3://llama-weights/llama-${SIZE}b
+    - storage's name (bucket name)
+    - storage's source (local path)
+
+    We simply dump file_mounts into a json string, and replace env vars using
+    regex. This should be safe as file_mounts has been schema-validated.
+
+    Env vars of the following forms are detected:
+        - ${ENV}
+        - $ENV
+    where <ENV> must appear in task.envs.
+    """
+    # TODO(zongheng): support ${ENV:-default}?
+    file_mounts_str = json.dumps(file_mounts)
+
+    def replace_var(match):
+        var_name = match.group(1)
+        # If the variable isn't in the dictionary, return it unchanged
+        return task_envs.get(var_name, match.group(0))
+
+    # Pattern for valid env var names in bash.
+    pattern = r'\$\{?\b([a-zA-Z_][a-zA-Z0-9_]*)\b\}?'
+    file_mounts_str = re.sub(pattern, replace_var, file_mounts_str)
+    return json.loads(file_mounts_str)
+
+
 class Task:
     """Task: a computation to be run on the cloud."""
 
@@ -82,6 +117,7 @@ class Task:
         num_nodes: Optional[int] = None,
         # Advanced:
         docker_image: Optional[str] = None,
+        event_callback: Optional[str] = None,
     ):
         """Initializes a Task.
 
@@ -147,6 +183,7 @@ class Task:
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
+        self.event_callback = event_callback
         # Ignore type error due to a mypy bug.
         # https://github.com/python/mypy/issues/3004
         self.num_nodes = num_nodes  # type: ignore
@@ -161,9 +198,9 @@ class Task:
                                                     int]] = None
         self.file_mounts: Optional[Dict[str, str]] = None
 
-        # Only set when 'self' is a spot controller task: 'self.spot_task' is
-        # the underlying managed spot task (Task object).
-        self.spot_task: Optional['Task'] = None
+        # Only set when 'self' is a spot controller task: 'self.spot_dag' is
+        # the underlying managed spot dag (sky.Dag object).
+        self.spot_dag: Optional['sky.Dag'] = None
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
@@ -231,37 +268,36 @@ class Task:
                         f'a symlink to a directory). {self.workdir} not found.')
 
     @staticmethod
-    def from_yaml(yaml_path: str) -> 'Task':
-        """Initializes a task from a task YAML.
+    def from_yaml_config(
+        config: Dict[str, Any],
+        env_overrides: Optional[List[Tuple[str, str]]] = None,
+    ) -> 'Task':
+        if env_overrides is not None:
+            # We must override env vars before constructing the Task, because
+            # the Storage object creation is eager and it (its name/source
+            # fields) may depend on env vars.
+            #
+            # FIXME(zongheng): The eagerness / how we construct Task's from
+            # entrypoint (YAML, CLI args) should be fixed.
+            new_envs = config.get('envs', {})
+            new_envs.update(env_overrides)
+            config['envs'] = new_envs
 
-        Example:
-            .. code-block:: python
-
-                task = sky.Task.from_yaml('/path/to/task.yaml')
-
-        Args:
-          yaml_path: file path to a valid task yaml file.
-
-        Raises:
-          ValueError: if the path gets loaded into a str instead of a dict; or
-            if there are any other parsing errors.
-        """
-        with open(os.path.expanduser(yaml_path), 'r') as f:
-            # TODO(zongheng): use
-            #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
-            # to raise errors on duplicate keys.
-            config = yaml.safe_load(f)
-
-        if isinstance(config, str):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('YAML loaded as str, not as dict. '
-                                 f'Is it correct? Path: {yaml_path}')
-
-        if config is None:
-            config = {}
+        # More robust handling for 'envs': explicitly convert keys and values to
+        # str, since users may pass '123' as keys/values which will get parsed
+        # as int causing validate_schema() to fail.
+        envs = config.get('envs')
+        if envs is not None and isinstance(envs, dict):
+            config['envs'] = {str(k): str(v) for k, v in envs.items()}
 
         backend_utils.validate_schema(config, schemas.get_task_schema(),
                                       'Invalid task YAML: ')
+
+        # Fill in any Task.envs into file_mounts (src/dst paths, storage
+        # name/source).
+        if config.get('file_mounts') is not None:
+            config['file_mounts'] = _fill_in_env_vars_in_file_mounts(
+                config['file_mounts'], config.get('envs', {}))
 
         task = Task(
             config.pop('name', None),
@@ -270,6 +306,7 @@ class Task:
             setup=config.pop('setup', None),
             num_nodes=config.pop('num_nodes', None),
             envs=config.pop('envs', None),
+            event_callback=config.pop('event_callback', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -297,8 +334,7 @@ class Task:
         all_storages = fm_storages
         for storage in all_storages:
             mount_path = storage[0]
-            assert mount_path, \
-                'Storage mount path cannot be empty.'
+            assert mount_path, 'Storage mount path cannot be empty.'
             try:
                 storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
             except exceptions.StorageSourceError as e:
@@ -332,6 +368,37 @@ class Task:
         task.set_resources({resources})
         assert not config, f'Invalid task args: {config.keys()}'
         return task
+
+    @staticmethod
+    def from_yaml(yaml_path: str) -> 'Task':
+        """Initializes a task from a task YAML.
+
+        Example:
+            .. code-block:: python
+
+                task = sky.Task.from_yaml('/path/to/task.yaml')
+
+        Args:
+          yaml_path: file path to a valid task yaml file.
+
+        Raises:
+          ValueError: if the path gets loaded into a str instead of a dict; or
+            if there are any other parsing errors.
+        """
+        with open(os.path.expanduser(yaml_path), 'r') as f:
+            # TODO(zongheng): use
+            #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
+            # to raise errors on duplicate keys.
+            config = yaml.safe_load(f)
+
+        if isinstance(config, str):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('YAML loaded as str, not as dict. '
+                                 f'Is it correct? Path: {yaml_path}')
+
+        if config is None:
+            config = {}
+        return Task.from_yaml_config(config)
 
     @property
     def num_nodes(self) -> int:
@@ -646,7 +713,7 @@ class Task:
 
         Different from set_storage_mounts(), this function updates into the
         existing storage_mounts (calls ``dict.update()``), rather than
-        overwritting it.
+        overwriting it.
 
         This should be called before provisioning in order to take effect.
 
@@ -826,6 +893,7 @@ class Task:
 
         add_if_not_none('setup', self.setup)
         add_if_not_none('workdir', self.workdir)
+        add_if_not_none('event_callback', self.event_callback)
         add_if_not_none('run', self.run)
         add_if_not_none('envs', self.envs, no_empty=True)
 

@@ -2,6 +2,8 @@
 from typing import Dict, List, Optional, Union
 from typing_extensions import Literal
 
+import colorama
+
 from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
@@ -19,33 +21,19 @@ _DEFAULT_DISK_SIZE_GB = 256
 
 
 class Resources:
-    """A cloud resource bundle.
+    """Resources: compute requirements of Tasks.
 
-    Used
-      * for representing resource requests for tasks/apps
-      * as a "filter" to get concrete launchable instances
-      * for calculating billing
-      * for provisioning on a cloud
+    Used:
 
-    Examples:
+    * for representing resource requests for tasks/apps
+    * as a "filter" to get concrete launchable instances
+    * for calculating billing
+    * for provisioning on a cloud
 
-        # Fully specified cloud and instance type (is_launchable() is True).
-        sky.Resources(clouds.AWS(), 'p3.2xlarge')
-        sky.Resources(clouds.GCP(), 'n1-standard-16')
-        sky.Resources(clouds.GCP(), 'n1-standard-8', 'V100')
-
-        # Specifying required resources; the system decides the cloud/instance
-        # type. The below are equivalent:
-        sky.Resources(accelerators='V100')
-        sky.Resources(accelerators='V100:1')
-        sky.Resources(accelerators={'V100': 1})
-
-        # TODO:
-        sky.Resources(requests={'mem': '16g', 'cpu': 8})
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 9
+    _VERSION = 10
 
     def __init__(
         self,
@@ -57,12 +45,76 @@ class Resources:
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
         spot_recovery: Optional[str] = None,
-        disk_size: Optional[int] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
+        disk_size: Optional[int] = None,
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
+        # Internal use only.
+        _is_image_managed: Optional[bool] = None,
     ):
+        """Initialize a Resources object.
+
+        All fields are optional.  ``Resources.is_launchable`` decides whether
+        the Resources is fully specified to launch an instance.
+
+        Examples:
+          .. code-block:: python
+
+            # Fully specified cloud and instance type (is_launchable() is True).
+            sky.Resources(clouds.AWS(), 'p3.2xlarge')
+            sky.Resources(clouds.GCP(), 'n1-standard-16')
+            sky.Resources(clouds.GCP(), 'n1-standard-8', 'V100')
+
+            # Specifying required resources; the system decides the
+            # cloud/instance type. The below are equivalent:
+            sky.Resources(accelerators='V100')
+            sky.Resources(accelerators='V100:1')
+            sky.Resources(accelerators={'V100': 1})
+            sky.Resources(cpus='2+', memory='16+', accelerators='V100')
+
+        Args:
+          cloud: the cloud to use.
+          instance_type: the instance type to use.
+          cpus: the number of CPUs required for the task.
+            If a str, must be a string of the form ``'2'`` or ``'2+'``, where
+            the ``+`` indicates that the task requires at least 2 CPUs.
+          memory: the amount of memory in GiB required. If a
+            str, must be a string of the form ``'16'`` or ``'16+'``, where
+            the ``+`` indicates that the task requires at least 16 GB of memory.
+          accelerators: the accelerators required. If a str, must be
+            a string of the form ``'V100'`` or ``'V100:2'``, where the ``:2``
+            indicates that the task requires 2 V100 GPUs. If a dict, must be a
+            dict of the form ``{'V100': 2}`` or ``{'tpu-v2-8': 1}``.
+          accelerator_args: accelerator-specific arguments. For example,
+            ``{'tpu_vm': True, 'runtime_version': 'tpu-vm-base'}`` for TPUs.
+          use_spot: whether to use spot instances. If None, defaults to
+            False.
+          spot_recovery: the spot recovery strategy to use for the managed
+            spot to recover the cluster from preemption. Refer to
+            `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/spot/recovery_strategy.py>`__ # pylint: disable=line-too-long
+            for more details.
+          region: the region to use.
+          zone: the zone to use.
+          image_id: the image ID to use. If a str, must be a string
+            of the image id from the cloud, such as AWS:
+            ``'ami-1234567890abcdef0'``, GCP:
+            ``'projects/my-project-id/global/images/my-image-name'``;
+            Or, a image tag provided by SkyPilot, such as AWS:
+            ``'skypilot:gpu-ubuntu-2004'``. If a dict, must be a dict mapping
+            from region to image ID, such as:
+
+            .. code-block:: python
+
+              {
+                'us-west1': 'ami-1234567890abcdef0',
+                'us-east1': 'ami-1234567890abcdef0'
+              }
+
+          disk_size: the size of the OS disk in GiB.
+          disk_tier: the disk performance tier to use. If None, defaults to
+            ``'medium'``.
+        """
         self._version = self._VERSION
         self._cloud = cloud
         self._region: Optional[str] = None
@@ -75,7 +127,8 @@ class Resources:
         self._use_spot = use_spot if use_spot is not None else False
         self._spot_recovery = None
         if spot_recovery is not None:
-            self._spot_recovery = spot_recovery.upper()
+            if spot_recovery.strip().lower() != 'none':
+                self._spot_recovery = spot_recovery.upper()
 
         if disk_size is not None:
             if round(disk_size) != disk_size:
@@ -98,6 +151,7 @@ class Resources:
                 self._image_id = {
                     k.strip(): v.strip() for k, v in image_id.items()
                 }
+        self._is_image_managed = _is_image_managed
 
         self._disk_tier = disk_tier
 
@@ -282,6 +336,10 @@ class Resources:
     @property
     def disk_tier(self) -> str:
         return self._disk_tier
+
+    @property
+    def is_image_managed(self) -> Optional[bool]:
+        return self._is_image_managed
 
     def _set_cpus(
         self,
@@ -473,6 +531,18 @@ class Resources:
                 continue
             # TODO: filter out the zones not available in the vpc_name
             filtered_regions.append(region)
+
+        # Friendlier UX. Otherwise users only get a generic
+        # ResourcesUnavailableError message without mentioning
+        # ssh_proxy_command.
+        if not filtered_regions:
+            yellow = colorama.Fore.YELLOW
+            reset = colorama.Style.RESET_ALL
+            logger.warning(
+                f'{yellow}Request {self} cannot be satisfied by any feasible '
+                'region. To fix, check that ssh_proxy_command\'s region keys '
+                f'include the regions to use.{reset}')
+
         return filtered_regions
 
     def _try_validate_instance_type(self) -> None:
@@ -647,13 +717,15 @@ class Resources:
                 raise ValueError(
                     'Cloud must be specified when image_id is provided.')
 
+        # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
         if not self._cloud.is_same_cloud(
-                clouds.IBM()) and not self._cloud.is_same_cloud(
-                    clouds.AWS()) and not self._cloud.is_same_cloud(
-                        clouds.GCP()):
+                clouds.AWS()) and not self._cloud.is_same_cloud(
+                    clouds.GCP()) and not self._cloud.is_same_cloud(
+                        clouds.IBM()) and not self._cloud.is_same_cloud(
+                            clouds.OCI()):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'image_id is only supported for AWS, GCP and IBM, please '
+                    'image_id is only supported for AWS/GCP/IBM/OCI, please '
                     'explicitly specify the cloud.')
 
         if self._region is not None:
@@ -829,6 +901,8 @@ class Resources:
             self.accelerators is None,
             self.accelerator_args is None,
             not self._use_spot_specified,
+            self.disk_size == _DEFAULT_DISK_SIZE_GB,
+            self._image_id is None,
         ])
 
     def copy(self, **override) -> 'Resources':
@@ -849,6 +923,8 @@ class Resources:
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
+            _is_image_managed=override.pop('_is_image_managed',
+                                           self._is_image_managed),
         )
         assert len(override) == 0
         return resources
@@ -898,11 +974,12 @@ class Resources:
         if config.get('zone') is not None:
             resources_fields['zone'] = config.pop('zone')
         if config.get('image_id') is not None:
-            logger.warning('image_id in resources is experimental. It only '
-                           'supports AWS/GCP/IBM.')
             resources_fields['image_id'] = config.pop('image_id')
         if config.get('disk_tier') is not None:
             resources_fields['disk_tier'] = config.pop('disk_tier')
+        if config.get('_is_image_managed') is not None:
+            resources_fields['_is_image_managed'] = config.pop(
+                '_is_image_managed')
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -930,6 +1007,8 @@ class Resources:
         add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
         add_if_not_none('disk_tier', self.disk_tier)
+        if self._is_image_managed is not None:
+            config['_is_image_managed'] = self._is_image_managed
         return config
 
     def __setstate__(self, state):
@@ -991,5 +1070,8 @@ class Resources:
 
         if version < 9:
             self._disk_tier = None
+
+        if version < 10:
+            self._is_image_managed = None
 
         self.__dict__.update(state)
