@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import boto3
 import botocore
 
+from sky import skypilot_config
 from sky.skylet.providers.aws.cloudwatch.cloudwatch_helper import (
     CloudwatchHelper as cwh,
 )
@@ -1002,14 +1003,33 @@ def _update_inbound_rules(target_security_group, sgids, config):
 def _create_default_inbound_rules(sgids, extended_rules=None):
     if extended_rules is None:
         extended_rules = []
+    user_specified_rules = _retrieve_user_specified_rules
     intracluster_rules = _create_default_intracluster_inbound_rules(sgids)
     ssh_rules = _create_default_ssh_inbound_rules()
     merged_rules = itertools.chain(
+        user_specified_rules,
         intracluster_rules,
         ssh_rules,
         extended_rules,
     )
     return list(merged_rules)
+
+
+def _retrieve_user_specified_rules():
+    rules = []
+    ports = skypilot_config.get_nested(("ports",), [])
+    for p in ports:
+        protocol, port = p.split(":")
+        port = int(port)
+        rules.append(
+            {
+                "FromPort": port,
+                "ToPort": port,
+                "IpProtocol": protocol,
+                "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
+            }
+        )
+    return rules
 
 
 def _create_default_intracluster_inbound_rules(intracluster_sgids):

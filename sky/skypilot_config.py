@@ -125,6 +125,30 @@ def to_dict() -> Dict[str, Any]:
     return {}
 
 
+def _syntax_check_for_ports() -> None:
+    ports = get_nested(('ports',), [])
+
+    def check_port(port_str: str) -> bool:
+        if not isinstance(port_str, str):
+            return False
+        protocol_and_port = port_str.split(':')
+        if len(protocol_and_port) != 2:
+            return False
+        protocol, port = protocol_and_port
+        if protocol not in ['tcp', 'udp']:
+            return False
+        if not port.isdigit():
+            return False
+        return True
+
+    for port in ports:
+        if not check_port(port):
+            raise ValueError(f'Invalid port config {port!r} '
+                             '(expected a string in the format of '
+                             '[tcp|udp]:port, e.g. '
+                             'tcp:80, udp:8080)')
+
+
 def _syntax_check_for_ssh_proxy_command(cloud: str) -> None:
     ssh_proxy_command_config = get_nested((cloud.lower(), 'ssh_proxy_command'),
                                           None)
@@ -160,6 +184,7 @@ def _try_load_config() -> None:
         except yaml.YAMLError as e:
             logger.error(f'Error in loading config file ({config_path}):', e)
 
+        _syntax_check_for_ports()
         for cloud in clouds.CLOUD_REGISTRY:
             _syntax_check_for_ssh_proxy_command(cloud)
         logger.debug('Config syntax check passed.')

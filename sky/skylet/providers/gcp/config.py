@@ -13,6 +13,7 @@ from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient import discovery, errors
 
+from sky import skypilot_config
 from sky.skylet.providers.gcp.node import (
     MAX_POLLS,
     POLL_INTERVAL,
@@ -622,9 +623,30 @@ def _configure_key_pair(config, compute):
     return config
 
 
+def _get_required_rules():
+    """Returns the required firewall rules."""
+    default_rules = FIREWALL_RULES_REQUIRED.copy()
+    ports = skypilot_config.get_nested(("ports",), [])
+    for p in ports:
+        protocol, port = p.split(":")
+        default_rules.append(
+            {
+                "direction": "INGRESS",
+                "allowed": [
+                    {
+                        "IPProtocol": protocol,
+                        "ports": [port],
+                    }
+                ],
+                "sourceRanges": ["0.0.0.0/0"],
+            }
+        )
+    return default_rules
+
+
 def _check_firewall_rules(vpc_name, config, compute):
     """Check if the firewall rules in the VPC are sufficient."""
-    required_rules = FIREWALL_RULES_REQUIRED.copy()
+    required_rules = _get_required_rules()
 
     operation = compute.networks().getEffectiveFirewalls(
         project=config["provider"]["project_id"], network=vpc_name
@@ -672,6 +694,11 @@ def _check_firewall_rules(vpc_name, config, compute):
         source2rules: Dict[Tuple[str, str], Dict[str, Set[int]]] = {}
         source2allowed_list: Dict[Tuple[str, str], List[Dict[str, str]]] = {}
         for rule in rules:
+            # Rules applied to specific VM (targetTags) may not work for the
+            # current VM, so should be skipped.
+            # See https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.networks.html#getEffectiveFirewalls # pylint: disable=line-too-long
+            if rule.get("targetTags", None) is not None:
+                continue
             direction = rule.get("direction", "")
             sources = rule.get("sourceRanges", [])
             allowed = rule.get("allowed", [])
@@ -722,6 +749,32 @@ def _check_firewall_rules(vpc_name, config, compute):
     return True
 
 
+def _get_filewall_rules_template():
+    """Returns the firewall rules template."""
+    default_template = FIREWALL_RULES_TEMPLATE.copy()
+    ports = skypilot_config.get_nested(("ports",), [])
+    for p in ports:
+        protocol, port = p.split(":")
+        default_template.append(
+            {
+                "name": "{VPC_NAME}" + f"-allow-user-specified-ports-{protocol}-{port}",
+                "description": f"Allow user-specified port {port} with {protocol} protocol",
+                "network": "projects/{PROJ_ID}/global/networks/{VPC_NAME}",
+                "selfLink": "projects/{PROJ_ID}/global/firewalls/{VPC_NAME}-allow-custom",
+                "direction": "INGRESS",
+                "priority": 65534,
+                "allowed": [
+                    {
+                        "IPProtocol": protocol,
+                        "ports": [port],
+                    },
+                ],
+                "sourceRanges": ["0.0.0.0/0"],
+            }
+        )
+    return default_template
+
+
 def get_usable_vpc(config):
     """Return a usable VPC.
 
@@ -766,7 +819,7 @@ def get_usable_vpc(config):
             _create_vpcnet(config, compute, body)
 
         # Create firewall rules
-        for rule in FIREWALL_RULES_TEMPLATE:
+        for rule in _get_filewall_rules_template():
             # Query firewall rule by its name (unique in a project).
             # If the rule already exists, delete it first.
             rule_name = rule["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
