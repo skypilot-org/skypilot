@@ -1638,6 +1638,9 @@ def check_owner_identity(cluster_name: str) -> None:
         for i, (owner,
                 current) in enumerate(zip(owner_identity,
                                           current_user_identity)):
+            # Clean up the owner identiy for the backslash and newlines, caused
+            # by the cloud CLI output, e.g. gcloud.
+            owner = owner.replace('\n', '').replace('\\', '')
             if owner == current:
                 if i != 0:
                     logger.warning(
