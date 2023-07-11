@@ -2,7 +2,7 @@
 import random
 import textwrap
 
-def get_syncing_command(sync_cmd: str, sync_path: str):
+def get_csync_command(csync_cmd: str, sync_path: str):
 
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash
@@ -17,7 +17,7 @@ def get_syncing_command(sync_cmd: str, sync_path: str):
           sudo chmod 777 $SYNC_PATH
         fi
 
-        nohup {sync_cmd} >/dev/null 2>&1 &
+        nohup {csync_cmd} >/dev/null 2>&1 &
     """)
 
     script_path = f'~/.sky/sync_{random.randint(0, 1000000)}.sh'
@@ -31,4 +31,7 @@ def get_syncing_command(sync_cmd: str, sync_path: str):
     return command
 
 def csync_is_running():
+    # get a list of sync_*.lock files
+    # go thorugh the list to check if any are 
     return
+

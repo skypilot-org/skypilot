@@ -5,6 +5,15 @@ import os
 import subprocess
 import time
 
+from sky.data import csync_utils
+
+def update_interval(interval, elapsed_time):
+    diff = interval - elapsed_time
+    if diff <= 0:
+        return 0
+    else:
+        return diff
+
 def is_locked(file_path):
     locked=False
     if os.path.exists(file_path):
@@ -55,7 +64,7 @@ def run_sync(src,storetype,bucketname,num_threads,delete):
 def csync(src, storetype,bucketname,num_threads,interval,delete,lock):
     base_dir = os.path.expanduser('~/.skystorage')
     os.makedirs(base_dir, exist_ok=True)
-    lock_file_name =  f'sync_{storetype}_{bucketname}.lock'
+    lock_file_name =  f'csync_{storetype}_{bucketname}.lock'
     lock_path = os.path.join(base_dir, lock_file_name)
 
     # When the csync daemon was previously terminated abnormally,
@@ -67,10 +76,13 @@ def csync(src, storetype,bucketname,num_threads,interval,delete,lock):
         with contextlib.ExitStack() as stack:
             if lock:
                 stack.enter_context(filelock.FileLock(lock_path))
+            start_time = time.time()
             # TODO: add try-except block
             run_sync(src,storetype,bucketname,num_threads,delete)
-        
-        time.sleep(interval)
+            end_time = time.time()
+        elapsed_time = start_time - end_time
+        updated_interval = update_interval(interval, elapsed_time)
+        time.sleep(updated_interval)
 
 @click.command()
 @click.argument('src', required=True,type=str)

@@ -2637,7 +2637,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Mounts all user files to the remote nodes."""
         self._execute_file_mounts(handle, all_file_mounts)
         self._execute_storage_mounts(handle, storage_mounts)
-        self._execute_storage_syncs(handle, storage_mounts)
+        self._execute_storage_csync(handle, storage_mounts)
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
@@ -3929,7 +3929,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         logger.debug(f'Storage mount sync took {end - start} seconds.')
 
 
-    def _execute_storage_syncs(self, handle: CloudVmRayResourceHandle,
+    def _execute_storage_csync(self, handle: CloudVmRayResourceHandle,
                                 storage_mounts: Dict[Path,
                                                      storage_lib.Storage]):
         """Executes storage mounts: installing mounting tools and mounting."""
@@ -3939,7 +3939,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
-            if storage_mount.mode == storage_lib.StorageMode.SYNC
+            if storage_mount.mode == storage_lib.StorageMode.C_SYNC
         }
 
         if not storage_mounts:
@@ -3971,7 +3971,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
             # Get the first store and use it to mount
             store = list(storage_obj.stores.values())[0]
-            sync_cmd = store.csync_command(dst)
+            csync_cmd = store.csync_command(dst)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
@@ -3981,7 +3981,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     runners,
                     source=src_print,
                     target=dst,
-                    cmd=sync_cmd,
+                    cmd=csync_cmd,
                     run_rsync=False,
                     action_message='Storage Syncing',
                     log_path=log_path,

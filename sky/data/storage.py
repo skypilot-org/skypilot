@@ -17,6 +17,7 @@ from sky.adaptors import gcp
 from sky.adaptors import cloudflare
 from sky.backends import backend_utils
 from sky.utils import schemas
+from sky.data import csync_utils
 from sky.data import data_transfer
 from sky.data import data_utils
 from sky.data import mounting_utils
@@ -109,7 +110,7 @@ class StoreType(enum.Enum):
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
-    SYNC = 'SYNC'
+    C_SYNC = 'C_SYNC'
 
 
 def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
@@ -302,7 +303,7 @@ class AbstractStore:
         """
         raise NotImplementedError
     
-    def sync_command(self, sync_path: str) -> str:
+    def csync_command(self, csync_path: str) -> str:
         raise NotImplementedError
 
     def __deepcopy__(self, memo):
@@ -1207,8 +1208,9 @@ class S3Store(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
-    def sync_command(self, sync_path: str) -> str:
-        raise NotImplementedError
+    def csync_command(self, csync_path: str) -> str:
+        csync_cmd = f'python -m skystorage {csync_path} s3 {self.bucket.name} --lock --delete'
+        return csync_utils.get_csync_command(csync_cmd, csync_path)
 
     def _create_s3_bucket(self,
                           bucket_name: str,
@@ -1624,9 +1626,9 @@ class GcsStore(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
 
-    def sync_command(self, sync_path: str) -> str:
-        sync_cmd = f'gsutil -m rsync -d {sync_path} gs://{self.bucket.name}'
-        return mounting_utils.get_syncing_command(sync_cmd, sync_path)
+    def csync_command(self, csync_path: str) -> str:
+        csync_cmd = f'python -m skystorage {csync_path} gcs {self.bucket.name} --lock --delete'
+        return csync_utils.get_csync_command(csync_cmd, csync_path)
 
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
@@ -1977,7 +1979,7 @@ class R2Store(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
-    def sync_command(self, sync_path: str) -> str:
+    def csync_command(self, csync_path: str) -> str:
         raise NotImplementedError
 
     def _create_r2_bucket(self,
