@@ -26,6 +26,7 @@ class GCPInstance:
     NEED_TO_STOP_STATES: List[str] = []
     NON_STOPPED_STATES: List[str] = []
     NEED_TO_TERMINATE_STATES: List[str] = []
+    _RESOURCE = None
 
     @classmethod
     def stop(
@@ -76,17 +77,22 @@ class GCPComputeInstance(GCPInstance):
     NEED_TO_TERMINATE_STATES = NON_STOPPED_STATES + ['TERMINATED']
 
     @classmethod
+    def load_resource(cls):
+        # We have the lru_cache in the adaptor.gcp module, so we don't need to
+        # cache the resource here.
+        return gcp.build('compute',
+                         'v1',
+                         credentials=None,
+                         cache_discovery=False)
+
+    @classmethod
     def stop(
         cls,
         project_id: str,
         zone: str,
         instance: str,
     ) -> dict:
-        compute = gcp.build('compute',
-                            'v1',
-                            credentials=None,
-                            cache_discovery=False)
-        operation = compute.instances().stop(
+        operation = cls.load_resource().instances().stop(
             project=project_id,
             zone=zone,
             instance=instance,
@@ -100,11 +106,7 @@ class GCPComputeInstance(GCPInstance):
         zone: str,
         instance: str,
     ) -> dict:
-        compute = gcp.build('compute',
-                            'v1',
-                            credentials=None,
-                            cache_discovery=False)
-        operation = compute.instances().delete(
+        operation = cls.load_resource().instances().delete(
             project=project_id,
             zone=zone,
             instance=instance,
@@ -121,10 +123,6 @@ class GCPComputeInstance(GCPInstance):
         included_instances: Optional[List[str]] = None,
         excluded_instances: Optional[List[str]] = None,
     ) -> List[str]:
-        compute = gcp.build('compute',
-                            'v1',
-                            credentials=None,
-                            cache_discovery=False)
         if label_filters:
             label_filter_expr = ('(' + ' AND '.join([
                 '(labels.{key} = {value})'.format(key=key, value=value)
@@ -150,7 +148,7 @@ class GCPComputeInstance(GCPInstance):
 
         filter_expr = ' AND '.join(not_empty_filters)
 
-        response = (compute.instances().list(
+        response = (cls.load_resource().instances().list(
             project=project_id,
             filter=filter_expr,
             zone=zone,
@@ -166,11 +164,7 @@ class GCPComputeInstance(GCPInstance):
     @classmethod
     def wait_for_operation(cls, operation: dict, project_id: str,
                            zone: str) -> bool:
-        compute = gcp.build('compute',
-                            'v1',
-                            credentials=None,
-                            cache_discovery=False)
-        result = (compute.zoneOperations().get(
+        result = (cls.load_resource().zoneOperations().get(
             project=project_id,
             operation=operation['name'],
             zone=zone,
@@ -198,18 +192,23 @@ class GCPTPUVMInstance(GCPInstance):
 
     NEED_TO_TERMINATE_STATES = NON_STOPPED_STATES + ['STOPPED']
 
-    # TODO(zhwu): implement TPU node
     @classmethod
-    def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: str) -> bool:
-        """Poll for TPU operation until finished."""
-        tpu = gcp.build(
+    def load_resource(cls):
+        # We have the lru_cache in the adaptor.gcp module, so we don't need to
+        # cache the resource here.
+        return gcp.build(
             'tpu',
             TPU_VERSION,
             credentials=None,
             cache_discovery=False,
             discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest')
-        result = (tpu.projects().locations().operations().get(
+
+    # TODO(zhwu): implement TPU node
+    @classmethod
+    def wait_for_operation(cls, operation: dict, project_id: str,
+                           zone: str) -> bool:
+        """Poll for TPU operation until finished."""
+        result = (cls.load_resource().projects().locations().operations().get(
             name=str(operation['name'])).execute())
         if 'error' in result:
             raise Exception(result['error'])
@@ -231,14 +230,8 @@ class GCPTPUVMInstance(GCPInstance):
         excluded_instances: Optional[List[str]] = None,
     ) -> List[str]:
         path = f'projects/{project_id}/locations/{zone}'
-        tpu = gcp.build(
-            'tpu',
-            TPU_VERSION,
-            credentials=None,
-            cache_discovery=False,
-            discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest')
         try:
-            response = (tpu.projects().locations().nodes().list(
+            response = (cls.load_resource().projects().locations().nodes().list(
                 parent=path).execute())
         except gcp.http_error_exception() as e:
             # SKY: Catch HttpError when accessing unauthorized region.
@@ -283,25 +276,15 @@ class GCPTPUVMInstance(GCPInstance):
     @classmethod
     def stop(cls, project_id: str, zone: str, instance: str) -> dict:
         """Stop a TPU node."""
-        tpu = gcp.build(
-            'tpu',
-            TPU_VERSION,
-            credentials=None,
-            cache_discovery=False,
-            discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest')
-        operation = tpu.projects().locations().nodes().stop(
+        del project_id, zone  # unused
+        operation = cls.load_resource().projects().locations().nodes().stop(
             name=instance).execute()
         return operation
 
     @classmethod
     def terminate(cls, project_id: str, zone: str, instance: str) -> dict:
         """Terminate a TPU node."""
-        tpu = gcp.build(
-            'tpu',
-            TPU_VERSION,
-            credentials=None,
-            cache_discovery=False,
-            discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest')
-        operation = tpu.projects().locations().nodes().delete(
+        del project_id, zone  # unused
+        operation = cls.load_resource().projects().locations().nodes().delete(
             name=instance).execute()
         return operation

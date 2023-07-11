@@ -1,7 +1,7 @@
 """GCP cloud adaptors"""
 
 # pylint: disable=import-outside-toplevel
-from functools import wraps
+import functools
 
 googleapiclient = None
 google = None
@@ -9,7 +9,7 @@ google = None
 
 def import_package(func):
 
-    @wraps(func)
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         global googleapiclient, google
         if googleapiclient is None or google is None:
@@ -27,6 +27,7 @@ def import_package(func):
 
 
 @import_package
+@functools.lru_cache()
 def build(service_name: str, version: str, *args, **kwargs):
     """Build a GCP service.
 
@@ -39,6 +40,7 @@ def build(service_name: str, version: str, *args, **kwargs):
 
 
 @import_package
+@functools.lru_cache()
 def storage_client():
     """Helper method that connects to GCS Storage Client for
     GCS Bucket
@@ -48,6 +50,7 @@ def storage_client():
 
 
 @import_package
+@functools.lru_cache()
 def anonymous_storage_client():
     """Helper method that connects to GCS Storage Client for
     Public GCS Buckets
@@ -57,6 +60,7 @@ def anonymous_storage_client():
 
 
 @import_package
+@functools.lru_cache()
 def not_found_exception():
     """NotFound exception."""
     from google.api_core import exceptions as gcs_exceptions
@@ -64,6 +68,7 @@ def not_found_exception():
 
 
 @import_package
+@functools.lru_cache()
 def forbidden_exception():
     """Forbidden exception."""
     from google.api_core import exceptions as gcs_exceptions
@@ -71,6 +76,7 @@ def forbidden_exception():
 
 
 @import_package
+@functools.lru_cache()
 def http_error_exception():
     """HttpError exception."""
     from googleapiclient import errors
@@ -78,6 +84,7 @@ def http_error_exception():
 
 
 @import_package
+@functools.lru_cache()
 def credential_error_exception():
     """CredentialError exception."""
     from google.auth import exceptions

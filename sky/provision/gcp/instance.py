@@ -127,14 +127,14 @@ def terminate_instances(
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, cluster_name
-    assert provider_config is not None, cluster_name
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
+    use_tpu_vms = provider_config.get('_has_tpus', False)
+
     name_filter = {TAG_RAY_CLUSTER_NAME: cluster_name}
     handlers: List[Type[instance_utils.GCPInstance]] = [
         instance_utils.GCPComputeInstance
     ]
-    use_tpu_vms = provider_config.get('_has_tpus', False)
     if use_tpu_vms:
         handlers.append(instance_utils.GCPTPUVMInstance)
 

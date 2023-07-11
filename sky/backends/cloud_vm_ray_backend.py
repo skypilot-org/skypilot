@@ -3375,9 +3375,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         cluster_name,
                         provider_config=config['provider'])
                 else:
-                    provision_api.stop_instances(repr(cloud),
-                                                cluster_name,
-                                                provider_config=config['provider'])
+                    provision_api.stop_instances(
+                        repr(cloud),
+                        cluster_name,
+                        provider_config=config['provider'])
             except Exception as e:  # pylint: disable=broad-except
                 if purge:
                     logger.warning(
