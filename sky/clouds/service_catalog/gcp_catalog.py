@@ -178,6 +178,18 @@ def _closest_power_of_two(x: int) -> int:
     return 1 << ((x - 1).bit_length() - 1)
 
 
+def _need_specific_vm(acc_name: str, acc_count: int) -> Tuple[bool, List[str]]:
+    """Returns (false, []) if the accelerator doesn't require a specific VM type.
+       Otherwise returns (true, [possible vm types]). """
+    # See: https://cloud.google.com/compute/docs/gpus#a100-gpus
+    #      https://cloud.google.com/compute/docs/gpus#l4-gpus
+    if acc_name in _A100_INSTANCE_TYPE_DICTS:
+        return True, [_A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]]
+    if acc_name == 'L4':
+        return True, _L4_INSTANCE_TYPE_DICT[acc_count]
+    return False, []
+
+
 def instance_type_exists(instance_type: str) -> bool:
     """Check the existence of the instance type."""
     if instance_type == 'TPU-VM':
@@ -245,13 +257,10 @@ def get_instance_type_for_accelerator(
     if instance_list is None:
         return None, fuzzy_candidate_list
 
-    if acc_name in _A100_INSTANCE_TYPE_DICTS:
-        # If A100 is used, host VM type must be A2.
-        # https://cloud.google.com/compute/docs/gpus#a100-gpus
-
+    need_specific_vm, instance_types = _need_specific_vm(acc_name, acc_count)
+    if need_specific_vm:
         df = _df[_df['InstanceType'].notna()]
-        instance_type = _A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]
-        df = df[df['InstanceType'] == instance_type]
+        df = df[df['InstanceType'].isin(instance_types)]
 
         # Check the cpus and memory specified by the user.
         instance_type = common.get_instance_type_for_cpus_mem_impl(
@@ -259,6 +268,14 @@ def get_instance_type_for_accelerator(
         if instance_type is None:
             return None, []
         return [instance_type], []
+
+    if acc_name in _A100_INSTANCE_TYPE_DICTS:
+        # If A100 is used, host VM type must be A2.
+        # https://cloud.google.com/compute/docs/gpus#a100-gpus
+
+        df = _df[_df['InstanceType'].notna()]
+        instance_type = _A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]
+        df = df[df['InstanceType'] == instance_type]
 
     if acc_name == 'L4':
         # If L4 is used, host VM type must be G2
@@ -377,8 +394,12 @@ def list_accelerators(
                 acc_name in _A100_INSTANCE_TYPE_DICTS or
                 acc_name == 'L4'):
             new_results[acc_name] = acc_info
-            new_results[acc_name] = acc_info
     results = new_results
+
+    # Unlike other GPUs that can be attached to different sizes of N1 VMs,
+    # A100 GPUs can only be attached to fixed-size A2 VMs,
+    # and L4 GPUs can only be attached to G2 VMs.
+    # Thus, we can show their exact cost including the host VM prices.
 
     a100_infos = results.get('A100', []) + results.get('A100-80GB', [])
     l4_infos = results.get('L4', [])
@@ -386,63 +407,41 @@ def list_accelerators(
         return results
 
     new_infos = defaultdict(list)
-    # Unlike other GPUs that can be attached to different sizes of N1 VMs,
-    # A100 GPUs can only be attached to fixed-size A2 VMs.
-    # Thus, we can show their exact cost including the host VM prices.
+    updates = []
+
     for info in a100_infos:
         assert pd.isna(info.instance_type) and pd.isna(info.memory), a100_infos
-        a100_host_vm_type = _A100_INSTANCE_TYPE_DICTS[info.accelerator_name][
-            info.accelerator_count]
-        df = _df[_df['InstanceType'] == a100_host_vm_type]
+        _, vm_types = _need_specific_vm(info.accelerator_name, info.accelerator_count)
+        updates += [(info, vm_type) for vm_type in vm_types]
+
+    for info in l4_infos:
+        assert pd.isna(info.instance_type) and pd.isna(info.memory), l4_infos
+        _, vm_types = _need_specific_vm(info.accelerator_name, info.accelerator_count)
+        updates += [(info, vm_type) for vm_type in vm_types]
+
+    for (info, vm_type) in updates:
+        df = _df[_df['InstanceType'] == vm_type]
         cpu_count = df['vCPUs'].iloc[0]
         memory = df['MemoryGiB'].iloc[0]
         vm_price = common.get_hourly_cost_impl(_df,
-                                               a100_host_vm_type,
+                                               vm_type,
                                                use_spot=False,
                                                region=None,
                                                zone=None)
         vm_spot_price = common.get_hourly_cost_impl(_df,
-                                                    a100_host_vm_type,
+                                                    vm_type,
                                                     use_spot=True,
                                                     region=None,
                                                     zone=None)
         new_infos[info.accelerator_name].append(
             info._replace(
-                instance_type=a100_host_vm_type,
+                instance_type=vm_type,
                 cpu_count=cpu_count,
                 memory=memory,
                 # total cost = VM instance + GPU.
                 price=info.price + vm_price,
                 spot_price=info.spot_price + vm_spot_price,
             ))
-
-    # L4 GPUs are similar: they can only be attached to G2 VMs
-    for info in l4_infos:
-        assert pd.isna(info.instance_type) and pd.isna(info.memory), l4_infos
-        vm_types = _L4_INSTANCE_TYPE_DICT.get(info.accelerator_count, [])
-        for vm_type in vm_types:
-            # they should be in catalog
-            df = _df[_df['InstanceType'] == vm_type]
-            cpu_count = df['vCPUs'].iloc[0]
-            memory = df['MemoryGiB'].iloc[0]
-            vm_price = common.get_hourly_cost_impl(_df,
-                                               vm_type,
-                                               use_spot=False,
-                                               region=None,
-                                               zone=None)
-            vm_spot_price = common.get_hourly_cost_impl(_df,
-                                                        vm_type,
-                                                        use_spot=True,
-                                                        region=None,
-                                                        zone=None)
-            new_infos[info.accelerator_name].append(
-                info._replace(
-                    instance_type=vm_type,
-                    cpu_count=cpu_count,
-                    memory=memory,
-                    price=info.price + vm_price,
-                    spot_price=info.spot_price + vm_spot_price,
-                ))
 
     results.update(new_infos)
     return results
