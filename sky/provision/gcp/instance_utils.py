@@ -26,7 +26,15 @@ class GCPInstance:
     NEED_TO_STOP_STATES: List[str] = []
     NON_STOPPED_STATES: List[str] = []
     NEED_TO_TERMINATE_STATES: List[str] = []
-    _RESOURCE = None
+
+    @classmethod
+    def load_resource(cls):
+        """Load the GCP API for the instance type.
+
+        Do not cache the resource object, as it will not work
+        when multiple threads are running.
+        """
+        raise NotImplementedError
 
     @classmethod
     def stop(
@@ -76,8 +84,6 @@ class GCPComputeInstance(GCPInstance):
 
     @classmethod
     def load_resource(cls):
-        # We have the lru_cache in the adaptor.gcp module, so we don't need to
-        # cache the resource here.
         return gcp.build('compute',
                          'v1',
                          credentials=None,
@@ -190,8 +196,6 @@ class GCPTPUVMInstance(GCPInstance):
 
     @classmethod
     def load_resource(cls):
-        # We have the lru_cache in the adaptor.gcp module, so we don't need to
-        # cache the resource here.
         return gcp.build(
             'tpu',
             TPU_VERSION,
@@ -203,6 +207,7 @@ class GCPTPUVMInstance(GCPInstance):
     def wait_for_operation(cls, operation: dict, project_id: str,
                            zone: str) -> bool:
         """Poll for TPU operation until finished."""
+        del project_id, zone  # unused
         result = (cls.load_resource().projects().locations().operations().get(
             name=str(operation['name'])).execute())
         if 'error' in result:
