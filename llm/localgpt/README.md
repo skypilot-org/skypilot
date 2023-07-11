@@ -5,19 +5,21 @@
 </p>
 
 [LocalGPT](https://github.com/PromtEngineer/localGPT) allows you to chat with your documents (txt, pdf, csv, and xlsx), ask questions and summarize content. The models run on your hardware and your data remains 100% private.
-SkyPilot can run localGPT on your cloud account with a single command, taking care of minimizing cost and finding availability.
+SkyPilot can run localGPT on any cloud (AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI) with a single command, taking care of minimizing cost and finding availability.
 
 ## Prerequisites
-Install the latest SkyPilot and check your setup of the cloud credentials:
+Install SkyPilot and check your setup of cloud credentials:
 ```bash
 pip install git+https://github.com/skypilot-org/skypilot.git
 sky check
 ```
-See the [SkyPilot YAML for localGPT](localgpt.yaml).
+See [docs](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html) for more.
+
+Once you are done, we will use [SkyPilot YAML for localGPT](localgpt.yaml) to define our task and run it.
 
 
 ## Launching localGPT on your cloud with SkyPilot
-1. Use `sky launch` to run the localGPT on your cloud. SkyPilot will show the estimated cost and chosen cloud before provisioning. For reference, running on T4 instances on AWS would cost about $0.53 per hour. 
+1. Use `sky launch` to run localGPT on your cloud. SkyPilot will show the estimated cost and chosen cloud before provisioning. For reference, running on T4 instances on AWS would cost about $0.53 per hour. 
 ```bash
 sky launch -c localgpt localgpt.yaml
 ```

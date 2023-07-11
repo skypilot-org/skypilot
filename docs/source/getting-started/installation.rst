@@ -261,11 +261,11 @@ Quick alternative: trying in Docker
 ------------------------------------------------------
 
 As a **quick alternative to installing SkyPilot on your laptop**, we also provide a Docker image with SkyPilot and
-its dependencies installed for users to quickly try out SkyPilot. You can simply run:
+its AWS and GCP dependencies installed for users to quickly try out SkyPilot. You can simply run:
 
 .. code-block:: console
 
-  $ docker run -td --name sky --rm -v "$HOME/.sky:/root/.sky:rw" -v "$HOME/.aws:/root/.aws:rw" -v "$HOME/.config/gcloud:/root/.config/gcloud:rw" -v "$HOME/.azure:/root/.azure:rw" public.ecr.aws/a9w6z7w5/sky:latest
+  $ docker run -td --name sky --rm -v "$HOME/.sky:/root/.sky:rw" -v "$HOME/.aws:/root/.aws:rw" -v "$HOME/.config/gcloud:/root/.config/gcloud:rw" berkeleyskypilot/skypilot:latest
   $ docker exec -it sky /bin/bash
 
 If your cloud CLIs are already setup, your credentials will be mounted to the

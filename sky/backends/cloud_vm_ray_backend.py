@@ -99,7 +99,8 @@ _TEARDOWN_FAILURE_MESSAGE = (
 _TEARDOWN_PURGE_WARNING = (
     f'{colorama.Fore.YELLOW}'
     'WARNING: Received non-zero exit code from {reason}. '
-    'Make sure resources are manually deleted.'
+    'Make sure resources are manually deleted.\n'
+    'Details: {details}'
     f'{colorama.Style.RESET_ALL}')
 
 _TPU_NOT_FOUND_ERROR = 'ERROR: (gcloud.compute.tpus.delete) NOT_FOUND'
@@ -3385,11 +3386,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'Failed to take down Ray autoscaler on the head node. '
                         'It might be because the cluster\'s head node has '
                         'already been terminated. It is fine to skip this.')
-            if terminate:
-                provision_api.terminate_instances(repr(cloud), region,
-                                                  cluster_name)
-            else:
-                provision_api.stop_instances(repr(cloud), region, cluster_name)
+            try:
+                if terminate:
+                    provision_api.terminate_instances(repr(cloud), region,
+                                                      cluster_name)
+                else:
+                    provision_api.stop_instances(repr(cloud), region,
+                                                 cluster_name)
+            except Exception as e:  # pylint: disable=broad-except
+                if purge:
+                    logger.warning(
+                        _TEARDOWN_PURGE_WARNING.format(
+                            reason='stopping/terminating cluster nodes',
+                            details=common_utils.format_exception(
+                                e, use_bracket=True)))
+                else:
+                    raise
 
             if post_teardown_cleanup:
                 self.post_teardown_cleanup(handle, terminate, purge)
@@ -3544,7 +3556,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if purge:
                 logger.warning(
                     _TEARDOWN_PURGE_WARNING.format(
-                        reason='stopping/terminating cluster nodes'))
+                        reason='stopping/terminating cluster nodes',
+                        details=stderr))
             # 'TPU must be specified.': This error returns when we call "gcloud
             #   delete" with an empty VM list where no instance exists. Safe to
             #   ignore it and do cleanup locally. TODO(wei-lin): refactor error
@@ -3609,7 +3622,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 elif purge:
                     logger.warning(
                         _TEARDOWN_PURGE_WARNING.format(
-                            reason='stopping/terminating TPU'))
+                            reason='stopping/terminating TPU',
+                            details=tpu_stderr))
                 else:
                     raise RuntimeError(
                         _TEARDOWN_FAILURE_MESSAGE.format(
