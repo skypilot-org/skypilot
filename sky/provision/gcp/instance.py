@@ -22,7 +22,8 @@ def _filter_instances(
     project_id: str,
     zone: str,
     label_filters: Dict[str, str],
-    status_filters_fn: Callable[[Type[instance_utils.GCPInstance]], List[str]],
+    status_filters_fn: Callable[[Type[instance_utils.GCPInstance]],
+                                Optional[List[str]]],
     included_instances: Optional[List[str]] = None,
     excluded_instances: Optional[List[str]] = None,
 ) -> Dict[Type[instance_utils.GCPInstance], List[str]]:
@@ -138,10 +139,10 @@ def terminate_instances(
     if use_tpu_vms:
         handlers.append(instance_utils.GCPTPUVMInstance)
 
-    handler_to_instances = _filter_instances(
-        handlers, project_id, zone, name_filter,
-        lambda handler: handler.NEED_TO_TERMINATE_STATES, included_instances,
-        excluded_instances)
+    handler_to_instances = _filter_instances(handlers, project_id, zone,
+                                             name_filter, lambda _: None,
+                                             included_instances,
+                                             excluded_instances)
     operations = collections.defaultdict(list)
     for handler, instances in handler_to_instances.items():
         for instance in instances:

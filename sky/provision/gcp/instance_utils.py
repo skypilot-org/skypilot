@@ -74,8 +74,6 @@ class GCPComputeInstance(GCPInstance):
 
     NON_STOPPED_STATES = NEED_TO_STOP_STATES + ['STOPPING']
 
-    NEED_TO_TERMINATE_STATES = NON_STOPPED_STATES + ['TERMINATED']
-
     @classmethod
     def load_resource(cls):
         # We have the lru_cache in the adaptor.gcp module, so we don't need to
@@ -190,8 +188,6 @@ class GCPTPUVMInstance(GCPInstance):
 
     NON_STOPPED_STATES = NEED_TO_STOP_STATES + ['STOPPING']
 
-    NEED_TO_TERMINATE_STATES = NON_STOPPED_STATES + ['STOPPED']
-
     @classmethod
     def load_resource(cls):
         # We have the lru_cache in the adaptor.gcp module, so we don't need to
@@ -203,7 +199,6 @@ class GCPTPUVMInstance(GCPInstance):
             cache_discovery=False,
             discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest')
 
-    # TODO(zhwu): implement TPU node
     @classmethod
     def wait_for_operation(cls, operation: dict, project_id: str,
                            zone: str) -> bool:
