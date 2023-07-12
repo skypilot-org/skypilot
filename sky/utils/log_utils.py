@@ -76,6 +76,7 @@ class RayUpLineProcessor(LineProcessor):
     class ProvisionStatus(enum.Enum):
         LAUNCH = 0
         RUNTIME_SETUP = 1
+        PULLING_DOCKER_IMAGES = 2
 
     def __enter__(self):
         self.state = self.ProvisionStatus.LAUNCH
@@ -83,10 +84,24 @@ class RayUpLineProcessor(LineProcessor):
         self.status_display.start()
 
     def process_line(self, log_line):
-        if ('Shared connection to' in log_line and
+        if ('Success.' in log_line and
                 self.state == self.ProvisionStatus.LAUNCH):
             self.status_display.stop()
             logger.info(f'{colorama.Fore.GREEN}Head node is up.'
+                        f'{colorama.Style.RESET_ALL}')
+            self.status_display.start()
+            self.status_display.update(
+                '[bold cyan]Launching - Preparing SkyPilot runtime')
+            self.state = self.ProvisionStatus.RUNTIME_SETUP
+        if ('Pulling from' in log_line and
+                self.state == self.ProvisionStatus.RUNTIME_SETUP):
+            self.status_display.update(
+                '[bold cyan]Launching - Pulling docker images')
+            self.state = self.ProvisionStatus.PULLING_DOCKER_IMAGES
+        if ('Status: Downloaded newer image' in log_line and
+                self.state == self.ProvisionStatus.PULLING_DOCKER_IMAGES):
+            self.status_display.stop()
+            logger.info(f'{colorama.Fore.GREEN}Docker image is downloaded.'
                         f'{colorama.Style.RESET_ALL}')
             self.status_display.start()
             self.status_display.update(
