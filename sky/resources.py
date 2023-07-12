@@ -724,6 +724,11 @@ class Resources:
 
         if self.extract_docker_image() is not None:
             # TODO(tian): validate the docker image exists / of reasonable size
+            for acc in self.accelerators.keys():
+                if acc.lower().startswith('tpu'):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'Docker image is not supported for TPU VM.')
             return
 
         if self.cloud is None:
