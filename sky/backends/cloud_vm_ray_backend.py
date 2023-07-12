@@ -1343,8 +1343,9 @@ class RetryingVmProvisioner(object):
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
-        os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
-        os.system(f'touch {log_path}')
+        if not dryrun:
+            os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
+            os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
