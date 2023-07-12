@@ -96,7 +96,7 @@ Note: if you encounter *Authorization Error (Error 400: invalid_request)* with t
 
 .. tip::
 
-  If you are using multiple GCP projects, list all the projects by :code:`gcloud project list` and activate one by :code:`gcloud config set project <PROJECT_ID>` (See `GCP docs <https://cloud.google.com/sdk/gcloud/reference/config/set>`_).
+  If you are using multiple GCP projects, list all the projects by :code:`gcloud projects list` and activate one by :code:`gcloud config set project <PROJECT_ID>` (See `GCP docs <https://cloud.google.com/sdk/gcloud/reference/config/set>`_).
 
 To use service account to access GCP for SkyPilot, see :ref:`here<gcp-service-account>` for instructions.
 
