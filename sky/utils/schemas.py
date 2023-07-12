@@ -130,6 +130,9 @@ def get_storage_schema():
                     mode.value for mode in storage.StorageMode
                 ]
             },
+            'interval': {
+                'type': 'number'
+            },
             '_force_delete': {
                 'type': 'boolean',
             }

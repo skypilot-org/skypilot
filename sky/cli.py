@@ -57,6 +57,7 @@ from sky.backends import onprem_utils
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
+from sky.data import csync_utils
 from sky.data import storage_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -2660,6 +2661,7 @@ def _down_or_stop_clusters(
         total=len(clusters))
 
     def _down_or_stop(name: str):
+        csync_utils.terminate_csyncs()
         success_progress = False
         if idle_minutes_to_autostop is not None:
             try:

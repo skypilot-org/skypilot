@@ -17,7 +17,7 @@ def get_csync_command(csync_cmd: str, sync_path: str):
           sudo chmod 777 $SYNC_PATH
         fi
 
-        nohup {csync_cmd} >/dev/null 2>&1 &
+        setsid {csync_cmd} >/dev/null 2>&1 &
     """)
 
     script_path = f'~/.sky/sync_{random.randint(0, 1000000)}.sh'
@@ -35,3 +35,15 @@ def csync_is_running():
     # go thorugh the list to check if any are 
     return
 
+def terminate_csyncs():
+    # use two loop: 1.while 2.for-loop
+    # use two sets: 1. track total running csync 2.track csync process thats not running 
+    # get a list of csync locks
+    # create this to set 1.
+    # while set1. is not empty:
+    #   iterate them through to see if any are running
+    #       add the one that is running in set 2.
+    #       kill the ones that are not running
+    #   set1 = set2 
+    # check if there are csync 
+    return

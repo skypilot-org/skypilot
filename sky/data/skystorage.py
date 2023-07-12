@@ -40,6 +40,7 @@ def set_gcs_sync_cmd(src_path,bucketname,num_threads,delete):
     if delete:
         sync_cmd += ' -d'
     sync_cmd += f' {src_path} gs://{bucketname}'
+    return sync_cmd
 
 def run_sync(src,storetype,bucketname,num_threads,delete):
     #TODO: add enum type class to handle storetypes
@@ -82,6 +83,8 @@ def csync(src, storetype,bucketname,num_threads,interval,delete,lock):
             end_time = time.time()
         elapsed_time = start_time - end_time
         updated_interval = update_interval(interval, elapsed_time)
+        if lock and os.path.exists(lock_path):
+            os.remove(lock_path)
         time.sleep(updated_interval)
 
 @click.command()
