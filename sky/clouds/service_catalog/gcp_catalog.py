@@ -388,7 +388,6 @@ def list_accelerators(
     for info in a100_infos + l4_infos:
         assert pd.isna(info.instance_type) and pd.isna(info.memory), a100_info + l4_info
         _, vm_types = _need_specific_vm(info.accelerator_name, info.accelerator_count)
-        updates += [(info, vm_type) for vm_type in vm_types]
         for vm_type in vm_types:
             df = _df[_df['InstanceType'] == vm_type]
             cpu_count = df['vCPUs'].iloc[0]
