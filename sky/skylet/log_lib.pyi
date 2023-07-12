@@ -11,16 +11,33 @@ from typing import Dict, List, Optional, Tuple, Union
 from typing_extensions import Literal
 
 
-def process_subprocess_stream(
-        proc,
-        log_path: str,
-        stream_logs: bool,
-        start_streaming_at: str = ...,
-        end_streaming_at: Optional[str] = ...,
-        skip_lines: Optional[List[str]] = ...,
-        replace_crlf: bool = ...,
-        line_processor: Optional[log_utils.LineProcessor] = ...,
-        streaming_prefix: Optional[str] = ...) -> Tuple[str, str]:
+class _ProcessingArgs:
+    log_path: str
+    stream_logs: bool
+    start_streaming_at: str = ...
+    end_streaming_at: Optional[str] = ...
+    skip_lines: Optional[List[str]] = ...
+    replace_crlf: bool = ...
+    line_processor: Optional[log_utils.LineProcessor] = ...
+    streaming_prefix: Optional[str] = ...
+
+    def __init__(self,
+                 log_path: str,
+                 stream_logs: bool,
+                 start_streaming_at: str = ...,
+                 end_streaming_at: Optional[str] = ...,
+                 skip_lines: Optional[List[str]] = ...,
+                 replace_crlf: bool = ...,
+                 line_processor: Optional[log_utils.LineProcessor] = ...,
+                 streaming_prefix: Optional[str] = ...) -> None:
+        ...
+
+
+def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
+    ...
+
+
+def process_subprocess_stream(proc, args: _ProcessingArgs) -> Tuple[str, str]:
     ...
 
 
@@ -96,8 +113,8 @@ def add_ray_env_vars(
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
-                              job_owner: str,
-                              job_id: int,
+                              job_owner: Optional[str] = ...,
+                              job_id: Optional[int] = ...,
                               env_vars: Optional[Dict[str, str]] = ...,
                               stream_logs: bool = ...,
                               with_ray: bool = ...,

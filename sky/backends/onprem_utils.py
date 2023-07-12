@@ -278,7 +278,7 @@ def get_local_cluster_accelerators(
                             'A100',
                             '1080',
                             '2080',
-                            'A5000'
+                            'A5000',
                             'A6000']
         accelerators_dict = {}
         for acc in all_accelerators:
@@ -371,9 +371,11 @@ def launch_ray_on_local_cluster(cluster_config: Dict[str, Dict[str, Any]],
     # Launching Ray on the head node.
     head_resources = json.dumps(custom_resources[0], separators=(',', ':'))
     head_gpu_count = sum(list(custom_resources[0].values()))
-    head_cmd = ('ray start --head --port=6379 '
-                '--object-manager-port=8076 --dashboard-port 8265 '
-                f'--resources={head_resources!r} --num-gpus={head_gpu_count}')
+    head_cmd = (f'ray start --head --port={constants.SKY_REMOTE_RAY_PORT} '
+                '--object-manager-port=8076 '
+                f'--dashboard-port {constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
+                f'--resources={head_resources!r} --num-gpus={head_gpu_count} '
+                f'--temp-dir {constants.SKY_REMOTE_RAY_TEMPDIR}')
 
     with console.status('[bold cyan]Launching ray cluster on head'):
         backend_utils.run_command_and_handle_ssh_failure(
@@ -398,7 +400,9 @@ def launch_ray_on_local_cluster(cluster_config: Dict[str, Dict[str, Any]],
     ssh_options = command_runner.ssh_options_list(
         ssh_private_key=remote_ssh_key, ssh_control_name=None)
     ssh_options = ' '.join(ssh_options)
-    port_cmd = (f'ssh -tt -L 8265:localhost:8265 '
+    ray_dashboard_port = constants.SKY_REMOTE_RAY_DASHBOARD_PORT
+    port_cmd = ('ssh -tt -L '
+                f'{ray_dashboard_port}:localhost:{ray_dashboard_port} '
                 f'{ssh_options} {ssh_user}@{head_ip} '
                 '\'while true; do sleep 86400; done\'')
     with console.status('[bold cyan]Waiting for workers.'):
@@ -414,10 +418,14 @@ def launch_ray_on_local_cluster(cluster_config: Dict[str, Dict[str, Any]],
             worker_resources = json.dumps(custom_resources[idx + 1],
                                           separators=(',', ':'))
             worker_gpu_count = sum(list(custom_resources[idx + 1].values()))
-            worker_cmd = (f'ray start --address={head_ip}:6379 '
-                          '--object-manager-port=8076 --dashboard-port 8265 '
-                          f'--resources={worker_resources!r} '
-                          f'--num-gpus={worker_gpu_count}')
+            worker_cmd = (
+                'ray start '
+                f'--address={head_ip}:{constants.SKY_REMOTE_RAY_PORT} '
+                '--object-manager-port=8076 --dashboard-port '
+                f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
+                f'--resources={worker_resources!r} '
+                f'--num-gpus={worker_gpu_count} '
+                f'--temp-dir {constants.SKY_REMOTE_RAY_TEMPDIR}')
             backend_utils.run_command_and_handle_ssh_failure(
                 runner,
                 worker_cmd,

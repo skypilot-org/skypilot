@@ -18,25 +18,40 @@ Welcome to SkyPilot!
    </p>
 
    <p style="text-align:center">
-   <strong>Run jobs on any cloud, easily and cost effectively</strong>
+   <strong>Run LLMs and AI on Any Cloud</strong>
    </p>
 
-SkyPilot is a framework for easily and cost effectively running ML workloads on any cloud.
+SkyPilot is a framework for running LLMs, AI, and batch jobs on any cloud, offering maximum cost savings, highest GPU availability, and managed execution.
 
-SkyPilot abstracts away cloud infra burden:
+SkyPilot **abstracts away cloud infra burdens**:
 
-- Launch jobs & clusters on any cloud (AWS, Azure, GCP, Lambda Cloud)
-- Find scarce resources across zones/regions/clouds
-- Queue jobs & use cloud object stores
+- Launch jobs & clusters on any cloud
+- Easy scale-out: queue and run many jobs, automatically managed
+- Easy access to object stores (S3, GCS, R2)
 
-SkyPilot cuts your cloud costs:
+SkyPilot **maximizes GPU availability for your jobs**:
 
-* :ref:`Managed Spot <Managed Spot Jobs>`: **3x cost savings** using spot VMs, with auto-recovery from preemptions
-* :ref:`Autostop <Auto-stopping>`: hands-free cleanup of idle clusters
-* :ref:`Benchmark <Benchmark: Find the Best Hardware for Your Jobs>`: find best VM types for your jobs
-* Optimizer: **2x cost savings** by auto-picking best prices across zones/regions/clouds
+* Provision in all zones/regions/clouds you have access to (`the Sky <https://arxiv.org/abs/2205.07147>`_), with automatic failover
+
+SkyPilot **cuts your cloud costs**:
+
+* `Managed Spot <https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html>`_: 3-6x cost savings using spot VMs, with auto-recovery from preemptions
+* Optimizer: 2x cost savings by auto-picking the cheapest VM/zone/region/cloud
+* `Autostop <https://skypilot.readthedocs.io/en/latest/reference/auto-stop.html>`_: hands-free cleanup of idle clusters
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
+
+Current supported providers (AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI, Cloudflare):
+
+.. raw:: html
+
+   <p align="center">
+   <picture>
+      <a href="https://skypilot.readthedocs.io/en/latest/getting-started/installation.html">
+      <img alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png" width=80%></a>
+   </picture>
+   </p>
+
 
 **More information**
 
@@ -86,12 +101,21 @@ Documentation
    :maxdepth: 1
    :caption: User Guides
 
-   reference/local/index
+   examples/docker-containers
    examples/iterative-dev-project
    reference/interactive-nodes
-   reference/quota
-   reference/logging
    reference/faq
+   reference/logging
+   reference/local/index
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Cloud Admin and Usage
+
+   cloud-setup/cloud-permissions/index
+   cloud-setup/cloud-auth
+   cloud-setup/quota
+
 
 .. toctree::
    :maxdepth: 1

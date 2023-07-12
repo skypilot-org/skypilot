@@ -10,6 +10,7 @@ import urllib.parse
 
 import colorama
 
+from sky import check
 from sky import clouds
 from sky.adaptors import aws
 from sky.adaptors import gcp
@@ -23,6 +24,7 @@ from sky.data import storage_utils
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import status_lib
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
@@ -33,7 +35,7 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 StorageHandle = Any
-StorageStatus = global_user_state.StorageStatus
+StorageStatus = status_lib.StorageStatus
 Path = str
 SourceType = Union[Path, List[Path]]
 
@@ -59,6 +61,19 @@ _BUCKET_FAIL_TO_CONNECT_MESSAGE = (
 _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
     'Bucket {bucket_name!r} does not exist. '
     'It may have been deleted externally.')
+
+
+def _is_storage_cloud_enabled(cloud_name: str,
+                              try_fix_with_sky_check: bool = True) -> bool:
+    enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+    if cloud_name in enabled_storage_clouds:
+        return True
+    if try_fix_with_sky_check:
+        # TODO(zhwu): Only check the specified cloud to speed up.
+        check.check(quiet=True)
+        return _is_storage_cloud_enabled(cloud_name,
+                                         try_fix_with_sky_check=False)
+    return False
 
 
 class StoreType(enum.Enum):
@@ -108,6 +123,9 @@ def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
     elif isinstance(cloud, clouds.Lambda):
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Lambda Cloud does not provide cloud storage.')
+    elif isinstance(cloud, clouds.SCP):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('SCP does not provide cloud storage.')
     else:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Unknown cloud type: {cloud}')
@@ -916,8 +934,7 @@ class S3Store(AbstractStore):
         self.name = self.validate_name(self.name)
 
         # Check if the storage is enabled
-        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
-        if str(clouds.AWS()) not in enabled_storage_clouds:
+        if not _is_storage_cloud_enabled(str(clouds.AWS())):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     'Storage \'store: s3\' specified, but ' \
@@ -1306,15 +1323,13 @@ class GcsStore(AbstractStore):
         # Validate name
         self.name = self.validate_name(self.name)
         # Check if the storage is enabled
-        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
-        if str(clouds.GCP()) not in enabled_storage_clouds:
+        if not _is_storage_cloud_enabled(str(clouds.GCP())):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
-                    'Storage \'store: gcs\' specified, but ' \
-                    'GCP access is disabled. To fix, enable '\
-                    'GCP by running `sky check`. '\
-                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
-                    )
+                    'Storage \'store: gcs\' specified, but '
+                    'GCP access is disabled. To fix, enable '
+                    'GCP by running `sky check`. '
+                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.')  # pylint: disable=line-too-long
 
     @classmethod
     def validate_name(cls, name) -> str:
@@ -1497,7 +1512,7 @@ class GcsStore(AbstractStore):
 
         def get_file_sync_command(base_dir_path, file_names):
             sync_format = '|'.join(file_names)
-            sync_command = (f'gsutil -m rsync -x \'^(?!{sync_format}$).*\' '
+            sync_command = (f'gsutil -m rsync -e -x \'^(?!{sync_format}$).*\' '
                             f'{base_dir_path} gs://{self.name}')
             return sync_command
 
@@ -1508,7 +1523,7 @@ class GcsStore(AbstractStore):
             excluded_list.append(r'^\.git/.*$')
             excludes = '|'.join(excluded_list)
             sync_command = (
-                f'gsutil -m rsync -r -x \'({excludes})\' {src_dir_path}'
+                f'gsutil -m rsync -e -r -x \'({excludes})\' {src_dir_path}'
                 f' gs://{self.name}/{dest_dir_name}')
             return sync_command
 
@@ -1725,8 +1740,7 @@ class R2Store(AbstractStore):
         # Validate name
         self.name = S3Store.validate_name(self.name)
         # Check if the storage is enabled
-        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
-        if cloudflare.NAME not in enabled_storage_clouds:
+        if not _is_storage_cloud_enabled(cloudflare.NAME):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     'Storage \'store: r2\' specified, but ' \

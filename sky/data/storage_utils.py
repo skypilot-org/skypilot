@@ -22,7 +22,7 @@ def format_storage_table(storages: List[Dict[str, Any]]) -> str:
     """
     storage_table = log_utils.create_table([
         'NAME',
-        'CREATED',
+        'UPDATED',
         'STORE',
         'COMMAND',
         'STATUS',

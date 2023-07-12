@@ -18,6 +18,7 @@ class Dag:
         import networkx as nx  # pylint: disable=import-outside-toplevel
 
         self.graph = nx.DiGraph()
+        self.name = None
 
     def add(self, task):
         self.graph.add_node(task)

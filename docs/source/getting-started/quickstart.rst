@@ -1,3 +1,5 @@
+.. _quickstart:
+
 ==========
 Quickstart
 ==========
@@ -157,14 +159,40 @@ After a task's execution,  use :code:`rsync` or :code:`scp` to download files (e
 
     $ rsync -Pavz mycluster:/remote/source /local/dest  # copy from remote VM
 
-For uploading files to the cluster, see :ref:`Syncing Code and Artifacts`.
+For uploading files to the cluster, see :ref:`Syncing Code and Artifacts <sync-code-artifacts>`.
 
 Stop/terminate a cluster
 =========================
 
-When you are done, run :code:`sky stop mycluster` to stop the cluster. To
-terminate a cluster instead, run :code:`sky down mycluster`.  Find more commands that
-manage the lifecycle of clusters :ref:`here <interactive-nodes>`.
+When you are done, stop the cluster with :code:`sky stop`:
+
+.. code-block:: console
+
+  $ sky stop mycluster
+
+To terminate a cluster instead, run :code:`sky down`:
+
+.. code-block:: console
+
+  $ sky down mycluster
+
+Find more commands that manage the lifecycle of clusters in the :ref:`CLI reference <cli>`.
+
+Scaling out
+=========================
+
+So far, we have used SkyPilot's CLI to submit work to and interact with a single cluster.
+When you are ready to scale out (e.g., run 10s or 100s of jobs), SkyPilot supports two options:
+
+- Queue jobs on one or more clusters with ``sky exec`` (see :ref:`Job Queue <job-queue>`); or
+- Use :ref:`Managed Spot Jobs <spot-jobs>` to run on auto-managed spot instances
+  (users need not interact with the underlying clusters)
+
+Managed spot jobs run on much cheaper spot instances, with automatic preemption recovery. Try it out with:
+
+.. code-block:: console
+
+  $ sky spot launch hello_sky.yaml
 
 Next steps
 -----------
@@ -173,8 +201,8 @@ Congratulations!  In this quickstart, you have launched a cluster, run a task, a
 
 Next steps:
 
-- Adapt :ref:`Tutorial: DNN Training` to start running your own project on SkyPilot!
+- Adapt :ref:`Tutorial: DNN Training <dnn-training>` to start running your own project on SkyPilot!
 - See the :ref:`Task YAML reference <yaml-spec>`, :ref:`CLI reference <cli>`, and `more examples <https://github.com/skypilot-org/skypilot/tree/master/examples>`_
 - To learn more, try out `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutorial>`_ in Jupyter notebooks
-- Try :ref:`Interactive Nodes` -- launch VMs in one command without a YAML file
-- Explore SkyPilot's unique features in the rest of the documentation
+
+We invite you to explore SkyPilot's unique features in the rest of the documentation.
