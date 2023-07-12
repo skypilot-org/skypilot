@@ -504,7 +504,7 @@ def queue(cluster_name: str,
     if all_users:
         username = None
     code = job_lib.JobLibCodeGen.get_job_queue(username, all_jobs)
-    
+
     handle = backend_utils.check_cluster_available(
         cluster_name,
         operation='getting the job queue',
