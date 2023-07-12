@@ -625,17 +625,16 @@ def _configure_key_pair(config, compute):
 def _get_required_rules(config):
     """Returns the required firewall rules."""
     default_rules = FIREWALL_RULES_REQUIRED.copy()
-    allowed_rules = config["provider"].get("allowed_rules", [])
-    for r in allowed_rules:
-        protocol, port = r[0], str(r[1])
+    ports = config["provider"].get("ports", [])
+    for port in ports:
         # Not set targetTags here to avoid filtered by _merge_and_refine_rule
         default_rules.append(
             {
                 "direction": "INGRESS",
                 "allowed": [
                     {
-                        "IPProtocol": protocol,
-                        "ports": [port],
+                        "IPProtocol": "tcp",
+                        "ports": [str(port)],
                     }
                 ],
                 "sourceRanges": ["0.0.0.0/0"],
@@ -757,24 +756,21 @@ def _check_firewall_rules(vpc_name, config, compute):
 def _get_filewall_rules_template(config):
     """Returns the firewall rules template."""
     default_template = FIREWALL_RULES_TEMPLATE.copy()
-    allowed_rules = config["provider"].get("allowed_rules", [])
-    for r in allowed_rules:
-        protocol, port = r[0], str(r[1])
-        suffix = (
-            f"-allow-user-specified-ports-{config['cluster_name']}-{protocol}-{port}"
-        )
+    ports = config["provider"].get("ports", [])
+    for port in ports:
+        suffix = f"-allow-user-specified-ports-{config['cluster_name']}-{port}"
         default_template.append(
             {
                 "name": "{VPC_NAME}" + suffix,
-                "description": f"Allow user-specified port {port} with {protocol} protocol for cluster {config['cluster_name']}",
+                "description": f"Allow user-specified port {port} for cluster {config['cluster_name']}",
                 "network": "projects/{PROJ_ID}/global/networks/{VPC_NAME}",
                 "selfLink": "projects/{PROJ_ID}/global/firewalls/{VPC_NAME}" + suffix,
                 "direction": "INGRESS",
                 "priority": 65534,
                 "allowed": [
                     {
-                        "IPProtocol": protocol,
-                        "ports": [port],
+                        "IPProtocol": "tcp",
+                        "ports": [str(port)],
                     },
                 ],
                 "sourceRanges": ["0.0.0.0/0"],

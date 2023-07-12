@@ -1330,7 +1330,6 @@ class RetryingVmProvisioner(object):
         self,
         to_provision: resources_lib.Resources,
         num_nodes: int,
-        allowed_rules: List[Tuple[str, str]],
         requested_resources: Set[resources_lib.Resources],
         dryrun: bool,
         stream_logs: bool,
@@ -1426,7 +1425,7 @@ class RetryingVmProvisioner(object):
                 config_dict = backend_utils.write_cluster_config(
                     to_provision,
                     num_nodes,
-                    allowed_rules,
+                    to_provision.ports,
                     _get_cluster_config_template(to_provision.cloud),
                     cluster_name,
                     self._local_wheel_path,
@@ -1949,7 +1948,6 @@ class RetryingVmProvisioner(object):
                 config_dict = self._retry_zones(
                     to_provision,
                     num_nodes,
-                    allowed_rules=task.allowed_rules,
                     requested_resources=task.resources,
                     dryrun=dryrun,
                     stream_logs=stream_logs,

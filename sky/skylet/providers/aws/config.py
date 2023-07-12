@@ -1001,7 +1001,7 @@ def _update_inbound_rules(target_security_group, sgids, config):
         config["provider"].get("security_group", {}).get("IpPermissions", [])
     )
     user_specified_rules = _retrieve_user_specified_rules(
-        config["provider"].get("allowed_rules", [])
+        config["provider"].get("ports", [])
     )
     ip_permissions = _create_default_inbound_rules(
         sgids, user_specified_rules, extended_rules
@@ -1023,15 +1023,14 @@ def _create_default_inbound_rules(sgids, user_specified_rules, extended_rules=No
     return list(merged_rules)
 
 
-def _retrieve_user_specified_rules(allowed_rules):
+def _retrieve_user_specified_rules(ports):
     rules = []
-    for r in allowed_rules:
-        protocol, port = r[0], r[1]
+    for port in ports:
         rules.append(
             {
                 "FromPort": port,
                 "ToPort": port,
-                "IpProtocol": protocol,
+                "IpProtocol": "tcp",
                 "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
             }
         )

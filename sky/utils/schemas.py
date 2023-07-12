@@ -66,6 +66,12 @@ def get_resources_schema():
             'disk_tier': {
                 'type': 'string',
             },
+            'ports': {
+                'type': 'array',
+                'items': {
+                    'type': 'integer',
+                }
+            },
             'accelerator_args': {
                 'type': 'object',
                 'required': [],
@@ -155,12 +161,6 @@ def get_task_schema():
             },
             'num_nodes': {
                 'type': 'integer',
-            },
-            'allowed_rules': {
-                'type': 'array',
-                'items': {
-                    'type': 'string'
-                },
             },
             # resources config is validated separately using RESOURCES_SCHEMA
             'resources': {
