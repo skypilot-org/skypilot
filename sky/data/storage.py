@@ -303,7 +303,7 @@ class AbstractStore:
         """
         raise NotImplementedError
     
-    def csync_command(self, csync_path: str) -> str:
+    def csync_command(self, csync_path: str, interval: int) -> str:
         raise NotImplementedError
 
     def __deepcopy__(self, memo):
@@ -385,6 +385,7 @@ class Storage(object):
                  stores: Optional[Dict[StoreType, AbstractStore]] = None,
                  persistent: Optional[bool] = True,
                  mode: StorageMode = StorageMode.MOUNT,
+                 interval: Optional[int] = None,
                  sync_on_reconstruction: bool = True) -> None:
         """Initializes a Storage object.
 
@@ -417,7 +418,10 @@ class Storage(object):
           stores: Optional; Specify pre-initialized stores (S3Store, GcsStore).
           persistent: bool; Whether to persist across sky launches.
           mode: StorageMode; Specify how the storage object is manifested on
-            the remote VM. Can be either MOUNT or COPY. Defaults to MOUNT.
+            the remote VM. Can be either MOUNT, COPY, or C_SYNC. Defaults to 
+            MOUNT.
+          interval: int; Used for C_SYNC mode only. Runs the sync command 
+            continuously for every INTERVAL seconds.
           sync_on_reconstruction: bool; Whether to sync the data if the storage
             object is found in the global_user_state and reconstructed from
             there. This is set to false when the Storage object is created not
@@ -428,6 +432,7 @@ class Storage(object):
         self.persistent = persistent
         self.mode = mode
         assert mode in StorageMode
+        self.interval = interval
         self.sync_on_reconstruction = sync_on_reconstruction
 
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
@@ -846,11 +851,15 @@ class Storage(object):
         source = config.pop('source', None)
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
+        interval = config.pop('interval', None)
         force_delete = config.pop('_force_delete', False)
 
         if isinstance(mode_str, str):
             # Make mode case insensitive, if specified
-            mode = StorageMode(mode_str.upper())
+            mode_str = mode_str.upper()
+            mode = StorageMode(mode_str)
+            if mode == StorageMode.C_SYNC:
+                interval = 600 if interval is None else interval
         else:
             # Make sure this keeps the same as the default mode in __init__
             mode = StorageMode.MOUNT
@@ -862,7 +871,8 @@ class Storage(object):
         storage_obj = cls(name=name,
                           source=source,
                           persistent=persistent,
-                          mode=mode)
+                          mode=mode,
+                          interval=interval)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
 
@@ -1208,8 +1218,8 @@ class S3Store(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
-    def csync_command(self, csync_path: str) -> str:
-        csync_cmd = f'python -m skystorage {csync_path} s3 {self.bucket.name} --lock --delete'
+    def csync_command(self, csync_path: str, interval: int) -> str:
+        csync_cmd = f'python -m sky.data.skystorage {csync_path} s3 {self.bucket.name} --interval {interval} --lock --delete'
         return csync_utils.get_csync_command(csync_cmd, csync_path)
 
     def _create_s3_bucket(self,
@@ -1626,8 +1636,8 @@ class GcsStore(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
 
-    def csync_command(self, csync_path: str) -> str:
-        csync_cmd = f'python -m skystorage {csync_path} gcs {self.bucket.name} --lock --delete'
+    def csync_command(self, csync_path: str, interval: int) -> str:
+        csync_cmd = f'python -m sky.data.skystorage {csync_path} gcs {self.bucket.name} --interval {interval} --lock --delete'
         return csync_utils.get_csync_command(csync_cmd, csync_path)
 
 
@@ -1979,7 +1989,7 @@ class R2Store(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
-    def csync_command(self, csync_path: str) -> str:
+    def csync_command(self, csync_path: str, interval: int) -> str:
         raise NotImplementedError
 
     def _create_r2_bucket(self,
