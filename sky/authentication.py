@@ -5,9 +5,7 @@ provisioning request.
 
 Specifically, after the ray yaml template file `<cloud>-ray.yml.j2` is filled in
 with resource specific information, these functions are called with the filled
-in ray yaml config as input, yaml template file `<cloud>-ray.yml.j2` is filled
-in with resource specific information. The functions will take the filled in ray
-yaml config as input,
+in ray yaml config as input,
 1. Replace the placeholders in the ray yaml file `skypilot:ssh_user` and
    `skypilot:ssh_public_key_content` with the actual username and public key
    content, i.e., `_replace_ssh_info_in_config`.
