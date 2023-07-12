@@ -75,5 +75,5 @@ as logs and checkpoints using familiar tools.
 
 .. tip::
 
-  Feel free to copy-paste the YAML above and start plugging in
+  Feel free to copy-paste the YAML above and customize it for
   your own project.
