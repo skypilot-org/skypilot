@@ -247,7 +247,7 @@ class Resources:
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
-            f'{disk_tier}{disk_size}')
+            f'{disk_tier}{disk_size}{ports}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):
@@ -257,7 +257,7 @@ class Resources:
         if self.cloud is not None:
             cloud_str = f'{self.cloud}'
 
-        return f'{cloud_str}({hardware_str}{ports})'
+        return f'{cloud_str}({hardware_str})'
 
     @property
     def cloud(self):
@@ -891,6 +891,12 @@ class Resources:
                 types = ['low', 'medium', 'high']
                 return types.index(self.disk_tier) < types.index(
                     other.disk_tier)
+
+        if self.ports is not None:
+            if other.ports is None:
+                return False
+            if not (set(self.ports) <= set(other.ports)):
+                return False
 
         # self <= other
         return True
