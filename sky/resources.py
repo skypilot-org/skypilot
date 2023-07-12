@@ -902,6 +902,7 @@ class Resources:
             self.accelerator_args is None,
             not self._use_spot_specified,
             self.disk_size == _DEFAULT_DISK_SIZE_GB,
+            self.disk_tier is None,
             self._image_id is None,
         ])
 
