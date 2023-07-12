@@ -920,9 +920,10 @@ def write_cluster_config(
                 # Generate the name of the security group we're looking for.
                 # (username, last 4 chars of hash of hostname): for uniquefying
                 # users on shared-account scenarios.
-                'security_group': skypilot_config.get_nested(
-                    ('aws', 'security_group_name'),
-                    f'sky-sg-{common_utils.user_and_hostname_hash()}-{cluster_name}'),
+                'security_group': skypilot_config.get_nested((
+                    'aws', 'security_group_name'
+                ), f'sky-sg-{common_utils.user_and_hostname_hash()}-{cluster_name}'
+                                                            ),
                 'vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
                                                        None),
                 'use_internal_ips': skypilot_config.get_nested(
