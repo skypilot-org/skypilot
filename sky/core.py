@@ -499,17 +499,17 @@ def queue(cluster_name: str,
           user identity.
         RuntimeError: if failed to get the job queue with ssh.
     """
-    handle = backend_utils.check_cluster_available(
-        cluster_name,
-        operation='getting the job queue',
-    )
-
-    backend = backend_utils.get_backend_from_handle(handle)
     all_jobs = not skip_finished
     username: Optional[str] = getpass.getuser()
     if all_users:
         username = None
     code = job_lib.JobLibCodeGen.get_job_queue(username, all_jobs)
+    
+    handle = backend_utils.check_cluster_available(
+        cluster_name,
+        operation='getting the job queue',
+    )
+    backend = backend_utils.get_backend_from_handle(handle)
 
     returncode, jobs_payload, stderr = backend.run_on_head(handle,
                                                            code,
