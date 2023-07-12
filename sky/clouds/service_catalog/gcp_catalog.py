@@ -269,29 +269,6 @@ def get_instance_type_for_accelerator(
             return None, []
         return [instance_type], []
 
-    if acc_name in _A100_INSTANCE_TYPE_DICTS:
-        # If A100 is used, host VM type must be A2.
-        # https://cloud.google.com/compute/docs/gpus#a100-gpus
-
-        df = _df[_df['InstanceType'].notna()]
-        instance_type = _A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]
-        df = df[df['InstanceType'] == instance_type]
-
-    if acc_name == 'L4':
-        # If L4 is used, host VM type must be G2
-        # https://cloud.google.com/compute/docs/gpus#l4-gpus
-
-        df = _df[_df['InstanceType'].notna()]
-        possible_instances = _L4_INSTANCE_TYPE_DICT[acc_count]
-        df = df[df['InstanceType'].isin(possible_instances)]
-
-        # Check the cpus and memory specified by the user.
-        instance_type = common.get_instance_type_for_cpus_mem_impl(
-            df, cpus, memory)
-        if instance_type is None:
-            return None, []
-        return [instance_type], []
-
     if acc_name not in _NUM_ACC_TO_NUM_CPU:
         acc_name = 'DEFAULT'
 
@@ -407,41 +384,34 @@ def list_accelerators(
         return results
 
     new_infos = defaultdict(list)
-    updates = []
 
-    for info in a100_infos:
-        assert pd.isna(info.instance_type) and pd.isna(info.memory), a100_infos
+    for info in a100_infos + l4_infos:
+        assert pd.isna(info.instance_type) and pd.isna(info.memory), a100_info + l4_info
         _, vm_types = _need_specific_vm(info.accelerator_name, info.accelerator_count)
         updates += [(info, vm_type) for vm_type in vm_types]
-
-    for info in l4_infos:
-        assert pd.isna(info.instance_type) and pd.isna(info.memory), l4_infos
-        _, vm_types = _need_specific_vm(info.accelerator_name, info.accelerator_count)
-        updates += [(info, vm_type) for vm_type in vm_types]
-
-    for (info, vm_type) in updates:
-        df = _df[_df['InstanceType'] == vm_type]
-        cpu_count = df['vCPUs'].iloc[0]
-        memory = df['MemoryGiB'].iloc[0]
-        vm_price = common.get_hourly_cost_impl(_df,
-                                               vm_type,
-                                               use_spot=False,
-                                               region=None,
-                                               zone=None)
-        vm_spot_price = common.get_hourly_cost_impl(_df,
-                                                    vm_type,
-                                                    use_spot=True,
-                                                    region=None,
-                                                    zone=None)
-        new_infos[info.accelerator_name].append(
-            info._replace(
-                instance_type=vm_type,
-                cpu_count=cpu_count,
-                memory=memory,
-                # total cost = VM instance + GPU.
-                price=info.price + vm_price,
-                spot_price=info.spot_price + vm_spot_price,
-            ))
+        for vm_type in vm_types:
+            df = _df[_df['InstanceType'] == vm_type]
+            cpu_count = df['vCPUs'].iloc[0]
+            memory = df['MemoryGiB'].iloc[0]
+            vm_price = common.get_hourly_cost_impl(_df,
+                                                   vm_type,
+                                                   use_spot=False,
+                                                   region=None,
+                                                   zone=None)
+            vm_spot_price = common.get_hourly_cost_impl(_df,
+                                                        vm_type,
+                                                        use_spot=True,
+                                                        region=None,
+                                                        zone=None)
+            new_infos[info.accelerator_name].append(
+                info._replace(
+                    instance_type=vm_type,
+                    cpu_count=cpu_count,
+                    memory=memory,
+                    # total cost = VM instance + GPU.
+                    price=info.price + vm_price,
+                    spot_price=info.spot_price + vm_spot_price,
+                ))
 
     results.update(new_infos)
     return results
