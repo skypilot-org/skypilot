@@ -895,7 +895,7 @@ class Resources:
         if self.ports is not None:
             if other.ports is None:
                 return False
-            if not (set(self.ports) <= set(other.ports)):
+            if not set(self.ports) <= set(other.ports):
                 return False
 
         # self <= other
