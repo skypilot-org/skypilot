@@ -2225,7 +2225,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                        self.launched_nodes)
         return hourly_cost
 
-    def docker_setup(self, cluster_config_file: str):
+    def setup_docker_user(self, cluster_config_file: str):
         ip_list = self.external_ips()
         assert ip_list is not None
         if len(ip_list) == 1:
@@ -2532,7 +2532,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             config = common_utils.read_yaml(cluster_config_file)
             if 'docker' in config:
-                handle.docker_setup(cluster_config_file)
+                handle.setup_docker_user(cluster_config_file)
 
             if 'tpu_name' in config_dict:
                 self._set_tpu_name(handle, config_dict['tpu_name'])
