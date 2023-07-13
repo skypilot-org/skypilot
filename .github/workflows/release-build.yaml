@@ -26,8 +26,8 @@ jobs:
         id: determine_version
         run: |
           my_string=${{ steps.extract.outputs.branch_tag }}
-          VERSION=$(echo "$my_string" | cut -d'-' -f2)
-          echo "::set-output name=VERSION::$VERSION"ERSION=$(echo "$my_string" | cut -d'-' -f2)
+          VERSION=$(echo "$my_string" | cut -d'-' -f3)
+          echo "::set-output name=VERSION::$VERSION"ERSION=$(echo "$my_string" | cut -d'-' -f3)
           echo "::set-output name=VERSION::$VERSION"
           
       - name: Build and push Docker image
@@ -36,6 +36,6 @@ jobs:
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
           VERSION: ${{ steps.determine_version.outputs.VERSION }}
         run: |
-          docker build -t skypilot:${{ env.VERSION }} .
+          docker build -t $DOCKER_USERNAME/skypilot:${{ env.VERSION }} .
           docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
-          docker push skypilot:${{ env.VERSION }}
+          docker push $DOCKER_USERNAME/skypilot:${{ env.VERSION }}
