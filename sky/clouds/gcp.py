@@ -345,7 +345,7 @@ class GCP(clouds.Cloud):
                     image_id = 'skypilot:k80-debian-10'
                 elif acc == 'L4':
                     # CUDA driver version 525.105.17, CUDA Library 11.8
-                    image_id = 'skypilot:cuda113-debian-11'
+                    image_id = 'skypilot:cuda118-debian-11'
                 else:
                     # Though the image is called cu113, it actually has later
                     # versions of CUDA as noted below.

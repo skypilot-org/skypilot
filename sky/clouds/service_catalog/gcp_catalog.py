@@ -378,15 +378,15 @@ def list_accelerators(
     # and L4 GPUs can only be attached to G2 VMs.
     # Thus, we can show their exact cost including the host VM prices.
 
-    a100_infos = results.get('A100', []) + results.get('A100-80GB', [])
-    l4_infos = results.get('L4', [])
-    if not a100_infos and not l4_infos:
+    acc_infos = results.get('A100', []) + results.get('A100-80GB', [])
+                                        + results.get('L4', [])
+    if not acc_infos:
         return results
 
     new_infos = defaultdict(list)
 
-    for info in a100_infos + l4_infos:
-        assert pd.isna(info.instance_type) and pd.isna(info.memory), a100_info + l4_info
+    for info in acc_infos:
+        assert pd.isna(info.instance_type) and pd.isna(info.memory), acc_infos
         _, vm_types = _need_specific_vm(info.accelerator_name, info.accelerator_count)
         for vm_type in vm_types:
             df = _df[_df['InstanceType'] == vm_type]
@@ -430,8 +430,8 @@ def check_host_accelerator_compatibility(
         instance_type: str, accelerators: Optional[Dict[str, int]]) -> None:
     """Check if the instance type is compatible with the accelerators.
 
-    This function ensures that TPUs and GPUs except A100 are attached to N1,
-    and A100 GPUs are attached to A2 machines.
+    This function ensures that TPUs and GPUs except A100 and L4 are attached to N1,
+    A100 GPUs are attached to A2 machines, and L4 GPUs are attached to G2 machines.
     """
     if accelerators is None:
         if instance_type.startswith('a2-'):
@@ -482,6 +482,7 @@ def check_host_accelerator_compatibility(
                     'https://cloud.google.com/compute/docs/gpus#a100-gpus')
         return
 
+    # TODO(hzeng): instead of repeating code here, make abstraction
     # Treat L4 as a special case.
     if acc_name == 'L4':
         # L4 must be attached to G2 instance type.
