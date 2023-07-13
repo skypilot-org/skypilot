@@ -133,7 +133,7 @@ class GcsCloudStorage(CloudStorage):
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads a directory using gsutil."""
         download_via_gsutil = (
-            f'{self._GSUTIL} -m rsync -r {source} {destination}')
+            f'{self._GSUTIL} -m rsync -e -r {source} {destination}')
         all_commands = [self._GET_GSUTIL]
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)

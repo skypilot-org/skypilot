@@ -99,7 +99,8 @@ _TEARDOWN_FAILURE_MESSAGE = (
 _TEARDOWN_PURGE_WARNING = (
     f'{colorama.Fore.YELLOW}'
     'WARNING: Received non-zero exit code from {reason}. '
-    'Make sure resources are manually deleted.'
+    'Make sure resources are manually deleted.\n'
+    'Details: {details}'
     f'{colorama.Style.RESET_ALL}')
 
 _TPU_NOT_FOUND_ERROR = 'ERROR: (gcloud.compute.tpus.delete) NOT_FOUND'
@@ -1372,8 +1373,9 @@ class RetryingVmProvisioner(object):
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
-        os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
-        os.system(f'touch {log_path}')
+        if not dryrun:
+            os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
+            os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
@@ -2466,10 +2468,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 (e.g., cluster name invalid) or a region/zone throwing
                 resource unavailability.
             exceptions.CommandError: any ssh command error.
+            RuntimeErorr: raised when 'rsync' is not installed.
             # TODO(zhwu): complete the list of exceptions.
         """
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.
+        # When rsync is not installed in the user's machine, Ray will
+        # silently retry to up the node for _MAX_RAY_UP_RETRY number
+        # of times. This is time consuming so we fail early.
+        backend_utils.check_rsync_installed()
         # Check if the cluster is owned by the current user. Raise
         # exceptions.ClusterOwnerIdentityMismatchError
         backend_utils.check_owner_identity(cluster_name)
@@ -3449,11 +3456,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'Failed to take down Ray autoscaler on the head node. '
                         'It might be because the cluster\'s head node has '
                         'already been terminated. It is fine to skip this.')
-            if terminate:
-                provision_api.terminate_instances(repr(cloud), region,
-                                                  cluster_name)
-            else:
-                provision_api.stop_instances(repr(cloud), region, cluster_name)
+            try:
+                if terminate:
+                    provision_api.terminate_instances(repr(cloud), region,
+                                                      cluster_name)
+                else:
+                    provision_api.stop_instances(repr(cloud), region,
+                                                 cluster_name)
+            except Exception as e:  # pylint: disable=broad-except
+                if purge:
+                    logger.warning(
+                        _TEARDOWN_PURGE_WARNING.format(
+                            reason='stopping/terminating cluster nodes',
+                            details=common_utils.format_exception(
+                                e, use_bracket=True)))
+                else:
+                    raise
 
             if post_teardown_cleanup:
                 self.post_teardown_cleanup(handle, terminate, purge)
@@ -3608,7 +3626,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if purge:
                 logger.warning(
                     _TEARDOWN_PURGE_WARNING.format(
-                        reason='stopping/terminating cluster nodes'))
+                        reason='stopping/terminating cluster nodes',
+                        details=stderr))
             # 'TPU must be specified.': This error returns when we call "gcloud
             #   delete" with an empty VM list where no instance exists. Safe to
             #   ignore it and do cleanup locally. TODO(wei-lin): refactor error
@@ -3673,7 +3692,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 elif purge:
                     logger.warning(
                         _TEARDOWN_PURGE_WARNING.format(
-                            reason='stopping/terminating TPU'))
+                            reason='stopping/terminating TPU',
+                            details=tpu_stderr))
                 else:
                     raise RuntimeError(
                         _TEARDOWN_FAILURE_MESSAGE.format(
@@ -3847,11 +3867,29 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             exceptions.InvalidClusterNameError: If the cluster name is invalid.
             # TODO(zhwu): complete the list of exceptions.
         """
-        handle_before_refresh = global_user_state.get_handle_from_cluster_name(
-            cluster_name)
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        handle_before_refresh = None if record is None else record['handle']
+        status_before_refresh = None if record is None else record['status']
+
         prev_cluster_status, handle = (
             backend_utils.refresh_cluster_status_handle(
-                cluster_name, acquire_per_cluster_status_lock=False))
+                cluster_name,
+                # We force refresh for the init status to determine the actual
+                # state of a previous cluster in INIT state.
+                #
+                # This is important for the case, where an existing cluster is
+                # transitioned into INIT state due to key interruption during
+                # launching, with the following steps:
+                # (1) launch, after answering prompt immediately ctrl-c;
+                # (2) launch again.
+                # If we don't refresh the state of the cluster and reset it back
+                # to STOPPED, our failover logic will consider it as an abnormal
+                # cluster after hitting resources capacity limit on the cloud,
+                # and will start failover. This is not desired, because the user
+                # may want to keep the data on the disk of that cluster.
+                force_refresh_statuses={status_lib.ClusterStatus.INIT},
+                acquire_per_cluster_status_lock=False,
+            ))
         if prev_cluster_status is not None:
             assert handle is not None
             # Cluster already exists.
@@ -3873,10 +3911,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         task_cloud.check_cluster_name_is_valid(cluster_name)
 
         if to_provision is None:
-            logger.info(
-                f'The cluster {cluster_name!r} was autodowned or manually '
-                'terminated on the cloud console. Using the same resources '
-                'as the previously terminated one to provision a new cluster.')
             # The cluster is recently terminated either by autostop or manually
             # terminated on the cloud. We should use the previously terminated
             # resources to provision the cluster.
@@ -3885,6 +3919,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'Trying to launch cluster {cluster_name!r} recently '
                     'terminated  on the cloud, but the handle is not a '
                     f'CloudVmRayResourceHandle ({handle_before_refresh}).')
+            status_before_refresh_str = None
+            if status_before_refresh is not None:
+                status_before_refresh_str = status_before_refresh.value
+
+            logger.info(
+                f'The cluster {cluster_name!r} (status: '
+                f'{status_before_refresh_str}) was not found on the cloud: it '
+                'may be autodowned, manually terminated, or its launch never '
+                'succeeded. Provisioning a new cluster by using the same '
+                'resources as its original launch.')
             to_provision = handle_before_refresh.launched_resources
             self.check_resources_fit_cluster(handle_before_refresh, task)
 

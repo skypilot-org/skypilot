@@ -41,6 +41,12 @@ To schedule autodown for a cluster, pass the ``--down`` flag to either :code:`sk
    # Or:
    sky autostop mycluster2 -i 10 --down
 
+.. note::
+
+  The autostop/autodown logic will be automatically executed by the remote
+  cluster.  Your local machine does *not* need to stay up for them to take
+  effect.
+
 To cancel any scheduled autostop/autodown on the cluster:
 
 .. code-block:: bash
