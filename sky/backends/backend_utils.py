@@ -466,7 +466,9 @@ class SSHConfigHelper(object):
               node.
             auth_config: read_yaml(handle.cluster_yaml)['auth']
         """
-        username = docker_user or auth_config['ssh_user']
+        username = auth_config['ssh_user']
+        if docker_user is not None:
+            username = docker_user
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
@@ -551,7 +553,9 @@ class SSHConfigHelper(object):
         auth_config: Dict[str, str],
         docker_user: Optional[str] = None,
     ):
-        username = docker_user or auth_config['ssh_user']
+        username = auth_config['ssh_user']
+        if docker_user is not None:
+            username = docker_user
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
@@ -626,9 +630,8 @@ class SSHConfigHelper(object):
                 logger.warning(f'Using {host_name} to identify host instead.')
                 ip = external_worker_ips[idx]
                 if docker_user is not None:
+                    docker_proxy_command = docker_proxy_command_generator(ip)
                     ip = 'localhost'
-                    docker_proxy_command = docker_proxy_command_generator(
-                        external_worker_ips[idx])
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, host_name, ip, username, key_path,
                     port, proxy_command, docker_proxy_command)
@@ -653,9 +656,8 @@ class SSHConfigHelper(object):
         # This checks if all codegens have been created.
         for idx, ip in enumerate(external_worker_ips):
             if docker_user is not None:
+                docker_proxy_command = docker_proxy_command_generator(ip)
                 ip = 'localhost'
-                docker_proxy_command = docker_proxy_command_generator(
-                    external_worker_ips[idx])
             if not codegens[idx]:
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, worker_names[idx], ip, username,
@@ -731,7 +733,7 @@ class SSHConfigHelper(object):
                             break
                         if config[idx].strip().startswith('ProxyCommand'):
                             proxy_command_line = config[idx].strip()
-                            if ip in proxy_command_line:
+                            if proxy_command_line.endswith(f'@{ip}'):
                                 found = True
                                 break
             if found:
@@ -1216,10 +1218,9 @@ def wait_until_ray_cluster_ready(
         return False, None  # failed
 
     config = common_utils.read_yaml(cluster_config_file)
-    use_docker = 'docker' in config
 
     docker_user = None
-    if use_docker:
+    if 'docker' in config:
         docker_user = get_docker_user(head_ip, cluster_config_file)
 
     if num_nodes <= 1:

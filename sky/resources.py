@@ -834,7 +834,6 @@ class Resources:
                 #   ubuntu:latest.
                 # docker_container_name: the name of the container. Default to
                 #   `sky_container`.
-                'use_docker': docker_image is not None,
                 'docker_image': docker_image,
                 'docker_container_name':
                     constants.DEFAULT_DOCKER_CONTAINER_NAME,

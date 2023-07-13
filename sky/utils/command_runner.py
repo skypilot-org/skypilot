@@ -93,12 +93,6 @@ def ssh_options_list(ssh_private_key: Optional[str],
     arg_dict = {k: [v] for k, v in arg_dict.items()}
     arg_dict = collections.defaultdict(list, arg_dict)
 
-    if ssh_proxy_command is not None:
-        logger.debug(f'--- Proxy: {ssh_proxy_command} ---')
-        # Due to how log_lib.run_with_log() works (using shell=True) we
-        # must quote this value.
-        arg_dict['ProxyCommand'].append(shlex.quote(ssh_proxy_command))
-
     if docker_ssh_proxy_command is not None:
         logger.debug(f'--- Docker SSH Proxy: {docker_ssh_proxy_command} ---')
         # If two proxy commands are specified, e.g.
@@ -109,8 +103,13 @@ def ssh_options_list(ssh_private_key: Optional[str],
         # establish a connection to the user-specified proxy host and then
         # proceed to ssh from the proxy host to the docker host VM, and
         # finally, ssh into the docker container.
-        arg_dict['ProxyCommand'].insert(0,
-                                        shlex.quote(docker_ssh_proxy_command))
+        arg_dict['ProxyCommand'].append(shlex.quote(docker_ssh_proxy_command))
+
+    if ssh_proxy_command is not None:
+        logger.debug(f'--- Proxy: {ssh_proxy_command} ---')
+        # Due to how log_lib.run_with_log() works (using shell=True) we
+        # must quote this value.
+        arg_dict['ProxyCommand'].append(shlex.quote(ssh_proxy_command))
 
     return ssh_key_option + [
         x for y in (['-o', f'{k}={v}']

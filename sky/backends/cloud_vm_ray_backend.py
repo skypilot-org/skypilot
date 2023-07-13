@@ -1812,7 +1812,6 @@ class RetryingVmProvisioner(object):
             head_ip = None
             if len(ip_list) == 1:
                 head_ip = ip_list[0]
-            # If single node, docker_user is set up after handle is created.
             return (self.GangSchedulingStatus.CLUSTER_READY, stdout, stderr,
                     head_ip)
 
@@ -2228,22 +2227,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def setup_docker_user(self, cluster_config_file: str):
         ip_list = self.external_ips()
         assert ip_list is not None
-        if len(ip_list) == 1:
-            # Setup head node.
-            docker_user = backend_utils.get_docker_user(ip_list[0],
-                                                        cluster_config_file)
-            self.docker_user = docker_user
-        else:
-            # Setup docker for all worker nodes. Head node setup is done
-            # in `backend_utils.wait_until_ray_cluster_ready`.
-            # Skip head ip here.
-            for worker_ip in ip_list[1:]:
-                docker_user = backend_utils.get_docker_user(
-                    worker_ip, cluster_config_file)
-                if self.docker_user is not None:
-                    assert docker_user == self.docker_user
-                else:
-                    self.docker_user = docker_user
+        docker_user = backend_utils.get_docker_user(ip_list[0],
+                                                    cluster_config_file)
+        self.docker_user = docker_user
 
     @property
     def cluster_yaml(self):
@@ -2854,8 +2840,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
-        ray_job_id = job_lib.make_ray_job_id(
-            job_id, handle.docker_user or ssh_credentials['ssh_user'])
+        job_owner = ssh_credentials['ssh_user']
+        if handle.docker_user is not None:
+            job_owner = handle.docker_user
+        ray_job_id = job_lib.make_ray_job_id(job_id, job_owner)
         if isinstance(handle.launched_resources.cloud, clouds.Local):
             # Ray Multitenancy is unsupported.
             # (Git Issue) https://github.com/ray-project/ray/issues/6800
