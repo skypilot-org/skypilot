@@ -54,3 +54,10 @@ def terminate_instances(provider_name: str,
                         excluded_instances: Optional[List[str]] = None) -> None:
     """Terminate running or stopped instances."""
     raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def cleanup_security_groups(provider_name: str, region: str,
+                            cluster_name: str) -> None:
+    """Delete security groups."""
+    raise NotImplementedError

@@ -796,6 +796,12 @@ class Resources:
     def _try_validate_ports(self) -> None:
         if self.ports is None:
             return
+        if skypilot_config.get_nested(('aws', 'security_group_name'),
+                                      None) is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify ports when AWS security group name is '
+                    'specified.')
         for port in self.ports:
             if not isinstance(port, int):
                 with ux_utils.print_exception_no_traceback():

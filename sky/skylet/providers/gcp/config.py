@@ -116,12 +116,13 @@ def wait_for_crm_operation(operation, crm):
     return result
 
 
-def wait_for_compute_global_operation(project_name, operation, compute):
+def wait_for_compute_global_operation(project_name, operation, compute, silent=False):
     """Poll for global compute operation until finished."""
-    logger.info(
-        "wait_for_compute_global_operation: "
-        "Waiting for operation {} to finish...".format(operation["name"])
-    )
+    if not silent:
+        logger.info(
+            "wait_for_compute_global_operation: "
+            "Waiting for operation {} to finish...".format(operation["name"])
+        )
 
     for _ in range(MAX_POLLS):
         result = (
@@ -136,7 +137,8 @@ def wait_for_compute_global_operation(project_name, operation, compute):
             raise Exception(result["error"])
 
         if result["status"] == "DONE":
-            logger.info("wait_for_compute_global_operation: Operation done.")
+            if not silent:
+                logger.info("wait_for_compute_global_operation: Operation done.")
             break
 
         time.sleep(POLL_INTERVAL)
@@ -970,6 +972,12 @@ def _configure_subnet(config, compute):
             node_config["networkConfig"] = copy.deepcopy(default_interfaces)[0]
             node_config["networkConfig"].pop("accessConfigs")
 
+        if "tags" not in node_config:
+            node_config["tags"] = {"items": []}
+        # Add cluster name to the tags so that firewall rules will apply to
+        # the created VM.
+        node_config["tags"]["items"].append(config["cluster_name"])
+
     return config
 
 
@@ -989,16 +997,22 @@ def _create_firewall_rule_wait(config, compute, operation):
     return response
 
 
-def _delete_firewall_rule(config, compute, name):
+def _delete_firewall_rule(config, compute, name, silent=False):
     operation = (
         compute.firewalls()
         .delete(project=config["provider"]["project_id"], firewall=name)
         .execute()
     )
     response = wait_for_compute_global_operation(
-        config["provider"]["project_id"], operation, compute
+        config["provider"]["project_id"], operation, compute, silent
     )
     return response
+
+
+def delete_firewall_rule_if_exist(config, compute, name, silent=False):
+    rule_list = _list_firewall_rules(config, compute, filter=f"(name={name})")
+    if len(rule_list) > 0:
+        _delete_firewall_rule(config, compute, name, silent)
 
 
 def _list_firewall_rules(config, compute, filter=None):
