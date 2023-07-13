@@ -65,21 +65,15 @@ run: |
     cat ${HOSTFILE_PATH}
     echo "*******************************************"
 
-    # Option 1:
-    # If you don't expect two SkyPilot jobs to run concurrently:
-    #    Move HOSTFILE_PATH to /job/hostfile; no command change needed.
-    # sudo mkdir -p /job; sudo chmod 777 /job; mv ${HOSTFILE_PATH} /job/hostfile
-
-    # Option 2 (shown below):
-    # Otherwise, change your DeepSpeed launch command to add one argument:
-    #    --hostfile $HOSTFILE_PATH
-    # Reference: https://huggingface.co/docs/transformers/main_classes/deepspeed#the-deepspeed-launcher
-
     ################ Your launch command goes here ################
 
     cd applications/DeepSpeed-Chat/training/step1_supervised_finetuning/
 
     # Adapted from: training_scripts/single_node/run_1.3b_lora.sh
+    # Note the additional argument: --hostfile $HOSTFILE_PATH
+    # Alternatively, you can move HOSTFILE_PATH to /job/hostfile:
+    #   sudo mkdir -p /job; sudo chmod 777 /job; mv ${HOSTFILE_PATH} /job/hostfile
+
     OUTPUT_PATH=./output
     mkdir -p $OUTPUT_PATH
     deepspeed \
