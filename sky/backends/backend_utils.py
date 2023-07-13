@@ -644,9 +644,8 @@ class SSHConfigHelper(object):
                     overwrite_begin_idxs[idx] = i - 1
                 ip = external_worker_ips[idx]
                 if docker_user is not None:
+                    docker_proxy_command = docker_proxy_command_generator(ip)
                     ip = 'localhost'
-                    docker_proxy_command = docker_proxy_command_generator(
-                        external_worker_ips[idx])
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, host_name, ip, username, key_path,
                     port, proxy_command, docker_proxy_command)
@@ -724,11 +723,11 @@ class SSHConfigHelper(object):
                 found = (line.strip() == 'HostName localhost' and
                          next_line.strip() == f'User {docker_user}')
                 if found:
-                    # Find the line starting with ProxyCommand
+                    # Find the line starting with ProxyCommand and contains the ip
                     found = False
                     for idx in range(i, len(config)):
                         # Stop if we reach an empty line, which means a new host
-                        if len(config[idx].strip()) == 0:
+                        if not config[idx].strip():
                             break
                         if config[idx].strip().startswith('ProxyCommand'):
                             proxy_command_line = config[idx].strip()
