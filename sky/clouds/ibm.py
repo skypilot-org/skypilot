@@ -38,6 +38,10 @@ class IBM(clouds.Cloud):
         return {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is not supported in {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.NATIVE_DOCKER_SUPPORT:
+                (f'Native docker is not supported in {cls._REPR}. '
+                 'You can try running docker command inside the '
+                 '`run` section in task.yaml.'),
         }
 
     @classmethod
@@ -256,6 +260,9 @@ class IBM(clouds.Cloud):
 
         Launchable resources require a cloud and an instance type be assigned.
         """
+        if (resources.disk_tier is not None or
+                resources.extract_docker_image() is not None):
+            return ([], [])
         fuzzy_candidate_list: Optional[List[str]] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources

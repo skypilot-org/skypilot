@@ -28,6 +28,7 @@ class CloudImplementationFeatures(enum.Enum):
     AUTOSTOP = 'autostop'
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
+    NATIVE_DOCKER_SUPPORT = 'native_docker_support'
 
 
 class Region(collections.namedtuple('Region', ['name'])):

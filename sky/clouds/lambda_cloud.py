@@ -36,6 +36,10 @@ class Lambda(clouds.Cloud):
         clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.NATIVE_DOCKER_SUPPORT:
+            (f'Native docker is not supported in {_REPR}. '
+             'You can try running docker command inside the '
+             '`run` section in task.yaml.'),
     }
 
     @classmethod
@@ -164,7 +168,8 @@ class Lambda(clouds.Cloud):
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
-        if resources.use_spot or resources.disk_tier is not None:
+        if (resources.use_spot or resources.disk_tier is not None or
+                resources.extract_docker_image() is not None):
             return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
