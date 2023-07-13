@@ -2420,6 +2420,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     task, to_provision, cluster_name)
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
+            if len(cluster_name
+                  ) >= 40 and to_provision_config.resources.ports is not None:
+                # GCP firewall rule name has a 63 character limit. Our firewall
+                # rule name template is f'{vpc_name}-user-ports-{cluster_name}',
+                # assuming vpc_name is 'skypilot-vpc', the cluster_name must be
+                # less than 40 characters.
+                # FIXME(tian): Retrieve the vpc_name and calculate max length
+                # The error message is:
+                # googleapiclient.errors.HttpError: <HttpError 400 when requesting https://compute.googleapis.com/compute/v1/projects/<project_id>/global/firewalls?alt=json returned "Invalid value for field 'resource.name': '<name>'. Must be a match of regex '(?:[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?)'"  # pylint: disable=line-too-long
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.InvalidClusterNameError(
+                        'Cluster name with ports must be less than 40 characters '
+                        'to meet the length requirement of the firewall name. '
+                        'Please specify a shorter cluster name.')
 
             prev_cluster_status = to_provision_config.prev_cluster_status
             usage_lib.messages.usage.update_cluster_resources(
@@ -3644,7 +3658,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       handle.cluster_name)
             elif isinstance(cloud, clouds.GCP):
                 if 'ports' in config['provider']:
-                    from sky.skylet.providers.gcp import config as gcp_config  # pylint: disable=import-outside-toplevel
+                    # pylint: disable=import-outside-toplevel
+                    from sky.skylet.providers.gcp import config as gcp_config
+                    from googleapiclient import errors
                     _, _, compute, _ = \
                         gcp_config.construct_clients_from_provider_config(
                         config['provider'])
@@ -3654,15 +3670,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         # TODO(tian): Add a function to generate rule name for
                         # GCP, then replace here and
                         # providers/gcp/config.py::_get_filewall_rules_template
-                        rule_name = (f'{vpc_name}-allow-user-specified-ports'
+                        rule_name = (f'{vpc_name}-user-ports'
                                      f'-{config["cluster_name"]}-{port}')
                         # Target rule might not exist since it is already
                         # allowed before the cluster is launched. So we only
                         # delete it if it exists.
-                        gcp_config.delete_firewall_rule_if_exist(config,
-                                                                 compute,
-                                                                 rule_name,
-                                                                 silent=True)
+                        try:
+                            gcp_config.delete_firewall_rule_if_exist(
+                                config, compute, rule_name, silent=True)
+                        except errors.HttpError as e:
+                            logger.warning(
+                                f'Failed to delete firewall rule {rule_name}. '
+                                f'Please remove it manually to avoid '
+                                f'leakage. Details: {e}')
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.

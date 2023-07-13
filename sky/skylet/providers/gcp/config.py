@@ -760,7 +760,7 @@ def _get_filewall_rules_template(config):
     default_template = FIREWALL_RULES_TEMPLATE.copy()
     ports = config["provider"].get("ports", [])
     for port in ports:
-        suffix = f"-allow-user-specified-ports-{config['cluster_name']}-{port}"
+        suffix = f"-user-ports-{config['cluster_name']}-{port}"
         default_template.append(
             {
                 "name": "{VPC_NAME}" + suffix,

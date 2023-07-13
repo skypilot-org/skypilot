@@ -1284,6 +1284,40 @@ def test_multi_hostname(generic_cloud: str):
     run_one_test(test)
 
 
+# ---------- Web apps with custom ports on GCP. ----------
+@pytest.mark.gcp
+def test_gcp_http_server_with_custom_ports():
+    name = _get_cluster_name()
+    test = Test(
+        'gcp_http_server_with_custom_ports',
+        [
+            f'sky launch -y -d -c {name} --cloud gcp examples/http_server_with_custom_ports/task.yaml',
+            'sleep 10',
+            'ip=$(grep -A1 "Host ' + name +
+            '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Web apps with custom ports on AWS. ----------
+@pytest.mark.aws
+def test_aws_http_server_with_custom_ports():
+    name = _get_cluster_name()
+    test = Test(
+        'aws_http_server_with_custom_ports',
+        [
+            f'sky launch -y -d -c {name} --cloud aws examples/http_server_with_custom_ports/task.yaml',
+            'sleep 10',
+            'ip=$(grep -A1 "Host ' + name +
+            '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Task: n=2 nodes with setups. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
