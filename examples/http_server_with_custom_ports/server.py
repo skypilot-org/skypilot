@@ -3,7 +3,9 @@ import socketserver
 
 PORT = 33828
 
+
 class MyHttpRequestHandler(http.server.SimpleHTTPRequestHandler):
+
     def do_GET(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
@@ -20,6 +22,7 @@ class MyHttpRequestHandler(http.server.SimpleHTTPRequestHandler):
         '''
         self.wfile.write(bytes(html, 'utf8'))
         return
+
 
 Handler = MyHttpRequestHandler
 
