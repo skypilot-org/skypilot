@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'releases/*'
+      - 'ci-cd/*'
 
 jobs:
   build:
