@@ -10,6 +10,8 @@ from sky.serve.load_balancers import RoundRobinLoadBalancer, LoadBalancer
 import time
 import threading
 
+from typing import Optional
+
 from fastapi import FastAPI, Request
 import uvicorn
 
@@ -26,7 +28,7 @@ class Controller:
     def __init__(self,
                  infra_provider: InfraProvider,
                  load_balancer: LoadBalancer,
-                 autoscaler: Autoscaler = None,
+                 autoscaler: Optional[Autoscaler] = None,
                  port: int = 8082):
         self.port = port
         self.infra_provider = infra_provider
