@@ -150,6 +150,9 @@ def get_task_schema():
             'workdir': {
                 'type': 'string',
             },
+            'event_callback': {
+                'type': 'string',
+            },
             'num_nodes': {
                 'type': 'integer',
             },
@@ -170,7 +173,13 @@ def get_task_schema():
             'envs': {
                 'type': 'object',
                 'required': [],
-                'additionalProperties': True,
+                'patternProperties': {
+                    # Checks env keys are valid env var names.
+                    '^[a-zA-Z_][a-zA-Z0-9_]*$': {
+                        'type': 'string'
+                    }
+                },
+                'additionalProperties': False,
             },
             # inputs and outputs are experimental
             'inputs': {

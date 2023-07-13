@@ -1321,11 +1321,10 @@ class GcsStore(AbstractStore):
         if not _is_storage_cloud_enabled(str(clouds.GCP())):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
-                    'Storage \'store: gcs\' specified, but ' \
-                    'GCP access is disabled. To fix, enable '\
-                    'GCP by running `sky check`. '\
-                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
-                    )
+                    'Storage \'store: gcs\' specified, but '
+                    'GCP access is disabled. To fix, enable '
+                    'GCP by running `sky check`. '
+                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.')  # pylint: disable=line-too-long
 
     @classmethod
     def validate_name(cls, name) -> str:
@@ -1508,14 +1507,15 @@ class GcsStore(AbstractStore):
 
         def get_file_sync_command(base_dir_path, file_names):
             sync_format = '|'.join(file_names)
-            sync_command = (f'gsutil -m rsync -x \'^(?!{sync_format}$).*\' '
+            sync_command = (f'gsutil -m rsync -e -x \'^(?!{sync_format}$).*\' '
                             f'{base_dir_path} gs://{self.name}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            sync_command = (f'gsutil -m rsync -r -x \'.git/*\' {src_dir_path} '
-                            f'gs://{self.name}/{dest_dir_name}')
+            sync_command = (
+                f'gsutil -m rsync -e -r -x \'.git/*\' {src_dir_path} '
+                f'gs://{self.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload

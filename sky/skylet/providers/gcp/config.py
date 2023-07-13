@@ -24,6 +24,8 @@ from sky.skylet.providers.gcp.constants import (
     VPC_TEMPLATE,
     FIREWALL_RULES_TEMPLATE,
     FIREWALL_RULES_REQUIRED,
+    VM_MINIMAL_PERMISSIONS,
+    TPU_MINIMAL_PERMISSIONS,
 )
 from ray.autoscaler._private.util import check_legacy_fields
 
@@ -37,6 +39,15 @@ DEFAULT_SERVICE_ACCOUNT_ID = RAY + "-sa-" + VERSION
 SERVICE_ACCOUNT_EMAIL_TEMPLATE = "{account_id}@{project_id}.iam.gserviceaccount.com"
 DEFAULT_SERVICE_ACCOUNT_CONFIG = {
     "displayName": "Ray Autoscaler Service Account ({})".format(VERSION),
+}
+
+SKYPILOT = "skypilot"
+SKYPILOT_SERVICE_ACCOUNT_ID = SKYPILOT + "-" + VERSION
+SKYPILOT_SERVICE_ACCOUNT_EMAIL_TEMPLATE = (
+    "{account_id}@{project_id}.iam.gserviceaccount.com"
+)
+SKYPILOT_SERVICE_ACCOUNT_CONFIG = {
+    "displayName": "SkyPilot Service Account ({})".format(VERSION),
 }
 
 # Those roles will be always added.
@@ -135,7 +146,7 @@ def wait_for_compute_global_operation(project_name, operation, compute):
 
 def key_pair_name(i, region, project_id, ssh_user):
     """Returns the ith default gcp_key_pair_name."""
-    key_name = "{}_gcp_{}_{}_{}_{}".format(RAY, region, project_id, ssh_user, i)
+    key_name = "{}_gcp_{}_{}_{}_{}".format(SKYPILOT, region, project_id, ssh_user, i)
     return key_name
 
 
@@ -333,6 +344,76 @@ def _configure_project(config, crm):
     return config
 
 
+def _is_permission_satisfied(
+    service_account, crm, iam, required_permissions, required_roles
+):
+    """Check if either of the roles or permissions are satisfied."""
+    if service_account is None:
+        return False, None
+
+    project_id = service_account["projectId"]
+    email = service_account["email"]
+
+    member_id = "serviceAccount:" + email
+
+    required_permissions = set(required_permissions)
+    policy = crm.projects().getIamPolicy(resource=project_id, body={}).execute()
+    original_policy = copy.deepcopy(policy)
+    already_configured = True
+
+    logger.info(f"_configure_iam_role: Checking permissions for {email}...")
+
+    # Check the roles first, as checking the permission requires more API calls and
+    # permissions.
+    for role in required_roles:
+        role_exists = False
+        for binding in policy["bindings"]:
+            if binding["role"] == role:
+                if member_id not in binding["members"]:
+                    binding["members"].append(member_id)
+                    already_configured = False
+                role_exists = True
+
+        if not role_exists:
+            already_configured = False
+            policy["bindings"].append(
+                {
+                    "members": [member_id],
+                    "role": role,
+                }
+            )
+
+    if already_configured:
+        # In some managed environments, an admin needs to grant the
+        # roles, so only call setIamPolicy if needed.
+        return True, policy
+
+    for binding in original_policy["bindings"]:
+        if member_id in binding["members"]:
+            role = binding["role"]
+            try:
+                role_definition = iam.projects().roles().get(name=role).execute()
+            except TypeError as e:
+                if "does not match the pattern" in str(e):
+                    logger.info(
+                        f"_configure_iam_role: fail to check permission for built-in role {role}. skipped."
+                    )
+                    permissions = []
+                else:
+                    raise
+            else:
+                permissions = role_definition["includedPermissions"]
+            required_permissions -= set(permissions)
+        if not required_permissions:
+            break
+    if not required_permissions:
+        # All required permissions are already granted.
+        return True, policy
+    logger.info(f"_configure_iam_role: missing permisisons {required_permissions}")
+
+    return False, policy
+
+
 def _configure_iam_role(config, crm, iam):
     """Setup a gcp service account with IAM roles.
 
@@ -345,30 +426,71 @@ def _configure_iam_role(config, crm, iam):
     """
     config = copy.deepcopy(config)
 
-    email = SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
-        account_id=DEFAULT_SERVICE_ACCOUNT_ID,
+    email = SKYPILOT_SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
+        account_id=SKYPILOT_SERVICE_ACCOUNT_ID,
         project_id=config["provider"]["project_id"],
     )
     service_account = _get_service_account(email, config, iam)
 
-    if service_account is None:
+    permissions = VM_MINIMAL_PERMISSIONS
+    roles = DEFAULT_SERVICE_ACCOUNT_ROLES
+    if config["provider"].get(HAS_TPU_PROVIDER_FIELD, False):
+        roles = DEFAULT_SERVICE_ACCOUNT_ROLES + TPU_SERVICE_ACCOUNT_ROLES
+        permissions = VM_MINIMAL_PERMISSIONS + TPU_MINIMAL_PERMISSIONS
+
+    satisfied, policy = _is_permission_satisfied(
+        service_account, crm, iam, permissions, roles
+    )
+
+    if not satisfied:
+        # SkyPilot: Fallback to the old ray service account name for
+        # backwards compatibility. Users using GCP before #2112 have
+        # the old service account setup setup in their GCP project,
+        # and the user may not have the permissions to create the
+        # new service account. This is to ensure that the old service
+        # account is still usable.
+        email = SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
+            account_id=DEFAULT_SERVICE_ACCOUNT_ID,
+            project_id=config["provider"]["project_id"],
+        )
+        logger.info(f"_configure_iam_role: Fallback to service account {email}")
+
+        ray_service_account = _get_service_account(email, config, iam)
+        ray_satisfied, _ = _is_permission_satisfied(
+            ray_service_account, crm, iam, permissions, roles
+        )
         logger.info(
             "_configure_iam_role: "
-            "Creating new service account {}".format(DEFAULT_SERVICE_ACCOUNT_ID)
+            f"Fallback to service account {email} succeeded? {ray_satisfied}"
         )
 
-        service_account = _create_service_account(
-            DEFAULT_SERVICE_ACCOUNT_ID, DEFAULT_SERVICE_ACCOUNT_CONFIG, config, iam
-        )
+        if ray_satisfied:
+            service_account = ray_service_account
+            satisfied = ray_satisfied
+        elif service_account is None:
+            logger.info(
+                "_configure_iam_role: "
+                "Creating new service account {}".format(SKYPILOT_SERVICE_ACCOUNT_ID)
+            )
+            # SkyPilot: a GCP user without the permission to create a service
+            # account will fail here.
+            service_account = _create_service_account(
+                SKYPILOT_SERVICE_ACCOUNT_ID,
+                SKYPILOT_SERVICE_ACCOUNT_CONFIG,
+                config,
+                iam,
+            )
+            satisfied, policy = _is_permission_satisfied(
+                service_account, crm, iam, permissions, roles
+            )
 
     assert service_account is not None, "Failed to create service account"
 
-    if config["provider"].get(HAS_TPU_PROVIDER_FIELD, False):
-        roles = DEFAULT_SERVICE_ACCOUNT_ROLES + TPU_SERVICE_ACCOUNT_ROLES
-    else:
-        roles = DEFAULT_SERVICE_ACCOUNT_ROLES
-
-    _add_iam_policy_binding(service_account, roles, crm)
+    if not satisfied:
+        logger.info(
+            "_configure_iam_role: " f"Adding roles to service account {email}..."
+        )
+        _add_iam_policy_binding(service_account, policy, crm, iam)
 
     account_dict = {
         "email": service_account["email"],
@@ -839,7 +961,10 @@ def _get_service_account(account, config, iam):
     try:
         service_account = iam.projects().serviceAccounts().get(name=full_name).execute()
     except errors.HttpError as e:
-        if e.resp.status != 404:
+        if e.resp.status not in [403, 404]:
+            # SkyPilot: added 403, which means the service account doesn't exist,
+            # or not accessible by the current account, which is fine, as we do the
+            # fallback in the caller.
             raise
         service_account = None
 
@@ -865,37 +990,9 @@ def _create_service_account(account_id, account_config, config, iam):
     return service_account
 
 
-def _add_iam_policy_binding(service_account, roles, crm):
+def _add_iam_policy_binding(service_account, policy, crm, iam):
     """Add new IAM roles for the service account."""
     project_id = service_account["projectId"]
-    email = service_account["email"]
-    member_id = "serviceAccount:" + email
-
-    policy = crm.projects().getIamPolicy(resource=project_id, body={}).execute()
-
-    already_configured = True
-    for role in roles:
-        role_exists = False
-        for binding in policy["bindings"]:
-            if binding["role"] == role:
-                if member_id not in binding["members"]:
-                    binding["members"].append(member_id)
-                    already_configured = False
-                role_exists = True
-
-        if not role_exists:
-            already_configured = False
-            policy["bindings"].append(
-                {
-                    "members": [member_id],
-                    "role": role,
-                }
-            )
-
-    if already_configured:
-        # In some managed environments, an admin needs to grant the
-        # roles, so only call setIamPolicy if needed.
-        return
 
     result = (
         crm.projects()

@@ -78,3 +78,47 @@ FIREWALL_RULES_TEMPLATE = [
         "sourceRanges": ["0.0.0.0/0"],
     },
 ]
+
+# A list of permissions required to run SkyPilot on GCP.
+# Keep this in sync with https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp # pylint: disable=line-too-long
+VM_MINIMAL_PERMISSIONS = [
+    "compute.disks.create",
+    "compute.disks.list",
+    "compute.firewalls.create",
+    "compute.firewalls.delete",
+    "compute.firewalls.get",
+    "compute.instances.create",
+    "compute.instances.delete",
+    "compute.instances.get",
+    "compute.instances.list",
+    "compute.instances.setLabels",
+    "compute.instances.setServiceAccount",
+    "compute.instances.start",
+    "compute.instances.stop",
+    "compute.networks.get",
+    "compute.networks.list",
+    "compute.networks.getEffectiveFirewalls",
+    "compute.globalOperations.get",
+    "compute.subnetworks.use",
+    "compute.subnetworks.list",
+    "compute.subnetworks.useExternalIp",
+    "compute.projects.get",
+    "compute.zoneOperations.get",
+    "iam.roles.get",
+    "iam.serviceAccounts.actAs",
+    "iam.serviceAccounts.get",
+    "serviceusage.services.enable",
+    "serviceusage.services.list",
+    "serviceusage.services.use",
+    "resourcemanager.projects.get",
+    "resourcemanager.projects.getIamPolicy",
+]
+
+TPU_MINIMAL_PERMISSIONS = [
+    "tpu.nodes.create",
+    "tpu.nodes.delete",
+    "tpu.nodes.list",
+    "tpu.nodes.get",
+    "tpu.nodes.update",
+    "tpu.operations.get",
+]

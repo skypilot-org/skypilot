@@ -275,6 +275,9 @@ class KubernetesNodeProvider(NodeProvider):
             pass
 
     def terminate_nodes(self, node_ids):
+        # TODO(romilb): terminate_nodes should be include optimizations for
+        #  deletion of multiple nodes. Currently, it deletes one node at a time.
+        #  We should look in to using deletecollection here for batch deletion.
         for node_id in node_ids:
             self.terminate_node(node_id)
 

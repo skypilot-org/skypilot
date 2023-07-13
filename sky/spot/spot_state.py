@@ -5,12 +5,18 @@ import enum
 import pathlib
 import sqlite3
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+import typing
+from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 
 import colorama
 
 from sky import sky_logging
 from sky.utils import db_utils
+
+if typing.TYPE_CHECKING:
+    import sky
+
+CallbackType = Callable[[str], None]
 
 logger = sky_logging.init_logger(__name__)
 
@@ -266,7 +272,8 @@ def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
 
 
 def set_submitted(job_id: int, task_id: int, run_timestamp: str,
-                  submit_time: float, resources_str: str):
+                  submit_time: float, resources_str: str,
+                  callback_func: CallbackType):
     """Set the task to submitted.
 
     Args:
@@ -294,9 +301,10 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
             task_id=(?)""",
             (resources_str, submit_time, SpotStatus.SUBMITTED.value,
              run_timestamp, job_id, task_id))
+    callback_func('SUBMITTED')
 
 
-def set_starting(job_id: int, task_id: int):
+def set_starting(job_id: int, task_id: int, callback_func: CallbackType):
     """Set the task to starting state."""
     logger.info('Launching the spot cluster...')
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -305,9 +313,11 @@ def set_starting(job_id: int, task_id: int):
             UPDATE spot SET status=(?)
             WHERE spot_job_id=(?) AND
             task_id=(?)""", (SpotStatus.STARTING.value, job_id, task_id))
+    callback_func('STARTING')
 
 
-def set_started(job_id: int, task_id: int, start_time: float):
+def set_started(job_id: int, task_id: int, start_time: float,
+                callback_func: CallbackType):
     """Set the task to started state."""
     logger.info('Job started.')
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -317,9 +327,10 @@ def set_started(job_id: int, task_id: int, start_time: float):
             WHERE spot_job_id=(?) AND
             task_id=(?)""",
             (SpotStatus.RUNNING.value, start_time, start_time, job_id, task_id))
+    callback_func('STARTED')
 
 
-def set_recovering(job_id: int, task_id: int):
+def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
     """Set the task to recovering state, and update the job duration."""
     logger.info('=== Recovering... ===')
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -330,9 +341,11 @@ def set_recovering(job_id: int, task_id: int):
                 WHERE spot_job_id=(?) AND
                 task_id=(?)""",
             (SpotStatus.RECOVERING.value, time.time(), job_id, task_id))
+    callback_func('RECOVERING')
 
 
-def set_recovered(job_id: int, task_id: int, recovered_time: float):
+def set_recovered(job_id: int, task_id: int, recovered_time: float,
+                  callback_func: CallbackType):
     """Set the task to recovered."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
@@ -343,9 +356,11 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float):
             task_id=(?)""",
             (SpotStatus.RUNNING.value, recovered_time, job_id, task_id))
     logger.info('==== Recovered. ====')
+    callback_func('RECOVERED')
 
 
-def set_succeeded(job_id: int, task_id: int, end_time: float):
+def set_succeeded(job_id: int, task_id: int, end_time: float,
+                  callback_func: CallbackType):
     """Set the task to succeeded, if it is in a non-terminal state."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
@@ -355,14 +370,19 @@ def set_succeeded(job_id: int, task_id: int, end_time: float):
             WHERE spot_job_id=(?) AND task_id=(?)
             AND end_at IS null""",
             (SpotStatus.SUCCEEDED.value, end_time, job_id, task_id))
+
+    callback_func('SUCCEEDED')
     logger.info('Job succeeded.')
 
 
-def set_failed(job_id: int,
-               task_id: Optional[int],
-               failure_type: SpotStatus,
-               failure_reason: str,
-               end_time: Optional[float] = None):
+def set_failed(
+    job_id: int,
+    task_id: Optional[int],
+    failure_type: SpotStatus,
+    failure_reason: str,
+    callback_func: Optional[CallbackType] = None,
+    end_time: Optional[float] = None,
+):
     """Set an entire job or task to failed, if they are in non-terminal states.
 
     Args:
@@ -401,10 +421,12 @@ def set_failed(job_id: int,
             {set_str}
             WHERE spot_job_id=(?){task_str} AND end_at IS null""",
             (*list(fields_to_set.values()), job_id))
+    if callback_func:
+        callback_func('FAILED')
     logger.info(failure_reason)
 
 
-def set_cancelling(job_id: int):
+def set_cancelling(job_id: int, callback_func: CallbackType):
     """Set tasks in the job as cancelling, if they are in non-terminal states.
 
     task_id is not needed, because we expect the job should be cancelled
@@ -419,9 +441,10 @@ def set_cancelling(job_id: int):
             (SpotStatus.CANCELLING.value, time.time(), job_id))
         if rows.rowcount > 0:
             logger.info('Cancelling the job...')
+            callback_func('CANCELLING')
 
 
-def set_cancelled(job_id: int):
+def set_cancelled(job_id: int, callback_func: CallbackType):
     """Set tasks in the job as cancelled, if they are in CANCELLING state.
 
     The set_cancelling should be called before this function.
@@ -436,6 +459,7 @@ def set_cancelled(job_id: int):
              SpotStatus.CANCELLING.value))
         if rows.rowcount > 0:
             logger.info('Job cancelled.')
+            callback_func('CANCELLED')
 
 
 # ======== utility functions ========

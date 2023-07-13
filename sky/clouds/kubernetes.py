@@ -135,6 +135,9 @@ class Kubernetes(clouds.Cloud):
     _REPR = 'Kubernetes'
     _regions: List[clouds.Region] = [clouds.Region('kubernetes')]
     _CLOUD_UNSUPPORTED_FEATURES = {
+        # TODO(romilb): Stopping might be possible to implement with
+        #  container checkpointing introduced in Kubernetes v1.25. See:
+        #  https://kubernetes.io/blog/2022/12/05/forensic-container-checkpointing-alpha/ # pylint: disable=line-too-long
         clouds.CloudImplementationFeatures.STOP: 'Kubernetes does not '
                                                  'support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Kubernetes does not '
@@ -172,7 +175,9 @@ class Kubernetes(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        # Assume zero cost for Kubernetes clusters
+        # TODO(romilb): Investigate how users can provide their own cost catalog
+        #  for Kubernetes clusters.
+        # For now, assume zero cost for Kubernetes clusters
         return 0.0
 
     def accelerators_to_hourly_cost(self,
@@ -208,6 +213,10 @@ class Kubernetes(clouds.Cloud):
             disk_tier: Optional[str] = None) -> Optional[str]:
         del disk_tier  # Unused.
         # TODO(romilb): Allow fractional CPUs and memory
+        # TODO(romilb): We should check the maximum number of CPUs and memory
+        #  that can be requested, and return None if the requested resources
+        #  exceed the maximum. This may require thought about how to handle
+        #  autoscaling clusters.
         # We strip '+' from resource requests since Kubernetes can provision
         # exactly the requested resources.
         instance_cpus = int(
@@ -280,6 +289,8 @@ class Kubernetes(clouds.Cloud):
             'memory': str(mem),
             'timeout': str(self.TIMEOUT),
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
+            # TODO(romilb): Allow user to specify custom images
+            'image_id': self.IMAGE,
         }
 
     def get_feasible_launchable_resources(self,
@@ -345,10 +356,10 @@ class Kubernetes(clouds.Cloud):
                                       acc_count: int,
                                       region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
-        # TODO(romilb): All accelerators are marked as available for now. In the
-        #  future, we should return false for accelerators that we know are not
-        #  supported by the cluster.
-        return True
+        # TODO(romilb): All accelerators are marked as not available for now.
+        #  In the future, we should return false for accelerators that we know
+        #  are not supported by the cluster.
+        return False
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],

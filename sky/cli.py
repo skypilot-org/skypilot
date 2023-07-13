@@ -33,6 +33,7 @@ import signal
 import subprocess
 import sys
 import textwrap
+import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 import webbrowser
@@ -225,7 +226,8 @@ def _interactive_node_cli_command(cli_func):
                              help=('OS disk size in GBs.'))
     disk_tier = click.option('--disk-tier',
                              default=None,
-                             type=str,
+                             type=click.Choice(['low', 'medium', 'high'],
+                                               case_sensitive=False),
                              required=False,
                              help=('OS disk tier. Could be one of "low", '
                                    '"medium", "high". Default: medium'))
@@ -725,12 +727,21 @@ def _launch_with_confirm(
     retry_until_up: bool = False,
     no_setup: bool = False,
     node_type: Optional[str] = None,
+    clone_disk_from: Optional[str] = None,
 ):
     """Launch a cluster with a Task."""
-    with sky.Dag() as dag:
-        dag.add(task)
     if cluster is None:
         cluster = backend_utils.generate_cluster_name()
+
+    clone_source_str = ''
+    if clone_disk_from is not None:
+        clone_source_str = f' from the disk of {clone_disk_from!r}'
+        task, _ = backend_utils.check_can_clone_disk_and_override_task(
+            clone_disk_from, cluster, task)
+
+    with sky.Dag() as dag:
+        dag.add(task)
+
     maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
     if maybe_status is None:
         # Show the optimize log before the prompt if the cluster does not exist.
@@ -756,7 +767,9 @@ def _launch_with_confirm(
             if onprem_utils.check_if_local_cloud(cluster):
                 prompt = f'Initializing local cluster{cluster_str}. Proceed?'
             else:
-                prompt = f'Launching a new cluster{cluster_str}. Proceed?'
+                prompt = (
+                    f'Launching a new cluster{cluster_str}{clone_source_str}. '
+                    'Proceed?')
         elif maybe_status == status_lib.ClusterStatus.STOPPED:
             prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
         if prompt is not None:
@@ -792,6 +805,7 @@ def _launch_with_confirm(
             down=down,
             retry_until_up=retry_until_up,
             no_setup=no_setup,
+            clone_disk_from=clone_disk_from,
         )
 
 
@@ -930,15 +944,23 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
         entrypoint: Path to a YAML file.
     """
     is_yaml = True
-    config = None
+    config: Optional[List[Dict[str, Any]]] = None
+    result = None
     shell_splits = shlex.split(entrypoint)
-    yaml_file_provided = len(shell_splits) == 1 and \
-        (shell_splits[0].endswith('yaml') or shell_splits[0].endswith('.yml'))
+    yaml_file_provided = (len(shell_splits) == 1 and
+                          (shell_splits[0].endswith('yaml') or
+                           shell_splits[0].endswith('.yml')))
     try:
         with open(entrypoint, 'r') as f:
             try:
-                config = list(yaml.safe_load_all(f))[0]
-                if isinstance(config, str):
+                config = list(yaml.safe_load_all(f))
+                if config:
+                    # FIXME(zongheng): in a chain DAG YAML it only returns the
+                    # first section. OK for downstream but is weird.
+                    result = config[0]
+                else:
+                    result = {}
+                if isinstance(result, str):
                     # 'sky exec cluster ./my_script.sh'
                     is_yaml = False
             except yaml.YAMLError as e:
@@ -966,7 +988,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
                 f'{entrypoint!r} looks like a yaml path but {invalid_reason}\n'
                 'It will be treated as a command to be run remotely. Continue?',
                 abort=True)
-    return is_yaml, config
+    return is_yaml, result
 
 
 def _make_task_or_dag_from_entrypoint_with_overrides(
@@ -1030,7 +1052,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if is_yaml:
         assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-        dag = dag_utils.load_chain_dag_from_yaml(entrypoint)
+        dag = dag_utils.load_chain_dag_from_yaml(entrypoint, env_overrides=env)
         if len(dag.tasks) > 1:
             # When the dag has more than 1 task. It is unclear how to
             # override the params for the dag. So we just ignore the
@@ -1041,7 +1063,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     'since the yaml file contains multiple tasks.',
                     fg='yellow')
             return dag
-        task = sky.Task.from_yaml(entrypoint)
+        assert len(dag.tasks) == 1, (
+            f'If you see this, please file an issue; tasks: {dag.tasks}')
+        task = dag.tasks[0]
     else:
         task = sky.Task(name='sky-cmd', run=entrypoint)
         task.set_resources({sky.Resources()})
@@ -1052,10 +1076,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
 
     # Spot launch specific.
     if spot_recovery is not None:
-        if spot_recovery.lower() == 'none':
-            override_params['spot_recovery'] = None
-        else:
-            override_params['spot_recovery'] = spot_recovery
+        override_params['spot_recovery'] = spot_recovery
 
     assert len(task.resources) == 1
     old_resources = list(task.resources)[0]
@@ -1209,7 +1230,7 @@ def cli():
 @click.option(
     '--disk-tier',
     default=None,
-    type=str,
+    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
     required=False,
     help=(
         'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
@@ -1259,6 +1280,15 @@ def cli():
               default=False,
               required=False,
               help='Skip setup phase when (re-)launching cluster.')
+@click.option(
+    '--clone-disk-from',
+    '--clone',
+    default=None,
+    type=str,
+    **_get_shell_complete_args(_complete_cluster_name),
+    help=('[Experimental] Clone disk from an existing cluster to launch '
+          'a new one. This is useful when the new cluster needs to have '
+          'the same data on the boot disk as an existing cluster.'))
 @usage_lib.entrypoint
 def launch(
     entrypoint: List[str],
@@ -1287,6 +1317,7 @@ def launch(
     retry_until_up: bool,
     yes: bool,
     no_setup: bool,
+    clone_disk_from: Optional[str],
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
@@ -1356,7 +1387,8 @@ def launch(
                          idle_minutes_to_autostop=idle_minutes_to_autostop,
                          down=down,
                          retry_until_up=retry_until_up,
-                         no_setup=no_setup)
+                         no_setup=no_setup,
+                         clone_disk_from=clone_disk_from)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -2975,8 +3007,13 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
 
 @cli.command()
+@click.option('--verbose',
+              '-v',
+              is_flag=True,
+              default=False,
+              help='Show the activated account for each cloud.')
 @usage_lib.entrypoint
-def check():
+def check(verbose: bool):
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
@@ -2986,7 +3023,7 @@ def check():
     The enabled clouds are cached and form the "search space" to be considered
     for each task.
     """
-    sky_check.check()
+    sky_check.check(verbose=verbose)
 
 
 @cli.command()
@@ -3208,11 +3245,18 @@ def storage():
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
 @usage_lib.entrypoint
-def storage_ls():
-    """List storage objects created."""
+# pylint: disable=redefined-builtin
+def storage_ls(all: bool):
+    """List storage objects managed by SkyPilot."""
     storages = sky.storage_ls()
-    storage_table = storage_utils.format_storage_table(storages)
+    storage_table = storage_utils.format_storage_table(storages, show_all=all)
     click.echo(storage_table)
 
 
@@ -3254,8 +3298,7 @@ def storage_delete(names: List[str], all: bool):  # pylint: disable=redefined-bu
     else:
         names = _get_glob_storages(names)
 
-    for name in names:
-        sky.storage_delete(name)
+    subprocess_utils.run_in_parallel(sky.storage_delete, names)
 
 
 @cli.group(cls=_NaturalOrderGroup)
@@ -3374,7 +3417,7 @@ def spot():
 @click.option(
     '--disk-tier',
     default=None,
-    type=str,
+    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
     required=False,
     help=(
         'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
@@ -3723,7 +3766,7 @@ def spot_dashboard(port: Optional[int]):
     click.secho('Checking if spot controller is up...', fg='yellow')
     hint = (
         'Dashboard is not available if spot controller is not up. Run a spot '
-        'job first, or use `sky start` to bring up an existing controller.')
+        'job first.')
     _, handle = spot_lib.is_spot_controller_up(stopped_message=hint,
                                                non_existent_message=hint)
     if handle is None:
@@ -3741,6 +3784,7 @@ def spot_dashboard(port: Optional[int]):
 
     with subprocess.Popen(ssh_command, shell=True,
                           start_new_session=True) as ssh_process:
+        time.sleep(3)  # Added delay for ssh_command to initialize.
         webbrowser.open(f'http://localhost:{free_port}')
         click.secho(
             f'Dashboard is now available at: http://127.0.0.1:{free_port}',
@@ -3833,7 +3877,7 @@ def bench():
 @click.option(
     '--disk-tier',
     default=None,
-    type=str,
+    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
     required=False,
     help=(
         'OS disk tier. Could be one of "low", "medium", "high". Default: medium'

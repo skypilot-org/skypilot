@@ -20,7 +20,7 @@ provider:
     use_internal_ips: true
 
     # Namespace to use for all resources created.
-    # TODO(romilb): Make this configurable.
+    # TODO(romilb): Make the namespace configurable.
     namespace: default
 
     timeout: {{timeout}}
@@ -114,74 +114,6 @@ provider:
 head_node_type: head_node
 # Specify the allowed pod types for this ray cluster and the resources they provide.
 available_node_types:
-  worker_node:
-    # Minimum number of Ray workers of this Pod type.
-    min_workers: {{num_nodes - 1}}
-    # Maximum number of Ray workers of this Pod type. Takes precedence over min_workers.
-    max_workers: {{num_nodes - 1}}
-    # User-specified custom resources for use by Ray. Object with string keys and integer values.
-    # (Ray detects CPU and GPU from pod spec resource requests and limits, so no need to fill those here.)
-    # resources: {"example-resource-a": 1, "example-resource-b": 2}
-    node_config:
-      apiVersion: v1
-      kind: Pod
-      metadata:
-        labels:
-          parent: skypilot
-          skypilot-cluster: {{cluster_name}}
-        # Automatically generates a name for the pod with this prefix.
-        generateName: {{cluster_name}}-ray-worker-
-      spec:
-        restartPolicy: Never
-        volumes:
-        - name: secret-volume
-          secret:
-            secretName: {{k8s_ssh_key_secret_name}}
-        - name: dshm
-          emptyDir:
-            medium: Memory
-        - name: dev-fuse    # Required for fuse mounting
-          hostPath:
-            path: /dev/fuse
-        containers:
-        - name: ray-node
-          imagePullPolicy: Always
-          image: {{skypilot_k8s_image}}
-          command: ["/bin/bash", "-c", "--"]
-          args: ["trap : TERM INT; sleep infinity & wait;"]
-          lifecycle:
-            postStart:
-              exec:
-                command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && sudo service ssh restart"]
-          ports:
-          - containerPort: 22  # Used for SSH
-          # This volume allocates shared memory for Ray to use for its plasma
-          # object store. If you do not provide this, Ray will fall back to
-          # /tmp which cause slowdowns if is not a shared memory volume.
-          volumeMounts:
-          - name: secret-volume
-            readOnly: true
-            mountPath: "/etc/secret-volume"
-          - mountPath: /dev/shm
-            name: dshm
-          - mountPath: /dev/fuse    # Required for fuse mounting
-            name: dev-fuse
-          securityContext:          # Required for FUSE mounting. TODO(romilb) - evaluate security risk
-            privileged: true
-          resources:
-            requests:
-              cpu: {{cpus}}
-              memory: {{memory}}G
-            limits:
-              # The maximum memory that this pod is allowed to use. The
-              # limit will be detected by ray and split to use 10% for
-              # redis, 30% for the shared memory object store, and the
-              # rest for application memory. If this limit is not set and
-              # the object store size is not set manually, ray will
-              # allocate a very large object store in each pod that may
-              # cause problems for other pods.
-              cpu: {{cpus}}
-              memory: {{memory}}G
   head_node:
     node_config:
       apiVersion: v1
@@ -217,7 +149,7 @@ available_node_types:
         containers:
         - name: ray-node
           imagePullPolicy: Always
-          image: {{skypilot_k8s_image}}
+          image: {{image_id}}
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
           command: ["/bin/bash", "-c", "--"]
@@ -245,6 +177,74 @@ available_node_types:
             postStart:
               exec:
                 command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && sudo service ssh restart"]
+          resources:
+            requests:
+              cpu: {{cpus}}
+              memory: {{memory}}G
+            limits:
+              # The maximum memory that this pod is allowed to use. The
+              # limit will be detected by ray and split to use 10% for
+              # redis, 30% for the shared memory object store, and the
+              # rest for application memory. If this limit is not set and
+              # the object store size is not set manually, ray will
+              # allocate a very large object store in each pod that may
+              # cause problems for other pods.
+              cpu: {{cpus}}
+              memory: {{memory}}G
+  worker_node:
+    # Minimum number of Ray workers of this Pod type.
+    min_workers: {{num_nodes - 1}}
+    # Maximum number of Ray workers of this Pod type. Takes precedence over min_workers.
+    max_workers: {{num_nodes - 1}}
+    # User-specified custom resources for use by Ray. Object with string keys and integer values.
+    # (Ray detects CPU and GPU from pod spec resource requests and limits, so no need to fill those here.)
+    # resources: {"example-resource-a": 1, "example-resource-b": 2}
+    node_config:
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        labels:
+          parent: skypilot
+          skypilot-cluster: {{cluster_name}}
+        # Automatically generates a name for the pod with this prefix.
+        generateName: {{cluster_name}}-ray-worker-
+      spec:
+        restartPolicy: Never
+        volumes:
+        - name: secret-volume
+          secret:
+            secretName: {{k8s_ssh_key_secret_name}}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+        - name: dev-fuse    # Required for fuse mounting
+          hostPath:
+            path: /dev/fuse
+        containers:
+        - name: ray-node
+          imagePullPolicy: Always
+          image: {{image_id}}
+          command: ["/bin/bash", "-c", "--"]
+          args: ["trap : TERM INT; sleep infinity & wait;"]
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && sudo service ssh restart"]
+          ports:
+          - containerPort: 22  # Used for SSH
+          # This volume allocates shared memory for Ray to use for its plasma
+          # object store. If you do not provide this, Ray will fall back to
+          # /tmp which cause slowdowns if is not a shared memory volume.
+          volumeMounts:
+          - name: secret-volume
+            readOnly: true
+            mountPath: "/etc/secret-volume"
+          - mountPath: /dev/shm
+            name: dshm
+          - mountPath: /dev/fuse    # Required for fuse mounting
+            name: dev-fuse
+          securityContext:          # Required for FUSE mounting. TODO(romilb) - evaluate security risk
+            privileged: true
           resources:
             requests:
               cpu: {{cpus}}
