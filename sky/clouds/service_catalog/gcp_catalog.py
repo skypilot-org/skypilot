@@ -16,8 +16,16 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_df = common.read_catalog('gcp/vms.csv')
-_image_df = common.read_catalog('gcp/images.csv')
+# Pull the latest catalog every week.
+# GCP guarantees that the catalog is updated at most once per 30 days, but
+# different VMs can be updated at different time. Thus, we pull the catalog
+# every 7 hours to make sure we have the latest information.
+_PULL_FREQUENCY_HOURS = 7
+
+_df = common.read_catalog('gcp/vms.csv',
+                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+_image_df = common.read_catalog('gcp/images.csv',
+                                pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 _TPU_REGIONS = [
     'us-central1',
@@ -25,9 +33,28 @@ _TPU_REGIONS = [
     'asia-east1',
 ]
 
+# We will select from the following three CPU instance families:
+_DEFAULT_INSTANCE_FAMILY = [
+    # This is the latest general-purpose instance family as of Mar 2023.
+    # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
+    # Memory: 4 GiB RAM per 1 vCPU;
+    'n2-standard',
+    # This is the latest memory-optimized instance family as of Mar 2023.
+    # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
+    # Memory: 8 GiB RAM per 1 vCPU;
+    'n2-highmem',
+    # This is the latest compute-optimized instance family as of Mar 2023.
+    # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
+    # Memory: 1 GiB RAM per 1 vCPU;
+    'n2-highcpu',
+]
+_DEFAULT_NUM_VCPUS = 8
+_DEFAULT_MEMORY_CPU_RATIO = 4
+
 # This can be switched between n1 and n2.
 # n2 is not allowed for launching GPUs.
 _DEFAULT_HOST_VM_FAMILY = 'n1'
+_DEFAULT_GPU_MEMORY_CPU_RATIO = 4
 
 # TODO(zongheng): fix A100 info directly in catalog.
 # https://cloud.google.com/blog/products/compute/a2-vms-with-nvidia-a100-gpus-are-ga
@@ -127,7 +154,7 @@ _NUM_ACC_TO_MAX_CPU_AND_MEMORY = {
 def _is_power_of_two(x: int) -> bool:
     """Returns true if x is a power of two."""
     # https://stackoverflow.com/questions/600293/how-to-check-if-a-number-is-a-power-of-2
-    return x and not x & (x - 1)
+    return bool(x and not x & (x - 1))
 
 
 def _closest_power_of_two(x: int) -> int:
@@ -146,25 +173,52 @@ def instance_type_exists(instance_type: str) -> bool:
 
 def get_hourly_cost(
     instance_type: str,
-    region: Optional[str] = None,
     use_spot: bool = False,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
 ) -> float:
-    """Returns the hourly price for a given instance type and region."""
     if instance_type == 'TPU-VM':
         # Currently the host VM of TPU does not cost extra.
         return 0
-    return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
+    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
+                                       zone)
 
 
-def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
-    # The number of vCPUs provided with a TPU VM is not officially documented.
+def get_vcpus_mem_from_instance_type(
+        instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+    # The number of vCPUs and memory size provided with a TPU VM is not
+    # officially documented.
     if instance_type == 'TPU-VM':
-        return None
-    return common.get_vcpus_from_instance_type_impl(_df, instance_type)
+        return None, None
+    return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
+
+
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory: Optional[str] = None,
+                              disk_tier: Optional[str] = None) -> Optional[str]:
+    del disk_tier  # unused
+    if cpus is None and memory is None:
+        cpus = f'{_DEFAULT_NUM_VCPUS}+'
+    if memory is None:
+        memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
+    else:
+        memory_gb_or_ratio = memory
+    instance_type_prefix = tuple(
+        f'{family}-' for family in _DEFAULT_INSTANCE_FAMILY)
+    df = _df[_df['InstanceType'].notna()]
+    df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
+    return common.get_instance_type_for_cpus_mem_impl(df, cpus,
+                                                      memory_gb_or_ratio)
 
 
 def get_instance_type_for_accelerator(
-        acc_name: str, acc_count: int) -> Tuple[Optional[List[str]], List[str]]:
+        acc_name: str,
+        acc_count: int,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        use_spot: bool = False,
+        region: Optional[str] = None,
+        zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
     """Fetch instance types with similar CPU count for given accelerator.
 
     Return: a list with a single matched instance type and a list of candidates
@@ -173,39 +227,48 @@ def get_instance_type_for_accelerator(
     """
     (instance_list,
      fuzzy_candidate_list) = common.get_instance_type_for_accelerator_impl(
-         df=_df, acc_name=acc_name, acc_count=acc_count)
+         _df, acc_name, acc_count, cpus, memory, use_spot, region, zone)
     if instance_list is None:
         return None, fuzzy_candidate_list
 
     if acc_name in _A100_INSTANCE_TYPE_DICTS:
         # If A100 is used, host VM type must be A2.
         # https://cloud.google.com/compute/docs/gpus#a100-gpus
-        return [_A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]], []
+
+        df = _df[_df['InstanceType'].notna()]
+        instance_type = _A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]
+        df = df[df['InstanceType'] == instance_type]
+
+        # Check the cpus and memory specified by the user.
+        instance_type = common.get_instance_type_for_cpus_mem_impl(
+            df, cpus, memory)
+        if instance_type is None:
+            return None, []
+        return [instance_type], []
+
     if acc_name not in _NUM_ACC_TO_NUM_CPU:
         acc_name = 'DEFAULT'
 
-    num_cpus = _NUM_ACC_TO_NUM_CPU[acc_name].get(acc_count, None)
-    # The (acc_name, acc_count) should be validated in the caller.
-    assert num_cpus is not None, (acc_name, acc_count)
-    mem_type = 'highmem'
-    # patches for the number of cores per GPU, as some of the combinations
-    # are not supported by GCP.
-    if _DEFAULT_HOST_VM_FAMILY == 'n1':
-        if num_cpus < 96:
-            num_cpus = _closest_power_of_two(num_cpus)
-        else:
-            num_cpus = 96
-    else:
-        if num_cpus > 80:
-            mem_type = 'standard'
+    assert _DEFAULT_HOST_VM_FAMILY == 'n1'
+
+    if cpus is None and memory is None:
+        cpus = f'{_NUM_ACC_TO_NUM_CPU[acc_name].get(acc_count, None)}+'
+    if memory is None:
+        memory = f'{_DEFAULT_GPU_MEMORY_CPU_RATIO}x'
+    df = _df[_df['InstanceType'].notna()]
+    df = df[df['InstanceType'].str.startswith(f'{_DEFAULT_HOST_VM_FAMILY}-')]
+
+    instance_type = common.get_instance_type_for_cpus_mem_impl(df, cpus, memory)
     # The fuzzy candidate should have already been fetched in the caller.
-    return [f'{_DEFAULT_HOST_VM_FAMILY}-{mem_type}-{num_cpus}'], []
+    if instance_type is None:
+        return None, []
+    return [instance_type], []
 
 
 def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    return common.validate_region_zone_impl(_df, region, zone)
+    return common.validate_region_zone_impl('gcp', _df, region, zone)
 
 
 def accelerator_in_region_or_zone(acc_name: str,
@@ -227,19 +290,22 @@ def _get_accelerator(
     accelerator: str,
     count: int,
     region: Optional[str],
+    zone: Optional[str] = None,
 ) -> pd.DataFrame:
     idx = (df['AcceleratorName'].str.fullmatch(
         accelerator, case=False)) & (df['AcceleratorCount'] == count)
     if region is not None:
         idx &= df['Region'] == region
+    if zone is not None:
+        idx &= df['AvailabilityZone'] == zone
     return df[idx]
 
 
 def get_accelerator_hourly_cost(accelerator: str,
                                 count: int,
+                                use_spot: bool = False,
                                 region: Optional[str] = None,
-                                use_spot: bool = False) -> float:
-    """Returns the cost, or the cheapest cost among all zones for spot."""
+                                zone: Optional[str] = None) -> float:
     # NOTE: As of 2022/4/13, Prices of TPU v3-64 to v3-2048 are not available on
     # https://cloud.google.com/tpu/pricing. We put estimates in gcp catalog.
     if region is None:
@@ -248,7 +314,8 @@ def get_accelerator_hourly_cost(accelerator: str,
             if len(set(df['Price'])) == 1:
                 region = tpu_region
                 break
-    df = _get_accelerator(_df, accelerator, count, region)
+
+    df = _get_accelerator(_df, accelerator, count, region, zone)
     assert len(set(df['Price'])) == 1, df
     if not use_spot:
         return df['Price'].iloc[0]
@@ -264,11 +331,24 @@ def get_accelerator_hourly_cost(accelerator: str,
 def list_accelerators(
     gpus_only: bool,
     name_filter: Optional[str] = None,
+    region_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
     case_sensitive: bool = True,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in GCP offering GPUs."""
     results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter,
+                                            region_filter, quantity_filter,
                                             case_sensitive)
+
+    # Remove GPUs that are unsupported by SkyPilot.
+    new_results = {}
+    for acc_name, acc_info in results.items():
+        if (acc_name.startswith('tpu') or
+                acc_name in _NUM_ACC_TO_MAX_CPU_AND_MEMORY or
+                acc_name in _A100_INSTANCE_TYPE_DICTS):
+            new_results[acc_name] = acc_info
+            new_results[acc_name] = acc_info
+    results = new_results
 
     a100_infos = results.get('A100', []) + results.get('A100-80GB', [])
     if not a100_infos:
@@ -287,12 +367,14 @@ def list_accelerators(
         memory = df['MemoryGiB'].iloc[0]
         vm_price = common.get_hourly_cost_impl(_df,
                                                a100_host_vm_type,
-                                               None,
-                                               use_spot=False)
+                                               use_spot=False,
+                                               region=None,
+                                               zone=None)
         vm_spot_price = common.get_hourly_cost_impl(_df,
                                                     a100_host_vm_type,
-                                                    None,
-                                                    use_spot=True)
+                                                    use_spot=True,
+                                                    region=None,
+                                                    zone=None)
         new_infos[info.accelerator_name].append(
             info._replace(
                 instance_type=a100_host_vm_type,
@@ -391,13 +473,14 @@ def check_accelerator_attachable_to_host(instance_type: str,
     acc_name, acc_count = acc[0]
 
     if acc_name.startswith('tpu-'):
-        # TODO(woosuk): Check max vcpus and memory for each TPU type.
+        # TODO(woosuk): Check max vCPUs and memory for each TPU type.
         assert instance_type == 'TPU-VM' or instance_type.startswith('n1-')
         return
 
     if acc_name in _A100_INSTANCE_TYPE_DICTS:
         valid_counts = list(_A100_INSTANCE_TYPE_DICTS[acc_name].keys())
     else:
+        assert acc_name in _NUM_ACC_TO_MAX_CPU_AND_MEMORY, acc_name
         valid_counts = list(_NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name].keys())
     if acc_count not in valid_counts:
         with ux_utils.print_exception_no_traceback():
@@ -449,6 +532,8 @@ def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     return common.get_image_id_from_tag_impl(_image_df, tag, region)
 
 
-def validate_image_tag(tag: str, region: Optional[str]) -> bool:
+def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
     """Returns whether the image tag is valid."""
-    return common.is_image_tag_valid_impl(_image_df, tag, region)
+    # GCP images are not region-specific.
+    del region  # Unused.
+    return common.is_image_tag_valid_impl(_image_df, tag, None)

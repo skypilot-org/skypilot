@@ -1,5 +1,6 @@
 """Task: a coarse-grained stage in an application."""
 import inspect
+import json
 import os
 import re
 import typing
@@ -8,7 +9,6 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import yaml
 
 import sky
-from sky import check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
@@ -69,6 +69,40 @@ def _is_valid_env_var(name: str) -> bool:
     return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
 
 
+def _fill_in_env_vars_in_file_mounts(
+    file_mounts: Dict[str, Any],
+    task_envs: Dict[str, str],
+) -> Dict[str, Any]:
+    """Detects env vars in file_mounts and fills them with task_envs.
+
+    Use cases of env vars in file_mounts:
+    - dst/src paths; e.g.,
+        /model_path/llama-${SIZE}b: s3://llama-weights/llama-${SIZE}b
+    - storage's name (bucket name)
+    - storage's source (local path)
+
+    We simply dump file_mounts into a json string, and replace env vars using
+    regex. This should be safe as file_mounts has been schema-validated.
+
+    Env vars of the following forms are detected:
+        - ${ENV}
+        - $ENV
+    where <ENV> must appear in task.envs.
+    """
+    # TODO(zongheng): support ${ENV:-default}?
+    file_mounts_str = json.dumps(file_mounts)
+
+    def replace_var(match):
+        var_name = match.group(1)
+        # If the variable isn't in the dictionary, return it unchanged
+        return task_envs.get(var_name, match.group(0))
+
+    # Pattern for valid env var names in bash.
+    pattern = r'\$\{?\b([a-zA-Z_][a-zA-Z0-9_]*)\b\}?'
+    file_mounts_str = re.sub(pattern, replace_var, file_mounts_str)
+    return json.loads(file_mounts_str)
+
+
 class Task:
     """Task: a computation to be run on the cloud."""
 
@@ -83,6 +117,7 @@ class Task:
         num_nodes: Optional[int] = None,
         # Advanced:
         docker_image: Optional[str] = None,
+        event_callback: Optional[str] = None,
     ):
         """Initializes a Task.
 
@@ -140,14 +175,18 @@ class Task:
         """
         self.name = name
         self.run = run
-        self.storage_mounts = {}
-        self.storage_plans = {}
+        self.storage_mounts: Dict[str, storage_lib.Storage] = {}
+        self.storage_plans: Dict[storage_lib.Storage,
+                                 storage_lib.StoreType] = {}
         self.setup = setup
-        self._envs = envs or dict()
+        self._envs = envs or {}
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
-        self.num_nodes = num_nodes
+        self.event_callback = event_callback
+        # Ignore type error due to a mypy bug.
+        # https://github.com/python/mypy/issues/3004
+        self.num_nodes = num_nodes  # type: ignore
 
         self.inputs = None
         self.outputs = None
@@ -155,12 +194,13 @@ class Task:
         self.estimated_outputs_size_gigabytes = None
         # Default to CPUNode
         self.resources = {sky.Resources()}
-        self.time_estimator_func = None
-        self.file_mounts = None
+        self.time_estimator_func: Optional[Callable[['sky.Resources'],
+                                                    int]] = None
+        self.file_mounts: Optional[Dict[str, str]] = None
 
-        # Only set when 'self' is a spot controller task: 'self.spot_task' is
-        # the underlying managed spot task (Task object).
-        self.spot_task = None
+        # Only set when 'self' is a spot controller task: 'self.spot_dag' is
+        # the underlying managed spot dag (sky.Dag object).
+        self.spot_dag: Optional['sky.Dag'] = None
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
@@ -228,37 +268,36 @@ class Task:
                         f'a symlink to a directory). {self.workdir} not found.')
 
     @staticmethod
-    def from_yaml(yaml_path: str) -> 'Task':
-        """Initializes a task from a task YAML.
+    def from_yaml_config(
+        config: Dict[str, Any],
+        env_overrides: Optional[List[Tuple[str, str]]] = None,
+    ) -> 'Task':
+        if env_overrides is not None:
+            # We must override env vars before constructing the Task, because
+            # the Storage object creation is eager and it (its name/source
+            # fields) may depend on env vars.
+            #
+            # FIXME(zongheng): The eagerness / how we construct Task's from
+            # entrypoint (YAML, CLI args) should be fixed.
+            new_envs = config.get('envs', {})
+            new_envs.update(env_overrides)
+            config['envs'] = new_envs
 
-        Example:
-            .. code-block:: python
-
-                task = sky.Task.from_yaml('/path/to/task.yaml')
-
-        Args:
-          yaml_path: file path to a valid task yaml file.
-
-        Raises:
-          ValueError: if the path gets loaded into a str instead of a dict; or
-            if there are any other parsing errors.
-        """
-        with open(os.path.expanduser(yaml_path), 'r') as f:
-            # TODO(zongheng): use
-            #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
-            # to raise errors on duplicate keys.
-            config = yaml.safe_load(f)
-
-        if isinstance(config, str):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('YAML loaded as str, not as dict. '
-                                 f'Is it correct? Path: {yaml_path}')
-
-        if config is None:
-            config = {}
+        # More robust handling for 'envs': explicitly convert keys and values to
+        # str, since users may pass '123' as keys/values which will get parsed
+        # as int causing validate_schema() to fail.
+        envs = config.get('envs')
+        if envs is not None and isinstance(envs, dict):
+            config['envs'] = {str(k): str(v) for k, v in envs.items()}
 
         backend_utils.validate_schema(config, schemas.get_task_schema(),
                                       'Invalid task YAML: ')
+
+        # Fill in any Task.envs into file_mounts (src/dst paths, storage
+        # name/source).
+        if config.get('file_mounts') is not None:
+            config['file_mounts'] = _fill_in_env_vars_in_file_mounts(
+                config['file_mounts'], config.get('envs', {}))
 
         task = Task(
             config.pop('name', None),
@@ -267,6 +306,7 @@ class Task:
             setup=config.pop('setup', None),
             num_nodes=config.pop('num_nodes', None),
             envs=config.pop('envs', None),
+            event_callback=config.pop('event_callback', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -275,7 +315,7 @@ class Task:
         fm_storages = []
         file_mounts = config.pop('file_mounts', None)
         if file_mounts is not None:
-            copy_mounts = dict()
+            copy_mounts = {}
             for dst_path, src in file_mounts.items():
                 # Check if it is str path
                 if isinstance(src, str):
@@ -290,12 +330,11 @@ class Task:
                                          f'{dst_path}:{src}')
             task.set_file_mounts(copy_mounts)
 
-        task_storage_mounts = {}  # type: Dict[str, Storage]
+        task_storage_mounts: Dict[str, storage_lib.Storage] = {}
         all_storages = fm_storages
         for storage in all_storages:
             mount_path = storage[0]
-            assert mount_path, \
-                'Storage mount path cannot be empty.'
+            assert mount_path, 'Storage mount path cannot be empty.'
             try:
                 storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
             except exceptions.StorageSourceError as e:
@@ -330,32 +369,72 @@ class Task:
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
+    @staticmethod
+    def from_yaml(yaml_path: str) -> 'Task':
+        """Initializes a task from a task YAML.
+
+        Example:
+            .. code-block:: python
+
+                task = sky.Task.from_yaml('/path/to/task.yaml')
+
+        Args:
+          yaml_path: file path to a valid task yaml file.
+
+        Raises:
+          ValueError: if the path gets loaded into a str instead of a dict; or
+            if there are any other parsing errors.
+        """
+        with open(os.path.expanduser(yaml_path), 'r') as f:
+            # TODO(zongheng): use
+            #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
+            # to raise errors on duplicate keys.
+            config = yaml.safe_load(f)
+
+        if isinstance(config, str):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('YAML loaded as str, not as dict. '
+                                 f'Is it correct? Path: {yaml_path}')
+
+        if config is None:
+            config = {}
+        return Task.from_yaml_config(config)
+
     @property
     def num_nodes(self) -> int:
         return self._num_nodes
+
+    @num_nodes.setter
+    def num_nodes(self, num_nodes: Optional[int]) -> None:
+        if num_nodes is None:
+            num_nodes = 1
+        if not isinstance(num_nodes, int) or num_nodes <= 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'num_nodes should be a positive int. Got: {num_nodes}')
+        self._num_nodes = num_nodes
 
     @property
     def envs(self) -> Dict[str, str]:
         return self._envs
 
-    def set_envs(
-            self, envs: Union[None, Tuple[Tuple[str, str]],
+    def update_envs(
+            self, envs: Union[None, List[Tuple[str, str]],
                               Dict[str, str]]) -> 'Task':
-        """Sets the environment variables for use inside the setup/run commands.
+        """Updates environment variables for use inside the setup/run commands.
 
         Args:
           envs: (optional) either a list of ``(env_name, value)`` or a dict
             ``{env_name: value}``.
 
         Returns:
-          self: The current task, with envs set.
+          self: The current task, with envs updated.
 
         Raises:
           ValueError: if various invalid inputs errors are detected.
         """
         if envs is None:
-            self._envs = dict()
-            return self
+            envs = {}
         if isinstance(envs, (list, tuple)):
             keys = set(env[0] for env in envs)
             if len(keys) != len(envs):
@@ -375,22 +454,16 @@ class Task:
                 raise ValueError(
                     'envs must be List[Tuple[str, str]] or Dict[str, str]: '
                     f'{envs}')
-        self._envs = envs
+        self._envs.update(envs)
         return self
 
     @property
     def need_spot_recovery(self) -> bool:
         return any(r.spot_recovery is not None for r in self.resources)
 
-    @num_nodes.setter
-    def num_nodes(self, num_nodes: Optional[int]) -> None:
-        if num_nodes is None:
-            num_nodes = 1
-        if not isinstance(num_nodes, int) or num_nodes <= 0:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'num_nodes should be a positive int. Got: {num_nodes}')
-        self._num_nodes = num_nodes
+    @property
+    def use_spot(self) -> bool:
+        return any(r.use_spot for r in self.resources)
 
     def set_inputs(self, inputs, estimated_size_gigabytes) -> 'Task':
         # E.g., 's3://bucket', 'gs://bucket', or None.
@@ -445,6 +518,7 @@ class Task:
         """
         if isinstance(resources, sky.Resources):
             resources = {resources}
+        # TODO(woosuk): Check if the resources are None.
         self.resources = resources
         return self
 
@@ -467,8 +541,8 @@ class Task:
         """
         if self.time_estimator_func is None:
             raise NotImplementedError(
-                'Node [{}] does not have a cost model set; '
-                'call set_time_estimator() first'.format(self))
+                f'Node [{self}] does not have a cost model set; '
+                'call set_time_estimator() first')
         return self.time_estimator_func(resources)
 
     def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> 'Task':
@@ -570,6 +644,7 @@ class Task:
         """
         if self.file_mounts is None:
             self.file_mounts = {}
+        assert self.file_mounts is not None
         self.file_mounts.update(file_mounts)
         # For validation logic:
         return self.set_file_mounts(self.file_mounts)
@@ -608,7 +683,7 @@ class Task:
           ValueError: if input paths are invalid.
         """
         if storage_mounts is None:
-            self.storage_mounts = None
+            self.storage_mounts = {}
             return self
         for target, _ in storage_mounts.items():
             # TODO(zhwu): /home/username/sky_workdir as the target path need
@@ -638,7 +713,7 @@ class Task:
 
         Different from set_storage_mounts(), this function updates into the
         existing storage_mounts (calls ``dict.update()``), rather than
-        overwritting it.
+        overwriting it.
 
         This should be called before provisioning in order to take effect.
 
@@ -666,31 +741,30 @@ class Task:
         #  order:
         #  1. cloud decided in best_resources.
         #  2. cloud specified in the task resources.
-        #  3. the first enabled cloud.
+        #  3. if not specified or the task's cloud does not support storage,
+        #     use the first enabled storage cloud.
         # This should be refactored and moved to the optimizer.
         assert len(self.resources) == 1, self.resources
         storage_cloud = None
+
+        backend_utils.check_public_cloud_enabled()
+        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+        if not enabled_storage_clouds:
+            raise ValueError('No enabled cloud for storage, run: sky check')
+
         if self.best_resources is not None:
             storage_cloud = self.best_resources.cloud
         else:
             resources = list(self.resources)[0]
             storage_cloud = resources.cloud
-            if storage_cloud is None:
-                # Get the first enabled cloud.
-                enabled_clouds = global_user_state.get_enabled_clouds()
-                if len(enabled_clouds) == 0:
-                    check.check(quiet=True)
-                    enabled_clouds = global_user_state.get_enabled_clouds()
-                if len(enabled_clouds) == 0:
-                    raise ValueError('No enabled clouds.')
+        if storage_cloud is not None:
+            if str(storage_cloud) not in enabled_storage_clouds:
+                storage_cloud = None
 
-                for cloud in storage_lib.STORE_ENABLED_CLOUDS:
-                    for enabled_cloud in enabled_clouds:
-                        if cloud.is_same_cloud(enabled_cloud):
-                            storage_cloud = cloud
-                            break
         if storage_cloud is None:
-            raise ValueError('No available cloud to mount storage.')
+            storage_cloud = clouds.CLOUD_REGISTRY.from_str(
+                enabled_storage_clouds[0])
+
         store_type = storage_lib.get_storetype_from_cloud(storage_cloud)
         return store_type
 
@@ -717,25 +791,38 @@ class Task:
                 store_type = storage_plans[storage]
                 if store_type is storage_lib.StoreType.S3:
                     # TODO: allow for Storage mounting of different clouds
-                    if storage.source is not None and storage.source.startswith(
-                            's3://'):
+                    if isinstance(storage.source,
+                                  str) and storage.source.startswith('s3://'):
                         blob_path = storage.source
                     else:
+                        assert storage.name is not None, storage
                         blob_path = 's3://' + storage.name
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
                 elif store_type is storage_lib.StoreType.GCS:
-                    if storage.source.startswith('gs://'):
+                    if isinstance(storage.source,
+                                  str) and storage.source.startswith('gs://'):
                         blob_path = storage.source
                     else:
+                        assert storage.name is not None, storage
                         blob_path = 'gs://' + storage.name
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
+                elif store_type is storage_lib.StoreType.R2:
+                    if storage.source is not None and not isinstance(
+                            storage.source,
+                            list) and storage.source.startswith('r2://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 'r2://' + storage.name
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
                 elif store_type is storage_lib.StoreType.AZURE:
                     # TODO when Azure Blob is done: sync ~/.azure
-                    assert False, 'TODO: Azure Blob not mountable yet'
+                    raise NotImplementedError('Azure Blob not mountable yet')
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Storage Type {store_type} '
@@ -780,7 +867,7 @@ class Task:
 
         INTERNAL: this method is internal-facing.
         """
-        config = dict()
+        config = {}
 
         def add_if_not_none(key, value, no_empty: bool = False):
             if no_empty and not value:
@@ -806,10 +893,11 @@ class Task:
 
         add_if_not_none('setup', self.setup)
         add_if_not_none('workdir', self.workdir)
+        add_if_not_none('event_callback', self.event_callback)
         add_if_not_none('run', self.run)
         add_if_not_none('envs', self.envs, no_empty=True)
 
-        add_if_not_none('file_mounts', dict())
+        add_if_not_none('file_mounts', {})
 
         if self.file_mounts is not None:
             config['file_mounts'].update(self.file_mounts)
@@ -825,7 +913,7 @@ class Task:
         sky.dag.get_current_dag().add_edge(self, b)
 
     def __repr__(self):
-        if self.name:
+        if self.name and self.name != 'sky-cmd':  # CLI launch with a command
             return self.name
         if isinstance(self.run, str):
             run_msg = self.run.replace('\n', '\\n')
@@ -834,7 +922,7 @@ class Task:
             else:
                 run_msg = f'run=\'{run_msg}\''
         elif self.run is None:
-            run_msg = 'run=None'
+            run_msg = 'run=<empty>'
         else:
             run_msg = 'run=<fn>'
 
@@ -845,8 +933,11 @@ class Task:
             s += f'\n  outputs: {self.outputs}'
         if self.num_nodes > 1:
             s += f'\n  nodes: {self.num_nodes}'
-        if len(self.resources) > 1 or not list(self.resources)[0].is_empty():
+        if len(self.resources) > 1:
             s += f'\n  resources: {self.resources}'
+        elif len(
+                self.resources) == 1 and not list(self.resources)[0].is_empty():
+            s += f'\n  resources: {list(self.resources)[0]}'
         else:
             s += '\n  resources: default instances'
         return s

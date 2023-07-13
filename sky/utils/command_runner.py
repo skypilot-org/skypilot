@@ -5,10 +5,11 @@ import hashlib
 import os
 import pathlib
 import shlex
+import time
 from typing import List, Optional, Tuple, Union
 
 from sky import sky_logging
-from sky.utils import subprocess_utils
+from sky.utils import common_utils, subprocess_utils
 from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -42,7 +43,8 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
 def ssh_options_list(ssh_private_key: Optional[str],
                      ssh_control_name: Optional[str],
                      *,
-                     timeout=30) -> List[str]:
+                     ssh_proxy_command: Optional[str] = None,
+                     timeout: int = 30) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     # Forked from Ray SSHOptions:
     # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
@@ -81,6 +83,14 @@ def ssh_options_list(ssh_private_key: Optional[str],
         '-i',
         ssh_private_key,
     ] if ssh_private_key is not None else []
+
+    if ssh_proxy_command is not None:
+        logger.debug(f'--- Proxy: {ssh_proxy_command} ---')
+        arg_dict.update({
+            # Due to how log_lib.run_with_log() works (using shell=True) we
+            # must quote this value.
+            'ProxyCommand': shlex.quote(ssh_proxy_command),
+        })
     return ssh_key_option + [
         x for y in (['-o', f'{k}={v}']
                     for k, v in arg_dict.items()
@@ -108,6 +118,7 @@ class SSHCommandRunner:
         ssh_user: str,
         ssh_private_key: str,
         ssh_control_name: Optional[str] = '__default__',
+        ssh_proxy_command: Optional[str] = None,
     ):
         """Initialize SSHCommandRunner.
 
@@ -124,6 +135,9 @@ class SSHCommandRunner:
                 used to avoid confliction between clusters for creating ssh
                 control files. It can simply be the cluster_name or any name
                 that can distinguish between clusters.
+            ssh_proxy_command: Optional, the value to pass to '-o
+                ProxyCommand'. Useful for communicating with clusters without
+                public IPs using a "jump server".
         """
         self.ip = ip
         self.ssh_user = ssh_user
@@ -131,17 +145,20 @@ class SSHCommandRunner:
         self.ssh_control_name = (
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
+        self._ssh_proxy_command = ssh_proxy_command
 
     @staticmethod
     def make_runner_list(
-            ip_list: List[str],
-            ssh_user: str,
-            ssh_private_key: str,
-            ssh_control_name: Optional[str] = None) -> List['SSHCommandRunner']:
+        ip_list: List[str],
+        ssh_user: str,
+        ssh_private_key: str,
+        ssh_control_name: Optional[str] = None,
+        ssh_proxy_command: Optional[str] = None,
+    ) -> List['SSHCommandRunner']:
         """Helper function for creating runners with the same ssh credentials"""
         return [
-            SSHCommandRunner(ip, ssh_user, ssh_private_key, ssh_control_name)
-            for ip in ip_list
+            SSHCommandRunner(ip, ssh_user, ssh_private_key, ssh_control_name,
+                             ssh_proxy_command) for ip in ip_list
         ]
 
     def _ssh_base_command(self, *, ssh_mode: SshMode,
@@ -162,15 +179,17 @@ class SSHCommandRunner:
                 ssh += ['-L', f'{remote}:localhost:{local}']
         return ssh + ssh_options_list(
             self.ssh_private_key,
-            self.ssh_control_name) + [f'{self.ssh_user}@{self.ip}']
+            self.ssh_control_name,
+            ssh_proxy_command=self._ssh_proxy_command,
+        ) + [f'{self.ssh_user}@{self.ip}']
 
     def run(
             self,
             cmd: Union[str, List[str]],
             *,
+            require_outputs: bool = False,
             port_forward: Optional[List[int]] = None,
             # Advanced options.
-            require_outputs: bool = False,
             log_path: str = os.devnull,
             # If False, do not redirect stdout/stderr to optimize performance.
             process_stream: bool = True,
@@ -240,8 +259,8 @@ class SSHCommandRunner:
                 '; exit ${PIPESTATUS[0]}'
             ]
 
-        command = ' '.join(command)
-        command = base_ssh_command + [shlex.quote(command)]
+        command_str = ' '.join(command)
+        command = base_ssh_command + [shlex.quote(command_str)]
 
         executable = None
         if not process_stream:
@@ -258,9 +277,9 @@ class SSHCommandRunner:
 
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
-                                    stream_logs,
-                                    process_stream=process_stream,
                                     require_outputs=require_outputs,
+                                    stream_logs=stream_logs,
+                                    process_stream=process_stream,
                                     shell=True,
                                     executable=executable,
                                     **kwargs)
@@ -274,6 +293,7 @@ class SSHCommandRunner:
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,
+        max_retry: int = 1,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -284,6 +304,8 @@ class SSHCommandRunner:
               for cluster to local.
             log_path: Redirect stdout/stderr to the log_path.
             stream_logs: Stream logs to the stdout/stderr.
+            max_retry: The maximum number of retries for the rsync command.
+              This value should be non-negative.
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -298,44 +320,59 @@ class SSHCommandRunner:
         # --filter
         rsync_command.append(RSYNC_FILTER_OPTION)
 
-        # --exclude-from
-        resolved_source = pathlib.Path(source).expanduser().resolve()
-        if (resolved_source / GIT_EXCLUDE).exists():
-            # Ensure file exists; otherwise, rsync will error out.
-            rsync_command.append(
-                RSYNC_EXCLUDE_OPTION.format(str(resolved_source / GIT_EXCLUDE)))
-
-        # rsync doesn't support '~' in a quoted target path. need to expand it.
-        full_source_str = str(resolved_source)
-        if resolved_source.is_dir():
-            full_source_str = os.path.join(full_source_str, '')
+        if up:
+            # The source is a local path, so we need to resolve it.
+            # --exclude-from
+            resolved_source = pathlib.Path(source).expanduser().resolve()
+            if (resolved_source / GIT_EXCLUDE).exists():
+                # Ensure file exists; otherwise, rsync will error out.
+                rsync_command.append(
+                    RSYNC_EXCLUDE_OPTION.format(
+                        str(resolved_source / GIT_EXCLUDE)))
 
         ssh_options = ' '.join(
-            ssh_options_list(self.ssh_private_key, self.ssh_control_name))
+            ssh_options_list(
+                self.ssh_private_key,
+                self.ssh_control_name,
+                ssh_proxy_command=self._ssh_proxy_command,
+            ))
         rsync_command.append(f'-e "ssh {ssh_options}"')
         # To support spaces in the path, we need to quote source and target.
+        # rsync doesn't support '~' in a quoted local path, but it is ok to
+        # have '~' in a quoted remote path.
         if up:
+            full_source_str = str(resolved_source)
+            if resolved_source.is_dir():
+                full_source_str = os.path.join(full_source_str, '')
             rsync_command.extend([
                 f'{full_source_str!r}',
                 f'{self.ssh_user}@{self.ip}:{target!r}',
             ])
         else:
             rsync_command.extend([
-                f'{self.ssh_user}@{self.ip}:{full_source_str!r}',
-                f'{target!r}',
+                f'{self.ssh_user}@{self.ip}:{source!r}',
+                f'{os.path.expanduser(target)!r}',
             ])
         command = ' '.join(rsync_command)
 
-        returncode, _, stderr = log_lib.run_with_log(command,
-                                                     log_path=log_path,
-                                                     stream_logs=stream_logs,
-                                                     shell=True,
-                                                     require_outputs=True)
+        backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
+        while max_retry >= 0:
+            returncode, _, stderr = log_lib.run_with_log(
+                command,
+                log_path=log_path,
+                stream_logs=stream_logs,
+                shell=True,
+                require_outputs=True)
+            if returncode == 0:
+                break
+            max_retry -= 1
+            time.sleep(backoff.current_backoff())
 
         direction = 'up' if up else 'down'
-        subprocess_utils.handle_returncode(
-            returncode,
-            command,
-            f'Failed to rsync {direction}: {source} -> {target}',
-            stderr=stderr,
-            stream_logs=stream_logs)
+        error_msg = (f'Failed to rsync {direction}: {source} -> {target}. '
+                     'Ensure that the network is stable, then retry.')
+        subprocess_utils.handle_returncode(returncode,
+                                           command,
+                                           error_msg,
+                                           stderr=stderr,
+                                           stream_logs=stream_logs)

@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from functools import partial
+from typing import Dict, List, Set, Tuple
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -12,7 +13,20 @@ from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient import discovery, errors
 
-from sky.skylet.providers.gcp.node import MAX_POLLS, POLL_INTERVAL, GCPNodeType
+from sky.skylet.providers.gcp.node import (
+    MAX_POLLS,
+    POLL_INTERVAL,
+    GCPNodeType,
+    GCPCompute,
+)
+from sky.skylet.providers.gcp.constants import (
+    SKYPILOT_VPC_NAME,
+    VPC_TEMPLATE,
+    FIREWALL_RULES_TEMPLATE,
+    FIREWALL_RULES_REQUIRED,
+    VM_MINIMAL_PERMISSIONS,
+    TPU_MINIMAL_PERMISSIONS,
+)
 from ray.autoscaler._private.util import check_legacy_fields
 
 logger = logging.getLogger(__name__)
@@ -25,6 +39,15 @@ DEFAULT_SERVICE_ACCOUNT_ID = RAY + "-sa-" + VERSION
 SERVICE_ACCOUNT_EMAIL_TEMPLATE = "{account_id}@{project_id}.iam.gserviceaccount.com"
 DEFAULT_SERVICE_ACCOUNT_CONFIG = {
     "displayName": "Ray Autoscaler Service Account ({})".format(VERSION),
+}
+
+SKYPILOT = "skypilot"
+SKYPILOT_SERVICE_ACCOUNT_ID = SKYPILOT + "-" + VERSION
+SKYPILOT_SERVICE_ACCOUNT_EMAIL_TEMPLATE = (
+    "{account_id}@{project_id}.iam.gserviceaccount.com"
+)
+SKYPILOT_SERVICE_ACCOUNT_CONFIG = {
+    "displayName": "SkyPilot Service Account ({})".format(VERSION),
 }
 
 # Those roles will be always added.
@@ -64,7 +87,8 @@ def get_node_type(node: dict) -> GCPNodeType:
             "required. "
             "For a TPU instance, 'acceleratorType' and no 'machineType' "
             "is required. "
-            f"Got {list(node)}")
+            f"Got {list(node)}"
+        )
 
     if "machineType" not in node and "acceleratorType" in node:
         return GCPNodeType.TPU
@@ -122,7 +146,7 @@ def wait_for_compute_global_operation(project_name, operation, compute):
 
 def key_pair_name(i, region, project_id, ssh_user):
     """Returns the ith default gcp_key_pair_name."""
-    key_name = "{}_gcp_{}_{}_{}_{}".format(RAY, region, project_id, ssh_user, i)
+    key_name = "{}_gcp_{}_{}_{}_{}".format(SKYPILOT, region, project_id, ssh_user, i)
     return key_name
 
 
@@ -279,7 +303,6 @@ def bootstrap_gcp(config):
     if _has_tpus_in_node_configs(config):
         config["provider"][HAS_TPU_PROVIDER_FIELD] = True
 
-
     crm, iam, compute, tpu = construct_clients_from_provider_config(config["provider"])
 
     config = _configure_project(config, crm)
@@ -321,6 +344,76 @@ def _configure_project(config, crm):
     return config
 
 
+def _is_permission_satisfied(
+    service_account, crm, iam, required_permissions, required_roles
+):
+    """Check if either of the roles or permissions are satisfied."""
+    if service_account is None:
+        return False, None
+
+    project_id = service_account["projectId"]
+    email = service_account["email"]
+
+    member_id = "serviceAccount:" + email
+
+    required_permissions = set(required_permissions)
+    policy = crm.projects().getIamPolicy(resource=project_id, body={}).execute()
+    original_policy = copy.deepcopy(policy)
+    already_configured = True
+
+    logger.info(f"_configure_iam_role: Checking permissions for {email}...")
+
+    # Check the roles first, as checking the permission requires more API calls and
+    # permissions.
+    for role in required_roles:
+        role_exists = False
+        for binding in policy["bindings"]:
+            if binding["role"] == role:
+                if member_id not in binding["members"]:
+                    binding["members"].append(member_id)
+                    already_configured = False
+                role_exists = True
+
+        if not role_exists:
+            already_configured = False
+            policy["bindings"].append(
+                {
+                    "members": [member_id],
+                    "role": role,
+                }
+            )
+
+    if already_configured:
+        # In some managed environments, an admin needs to grant the
+        # roles, so only call setIamPolicy if needed.
+        return True, policy
+
+    for binding in original_policy["bindings"]:
+        if member_id in binding["members"]:
+            role = binding["role"]
+            try:
+                role_definition = iam.projects().roles().get(name=role).execute()
+            except TypeError as e:
+                if "does not match the pattern" in str(e):
+                    logger.info(
+                        f"_configure_iam_role: fail to check permission for built-in role {role}. skipped."
+                    )
+                    permissions = []
+                else:
+                    raise
+            else:
+                permissions = role_definition["includedPermissions"]
+            required_permissions -= set(permissions)
+        if not required_permissions:
+            break
+    if not required_permissions:
+        # All required permissions are already granted.
+        return True, policy
+    logger.info(f"_configure_iam_role: missing permisisons {required_permissions}")
+
+    return False, policy
+
+
 def _configure_iam_role(config, crm, iam):
     """Setup a gcp service account with IAM roles.
 
@@ -333,30 +426,71 @@ def _configure_iam_role(config, crm, iam):
     """
     config = copy.deepcopy(config)
 
-    email = SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
-        account_id=DEFAULT_SERVICE_ACCOUNT_ID,
+    email = SKYPILOT_SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
+        account_id=SKYPILOT_SERVICE_ACCOUNT_ID,
         project_id=config["provider"]["project_id"],
     )
     service_account = _get_service_account(email, config, iam)
 
-    if service_account is None:
+    permissions = VM_MINIMAL_PERMISSIONS
+    roles = DEFAULT_SERVICE_ACCOUNT_ROLES
+    if config["provider"].get(HAS_TPU_PROVIDER_FIELD, False):
+        roles = DEFAULT_SERVICE_ACCOUNT_ROLES + TPU_SERVICE_ACCOUNT_ROLES
+        permissions = VM_MINIMAL_PERMISSIONS + TPU_MINIMAL_PERMISSIONS
+
+    satisfied, policy = _is_permission_satisfied(
+        service_account, crm, iam, permissions, roles
+    )
+
+    if not satisfied:
+        # SkyPilot: Fallback to the old ray service account name for
+        # backwards compatibility. Users using GCP before #2112 have
+        # the old service account setup setup in their GCP project,
+        # and the user may not have the permissions to create the
+        # new service account. This is to ensure that the old service
+        # account is still usable.
+        email = SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
+            account_id=DEFAULT_SERVICE_ACCOUNT_ID,
+            project_id=config["provider"]["project_id"],
+        )
+        logger.info(f"_configure_iam_role: Fallback to service account {email}")
+
+        ray_service_account = _get_service_account(email, config, iam)
+        ray_satisfied, _ = _is_permission_satisfied(
+            ray_service_account, crm, iam, permissions, roles
+        )
         logger.info(
             "_configure_iam_role: "
-            "Creating new service account {}".format(DEFAULT_SERVICE_ACCOUNT_ID)
+            f"Fallback to service account {email} succeeded? {ray_satisfied}"
         )
 
-        service_account = _create_service_account(
-            DEFAULT_SERVICE_ACCOUNT_ID, DEFAULT_SERVICE_ACCOUNT_CONFIG, config, iam
-        )
+        if ray_satisfied:
+            service_account = ray_service_account
+            satisfied = ray_satisfied
+        elif service_account is None:
+            logger.info(
+                "_configure_iam_role: "
+                "Creating new service account {}".format(SKYPILOT_SERVICE_ACCOUNT_ID)
+            )
+            # SkyPilot: a GCP user without the permission to create a service
+            # account will fail here.
+            service_account = _create_service_account(
+                SKYPILOT_SERVICE_ACCOUNT_ID,
+                SKYPILOT_SERVICE_ACCOUNT_CONFIG,
+                config,
+                iam,
+            )
+            satisfied, policy = _is_permission_satisfied(
+                service_account, crm, iam, permissions, roles
+            )
 
     assert service_account is not None, "Failed to create service account"
 
-    if config["provider"].get(HAS_TPU_PROVIDER_FIELD, False):
-        roles = DEFAULT_SERVICE_ACCOUNT_ROLES + TPU_SERVICE_ACCOUNT_ROLES
-    else:
-        roles = DEFAULT_SERVICE_ACCOUNT_ROLES
-
-    _add_iam_policy_binding(service_account, roles, crm)
+    if not satisfied:
+        logger.info(
+            "_configure_iam_role: " f"Adding roles to service account {email}..."
+        )
+        _add_iam_policy_binding(service_account, policy, crm, iam)
 
     account_dict = {
         "email": service_account["email"],
@@ -364,7 +498,7 @@ def _configure_iam_role(config, crm, iam):
         # role of the service account. Even if the cloud-platform scope
         # gives (scope) access to the whole cloud-platform, the service
         # account is limited by the IAM rights specified below.
-        "scopes": ["https://www.googleapis.com/auth/cloud-platform"]
+        "scopes": ["https://www.googleapis.com/auth/cloud-platform"],
     }
     if _is_head_node_a_tpu(config):
         # SKY: The API for TPU VM is slightly different from normal compute instances.
@@ -488,6 +622,176 @@ def _configure_key_pair(config, compute):
     return config
 
 
+def _check_firewall_rules(vpc_name, config, compute):
+    """Check if the firewall rules in the VPC are sufficient."""
+    required_rules = FIREWALL_RULES_REQUIRED.copy()
+
+    operation = compute.networks().getEffectiveFirewalls(
+        project=config["provider"]["project_id"], network=vpc_name
+    )
+    response = operation.execute()
+    if len(response) == 0:
+        return False
+    effective_rules = response["firewalls"]
+
+    def _merge_and_refine_rule(rules):
+        """Returns the reformatted rules from the firewall rules
+
+        The function translates firewall rules fetched from the cloud provider
+        to a format for simple comparison.
+
+        Example of firewall rules from the cloud:
+        [
+            {
+                ...
+                "direction": "INGRESS",
+                "allowed": [
+                    {"IPProtocol": "tcp", "ports": ['80', '443']},
+                    {"IPProtocol": "udp", "ports": ['53']},
+                ],
+                "sourceRanges": ["10.128.0.0/9"],
+            },
+            {
+                ...
+                "direction": "INGRESS",
+                "allowed": [{
+                    "IPProtocol": "tcp",
+                    "ports": ["22"],
+                }],
+                "sourceRanges": ["0.0.0.0/0"],
+            },
+        ]
+
+        Returns:
+            source2rules: Dict[(direction, sourceRanges) -> Dict(protocol -> Set[ports])]
+                Example {
+                    ("INGRESS", "10.128.0.0/9"): {"tcp": {80, 443}, "udp": {53}},
+                    ("INGRESS", "0.0.0.0/0"): {"tcp": {22}},
+                }
+        """
+        source2rules: Dict[Tuple[str, str], Dict[str, Set[int]]] = {}
+        source2allowed_list: Dict[Tuple[str, str], List[Dict[str, str]]] = {}
+        for rule in rules:
+            direction = rule.get("direction", "")
+            sources = rule.get("sourceRanges", [])
+            allowed = rule.get("allowed", [])
+            for source in sources:
+                key = (direction, source)
+                source2allowed_list[key] = source2allowed_list.get(key, []) + allowed
+        for direction_source, allowed_list in source2allowed_list.items():
+            source2rules[direction_source] = {}
+            for allowed in allowed_list:
+                # Example of port_list: ["20", "50-60"]
+                # If list is empty, it means all ports
+                port_list = allowed.get("ports", [])
+                port_set = set()
+                if port_list == []:
+                    port_set.update(set(range(1, 65536)))
+                else:
+                    for port_range in port_list:
+                        parse_ports = port_range.split("-")
+                        if len(parse_ports) == 1:
+                            port_set.add(int(parse_ports[0]))
+                        else:
+                            assert (
+                                len(parse_ports) == 2
+                            ), f"Failed to parse the port range: {port_range}"
+                            port_set.update(
+                                set(range(int(parse_ports[0]), int(parse_ports[1]) + 1))
+                            )
+                if allowed["IPProtocol"] not in source2rules[direction_source]:
+                    source2rules[direction_source][allowed["IPProtocol"]] = set()
+                source2rules[direction_source][allowed["IPProtocol"]].update(port_set)
+        return source2rules
+
+    effective_rules = _merge_and_refine_rule(effective_rules)
+    required_rules = _merge_and_refine_rule(required_rules)
+
+    for direction_source, allowed_req in required_rules.items():
+        if direction_source not in effective_rules:
+            return False
+        allowed_eff = effective_rules[direction_source]
+        # Special case: "all" means allowing all traffic
+        if "all" in allowed_eff:
+            continue
+        # Check if the required ports are a subset of the effective ports
+        for protocol, ports_req in allowed_req.items():
+            ports_eff = allowed_eff.get(protocol, set())
+            if not ports_req.issubset(ports_eff):
+                return False
+    return True
+
+
+def get_usable_vpc(config):
+    """Return a usable VPC.
+
+    If not found, create a new one with sufficient firewall rules.
+    """
+    _, _, compute, _ = construct_clients_from_provider_config(config["provider"])
+
+    # For backward compatibility, reuse the VPC if the VM is launched.
+    resource = GCPCompute(
+        compute,
+        config["provider"]["project_id"],
+        config["provider"]["availability_zone"],
+        config["cluster_name"],
+    )
+    node = resource._list_instances(label_filters=None, status_filter=None)
+    if len(node) > 0:
+        netInterfaces = node[0].get("networkInterfaces", [])
+        if len(netInterfaces) > 0:
+            vpc_name = netInterfaces[0]["network"].split("/")[-1]
+            return vpc_name
+
+    vpcnets_all = _list_vpcnets(config, compute)
+
+    usable_vpc_name = None
+    for vpc in vpcnets_all:
+        if _check_firewall_rules(vpc["name"], config, compute):
+            usable_vpc_name = vpc["name"]
+            break
+
+    if usable_vpc_name is None:
+        logger.info(f"Creating a default VPC network, {SKYPILOT_VPC_NAME}...")
+
+        proj_id = config["provider"]["project_id"]
+        # Create a SkyPilot VPC network if it doesn't exist
+        vpc_list = _list_vpcnets(config, compute, filter=f"name={SKYPILOT_VPC_NAME}")
+        if len(vpc_list) == 0:
+            body = VPC_TEMPLATE.copy()
+            body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
+            body["selfLink"] = body["selfLink"].format(
+                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME
+            )
+            _create_vpcnet(config, compute, body)
+
+        # Create firewall rules
+        for rule in FIREWALL_RULES_TEMPLATE:
+            # Query firewall rule by its name (unique in a project).
+            # If the rule already exists, delete it first.
+            rule_name = rule["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
+            rule_list = _list_firewall_rules(
+                config, compute, filter=f"(name={rule_name})"
+            )
+            if len(rule_list) > 0:
+                _delete_firewall_rule(config, compute, rule_name)
+
+            body = rule.copy()
+            body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
+            body["network"] = body["network"].format(
+                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME
+            )
+            body["selfLink"] = body["selfLink"].format(
+                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME
+            )
+            _create_firewall_rule(config, compute, body)
+
+        usable_vpc_name = SKYPILOT_VPC_NAME
+        logger.info(f"A VPC network {SKYPILOT_VPC_NAME} created.")
+
+    return usable_vpc_name
+
+
 def _configure_subnet(config, compute):
     """Pick a reasonable subnet if not specified by the config."""
     config = copy.deepcopy(config)
@@ -506,14 +810,9 @@ def _configure_subnet(config, compute):
     ):
         return config
 
-    subnets = _list_subnets(config, compute)
-
-    if not subnets:
-        raise NotImplementedError("Should be able to create subnet.")
-
-    # TODO: make sure that we have usable subnet. Maybe call
-    # compute.subnetworks().listUsable? For some reason it didn't
-    # work out-of-the-box
+    # SkyPilot: make sure there's a usable VPC
+    usable_vpc_name = get_usable_vpc(config)
+    subnets = _list_subnets(config, compute, filter=f'(name="{usable_vpc_name}")')
     default_subnet = subnets[0]
 
     default_interfaces = [
@@ -542,17 +841,79 @@ def _configure_subnet(config, compute):
     return config
 
 
-def _list_subnets(config, compute):
+def _create_firewall_rule(config, compute, body):
+    operation = (
+        compute.firewalls()
+        .insert(project=config["provider"]["project_id"], body=body)
+        .execute()
+    )
+    response = wait_for_compute_global_operation(
+        config["provider"]["project_id"], operation, compute
+    )
+    return response
+
+
+def _delete_firewall_rule(config, compute, name):
+    operation = (
+        compute.firewalls()
+        .delete(project=config["provider"]["project_id"], firewall=name)
+        .execute()
+    )
+    response = wait_for_compute_global_operation(
+        config["provider"]["project_id"], operation, compute
+    )
+    return response
+
+
+def _list_firewall_rules(config, compute, filter=None):
+    response = (
+        compute.firewalls()
+        .list(
+            project=config["provider"]["project_id"],
+            filter=filter,
+        )
+        .execute()
+    )
+    return response["items"] if "items" in response else []
+
+
+def _create_vpcnet(config, compute, body):
+    operation = (
+        compute.networks()
+        .insert(project=config["provider"]["project_id"], body=body)
+        .execute()
+    )
+    response = wait_for_compute_global_operation(
+        config["provider"]["project_id"], operation, compute
+    )
+    return response
+
+
+def _list_vpcnets(config, compute, filter=None):
+    response = (
+        compute.networks()
+        .list(
+            project=config["provider"]["project_id"],
+            filter=filter,
+        )
+        .execute()
+    )
+
+    return response["items"] if "items" in response else []
+
+
+def _list_subnets(config, compute, filter=None):
     response = (
         compute.subnetworks()
         .list(
             project=config["provider"]["project_id"],
             region=config["provider"]["region"],
+            filter=filter,
         )
         .execute()
     )
 
-    return response["items"]
+    return response["items"] if "items" in response else []
 
 
 def _get_subnet(config, subnet_id, compute):
@@ -600,7 +961,10 @@ def _get_service_account(account, config, iam):
     try:
         service_account = iam.projects().serviceAccounts().get(name=full_name).execute()
     except errors.HttpError as e:
-        if e.resp.status != 404:
+        if e.resp.status not in [403, 404]:
+            # SkyPilot: added 403, which means the service account doesn't exist,
+            # or not accessible by the current account, which is fine, as we do the
+            # fallback in the caller.
             raise
         service_account = None
 
@@ -626,37 +990,9 @@ def _create_service_account(account_id, account_config, config, iam):
     return service_account
 
 
-def _add_iam_policy_binding(service_account, roles, crm):
+def _add_iam_policy_binding(service_account, policy, crm, iam):
     """Add new IAM roles for the service account."""
     project_id = service_account["projectId"]
-    email = service_account["email"]
-    member_id = "serviceAccount:" + email
-
-    policy = crm.projects().getIamPolicy(resource=project_id, body={}).execute()
-
-    already_configured = True
-    for role in roles:
-        role_exists = False
-        for binding in policy["bindings"]:
-            if binding["role"] == role:
-                if member_id not in binding["members"]:
-                    binding["members"].append(member_id)
-                    already_configured = False
-                role_exists = True
-
-        if not role_exists:
-            already_configured = False
-            policy["bindings"].append(
-                {
-                    "members": [member_id],
-                    "role": role,
-                }
-            )
-
-    if already_configured:
-        # In some managed environments, an admin needs to grant the
-        # roles, so only call setIamPolicy if needed.
-        return
 
     result = (
         crm.projects()

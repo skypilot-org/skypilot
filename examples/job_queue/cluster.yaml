@@ -7,5 +7,4 @@
 #   sky exec jq job.yaml
 
 resources:
-  cloud: aws
   accelerators: K80

@@ -4,14 +4,14 @@ This script takes about 1 minute to finish.
 """
 import argparse
 import json
+from multiprocessing import pool as mp_pool
 import os
 import subprocess
-from typing import Optional, Set, Tuple
+from typing import List, Optional, Set
 import urllib
 
 import numpy as np
 import pandas as pd
-import ray
 import requests
 
 US_REGIONS = [
@@ -23,12 +23,18 @@ US_REGIONS = [
     'westcentralus',
     'westus',
     'westus2',
-    # 'WestUS3',   # WestUS3 pricing table is broken as of 2021/11.
+    'westus3',
 ]
 
+# Exclude the following regions as they do not have ProductName in the
+# pricing table. Reference: #1768
+EXCLUDED_REGIONS = {
+    'eastus2euap',
+    'centraluseuap',
+}
 
-# To enable all the regions, uncomment the following line.
-def get_regions() -> Tuple[str]:
+
+def get_regions() -> List[str]:
     """Get all available regions."""
     proc = subprocess.run(
         'az account list-locations  --query "[?not_null(metadata.latitude)] '
@@ -42,7 +48,7 @@ def get_regions() -> Tuple[str]:
         for item in items
         if not item['RegionName'].endswith('stg')
     ]
-    return tuple(regions)
+    return regions
 
 
 # Azure secretly deprecated the M60 family which is still returned by its API.
@@ -66,7 +72,6 @@ def get_pricing_url(region: Optional[str] = None) -> str:
     return f'https://prices.azure.com/api/retail/prices?$filter={filters_str}'
 
 
-@ray.remote
 def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
     all_items = []
     url = get_pricing_url(region)
@@ -78,8 +83,8 @@ def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
             print(f'Fetched pricing pages {page}')
         r = requests.get(url)
         r.raise_for_status()
-        content = r.content.decode('ascii')
-        content = json.loads(content)
+        content_str = r.content.decode('ascii')
+        content = json.loads(content_str)
         items = content.get('Items', [])
         if len(items) == 0:
             break
@@ -92,18 +97,11 @@ def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
               (df['unitPrice'] > 0)]
 
 
-@ray.remote
-def get_all_regions_pricing_df(regions: Set[str]) -> pd.DataFrame:
-    dfs = ray.get([get_pricing_df.remote(region) for region in regions])
-    return pd.concat(dfs)
-
-
-@ray.remote
 def get_sku_df(region_set: Set[str]) -> pd.DataFrame:
     print('Fetching SKU list')
     # To get a complete list, --all option is necessary.
     proc = subprocess.run(
-        'az vm list-skus --all',
+        'az vm list-skus --all --resource-type virtualMachines -o json',
         shell=True,
         check=True,
         stdout=subprocess.PIPE,
@@ -114,17 +112,16 @@ def get_sku_df(region_set: Set[str]) -> pd.DataFrame:
     for item in items:
         # zones = item['locationInfo'][0]['zones']
         region = item['locations'][0]
-        if region not in region_set:
+        if region.lower() not in region_set:
             continue
         item['Region'] = region
         filtered_items.append(item)
 
     df = pd.DataFrame(filtered_items)
-    df = df[(df['resourceType'] == 'virtualMachines')]
     return df
 
 
-def get_gpu_name(family: str) -> str:
+def get_gpu_name(family: str) -> Optional[str]:
     gpu_data = {
         'standardNCFamily': 'K80',
         'standardNCSv2Family': 'P100',
@@ -151,10 +148,13 @@ def get_gpu_name(family: str) -> str:
 
 
 def get_all_regions_instance_types_df(region_set: Set[str]):
-    df, df_sku = ray.get([
-        get_all_regions_pricing_df.remote(region_set),
-        get_sku_df.remote(region_set),
-    ])
+    with mp_pool.Pool() as pool:
+        dfs = pool.map_async(get_pricing_df, region_set)
+        df_sku = pool.apply_async(get_sku_df, (region_set,))
+        dfs = dfs.get()
+        df = pd.concat(dfs)
+        df_sku = df_sku.get()
+
     print('Processing dataframes')
     df.drop_duplicates(inplace=True)
 
@@ -162,18 +162,23 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
 
     print('Getting price df')
     df['merge_name'] = df['armSkuName']
+    # Use lower case for the Region, as for westus3, the SKU API returns
+    # WestUS3.
+    # This is inconsistent with the region name used in the pricing API, and
+    # the case does not matter for launching instances, so we can safely
+    # discard the case.
+    df['Region'] = df['armRegionName'].str.lower()
     df['is_promo'] = df['skuName'].str.endswith(' Low Priority')
     df.rename(columns={
         'armSkuName': 'InstanceType',
-        'armRegionName': 'Region',
-    },
-              inplace=True)
+    }, inplace=True)
     demand_df = df[~df['skuName'].str.contains(' Spot')][[
         'is_promo', 'InstanceType', 'Region', 'unitPrice'
     ]]
     spot_df = df[df['skuName'].str.contains(' Spot')][[
         'is_promo', 'InstanceType', 'Region', 'unitPrice'
     ]]
+
     demand_df.set_index(['InstanceType', 'Region', 'is_promo'], inplace=True)
     spot_df.set_index(['InstanceType', 'Region', 'is_promo'], inplace=True)
 
@@ -183,7 +188,9 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
     print('Getting sku df')
     df_sku['is_promo'] = df_sku['name'].str.endswith('_Promo')
     df_sku.rename(columns={'name': 'InstanceType'}, inplace=True)
+
     df_sku['merge_name'] = df_sku['InstanceType'].str.replace('_Promo', '')
+    df_sku['Region'] = df_sku['Region'].str.lower()
 
     print('Joining')
     df = df_sku.join(demand_df,
@@ -195,7 +202,7 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
         gpu_name = None
         gpu_count = np.nan
         vcpus = np.nan
-        memory_gb = np.nan
+        memory = np.nan
         gen_version = None
         caps = row['capabilities']
         for item in caps:
@@ -207,19 +214,18 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
             elif item['name'] == 'vCPUs':
                 vcpus = float(item['value'])
             elif item['name'] == 'MemoryGB':
-                memory_gb = item['value']
+                memory = item['value']
             elif item['name'] == 'HyperVGenerations':
                 gen_version = item['value']
-        return gpu_name, gpu_count, vcpus, memory_gb, gen_version
+        return gpu_name, gpu_count, vcpus, memory, gen_version
 
     def get_additional_columns(row):
-        gpu_name, gpu_count, vcpus, memory_gb, gen_version = get_capabilities(
-            row)
+        gpu_name, gpu_count, vcpus, memory, gen_version = get_capabilities(row)
         return pd.Series({
             'AcceleratorName': gpu_name,
             'AcceleratorCount': gpu_count,
             'vCPUs': vcpus,
-            'MemoryGiB': memory_gb,
+            'MemoryGiB': memory,
             'GpuInfo': gpu_name,
             'Generation': gen_version,
         })
@@ -232,7 +238,7 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
     before_drop_len = len(df_ret)
     df_ret.dropna(subset=['InstanceType'], inplace=True, how='all')
     after_drop_len = len(df_ret)
-    print('Dropped {} duplicated rows'.format(before_drop_len - after_drop_len))
+    print(f'Dropped {before_drop_len - after_drop_len} duplicated rows')
 
     # Filter out deprecated families
     df_ret = df_ret.loc[~df_ret['family'].isin(DEPRECATED_FAMILIES)]
@@ -248,9 +254,8 @@ if __name__ == '__main__':
         help='Fetch all global regions, not just the U.S. ones.')
     args = parser.parse_args()
 
-    ray.init()
     region_filter = get_regions() if args.all_regions else US_REGIONS
-    region_filter = set(region_filter)
+    region_filter = set(region_filter) - EXCLUDED_REGIONS
 
     instance_df = get_all_regions_instance_types_df(region_filter)
     os.makedirs('azure', exist_ok=True)

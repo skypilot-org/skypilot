@@ -75,7 +75,6 @@ If you have edited the ``file_mounts`` section (e.g., by adding some files) and 
 
 To avoid rerunning the ``setup`` commands, pass the ``--no-setup`` flag to ``sky launch``.
 
-
 (Advanced) How to make SkyPilot use all global regions?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

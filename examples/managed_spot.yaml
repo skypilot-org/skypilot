@@ -1,10 +1,5 @@
 name: minimal
 
-resources:
-  cloud: aws
-  use_spot: true
-  spot_recovery: failover
-
 setup: |
   echo "running setup"
   pip install tqdm
@@ -15,7 +10,7 @@ run: |
   import time
   import tqdm
 
-  for i in tqdm.trange(120):
+  for i in tqdm.trange(240):
     time.sleep(1)
   
   EOF

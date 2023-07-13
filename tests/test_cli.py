@@ -4,8 +4,9 @@ import textwrap
 from click import testing as cli_testing
 
 import sky
-from sky import clouds
 import sky.cli as cli
+
+CLOUDS_TO_TEST = ['aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci']
 
 
 def test_infer_gpunode_type():
@@ -41,25 +42,8 @@ def test_infer_tpunode_type():
         assert cli._infer_interactive_node_type(spec) == 'tpunode', spec
 
 
-def test_accelerator_mismatch(monkeypatch):
+def test_accelerator_mismatch(enable_all_clouds):
     """Test the specified accelerator does not match the instance_type."""
-    # Monkey-patching is required because in the test environment, no cloud is
-    # enabled. The optimizer checks the environment to find enabled clouds, and
-    # only generates plans within these clouds. The tests assume that all three
-    # clouds are enabled, so we monkeypatch the `sky.global_user_state` module
-    # to return all three clouds. We also monkeypatch `sky.check.check` so that
-    # when the optimizer tries calling it to update enabled_clouds, it does not
-    # raise exceptions.
-    enabled_clouds = list(clouds.CLOUD_REGISTRY.values())
-    monkeypatch.setattr(
-        'sky.global_user_state.get_enabled_clouds',
-        lambda: enabled_clouds,
-    )
-    monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
-    config_file_backup = tempfile.NamedTemporaryFile(
-        prefix='tmp_backup_config_default', delete=False)
-    monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
-                        config_file_backup.name)
 
     spec = textwrap.dedent("""\
         resources:
@@ -91,3 +75,62 @@ def test_accelerator_mismatch(monkeypatch):
         _capture_match_gpus_spec(f.name, 'v100:1')
         _capture_match_gpus_spec(f.name, 'V100:0.5')
         _capture_match_gpus_spec(f.name, 'V100')
+
+
+def test_show_gpus():
+    """
+    This is a test suite for `sky show-gpus` to check functionality (but not correctness).
+    The tests below correspond to the following terminal commands,
+    in order:
+
+    -> sky show-gpus
+    -> sky show-gpus --all
+    -> sky show-gpus V100:4
+    -> sky show-gpus :4
+    -> sky show-gpus V100:0
+    -> sky show-gpus V100:-2
+    -> sky show-gpus --cloud aws --region us-west-1
+    -> sky show-gpus --cloud lambda
+    -> sky show-gpus --cloud lambda --all
+    -> sky show-gpus V100:4 --cloud lambda
+    -> sky show-gpus V100:4 --cloud lambda --all
+    """
+    cli_runner = cli_testing.CliRunner()
+    result = cli_runner.invoke(cli.show_gpus, [])
+    assert not result.exit_code
+
+    result = cli_runner.invoke(cli.show_gpus, ['--all'])
+    assert not result.exit_code
+
+    result = cli_runner.invoke(cli.show_gpus, ['V100:4'])
+    assert not result.exit_code
+
+    result = cli_runner.invoke(cli.show_gpus, [':4'])
+    assert not result.exit_code
+
+    result = cli_runner.invoke(cli.show_gpus, ['V100:0'])
+    assert isinstance(result.exception, SystemExit)
+
+    result = cli_runner.invoke(cli.show_gpus, ['V100:-2'])
+    assert isinstance(result.exception, SystemExit)
+
+    result = cli_runner.invoke(cli.show_gpus,
+                               ['--cloud', 'aws', '--region', 'us-west-1'])
+    assert not result.exit_code
+
+    for cloud in CLOUDS_TO_TEST:
+        result = cli_runner.invoke(cli.show_gpus, ['--cloud', cloud])
+        assert not result.exit_code
+
+        result = cli_runner.invoke(cli.show_gpus, ['--cloud', cloud, '--all'])
+        assert not result.exit_code
+
+        result = cli_runner.invoke(cli.show_gpus, ['V100', '--cloud', cloud])
+        assert not result.exit_code
+
+        result = cli_runner.invoke(cli.show_gpus, ['V100:4', '--cloud', cloud])
+        assert not result.exit_code
+
+        result = cli_runner.invoke(cli.show_gpus,
+                                   ['V100:4', '--cloud', cloud, '--all'])
+        assert isinstance(result.exception, SystemExit)

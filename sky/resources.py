@@ -1,5 +1,8 @@
 """Resources: compute requirements of Tasks."""
 from typing import Dict, List, Optional, Union
+from typing_extensions import Literal
+
+import colorama
 
 from sky import clouds
 from sky import global_user_state
@@ -8,7 +11,9 @@ from sky import spot
 from sky.backends import backend_utils
 from sky.utils import accelerator_registry
 from sky.utils import schemas
+from sky.utils import tpu_utils
 from sky.utils import ux_utils
+from sky import skypilot_config
 
 logger = sky_logging.init_logger(__name__)
 
@@ -16,49 +21,100 @@ _DEFAULT_DISK_SIZE_GB = 256
 
 
 class Resources:
-    """A cloud resource bundle.
+    """Resources: compute requirements of Tasks.
 
-    Used
-      * for representing resource requests for tasks/apps
-      * as a "filter" to get concrete launchable instances
-      * for calculating billing
-      * for provisioning on a cloud
+    Used:
 
-    Examples:
+    * for representing resource requests for tasks/apps
+    * as a "filter" to get concrete launchable instances
+    * for calculating billing
+    * for provisioning on a cloud
 
-        # Fully specified cloud and instance type (is_launchable() is True).
-        sky.Resources(clouds.AWS(), 'p3.2xlarge')
-        sky.Resources(clouds.GCP(), 'n1-standard-16')
-        sky.Resources(clouds.GCP(), 'n1-standard-8', 'V100')
-
-        # Specifying required resources; the system decides the cloud/instance
-        # type. The below are equivalent:
-        sky.Resources(accelerators='V100')
-        sky.Resources(accelerators='V100:1')
-        sky.Resources(accelerators={'V100': 1})
-
-        # TODO:
-        sky.Resources(requests={'mem': '16g', 'cpu': 8})
     """
-    # If any fields changed:
-    # 1. Increment the version. For backward compatibility.
-    # 2. Change the __setstate__ method to handle the new fields.
-    # 3. Modify the to_config method to handle the new fields.
-    _VERSION = 6
+    # If any fields changed, increment the version. For backward compatibility,
+    # modify the __setstate__ method to handle the old version.
+    _VERSION = 10
 
     def __init__(
         self,
         cloud: Optional[clouds.Cloud] = None,
         instance_type: Optional[str] = None,
+        cpus: Union[None, int, float, str] = None,
+        memory: Union[None, int, float, str] = None,
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
         spot_recovery: Optional[str] = None,
-        disk_size: Optional[int] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
+        disk_size: Optional[int] = None,
+        disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
+        # Internal use only.
+        _is_image_managed: Optional[bool] = None,
     ):
+        """Initialize a Resources object.
+
+        All fields are optional.  ``Resources.is_launchable`` decides whether
+        the Resources is fully specified to launch an instance.
+
+        Examples:
+          .. code-block:: python
+
+            # Fully specified cloud and instance type (is_launchable() is True).
+            sky.Resources(clouds.AWS(), 'p3.2xlarge')
+            sky.Resources(clouds.GCP(), 'n1-standard-16')
+            sky.Resources(clouds.GCP(), 'n1-standard-8', 'V100')
+
+            # Specifying required resources; the system decides the
+            # cloud/instance type. The below are equivalent:
+            sky.Resources(accelerators='V100')
+            sky.Resources(accelerators='V100:1')
+            sky.Resources(accelerators={'V100': 1})
+            sky.Resources(cpus='2+', memory='16+', accelerators='V100')
+
+        Args:
+          cloud: the cloud to use.
+          instance_type: the instance type to use.
+          cpus: the number of CPUs required for the task.
+            If a str, must be a string of the form ``'2'`` or ``'2+'``, where
+            the ``+`` indicates that the task requires at least 2 CPUs.
+          memory: the amount of memory in GiB required. If a
+            str, must be a string of the form ``'16'`` or ``'16+'``, where
+            the ``+`` indicates that the task requires at least 16 GB of memory.
+          accelerators: the accelerators required. If a str, must be
+            a string of the form ``'V100'`` or ``'V100:2'``, where the ``:2``
+            indicates that the task requires 2 V100 GPUs. If a dict, must be a
+            dict of the form ``{'V100': 2}`` or ``{'tpu-v2-8': 1}``.
+          accelerator_args: accelerator-specific arguments. For example,
+            ``{'tpu_vm': True, 'runtime_version': 'tpu-vm-base'}`` for TPUs.
+          use_spot: whether to use spot instances. If None, defaults to
+            False.
+          spot_recovery: the spot recovery strategy to use for the managed
+            spot to recover the cluster from preemption. Refer to
+            `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/spot/recovery_strategy.py>`__ # pylint: disable=line-too-long
+            for more details.
+          region: the region to use.
+          zone: the zone to use.
+          image_id: the image ID to use. If a str, must be a string
+            of the image id from the cloud, such as AWS:
+            ``'ami-1234567890abcdef0'``, GCP:
+            ``'projects/my-project-id/global/images/my-image-name'``;
+            Or, a image tag provided by SkyPilot, such as AWS:
+            ``'skypilot:gpu-ubuntu-2004'``. If a dict, must be a dict mapping
+            from region to image ID, such as:
+
+            .. code-block:: python
+
+              {
+                'us-west1': 'ami-1234567890abcdef0',
+                'us-east1': 'ami-1234567890abcdef0'
+              }
+
+          disk_size: the size of the OS disk in GiB.
+          disk_tier: the disk performance tier to use. If None, defaults to
+            ``'medium'``.
+        """
         self._version = self._VERSION
         self._cloud = cloud
         self._region: Optional[str] = None
@@ -71,14 +127,10 @@ class Resources:
         self._use_spot = use_spot if use_spot is not None else False
         self._spot_recovery = None
         if spot_recovery is not None:
-            self._spot_recovery = spot_recovery.upper()
+            if spot_recovery.strip().lower() != 'none':
+                self._spot_recovery = spot_recovery.upper()
 
         if disk_size is not None:
-            if disk_size < 50:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'OS disk size must be larger than 50GB. Got: '
-                        f'{disk_size}.')
             if round(disk_size) != disk_size:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -87,27 +139,72 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
+        # self._image_id is a dict of {region: image_id}.
+        # The key is None if the same image_id applies for all regions.
         self._image_id = image_id
         if isinstance(image_id, str):
-            self._image_id = {self._region: image_id}
-        elif isinstance(image_id, dict) and None in image_id:
-            self._image_id = {self._region: image_id[None]}
+            self._image_id = {self._region: image_id.strip()}
+        elif isinstance(image_id, dict):
+            if None in image_id:
+                self._image_id = {self._region: image_id[None].strip()}
+            else:
+                self._image_id = {
+                    k.strip(): v.strip() for k, v in image_id.items()
+                }
+        self._is_image_managed = _is_image_managed
 
+        self._disk_tier = disk_tier
+
+        self._set_cpus(cpus)
+        self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
 
         self._try_validate_local()
         self._try_validate_instance_type()
+        self._try_validate_cpus_mem()
         self._try_validate_accelerators()
         self._try_validate_spot()
         self._try_validate_image_id()
+        self._try_validate_disk_tier()
 
     def __repr__(self) -> str:
+        """Returns a string representation for display.
+
+        Examples:
+
+            >>> sky.Resources(accelerators='V100')
+            <Cloud>({'V100': 1})
+
+            >>> sky.Resources(accelerators='V100', use_spot=True)
+            <Cloud>([Spot], {'V100': 1})
+
+            >>> sky.Resources(accelerators='V100',
+            ...     use_spot=True, instance_type='p3.2xlarge')
+            AWS(p3.2xlarge[Spot], {'V100': 1})
+
+            >>> sky.Resources(accelerators='V100', instance_type='p3.2xlarge')
+            AWS(p3.2xlarge, {'V100': 1})
+
+            >>> sky.Resources(instance_type='p3.2xlarge')
+            AWS(p3.2xlarge, {'V100': 1})
+
+            >>> sky.Resources(disk_size=100)
+            <Cloud>(disk_size=100)
+        """
         accelerators = ''
         accelerator_args = ''
         if self.accelerators is not None:
             accelerators = f', {self.accelerators}'
             if self.accelerator_args is not None:
                 accelerator_args = f', accelerator_args={self.accelerator_args}'
+
+        cpus = ''
+        if self.cpus is not None:
+            cpus = f', cpus={self.cpus}'
+
+        memory = ''
+        if self.memory is not None:
+            memory = f', mem={self.memory}'
 
         if isinstance(self.cloud, clouds.Local):
             return f'{self.cloud}({self.accelerators})'
@@ -123,12 +220,36 @@ class Resources:
             else:
                 image_id = f', image_id={self.image_id!r}'
 
+        disk_tier = ''
+        if self.disk_tier is not None:
+            disk_tier = f', disk_tier={self.disk_tier}'
+
         disk_size = ''
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
 
-        return (f'{self.cloud}({self._instance_type}{use_spot}'
-                f'{accelerators}{accelerator_args}{image_id}{disk_size})')
+        if self._instance_type is not None:
+            instance_type = f'{self._instance_type}'
+        else:
+            instance_type = ''
+
+        # Do not show region/zone here as `sky status -a` would show them as
+        # separate columns. Also, Resources repr will be printed during
+        # failover, and the region may be dynamically determined.
+        hardware_str = (
+            f'{instance_type}{use_spot}'
+            f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
+            f'{disk_tier}{disk_size}')
+        # It may have leading ',' (for example, instance_type not set) or empty
+        # spaces.  Remove them.
+        while hardware_str and hardware_str[0] in (',', ' '):
+            hardware_str = hardware_str[1:]
+
+        cloud_str = '<Cloud>'
+        if self.cloud is not None:
+            cloud_str = f'{self.cloud}'
+
+        return f'{cloud_str}({hardware_str})'
 
     @property
     def cloud(self):
@@ -145,6 +266,33 @@ class Resources:
     @property
     def instance_type(self):
         return self._instance_type
+
+    @property
+    def cpus(self) -> Optional[str]:
+        """Returns the number of vCPUs that each instance must have.
+
+        For example, cpus='4' means each instance must have exactly 4 vCPUs,
+        and cpus='4+' means each instance must have at least 4 vCPUs.
+
+        (Developer note: The cpus field is only used to select the instance type
+        at launch time. Thus, Resources in the backend's ResourceHandle will
+        always have the cpus field set to None.)
+        """
+        return self._cpus
+
+    @property
+    def memory(self) -> Optional[str]:
+        """Returns the memory that each instance must have in GB.
+
+        For example, memory='16' means each instance must have exactly 16GB
+        memory; memory='16+' means each instance must have at least 16GB
+        memory.
+
+        (Developer note: The memory field is only used to select the instance
+        type at launch time. Thus, Resources in the backend's ResourceHandle
+        will always have the memory field set to None.)
+        """
+        return self._memory
 
     @property
     def accelerators(self) -> Optional[Dict[str, int]]:
@@ -184,6 +332,74 @@ class Resources:
     @property
     def image_id(self) -> Optional[Dict[str, str]]:
         return self._image_id
+
+    @property
+    def disk_tier(self) -> str:
+        return self._disk_tier
+
+    @property
+    def is_image_managed(self) -> Optional[bool]:
+        return self._is_image_managed
+
+    def _set_cpus(
+        self,
+        cpus: Union[None, int, float, str],
+    ) -> None:
+        if cpus is None:
+            self._cpus = None
+            return
+
+        self._cpus = str(cpus)
+        if isinstance(cpus, str):
+            if cpus.endswith('+'):
+                num_cpus_str = cpus[:-1]
+            else:
+                num_cpus_str = cpus
+
+            try:
+                num_cpus = float(num_cpus_str)
+            except ValueError:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'The "cpus" field should be either a number or '
+                        f'a string "<number>+". Found: {cpus!r}') from None
+        else:
+            num_cpus = float(cpus)
+
+        if num_cpus <= 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'The "cpus" field should be positive. Found: {cpus!r}')
+
+    def _set_memory(
+        self,
+        memory: Union[None, int, float, str],
+    ) -> None:
+        if memory is None:
+            self._memory = None
+            return
+
+        self._memory = str(memory)
+        if isinstance(memory, str):
+            if memory.endswith('+'):
+                num_memory_gb = memory[:-1]
+            else:
+                num_memory_gb = memory
+
+            try:
+                memory_gb = float(num_memory_gb)
+            except ValueError:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'The "memory" field should be either a number or '
+                        f'a string "<number>+". Found: {memory!r}') from None
+        else:
+            memory_gb = float(memory)
+
+        if memory_gb <= 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'The "cpus" field should be positive. Found: {memory!r}')
 
     def _set_accelerators(
         self,
@@ -238,7 +454,7 @@ class Resources:
                     accelerator_args = {}
                 use_tpu_vm = accelerator_args.get('tpu_vm', False)
                 if use_tpu_vm:
-                    backend_utils.check_gcp_cli_include_tpu_vm()
+                    tpu_utils.check_gcp_cli_include_tpu_vm()
                 if self.instance_type is not None and use_tpu_vm:
                     if self.instance_type != 'TPU-VM':
                         with ux_utils.print_exception_no_traceback():
@@ -260,6 +476,11 @@ class Resources:
     def is_launchable(self) -> bool:
         return self.cloud is not None and self._instance_type is not None
 
+    def need_cleanup_after_preemption(self) -> bool:
+        """Returns whether a spot resource needs cleanup after preeemption."""
+        assert self.is_launchable(), self
+        return self.cloud.need_cleanup_after_preemption(self)
+
     def _set_region_zone(self, region: Optional[str],
                          zone: Optional[str]) -> None:
         if region is None and zone is None:
@@ -275,7 +496,56 @@ class Resources:
         self._region, self._zone = self._cloud.validate_region_zone(
             region, zone)
 
-    def _try_validate_instance_type(self):
+    def get_valid_regions_for_launchable(self) -> List[clouds.Region]:
+        """Returns a set of `Region`s that can provision this Resources.
+
+        Each `Region` has a list of `Zone`s that can provision this Resources.
+
+        (Internal) This function respects any config in skypilot_config that
+        may have restricted the regions to be considered (e.g., a
+        ssh_proxy_command dict with region names as keys).
+        """
+        assert self.is_launchable()
+        regions = self._cloud.regions_with_offering(self._instance_type,
+                                                    self.accelerators,
+                                                    self._use_spot,
+                                                    self._region, self._zone)
+        if self._image_id is not None and None not in self._image_id:
+            regions = [r for r in regions if r.name in self._image_id]
+
+        # Filter the regions by the skypilot_config
+        ssh_proxy_command_config = skypilot_config.get_nested(
+            (str(self._cloud).lower(), 'ssh_proxy_command'), None)
+        if (isinstance(ssh_proxy_command_config, str) or
+                ssh_proxy_command_config is None):
+            # All regions are valid as the regions are not specified for the
+            # ssh_proxy_command config.
+            return regions
+
+        # ssh_proxy_command_config: Dict[str, str], region_name -> command
+        # This type check is done by skypilot_config at config load time.
+        filtered_regions = []
+        for region in regions:
+            region_name = region.name
+            if region_name not in ssh_proxy_command_config:
+                continue
+            # TODO: filter out the zones not available in the vpc_name
+            filtered_regions.append(region)
+
+        # Friendlier UX. Otherwise users only get a generic
+        # ResourcesUnavailableError message without mentioning
+        # ssh_proxy_command.
+        if not filtered_regions:
+            yellow = colorama.Fore.YELLOW
+            reset = colorama.Style.RESET_ALL
+            logger.warning(
+                f'{yellow}Request {self} cannot be satisfied by any feasible '
+                'region. To fix, check that ssh_proxy_command\'s region keys '
+                f'include the regions to use.{reset}')
+
+        return filtered_regions
+
+    def _try_validate_instance_type(self) -> None:
         if self.instance_type is None:
             return
 
@@ -314,6 +584,46 @@ class Resources:
                 f'inferred from the instance_type {self.instance_type!r}.')
             self._cloud = valid_clouds[0]
 
+    def _try_validate_cpus_mem(self) -> None:
+        if self.cpus is None and self.memory is None:
+            return
+        if self.instance_type is not None:
+            # The assertion should be true because we have already executed
+            # _try_validate_instance_type() before this method.
+            # The _try_validate_instance_type() method infers and sets
+            # self.cloud if self.instance_type is not None.
+            assert self.cloud is not None
+            cpus, mem = self.cloud.get_vcpus_mem_from_instance_type(
+                self.instance_type)
+            if self.cpus is not None:
+                if self.cpus.endswith('+'):
+                    if cpus < float(self.cpus[:-1]):
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                f'{self.instance_type} does not have enough '
+                                f'vCPUs. {self.instance_type} has {cpus} '
+                                f'vCPUs, but {self.cpus} is requested.')
+                elif cpus != float(self.cpus):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'{self.instance_type} does not have the requested '
+                            f'number of vCPUs. {self.instance_type} has {cpus} '
+                            f'vCPUs, but {self.cpus} is requested.')
+            if self.memory is not None:
+                if self.memory.endswith('+'):
+                    if mem < float(self.memory[:-1]):
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                f'{self.instance_type} does not have enough '
+                                f'memory. {self.instance_type} has {mem} GB '
+                                f'memory, but {self.memory} is requested.')
+                elif mem != float(self.memory):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'{self.instance_type} does not have the requested '
+                            f'memory. {self.instance_type} has {mem} GB '
+                            f'memory, but {self.memory} is requested.')
+
     def _try_validate_accelerators(self) -> None:
         """Validate accelerators against the instance type and region/zone."""
         acc_requested = self.accelerators
@@ -328,6 +638,7 @@ class Resources:
 
         if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
             # GCP attaches accelerators to VMs, so no need for this check.
+            acc_requested = self.accelerators
             acc_from_instance_type = (
                 self.cloud.get_accelerators_from_instance_type(
                     self._instance_type))
@@ -348,11 +659,14 @@ class Resources:
 
         # Validate whether accelerator is available in specified region/zone.
         acc, acc_count = list(acc_requested.items())[0]
+        # Fractional accelerators are temporarily bumped up to 1.
+        if 0 < acc_count < 1:
+            acc_count = 1
         if self.region is not None or self.zone is not None:
             if not self._cloud.accelerator_in_region_or_zone(
                     acc, acc_count, self.region, self.zone):
                 error_str = (f'Accelerator "{acc}" is not available in '
-                             '"{}" region/zone.')
+                             '"{}".')
                 if self.zone:
                     error_str = error_str.format(self.zone)
                 else:
@@ -403,11 +717,15 @@ class Resources:
                 raise ValueError(
                     'Cloud must be specified when image_id is provided.')
 
+        # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
         if not self._cloud.is_same_cloud(
-                clouds.AWS()) and not self._cloud.is_same_cloud(clouds.GCP()):
+                clouds.AWS()) and not self._cloud.is_same_cloud(
+                    clouds.GCP()) and not self._cloud.is_same_cloud(
+                        clouds.IBM()) and not self._cloud.is_same_cloud(
+                            clouds.OCI()):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'image_id is only supported for AWS and GCP, please '
+                    'image_id is only supported for AWS/GCP/IBM/OCI, please '
                     'explicitly specify the cloud.')
 
         if self._region is not None:
@@ -426,7 +744,7 @@ class Resources:
                 region_str = f' ({region})' if region else ''
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Image tag {image_id} is not valid, please make sure'
+                        f'Image tag {image_id!r} is not valid, please make sure'
                         f' the tag exists in {self._cloud}{region_str}.')
 
             if (self._cloud.is_same_cloud(clouds.AWS()) and
@@ -436,73 +754,44 @@ class Resources:
                         'image_id is only supported for AWS in a specific '
                         'region, please explicitly specify the region.')
 
+        # Validate the image exists and the size is smaller than the disk size.
+        for region, image_id in self._image_id.items():
+            # Check the image exists and get the image size.
+            # It will raise ValueError if the image does not exist.
+            image_size = self.cloud.get_image_size(image_id, region)
+            if image_size > self.disk_size:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Image {image_id!r} is {image_size}GB, which is '
+                        f'larger than the specified disk_size: {self.disk_size}'
+                        ' GB. Please specify a larger disk_size to use this '
+                        'image.')
+
+    def _try_validate_disk_tier(self) -> None:
+        if self.disk_tier is None:
+            return
+        if self.disk_tier not in ['high', 'medium', 'low']:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Invalid disk_tier {self.disk_tier}. '
+                    'Please use one of "high", "medium", or "low".')
+        if self.instance_type is None:
+            return
+        if self.cloud is not None:
+            self.cloud.check_disk_tier_enabled(self.instance_type,
+                                               self.disk_tier)
+
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
         # Instance.
         hourly_cost = self.cloud.instance_type_to_hourly_cost(
-            self._instance_type, self.use_spot)
+            self._instance_type, self.use_spot, self._region, self._zone)
         # Accelerators (if any).
         if self.accelerators is not None:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
-                self.accelerators, self.use_spot)
+                self.accelerators, self.use_spot, self._region, self._zone)
         return hourly_cost * hours
-
-    def is_same_resources(self, other: 'Resources') -> bool:
-        """Returns whether two resources are the same.
-
-        Returns True if they are the same, False if not.
-        """
-        if (self.cloud is None) != (other.cloud is None):
-            # self and other's cloud should be both None or both not None
-            return False
-
-        if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
-            return False
-        # self.cloud == other.cloud
-
-        if (self.region is None) != (other.region is None):
-            # self and other's region should be both None or both not None
-            return False
-
-        if self.region is not None and self.region != other.region:
-            return False
-        # self.region <= other.region
-
-        if (self.zone is None) != (other.zone is None):
-            # self and other's zone should be both None or both not None
-            return False
-
-        if self.zone is not None and self.zone != other.zone:
-            return False
-
-        if (self.image_id is None) != (other.image_id is None):
-            # self and other's image id should be both None or both not None
-            return False
-
-        if (self.image_id is not None and self.image_id != other.image_id):
-            return False
-
-        if (self._instance_type is not None and
-                self._instance_type != other.instance_type):
-            return False
-        # self._instance_type == other.instance_type
-
-        other_accelerators = other.accelerators
-        accelerators = self.accelerators
-        if accelerators != other_accelerators:
-            return False
-        # self.accelerators == other.accelerators
-
-        if self.accelerator_args != other.accelerator_args:
-            return False
-        # self.accelerator_args == other.accelerator_args
-
-        if self.use_spot != other.use_spot:
-            return False
-
-        # self == other
-        return True
 
     def less_demanding_than(self,
                             other: Union[List['Resources'], 'Resources'],
@@ -569,26 +858,52 @@ class Resources:
         if self.use_spot_specified and self.use_spot != other.use_spot:
             return False
 
+        if self.disk_tier is not None:
+            if other.disk_tier is None:
+                return False
+            if self.disk_tier != other.disk_tier:
+                types = ['low', 'medium', 'high']
+                return types.index(self.disk_tier) < types.index(
+                    other.disk_tier)
+
         # self <= other
         return True
 
-    def is_launchable_fuzzy_equal(self, other: 'Resources') -> bool:
-        """Whether the resources are the fuzzily same launchable resources."""
-        assert self.cloud is not None and other.cloud is not None
-        if not self.cloud.is_same_cloud(other.cloud):
-            return False
-        if self._instance_type is not None or other.instance_type is not None:
-            return self._instance_type == other.instance_type
-        return self.accelerators.keys() == other.accelerators.keys()
+    def should_be_blocked_by(self, blocked: 'Resources') -> bool:
+        """Whether this Resources matches the blocked Resources.
+
+        If a field in `blocked` is None, it should be considered as a wildcard
+        for that field.
+        """
+        is_matched = True
+        if (blocked.cloud is not None and
+                not self.cloud.is_same_cloud(blocked.cloud)):
+            is_matched = False
+        if (blocked.instance_type is not None and
+                self.instance_type != blocked.instance_type):
+            is_matched = False
+        if blocked.region is not None and self._region != blocked.region:
+            is_matched = False
+        if blocked.zone is not None and self._zone != blocked.zone:
+            is_matched = False
+        if (blocked.accelerators is not None and
+                self.accelerators != blocked.accelerators):
+            is_matched = False
+        return is_matched
 
     def is_empty(self) -> bool:
         """Is this Resources an empty request (all fields None)?"""
         return all([
             self.cloud is None,
             self._instance_type is None,
+            self.cpus is None,
+            self.memory is None,
             self.accelerators is None,
             self.accelerator_args is None,
             not self._use_spot_specified,
+            self.disk_size == _DEFAULT_DISK_SIZE_GB,
+            self.disk_tier is None,
+            self._image_id is None,
         ])
 
     def copy(self, **override) -> 'Resources':
@@ -597,6 +912,8 @@ class Resources:
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
+            cpus=override.pop('cpus', self.cpus),
+            memory=override.pop('memory', self.memory),
             accelerators=override.pop('accelerators', self.accelerators),
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
@@ -606,6 +923,9 @@ class Resources:
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
+            disk_tier=override.pop('disk_tier', self.disk_tier),
+            _is_image_managed=override.pop('_is_image_managed',
+                                           self._is_image_managed),
         )
         assert len(override) == 0
         return resources
@@ -629,12 +949,16 @@ class Resources:
         backend_utils.validate_schema(config, schemas.get_resources_schema(),
                                       'Invalid resources YAML: ')
 
-        resources_fields = dict()
+        resources_fields = {}
         if config.get('cloud') is not None:
             resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
                 config.pop('cloud'))
         if config.get('instance_type') is not None:
             resources_fields['instance_type'] = config.pop('instance_type')
+        if config.get('cpus') is not None:
+            resources_fields['cpus'] = str(config.pop('cpus'))
+        if config.get('memory') is not None:
+            resources_fields['memory'] = str(config.pop('memory'))
         if config.get('accelerators') is not None:
             resources_fields['accelerators'] = config.pop('accelerators')
         if config.get('accelerator_args') is not None:
@@ -651,9 +975,12 @@ class Resources:
         if config.get('zone') is not None:
             resources_fields['zone'] = config.pop('zone')
         if config.get('image_id') is not None:
-            logger.warning('image_id in resources is experimental. It only '
-                           'supports AWS/GCP.')
             resources_fields['image_id'] = config.pop('image_id')
+        if config.get('disk_tier') is not None:
+            resources_fields['disk_tier'] = config.pop('disk_tier')
+        if config.get('_is_image_managed') is not None:
+            resources_fields['_is_image_managed'] = config.pop(
+                '_is_image_managed')
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -668,6 +995,8 @@ class Resources:
 
         add_if_not_none('cloud', str(self.cloud))
         add_if_not_none('instance_type', self.instance_type)
+        add_if_not_none('cpus', self.cpus)
+        add_if_not_none('memory', self.memory)
         add_if_not_none('accelerators', self.accelerators)
         add_if_not_none('accelerator_args', self.accelerator_args)
 
@@ -678,6 +1007,9 @@ class Resources:
         add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
+        add_if_not_none('disk_tier', self.disk_tier)
+        if self._is_image_managed is not None:
+            config['_is_image_managed'] = self._is_image_managed
         return config
 
     def __setstate__(self, state):
@@ -691,19 +1023,19 @@ class Resources:
         if version is None:
             version = -1
         if version < 0:
-            cloud = state.pop('cloud')
+            cloud = state.pop('cloud', None)
             state['_cloud'] = cloud
 
-            instance_type = state.pop('instance_type')
+            instance_type = state.pop('instance_type', None)
             state['_instance_type'] = instance_type
 
-            use_spot = state.pop('use_spot')
+            use_spot = state.pop('use_spot', False)
             state['_use_spot'] = use_spot
 
-            accelerator_args = state.pop('accelerator_args')
+            accelerator_args = state.pop('accelerator_args', None)
             state['_accelerator_args'] = accelerator_args
 
-            disk_size = state.pop('disk_size')
+            disk_size = state.pop('disk_size', _DEFAULT_DISK_SIZE_GB)
             state['_disk_size'] = disk_size
 
         if version < 2:
@@ -719,12 +1051,28 @@ class Resources:
             self._zone = None
 
         if version < 6:
-            accelerators = state.pop('_accelerators')
+            accelerators = state.pop('_accelerators', None)
             if accelerators is not None:
                 accelerators = {
                     accelerator_registry.canonicalize_accelerator_name(acc):
                     acc_count for acc, acc_count in accelerators.items()
                 }
             state['_accelerators'] = accelerators
+
+        if version < 7:
+            self._cpus = None
+
+        if version < 8:
+            self._memory = None
+
+        image_id = state.get('_image_id', None)
+        if isinstance(image_id, str):
+            state['_image_id'] = {state.get('_region', None): image_id}
+
+        if version < 9:
+            self._disk_tier = None
+
+        if version < 10:
+            self._is_image_managed = None
 
         self.__dict__.update(state)

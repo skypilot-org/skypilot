@@ -86,6 +86,7 @@ Here is a complete task YAML that runs `MNIST training <https://cloud.google.com
          pip install "jax[tpu]>=0.2.16" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
          pip install --upgrade clu
          pip install -e flax
+         pip install tensorflow tensorflow-datasets
       fi
 
    run: |

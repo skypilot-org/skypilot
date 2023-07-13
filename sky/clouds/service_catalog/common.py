@@ -1,4 +1,5 @@
 """Common utilities for service catalog."""
+import ast
 import hashlib
 import os
 import time
@@ -10,9 +11,9 @@ import requests
 import pandas as pd
 
 from sky import sky_logging
-from sky.backends import backend_utils
 from sky.clouds import cloud as cloud_lib
 from sky.clouds.service_catalog import constants
+from sky.utils import log_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -31,18 +32,22 @@ class InstanceTypeInfo(NamedTuple):
     - accelerator_name: Canonical name of the accelerator. E.g. `V100`.
     - accelerator_count: Number of accelerators offered by this instance type.
     - cpu_count: Number of vCPUs offered by this instance type.
+    - device_memory: Device memory in GiB.
     - memory: Instance memory in GiB.
     - price: Regular instance price per hour (cheapest across all regions).
     - spot_price: Spot instance price per hour (cheapest across all regions).
+    - region: Region where this instance type belongs to.
     """
     cloud: str
     instance_type: Optional[str]
     accelerator_name: str
     accelerator_count: int
     cpu_count: Optional[float]
+    device_memory: Optional[float]
     memory: Optional[float]
     price: float
     spot_price: float
+    region: str
 
 
 def get_catalog_path(filename: str) -> str:
@@ -98,21 +103,36 @@ def read_catalog(filename: str,
             update_frequency_str = ''
             if pull_frequency_hours is not None:
                 update_frequency_str = f' (every {pull_frequency_hours} hours)'
-            with backend_utils.safe_console_status(
-                    f'Updating {cloud} catalog{update_frequency_str}'):
+            with log_utils.safe_rich_status(
+                (f'Updating {cloud} catalog: '
+                 f'{filename}'
+                 f'{update_frequency_str}')) as status:
                 try:
                     r = requests.get(url)
                     r.raise_for_status()
                 except requests.exceptions.RequestException as e:
-                    logger.error(f'Failed to download {cloud} catalog:')
-                    with ux_utils.print_exception_no_traceback():
-                        raise e
-            # Save the catalog to a local file.
-            os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
-            with open(catalog_path, 'w') as f:
-                f.write(r.text)
-            with open(meta_path + '.md5', 'w') as f:
-                f.write(hashlib.md5(r.text.encode()).hexdigest())
+                    ux_utils.console_newline()
+                    status.stop()
+                    error_str = (f'Failed to fetch {cloud} catalog '
+                                 f'{filename}. ')
+                    if os.path.exists(catalog_path):
+                        logger.warning(
+                            f'{error_str}Using cached catalog files.')
+                        # Update catalog file modification time.
+                        os.utime(catalog_path, None)  # Sets to current time
+                    else:
+                        logger.error(
+                            f'{error_str}Please check your internet connection.'
+                        )
+                        with ux_utils.print_exception_no_traceback():
+                            raise e
+                else:
+                    # Download successful, save the catalog to a local file.
+                    os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
+                    with open(catalog_path, 'w') as f:
+                        f.write(r.text)
+                    with open(meta_path + '.md5', 'w') as f:
+                        f.write(hashlib.md5(r.text.encode()).hexdigest())
 
     try:
         df = pd.read_csv(catalog_path)
@@ -129,10 +149,14 @@ def _get_instance_type(
     df: pd.DataFrame,
     instance_type: str,
     region: Optional[str],
+    zone: Optional[str] = None,
 ) -> pd.DataFrame:
     idx = df['InstanceType'] == instance_type
     if region is not None:
-        idx &= df['Region'] == region
+        idx &= df['Region'].str.lower() == region.lower()
+    if zone is not None:
+        # NOTE: For Azure instances, zone must be None.
+        idx &= df['AvailabilityZone'] == zone
     return df[idx]
 
 
@@ -142,11 +166,11 @@ def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
 
 
 def validate_region_zone_impl(
-        df: pd.DataFrame, region: Optional[str],
+        cloud_name: str, df: pd.DataFrame, region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Validates whether region and zone exist in the catalog."""
 
-    def _get_candidate_str(loc: str, all_loc: List[str]) -> List[str]:
+    def _get_candidate_str(loc: str, all_loc: List[str]) -> str:
         candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.9)
         candidate_loc = sorted(candidate_loc)
         candidate_strs = ''
@@ -155,16 +179,28 @@ def validate_region_zone_impl(
             candidate_strs = f'\nDid you mean one of these: {candidate_strs!r}?'
         return candidate_strs
 
+    def _get_all_supported_regions_str() -> str:
+        all_regions: List[str] = sorted(
+            df['Region'].str.lower().unique().tolist())
+        return (f'\nList of supported {cloud_name} regions: '
+                f'{", ".join(all_regions)!r}')
+
     validated_region, validated_zone = region, zone
 
     filter_df = df
     if region is not None:
-        filter_df = filter_df[filter_df['Region'] == region]
+        filter_df = filter_df[filter_df['Region'].str.lower() == region.lower()]
         if len(filter_df) == 0:
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid region {region!r}')
-                error_msg += _get_candidate_str(region, df['Region'].unique())
+                candidate_strs = _get_candidate_str(
+                    region.lower(), df['Region'].str.lower().unique())
+                if not candidate_strs:
+                    error_msg += _get_all_supported_regions_str()
+                    raise ValueError(error_msg)
+                error_msg += candidate_strs
                 raise ValueError(error_msg)
+        validated_region = filter_df['Region'].unique()[0]
 
     if zone is not None:
         maybe_region_df = filter_df
@@ -186,28 +222,52 @@ def validate_region_zone_impl(
 def get_hourly_cost_impl(
     df: pd.DataFrame,
     instance_type: str,
+    use_spot: bool,
     region: Optional[str],
-    use_spot: bool = False,
+    zone: Optional[str],
 ) -> float:
-    """Returns the cost, or the cheapest cost among all zones for spot."""
-    df = _get_instance_type(df, instance_type, region)
-    assert pd.isnull(
-        df['Price'].iloc[0]) is False, (f'Missing price for "{instance_type}, '
-                                        f'Spot: {use_spot}" in the catalog.')
-    # TODO(zhwu): We should handle the price difference among different regions.
-    price_str = 'SpotPrice' if use_spot else 'Price'
-    assert region is None or len(set(df[price_str])) == 1, df
+    """Returns the hourly price of a VM instance in the given region and zone.
+
+    Refer to get_hourly_cost in service_catalog/__init__.py for the docstring.
+    """
+    df = _get_instance_type(df, instance_type, region, zone)
+    if df.empty:
+        if zone is None:
+            if region is None:
+                region_or_zone = 'all regions'
+            else:
+                region_or_zone = f'region {region!r}'
+        else:
+            region_or_zone = f'zone {zone!r}'
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Instance type {instance_type!r} not found '
+                             f'in {region_or_zone}.')
+
+    # If the zone is specified, only one row should be found by the query.
+    assert zone is None or len(df) == 1, df
+    if use_spot:
+        price_str = 'SpotPrice'
+    else:
+        price_str = 'Price'
+        # For AWS/Azure/GCP on-demand instances, the price is the same across
+        # all the zones in the same region.
+        assert region is None or len(set(df[price_str])) == 1, df
 
     cheapest_idx = df[price_str].idxmin()
-
     cheapest = df.loc[cheapest_idx]
     return cheapest[price_str]
 
 
-def get_vcpus_from_instance_type_impl(
+def _get_value(value):
+    if pd.isna(value):
+        return None
+    return float(value)
+
+
+def get_vcpus_mem_from_instance_type_impl(
     df: pd.DataFrame,
     instance_type: str,
-) -> Optional[float]:
+) -> Tuple[Optional[float], Optional[float]]:
     df = _get_instance_type(df, instance_type, None)
     if len(df) == 0:
         with ux_utils.print_exception_no_traceback():
@@ -215,10 +275,89 @@ def get_vcpus_from_instance_type_impl(
     assert len(set(df['vCPUs'])) == 1, ('Cannot determine the number of vCPUs '
                                         f'of the instance type {instance_type}.'
                                         f'\n{df}')
+    assert len(set(
+        df['MemoryGiB'])) == 1, ('Cannot determine the memory size '
+                                 f'of the instance type {instance_type}.'
+                                 f'\n{df}')
+
     vcpus = df['vCPUs'].iloc[0]
-    if pd.isna(vcpus):
+    mem = df['MemoryGiB'].iloc[0]
+
+    return _get_value(vcpus), _get_value(mem)
+
+
+def _filter_with_cpus(df: pd.DataFrame, cpus: Optional[str]) -> pd.DataFrame:
+    if cpus is None:
+        return df
+
+    # The following code is redundant with the code in resources.py::_set_cpus()
+    # but we add it here for safety.
+    if cpus.endswith('+'):
+        num_cpus_str = cpus[:-1]
+    else:
+        num_cpus_str = cpus
+    try:
+        num_cpus = float(num_cpus_str)
+    except ValueError:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'The "cpus" field should be either a number or '
+                             f'a string "<number>+". Found: {cpus!r}') from None
+
+    if cpus.endswith('+'):
+        return df[df['vCPUs'] >= num_cpus]
+    else:
+        return df[df['vCPUs'] == num_cpus]
+
+
+def _filter_with_mem(df: pd.DataFrame,
+                     memory_gb_or_ratio: Optional[str]) -> pd.DataFrame:
+    if memory_gb_or_ratio is None:
+        return df
+
+    # The following code is partially redundant with the code in
+    # resources.py::_set_memory() but we add it here for safety.
+    if memory_gb_or_ratio.endswith(('+', 'x')):
+        memory_gb_str = memory_gb_or_ratio[:-1]
+    else:
+        memory_gb_str = memory_gb_or_ratio
+    try:
+        memory = float(memory_gb_str)
+    except ValueError:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'The "memory" field should be either a number or '
+                             'a string "<number>+" or "<number>x". Found: '
+                             f'{memory_gb_or_ratio!r}') from None
+    if memory_gb_or_ratio.endswith('+'):
+        return df[df['MemoryGiB'] >= memory]
+    elif memory_gb_or_ratio.endswith('x'):
+        return df[df['MemoryGiB'] >= df['vCPUs'] * memory]
+    else:
+        return df[df['MemoryGiB'] == memory]
+
+
+def get_instance_type_for_cpus_mem_impl(
+        df: pd.DataFrame, cpus: Optional[str],
+        memory_gb_or_ratio: Optional[str]) -> Optional[str]:
+    """Returns the cheapest instance type that satisfies the requirements.
+
+    Args:
+        df: The catalog cloud catalog data frame.
+        cpus: The number of vCPUs. Can be a number or a string "<number>+". If
+            the string ends with "+", then the returned instance type should
+            have at least the given number of vCPUs.
+        memory_gb_or_ratio: The memory size in GB. Can be a number or a string
+            "<number>+" or "<number>x". If the string ends with "+", then the
+            returned instance type should have at least the given memory size.
+            If the string ends with "x", then the returned instance type should
+            have at least the given number of vCPUs times the given ratio.
+    """
+    df = _filter_with_cpus(df, cpus)
+    df = _filter_with_mem(df, memory_gb_or_ratio)
+    if df.empty:
         return None
-    return float(vcpus)
+    # Sort by the price.
+    df = df.sort_values(by=['Price'], ascending=True)
+    return df['InstanceType'].iloc[0]
 
 
 def get_accelerators_from_instance_type_impl(
@@ -240,6 +379,11 @@ def get_instance_type_for_accelerator_impl(
     df: pd.DataFrame,
     acc_name: str,
     acc_count: int,
+    cpus: Optional[str] = None,
+    memory: Optional[str] = None,
+    use_spot: bool = False,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """
     Returns a list of instance types satisfying the required count of
@@ -260,8 +404,20 @@ def get_instance_type_for_accelerator_impl(
                 fuzzy_candidate_list.append(f'{row["AcceleratorName"]}:'
                                             f'{int(row["AcceleratorCount"])}')
         return (None, fuzzy_candidate_list)
+
+    result = _filter_with_cpus(result, cpus)
+    result = _filter_with_mem(result, memory)
+    if region is not None:
+        result = result[result['Region'].str.lower() == region]
+    if zone is not None:
+        # NOTE: For Azure regions, zone must be None.
+        result = result[result['AvailabilityZone'] == zone]
+    if len(result) == 0:
+        return ([], [])
+
     # Current strategy: choose the cheapest instance
-    result = result.sort_values('Price', ascending=True)
+    price_str = 'SpotPrice' if use_spot else 'Price'
+    result = result.sort_values(price_str, ascending=True)
     instance_types = list(result['InstanceType'].drop_duplicates())
     return (instance_types, [])
 
@@ -271,6 +427,8 @@ def list_accelerators_impl(
     df: pd.DataFrame,
     gpus_only: bool,
     name_filter: Optional[str],
+    region_filter: Optional[str],
+    quantity_filter: Optional[int],
     case_sensitive: bool = True,
 ) -> Dict[str, List[InstanceTypeInfo]]:
     """Lists accelerators offered in a cloud service catalog.
@@ -283,20 +441,40 @@ def list_accelerators_impl(
     """
     if gpus_only:
         df = df[~df['GpuInfo'].isna()]
+    df = df.copy()  # avoid column assignment warning
+
+    try:
+        gpu_info_df = df['GpuInfo'].apply(ast.literal_eval)
+        df['DeviceMemoryGiB'] = gpu_info_df.apply(
+            lambda row: row['Gpus'][0]['MemoryInfo']['SizeInMiB']) / 1024.0
+    except ValueError:
+        # TODO(zongheng,woosuk): GCP/Azure catalogs do not have well-formed
+        # GpuInfo fields. So the above will throw:
+        #  ValueError: malformed node or string: <_ast.Name object at ..>
+        df['DeviceMemoryGiB'] = None
+
     df = df[[
         'InstanceType',
         'AcceleratorName',
         'AcceleratorCount',
         'vCPUs',
-        'MemoryGiB',
+        'DeviceMemoryGiB',  # device memory
+        'MemoryGiB',  # host memory
         'Price',
         'SpotPrice',
+        'Region',
     ]].dropna(subset=['AcceleratorName']).drop_duplicates()
     if name_filter is not None:
         df = df[df['AcceleratorName'].str.contains(name_filter,
                                                    case=case_sensitive,
                                                    regex=True)]
+    if region_filter is not None:
+        df = df[df['Region'].str.contains(region_filter,
+                                          case=case_sensitive,
+                                          regex=True)]
     df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
+    if quantity_filter is not None:
+        df = df[df['AcceleratorCount'] == quantity_filter]
     grouped = df.groupby('AcceleratorName')
 
     def make_list_from_df(rows):
@@ -313,9 +491,11 @@ def list_accelerators_impl(
                 row['AcceleratorName'],
                 row['AcceleratorCount'],
                 row['vCPUs'],
+                row['DeviceMemoryGiB'],
                 row['MemoryGiB'],
                 row['Price'],
                 row['SpotPrice'],
+                row['Region'],
             ),
             axis='columns',
         ).tolist()
@@ -350,7 +530,7 @@ def _accelerator_in_region(df: pd.DataFrame, acc_name: str, acc_count: int,
     """Returns True if the accelerator is in the region."""
     return len(df[(df['AcceleratorName'] == acc_name) &
                   (df['AcceleratorCount'] == acc_count) &
-                  (df['Region'] == region)]) > 0
+                  (df['Region'].str.lower() == region.lower())]) > 0
 
 
 def _accelerator_in_zone(df: pd.DataFrame, acc_name: str, acc_count: int,
@@ -372,6 +552,7 @@ def accelerator_in_region_or_zone_impl(
     assert region is not None or zone is not None, (
         'Both region and zone are None.')
     if zone is None:
+        assert region is not None
         return _accelerator_in_region(df, accelerator_name, acc_count, region)
     else:
         return _accelerator_in_zone(df, accelerator_name, acc_count, zone)
@@ -389,7 +570,7 @@ def get_image_id_from_tag_impl(df: pd.DataFrame, tag: str,
     """
     df = df[df['Tag'] == tag]
     if region is not None:
-        df = df[df['Region'] == region]
+        df = df[df['Region'].str.lower() == region.lower()]
     assert len(df) <= 1, ('Multiple images found for tag '
                           f'{tag} in region {region}')
     if len(df) == 0:
@@ -405,6 +586,6 @@ def is_image_tag_valid_impl(df: pd.DataFrame, tag: str,
     """Returns True if the image tag is valid."""
     df = df[df['Tag'] == tag]
     if region is not None:
-        df = df[df['Region'] == region]
+        df = df[df['Region'].str.lower() == region.lower()]
     df = df.dropna(subset=['ImageId'])
     return len(df) > 0

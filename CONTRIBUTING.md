@@ -16,9 +16,9 @@ We use GitHub to track issues and features. For new contributors, we recommend l
 
 ### Installing SkyPilot for development
 ```bash
-# SkyPilot requires python >= 3.6.
+# SkyPilot requires python >= 3.7.
 # You can just install the dependencies for
-# certain clouds, e.g., ".[aws,azure,gcp]"
+# certain clouds, e.g., ".[aws,azure,gcp,lambda]"
 pip install -e ".[all]"
 pip install -r requirements-dev.txt
 ```
@@ -26,10 +26,26 @@ pip install -r requirements-dev.txt
 ### Testing
 To run smoke tests (NOTE: Running all smoke tests launches ~20 clusters):
 ```
-bash tests/run_smoke_tests.sh
+# Run all tests except for AWS and Lambda Cloud
+pytest tests/test_smoke.py
+
+# Terminate a test's cluster even if the test failed (default is to keep it around for debugging)
+pytest tests/test_smoke.py --terminate-on-failure
+
+# Re-run last failed tests
+pytest --lf
 
 # Run one of the smoke tests
-bash tests/run_smoke_tests.sh test_minimal
+pytest tests/test_smoke.py::test_minimal
+
+# Only run managed spot tests
+pytest tests/test_smoke.py --managed-spot
+
+# Only run test for AWS + generic tests
+pytest tests/test_smoke.py --aws
+
+# Change cloud for generic tests to aws
+pytest tests/test_smoke.py --generic-cloud aws
 ```
 
 For profiling code, use:

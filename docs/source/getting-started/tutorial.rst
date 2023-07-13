@@ -1,10 +1,10 @@
-.. _huggingface:
+.. _dnn-training:
 
 Tutorial: DNN Training
 ======================
 This example uses SkyPilot to train a Transformer-based language model from HuggingFace.
 
-First, define a task YAML with resource requirements, the setup commands,
+First, define a :ref:`task YAML <yaml-spec>` with the resource requirements, the setup commands,
 and the commands to run:
 
 .. code-block:: yaml
@@ -51,6 +51,11 @@ and the commands to run:
       --output_dir /tmp/imdb/ --overwrite_output_dir \
       --fp16
 
+.. tip::
+
+  In the YAML, the ``workdir`` and ``file_mounts`` fields are commented out. To
+  learn about how to use them to mount local dirs/files or object store buckets
+  (S3, GCS, R2) into your cluster, see :ref:`sync-code-artifacts`.
 
 Then, launch training:
 
@@ -58,7 +63,7 @@ Then, launch training:
 
    $ sky launch -c lm-cluster dnn.yaml
 
-This will provision a cluster with the required resources, execute the setup
+This will provision the cheapest cluster with the required resources, execute the setup
 commands, then execute the run commands.
 
 After the training job starts running, you can safely :code:`Ctrl-C` to detach
@@ -67,3 +72,8 @@ the job, use the :code:`sky cancel <cluster_name> <job_id>` command (refer to :r
 
 After training, :ref:`transfer artifacts <sync-code-artifacts>` such
 as logs and checkpoints using familiar tools.
+
+.. tip::
+
+  Feel free to copy-paste the YAML above and customize it for
+  your own project.

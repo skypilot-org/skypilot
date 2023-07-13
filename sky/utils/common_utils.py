@@ -2,23 +2,28 @@
 
 import functools
 import getpass
-import inspect
 import hashlib
+import inspect
 import json
-import random
 import os
+import platform
+import random
 import re
 import socket
 import sys
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 import yaml
+
+import colorama
 
 from sky import sky_logging
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
+
+_COLOR_PATTERN = re.compile(r'\x1b[^m]*m')
 
 _PAYLOAD_PATTERN = re.compile(r'<sky-payload>(.*)</sky-payload>')
 _PAYLOAD_STR = '<sky-payload>{}</sky-payload>'
@@ -49,6 +54,8 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
     """
 
     def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
+        if user_hash is None:
+            return False
         try:
             int(user_hash, 16)
         except (TypeError, ValueError):
@@ -57,6 +64,7 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
 
     user_hash = default_value
     if _is_valid_user_hash(user_hash):
+        assert user_hash is not None
         return user_hash
 
     if os.path.exists(_USER_HASH_FILE):
@@ -78,13 +86,18 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
     return user_hash
 
 
-def get_global_job_id(job_timestamp: str, cluster_name: Optional[str],
-                      job_id: str) -> str:
+def get_global_job_id(job_timestamp: str,
+                      cluster_name: Optional[str],
+                      job_id: str,
+                      task_id: Optional[int] = None) -> str:
     """Returns a unique job run id for each job run.
 
     A job run is defined as the lifetime of a job that has been launched.
     """
-    return f'{job_timestamp}_{cluster_name}_id-{job_id}'
+    global_job_id = f'{job_timestamp}_{cluster_name}_id-{job_id}'
+    if task_id is not None:
+        global_job_id += f'-{task_id}'
+    return global_job_id
 
 
 class Backoff:
@@ -94,7 +107,7 @@ class Backoff:
 
     def __init__(self, initial_backoff: int = 5, max_backoff_factor: int = 5):
         self._initial = True
-        self._backoff = None
+        self._backoff = 0.0
         self._inital_backoff = initial_backoff
         self._max_backoff = max_backoff_factor * self._inital_backoff
 
@@ -166,6 +179,16 @@ def read_yaml(path) -> Dict[str, Any]:
     return config
 
 
+def read_yaml_all(path: str) -> List[Dict[str, Any]]:
+    with open(path, 'r') as f:
+        config = yaml.safe_load_all(f)
+        configs = list(config)
+        if not configs:
+            # Empty YAML file.
+            return [{}]
+        return configs
+
+
 def dump_yaml(path, config) -> None:
     with open(path, 'w') as f:
         f.write(dump_yaml_str(config))
@@ -180,13 +203,17 @@ def dump_yaml_str(config):
             if len(self.indents) == 1:
                 super().write_line_break()
 
-    return yaml.dump(config,
+    if isinstance(config, list):
+        dump_func = yaml.dump_all
+    else:
+        dump_func = yaml.dump
+    return dump_func(config,
                      Dumper=LineBreakDumper,
                      sort_keys=False,
                      default_flow_style=False)
 
 
-def make_decorator(cls, name_or_fn, **ctx_kwargs):
+def make_decorator(cls, name_or_fn: Union[str, Callable], **ctx_kwargs):
     """Make the cls a decorator.
 
     class cls:
@@ -291,3 +318,85 @@ def decode_payload(payload_str: str) -> Any:
     payload_str = matched[0]
     payload = json.loads(payload_str)
     return payload
+
+
+def class_fullname(cls):
+    """Get the full name of a class.
+
+    Example:
+        >>> e = sky.exceptions.FetchIPError()
+        >>> class_fullname(e.__class__)
+        'sky.exceptions.FetchIPError'
+
+    Args:
+        cls: The class to get the full name.
+
+    Returns:
+        The full name of the class.
+    """
+    return f'{cls.__module__}.{cls.__name__}'
+
+
+def format_exception(e: Union[Exception, SystemExit],
+                     use_bracket: bool = False) -> str:
+    """Format an exception to a string.
+
+    Args:
+        e: The exception to format.
+
+    Returns:
+        A string that represents the exception.
+    """
+    bright = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
+    if use_bracket:
+        return f'{bright}[{class_fullname(e.__class__)}]{reset} {e}'
+    return f'{bright}{class_fullname(e.__class__)}:{reset} {e}'
+
+
+def remove_color(s: str):
+    """Remove color from a string.
+
+    Args:
+        s: The string to remove color.
+
+    Returns:
+        A string without color.
+    """
+    return _COLOR_PATTERN.sub('', s)
+
+
+def remove_file_if_exists(path: str):
+    """Delete a file if it exists.
+
+    Args:
+        path: The path to the file.
+    """
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        logger.debug(f'Tried to remove {path} but failed to find it. Skip.')
+        pass
+
+
+def is_wsl() -> bool:
+    """Detect if running under Windows Subsystem for Linux (WSL)."""
+    return 'microsoft' in platform.uname()[3].lower()
+
+
+def find_free_port(start_port: int) -> int:
+    """Finds first free local port starting with 'start_port'.
+
+    Returns: a free local port.
+
+    Raises:
+      OSError: If no free ports are available.
+    """
+    for port in range(start_port, 65535):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(('', port))
+                return port
+            except OSError:
+                pass
+    raise OSError('No free ports available.')

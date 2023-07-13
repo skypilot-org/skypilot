@@ -1,0 +1,7 @@
+name: min
+
+setup: |
+  echo "running setup"
+
+run: |
+  conda env list

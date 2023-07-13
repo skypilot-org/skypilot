@@ -19,8 +19,8 @@ def import_package(func):
                 googleapiclient = _googleapiclient
                 google = _google
             except ImportError:
-                raise ImportError('Fail to import dependencies for GCP.'
-                                  'Try pip install "skypilot[gcp]"') from None
+                raise ImportError('Failed to import dependencies for GCP. '
+                                  'Try: pip install "skypilot[gcp]"') from None
         return func(*args, **kwargs)
 
     return wrapper
@@ -68,3 +68,17 @@ def forbidden_exception():
     """Forbidden exception."""
     from google.api_core import exceptions as gcs_exceptions
     return gcs_exceptions.Forbidden
+
+
+@import_package
+def http_error_exception():
+    """HttpError exception."""
+    from googleapiclient import errors
+    return errors.HttpError
+
+
+@import_package
+def credential_error_exception():
+    """CredentialError exception."""
+    from google.auth import exceptions
+    return exceptions.DefaultCredentialsError

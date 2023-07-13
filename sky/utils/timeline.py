@@ -27,7 +27,7 @@ class Event:
         message: The message attached to the event.
     """
 
-    def __init__(self, name: str, message: str = None):
+    def __init__(self, name: str, message: Optional[str] = None):
         self._name = name
         self._message = message
         # See the module doc for the event format.

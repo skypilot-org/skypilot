@@ -3,13 +3,12 @@
 from multiprocessing import pool
 import os
 import subprocess
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
 
 from sky import exceptions
 from sky import sky_logging
-from sky.adaptors import aws, gcp
+from sky.adaptors import aws, gcp, cloudflare
 from sky.utils import ux_utils
 
 Client = Any
@@ -36,6 +35,18 @@ def split_gcs_path(gcs_path: str) -> Tuple[str, str]:
       gcs_path: str; GCS Path, e.g. gcs://imagenet/train/
     """
     path_parts = gcs_path.replace('gs://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
+def split_r2_path(r2_path: str) -> Tuple[str, str]:
+    """Splits R2 Path into Bucket name and Relative Path to Bucket
+
+    Args:
+      r2_path: str; R2 Path, e.g. r2://imagenet/train/
+    """
+    path_parts = r2_path.replace('r2://', '').split('/')
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
@@ -74,6 +85,26 @@ def verify_gcs_bucket(name: str) -> bool:
         return False
 
 
+def create_r2_client(region: str = 'auto') -> Client:
+    """Helper method that connects to Boto3 client for R2 Bucket
+
+    Args:
+      region: str; Region for CLOUDFLARE R2 is set to auto
+    """
+    return cloudflare.client('s3', region)
+
+
+def verify_r2_bucket(name: str) -> bool:
+    """Helper method that checks if the R2 bucket exists
+
+    Args:
+      name: str; Name of R2 Bucket (without r2:// prefix)
+    """
+    r2 = cloudflare.resource('s3')
+    bucket = r2.Bucket(name)
+    return bucket in r2.buckets.all()
+
+
 def is_cloud_store_url(url):
     result = urllib.parse.urlsplit(url)
     # '' means non-cloud URLs.
@@ -95,7 +126,7 @@ def _group_files_by_dir(
     Args:
         source_list: List[str]; List of paths to group
     """
-    grouped_files = {}
+    grouped_files: Dict[str, List[str]] = {}
     dirs = []
     for source in source_list:
         source = os.path.abspath(os.path.expanduser(source))
@@ -110,7 +141,7 @@ def _group_files_by_dir(
     return grouped_files, dirs
 
 
-def parallel_upload(source_path_list: List[Path],
+def parallel_upload(source_path_list: List[str],
                     filesync_command_generator: Callable[[str, List[str]], str],
                     dirsync_command_generator: Callable[[str, str], str],
                     bucket_name: str,
@@ -119,7 +150,7 @@ def parallel_upload(source_path_list: List[Path],
                     max_concurrent_uploads: Optional[int] = None) -> None:
     """Helper function to run parallel uploads for a list of paths.
 
-    Used by S3Store and GCSStore to run rsync commands in parallel by
+    Used by S3Store, GCSStore, and R2Store to run rsync commands in parallel by
     providing appropriate command generators.
 
     Args:
@@ -171,6 +202,7 @@ def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
                           stdout=subprocess.DEVNULL,
                           shell=True) as process:
         stderr = []
+        assert process.stderr is not None  # for mypy
         while True:
             line = process.stderr.readline()
             if not line:
@@ -187,9 +219,9 @@ def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
                         'the bucket is public.')
         returncode = process.wait()
         if returncode != 0:
-            stderr = '\n'.join(stderr)
+            stderr_str = '\n'.join(stderr)
             with ux_utils.print_exception_no_traceback():
-                logger.error(stderr)
+                logger.error(stderr_str)
                 raise exceptions.StorageUploadError(
                     f'Upload to bucket failed for store {bucket_name}. '
                     'Please check the logs.')

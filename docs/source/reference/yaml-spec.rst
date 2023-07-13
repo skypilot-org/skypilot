@@ -1,7 +1,7 @@
 .. _yaml-spec:
 
 Task YAML
-==================
+=========
 
 SkyPilot provides an intuitive YAML interface to specify a task (resource requirements, setup commands, run commands, file mounts, storage mounts, and so on).
 
@@ -47,6 +47,15 @@ Available fields:
       # Format: <name>:<count> (or simply <name>, short for a count of 1).
       accelerators: V100:4
 
+      # Number of vCPUs per node (optional).
+      #
+      # Format: <count> (exactly <count> vCPUs) or <count>+
+      # (at least <count> vCPUs).
+      #
+      # E.g., 4+ would first try to find an instance type with 4 vCPUs. If not
+      # found, it will use the next cheapest instance with more than 4 vCPUs.
+      cpus: 32
+
       # Instance type to use (optional). If 'accelerators' is specified,
       # the corresponding instance type is automatically inferred.
       instance_type: p3.8xlarge
@@ -63,6 +72,13 @@ Available fields:
       # Disk size in GB to allocate for OS (mounted at /). Increase this if you
       # have a large working directory or tasks that write out large outputs.
       disk_size: 256
+
+      # Disk tier to use for OS (optional).
+      # Could be one of 'low', 'medium', or 'high' (default: 'medium'). Rough performance estimate:
+      #   low: 500 IOPS; read 20MB/s; write 40 MB/s
+      #   medium: 3000 IOPS; read 220 MB/s; write 200 MB/s
+      #   high: 6000 IOPS; 340 MB/s; write 250 MB/s
+      disk_tier: 'medium'
 
       # Additional accelerator metadata (optional); only used for TPU node
       # and TPU VM.
@@ -96,7 +112,7 @@ Available fields:
       #   image_id: skypilot:k80-ubuntu-2004
       #   image_id: skypilot:gpu-ubuntu-1804
       #   image_id: skypilot:k80-ubuntu-1804
-      # It is also possible to specify a per-region image id (failover will only go through the regions sepcified as keys; 
+      # It is also possible to specify a per-region image id (failover will only go through the regions sepcified as keys;
       # useful when you have the custom images in multiple regions):
       #   image_id:
       #     us-east-1: ami-0729d913a335efca7
@@ -105,6 +121,26 @@ Available fields:
       # GCP
       # To find GCP images: https://cloud.google.com/compute/docs/images
       # image_id: projects/deeplearning-platform-release/global/images/family/tf2-ent-2-1-cpu-ubuntu-2004
+      #
+      # IBM
+      # Create a private VPC image and paste its ID in the following format:
+      # image_id: <unique_image_id>
+      # To create an image manually:
+      # https://cloud.ibm.com/docs/vpc?topic=vpc-creating-and-using-an-image-from-volume.
+      # To use an official VPC image creation tool:
+      # https://www.ibm.com/cloud/blog/use-ibm-packer-plugin-to-create-custom-images-on-ibm-cloud-vpc-infrastructure
+      # To use a more limited but easier to manage tool:
+      # https://github.com/IBM/vpc-img-inst
+
+    # Environment variables (optional). These values can be accessed in the
+    # `file_mounts`, `setup`, and `run` sections below.
+    #
+    # Values set here can be overridden by a CLI flag:
+    # `sky launch/exec --env ENV=val` (if ENV is present).
+    envs:
+      MY_BUCKET: skypilot-temp-gcs-test
+      MY_LOCAL_PATH: tmp-workdir
+      MODEL_SIZE: 13b
 
     file_mounts:
       # Uses rsync to sync local files/directories to all nodes of the cluster.
@@ -117,7 +153,7 @@ Available fields:
       # Uses SkyPilot Storage to create a S3 bucket named sky-dataset, uploads the
       # contents of /local/path/datasets to the bucket, and marks the bucket
       # as persistent (it will not be deleted after the completion of this task).
-      # Symlink contents are copied over.
+      # Symlinks and their contents are NOT copied.
       #
       # Mounts the bucket at /datasets-storage on every node of the cluster.
       /datasets-storage:
@@ -129,6 +165,12 @@ Available fields:
 
       # Copies a cloud object store URI to the cluster. Can be private buckets.
       /datasets-s3: s3://my-awesome-dataset
+
+      # Demoing env var usage.
+      /checkpoint/${MODEL_SIZE}: ~/${MY_LOCAL_PATH}
+      /mydir:
+        name: ${MY_BUCKET}  # Name of the bucket.
+        mode: MOUNT
 
     # Setup script (optional) to execute on every `sky launch`.
     # This is executed before the 'run' commands.
@@ -144,3 +186,6 @@ Available fields:
     run: |
       echo "Beginning task."
       python train.py
+
+      # Demoing env var usage.
+      echo Env var MODEL_SIZE has value: ${MODEL_SIZE}

@@ -1,7 +1,21 @@
 """Utils for sky databases."""
-import threading
+import contextlib
 import sqlite3
-from typing import Callable
+import threading
+from typing import Any, Callable, Optional
+
+
+@contextlib.contextmanager
+def safe_cursor(db_path: str):
+    """A newly created, auto-committing, auto-closing cursor."""
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    try:
+        yield cursor
+    finally:
+        cursor.close()
+        conn.commit()
+        conn.close()
 
 
 def add_column_to_table(
@@ -10,14 +24,34 @@ def add_column_to_table(
     table_name: str,
     column_name: str,
     column_type: str,
+    copy_from: Optional[str] = None,
+    default_value_to_replace_nulls: Optional[Any] = None,
 ):
     """Add a column to a table."""
     for row in cursor.execute(f'PRAGMA table_info({table_name})'):
         if row[1] == column_name:
             break
     else:
-        cursor.execute(f'ALTER TABLE {table_name} '
-                       f'ADD COLUMN {column_name} {column_type}')
+        try:
+            add_column_cmd = (f'ALTER TABLE {table_name} '
+                              f'ADD COLUMN {column_name} {column_type}')
+            cursor.execute(add_column_cmd)
+            if copy_from is not None:
+                cursor.execute(f'UPDATE {table_name} '
+                               f'SET {column_name} = {copy_from}')
+            if default_value_to_replace_nulls is not None:
+                cursor.execute(
+                    f'UPDATE {table_name} '
+                    f'SET {column_name} = (?) '
+                    f'WHERE {column_name} IS NULL',
+                    (default_value_to_replace_nulls,))
+        except sqlite3.OperationalError as e:
+            if 'duplicate column name' in str(e):
+                # We may be trying to add the same column twice, when
+                # running multiple threads. This is fine.
+                pass
+            else:
+                raise
     conn.commit()
 
 
@@ -45,6 +79,8 @@ class SQLiteConn(threading.local):
     def __init__(self, db_path: str, create_table: Callable):
         super().__init__()
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
+        # NOTE: We use a timeout of 10 seconds to avoid database locked
+        # errors. This is a hack, but it works.
+        self.conn = sqlite3.connect(db_path, timeout=10)
         self.cursor = self.conn.cursor()
         create_table(self.cursor, self.conn)
