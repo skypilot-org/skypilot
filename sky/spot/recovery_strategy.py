@@ -480,20 +480,25 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
         logger.debug('Relaunch the cluster skipping the previously launched '
                      'cloud/region.')
         if self._launched_cloud_region is not None:
-            launched_cloud, launched_region = self._launched_cloud_region
             task = self.dag.tasks[0]
             resources = list(task.resources)[0]
-            task.blocked_resources = {
-                resources.copy(cloud=launched_cloud, region=launched_region)
-            }
-            # Not using self.launch to avoid the retry until up logic.
-            job_submitted_at = self._launch(raise_on_failure=False)
-            task.blocked_resources = None
-            # Restore the original dag, i.e. reset the region constraint.
-            if job_submitted_at is not None:
-                return job_submitted_at
-            self._launched_cloud_region = None
-            terminate_cluster(self.cluster_name)
+            if resources.region is None and resources.zone is None:
+                # Optimization: We only block the previously launched region,
+                # if the task does not specify a region or zone, because,
+                # otherwise, we will spend unnecessary time for skipping the
+                # only specified region/zone.
+                launched_cloud, launched_region = self._launched_cloud_region
+                task.blocked_resources = {
+                    resources.copy(cloud=launched_cloud, region=launched_region)
+                }
+                # Not using self.launch to avoid the retry until up logic.
+                job_submitted_at = self._launch(raise_on_failure=False)
+                task.blocked_resources = None
+                # Restore the original dag, i.e. reset the region constraint.
+                if job_submitted_at is not None:
+                    return job_submitted_at
+                self._launched_cloud_region = None
+                terminate_cluster(self.cluster_name)
 
         # Retry the entire block until the cluster is up, so that the ratio of
         # the time spent in the current region and the time spent in the other
