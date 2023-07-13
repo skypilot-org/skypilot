@@ -365,6 +365,9 @@ class Task:
         resources = config.pop('resources', None)
         resources = sky.Resources.from_yaml_config(resources)
 
+        # FIXME: find a better way to exclude unused fields.
+        config.pop('service', None)
+
         task.set_resources({resources})
         assert not config, f'Invalid task args: {config.keys()}'
         return task

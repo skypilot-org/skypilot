@@ -198,6 +198,9 @@ def get_task_schema():
                     'type': 'number'
                 }
             },
+            'service': {
+                'type': 'object',
+            }
         }
     }
 
