@@ -23,7 +23,10 @@ logger = logging.getLogger(__name__)
 
 class SkyServeRedirector:
 
-    def __init__(self, controller_url: str,  service_spec: SkyServiceSpec, port: int = 8081):
+    def __init__(self,
+                 controller_url: str,
+                 service_spec: SkyServiceSpec,
+                 port: int = 8081):
         self.controller_url = controller_url
         self.port = port
         self.app_port = service_spec.app_port
@@ -95,7 +98,10 @@ class SkyServeRedirector:
 if __name__ == '__main__':
     # Add argparse
     parser = argparse.ArgumentParser(description='SkyServe Redirector')
-    parser.add_argument('--task-yaml', type=str, help='Task YAML file', required=True)
+    parser.add_argument('--task-yaml',
+                        type=str,
+                        help='Task YAML file',
+                        required=True)
     parser.add_argument('--port',
                         '-p',
                         type=int,

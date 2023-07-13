@@ -72,7 +72,10 @@ class Controller:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='SkyServe Server')
-    parser.add_argument('--task-yaml', type=str, help='Task YAML file', required=True)
+    parser.add_argument('--task-yaml',
+                        type=str,
+                        help='Task YAML file',
+                        required=True)
     parser.add_argument('--port',
                         '-p',
                         type=int,
@@ -112,5 +115,6 @@ if __name__ == '__main__':
 
     # ======= Controller =========
     # Create a controller object and run it.
-    controller = Controller(infra_provider, load_balancer, autoscaler, args.port)
+    controller = Controller(infra_provider, load_balancer, autoscaler,
+                            args.port)
     controller.run()

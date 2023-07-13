@@ -20,10 +20,10 @@ class InfraProvider:
         # Returns the total number of servers, including those under provisioning and deletion
         raise NotImplementedError
 
-    def scale_up(self) -> None:
+    def scale_up(self, n: int) -> None:
         raise NotImplementedError
 
-    def scale_down(self) -> None:
+    def scale_down(self, n: int) -> None:
         # TODO - Scale down must also pass in a list of servers to delete or the number of servers to delete
         raise NotImplementedError
 

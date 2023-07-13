@@ -1,5 +1,6 @@
 import yaml
 
+
 class SkyServiceSpec:
 
     def __init__(self, yaml_path: str):
@@ -25,7 +26,7 @@ class SkyServiceSpec:
     @property
     def readiness_path(self):
         return self._readiness_path
-    
+
     @property
     def app_port(self):
         return self._app_port
