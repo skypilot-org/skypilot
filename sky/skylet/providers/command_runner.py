@@ -8,6 +8,7 @@ from sky.skylet import constants
 from ray.autoscaler._private.cli_logger import cli_logger
 from ray.autoscaler._private.command_runner import DockerCommandRunner
 from ray.autoscaler._private.docker import check_docker_running_cmd
+from ray.autoscaler.sdk import get_docker_host_mount_location
 
 
 def docker_start_cmds(
@@ -27,9 +28,6 @@ def docker_start_cmds(
     """
     del user  # unused
 
-    # pylint: disable=import-outside-toplevel
-    from ray.autoscaler.sdk import get_docker_host_mount_location
-
     docker_mount_prefix = get_docker_host_mount_location(cluster_name)
     mount = {f'{docker_mount_prefix}/{dst}': dst for dst in mount_dict}
 
@@ -48,6 +46,8 @@ def docker_start_cmds(
     docker_run = [
         docker_cmd,
         'run',
+        # SkyPilot: Remove --rm flag to keep the container after `ray stop`
+        # is executed.
         '--name {}'.format(container_name),
         '-d',
         '-it',
@@ -71,6 +71,9 @@ class SkyDockerCommandRunner(DockerCommandRunner):
     `ray.autoscaler._private.command_runner.DockerCommandRunner`.
     """
 
+    # SkyPilot: New function to check whether a container is exited
+    # (but not removed). This is due to previous `sky stop` command,
+    # which will stop the container but not remove it.
     def _check_container_exited(self) -> bool:
         if self.initialized:
             return True
@@ -93,6 +96,10 @@ class SkyDockerCommandRunner(DockerCommandRunner):
 
         self._check_docker_installed()
 
+        # SkyPilot: Check if the container is exited but not removed.
+        # If true, then we can start the container directly.
+        # Notice that we will skip all setup commands, so we need to
+        # manually start the ssh service.
         if self._check_container_exited():
             self.initialized = True
             self.run(f'docker start {self.container_name}', run_env='host')
@@ -172,10 +179,10 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             self.run(start_command, run_env='host')
             docker_run_executed = True
 
-        # Setup Commands.
+        # SkyPilot: Setup Commands.
         # Most of docker images are using root as default user, so we set an
-        # alias for sudo to empty string, so any sudo in the following commands
-        # won't fail.
+        # alias for sudo to empty string, therefore any sudo in the following
+        # commands won't fail.
         # Disable apt-get from asking user input during installation.
         # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai  # pylint: disable=line-too-long
         self.run(
@@ -207,6 +214,8 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                  'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
                  'sudo service ssh start;'
                  'sudo sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;')
+
+        # SkyPilot: End of Setup Commands.
 
         # Explicitly copy in ray bootstrap files.
         for mount in bootstrap_mounts:
