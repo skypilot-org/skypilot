@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - 'releases/*'
-      - 'ci-cd/*'
 
 jobs:
   print_branch_tag:
@@ -17,7 +16,7 @@ jobs:
       - uses: nimblehq/branch-tag-action@v1
         id: extract
 
-      # Use the output/env from the `extract` step
+
       - name: Print the values
         run: |
           echo "The branch tag is ${{ steps.extract.outputs.branch_tag }}"
@@ -26,8 +25,8 @@ jobs:
         id: determine_version
         run: |
           my_string=${{ steps.extract.outputs.branch_tag }}
-          VERSION=$(echo "$my_string" | cut -d'-' -f3)
-          echo "::set-output name=VERSION::$VERSION"ERSION=$(echo "$my_string" | cut -d'-' -f3)
+          VERSION=$(echo "$my_string" | cut -d'-' -f2)
+          echo "::set-output name=VERSION::$VERSION"ERSION=$(echo "$my_string" | cut -d'-' -f2)
           echo "::set-output name=VERSION::$VERSION"
           
       - name: Build and push Docker image
