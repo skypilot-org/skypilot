@@ -5,11 +5,11 @@ import typing
 from typing import Optional, Tuple
 
 import sky
+from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
-from sky import backends
 from sky.backends import backend_utils
 from sky.skylet import job_lib
 from sky.spot import spot_utils
@@ -418,6 +418,80 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
                 if job_submitted_at is not None:
                     return job_submitted_at
 
+            # Step 2
+            logger.debug('Terminating unhealthy spot cluster and '
+                         'reset cloud region.')
+            self._launched_cloud_region = None
+            terminate_cluster(self.cluster_name)
+
+            # Step 3
+            logger.debug('Relaunch the cluster  without constraining to prior '
+                         'cloud/region.')
+            # Not using self.launch to avoid the retry until up logic.
+            job_submitted_at = self._launch(max_retry=self._MAX_RETRY_CNT,
+                                            raise_on_failure=False)
+            if job_submitted_at is None:
+                # Failed to launch the cluster.
+                if self.retry_until_up:
+                    gap_seconds = self.RETRY_INIT_GAP_SECONDS
+                    logger.info('Retrying to recover the spot cluster in '
+                                f'{gap_seconds:.1f} seconds.')
+                    time.sleep(gap_seconds)
+                    continue
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesUnavailableError(
+                        f'Failed to recover the spot cluster after retrying '
+                        f'{self._MAX_RETRY_CNT} times.')
+
+            return job_submitted_at
+
+
+class AggressiveFailoverStrategyExecutor(FailoverStrategyExecutor,
+                                         name='AGGRESSIVE_FAILOVER',
+                                         default=False):
+    """Aggressive failover strategy
+
+    This strategy is an extension of the failover strategy. Instead of waiting
+    in the same region when the preemption happens, it immediately terminates
+    the cluster and relaunches it in a different regions. This is based on the
+    observation that the preemption is likely to happen again shortly in the
+    same region, so trying other regions first is more likely to get a longer
+    running cluster.
+    """
+
+    def recover(self) -> float:
+        # 1. Terminate the current cluster
+        # 2. Launch the cluster without retrying the previously launched region
+        # 3. Launch the cluster with no cloud/region constraint or respect the
+        #    original user specification.
+
+        # Step 1
+        logger.debug('Terminating unhealthy spot cluster and '
+                     'reset cloud region.')
+        terminate_cluster(self.cluster_name)
+
+        # Step 2
+        logger.debug('Relaunch the cluster skipping the previously launched '
+                     'cloud/region.')
+        if self._launched_cloud_region is not None:
+            launched_cloud, launched_region = self._launched_cloud_region
+            task = self.dag.tasks[0]
+            resources = list(task.resources)[0]
+            task.blocked_resources = {
+                resources.copy(cloud=launched_cloud, region=launched_region)
+            }
+            # Not using self.launch to avoid the retry until up logic.
+            job_submitted_at = self._launch(raise_on_failure=False)
+            # Restore the original dag, i.e. reset the region constraint.
+            if job_submitted_at is not None:
+                return job_submitted_at
+            self._launched_cloud_region = None
+            terminate_cluster(self.cluster_name)
+
+        # Retry the entire block until the cluster is up, so that the ratio of
+        # the time spent in the current region and the time spent in the other
+        # region is consistent during the retry.
+        while True:
             # Step 2
             logger.debug('Terminating unhealthy spot cluster and '
                          'reset cloud region.')

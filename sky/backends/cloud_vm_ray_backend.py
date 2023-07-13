@@ -623,11 +623,18 @@ class RetryingVmProvisioner(object):
         GANG_FAILED = 1
         HEAD_FAILED = 2
 
-    def __init__(self, log_dir: str, dag: 'dag.Dag',
+    def __init__(self,
+                 log_dir: str,
+                 dag: 'dag.Dag',
                  optimize_target: 'optimizer.OptimizeTarget',
                  requested_features: Set[clouds.CloudImplementationFeatures],
-                 local_wheel_path: pathlib.Path, wheel_hash: str):
+                 local_wheel_path: pathlib.Path,
+                 wheel_hash: str,
+                 blocked_resources: Optional[Iterable[
+                     resources_lib.Resources]] = None):
         self._blocked_resources: Set[resources_lib.Resources] = set()
+        if blocked_resources:
+            self._blocked_resources.update(blocked_resources)
 
         self.log_dir = os.path.expanduser(log_dir)
         self._dag = dag
@@ -2452,8 +2459,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # of optimization infinitely.
                 try:
                     provisioner = RetryingVmProvisioner(
-                        self.log_dir, self._dag, self._optimize_target,
-                        self._requested_features, local_wheel_path, wheel_hash)
+                        self.log_dir,
+                        self._dag,
+                        self._optimize_target,
+                        self._requested_features,
+                        local_wheel_path,
+                        wheel_hash,
+                        blocked_resources=task.blocked_resources)
                     config_dict = provisioner.provision_with_retries(
                         task, to_provision_config, dryrun, stream_logs)
                     break
