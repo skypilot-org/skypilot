@@ -197,3 +197,14 @@ IAM Role Creation
 4. **Optional**: If you would like to let the user access S3 buckets on the VM they created, you can additionally attach the s3 access permission to the IAM role, such as the "AmazonS3FullAccess" policy.
 5. Click **Next**, and name your role "skypilot-v1". Click **Create role**.
 
+
+Using a specific VPC
+-----------------------
+
+To instruct SkyPilot to use a specific VPC, you can use SkyPilot's global config
+file ``~/.sky/config.yaml`` to specify the VPC name. See the ``aws.vpc_name``
+field in :ref:`config-yaml`.
+
+Example use cases include using a private VPC or a VPC with fine-grained
+constraints, typically created via Terraform or manually. By default, SkyPilot
+uses the "default" VPC in each region.

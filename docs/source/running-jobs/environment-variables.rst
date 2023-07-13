@@ -41,7 +41,7 @@ The values of these variables are filled in by SkyPilot at task YAML parse time.
 Read more at `examples/using_file_mounts_with_env_vars.yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/using_file_mounts_with_env_vars.yaml>`_.
 
 Using in ``setup`` and ``run``
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 All user-specified environment variables are exported to a task's ``setup`` and ``run`` commands (i.e., accessible when they are being run).
 
