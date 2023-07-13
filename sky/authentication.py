@@ -21,6 +21,7 @@ comments in setup_lambda_authentication)
 """
 import copy
 import functools
+import json
 import os
 import re
 import socket
@@ -33,8 +34,10 @@ import colorama
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
+import jinja2
 import yaml
 
+import sky
 from sky import clouds
 from sky import sky_logging
 from sky.adaptors import gcp, ibm, kubernetes
@@ -404,83 +407,18 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     sshjump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
     sshjump_image =  clouds.Kubernetes.SSH_JUMP_IMAGE
 
-    def _to_sshjump_pod_spec(name, image, secret):
-        return {
-        'apiVersion': 'v1',
-        'kind': 'Pod',
-        'metadata': {
-            'name': name,
-            'labels': {
-                'component': name,
-                'parent': 'skypilot'
-            }
-        },
-        'spec': {
-            'volumes': [
-                {
-                    'name': 'secret-volume',
-                    'secret': {'secretName': secret}
-                }
-            ],
-            'containers': [
-                {
-                    'name': name,
-                    'imagePullPolicy': 'Always',
-                    'image': image,
-                    'command': ["/bin/bash", "-c", "--"],
-                    'args': ['trap : TERM INT; sleep infinity & wait;'],
-                    'ports':[ 
-                        {
-                            'containerPort': 22
-                        }
-                    ],
-                    'volumeMounts': [
-                        {
-                            'name': 'secret-volume',
-                            'readOnly': True,
-                            'mountPath': "/etc/secret-volume"
-                        }
-                    ],
-                    'lifecycle': {
-                        'postStart': {
-                            'exec': {
-                                'command': ["/bin/bash", "-c", "mkdir -p ~/.ssh && cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && sudo service ssh restart"]
-                            }
-                        }
-                    }
-                }
-            ]
-        }
-    }
+    template_path = os.path.join(sky.__root_dir__, 'templates', 'kubernetes-sshjump.j2')
+    if not os.path.exists(template_path):
+        raise FileNotFoundError('Template "kubernetes-sshjump.j2" does not exist.')
+    with open(template_path) as fin:
+        template = fin.read()
+    j2_template = jinja2.Template(template)
+    _content = j2_template.render(name=sshjump_name, image=sshjump_image, secret=key_label)
 
-
-    def _to_sshjump_service_spec(name):
-        return {
-        'apiVersion': 'v1',
-        'kind': 'Service',
-        'metadata': {
-            'name': name,
-            'labels': {
-                'parent': 'skypilot'
-            }
-        },
-        'spec': {
-            'type': 'NodePort',
-            'selector': {
-                'component': name
-            },
-            'ports': [
-                {
-                    'protocol': 'TCP',
-                    'port': 22,
-                    'targetPort': 22
-                }
-            ]
-         }
-    }
+    content = json.loads(_content)
 
     try:
-        kubernetes.core_api().create_namespaced_pod('default', _to_sshjump_pod_spec(name=sshjump_name, secret=key_label, image=sshjump_image))
+        kubernetes.core_api().create_namespaced_pod('default', content['pod_spec'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
@@ -491,7 +429,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(
             f'Creating SSH Jump Host {sshjump_name} in the cluster...')
     try:
-        kubernetes.core_api().create_namespaced_service('default', _to_sshjump_service_spec(name=sshjump_name))
+        kubernetes.core_api().create_namespaced_service('default', content['service_spec'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
