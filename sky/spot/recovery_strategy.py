@@ -452,8 +452,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             return job_submitted_at
 
 
-class AggressiveFailoverStrategyExecutor(FailoverStrategyExecutor,
-                                         name='AGGRESSIVE_FAILOVER',
+class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
+                                         name='EAGER_FAILOVER',
                                          default=False):
     """Aggressive failover strategy
 
@@ -488,6 +488,7 @@ class AggressiveFailoverStrategyExecutor(FailoverStrategyExecutor,
             }
             # Not using self.launch to avoid the retry until up logic.
             job_submitted_at = self._launch(raise_on_failure=False)
+            task.blocked_resources = set()
             # Restore the original dag, i.e. reset the region constraint.
             if job_submitted_at is not None:
                 return job_submitted_at
