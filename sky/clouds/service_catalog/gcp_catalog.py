@@ -378,8 +378,8 @@ def list_accelerators(
     # and L4 GPUs can only be attached to G2 VMs.
     # Thus, we can show their exact cost including the host VM prices.
 
-    acc_infos = results.get('A100', []) + results.get('A100-80GB', [])
-                                        + results.get('L4', [])
+    acc_infos = results.get('A100', []) + results.get('A100-80GB', []) + \
+        results.get('L4', [])
     if not acc_infos:
         return results
 
