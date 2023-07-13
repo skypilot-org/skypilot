@@ -1,4 +1,10 @@
-"""The strategy to handle launching/recovery/termination of spot clusters."""
+"""The strategy to handle launching/recovery/termination of spot clusters.
+
+In the YAML file, the user can specify the strategy to use for spot jobs.
+
+resources:
+    spot_recovery: AGGRESSIVE_FAILOVER
+"""
 import time
 import traceback
 import typing
@@ -492,12 +498,6 @@ class AggressiveFailoverStrategyExecutor(FailoverStrategyExecutor,
         # the time spent in the current region and the time spent in the other
         # region is consistent during the retry.
         while True:
-            # Step 2
-            logger.debug('Terminating unhealthy spot cluster and '
-                         'reset cloud region.')
-            self._launched_cloud_region = None
-            terminate_cluster(self.cluster_name)
-
             # Step 3
             logger.debug('Relaunch the cluster  without constraining to prior '
                          'cloud/region.')
