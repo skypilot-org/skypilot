@@ -401,12 +401,4 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             logger.error(suffix)
             raise
 
-    # Need to use ~ relative path because Ray uses the same
-    # path for finding the public key path on both local and head node.
-    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
-
-    file_mounts = config['file_mounts']
-    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
-    config['file_mounts'] = file_mounts
-
     return config
