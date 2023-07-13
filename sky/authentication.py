@@ -29,8 +29,6 @@ import sys
 from typing import Any, Dict, Tuple
 import uuid
 
-from urllib.parse import urlparse
-
 import colorama
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
