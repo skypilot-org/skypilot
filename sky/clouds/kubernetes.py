@@ -147,6 +147,7 @@ class Kubernetes(clouds.Cloud):
                                                        'implementation yet.',
     }
 
+    # TODO(romilb): Add GPU Support - have GPU-enabled image.
     IMAGE = 'us-central1-docker.pkg.dev/' \
             'skypilot-375900/skypilotk8s/skypilot:latest'
 
@@ -228,7 +229,10 @@ class Kubernetes(clouds.Cloud):
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
         # TODO(romilb): Add GPU support.
-        return None
+        inst = KubernetesInstanceType.from_instance_type(instance_type)
+        return {
+            inst.accelerator_type: inst.accelerator_count
+        } if inst.accelerator_count else None
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
@@ -274,17 +278,33 @@ class Kubernetes(clouds.Cloud):
         # We fetch the default values for the instance type in that case.
         cpus, mem = self.get_vcpus_mem_from_instance_type(
             resources.instance_type)
-        return {
+        acc_count = 0
+        acc_type = None
+
+        # Add accelerator variables if they are set.
+        accelerators = resources.accelerators
+        if accelerators is not None:
+            assert len(accelerators) == 1, resources
+            acc_type, acc_count = list(accelerators.items())[0]
+            # TODO(romilb): Add accelerator type support.
+            # For now, hacking back to None
+            acc_type = None
+
+        vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
             'cpus': str(cpus),
             'memory': str(mem),
+            'accelerator_count': str(acc_count),
             'timeout': str(self.TIMEOUT),
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             # TODO(romilb): Allow user to specify custom images
             'image_id': self.IMAGE,
         }
+        return vars
+
+
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
@@ -309,21 +329,28 @@ class Kubernetes(clouds.Cloud):
 
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
+        default_instance_type = Kubernetes.get_default_instance_type(
+            cpus=resources.cpus,
+            memory=resources.memory,
+            disk_tier=resources.disk_tier)
         if accelerators is None:
             # Return a default instance type with the given number of vCPUs.
-            default_instance_type = Kubernetes.get_default_instance_type(
-                cpus=resources.cpus,
-                memory=resources.memory,
-                disk_tier=resources.disk_tier)
             if default_instance_type is None:
                 return ([], [])
             else:
-                return (_make([default_instance_type]), [])
+                return _make([default_instance_type]), []
 
         assert len(accelerators) == 1, resources
         # If GPUs are requested, return an empty list.
         # TODO(romilb): Add GPU support.
-        return ([], [])
+        acc_type, acc_count = list(accelerators.items())[0]
+        default_inst = KubernetesInstanceType.from_instance_type(default_instance_type)
+        instance_type = KubernetesInstanceType.from_resources(int(default_inst.cpus),
+                                                              int(default_inst.memory),
+                                                              int(acc_count),
+                                                              acc_type).name
+        # No fuzzy lists for Kubernetes
+        return _make([instance_type]), []
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
@@ -352,7 +379,7 @@ class Kubernetes(clouds.Cloud):
         # TODO(romilb): All accelerators are marked as not available for now.
         #  In the future, we should return false for accelerators that we know
         #  are not supported by the cluster.
-        return False
+        return True
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],

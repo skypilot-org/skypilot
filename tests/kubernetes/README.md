@@ -39,3 +39,25 @@ gcloud container clusters get-credentials <cluster-name> --region <region>
 `scripts` directory contains other useful scripts for development, including 
 Kubernetes dashboard, ray yaml for testing the SkyPilot Kubernetes node provider 
 and more.
+
+# GKE GPU support guide
+
+Create a GKE cluster using the cloud console. Use standard cluster, not autopilot.
+
+## Install nvidia drivers (if needed)
+If you're using GKE and running GKE < 1.27.2-gke.1200, you'll need to manually install nvidia drivers.
+```bash
+# For ubuntu image:
+kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/ubuntu/daemonset-preloaded.yaml
+```
+
+[Not sure] This will create a resource like `nvidia.com/gpu: 1`. However, we still need labels for GPU type (e.g., A100).
+
+## Install GPU feature discovery
+NOTE - GFD does not work on GKE! https://github.com/NVIDIA/gpu-feature-discovery/issues/44
+We can use Nvidia [gpu-feature-discovery](https://github.com/NVIDIA/gpu-feature-discovery/blob/main/README.md) to detect GPUs on the nodes and automatically label the nodes.
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/NVIDIA/gpu-feature-discovery/v0.8.1/deployments/static/nfd.yaml
+kubectl apply -f https://raw.githubusercontent.com/NVIDIA/gpu-feature-discovery/v0.8.1/deployments/static/gpu-feature-discovery-daemonset.yaml
+```
