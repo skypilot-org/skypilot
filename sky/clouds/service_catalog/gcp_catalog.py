@@ -390,6 +390,8 @@ def list_accelerators(
                                         info.accelerator_count)
         for vm_type in vm_types:
             df = _df[_df['InstanceType'] == vm_type]
+            if df.empty:
+                continue
             cpu_count = df['vCPUs'].iloc[0]
             memory = df['MemoryGiB'].iloc[0]
             vm_price = common.get_hourly_cost_impl(_df,
