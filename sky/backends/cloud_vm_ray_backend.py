@@ -2420,20 +2420,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     task, to_provision, cluster_name)
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
-            if len(cluster_name
-                  ) >= 40 and to_provision_config.resources.ports is not None:
-                # GCP firewall rule name has a 63 character limit. Our firewall
-                # rule name template is f'{vpc_name}-user-ports-{cluster_name}',
-                # assuming vpc_name is 'skypilot-vpc', the cluster_name must be
-                # less than 40 characters.
-                # FIXME(tian): Retrieve the vpc_name and calculate max length
-                # The error message is:
-                # googleapiclient.errors.HttpError: <HttpError 400 when requesting https://compute.googleapis.com/compute/v1/projects/<project_id>/global/firewalls?alt=json returned "Invalid value for field 'resource.name': '<name>'. Must be a match of regex '(?:[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?)'"  # pylint: disable=line-too-long
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.InvalidClusterNameError(
-                        'Cluster name with ports must be less than 40 characters '
-                        'to meet the length requirement of the firewall name. '
-                        'Please specify a shorter cluster name.')
 
             prev_cluster_status = to_provision_config.prev_cluster_status
             usage_lib.messages.usage.update_cluster_resources(
