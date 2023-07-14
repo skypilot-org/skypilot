@@ -50,7 +50,7 @@ class ZoneConfig:
         instance_config['serverType'] = node_config['InstanceType']
         instance_config['contractId'] = "None"
         instance_config['initialScript'] = self._get_vm_init_script(
-            node_config['auth']['ssh_public_key'])
+            node_config['AuthorizedKey'])
 
         miscellaneous = {
             'deletionProtectionEnabled': False,
@@ -112,10 +112,10 @@ class ZoneConfig:
 
         return vpc_subnets
 
-    def _get_vm_init_script(self, ssh_public_key_path):
+    def _get_vm_init_script(self, ssh_public_key):
 
         init_script_content = self._get_default_config_cmd(
-        ) + self._get_ssh_key_gen_cmd(ssh_public_key_path)
+        ) + self._get_ssh_key_gen_cmd(ssh_public_key)
         return {
             "encodingType": "plain",
             "initialScriptShell": "bash",
@@ -123,17 +123,11 @@ class ZoneConfig:
             "initialScriptContent": init_script_content
         }
 
-    def _get_ssh_key_gen_cmd(self, ssh_public_key_path):
+    def _get_ssh_key_gen_cmd(self, ssh_public_key):
         cmd_st = "mkdir -p ~/.ssh/; touch ~/.ssh/authorized_keys;"
         cmd_ed = "chmod 644 ~/.ssh/authorized_keys; chmod 700 ~/.ssh/"
-        try:
-            with open(ssh_public_key_path, 'r') as f:
-                key = f.read()
-        # Load configuration file values
-        except FileNotFoundError:
-            print('Public SSH key does not exist.')
 
-        cmd = "echo '{}' &>>~/.ssh/authorized_keys;".format(key)
+        cmd = "echo '{}' &>>~/.ssh/authorized_keys;".format(ssh_public_key)
 
         return cmd_st + cmd + cmd_ed
 

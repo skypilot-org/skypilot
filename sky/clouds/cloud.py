@@ -359,6 +359,14 @@ class Cloud:
         """
         return None
 
+    @classmethod
+    def get_current_user_identity_str(cls) -> Optional[str]:
+        """Returns a user friendly representation of the current identity."""
+        user_identity = cls.get_current_user_identity()
+        if user_identity is None:
+            return None
+        return ', '.join(user_identity)
+
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns the files necessary to access this cloud.
 

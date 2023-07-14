@@ -62,6 +62,9 @@ available_node_types:
       # Use cloud init in UserData to set up the authorized_keys to get
       # around the number of keys limit and permission issues with
       # ec2.describe_key_pairs.
+      # The | can ensure the line below are interpreted as a plain text,
+      # without yaml specific syntax to be parsed, such as string that
+      # contains `: `.
       # Note that sudo and shell need to be specified to ensure setup works.
       # Reference: https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups
       # The bootcmd is to disable automatic APT updates, to avoid the lock
@@ -74,7 +77,8 @@ available_node_types:
             shell: /bin/bash
             sudo: ALL=(ALL) NOPASSWD:ALL
             ssh_authorized_keys:
-              - skypilot:ssh_public_key_content
+              - |
+                skypilot:ssh_public_key_content
         write_files:
           - path: /etc/apt/apt.conf.d/20auto-upgrades
             content: |
@@ -126,7 +130,8 @@ available_node_types:
             shell: /bin/bash
             sudo: ALL=(ALL) NOPASSWD:ALL
             ssh_authorized_keys:
-              - skypilot:ssh_public_key_content
+              - |
+                skypilot:ssh_public_key_content
         write_files:
           - path: /etc/apt/apt.conf.d/20auto-upgrades
             content: |

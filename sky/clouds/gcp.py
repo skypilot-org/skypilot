@@ -114,6 +114,33 @@ class GCP(clouds.Cloud):
     # lower limit.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 35
 
+    _INDENT_PREFIX = '    '
+    _DEPENDENCY_HINT = (
+        'GCP tools are not installed. Run the following commands:\n'
+        # Install the Google Cloud SDK:
+        f'{_INDENT_PREFIX}  $ pip install google-api-python-client\n'
+        f'{_INDENT_PREFIX}  $ conda install -c conda-forge '
+        'google-cloud-sdk -y')
+
+    _CREDENTIAL_HINT = (
+        'Run the following commands:\n'
+        # This authenticates the CLI to make `gsutil` work:
+        f'{_INDENT_PREFIX}  $ gcloud init\n'
+        # This will generate
+        # ~/.config/gcloud/application_default_credentials.json.
+        f'{_INDENT_PREFIX}  $ gcloud auth application-default login\n'
+        f'{_INDENT_PREFIX}For more info: '
+        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
+    )
+    _APPLICATION_CREDENTIAL_HINT = (
+        'Run the following commands:\n'
+        f'{_INDENT_PREFIX}  $ gcloud auth application-default login\n'
+        f'{_INDENT_PREFIX}Or set the environment variable GOOGLE_APPLICATION_CREDENTIALS '
+        'to the path of your service account key file.\n'
+        f'{_INDENT_PREFIX}For more info: '
+        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
+    )
+
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
@@ -503,6 +530,17 @@ class GCP(clouds.Cloud):
             # Check google-api-python-client installation.
             import googleapiclient
 
+            # Check the installation of google-cloud-sdk.
+            _run_output('gcloud --version')
+        except (ImportError, subprocess.CalledProcessError) as e:
+            return False, (
+                f'{cls._DEPENDENCY_HINT}\n'
+                f'{cls._INDENT_PREFIX}Credentials may also need to be set. '
+                f'{cls._CREDENTIAL_HINT}\n'
+                f'{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+
+        try:
             # These files are required because they will be synced to remote
             # VMs for `gsutil` to access private storage buckets.
             # `auth.default()` does not guarantee these files exist.
@@ -512,37 +550,38 @@ class GCP(clouds.Cloud):
             ]:
                 if not os.path.isfile(os.path.expanduser(file)):
                     raise FileNotFoundError(file)
+        except FileNotFoundError as e:
+            return False, (
+                f'Credentails are not set. '
+                f'{cls._CREDENTIAL_HINT}\n'
+                f'{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
+        try:
             cls._find_application_key_path()
+        except FileNotFoundError as e:
+            return False, (
+                f'Application credentials are not set. '
+                f'{cls._APPLICATION_CREDENTIAL_HINT}\n'
+                f'{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
-            # Check the installation of google-cloud-sdk.
-            _run_output('gcloud --version')
-
+        try:
             # Check if application default credentials are set.
             project_id = cls.get_project_id()
 
             # Check if the user is activated.
             identity = cls.get_current_user_identity()
         except (auth.exceptions.DefaultCredentialsError,
-                subprocess.CalledProcessError,
-                exceptions.CloudUserIdentityError, FileNotFoundError,
-                ImportError) as e:
+                exceptions.CloudUserIdentityError) as e:
             # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
-                'GCP tools are not installed or credentials are not set. '
-                'Run the following commands:\n    '
-                # Install the Google Cloud SDK:
-                '  $ pip install google-api-python-client\n    '
-                '  $ conda install -c conda-forge google-cloud-sdk -y\n    '
-                # This authenticates the CLI to make `gsutil` work:
-                '  $ gcloud init\n    '
-                # This will generate
-                # ~/.config/gcloud/application_default_credentials.json.
-                '  $ gcloud auth application-default login\n    '
-                'For more info: '
-                'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
-                f'\nDetails: {common_utils.format_exception(e, use_bracket=True)}'
-            )
+                'Getting project ID or user identity failed. You can debug '
+                'with `gcloud auth list`. To fix this, '
+                f'{cls._CREDENTIAL_HINT[0].lower()}'
+                f'{cls._CREDENTIAL_HINT[1:]}\n'
+                f'{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
         # Check APIs.
         apis = (
@@ -654,6 +693,7 @@ class GCP(clouds.Cloud):
         try:
             account = _run_output('gcloud auth list --filter=status:ACTIVE '
                                   '--format="value(account)"')
+            account = account.strip()
         except subprocess.CalledProcessError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
@@ -680,6 +720,13 @@ class GCP(clouds.Cloud):
                     f'{common_utils.format_exception(e, use_bracket=True)}'
                 ) from e
         return [f'{account} [project_id={project_id}]']
+
+    @classmethod
+    def get_current_user_identity_str(cls) -> Optional[str]:
+        user_identity = cls.get_current_user_identity()
+        if user_identity is None:
+            return None
+        return user_identity[0].replace('\n', '')
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')

@@ -59,8 +59,15 @@ available_node_types:
       guestAccelerators:
         - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
           acceleratorCount: {{gpu_count}}
+  {%- endif %}
       metadata:
         items:
+          - key: ssh-keys
+            # After replacing the variables, this will become username:ssh_public_key_content.
+            # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
+            value: |
+              skypilot:ssh_user:skypilot:ssh_public_key_content
+  {%- if gpu is not none %}
           - key: install-nvidia-driver
             value: "True"
   {%- endif %}
@@ -102,8 +109,13 @@ available_node_types:
       guestAccelerators:
         - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
           acceleratorCount: {{gpu_count}}
+    {%- endif %}
       metadata:
         items:
+          - key: ssh-keys
+            value: |
+              skypilot:ssh_user:skypilot:ssh_public_key_content
+    {%- if gpu is not none %}
           - key: install-nvidia-driver
             value: "True"
     {%- endif %}

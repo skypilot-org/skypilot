@@ -38,6 +38,9 @@ available_node_types:
         tags:
           skypilot-user: {{ user }}
         azure_arm_parameters:
+            adminUsername: skypilot:ssh_user
+            publicKey: |
+              skypilot:ssh_public_key_content
             vmSize: {{instance_type}}
             # List images https://docs.microsoft.com/en-us/azure/virtual-machines/linux/cli-ps-findimage
             imagePublisher: {{image_publisher}}
@@ -63,6 +66,9 @@ available_node_types:
         tags:
           skypilot-user: {{ user }}
         azure_arm_parameters:
+            adminUsername: skypilot:ssh_user
+            publicKey: |
+              skypilot:ssh_public_key_content
             vmSize: {{instance_type}}
             # List images https://docs.microsoft.com/en-us/azure/virtual-machines/linux/cli-ps-findimage
             imagePublisher: {{image_publisher}}
