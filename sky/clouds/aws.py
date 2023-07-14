@@ -336,6 +336,7 @@ class AWS(clouds.Cloud):
             self, resources: 'resources_lib.Resources', region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Any]:
         assert zones is not None, (region, zones)
+        resources = resources_lib.LaunchableResources(resources)
 
         region_name = region.name
         zone_names = [zone.name for zone in zones]
@@ -357,13 +358,12 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
-            **AWS._get_disk_specs(r.disk_tier)
+            **self._get_disk_specs(r.disk_tier)
         }
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
         if resources.instance_type is not None:
-            assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
             resources = resources.copy(accelerators=None)
             return ([resources], [])

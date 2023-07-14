@@ -287,7 +287,6 @@ class Azure(clouds.Cloud):
             # Need to support it.
             return ([], [])
         if resources.instance_type is not None:
-            assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
             resources = resources.copy(
                 accelerators=None,

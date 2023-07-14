@@ -35,7 +35,7 @@ import sys
 import textwrap
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 import webbrowser
 
 import click
@@ -2758,11 +2758,12 @@ def _down_or_stop_clusters(
 def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], region: Optional[str], zone: Optional[str],
             instance_type: Optional[str], cpus: Optional[str],
-            memory: Optional[str], gpus: Optional[str],
+            memory: Optional[str], gpus: Optional[Dict[str, int]],
             use_spot: Optional[bool], screen: Optional[bool],
             tmux: Optional[bool], disk_size: Optional[int],
-            disk_tier: Optional[str], idle_minutes_to_autostop: Optional[int],
-            down: bool, retry_until_up: bool):
+            disk_tier: Optional[Literal['low', 'medium', 'high']],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
 
     Examples:
@@ -2844,7 +2845,9 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             instance_type: Optional[str], cpus: Optional[str],
             memory: Optional[str], use_spot: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], disk_tier: Optional[str],
+            disk_size: Optional[int], disk_tier: Optional[Literal['low',
+                                                                  'medium',
+                                                                  'high']],
             idle_minutes_to_autostop: Optional[int], down: bool,
             retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
@@ -2922,10 +2925,12 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             region: Optional[str], zone: Optional[str],
             instance_type: Optional[str], cpus: Optional[str],
-            memory: Optional[str], tpus: Optional[str],
+            memory: Optional[str], tpus: Optional[Dict[str, int]],
             use_spot: Optional[bool], tpu_vm: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], disk_tier: Optional[str],
+            disk_size: Optional[int], disk_tier: Optional[Literal['low',
+                                                                  'medium',
+                                                                  'high']],
             idle_minutes_to_autostop: Optional[int], down: bool,
             retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
@@ -2970,6 +2975,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
     accelerator_args = default_resources.accelerator_args
     if tpu_vm:
+        assert accelerator_args is not None, default_resources
         accelerator_args['tpu_vm'] = True
         accelerator_args['runtime_version'] = 'tpu-vm-base'
     if instance_type is None:
@@ -3460,7 +3466,7 @@ def spot_launch(
     spot_recovery: Optional[str],
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
-    disk_tier: Optional[str],
+    disk_tier: Optional[Literal['low', 'medium', 'high']],
     detach_run: bool,
     retry_until_up: bool,
     yes: bool,

@@ -9,6 +9,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import gcp
@@ -17,9 +18,6 @@ from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-
-if typing.TYPE_CHECKING:
-    from sky import resources
 
 logger = sky_logging.init_logger(__name__)
 
@@ -313,7 +311,7 @@ class GCP(clouds.Cloud):
                                                          clouds='gcp')
 
     def make_deploy_resources_variables(
-            self, resources: 'resources.Resources', region: 'clouds.Region',
+            self, resources: 'resources_lib.Resources', region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         assert zones is not None, (region, zones)
 
@@ -394,9 +392,11 @@ class GCP(clouds.Cloud):
 
         return resources_vars
 
-    def get_feasible_launchable_resources(self, resources):
+    def get_feasible_launchable_resources(
+        self, resources: resources_lib.Resources
+    ) -> Tuple[List[resources_lib.LaunchableResources], List[str]]:
         if resources.instance_type is not None:
-            assert resources.is_launchable(), resources
+            resources = resources_lib.LaunchableResources(resources)
             return ([resources], [])
 
         if resources.accelerators is None:
@@ -408,13 +408,14 @@ class GCP(clouds.Cloud):
             if host_vm_type is None:
                 return ([], [])
             else:
-                r = resources.copy(
-                    cloud=GCP(),
-                    instance_type=host_vm_type,
-                    accelerators=None,
-                    cpus=None,
-                    memory=None,
-                )
+                r = resources_lib.LaunchableResources(
+                    resources.copy(
+                        cloud=GCP(),
+                        instance_type=host_vm_type,
+                        accelerators=None,
+                        cpus=None,
+                        memory=None,
+                    ))
                 return ([r], [])
 
         use_tpu_vm = False
@@ -739,8 +740,8 @@ class GCP(clouds.Cloud):
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'gcp')
 
-    def need_cleanup_after_preemption(self,
-                                      resources: 'resources.Resources') -> bool:
+    def need_cleanup_after_preemption(
+            self, resources: 'resources_lib.Resources') -> bool:
         """Returns whether a spot resource needs cleanup after preeemption."""
         # Spot TPU VMs require manual cleanup after preemption.
         # "If your Cloud TPU is preempted,

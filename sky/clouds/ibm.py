@@ -3,19 +3,16 @@ import os
 import yaml
 import json
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import ibm
 from sky.adaptors.ibm import CREDENTIAL_FILE
 from sky.clouds import service_catalog
 from sky.utils import ux_utils
-
-if typing.TYPE_CHECKING:
-    # renaming to avoid shadowing variables
-    from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -156,7 +153,7 @@ class IBM(clouds.Cloud):
         resources: 'resources_lib.Resources',
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Optional[Union[str, bool]]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,
@@ -246,8 +243,9 @@ class IBM(clouds.Cloud):
                                                          disk_tier=disk_tier,
                                                          clouds='ibm')
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
+    def get_feasible_launchable_resources(
+        self, resources: 'resources.Resources'
+    ) -> Tuple[List['resources.LaunchableResources'], List[str]]:
         """Returns a list of feasible and launchable resources.
 
         Feasible resources refer to an offering respecting the resource

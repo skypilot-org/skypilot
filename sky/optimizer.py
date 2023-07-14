@@ -874,7 +874,8 @@ def _cloud_in_list(cloud: clouds.Cloud, lst: Iterable[clouds.Cloud]) -> bool:
 def _make_launchables_for_valid_region_zones(
     launchable_resources: resources_lib.Resources
 ) -> List[resources_lib.Resources]:
-    assert launchable_resources.is_launchable()
+    launchable_resources = resources_lib.LaunchableResources(
+        launchable_resources)
     # In principle, all provisioning requests should be made at the granularity
     # of a single zone. However, for on-demand instances, we batch the requests
     # to the zones in the same region in order to leverage the region-level

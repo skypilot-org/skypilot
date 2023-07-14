@@ -42,12 +42,12 @@ class Resources:
         cpus: Union[None, int, float, str] = None,
         memory: Union[None, int, float, str] = None,
         accelerators: Union[None, str, Dict[str, int]] = None,
-        accelerator_args: Optional[Dict[str, str]] = None,
+        accelerator_args: Optional[Dict[str, Union[str, bool]]] = None,
         use_spot: Optional[bool] = None,
         spot_recovery: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
-        image_id: Union[Dict[str, str], str, None] = None,
+        image_id: Union[Dict[str, str], Dict[None, str], str, None] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
         # Internal use only.
@@ -141,7 +141,6 @@ class Resources:
 
         # self._image_id is a dict of {region: image_id}.
         # The key is None if the same image_id applies for all regions.
-        self._image_id = image_id
         if isinstance(image_id, str):
             self._image_id = {self._region: image_id.strip()}
         elif isinstance(image_id, dict):
@@ -151,6 +150,9 @@ class Resources:
                 self._image_id = {
                     k.strip(): v.strip() for k, v in image_id.items()
                 }
+        else:
+            self._image_id = image_id
+
         self._is_image_managed = _is_image_managed
 
         self._disk_tier = disk_tier
@@ -310,7 +312,7 @@ class Resources:
         return None
 
     @property
-    def accelerator_args(self) -> Optional[Dict[str, str]]:
+    def accelerator_args(self) -> Optional[Dict[str, Union[str, bool]]]:
         return self._accelerator_args
 
     @property
@@ -330,11 +332,11 @@ class Resources:
         return self._disk_size
 
     @property
-    def image_id(self) -> Optional[Dict[str, str]]:
+    def image_id(self) -> Optional[Union[Dict[str, str], Dict[None, str]]]:
         return self._image_id
 
     @property
-    def disk_tier(self) -> str:
+    def disk_tier(self) -> Optional[Literal['low', 'medium', 'high']]:
         return self._disk_tier
 
     @property
@@ -476,11 +478,6 @@ class Resources:
     def is_launchable(self) -> bool:
         return self.cloud is not None and self._instance_type is not None
 
-    def need_cleanup_after_preemption(self) -> bool:
-        """Returns whether a spot resource needs cleanup after preeemption."""
-        assert self.is_launchable(), self
-        return self.cloud.need_cleanup_after_preemption(self)
-
     def _set_region_zone(self, region: Optional[str],
                          zone: Optional[str]) -> None:
         if region is None and zone is None:
@@ -495,55 +492,6 @@ class Resources:
         # region if zone is specified.
         self._region, self._zone = self._cloud.validate_region_zone(
             region, zone)
-
-    def get_valid_regions_for_launchable(self) -> List[clouds.Region]:
-        """Returns a set of `Region`s that can provision this Resources.
-
-        Each `Region` has a list of `Zone`s that can provision this Resources.
-
-        (Internal) This function respects any config in skypilot_config that
-        may have restricted the regions to be considered (e.g., a
-        ssh_proxy_command dict with region names as keys).
-        """
-        assert self.is_launchable()
-        regions = self._cloud.regions_with_offering(self._instance_type,
-                                                    self.accelerators,
-                                                    self._use_spot,
-                                                    self._region, self._zone)
-        if self._image_id is not None and None not in self._image_id:
-            regions = [r for r in regions if r.name in self._image_id]
-
-        # Filter the regions by the skypilot_config
-        ssh_proxy_command_config = skypilot_config.get_nested(
-            (str(self._cloud).lower(), 'ssh_proxy_command'), None)
-        if (isinstance(ssh_proxy_command_config, str) or
-                ssh_proxy_command_config is None):
-            # All regions are valid as the regions are not specified for the
-            # ssh_proxy_command config.
-            return regions
-
-        # ssh_proxy_command_config: Dict[str, str], region_name -> command
-        # This type check is done by skypilot_config at config load time.
-        filtered_regions = []
-        for region in regions:
-            region_name = region.name
-            if region_name not in ssh_proxy_command_config:
-                continue
-            # TODO: filter out the zones not available in the vpc_name
-            filtered_regions.append(region)
-
-        # Friendlier UX. Otherwise users only get a generic
-        # ResourcesUnavailableError message without mentioning
-        # ssh_proxy_command.
-        if not filtered_regions:
-            yellow = colorama.Fore.YELLOW
-            reset = colorama.Style.RESET_ALL
-            logger.warning(
-                f'{yellow}Request {self} cannot be satisfied by any feasible '
-                'region. To fix, check that ssh_proxy_command\'s region keys '
-                f'include the regions to use.{reset}')
-
-        return filtered_regions
 
     def _try_validate_instance_type(self) -> None:
         if self.instance_type is None:
@@ -1076,3 +1024,90 @@ class Resources:
             self._is_image_managed = None
 
         self.__dict__.update(state)
+
+
+class LaunchableResources(Resources):
+    """A class representing resources that can be launched."""
+
+    def __init__(
+        self,
+        resources: Resources,
+    ):
+        super().__init__(cloud=resources._cloud,
+                         instance_type=resources._instance_type,
+                         cpus=resources.cpus,
+                         memory=resources.memory,
+                         accelerators=resources.accelerators,
+                         accelerator_args=resources.accelerator_args,
+                         use_spot=resources.use_spot,
+                         spot_recovery=resources.spot_recovery,
+                         disk_size=resources.disk_size,
+                         region=resources.region,
+                         zone=resources.zone,
+                         image_id=resources.image_id,
+                         disk_tier=resources.disk_tier,
+                         _is_image_managed=resources._is_image_managed)
+        self._cloud: clouds.Cloud
+        self._instance_type: str
+        assert self._cloud is not None, self
+        assert self._instance_type is not None, self
+
+    @property
+    def cloud(self) -> clouds.Cloud:
+        return self._cloud
+
+    @property
+    def instance_type(self) -> str:
+        return self._instance_type
+
+    def get_valid_regions_for_launchable(self) -> List[clouds.Region]:
+        """Returns a set of `Region`s that can provision this Resources.
+
+        Each `Region` has a list of `Zone`s that can provision this Resources.
+
+        (Internal) This function respects any config in skypilot_config that
+        may have restricted the regions to be considered (e.g., a
+        ssh_proxy_command dict with region names as keys).
+        """
+        regions = self._cloud.regions_with_offering(self._instance_type,
+                                                    self.accelerators,
+                                                    self._use_spot,
+                                                    self._region, self._zone)
+        if self._image_id is not None and None not in self._image_id:
+            regions = [r for r in regions if r.name in self._image_id]
+
+        # Filter the regions by the skypilot_config
+        ssh_proxy_command_config = skypilot_config.get_nested(
+            (str(self._cloud).lower(), 'ssh_proxy_command'), None)
+        if (isinstance(ssh_proxy_command_config, str) or
+                ssh_proxy_command_config is None):
+            # All regions are valid as the regions are not specified for the
+            # ssh_proxy_command config.
+            return regions
+
+        # ssh_proxy_command_config: Dict[str, str], region_name -> command
+        # This type check is done by skypilot_config at config load time.
+        filtered_regions = []
+        for region in regions:
+            region_name = region.name
+            if region_name not in ssh_proxy_command_config:
+                continue
+            # TODO: filter out the zones not available in the vpc_name
+            filtered_regions.append(region)
+
+        # Friendlier UX. Otherwise users only get a generic
+        # ResourcesUnavailableError message without mentioning
+        # ssh_proxy_command.
+        if not filtered_regions:
+            yellow = colorama.Fore.YELLOW
+            reset = colorama.Style.RESET_ALL
+            logger.warning(
+                f'{yellow}Request {self} cannot be satisfied by any feasible '
+                'region. To fix, check that ssh_proxy_command\'s region keys '
+                f'include the regions to use.{reset}')
+
+        return filtered_regions
+
+    def need_cleanup_after_preemption(self) -> bool:
+        """Returns whether a spot resource needs cleanup after preeemption."""
+        return self._cloud.need_cleanup_after_preemption(self)

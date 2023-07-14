@@ -6,7 +6,7 @@ to access the SCP catalog and check credentials for the SCP access.
 
 import json
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky import status_lib
@@ -183,7 +183,7 @@ class SCP(clouds.Cloud):
     @classmethod
     def _get_image_id(
         cls,
-        image_id: Optional[Dict[Optional[str], str]],
+        image_id: Optional[Union[Dict[str, str], Dict[None, str]]],
         region_name: str,
         instance_type: str,
     ) -> str:

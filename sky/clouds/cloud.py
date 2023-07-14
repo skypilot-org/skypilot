@@ -285,8 +285,10 @@ class Cloud:
                                                   region,
                                                   clouds=cls._REPR.lower())
 
-    def get_feasible_launchable_resources(self, resources):
-        """Returns a list of feasible and launchable resources.
+    def get_feasible_launchable_resources(
+        self, resources: 'resources.Resources'
+    ) -> Tuple[List['resources.LaunchableResources'], List[str]]:
+        """Returns feasible resources with candidate instance types.
 
         Feasible resources refer to an offering respecting the resource
         requirements.  Currently, this function implements "filtering" the

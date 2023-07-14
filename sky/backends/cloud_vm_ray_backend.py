@@ -780,8 +780,9 @@ class RetryingVmProvisioner(object):
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
             stdout: str, stderr: str):
-        assert launchable_resources.is_launchable()
         assert zones is not None, 'AWS should always have zones.'
+        launchable_resources = resources_lib.LaunchableResources(
+            launchable_resources)
 
         style = colorama.Style
         stdout_splits = stdout.split('\n')
@@ -1318,6 +1319,7 @@ class RetryingVmProvisioner(object):
                 # INVALID_ARGUMENT: CloudTpu received an invalid
                 # AcceleratorType, "v3-8" for zone "us-central1-c". Valid
                 # values are "v2-8, ".
+                assert to_provision.accelerators is not None, to_provision
                 tpu_type = list(to_provision.accelerators.keys())[0]
                 logger.info(
                     f'  TPU type {tpu_type} is not available in this zone.')
@@ -2032,9 +2034,11 @@ class RetryingVmProvisioner(object):
                 # restrictive. If we reach here, our failover logic finally
                 # ends here.
                 raise e.with_failover_history(failover_history)
+            assert task.best_resources is not None, (
+                'Internal logic error:'
+                'best_resources must be set after optimization.')
             to_provision = task.best_resources
             assert task in self._dag.tasks, 'Internal logic error.'
-            assert to_provision is not None, task
         return config_dict
 
 
@@ -2409,15 +2413,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
         with timeline.FileLockEvent(lock_path):
-            to_provision_config = RetryingVmProvisioner.ToProvisionConfig(
-                cluster_name,
-                to_provision,
-                task.num_nodes,
-                prev_cluster_status=None)
-            if not dryrun:  # dry run doesn't need to check existing cluster.
-                # Try to launch the exiting cluster first
-                to_provision_config = self._check_existing_cluster(
-                    task, to_provision, cluster_name)
+            assert not dryrun or to_provision is not None, (dryrun,
+                                                            to_provision)
+            # Try to launch the exiting cluster first
+            to_provision_config = self._check_existing_cluster(
+                task, to_provision, cluster_name, dryrun)
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
 
@@ -3767,9 +3767,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     @timeline.event
     def _check_existing_cluster(
-            self, task: task_lib.Task,
+            self,
+            task: task_lib.Task,
             to_provision: Optional[resources_lib.Resources],
-            cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
+            cluster_name: str,
+            dryrun: bool = False) -> RetryingVmProvisioner.ToProvisionConfig:
         """Checks if the cluster exists and returns the provision config.
 
         Raises:
@@ -3778,6 +3780,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             exceptions.InvalidClusterNameError: If the cluster name is invalid.
             # TODO(zhwu): complete the list of exceptions.
         """
+        if dryrun:
+            assert to_provision is not None, ('to_provision must be provided'
+                                              ' in dryrun mode')
+            return RetryingVmProvisioner.ToProvisionConfig(
+                cluster_name,
+                to_provision,
+                task.num_nodes,
+                prev_cluster_status=None,
+            )
         record = global_user_state.get_cluster_from_name(cluster_name)
         handle_before_refresh = None if record is None else record['handle']
         status_before_refresh = None if record is None else record['status']
