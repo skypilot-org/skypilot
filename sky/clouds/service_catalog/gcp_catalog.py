@@ -179,7 +179,7 @@ def _closest_power_of_two(x: int) -> int:
 
 
 def _need_specific_vm(acc_name: str, acc_count: int) -> Tuple[bool, List[str]]:
-    """Returns (false, []) if the accelerator doesn't require a specific VM type.
+    """Returns (false, []) if the accelerator doesn't need a specific VM type.
        Otherwise returns (true, [possible vm types]). """
     # See: https://cloud.google.com/compute/docs/gpus#a100-gpus
     #      https://cloud.google.com/compute/docs/gpus#l4-gpus
@@ -368,8 +368,7 @@ def list_accelerators(
     for acc_name, acc_info in results.items():
         if (acc_name.startswith('tpu') or
                 acc_name in _NUM_ACC_TO_MAX_CPU_AND_MEMORY or
-                acc_name in _A100_INSTANCE_TYPE_DICTS or
-                acc_name == 'L4'):
+                acc_name in _A100_INSTANCE_TYPE_DICTS or acc_name == 'L4'):
             new_results[acc_name] = acc_info
     results = new_results
 
@@ -387,7 +386,8 @@ def list_accelerators(
 
     for info in acc_infos:
         assert pd.isna(info.instance_type) and pd.isna(info.memory), acc_infos
-        _, vm_types = _need_specific_vm(info.accelerator_name, info.accelerator_count)
+        _, vm_types = _need_specific_vm(info.accelerator_name,
+                                        info.accelerator_count)
         for vm_type in vm_types:
             df = _df[_df['InstanceType'] == vm_type]
             cpu_count = df['vCPUs'].iloc[0]
@@ -430,8 +430,8 @@ def check_host_accelerator_compatibility(
         instance_type: str, accelerators: Optional[Dict[str, int]]) -> None:
     """Check if the instance type is compatible with the accelerators.
 
-    This function ensures that TPUs and GPUs except A100 and L4 are attached to N1,
-    A100 GPUs are attached to A2 machines, and L4 GPUs are attached to G2 machines.
+    This function ensures that TPUs and GPUs except A100 and L4 are attached
+    to N1, A100 GPUs are attached to A2, and L4 GPUs are attached to G2.
     """
     if accelerators is None:
         if instance_type.startswith('a2-'):
