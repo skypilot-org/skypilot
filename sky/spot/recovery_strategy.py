@@ -362,7 +362,7 @@ class StrategyExecutor:
             time.sleep(gap_seconds)
 
 
-class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
+class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=False):
     """Failover strategy: wait in same region and failover after timout."""
 
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
@@ -454,7 +454,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
 
 class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
                                     name='EAGER_FAILOVER',
-                                    default=False):
+                                    default=True):
     """Aggressive failover strategy
 
     This strategy is an extension of the failover strategy. Instead of waiting
