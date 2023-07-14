@@ -1,0 +1,45 @@
+resources:
+  accelerators: A100-80GB:1
+  disk_size: 1000
+  use_spot: true
+  disk_tier: high
+
+envs:
+  MODEL_NAME: tiiuae/falcon-7b # [ybelkada/falcon-7b-sharded-bf16, tiiuae/falcon-7b, tiiuae/falcon-40b]
+  WANDB_API_KEY: YOUR_WANDB_KEY # Change to your own wandb key
+
+file_mounts:
+  /results:
+    name: YOUR_OWN_BUCKET_NAME # Change to your own bucket name
+    mode: MOUNT
+
+setup: |
+  # Setup the environment
+  conda activate falcon
+  if [ $? -ne 0 ]; then
+    conda create -n falcon python=3.10 -y
+    conda activate falcon
+  fi
+
+  # Install dependencies
+  pip install -q -U trl transformers accelerate git+https://github.com/huggingface/peft.git
+  pip install -q datasets bitsandbytes einops wandb scipy
+  pip install torch torchvision torchaudio
+
+  git clone https://github.com/xzrderek/sky-falcon.git
+
+run: |
+  conda activate falcon
+  wandb login $WANDB_API_KEY
+  cd sky-falcon
+  echo "Starting training..."
+  python train.py \
+  --model_name $MODEL_NAME \
+  --max_seq_len 2048 \
+  --bf16 \
+  --group_by_length \
+  --bnb_4bit_compute_dtype bfloat16 \
+  --max_steps 200 \
+  --dataset_name timdettmers/openassistant-guanaco
+  echo "Saving model checkpoints..."
+  gsutil -m rsync -r results gs://YOUR_OWN_BUCKET_NAME # Change to your own bucket name
