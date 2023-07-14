@@ -524,6 +524,8 @@ def check_accelerator_attachable_to_host(instance_type: str,
 
     if acc_name in _A100_INSTANCE_TYPE_DICTS:
         valid_counts = list(_A100_INSTANCE_TYPE_DICTS[acc_name].keys())
+    elif acc_name == 'L4':
+        valid_counts = list(_L4_INSTANCE_TYPE_DICT.keys())
     else:
         assert acc_name in _NUM_ACC_TO_MAX_CPU_AND_MEMORY, acc_name
         valid_counts = list(_NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name].keys())
@@ -541,6 +543,16 @@ def check_accelerator_attachable_to_host(instance_type: str,
                     f'A100:{acc_count} cannot be attached to {instance_type}. '
                     f'Use {a100_instance_type} instead. Please refer to '
                     'https://cloud.google.com/compute/docs/gpus#a100-gpus')
+        return
+
+    if acc_name == 'L4':
+        l4_instance_types = _L4_INSTANCE_TYPE_DICT[acc_count]
+        if instance_type not in l4_instance_types:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    f'L4:{acc_count} cannot be attached to {instance_type}. '
+                    f'Use one of {l4_instance_types} instead. Please refer to '
+                    'https://cloud.google.com/compute/docs/gpus#l4-gpus')
         return
 
     # Check maximum vCPUs and memory.
