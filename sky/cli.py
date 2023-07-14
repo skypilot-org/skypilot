@@ -57,7 +57,7 @@ from sky.backends import onprem_utils
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
-from sky.data import csync_utils
+from sky.data import Storage as storage_lib
 from sky.data import storage_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -2661,7 +2661,33 @@ def _down_or_stop_clusters(
         total=len(clusters))
 
     def _down_or_stop(name: str):
-        csync_utils.terminate_csyncs()
+        def wait_and_terminate_csyncs(cluster_name):
+            # use two loop: 1.while 2.for-loop
+            # use two sets: 1. track total running csync 2.track csync process thats not running 
+
+            # get the list of csync's from cluster's metadata
+            cluster_metadata = global_user_state.get_cluster_metadata(cluster_name)
+            c_sync_locks = set()
+            storage_metadata = global_user_state.CLUSTER_STORAGE_METADATA_NAME
+            if storage_metadata in cluster_metadata:
+                for storage_name, storage_obj in cluster_metadata[storage_metadata]:
+                    if storage_obj.mode == storage_lib.StorageMode.C_SYNC:
+                        for store_type, store_obj in storage_obj.stores:
+                            # based on the cluster's metadata, create lock file name of each sync
+                            lock_file_name = f'sync_{store_type.value}_{store_obj.name}.lock'
+                            # Add the name list in set1 1    # create this to set 1.
+                            c_sync_locks.add(lock_file_name)
+            
+                
+
+            # while set1. is not empty:
+            #   iterate them through to see if any are running
+            #       add the one that is running in set 2.
+            #       kill the ones that are not running
+            #   set1 = set2 
+            # check if there are csync     
+            return
+        wait_and_terminate_csyncs(name)
         success_progress = False
         if idle_minutes_to_autostop is not None:
             try:

@@ -2605,11 +2605,3 @@ def check_rsync_installed() -> None:
                 ' it is not installed. For Debian/Ubuntu system, '
                 'install it with:\n'
                 '  $ sudo apt install rsync') from None
-
-
-def update_cluster_metedata_storage(resource_handle: backends.backend.ResourceHandle, storage_name: str, store_type: str):
-    cluster_name = resource_handle.cluster_name
-    #global_user_state.set_cluster_metadata
-    return
-
-#            bucket_type = list(handle.sky_stores.keys())[0]

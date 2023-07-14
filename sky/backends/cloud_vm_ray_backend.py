@@ -3928,6 +3928,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
 
+    def update_cluster_metedata_storage(cluster_name: str, storage_obj: storage_lib.Storage) -> None:
+        cluster_metadata: Dict[str, Any] = global_user_state.get_cluster_metadata(cluster_name)
+        #lock_file_name = f'sync_{store_type}_{storage_name}.lock'
+        storage_name = storage_obj.get_storage_name()
+        storage_metadata = global_user_state.CLUSTER_STORAGE_METADATA_NAME
+        if not cluster_metadata[storage_metadata]:
+            cluster_metadata[storage_metadata] = {}
+        cluster_metadata[storage_metadata][storage_name] = storage_obj
+        global_user_state.set_cluster_metadata(cluster_name, cluster_metadata)
+
 
     def _execute_storage_csync(self, handle: CloudVmRayResourceHandle,
                                 storage_mounts: Dict[Path,
@@ -3975,9 +3985,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             # Set storage information in cluster's metadata
-            storage_name = storage_obj.get_storage_name()
-            storetype = storage_lib.StoreType.from_store(store)
-            backend_utils.update_cluster_metedata_storage(handle, storage_name, storetype.value)
+            self.update_cluster_metedata_storage(handle.cluster_name, storage_obj)
             if isinstance(src_print, list):
                 src_print = ', '.join(src_print)
             try:
