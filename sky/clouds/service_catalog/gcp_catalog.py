@@ -383,15 +383,12 @@ def list_accelerators(
         return results
 
     new_infos = defaultdict(list)
-
     for info in acc_infos:
         assert pd.isna(info.instance_type) and pd.isna(info.memory), acc_infos
         _, vm_types = _need_specific_vm(info.accelerator_name,
                                         info.accelerator_count)
         for vm_type in vm_types:
             df = _df[_df['InstanceType'] == vm_type]
-            if df.empty:
-                continue
             cpu_count = df['vCPUs'].iloc[0]
             memory = df['MemoryGiB'].iloc[0]
             vm_price = common.get_hourly_cost_impl(_df,
@@ -413,7 +410,6 @@ def list_accelerators(
                     price=info.price + vm_price,
                     spot_price=info.spot_price + vm_spot_price,
                 ))
-
     results.update(new_infos)
     return results
 

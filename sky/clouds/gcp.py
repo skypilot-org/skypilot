@@ -331,7 +331,7 @@ class GCP(clouds.Cloud):
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
-                if acc == 'A100-80GB' or acc == 'L4':
+                if acc in ('A100-80GB', 'L4'):
                     # A100-80GB and L4 have a different name pattern.
                     resources_vars['gpu'] = 'nvidia-{}'.format(acc.lower())
                 else:
