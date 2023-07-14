@@ -282,7 +282,7 @@ class Azure(clouds.Cloud):
             else:
                 return True, None
 
-        if resources.use_spot:
+        if resources.use_spot or resources.ports is not None:
             # TODO(zhwu): our azure subscription offer ID does not support spot.
             # Need to support it.
             return ([], [])
