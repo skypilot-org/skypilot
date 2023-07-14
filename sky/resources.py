@@ -802,6 +802,13 @@ class Resources:
                 raise ValueError(
                     'Cannot specify ports when AWS security group name is '
                     'specified.')
+        # TODO(tian): maybe use clouds.CloudImplementationFeatures?
+        if self.cloud is not None and not isinstance(self.cloud,
+                                                     (clouds.AWS, clouds.GCP)):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Open ports is only supported for AWS/GCP. Please '
+                    'remove the ports field in the resources section.')
         for port in self.ports:
             if not isinstance(port, int):
                 with ux_utils.print_exception_no_traceback():
