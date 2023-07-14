@@ -20,6 +20,13 @@ class TestExecutionOnExistingClusters:
 
     @pytest.fixture
     def _mock_cluster_state(self, _mock_db_conn, enable_all_clouds):
+        """Add clusters to the global state.
+        
+        This fixture adss three clusters to the global state:
+        - test-cluster1: AWS, 2x p4d.24xlarge (8x A100)
+        - test-cluster2: GCP, 1x n1-highmem-64, 4x V100
+        - test-cluster3: Azure, 1x Standard_D4s_v3 (CPU only)
+        """
         assert 'state.db' not in global_user_state._DB.db_path
 
         handle = backends.CloudVmRayResourceHandle(
@@ -66,6 +73,11 @@ class TestExecutionOnExistingClusters:
             ready=False)
 
     def test_launch_exec(self, _mock_cluster_state, monkeypatch):
+        """Test launch and exec on existing clusters.
+        
+        This test runs launch and exec with less demanding resources
+        than the existing clusters can pass the check.
+        """
         task = sky.Task(run='echo hi')
         task.set_resources(sky.Resources(accelerators='A100:8'))
         sky.launch(task, cluster_name='test-cluster1', dryrun=True)
@@ -105,6 +117,7 @@ class TestExecutionOnExistingClusters:
                 e.value)
 
     def test_launch_exec_mismatch(self, _mock_cluster_state, monkeypatch):
+        """Test launch and exec on existing clusters with mismatched resources."""
         task = sky.Task(run='echo hi')
         # Accelerators mismatch
         task.set_resources(sky.Resources(accelerators='V100:8'))

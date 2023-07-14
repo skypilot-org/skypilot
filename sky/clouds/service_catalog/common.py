@@ -189,7 +189,7 @@ def validate_region_zone_impl(
 
     filter_df = df
     if region is not None:
-        filter_df = _filter_region_zone(filter_df, region, None)
+        filter_df = _filter_region_zone(filter_df, region, zone=None)
         if len(filter_df) == 0:
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid region {region!r}')
@@ -576,7 +576,7 @@ def get_image_id_from_tag_impl(df: pd.DataFrame, tag: str,
     an image that matches the tag.
     """
     df = df[df['Tag'] == tag]
-    df = _filter_region_zone(df, region, None)
+    df = _filter_region_zone(df, region, zone=None)
     assert len(df) <= 1, ('Multiple images found for tag '
                           f'{tag} in region {region}')
     if len(df) == 0:
@@ -591,6 +591,6 @@ def is_image_tag_valid_impl(df: pd.DataFrame, tag: str,
                             region: Optional[str]) -> bool:
     """Returns True if the image tag is valid."""
     df = df[df['Tag'] == tag]
-    df = _filter_region_zone(df, region, None)
+    df = _filter_region_zone(df, region, zone=None)
     df = df.dropna(subset=['ImageId'])
     return len(df) > 0

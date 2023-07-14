@@ -494,7 +494,15 @@ class Cloud:
         """
         assert resources.is_launchable(), resources
 
-        def _equal_accelerators(acc_requested, acc_from_instance_type):
+        def _equal_accelerators(
+                acc_requested: Optional[Dict[str, int]],
+                acc_from_instance_type: Optional[Dict[str, int]]) -> bool:
+            """Check the requested accelerators equals to the instance type
+
+            Check the requested accelerators equals to the accelerators
+            from the instance type (both the accelerator type and the
+            count).
+            """
             if acc_requested is None:
                 return acc_from_instance_type is None
             if acc_from_instance_type is None:
