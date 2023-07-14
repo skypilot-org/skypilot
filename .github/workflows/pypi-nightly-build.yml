@@ -2,6 +2,7 @@ name: pypi-publish-nightly
 on:
   schedule:
     - cron: '35 10 * * *' # 10:35am UTC, 2:35am PST, 5:35am EST
+  workflow_dispatch:
 
 jobs:
   # nightly release check from https://stackoverflow.com/a/67527144
