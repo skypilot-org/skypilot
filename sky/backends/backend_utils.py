@@ -1256,12 +1256,15 @@ def parallel_data_transfer_to_nodes(
                                             log_path=log_path,
                                             stream_logs=stream_logs,
                                             require_outputs=True)
-            subprocess_utils.handle_returncode(
-                rc,
-                cmd, ('Failed to run command before rsync '
-                      f'{origin_source} -> {target}. '
-                      'Ensure that the network is stable, then retry.'),
-                stderr=stdout + stderr)
+            err_msg = ('Failed to run command before rsync '
+                       f'{origin_source} -> {target}. '
+                       'Ensure that the network is stable, then retry.')
+            if log_path != os.devnull:
+                err_msg += f' See logs in {log_path}'
+            subprocess_utils.handle_returncode(rc,
+                                               cmd,
+                                               err_msg,
+                                               stderr=stdout + stderr)
 
         if run_rsync:
             assert source is not None
@@ -1662,6 +1665,13 @@ def check_owner_identity(cluster_name: str) -> None:
                 f'is {current_user_identity!r}.')
 
 
+def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
+    """Returns a tag filter for the cluster."""
+    return {
+        'ray-cluster-name': cluster_name,
+    }
+
+
 def _query_cluster_status_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
 ) -> List[status_lib.ClusterStatus]:
@@ -1680,7 +1690,7 @@ def _query_cluster_status_via_cloud_api(
 
     # Query the cloud provider.
     node_statuses = handle.launched_resources.cloud.query_status(
-        cluster_name, {'ray-cluster-name': cluster_name}, region, zone,
+        cluster_name, tag_filter_for_cluster(cluster_name), region, zone,
         **kwargs)
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
     # TODO(wei-lin): handle multi-node cases.
@@ -1691,16 +1701,106 @@ def _query_cluster_status_via_cloud_api(
         logger.debug(f'Terminating preempted TPU VM cluster {cluster_name}')
         backend = backends.CloudVmRayBackend()
         # Do not use refresh cluster status during teardown, as that will
-        # cause inifinite recursion by calling cluster status refresh
+        # cause infinite recursion by calling cluster status refresh
         # again.
-        # Post teardown cleanup be done later in this function, which will remove
-        # the cluster entry from the status table & the ssh config file.
+
+        # Post teardown cleanup be done later in this function, which will
+        # remove the cluster entry from the status table & the ssh config file.
         backend.teardown_no_lock(handle,
                                  terminate=True,
                                  purge=False,
                                  post_teardown_cleanup=False,
                                  refresh_cluster_status=False)
     return node_statuses
+
+
+def check_can_clone_disk_and_override_task(
+    cluster_name: str, target_cluster_name: Optional[str], task: 'task_lib.Task'
+) -> Tuple['task_lib.Task', 'cloud_vm_ray_backend.CloudVmRayResourceHandle']:
+    """Check if the task is compatible to clone disk from the source cluster.
+
+    Args:
+        cluster_name: The name of the cluster to clone disk from.
+        target_cluster_name: The name of the target cluster.
+        task: The task to check.
+
+    Returns:
+        The task to use and the resource handle of the source cluster.
+
+    Raises:
+        ValueError: If the source cluster does not exist.
+        exceptions.NotSupportedError: If the source cluster is not valid or the
+            task is not compatible to clone disk from the source cluster.
+    """
+    source_cluster_status, handle = refresh_cluster_status_handle(cluster_name)
+    if source_cluster_status is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Cannot find cluster {cluster_name!r} to clone disk from.')
+
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                f'Cannot clone disk from a non-cloud cluster {cluster_name!r}.')
+
+    if source_cluster_status != status_lib.ClusterStatus.STOPPED:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                f'Cannot clone disk from cluster {cluster_name!r} '
+                f'({source_cluster_status!r}). Please stop the '
+                f'cluster first: sky stop {cluster_name}')
+
+    if target_cluster_name is not None:
+        target_cluster_status, _ = refresh_cluster_status_handle(
+            target_cluster_name)
+        if target_cluster_status is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'The target cluster {target_cluster_name!r} already exists. Cloning '
+                    'disk is only supported when creating a new cluster. To fix: specify '
+                    'a new target cluster name.')
+
+    assert len(task.resources) == 1, task.resources
+    task_resources = list(task.resources)[0]
+    if handle.launched_resources.disk_size > task_resources.disk_size:
+        # The target cluster's disk should be at least as large as the source.
+        with ux_utils.print_exception_no_traceback():
+            target_cluster_name_str = f' {target_cluster_name!r}'
+            if target_cluster_name is None:
+                target_cluster_name_str = ''
+            raise exceptions.NotSupportedError(
+                f'The target cluster{target_cluster_name_str} should have a disk size '
+                f'of at least {handle.launched_resources.disk_size} GB to clone the '
+                f'disk from {cluster_name!r}.')
+    override_param = {}
+    original_cloud = handle.launched_resources.cloud
+    assert original_cloud is not None, handle.launched_resources
+    if task_resources.cloud is None:
+        override_param['cloud'] = original_cloud
+    else:
+        if not original_cloud.is_same_cloud(task_resources.cloud):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot clone disk across cloud from {original_cloud} to '
+                    f'{task_resources.cloud}.')
+    original_cloud.check_features_are_supported(
+        {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
+
+    if task_resources.region is None:
+        override_param['region'] = handle.launched_resources.region
+
+    if override_param:
+        logger.info(
+            f'No cloud/region specified for the task. Using the same region '
+            f'as source cluster {cluster_name!r}: '
+            f'{handle.launched_resources.cloud}'
+            f'({handle.launched_resources.region}).')
+        task_resources = task_resources.copy(**override_param)
+        task.set_resources({task_resources})
+        # Reset the best_resources to triger re-optimization
+        # later, so that the new task_resources will be used.
+        task.best_resources = None
+    return task, handle
 
 
 def _update_cluster_status_no_lock(
@@ -1947,7 +2047,7 @@ def _update_cluster_status(
 def _refresh_cluster_record(
         cluster_name: str,
         *,
-        force_refresh: bool = False,
+        force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
         acquire_per_cluster_status_lock: bool = True
 ) -> Optional[Dict[str, Any]]:
     """Refresh the cluster, and return the possibly updated record.
@@ -1958,8 +2058,10 @@ def _refresh_cluster_record(
 
     Args:
         cluster_name: The name of the cluster.
-        force_refresh: if True, refresh the cluster status even if it may be
-            skipped. Otherwise (the default), only refresh if the cluster:
+        force_refresh_statuses: if specified, refresh the cluster if it has one of
+            the specified statuses. Additionally, clusters satisfying the
+            following conditions will always be refreshed no matter the
+            argument is specified or not:
                 1. is a spot cluster, or
                 2. is a non-spot cluster, is not STOPPED, and autostop is set.
         acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
@@ -1989,7 +2091,9 @@ def _refresh_cluster_record(
         use_spot = handle.launched_resources.use_spot
         has_autostop = (record['status'] != status_lib.ClusterStatus.STOPPED and
                         record['autostop'] >= 0)
-        if force_refresh or has_autostop or use_spot:
+        force_refresh_for_cluster = (force_refresh_statuses is not None and
+                                     record['status'] in force_refresh_statuses)
+        if force_refresh_for_cluster or has_autostop or use_spot:
             record = _update_cluster_status(
                 cluster_name,
                 acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
@@ -2000,7 +2104,7 @@ def _refresh_cluster_record(
 def refresh_cluster_status_handle(
     cluster_name: str,
     *,
-    force_refresh: bool = False,
+    force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
     acquire_per_cluster_status_lock: bool = True,
 ) -> Tuple[Optional[status_lib.ClusterStatus],
            Optional[backends.ResourceHandle]]:
@@ -2012,7 +2116,7 @@ def refresh_cluster_status_handle(
     """
     record = _refresh_cluster_record(
         cluster_name,
-        force_refresh=force_refresh,
+        force_refresh_statuses=force_refresh_statuses,
         acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
     if record is None:
         return None, None
@@ -2231,7 +2335,7 @@ def get_clusters(
         try:
             record = _refresh_cluster_record(
                 cluster_name,
-                force_refresh=True,
+                force_refresh_statuses=set(status_lib.ClusterStatus),
                 acquire_per_cluster_status_lock=True)
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.CloudUserIdentityError,
@@ -2405,17 +2509,28 @@ def validate_schema(obj, schema, err_msg_prefix=''):
         validator.SchemaValidator(schema).validate(obj)
     except jsonschema.ValidationError as e:
         if e.validator == 'additionalProperties':
-            err_msg = err_msg_prefix + 'The following fields are invalid:'
-            known_fields = set(e.schema.get('properties', {}).keys())
-            for field in e.instance:
-                if field not in known_fields:
-                    most_similar_field = difflib.get_close_matches(
-                        field, known_fields, 1)
-                    if most_similar_field:
-                        err_msg += (f'\nInstead of {field!r}, did you mean '
-                                    f'{most_similar_field[0]!r}?')
-                    else:
-                        err_msg += f'\nFound unsupported field {field!r}.'
+            if tuple(e.schema_path) == ('properties', 'envs',
+                                        'additionalProperties'):
+                # Hack. Here the error is Task.envs having some invalid keys. So
+                # we should not print "unsupported field".
+                #
+                # This will print something like:
+                # 'hello world' does not match any of the regexes: <regex>
+                err_msg = (err_msg_prefix +
+                           'The `envs` field contains invalid keys:\n' +
+                           e.message)
+            else:
+                err_msg = err_msg_prefix + 'The following fields are invalid:'
+                known_fields = set(e.schema.get('properties', {}).keys())
+                for field in e.instance:
+                    if field not in known_fields:
+                        most_similar_field = difflib.get_close_matches(
+                            field, known_fields, 1)
+                        if most_similar_field:
+                            err_msg += (f'\nInstead of {field!r}, did you mean '
+                                        f'{most_similar_field[0]!r}?')
+                        else:
+                            err_msg += f'\nFound unsupported field {field!r}.'
         else:
             # Example e.json_path value: '$.resources'
             err_msg = (err_msg_prefix + e.message +
@@ -2469,3 +2584,32 @@ def run_command_and_handle_ssh_failure(runner: command_runner.SSHCommandRunner,
                                        failure_message,
                                        stderr=stderr)
     return stdout
+
+
+def check_rsync_installed() -> None:
+    """Checks if rsync is installed.
+
+    Raises:
+        RuntimeError: if rsync is not installed in the machine.
+    """
+    try:
+        subprocess.run('rsync --version',
+                       shell=True,
+                       check=True,
+                       stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                '`rsync` is required for provisioning and'
+                ' it is not installed. For Debian/Ubuntu system, '
+                'install it with:\n'
+                '  $ sudo apt install rsync') from None
+
+
+def update_cluster_metedata_storage(resource_handle: backends.backend.ResourceHandle, storage_name: str, store_type: str):
+    cluster_name = resource_handle.cluster_name
+    #global_user_state.set_cluster_metadata
+    return
+
+#            bucket_type = list(handle.sky_stores.keys())[0]

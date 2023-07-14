@@ -305,7 +305,7 @@ class AbstractStore:
     
     def csync_command(self, csync_path: str, interval: int) -> str:
         raise NotImplementedError
-
+    
     def __deepcopy__(self, memo):
         # S3 Client and GCS Client cannot be deep copied, hence the
         # original Store object is returned
@@ -904,6 +904,9 @@ class Storage(object):
         if self.force_delete:
             config['_force_delete'] = True
         return config
+    
+    def get_storage_name(self):
+        return self.name
 
 
 class S3Store(AbstractStore):

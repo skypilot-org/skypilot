@@ -38,12 +38,14 @@ def csync_is_running():
 def terminate_csyncs():
     # use two loop: 1.while 2.for-loop
     # use two sets: 1. track total running csync 2.track csync process thats not running 
-    # get a list of csync locks
-    # create this to set 1.
+
+    # get the list of csync's from cluster's metadata
+    # based on the cluster's metadata, create lock file name of each sync
+    # Add the name list in set1 1    # create this to set 1.
     # while set1. is not empty:
     #   iterate them through to see if any are running
     #       add the one that is running in set 2.
     #       kill the ones that are not running
     #   set1 = set2 
-    # check if there are csync 
+    # check if there are csync     
     return

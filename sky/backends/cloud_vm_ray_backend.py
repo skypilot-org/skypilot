@@ -3969,11 +3969,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         for dst, storage_obj in storage_mounts.items():
             if not os.path.isabs(dst) and not dst.startswith('~/'):
                 dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
-            # Get the first store and use it to mount
+            # Get the first store and use it to sync
             store = list(storage_obj.stores.values())[0]
             csync_cmd = store.csync_command(dst, storage_obj.interval)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
+            # Set storage information in cluster's metadata
+            storage_name = storage_obj.get_storage_name()
+            storetype = storage_lib.StoreType.from_store(store)
+            backend_utils.update_cluster_metedata_storage(handle, storage_name, storetype.value)
             if isinstance(src_print, list):
                 src_print = ', '.join(src_print)
             try:
