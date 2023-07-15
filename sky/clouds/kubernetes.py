@@ -147,7 +147,7 @@ class Kubernetes(clouds.Cloud):
                                                        'implementation yet.',
     }
 
-    # TODO(romilb): Add GPU Support - have GPU-enabled image.
+    # TODO(romilb): Add GPU Support - have GPU-enabled image.sky
     IMAGE = 'us-central1-docker.pkg.dev/' \
             'skypilot-375900/skypilotk8s/skypilot:latest'
 

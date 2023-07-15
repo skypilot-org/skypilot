@@ -1,32 +1,52 @@
 #!/bin/bash
 # Builds the Dockerfile_k8s image as the SkyPilot image.
-# Optionally, if -p is specified, pushes the image to the registry.
 # Uses buildx to build the image for both amd64 and arm64.
-# Usage: ./build_image.sh [-p]
+# If -p flag is specified, pushes the image to the registry.
+# If -g flag is specified, builds the GPU image in Dockerfile_k8s_gpu. GPU image is built only for amd64.
+# Usage: ./build_image.sh [-p] [-g]
 # -p: Push the image to the registry
+# -g: Build the GPU image
 
 TAG=us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest
 
 # Parse command line arguments
-while getopts ":p" opt; do
-  case $opt in
-    p)
+while getopts ":pg" opt; do
+  case ${opt} in
+    p )
       push=true
       ;;
-    \?)
-      echo "Invalid option: -$OPTARG" >&2
+    g )
+      gpu=true
+      ;;
+    \? )
+      echo "Usage: ./build_image.sh [-p] [-g]"
+      echo "-p: Push the image to the registry"
+      echo "-g: Build the GPU image"
+      exit 1
       ;;
   esac
 done
+
+# Add -gpu to the tag if the GPU image is being built
+if [[ $gpu ]]; then
+  TAG=$TAG-gpu
+fi
 
 # Navigate to the root of the project (inferred from git)
 cd "$(git rev-parse --show-toplevel)"
 
 # If push is used, build the image for both amd64 and arm64
 if [[ $push ]]; then
-  echo "Building and pushing for amd64 and arm64"
-  # Push both platforms as one image manifest list
-  docker buildx build --push --platform linux/amd64,linux/arm64 -t $TAG -f Dockerfile_k8s ./sky
+  # If gpu is used, build the GPU image
+  if [[ $gpu ]]; then
+    echo "Building and pushing GPU image for amd64"
+    docker buildx build --push --platform linux/amd64 -t $TAG -f Dockerfile_k8s_gpu ./sky
+  fi
+  # Else, build the CPU image
+  else
+    echo "Building and pushing CPU image for amd64 and arm64"
+    docker buildx build --push --platform linux/arm64,linux/amd64 -t $TAG -f Dockerfile_k8s ./sky
+  fi
 fi
 
 # Load the right image depending on the architecture of the host machine (Apple Silicon or Intel)
@@ -41,5 +61,11 @@ else
   exit 1
 fi
 
-echo "Tagging image as skypilot:latest"
-docker tag us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest skypilot:latest
+echo "Tagging image."
+if [[ $gpu ]]; then
+  docker tag $TAG skypilot:latest-gpu
+else
+  docker tag $TAG skypilot:latest
+fi
+
+docker buildx build --push --platform linux/amd64 -t us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest-gpu -f Dockerfile_k8s_gpu ./sky
