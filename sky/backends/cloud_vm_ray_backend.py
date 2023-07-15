@@ -1343,8 +1343,9 @@ class RetryingVmProvisioner(object):
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
-        os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
-        os.system(f'touch {log_path}')
+        if not dryrun:
+            os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
+            os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
@@ -1439,7 +1440,7 @@ class RetryingVmProvisioner(object):
                     f'Failed to find catalog in region {region.name}: {e}')
                 continue
             if dryrun:
-                return
+                return config_dict
             cluster_config_file = config_dict['ray']
 
             # Record early, so if anything goes wrong, 'sky status' will show
@@ -2413,10 +2414,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 to_provision,
                 task.num_nodes,
                 prev_cluster_status=None)
-            if not dryrun:  # dry run doesn't need to check existing cluster.
-                # Try to launch the exiting cluster first
-                to_provision_config = self._check_existing_cluster(
-                    task, to_provision, cluster_name)
+            # Try to launch the exiting cluster first
+            to_provision_config = self._check_existing_cluster(
+                task, to_provision, cluster_name, dryrun)
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
 
@@ -2494,7 +2494,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             error_message,
                             failover_history=e.failover_history) from None
             if dryrun:
-                return None
+                record = global_user_state.get_cluster_from_name(cluster_name)
+                return record['handle'] if record is not None else None
             cluster_config_file = config_dict['ray']
 
             handle = CloudVmRayResourceHandle(
@@ -3007,6 +3008,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         task: task_lib.Task,
         detach_run: bool,
+        dryrun: bool = False,
     ) -> None:
         if task.run is None:
             logger.info('Run commands not specified or empty.')
@@ -3016,6 +3018,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self.check_resources_fit_cluster(handle, task)
 
         resources_str = backend_utils.get_task_resources_str(task)
+
+        if dryrun:
+            logger.info(f'Dryrun complete. Would have run:\n{task}')
+            return
+
         job_id = self._add_job(handle, task.name, resources_str)
 
         is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
@@ -3735,9 +3742,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     @timeline.event
     def _check_existing_cluster(
-            self, task: task_lib.Task,
+            self,
+            task: task_lib.Task,
             to_provision: Optional[resources_lib.Resources],
-            cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
+            cluster_name: str,
+            dryrun: bool = False) -> RetryingVmProvisioner.ToProvisionConfig:
         """Checks if the cluster exists and returns the provision config.
 
         Raises:
@@ -3750,25 +3759,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle_before_refresh = None if record is None else record['handle']
         status_before_refresh = None if record is None else record['status']
 
-        prev_cluster_status, handle = (
-            backend_utils.refresh_cluster_status_handle(
-                cluster_name,
-                # We force refresh for the init status to determine the actual
-                # state of a previous cluster in INIT state.
-                #
-                # This is important for the case, where an existing cluster is
-                # transitioned into INIT state due to key interruption during
-                # launching, with the following steps:
-                # (1) launch, after answering prompt immediately ctrl-c;
-                # (2) launch again.
-                # If we don't refresh the state of the cluster and reset it back
-                # to STOPPED, our failover logic will consider it as an abnormal
-                # cluster after hitting resources capacity limit on the cloud,
-                # and will start failover. This is not desired, because the user
-                # may want to keep the data on the disk of that cluster.
-                force_refresh_statuses={status_lib.ClusterStatus.INIT},
-                acquire_per_cluster_status_lock=False,
-            ))
+        prev_cluster_status, handle = (status_before_refresh,
+                                       handle_before_refresh)
+
+        if not dryrun:
+            prev_cluster_status, handle = (
+                backend_utils.refresh_cluster_status_handle(
+                    cluster_name,
+                    # We force refresh for the init status to determine the
+                    # actual state of a previous cluster in INIT state.
+                    #
+                    # This is important for the case, where an existing cluster
+                    # is transitioned into INIT state due to key interruption
+                    # during launching, with the following steps:
+                    # (1) launch, after answering prompt immediately ctrl-c;
+                    # (2) launch again.
+                    # If we don't refresh the state of the cluster and reset it
+                    # back to STOPPED, our failover logic will consider it as an
+                    # abnormal cluster after hitting resources capacity limit on
+                    # the cloud, and will start failover. This is not desired,
+                    # because the user may want to keep the data on the disk of
+                    # that cluster.
+                    force_refresh_statuses={status_lib.ClusterStatus.INIT},
+                    acquire_per_cluster_status_lock=False,
+                ))
         if prev_cluster_status is not None:
             assert handle is not None
             # Cluster already exists.

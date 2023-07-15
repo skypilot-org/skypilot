@@ -1,5 +1,6 @@
 """Lambda Cloud."""
 import json
+import requests
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -162,8 +163,8 @@ class Lambda(clouds.Cloud):
             'region': region.name,
         }
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
+    def _get_feasible_launchable_resources(
+            self, resources: 'resources_lib.Resources'):
         if resources.use_spot or resources.disk_tier is not None:
             return ([], [])
         if resources.instance_type is not None:
@@ -227,6 +228,10 @@ class Lambda(clouds.Cloud):
                            'to generate API key and add the line\n    '
                            '  api_key = [YOUR API KEY]\n    '
                            'to ~/.lambda_cloud/lambda_keys')
+        except requests.exceptions.ConnectionError:
+            return False, ('Failed to verify Lambda Cloud credentials. '
+                           'Check your network connection '
+                           'and try again.')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
