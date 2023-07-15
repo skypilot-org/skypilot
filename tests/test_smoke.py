@@ -2304,7 +2304,7 @@ def test_aws_zero_quota_failover():
 
     name = _get_cluster_name()
     region = get_aws_region_for_quota_failover()
-    return True
+    
     if not region:
         return
 
