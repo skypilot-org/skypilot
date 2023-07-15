@@ -2694,7 +2694,7 @@ def _down_or_stop_clusters(
 
 
     def _down_or_stop(name: str):
-        csync_utils.wait_and_terminate_csyncs(name)
+        csync_utils.wait_and_terminate_csyncs()
         success_progress = False
         if idle_minutes_to_autostop is not None:
             try:
