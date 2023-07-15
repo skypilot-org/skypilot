@@ -4135,7 +4135,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, **ssh_credentials)
-        log_path = os.path.join(self.log_dir, 'storage_syncs.log')
+        log_path = os.path.join(self.log_dir, 'storage_csyncs.log')
 
         for dst, storage_obj in storage_mounts.items():
             if not os.path.isabs(dst) and not dst.startswith('~/'):
@@ -4170,7 +4170,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise RuntimeError(error_msg) from None
 
         end = time.time()
-        logger.debug(f'Storage Sync took {end - start} seconds.')
+        logger.debug(f'Storage Sync setup took {end - start} seconds.')
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,

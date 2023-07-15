@@ -901,6 +901,8 @@ class Storage(object):
         add_if_not_none('store', stores)
         add_if_not_none('persistent', self.persistent)
         add_if_not_none('mode', self.mode.value)
+        if self.mode == StorageMode.C_SYNC:
+            add_if_not_none('interval', self.interval)
         if self.force_delete:
             config['_force_delete'] = True
         return config
