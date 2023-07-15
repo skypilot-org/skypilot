@@ -1363,30 +1363,14 @@ class RetryingVmProvisioner(object):
         # the instance type in the target region. If not, fail early
         # instead of trying to provision and failing later.
 
-        need_provision = True
-        if to_provision.cloud.is_same_cloud(clouds.AWS()):
-            try:
-                need_provision = to_provision.cloud.check_quota_available(
-                    to_provision.region, to_provision.instance_type,
-                    None, to_provision.use_spot)
+        try:
+            need_provision = to_provision.cloud.check_quota_available(to_provision)
 
-            except Exception as e:  # pylint: disable=broad-except
-                logger.info(f'Error occurred when trying to check quota. '
-                            f'Proceeding assuming quotas are available. Error: '
-                            f'{common_utils.format_exception(e, use_bracket=True)}')
-        
-        if to_provision.cloud.is_same_cloud(clouds.GCP()) and to_provision.accelerators:
-            try:
-                need_provision = to_provision.cloud.check_quota_available(
-                    to_provision.region, None, list(to_provision.accelerators.keys())[0],
-                    to_provision.use_spot
-                )
-                
-            except Exception as e:
-                logger.info(f'Error occurred when trying to check quota. '
-                            f'Proceeding assuming quotas are available. Error: '
-                            f'{common_utils.format_exception(e, use_bracket=True)}')
-
+        except Exception as e:  # pylint: disable=broad-except
+            need_provision = True
+            logger.info(f'Error occurred when trying to check quota. '
+                        f'Proceeding assuming quotas are available. Error: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
 
         if not need_provision:
             # if quota is found to be zero, raise exception and skip to

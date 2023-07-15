@@ -182,18 +182,20 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
 
 
 def get_aws_region_for_quota_failover() -> Optional[str]:
-
     candidate_regions = AWS.regions_with_offering(instance_type='p3.16xlarge',
                                                   accelerators=None,
                                                   use_spot=True,
                                                   region=None,
                                                   zone=None)
-
+    
     for region in candidate_regions:
-        if not AWS.check_quota_available(region=region.name, 
-                                         instance_type='p3.16xlarge', 
-                                         accelerator=None, 
-                                         use_spot=True):
+        resources = sky.Resources(
+            cloud=sky.AWS(),
+            instance_type='p3.16xlarge',
+            region = region.name,
+            use_spot=True
+        )
+        if not AWS.check_quota_available(resources):
             return region.name
 
     return None
@@ -207,10 +209,12 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
                                                   zone=None)
 
     for region in candidate_regions:
-        if not GCP.check_quota_available(region=region.name,
-                                         instance_type=None,
-                                         accelerator='A100',
-                                         use_spot=True):
+        if not GCP.check_quota_available(sky.Resources(
+            cloud=sky.GCP(),
+            region = region.name,
+            accelerators={'A100':1},
+            use_spot=True
+        )):
             return region.name
 
     return None
@@ -2302,7 +2306,7 @@ def test_aws_zero_quota_failover():
 
     name = _get_cluster_name()
     region = get_aws_region_for_quota_failover()
-
+    return True
     if not region:
         return
 

@@ -479,21 +479,19 @@ class Cloud:
 
     @classmethod
     # pylint: disable=unused-argument
-    def check_quota_available(cls,
-                              region: str,
-                              instance_type: Optional[str],
-                              accelerator: Optional[str],
-                              use_spot: bool = False) -> bool:
-        """Check if quota is available for `instance_type` in `region`.
+    def check_quota_available(cls, resources: 'resources.Resources') -> bool:
+        """Check if quota is available based on `resources`.
 
         The _retry_zones function in cloud_vm_ray_backend goes through different
         candidate regions and attempts to provision the requested
-        `instance_type` or `accelerator` accelerators in the region, until
-        a successful provisioning happens or all regions with the requested 
-        accelerator have been looked at. Previously, SkyPilot would attempt 
-        to provision resources in all of these regions. However, many regions 
-        would have a zero quota or inadequate quota, meaning these attempted 
-        provisions were destined to fail from the get-go.
+        `instance_type` or `accelerator` accelerators in the `region`
+        (the `instance_type` or `accelerator`, and `region`, as defined in
+        `resources`) until a successful provisioning happens or all regions
+        with the requested accelerator have been looked at. Previously,
+        SkyPilot would attempt to provision resources in all of these regions.
+        However, many regions would have a zero quota or inadequate quota,
+        meaning these attempted provisions were destined to fail from
+        the get-go.
 
         Checking the quota is substantially faster than attempting a failed
         provision (~1 second vs 30+ seconds) so this function attempts to
@@ -505,7 +503,7 @@ class Cloud:
         quota utilization because many cloud providers' APIs don't have a
         built-in command for checking the real-time utilization. Checking
         real-time utilization is a more difficult endeavor that involves
-        monitoring etc., so we are holding off on that for now.
+        observability etc., so we are holding off on that for now.
 
         If for at any point the function fails, whether it's because we can't
         import the necessary dependencies or a query using a cloud provider's
