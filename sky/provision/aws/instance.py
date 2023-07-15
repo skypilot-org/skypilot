@@ -27,11 +27,15 @@ def _filter_instances(ec2, filters: List[Dict[str, Any]],
     return instances
 
 
-def stop_instances(region: str,
-                   cluster_name: str,
-                   included_instances: Optional[List[str]] = None,
-                   excluded_instances: Optional[List[str]] = None) -> None:
+def stop_instances(
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    included_instances: Optional[List[str]] = None,
+    excluded_instances: Optional[List[str]] = None,
+) -> None:
     """See sky/provision/__init__.py"""
+    assert provider_config is not None, (cluster_name, provider_config)
+    region = provider_config['region']
     ec2 = aws.resource(
         'ec2',
         region_name=region,
@@ -57,11 +61,15 @@ def stop_instances(region: str,
     #  of most cloud implementations (including AWS).
 
 
-def terminate_instances(region: str,
-                        cluster_name: str,
-                        included_instances: Optional[List[str]] = None,
-                        excluded_instances: Optional[List[str]] = None) -> None:
+def terminate_instances(
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    included_instances: Optional[List[str]] = None,
+    excluded_instances: Optional[List[str]] = None,
+) -> None:
     """See sky/provision/__init__.py"""
+    assert provider_config is not None, (cluster_name, provider_config)
+    region = provider_config['region']
     ec2 = aws.resource(
         'ec2',
         region_name=region,
