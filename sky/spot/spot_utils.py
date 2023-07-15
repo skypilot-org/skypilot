@@ -505,7 +505,8 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
-def format_job_table(jobs: List[Dict[str, Any]],
+@typing.overload
+def format_job_table(tasks: List[Dict[str, Any]],
                      show_all: bool,
                      return_rows: Literal[False] = False,
                      max_jobs: Optional[int] = None) -> str:
@@ -537,7 +538,6 @@ def format_job_table(
     Returns: A formatted string of spot jobs, if not `return_rows`; otherwise a
       list of "rows" (each of which is a list of str).
     """
-
     columns = [
         'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
         'JOB DURATION', '#RECOVERIES', 'STATUS'
@@ -561,8 +561,6 @@ def format_job_table(
         jobs[task['job_id']].append(task)
 
     for job_id, job_tasks in jobs.items():
-        print(job_id, job_tasks)
-
         if len(job_tasks) > 1:
             # Aggregate the tasks into a new row in the table.
             job_name = job_tasks[0]['job_name']
