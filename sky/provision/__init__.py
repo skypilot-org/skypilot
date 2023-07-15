@@ -3,7 +3,7 @@
 This module provides a standard low-level interface that all
 providers supported by SkyPilot need to follow.
 """
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import functools
 import importlib
@@ -37,20 +37,24 @@ def _route_to_cloud_impl(func):
 
 
 @_route_to_cloud_impl
-def stop_instances(provider_name: str,
-                   region: str,
-                   cluster_name: str,
-                   included_instances: Optional[List[str]] = None,
-                   excluded_instances: Optional[List[str]] = None) -> None:
+def stop_instances(
+    provider_name: str,
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    included_instances: Optional[List[str]] = None,
+    excluded_instances: Optional[List[str]] = None,
+) -> None:
     """Stop running instances."""
     raise NotImplementedError
 
 
 @_route_to_cloud_impl
-def terminate_instances(provider_name: str,
-                        region: str,
-                        cluster_name: str,
-                        included_instances: Optional[List[str]] = None,
-                        excluded_instances: Optional[List[str]] = None) -> None:
+def terminate_instances(
+    provider_name: str,
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    included_instances: Optional[List[str]] = None,
+    excluded_instances: Optional[List[str]] = None,
+) -> None:
     """Terminate running or stopped instances."""
     raise NotImplementedError

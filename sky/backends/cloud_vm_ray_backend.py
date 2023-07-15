@@ -71,7 +71,7 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.AWS: 90,
     clouds.Azure: 90,
-    clouds.GCP: 120,
+    clouds.GCP: 240,
     clouds.Lambda: 150,
     clouds.IBM: 160,
     clouds.Local: 90,
@@ -3350,7 +3350,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cloud = handle.launched_resources.cloud
         config = common_utils.read_yaml(handle.cluster_yaml)
         cluster_name = handle.cluster_name
-        use_tpu_vm = config['provider'].get('_has_tpus', False)
 
         # Avoid possibly unbound warnings. Code below must overwrite these vars:
         returncode = 0
@@ -3358,8 +3357,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         stderr = ''
 
         # Use the new provisioner for AWS.
-        if isinstance(cloud, clouds.AWS):
-            region = config['provider']['region']
+        if isinstance(cloud, (clouds.AWS, clouds.GCP)):
             # Stop the ray autoscaler first to avoid the head node trying to
             # re-launch the worker nodes, during the termination of the
             # cluster.
@@ -3379,11 +3377,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'already been terminated. It is fine to skip this.')
             try:
                 if terminate:
-                    provision_api.terminate_instances(repr(cloud), region,
-                                                      cluster_name)
+                    provision_api.terminate_instances(
+                        repr(cloud),
+                        cluster_name,
+                        provider_config=config['provider'])
                 else:
-                    provision_api.stop_instances(repr(cloud), region,
-                                                 cluster_name)
+                    provision_api.stop_instances(
+                        repr(cloud),
+                        cluster_name,
+                        provider_config=config['provider'])
             except Exception as e:  # pylint: disable=broad-except
                 if purge:
                     logger.warning(
@@ -3485,39 +3487,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             # To avoid undefined local variables error.
             stdout = stderr = ''
-        elif (terminate and
-              (prev_cluster_status == status_lib.ClusterStatus.STOPPED or
-               use_tpu_vm)):
-            # For TPU VMs, gcloud CLI is used for VM termination.
-            if isinstance(cloud, clouds.GCP):
-                zone = config['provider']['availability_zone']
-                # TODO(wei-lin): refactor by calling functions of node provider
-                # that uses Python API rather than CLI
-                if use_tpu_vm:
-                    terminate_cmd = tpu_utils.terminate_tpu_vm_cluster_cmd(
-                        cluster_name, zone, log_abs_path)
-                else:
-                    query_cmd = (f'gcloud compute instances list --filter='
-                                 f'"(labels.ray-cluster-name={cluster_name})" '
-                                 f'--zones={zone} --format=value\\(name\\)')
-                    # If there are no instances, exit with 0 rather than causing
-                    # the delete command to fail.
-                    terminate_cmd = (
-                        f'VMS=$({query_cmd}) && [ -n "$VMS" ] && '
-                        f'gcloud compute instances delete --zone={zone} --quiet'
-                        ' $VMS || echo "No instances to delete."')
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Unsupported cloud {cloud} for stopped '
-                                     f'cluster {cluster_name!r}.')
-            with log_utils.safe_rich_status(f'[bold cyan]Terminating '
-                                            f'[green]{cluster_name}'):
-                returncode, stdout, stderr = log_lib.run_with_log(
-                    terminate_cmd,
-                    log_abs_path,
-                    shell=True,
-                    stream_logs=False,
-                    require_outputs=True)
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',
