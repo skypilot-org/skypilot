@@ -22,29 +22,32 @@
 
 
 <h3 align="center">
-    Run jobs on any cloud, easily and cost effectively
+    Run LLMs and AI on Any Cloud
 </h3>
 
 ----
 :fire: *News* :fire:
+- [June, 2023] Serving LLM **24x Faster On the Cloud** with vLLM and SkyPilot: [**example**](./llm/vllm/), [**blog post**](https://blog.skypilot.co/serving-llm-24x-faster-on-the-cloud-with-vllm-and-skypilot/)
 - [June, 2023] [**Two new clouds supported**](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html): Samsung SCP and Oracle OCI!
 - [April, 2023] **[**SkyPilot YAMLs released**](./llm/vicuna/) for finetuning & serving the Vicuna model with a single command**!
 - [March, 2023] **[Vicuna LLM chatbot](https://lmsys.org/blog/2023-03-30-vicuna/) trained** [**using SkyPilot**](./llm/vicuna/) **for $300 on spot instances!** 
-- [March, 2023] *Serve* your own LLaMA LLM chatbot (not finetuned) on any cloud: [**example**](./llm/llama-chatbots/), [**repo**](https://github.com/skypilot-org/sky-llama)
+- [March, 2023] Serve your own LLaMA LLM chatbot (not finetuned) on any cloud: [**example**](./llm/llama-chatbots/), [**repo**](https://github.com/skypilot-org/sky-llama)
 ----
 
-SkyPilot is a framework for easily and cost effectively running ML workloads[^1] on any cloud. 
+SkyPilot is a framework for running LLMs, AI, and batch jobs on any cloud, offering maximum cost savings, highest GPU availability, and managed execution.
 
-SkyPilot abstracts away the cloud infra burden:
-- Launch jobs & clusters on any cloud (AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI)
-- Find scarce resources across zones/regions/clouds
-- Queue jobs & use cloud object stores
+SkyPilot **abstracts away cloud infra burdens**:
+- Launch jobs & clusters on any cloud 
+- Easy scale-out: queue and run many jobs, automatically managed
+- Easy access to object stores (S3, GCS, R2)
 
-SkyPilot cuts your cloud costs:
-* [Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html): **3x cost savings** using spot VMs, with auto-recovery from preemptions
+SkyPilot **maximizes GPU availability for your jobs**:
+* Provision in all zones/regions/clouds you have access to ([the _Sky_](https://arxiv.org/abs/2205.07147)), with automatic failover
+
+SkyPilot **cuts your cloud costs**:
+* [Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html): 3-6x cost savings using spot VMs, with auto-recovery from preemptions
+* Optimizer: 2x cost savings by auto-picking the cheapest VM/zone/region/cloud
 * [Autostop](https://skypilot.readthedocs.io/en/latest/reference/auto-stop.html): hands-free cleanup of idle clusters 
-* [Benchmark](https://skypilot.readthedocs.io/en/latest/reference/benchmark/index.html): find best VM types for your jobs
-* Optimizer: **2x cost savings** by auto-picking best prices across zones/regions/clouds
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes. 
 
@@ -52,6 +55,8 @@ Install with pip or [from source](https://skypilot.readthedocs.io/en/latest/gett
 ```
 pip install "skypilot[aws,gcp,azure,ibm,oci,scp,lambda]"  # choose your clouds
 ```
+
+Current supported providers (AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI, Cloudflare):
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-dark.png">
@@ -66,7 +71,7 @@ You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/
 - [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html)
 - [CLI reference](https://skypilot.readthedocs.io/en/latest/reference/cli.html)
 
-## SkyPilot in 1 minute
+## SkyPilot in 1 Minute
 
 A SkyPilot task specifies: resource requirements, data to be synced, setup commands, and the task commands. 
 
@@ -120,20 +125,31 @@ SkyPilot then performs the heavy-lifting for you, including:
 
 Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) to get started with SkyPilot.
 
-## Learn more
+## More Information
+To learn more, see our [Documentation](https://skypilot.readthedocs.io/en/latest/) and [Tutorials](https://github.com/skypilot-org/skypilot-tutorial).
 
-- [Documentation](https://skypilot.readthedocs.io/en/latest/)
-- [Example: HuggingFace](https://skypilot.readthedocs.io/en/latest/getting-started/tutorial.html) 
-- [Tutorials](https://github.com/skypilot-org/skypilot-tutorial) 
-- [YAML reference](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html)
-- Framework examples: [PyTorch DDP](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml),  [Distributed](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py) [TensorFlow](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml), [JAX/Flax on TPU](https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml), [Stable Diffusion](https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion), [Detectron2](https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml), [programmatic grid search](https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py), [Docker](https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml), and [many more](./examples).
+Runnable examples:
+- LLMs on SkyPilot
+  - [Vicuna chatbots: Training & Serving](./llm/vicuna/) (from official Vicuna team)
+  - [vLLM: Serving LLM 24x Faster On the Cloud](./llm/vllm/) (from official vLLM team)
+  - [QLoRA](https://github.com/artidoro/qlora/pull/132)
+  - [LLaMA-LoRA-Tuner](https://github.com/zetavg/LLaMA-LoRA-Tuner#run-on-a-cloud-service-via-skypilot)
+  - [Tabby: Self-hosted AI coding assistant](https://github.com/TabbyML/tabby/blob/bed723fcedb44a6b867ce22a7b1f03d2f3531c1e/experimental/eval/skypilot.yaml)
+  - [LocalGPT](./llm/localgpt)
+  - Add yours here & see more in [`llm/`](./llm)!
+- Framework examples: [PyTorch DDP](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml), [DeepSpeed](./examples/deepspeed-multinode/sky.yaml), [JAX/Flax on TPU](https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml), [Stable Diffusion](https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion), [Detectron2](https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml), [Distributed](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py) [TensorFlow](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml), [programmatic grid search](https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py), [Docker](https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml), and [many more (`examples/`)](./examples).
 
-More information:
-- [SkyPilot Blog](https://blog.skypilot.co/)
-  - [Introductory blog post](https://blog.skypilot.co/introducing-skypilot/)
-- [NSDI 2023 paper & talk](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng)
+Follow updates:
+- [Twitter](https://twitter.com/skypilot_org)
+- [Slack](http://slack.skypilot.co)
+- [SkyPilot Blog](https://blog.skypilot.co/) ([Introductory blog post](https://blog.skypilot.co/introducing-skypilot/))
 
-## Issues, feature requests, and questions
+Read the research:
+- [SkyPilot paper](https://www.usenix.org/system/files/nsdi23-yang-zongheng.pdf) and [talk](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng) (NSDI 2023)
+- [Sky Computing whitepaper](https://arxiv.org/abs/2205.07147)
+- [Sky Computing vision paper](https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf) (HotOS 2021)
+
+## Support and Questions
 We are excited to hear your feedback! 
 * For issues and feature requests, please [open a GitHub issue](https://github.com/skypilot-org/skypilot/issues/new).
 * For questions, please use [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
@@ -142,6 +158,3 @@ For general discussions, join us on the [SkyPilot Slack](http://slack.skypilot.c
 
 ## Contributing
 We welcome and value all contributions to the project! Please refer to [CONTRIBUTING](CONTRIBUTING.md) for how to get involved.
-
-<!-- Footnote -->
-[^1]: While SkyPilot is currently targeted at machine learning workloads, it supports and has been used for other general batch workloads. We're excited to hear about your use case and how we can better support your requirements; please join us in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)!

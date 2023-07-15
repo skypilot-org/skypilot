@@ -5,3 +5,4 @@ More User Guides
 
    distributed-jobs
    grid-search
+   environment-variables

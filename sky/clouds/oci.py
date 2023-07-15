@@ -45,7 +45,10 @@ class OCI(clouds.Cloud):
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return dict()
+        return {
+            clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+                (f'Migrating disk is not supported in {cls._REPR}.'),
+        }
 
     @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:

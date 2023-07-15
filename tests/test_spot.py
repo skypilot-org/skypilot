@@ -103,7 +103,7 @@ class TestReservedClustersOperations:
         def mock_cluster_refresh_up(
             cluster_name: str,
             *,
-            force_refresh: bool = False,
+            force_refresh_statuses: bool = False,
             acquire_per_cluster_status_lock: bool = True,
         ):
             record = global_user_state.get_cluster_from_name(cluster_name)

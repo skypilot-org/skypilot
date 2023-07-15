@@ -1,6 +1,6 @@
 import tempfile
 import textwrap
-from typing import List
+from typing import Callable, List, Optional
 
 import pytest
 
@@ -9,31 +9,39 @@ from sky import clouds
 from sky import exceptions
 
 
-def _test_parse_cpus(spec, expected_cpus):
+def _test_parse_task_yaml(spec: str, test_fn: Optional[Callable] = None):
+    """Tests parsing a task from a YAML spec and running a test_fn."""
     with tempfile.NamedTemporaryFile('w') as f:
         f.write(spec)
         f.flush()
         with sky.Dag():
             task = sky.Task.from_yaml(f.name)
-            assert list(task.resources)[0].cpus == expected_cpus
+            if test_fn is not None:
+                test_fn(task)
+
+
+def _test_parse_cpus(spec, expected_cpus):
+
+    def test_fn(task):
+        assert list(task.resources)[0].cpus == expected_cpus
+
+    _test_parse_task_yaml(spec, test_fn)
 
 
 def _test_parse_memory(spec, expected_memory):
-    with tempfile.NamedTemporaryFile('w') as f:
-        f.write(spec)
-        f.flush()
-        with sky.Dag():
-            task = sky.Task.from_yaml(f.name)
-            assert list(task.resources)[0].memory == expected_memory
+
+    def test_fn(task):
+        assert list(task.resources)[0].memory == expected_memory
+
+    _test_parse_task_yaml(spec, test_fn)
 
 
 def _test_parse_accelerators(spec, expected_accelerators):
-    with tempfile.NamedTemporaryFile('w') as f:
-        f.write(spec)
-        f.flush()
-        with sky.Dag():
-            task = sky.Task.from_yaml(f.name)
-            assert list(task.resources)[0].accelerators == expected_accelerators
+
+    def test_fn(task):
+        assert list(task.resources)[0].accelerators == expected_accelerators
+
+    _test_parse_task_yaml(spec, test_fn)
 
 
 # Monkey-patching is required because in the test environment, no cloud is
@@ -42,6 +50,8 @@ def _test_parse_accelerators(spec, expected_accelerators):
 # clouds are enabled, so we monkeypatch the `sky.global_user_state` module
 # to return all three clouds. We also monkeypatch `sky.check.check` so that
 # when the optimizer tries calling it to update enabled_clouds, it does not
+# TODO: Keep the cloud enabling in sync with the fixture enable_all_clouds
+# in tests/conftest.py
 # raise exceptions.
 def _make_resources(
     monkeypatch,
@@ -61,6 +71,9 @@ def _make_resources(
         prefix='tmp_backup_config_default', delete=False)
     monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
                         config_file_backup.name)
+    monkeypatch.setattr(
+        'sky.clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH',
+        config_file_backup.name)
     monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
 
     # Should create Resources here, since it uses the enabled clouds.
@@ -542,3 +555,47 @@ def test_invalid_num_nodes():
                 task = sky.Task()
                 task.num_nodes = invalid_value
             assert 'num_nodes should be a positive int' in str(e.value)
+
+
+def test_parse_empty_yaml():
+    spec = textwrap.dedent("""\
+        """)
+
+    def test_fn(task):
+        assert task.num_nodes == 1
+
+    _test_parse_task_yaml(spec, test_fn)
+
+
+def test_parse_name_only_yaml():
+    spec = textwrap.dedent("""\
+        name: test_task
+        """)
+
+    def test_fn(task):
+        assert task.name == 'test_task'
+
+    _test_parse_task_yaml(spec, test_fn)
+
+
+def test_parse_invalid_envs_yaml(monkeypatch):
+    spec = textwrap.dedent("""\
+        envs:
+          hello world: 1  # invalid key
+          123: val  # invalid key
+          good_key: val
+        """)
+    with pytest.raises(ValueError) as e:
+        _test_parse_task_yaml(spec)
+    assert '\'123\', \'hello world\' do not match any of the regexes' in str(
+        e.value)
+
+
+def test_parse_valid_envs_yaml(monkeypatch):
+    spec = textwrap.dedent("""\
+        envs:
+          hello_world: 1
+          HELLO: val
+          GOOD123: 123
+        """)
+    _test_parse_task_yaml(spec)

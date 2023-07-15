@@ -57,7 +57,7 @@ class oci_query_helper:
 
     @classmethod
     def terminate_instances_by_tags(cls, tag_filters, region) -> int:
-        logger.info(f"Terminate instance by tags: {tag_filters}")
+        logger.debug(f"Terminate instance by tags: {tag_filters}")
         insts = cls.query_instances_by_tags(tag_filters, region)
         fail_count = 0
         for inst in insts:
@@ -73,7 +73,7 @@ class oci_query_helper:
                 traceback.print_exc()
 
         if fail_count == 0:
-            logger.info(f"Instance teardown result: OK")
+            logger.debug(f"Instance teardown result: OK")
         else:
             logger.warn(f"Instance teardown result: {fail_count} failed!")
 

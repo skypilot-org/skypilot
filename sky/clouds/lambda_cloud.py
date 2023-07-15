@@ -1,5 +1,6 @@
 """Lambda Cloud."""
 import json
+import requests
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -35,6 +36,7 @@ class Lambda(clouds.Cloud):
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {_REPR}.',
     }
 
     @classmethod
@@ -226,6 +228,10 @@ class Lambda(clouds.Cloud):
                            'to generate API key and add the line\n    '
                            '  api_key = [YOUR API KEY]\n    '
                            'to ~/.lambda_cloud/lambda_keys')
+        except requests.exceptions.ConnectionError:
+            return False, ('Failed to verify Lambda Cloud credentials. '
+                           'Check your network connection '
+                           'and try again.')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
