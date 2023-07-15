@@ -724,7 +724,8 @@ def load_spot_cost_report(payload: str) -> List[Dict[str, Any]]:
     return cost_report
 
 
-def format_cost_table(reports: List[Dict[str, Any]], all: bool) -> str:
+def format_cost_table(reports: List[Dict[str, Any]],
+                      show_all_rows: bool) -> str:
     """Show all spot costs."""
     columns = [
         'JOB ID',
@@ -745,7 +746,7 @@ def format_cost_table(reports: List[Dict[str, Any]], all: bool) -> str:
     num_main_rows = 0
 
     num_main_rows_to_show = _NUM_SPOT_COST_REPORT_ROWS_TO_SHOW
-    if all:
+    if show_all_rows:
         num_main_rows_to_show = len(reports)
 
     for i, report in enumerate(reports):
