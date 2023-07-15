@@ -481,7 +481,7 @@ class Cloud:
             exceptions.NotSupportedError: If the disk tier is not supported.
         """
         raise NotImplementedError
-    
+
     @classmethod
     def _check_instance_type_accelerators_combination(
             cls, resources: 'resources_lib.Resources') -> None:
@@ -531,8 +531,8 @@ class Cloud:
                     'change the accelerators field to be consistent.')
 
     @classmethod
-    # pylint: disable=unused-argument
-    def check_quota_available(cls, resources: 'resources.Resources') -> bool:
+    def check_quota_available(cls,
+                              resources: 'resources_lib.Resources') -> bool:
         """Check if quota is available based on `resources`.
 
         The _retry_zones function in cloud_vm_ray_backend goes through different
@@ -576,7 +576,7 @@ class Cloud:
         Returns:
             False if the quota is found to be zero, and true otherwise.
         """
-        del region, instance_type, use_spot  # unused
+        del resources  # unused
 
         return True
 

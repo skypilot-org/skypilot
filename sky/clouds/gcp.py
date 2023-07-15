@@ -791,10 +791,9 @@ class GCP(clouds.Cloud):
     @classmethod
     def _label_filter_str(cls, tag_filters: Dict[str, str]) -> str:
         return ' '.join(f'labels.{k}={v}' for k, v in tag_filters.items())
-    
+
     @classmethod
     def check_quota_available(cls, resources: 'resources.Resources') -> bool:
-        
         """Check if GCP quota is available based on `resources`.
 
         GCP-specific implementation of check_quota_available. The function works by
@@ -813,28 +812,27 @@ class GCP(clouds.Cloud):
         accelerator = list(resources.accelerators.keys())[0]
         use_spot = resources.use_spot
         region = resources.region
-        
-        from sky.clouds.service_catalog import gcp_catalog
+
+        from sky.clouds.service_catalog import gcp_catalog  # pylint: disable=import-outside-toplevel
 
         quota_code = gcp_catalog.get_quota_code(accelerator, use_spot)
 
         if quota_code is None:
             # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
             return True
-        
+
         try:
             command = f'gcloud compute regions describe {region} |grep -B 1 "{quota_code}" | awk \'/limit/ {{print; exit}}\''
             print(command)
-            proc = subprocess_utils.run(
-                    cmd=command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE)
+            proc = subprocess_utils.run(cmd=command,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE)
 
         except subprocess.CalledProcessError as e:
-            print(f"Command failed with exit code {e.returncode}")
-        
+            print(f'Command failed with exit code {e.returncode}')
+
         out = proc.stdout.decode()
-        last_number = out.split("limit:")[-1].strip()
+        last_number = out.split('limit:')[-1].strip()
         last_number_int = int(float(last_number))
 
         if last_number_int == 0:

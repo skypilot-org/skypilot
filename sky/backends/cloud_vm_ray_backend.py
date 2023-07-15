@@ -1365,7 +1365,8 @@ class RetryingVmProvisioner(object):
         # instead of trying to provision and failing later.
 
         try:
-            need_provision = to_provision.cloud.check_quota_available(to_provision)
+            need_provision = to_provision.cloud.check_quota_available(
+                to_provision)
 
         except Exception as e:  # pylint: disable=broad-except
             need_provision = True

@@ -697,12 +697,13 @@ class AWS(clouds.Cloud):
         }
 
     @classmethod
-    def check_quota_available(cls, resources: 'resources_lib.Resources') -> bool:
+    def check_quota_available(cls,
+                              resources: 'resources_lib.Resources') -> bool:
         """Check if AWS quota is available based on `resources`.
 
         AWS-specific implementation of check_quota_available. The function
         works by matching the `instance_type` to the corresponding AWS quota
-        code, and then using the boto3 Python API to query the `region` for 
+        code, and then using the boto3 Python API to query the `region` for
         the specific quota code (the `instance_type` and `region` as defined
         by `resources`).
 
@@ -712,7 +713,7 @@ class AWS(clouds.Cloud):
             ImportError: if the dependencies for AWS are not able to be installed.
             botocore.exceptions.ClientError: error in Boto3 client request.
         """
-        
+
         instance_type = resources.instance_type
         region = resources.region
         use_spot = resources.use_spot

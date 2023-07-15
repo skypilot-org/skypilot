@@ -8,7 +8,7 @@ set -ev
 need_launch=${1:-0}
 start_from=${2:-0}
 
-source ~/.bashrc 
+source ~/.zshrc
 CLUSTER_NAME="test-back-compat-$USER"
 source $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh
 CLOUD="gcp"

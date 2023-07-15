@@ -187,34 +187,32 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
                                                   use_spot=True,
                                                   region=None,
                                                   zone=None)
-    
+
     for region in candidate_regions:
-        resources = sky.Resources(
-            cloud=sky.AWS(),
-            instance_type='p3.16xlarge',
-            region = region.name,
-            use_spot=True
-        )
+        resources = sky.Resources(cloud=sky.AWS(),
+                                  instance_type='p3.16xlarge',
+                                  region=region.name,
+                                  use_spot=True)
         if not AWS.check_quota_available(resources):
             return region.name
 
     return None
 
+
 def get_gcp_region_for_quota_failover() -> Optional[str]:
 
     candidate_regions = GCP.regions_with_offering(instance_type=None,
-                                                  accelerators={'A100':1},
+                                                  accelerators={'A100': 1},
                                                   use_spot=True,
                                                   region=None,
                                                   zone=None)
 
     for region in candidate_regions:
-        if not GCP.check_quota_available(sky.Resources(
-            cloud=sky.GCP(),
-            region = region.name,
-            accelerators={'A100':1},
-            use_spot=True
-        )):
+        if not GCP.check_quota_available(
+                sky.Resources(cloud=sky.GCP(),
+                              region=region.name,
+                              accelerators={'A100': 1},
+                              use_spot=True)):
             return region.name
 
     return None
@@ -2318,6 +2316,7 @@ def test_aws_zero_quota_failover():
         f'sky down -y {name}',
     )
     run_one_test(test)
+
 
 @pytest.mark.gcp
 def test_gcp_zero_quota_failover():
