@@ -1,3 +1,4 @@
+#!/bin/bash
 # Deletes the local kind cluster
 # Usage: ./delete_cluster.sh
 # Raises error code 100 if the local cluster does not exist
