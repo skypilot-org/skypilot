@@ -33,6 +33,7 @@ import signal
 import subprocess
 import sys
 import textwrap
+import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 import webbrowser
@@ -2660,12 +2661,25 @@ def _down_or_stop_clusters(
         f'[bold cyan]{operation} {len(clusters)} cluster{plural}[/]',
         total=len(clusters))
 
+    C_SYNC_FILE_PATH = '~/.skystorage'
+
     def _down_or_stop(name: str):
         def wait_and_terminate_csyncs(cluster_name):
+
+
+            import psutil
+            process_dict = {}
+            for proc in psutil.process_iter(['cmdline']):
+                cmd = proc.info['cmdline']
+                if 'sky.data.skystorage' in cmd:
+                    # cmd[4] is store type and cmd[5] is the bucket name
+                    process_dict[proc.pid] = (cmd[4], cmd[5])
+                    #pid, store_type, bucket_name, 
             # use two loop: 1.while 2.for-loop
             # use two sets: 1. track total running csync 2.track csync process thats not running 
-
+            """
             # get the list of csync's from cluster's metadata
+            # Add the following under other function called get running csync list. Perhaps add this in skystorage.py
             cluster_metadata = global_user_state.get_cluster_metadata(cluster_name)
             c_sync_locks = set()
             storage_metadata = global_user_state.CLUSTER_STORAGE_METADATA_NAME
@@ -2675,10 +2689,26 @@ def _down_or_stop_clusters(
                         for store_type, store_obj in storage_obj.stores:
                             # based on the cluster's metadata, create lock file name of each sync
                             lock_file_name = f'sync_{store_type.value}_{store_obj.name}.lock'
-                            # Add the name list in set1 1    # create this to set 1.
-                            c_sync_locks.add(lock_file_name)
-            
-                
+                            # Add the name list in set1 1    
+                            # create this to set 1.
+                            c_sync_locks.add((lock_file_name, bucket_to_pid[store_obj.name]))
+            """
+
+            while True:
+                running_sync = dict(process_dict)
+                if not running_sync:
+                    break
+                for pid in list(running_sync):
+                    store_type = running_sync[pid][0]
+                    bucket_name = running_sync[pid][1]
+                    lock_file_name = f'sync_{store_type}_{bucket_name}.lock'
+                    lock_file_path = os.path.join(C_SYNC_FILE_PATH, lock_file_name)
+                    if not os.path.exists(lock_file_path):
+                        # kill c_sync process
+                        psutil.Process(pid).terminate()
+                        # remove from c_sync_locks
+                        del process_dict[pid]
+                time.sleep(10)
 
             # while set1. is not empty:
             #   iterate them through to see if any are running
