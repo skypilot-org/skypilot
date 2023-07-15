@@ -53,7 +53,7 @@ def run_sync(src,storetype,bucketname,num_threads,delete):
         raise ValueError(f'Unknown store type: {storetype}')
     #run the sync command
     #TODO: add try-except block
-    subprocess.run(sync_cmd, shell=True)
+    subprocess.run(sync_cmd, shell=True, check=True)
 
     #run necessary post-processes
     if storetype == 's3':
