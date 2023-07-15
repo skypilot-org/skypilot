@@ -1,9 +1,9 @@
-name: Release Build
+name: docker-release-build
 
 on:
   push:
     branches:
-      - 'releases/*'
+      - 'releases/**'
 
 jobs:
   print_branch_tag:
