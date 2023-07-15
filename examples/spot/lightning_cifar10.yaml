@@ -9,7 +9,7 @@ resources:
 num_nodes: 1
 
 file_mounts:
-    /checkpoint:
+    ~/checkpoint:
         name: # NOTE: Fill in your bucket name for checkpoint
         mode: MOUNT
 
@@ -30,4 +30,4 @@ setup: |
 
 run: |
     cd ~/lit
-    python train.py --root_dir /checkpoint/ --resume --num_epochs 1000
+    python train.py --root_dir ~/checkpoint/ --resume --num_epochs 1000
