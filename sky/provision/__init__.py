@@ -61,7 +61,10 @@ def terminate_instances(
 
 
 @_route_to_cloud_impl
-def cleanup_security_groups(provider_name: str, region: str,
-                            cluster_name: str) -> None:
-    """Delete security groups."""
+def cleanup_ports(
+    provider_name: str,
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Delete any opened ports."""
     raise NotImplementedError

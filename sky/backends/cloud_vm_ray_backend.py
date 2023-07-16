@@ -3613,38 +3613,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if terminate:
             cloud = handle.launched_resources.cloud
             config = common_utils.read_yaml(handle.cluster_yaml)
-            region = config['provider']['region']
-            if isinstance(cloud, clouds.AWS):
+            if isinstance(cloud, (clouds.AWS, clouds.GCP)):
                 # Clean up AWS SGs
-                provision_api.cleanup_security_groups(repr(cloud), region,
-                                                      handle.cluster_name)
-            elif isinstance(cloud, clouds.GCP):
-                if 'ports' in config['provider']:
-                    # pylint: disable=import-outside-toplevel
-                    from sky.skylet.providers.gcp import config as gcp_config
-                    from googleapiclient import errors
-                    _, _, compute, _ = \
-                        gcp_config.construct_clients_from_provider_config(
-                        config['provider'])
-                    vpc_name = gcp_config.get_usable_vpc(config)
-                    ports = config['provider']['ports']
-                    for port in ports:
-                        # TODO(tian): Add a function to generate rule name for
-                        # GCP, then replace here and
-                        # providers/gcp/config.py::_get_filewall_rules_template
-                        rule_name = (f'{vpc_name}-user-ports'
-                                     f'-{config["cluster_name"]}-{port}')
-                        # Target rule might not exist since it is already
-                        # allowed before the cluster is launched. So we only
-                        # delete it if it exists.
-                        try:
-                            gcp_config.delete_firewall_rule_if_exist(
-                                config, compute, rule_name, silent=True)
-                        except errors.HttpError as e:
-                            logger.warning(
-                                f'Failed to delete firewall rule {rule_name}. '
-                                f'Please remove it manually to avoid '
-                                f'leakage. Details: {e}')
+                provision_api.cleanup_ports(repr(cloud), handle.cluster_name,
+                                            config['provider'])
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.

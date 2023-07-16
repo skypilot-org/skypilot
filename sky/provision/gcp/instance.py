@@ -151,3 +151,37 @@ def terminate_instances(
     _wait_for_operations(operations, project_id, zone)
     # We don't wait for the instances to be terminated, as it can take a long
     # time (same as what we did in ray's node_provider).
+
+
+def cleanup_ports(
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, cluster_name
+    if 'ports' not in provider_config:
+        # No new ports were opened, so there is nothing to clean up.
+        return
+    zone = provider_config['availability_zone']
+    project_id = provider_config['project_id']
+
+    name_filter = {TAG_RAY_CLUSTER_NAME: cluster_name}
+    handlers: List[Type[instance_utils.GCPInstance]] = [
+        instance_utils.GCPComputeInstance
+    ]
+    handler_to_instances = _filter_instances(handlers, project_id, zone,
+                                             name_filter, lambda _: None, None,
+                                             None)
+    assert len(handler_to_instances) == 1, handler_to_instances
+
+    for handler, instances in handler_to_instances.items():
+        # all instances should be in the same VPC
+        vpc_name = handler.get_vpc_name(project_id, zone, instances[0])
+        if vpc_name is None:
+            logger.warning(f'VPC for cluster {cluster_name} not found. '
+                           'Skipping cleanup. Please manually delete the '
+                           'firewall rules.')
+            return
+        for port in provider_config['ports']:
+            rule_name = (f'{vpc_name}-user-ports-{cluster_name}-{port}')
+            handler.delete_firewall_rule(project_id, rule_name)

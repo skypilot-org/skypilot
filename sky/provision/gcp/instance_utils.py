@@ -71,6 +71,23 @@ class GCPInstance:
     ) -> List[str]:
         raise NotImplementedError
 
+    @classmethod
+    def get_vpc_name(
+        cls,
+        project_id: str,
+        zone: str,
+        instance: str,
+    ) -> Optional[str]:
+        raise NotImplementedError
+
+    @classmethod
+    def delete_firewall_rule(
+        cls,
+        project_id: str,
+        firewall_rule_name: str,
+    ) -> None:
+        raise NotImplementedError
+
 
 class GCPComputeInstance(GCPInstance):
     """Instance handler for GCP compute instances."""
@@ -181,6 +198,41 @@ class GCPComputeInstance(GCPInstance):
                          f'Operation {operation["name"]} finished.')
             return True
         return False
+
+    @classmethod
+    def get_vpc_name(
+        cls,
+        project_id: str,
+        zone: str,
+        instance: str,
+    ) -> Optional[str]:
+        response = (cls.load_resource().instances().get(
+            project=project_id,
+            instance=instance,
+            zone=zone,
+        ).execute())
+        if ('networkInterfaces' not in response or
+                len(response['networkInterfaces']) != 1):
+            return None
+        assert 'network' in response['networkInterfaces'][0]
+        return response['networkInterfaces'][0]['network'].split('/')[-1]
+
+    @classmethod
+    def delete_firewall_rule(
+        cls,
+        project_id: str,
+        firewall_rule_name: str,
+    ) -> None:
+        rule = cls.load_resource().firewalls().list(
+            project=project_id, filter=f'name={firewall_rule_name}')
+        if not rule:
+            logger.warning(f'Firewall rule {firewall_rule_name} not found. '
+                           'Skip cleanup.')
+            return
+        cls.load_resource().firewalls().delete(
+            project=project_id,
+            firewall=firewall_rule_name,
+        ).execute()
 
 
 class GCPTPUVMInstance(GCPInstance):

@@ -102,8 +102,13 @@ def terminate_instances(
     #  of most cloud implementations (including AWS).
 
 
-def cleanup_security_groups(region: str, cluster_name: str) -> None:
+def cleanup_ports(
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
     """See sky/provision/__init__.py"""
+    assert provider_config is not None, (cluster_name, provider_config)
+    region = provider_config['region']
     ec2 = aws.resource(
         'ec2',
         region_name=region,
