@@ -1,16 +1,17 @@
 """Miscellaneous Utils for Sky Data
 """
-from multiprocessing import pool
 import concurrent.futures
+from enum import Enum
+from multiprocessing import pool
 import os
 import subprocess
+import textwrap
+import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
 import re
-import textwrap
-import threading
+
 from filelock import FileLock
-from enum import Enum
 
 from sky import exceptions
 from sky import sky_logging
