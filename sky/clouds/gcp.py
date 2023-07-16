@@ -394,7 +394,7 @@ class GCP(clouds.Cloud):
 
         return resources_vars
 
-    def get_feasible_launchable_resources(self, resources):
+    def _get_feasible_launchable_resources(self, resources):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             return ([resources], [])
@@ -766,18 +766,12 @@ class GCP(clouds.Cloud):
         return project_id
 
     @staticmethod
-    def check_host_accelerator_compatibility(
-            instance_type: str, accelerators: Optional[Dict[str, int]]) -> None:
-        service_catalog.check_host_accelerator_compatibility(
-            instance_type, accelerators, 'gcp')
-
-    @staticmethod
-    def check_accelerator_attachable_to_host(
-            instance_type: str,
-            accelerators: Optional[Dict[str, int]],
-            zone: Optional[str] = None) -> None:
+    def _check_instance_type_accelerators_combination(
+            resources: 'resources.Resources') -> None:
+        assert resources.is_launchable(), resources
         service_catalog.check_accelerator_attachable_to_host(
-            instance_type, accelerators, zone, 'gcp')
+            resources.instance_type, resources.accelerators, resources.zone,
+            'gcp')
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,

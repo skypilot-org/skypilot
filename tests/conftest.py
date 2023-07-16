@@ -2,6 +2,8 @@ import pytest
 import tempfile
 from typing import List
 
+import pandas as pd
+
 # Usage: use
 #   @pytest.mark.slow
 # to mark a test as slow and to skip by default.
@@ -200,6 +202,18 @@ def enable_all_clouds(monkeypatch):
         'sky.clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH',
         config_file_backup.name)
     monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
+
+    az_mappings = pd.read_csv('tests/default_aws_az_mappings.csv')
+
+    def _get_az_mappings(_):
+        return az_mappings
+
+    monkeypatch.setattr(
+        'sky.clouds.service_catalog.aws_catalog._get_az_mappings',
+        _get_az_mappings)
+
+    monkeypatch.setattr('sky.backends.backend_utils.check_owner_identity',
+                        lambda _: None)
 
 
 @pytest.fixture
