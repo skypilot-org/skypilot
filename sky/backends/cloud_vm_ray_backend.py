@@ -4127,7 +4127,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         style = colorama.Style
         plural = 's' if len(storage_mounts) > 1 else ''
         logger.info(f'{fore.CYAN}Processing {len(storage_mounts)} '
-                    f'storage sync{plural}.{style.RESET_ALL}')
+                    f'storage continuous sync{plural}.{style.RESET_ALL}')
         start = time.time()
         ip_list = handle.external_ips()
         assert ip_list is not None, 'external_ips is not cached in handle'
@@ -4137,12 +4137,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             ip_list, **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'storage_csyncs.log')
 
-        for dst, storage_obj in storage_mounts.items():
-            if not os.path.isabs(dst) and not dst.startswith('~/'):
-                dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
+        for src, storage_obj in storage_mounts.items():
+            if not os.path.isabs(src) and not src.startswith('~/'):
+                src = f'{SKY_REMOTE_WORKDIR}/{src}'
             # Get the first store and use it to sync
             store = list(storage_obj.stores.values())[0]
-            csync_cmd = store.csync_command(dst, storage_obj.interval)
+            csync_cmd = store.csync_command(src, storage_obj.interval)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
@@ -4151,7 +4151,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 backend_utils.parallel_data_transfer_to_nodes(
                     runners,
                     source=src_print,
-                    target=dst,
+                    target=src,
                     cmd=csync_cmd,
                     run_rsync=False,
                     action_message='Setting cont. sync',
@@ -4160,7 +4160,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             except exceptions.CommandError as e:
                 if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:
                     sync_path = (f'{colorama.Fore.RED}'
-                                  f'{colorama.Style.BRIGHT}{dst}'
+                                  f'{colorama.Style.BRIGHT}{src}'
                                   f'{colorama.Style.RESET_ALL}')
                     error_msg = (f'Sync path {sync_path} is non-empty.'
                                  f' {sync_path} may be a standard unix '
