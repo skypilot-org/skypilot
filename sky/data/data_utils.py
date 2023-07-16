@@ -6,7 +6,6 @@ from multiprocessing import pool
 import os
 import subprocess
 import textwrap
-import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
 import re
@@ -163,16 +162,11 @@ def get_ibm_cos_bucket_region(bucket_name: str) -> str:
     Returns:
         str: region of bucket if bucket exists, else empty string.
     """
-    boto3_client_lock = threading.Lock()
 
     def _get_bucket_region(region):
         try:
-            # thread lock is needed. Although boto3.client is thread safe,
-            # creating a session() (default session) indirectly through it,
-            # isn't thread safe.
-            with boto3_client_lock:
-                # reinitialize a client to search in different regions
-                tmp_client = ibm.get_cos_client(region)
+            # reinitialize a client to search in different regions
+            tmp_client = ibm.get_cos_client(region)
             tmp_client.head_bucket(Bucket=bucket_name)
             return region
         except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # pylint: disable=line-too-long

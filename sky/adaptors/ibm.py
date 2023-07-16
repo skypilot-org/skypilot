@@ -8,6 +8,8 @@ import os
 import json
 import requests
 import functools
+import multiprocessing
+import threading
 
 CREDENTIAL_FILE = '~/.ibm/credentials.yaml'
 logger = sky_logging.init_logger(__name__)
@@ -17,7 +19,9 @@ ibm_cloud_sdk_core = None
 ibm_platform_services = None
 ibm_boto3 = None
 ibm_botocore = None
-
+# locks for synchronizing storage clients
+multiprocessing_lock = multiprocessing.Lock()
+threading_lock = threading.Lock()
 
 def import_package(func):
 
@@ -125,21 +129,43 @@ def tagging_client():
 
 @import_package
 def get_cos_client(region: str = 'us-east'):
+    """Returns an IBM COS client object.
+      thread/process locks are needed. Although boto3.client is thread/process safe,
+      creating a session() (default session) indirectly through it isn't.
+    Args:
+        region (str, optional): Client endpoint. Defaults to 'us-east'.
+
+    Returns:
+        IBM COS client
+    """
     access_key_id, secret_access_key = get_hmac_keys()
-    return ibm_boto3.client(  # type: ignore[union-attr]
-        service_name='s3',
-        aws_access_key_id=access_key_id,
-        aws_secret_access_key=secret_access_key,
-        endpoint_url=f'https://s3.{region}.cloud-object-storage.appdomain.cloud'
-    )
+    with multiprocessing_lock:
+        with threading_lock:
+            return ibm_boto3.client(  # type: ignore[union-attr]
+                service_name='s3',
+                aws_access_key_id=access_key_id,
+                aws_secret_access_key=secret_access_key,
+                endpoint_url=f'https://s3.{region}.cloud-object-storage.appdomain.cloud'
+            )
 
 
 @import_package
 def get_cos_resource(region: str = 'us-east'):
+    """Returns an IBM COS Resource object.
+      thread/process locks are needed. boto3.Resource isn't thread/process safe.
+
+    Args:
+        region (str, optional): Resource Endpoint. Defaults to 'us-east'.
+
+    Returns:
+        IBM COS Resource
+    """
     access_key_id, secret_access_key = get_hmac_keys()
-    return ibm_boto3.resource(  # type: ignore[union-attr]
-        's3',
-        aws_access_key_id=access_key_id,
-        aws_secret_access_key=secret_access_key,
-        endpoint_url=f'https://s3.{region}.cloud-object-storage.appdomain.cloud'
-    )
+    with multiprocessing_lock:
+        with threading_lock:
+            return ibm_boto3.resource(  # type: ignore[union-attr]
+                's3',
+                aws_access_key_id=access_key_id,
+                aws_secret_access_key=secret_access_key,
+                endpoint_url=f'https://s3.{region}.cloud-object-storage.appdomain.cloud'
+            )
