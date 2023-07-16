@@ -99,6 +99,12 @@ and storage mounting:
       # storage to local disk.
       /train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
 
+      # *** Copying files from IBM COS ***
+      #
+      # This re-uses a predefined bucket and copies its contents directly to /datasets-cos. 
+      # Users must provide the region their bucket resides in, e.g. cos://us-east/bucket-name.
+      /datasets-cos: cos://<region-of-bucket>/<bucket-name>
+
       # *** Persistent Data Storage by copying from S3 ***
       #
       # This uses SkyPilot Storage to first create a S3 bucket named sky-dataset,
