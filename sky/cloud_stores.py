@@ -95,7 +95,7 @@ class GcsCloudStorage(CloudStorage):
     # parellel workers on our end.
     # The gsutil command is part of the Google Cloud SDK, and we reuse
     # the installation logic here.
-    _GET_GSUTIL = gcp.GCLOUD_INSTALLATION_COMMAND
+    _GET_GSUTIL = gcp.GOOGLE_SDK_INSTALLATION_COMMAND
 
     _GSUTIL = ('GOOGLE_APPLICATION_CREDENTIALS='
                f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH} gsutil')
@@ -134,7 +134,7 @@ class GcsCloudStorage(CloudStorage):
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads a directory using gsutil."""
         download_via_gsutil = (
-            f'{self._GSUTIL} -m rsync -r {source} {destination}')
+            f'{self._GSUTIL} -m rsync -e -r {source} {destination}')
         all_commands = [self._GET_GSUTIL]
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)

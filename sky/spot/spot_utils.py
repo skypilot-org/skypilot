@@ -2,10 +2,13 @@
 import collections
 import enum
 import json
+import os
 import pathlib
 import shlex
 import time
-from typing import Any, Dict, List, Optional, Tuple
+import typing
+from typing import Any, Dict, List, Optional, Tuple, Union
+from typing_extensions import Literal
 
 import colorama
 import filelock
@@ -14,12 +17,19 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import status_lib
 from sky.backends import backend_utils
+from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.skylet.log_lib import run_bash_command_with_log
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.spot import spot_state
 from sky.utils import subprocess_utils
+
+if typing.TYPE_CHECKING:
+    from sky import dag as dag_lib
+    import sky
 
 logger = sky_logging.init_logger(__name__)
 
@@ -37,10 +47,11 @@ _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
-_JOB_WAITING_STATUS_MESSAGE = ('[bold cyan]Waiting for the job to start'
+_JOB_WAITING_STATUS_MESSAGE = ('[bold cyan]Waiting for the task to start'
                                '{status_str}.[/] It may take a few minutes.')
-_JOB_CANCELLED_MESSAGE = ('[bold cyan]Waiting for the job status to be updated.'
-                          '[/] It may take a minute.')
+_JOB_CANCELLED_MESSAGE = (
+    '[bold cyan]Waiting for the task status to be updated.'
+    '[/] It may take a minute.')
 
 # The maximum time to wait for the spot job status to transition to terminal
 # state, after the job finished. This is a safeguard to avoid the case where
@@ -98,30 +109,34 @@ def update_spot_job_status(job_id: Optional[int] = None):
         if controller_status is None or controller_status.is_terminal():
             logger.error(f'Controller for job {job_id_} has exited abnormally. '
                          'Setting the job status to FAILED_CONTROLLER.')
-            task_name = spot_state.get_task_name_by_job_id(job_id_)
-
-            # Tear down the abnormal spot cluster to avoid resource leakage.
-            cluster_name = generate_spot_cluster_name(task_name, job_id_)
-            handle = global_user_state.get_handle_from_cluster_name(
-                cluster_name)
-            if handle is not None:
-                backend = backend_utils.get_backend_from_handle(handle)
-                max_retry = 3
-                for retry_cnt in range(max_retry):
-                    try:
-                        backend.teardown(handle, terminate=True)
-                        break
-                    except RuntimeError:
-                        logger.error('Failed to tear down the spot cluster '
-                                     f'{cluster_name!r}. Retrying '
-                                     f'[{retry_cnt}/{max_retry}].')
+            tasks = spot_state.get_spot_jobs(job_id_)
+            for task in tasks:
+                task_name = task['job_name']
+                # Tear down the abnormal spot cluster to avoid resource leakage.
+                cluster_name = generate_spot_cluster_name(task_name, job_id_)
+                handle = global_user_state.get_handle_from_cluster_name(
+                    cluster_name)
+                if handle is not None:
+                    backend = backend_utils.get_backend_from_handle(handle)
+                    max_retry = 3
+                    for retry_cnt in range(max_retry):
+                        try:
+                            backend.teardown(handle, terminate=True)
+                            break
+                        except RuntimeError:
+                            logger.error('Failed to tear down the spot cluster '
+                                         f'{cluster_name!r}. Retrying '
+                                         f'[{retry_cnt}/{max_retry}].')
 
             # The controller job for this spot job is not running: it must
             # have exited abnormally, and we should set the job status to
             # FAILED_CONTROLLER.
+            # The `set_failed` will only update the task's status if the
+            # status is non-terminal.
             spot_state.set_failed(
                 job_id_,
-                spot_state.SpotStatus.FAILED_CONTROLLER,
+                task_id=None,
+                failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
                 failure_reason=
                 'Controller process has exited abnormally. For more details,'
                 f' run: sky spot logs --controller {job_id_}')
@@ -144,6 +159,44 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
     return float(stdout)
 
 
+def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
+    """Run event callback for the task."""
+
+    def callback_func(state: str):
+        event_callback = task.event_callback if task else None
+        if event_callback is None or task is None:
+            return
+        event_callback = event_callback.strip()
+        cluster_name = generate_spot_cluster_name(task.name,
+                                                  job_id) if task.name else None
+        logger.info(f'=== START: event callback for {state!r} ===')
+        log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, 'spot_event',
+                                f'spot-callback-{job_id}-{task_id}.log')
+        result = run_bash_command_with_log(
+            bash_command=event_callback,
+            log_path=log_path,
+            env_vars=dict(
+                SKYPILOT_JOB_ID=str(
+                    task.envs.get(constants.TASK_ID_ENV_VAR_DEPRECATED,
+                                  'N.A.')),
+                SKYPILOT_TASK_ID=str(
+                    task.envs.get(constants.TASK_ID_ENV_VAR, 'N.A.')),
+                SKYPILOT_TASK_IDS=str(
+                    task.envs.get(constants.TASK_ID_LIST_ENV_VAR, 'N.A.')),
+                TASK_ID=str(task_id),
+                JOB_ID=str(job_id),
+                JOB_STATUS=state,
+                CLUSTER_NAME=cluster_name or '',
+                TASK_NAME=task.name or '',
+                # TODO(MaoZiming): Future event type Job or Spot.
+                EVENT_TYPE='Spot'))
+        logger.info(
+            f'Bash:{event_callback},log_path:{log_path},result:{result}')
+        logger.info(f'=== END: event callback for {state!r} ===')
+
+    return callback_func
+
+
 # ======== user functions ========
 
 
@@ -159,6 +212,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
     """
     if job_ids is None:
         job_ids = spot_state.get_nonterminal_job_ids_by_name(None)
+    job_ids = list(set(job_ids))
     if len(job_ids) == 0:
         return 'No job to cancel.'
     job_id_str = ', '.join(map(str, job_ids))
@@ -216,10 +270,12 @@ def cancel_job_by_name(job_name: str) -> str:
 def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     """Stream logs by job id."""
     controller_status = job_lib.get_status(job_id)
-    status_msg = ('[bold cyan]Waiting for controller process to be RUNNING '
-                  '{status_str}[/]. It may take a few minutes.')
+    status_msg = ('[bold cyan]Waiting for controller process to be RUNNING'
+                  '{status_str}[/].')
     status_display = log_utils.safe_rich_status(
         status_msg.format(status_str=''))
+    num_tasks = spot_state.get_num_tasks(job_id)
+
     with status_display:
         prev_msg = None
         while (controller_status != job_lib.JobStatus.RUNNING and
@@ -253,16 +309,19 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     f'Job {job_id} is already in terminal state '
                     f'{spot_job_status.value}. Logs will not be shown.'
                     f'{colorama.Style.RESET_ALL}{job_msg}')
-        task_name = spot_state.get_task_name_by_job_id(job_id)
-        cluster_name = generate_spot_cluster_name(task_name, job_id)
         backend = backends.CloudVmRayBackend()
-        spot_status = spot_state.get_status(job_id)
+        task_id, spot_status = spot_state.get_latest_task_id_status(job_id)
 
-        # spot_status can be None if the controller process just started and has
-        # not updated the spot status yet.
+        # task_id and spot_status can be None if the controller process just
+        # started and the spot status has not set to PENDING yet.
         while spot_status is None or not spot_status.is_terminal():
-            handle = global_user_state.get_handle_from_cluster_name(
-                cluster_name)
+            handle = None
+            if task_id is not None:
+                task_name = spot_state.get_task_name(job_id, task_id)
+                cluster_name = generate_spot_cluster_name(task_name, job_id)
+                handle = global_user_state.get_handle_from_cluster_name(
+                    cluster_name)
+
             # Check the handle: The cluster can be preempted and removed from
             # the table before the spot state is updated by the controller. In
             # this case, we should skip the logging, and wait for the next
@@ -280,7 +339,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     status_display.update(msg)
                     prev_msg = msg
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                spot_status = spot_state.get_status(job_id)
+                task_id, spot_status = (
+                    spot_state.get_latest_task_id_status(job_id))
                 continue
             assert spot_status is not None
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
@@ -298,7 +358,27 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 job_status = list(job_statuses.values())[0]
                 assert job_status is not None, 'No job found.'
                 if job_status != job_lib.JobStatus.CANCELLED:
-                    break
+                    assert task_id is not None, job_id
+                    if task_id < num_tasks - 1 and follow:
+                        # The log for the current job is finished. We need to
+                        # wait until next job to be started.
+                        logger.debug(
+                            f'INFO: Log for the current task ({task_id}) '
+                            'is finished. Waiting for the next task\'s log '
+                            'to be started.')
+                        status_display.update('Waiting for the next task: '
+                                              f'{task_id + 1}.')
+                        status_display.start()
+                        original_task_id = task_id
+                        while True:
+                            task_id, spot_status = (
+                                spot_state.get_latest_task_id_status(job_id))
+                            if original_task_id != task_id:
+                                break
+                            time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+                        continue
+                    else:
+                        break
                 # The job can be cancelled by the user or the controller (when
                 # the cluster is partially preempted).
                 logger.debug(
@@ -380,7 +460,7 @@ def dump_spot_job_queue() -> str:
         job['job_duration'] = job_duration
         job['status'] = job['status'].value
 
-        cluster_name = generate_spot_cluster_name(job['job_name'],
+        cluster_name = generate_spot_cluster_name(job['task_name'],
                                                   job['job_id'])
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
@@ -389,6 +469,7 @@ def dump_spot_job_queue() -> str:
                 f'{handle.launched_nodes}x {handle.launched_resources}')
             job['region'] = handle.launched_resources.region
         else:
+            # FIXME(zongheng): display the last cached values for these.
             job['cluster_resources'] = '-'
             job['region'] = '-'
 
@@ -403,63 +484,165 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
-def format_job_table(jobs: List[Dict[str, Any]],
+@typing.overload
+def format_job_table(tasks: List[Dict[str, Any]],
                      show_all: bool,
+                     return_rows: Literal[False] = False,
                      max_jobs: Optional[int] = None) -> str:
+    ...
+
+
+@typing.overload
+def format_job_table(tasks: List[Dict[str, Any]],
+                     show_all: bool,
+                     return_rows: Literal[True],
+                     max_jobs: Optional[int] = None) -> List[List[str]]:
+    ...
+
+
+def format_job_table(
+        tasks: List[Dict[str, Any]],
+        show_all: bool,
+        return_rows: bool = False,
+        max_jobs: Optional[int] = None) -> Union[str, List[List[str]]]:
     """Returns spot jobs as a formatted string.
 
     Args:
         jobs: A list of spot jobs.
         show_all: Whether to show all columns.
         max_jobs: The maximum number of jobs to show in the table.
+        return_rows: If True, return the rows as a list of strings instead of
+          all rows concatenated into a single string.
+
+    Returns: A formatted string of spot jobs, if not `return_rows`; otherwise a
+      list of "rows" (each of which is a list of str).
     """
     columns = [
-        'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'JOB DURATION',
-        '#RECOVERIES', 'STATUS'
+        'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
+        'JOB DURATION', '#RECOVERIES', 'STATUS'
     ]
     if show_all:
         columns += ['STARTED', 'CLUSTER', 'REGION', 'FAILURE']
     job_table = log_utils.create_table(columns)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
-    for job in jobs:
-        if not job['status'].is_terminal():
-            status_counts[job['status'].value] += 1
+    for task in tasks:
+        if not task['status'].is_terminal():
+            status_counts[task['status'].value] += 1
 
+    all_tasks = tasks
     if max_jobs is not None:
-        jobs = jobs[:max_jobs]
-    for job in jobs:
-        # The job['job_duration'] is already calculated in
-        # dump_spot_job_queue().
-        job_duration = log_utils.readable_time_duration(0,
-                                                        job['job_duration'],
-                                                        absolute=True)
-        submitted = log_utils.readable_time_duration(job['submitted_at'])
-        values = [
-            job['job_id'],
-            job['job_name'],
-            job['resources'],
-            # SUBMITTED
-            submitted if submitted != '-' else submitted,
-            # TOT. DURATION
-            log_utils.readable_time_duration(job['submitted_at'],
-                                             job['end_at'],
-                                             absolute=True),
-            job_duration,
-            job['recovery_count'],
-            job['status'].colored_str(),
-        ]
-        if show_all:
-            values.extend([
-                # STARTED
-                log_utils.readable_time_duration(job['start_at']),
-                job['cluster_resources'],
-                job['region'],
-                job['failure_reason']
-                if job['failure_reason'] is not None else '-',
-            ])
-        job_table.add_row(values)
+        all_tasks = tasks[:max_jobs]
+    jobs = collections.defaultdict(list)
+    for task in all_tasks:
+        # The tasks within the same job_id are already sorted
+        # by the task_id.
+        jobs[task['job_id']].append(task)
 
+    for job_id, job_tasks in jobs.items():
+        if len(job_tasks) > 1:
+            # Aggregate the tasks into a new row in the table.
+            job_name = job_tasks[0]['job_name']
+            job_duration = 0
+            submitted_at = None
+            end_at: Optional[int] = 0
+            recovery_cnt = 0
+            spot_status = spot_state.SpotStatus.SUCCEEDED
+            failure_reason = None
+            current_task_id = len(job_tasks) - 1
+            for task in job_tasks:
+                job_duration += task['job_duration']
+                if task['submitted_at'] is not None:
+                    if (submitted_at is None or
+                            submitted_at > task['submitted_at']):
+                        submitted_at = task['submitted_at']
+                if task['end_at'] is not None:
+                    if end_at is not None and end_at < task['end_at']:
+                        end_at = task['end_at']
+                else:
+                    end_at = None
+                recovery_cnt += task['recovery_count']
+                if spot_status == spot_state.SpotStatus.SUCCEEDED:
+                    # Use the first non-succeeded status.
+                    # TODO(zhwu): we should not blindly use the first non-
+                    # succeeded as the status could be changed to SUBMITTED
+                    # when going from one task to the next one, which can be
+                    # confusing.
+                    spot_status = task['status']
+                    current_task_id = task['task_id']
+
+                if (failure_reason is None and
+                        task['status'] > spot_state.SpotStatus.SUCCEEDED):
+                    failure_reason = task['failure_reason']
+
+            job_duration = log_utils.readable_time_duration(0,
+                                                            job_duration,
+                                                            absolute=True)
+            submitted = log_utils.readable_time_duration(submitted_at)
+            total_duration = log_utils.readable_time_duration(submitted_at,
+                                                              end_at,
+                                                              absolute=True)
+
+            status_str = spot_status.colored_str()
+            if (spot_status < spot_state.SpotStatus.RUNNING and
+                    current_task_id > 0):
+                status_str += f' (task: {current_task_id})'
+
+            job_values = [
+                job_id,
+                '',
+                job_name,
+                '-',
+                submitted,
+                total_duration,
+                job_duration,
+                recovery_cnt,
+                status_str,
+            ]
+            if show_all:
+                job_values.extend([
+                    '-',
+                    '-',
+                    '-',
+                    failure_reason if failure_reason is not None else '-',
+                ])
+            job_table.add_row(job_values)
+
+        for task in job_tasks:
+            # The job['job_duration'] is already calculated in
+            # dump_spot_job_queue().
+            job_duration = log_utils.readable_time_duration(
+                0, task['job_duration'], absolute=True)
+            submitted = log_utils.readable_time_duration(task['submitted_at'])
+            values = [
+                task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
+                task['task_id'] if len(job_tasks) > 1 else '-',
+                task['task_name'],
+                task['resources'],
+                # SUBMITTED
+                submitted if submitted != '-' else submitted,
+                # TOT. DURATION
+                log_utils.readable_time_duration(task['submitted_at'],
+                                                 task['end_at'],
+                                                 absolute=True),
+                job_duration,
+                task['recovery_count'],
+                task['status'].colored_str(),
+            ]
+            if show_all:
+                values.extend([
+                    # STARTED
+                    log_utils.readable_time_duration(task['start_at']),
+                    task['cluster_resources'],
+                    task['region'],
+                    task['failure_reason']
+                    if task['failure_reason'] is not None else '-',
+                ])
+            job_table.add_row(values)
+
+        if len(job_tasks) > 1:
+            # Add a row to separate the aggregated job from the next job.
+            job_table.add_row([''] * len(columns))
     status_str = ', '.join([
         f'{count} {status}' for status, count in sorted(status_counts.items())
     ])
@@ -470,6 +653,8 @@ def format_job_table(jobs: List[Dict[str, Any]],
     output = status_str
     if str(job_table):
         output += f'\n{job_table}'
+    if return_rows:
+        return job_table.rows
     return output
 
 
@@ -531,6 +716,23 @@ class SpotCodeGen:
         return cls._build(code)
 
     @classmethod
+    def set_pending(cls, job_id: int, spot_dag: 'dag_lib.Dag') -> str:
+        dag_name = spot_dag.name
+        # Add the spot job to spot queue table.
+        code = [
+            f'spot_state.set_job_name('
+            f'{job_id}, {dag_name!r})',
+        ]
+        for task_id, task in enumerate(spot_dag.tasks):
+            resources_str = backend_utils.get_task_resources_str(task)
+            code += [
+                f'spot_state.set_pending('
+                f'{job_id}, {task_id}, {task.name!r}, '
+                f'{resources_str!r})',
+            ]
+        return cls._build(code)
+
+    @classmethod
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)
@@ -562,13 +764,18 @@ def load_job_table_cache() -> Optional[Tuple[float, str]]:
 
 def is_spot_controller_up(
     stopped_message: str,
-) -> Tuple[Optional[global_user_state.ClusterStatus],
+    non_existent_message: str = 'No managed spot jobs are found.',
+) -> Tuple[Optional[status_lib.ClusterStatus],
            Optional['backends.CloudVmRayResourceHandle']]:
     """Check if the spot controller is up.
 
     It can be used to check the actual controller status (since the autostop is
     set for the controller) before the spot commands interact with the
     controller.
+
+    Args:
+        stopped_message: Message to print if the controller is STOPPED.
+        non_existent_message: Message to show if the controller does not exist.
 
     Returns:
         controller_status: The status of the spot controller. If it fails during
@@ -584,13 +791,14 @@ def is_spot_controller_up(
           identity.
     """
     try:
-        # Set force_refresh=False to make sure the refresh only happens when the
-        # controller is INIT/UP. This optimization avoids unnecessary costly
-        # refresh when the controller is already stopped. This optimization is
-        # based on the assumption that the user will not start the controller
-        # manually from the cloud console.
+        # Set force_refresh_statuses=None to make sure the refresh only happens
+        # when the controller is INIT/UP (triggered in these statuses as the
+        # autostop is always set for spot controller). This optimization avoids
+        # unnecessary costly refresh when the controller is already stopped.
+        # This optimization is based on the assumption that the user will not
+        # start the controller manually from the cloud console.
         controller_status, handle = backend_utils.refresh_cluster_status_handle(
-            SPOT_CONTROLLER_NAME, force_refresh=False)
+            SPOT_CONTROLLER_NAME, force_refresh_statuses=None)
     except exceptions.ClusterStatusFetchingError as e:
         # We do not catch the exceptions related to the cluster owner identity
         # mismatch, please refer to the comment in
@@ -606,13 +814,13 @@ def is_spot_controller_up(
             controller_status, handle = record['status'], record['handle']
 
     if controller_status is None:
-        sky_logging.print('No managed spot jobs are found.')
-    elif controller_status != global_user_state.ClusterStatus.UP:
+        sky_logging.print(non_existent_message)
+    elif controller_status != status_lib.ClusterStatus.UP:
         msg = (f'Spot controller {SPOT_CONTROLLER_NAME} '
                f'is {controller_status.value}.')
-        if controller_status == global_user_state.ClusterStatus.STOPPED:
+        if controller_status == status_lib.ClusterStatus.STOPPED:
             msg += f'\n{stopped_message}'
-        if controller_status == global_user_state.ClusterStatus.INIT:
+        if controller_status == status_lib.ClusterStatus.INIT:
             msg += '\nPlease wait for the controller to be ready.'
         sky_logging.print(msg)
         handle = None

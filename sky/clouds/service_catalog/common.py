@@ -153,7 +153,7 @@ def _get_instance_type(
 ) -> pd.DataFrame:
     idx = df['InstanceType'] == instance_type
     if region is not None:
-        idx &= df['Region'] == region
+        idx &= df['Region'].str.lower() == region.lower()
     if zone is not None:
         # NOTE: For Azure instances, zone must be None.
         idx &= df['AvailabilityZone'] == zone
@@ -180,7 +180,8 @@ def validate_region_zone_impl(
         return candidate_strs
 
     def _get_all_supported_regions_str() -> str:
-        all_regions: List[str] = sorted(df['Region'].unique().tolist())
+        all_regions: List[str] = sorted(
+            df['Region'].str.lower().unique().tolist())
         return (f'\nList of supported {cloud_name} regions: '
                 f'{", ".join(all_regions)!r}')
 
@@ -188,17 +189,18 @@ def validate_region_zone_impl(
 
     filter_df = df
     if region is not None:
-        filter_df = filter_df[filter_df['Region'] == region]
+        filter_df = _filter_region_zone(filter_df, region, zone=None)
         if len(filter_df) == 0:
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid region {region!r}')
-                candidate_strs = _get_candidate_str(region,
-                                                    df['Region'].unique())
+                candidate_strs = _get_candidate_str(
+                    region.lower(), df['Region'].str.lower().unique())
                 if not candidate_strs:
                     error_msg += _get_all_supported_regions_str()
                     raise ValueError(error_msg)
                 error_msg += candidate_strs
                 raise ValueError(error_msg)
+        validated_region = filter_df['Region'].unique()[0]
 
     if zone is not None:
         maybe_region_df = filter_df
@@ -333,6 +335,15 @@ def _filter_with_mem(df: pd.DataFrame,
         return df[df['MemoryGiB'] == memory]
 
 
+def _filter_region_zone(df: pd.DataFrame, region: Optional[str],
+                        zone: Optional[str]) -> pd.DataFrame:
+    if region is not None:
+        df = df[df['Region'].str.lower() == region.lower()]
+    if zone is not None:
+        df = df[df['AvailabilityZone'].str.lower() == zone.lower()]
+    return df
+
+
 def get_instance_type_for_cpus_mem_impl(
         df: pd.DataFrame, cpus: Optional[str],
         memory_gb_or_ratio: Optional[str]) -> Optional[str]:
@@ -353,8 +364,8 @@ def get_instance_type_for_cpus_mem_impl(
     df = _filter_with_mem(df, memory_gb_or_ratio)
     if df.empty:
         return None
-    # Sort by the number of vCPUs and then by the price.
-    df = df.sort_values(by=['vCPUs', 'Price'], ascending=True)
+    # Sort by the price.
+    df = df.sort_values(by=['Price'], ascending=True)
     return df['InstanceType'].iloc[0]
 
 
@@ -389,10 +400,12 @@ def get_instance_type_for_accelerator_impl(
     """
     result = df[(df['AcceleratorName'].str.fullmatch(acc_name, case=False)) &
                 (df['AcceleratorCount'] == acc_count)]
+    result = _filter_region_zone(result, region, zone)
     if len(result) == 0:
         fuzzy_result = df[
             (df['AcceleratorName'].str.contains(acc_name, case=False)) &
             (df['AcceleratorCount'] >= acc_count)]
+        fuzzy_result = _filter_region_zone(fuzzy_result, region, zone)
         fuzzy_result = fuzzy_result.sort_values('Price', ascending=True)
         fuzzy_result = fuzzy_result[['AcceleratorName',
                                      'AcceleratorCount']].drop_duplicates()
@@ -405,11 +418,7 @@ def get_instance_type_for_accelerator_impl(
 
     result = _filter_with_cpus(result, cpus)
     result = _filter_with_mem(result, memory)
-    if region is not None:
-        result = result[result['Region'] == region]
-    if zone is not None:
-        # NOTE: For Azure regions, zone must be None.
-        result = result[result['AvailabilityZone'] == zone]
+    result = _filter_region_zone(result, region, zone)
     if len(result) == 0:
         return ([], [])
 
@@ -528,7 +537,7 @@ def _accelerator_in_region(df: pd.DataFrame, acc_name: str, acc_count: int,
     """Returns True if the accelerator is in the region."""
     return len(df[(df['AcceleratorName'] == acc_name) &
                   (df['AcceleratorCount'] == acc_count) &
-                  (df['Region'] == region)]) > 0
+                  (df['Region'].str.lower() == region.lower())]) > 0
 
 
 def _accelerator_in_zone(df: pd.DataFrame, acc_name: str, acc_count: int,
@@ -567,8 +576,7 @@ def get_image_id_from_tag_impl(df: pd.DataFrame, tag: str,
     an image that matches the tag.
     """
     df = df[df['Tag'] == tag]
-    if region is not None:
-        df = df[df['Region'] == region]
+    df = _filter_region_zone(df, region, zone=None)
     assert len(df) <= 1, ('Multiple images found for tag '
                           f'{tag} in region {region}')
     if len(df) == 0:
@@ -583,7 +591,6 @@ def is_image_tag_valid_impl(df: pd.DataFrame, tag: str,
                             region: Optional[str]) -> bool:
     """Returns True if the image tag is valid."""
     df = df[df['Tag'] == tag]
-    if region is not None:
-        df = df[df['Region'] == region]
+    df = _filter_region_zone(df, region, zone=None)
     df = df.dropna(subset=['ImageId'])
     return len(df) > 0

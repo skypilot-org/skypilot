@@ -2,8 +2,6 @@ resources:
   accelerators: A100-80GB:8
   disk_size: 1000
   use_spot: true
-  # Note: The disk_tier option is not offered in skypilot<=0.2.5, we need
-  # to install SkyPilot from source.
   disk_tier: high
 
 num_nodes: 1
@@ -13,6 +11,8 @@ file_mounts:
     name: YOUR_OWN_BUCKET_NAME # Change to your own bucket name
     mode: MOUNT
   /data/mydata.json: ./dummy.json
+
+workdir: .
 
 setup: |
   # Setup the environment
@@ -65,7 +65,7 @@ run: |
   mkdir -p ~/.checkpoints/${last_ckpt}
   gsutil -m rsync -r ${CKPT_PATH}/${last_ckpt}/ ~/.checkpoints/${last_ckpt}
 
-  bash scripts/sync_local_checkpoint.sh ${LOCAL_CKPT_PATH} ${CKPT_PATH} > sync.log 2>&1 &
+  bash ../scripts/sync_local_checkpoint.sh ${LOCAL_CKPT_PATH} ${CKPT_PATH} > sync.log 2>&1 &
   
   # Turn off wandb if no api key is provided
   if [ $WANDB_API_KEY == "" ]; then

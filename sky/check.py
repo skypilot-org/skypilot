@@ -8,7 +8,8 @@ from sky import global_user_state
 from sky.adaptors import cloudflare
 
 
-def check(quiet: bool = False) -> None:
+# TODO(zhwu): add check for a single cloud to improve performance
+def check(quiet: bool = False, verbose: bool = False) -> None:
     echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
     echo('Checking credentials to enable clouds for SkyPilot.')
 
@@ -26,6 +27,10 @@ def check(quiet: bool = False) -> None:
                  ' ' * 10)
         if ok:
             enabled_clouds.append(str(cloud))
+            if verbose:
+                activated_account = cloud.get_current_user_identity_str()
+                if activated_account is not None:
+                    echo(f'    Activated account: {activated_account}')
             if reason is not None:
                 echo(f'    Hint: {reason}')
         else:

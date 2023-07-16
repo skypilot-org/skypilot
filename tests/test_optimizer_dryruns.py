@@ -1,6 +1,6 @@
 import tempfile
 import textwrap
-from typing import List
+from typing import Callable, List, Optional
 
 import pytest
 
@@ -9,31 +9,39 @@ from sky import clouds
 from sky import exceptions
 
 
-def _test_parse_cpus(spec, expected_cpus):
+def _test_parse_task_yaml(spec: str, test_fn: Optional[Callable] = None):
+    """Tests parsing a task from a YAML spec and running a test_fn."""
     with tempfile.NamedTemporaryFile('w') as f:
         f.write(spec)
         f.flush()
         with sky.Dag():
             task = sky.Task.from_yaml(f.name)
-            assert list(task.resources)[0].cpus == expected_cpus
+            if test_fn is not None:
+                test_fn(task)
+
+
+def _test_parse_cpus(spec, expected_cpus):
+
+    def test_fn(task):
+        assert list(task.resources)[0].cpus == expected_cpus
+
+    _test_parse_task_yaml(spec, test_fn)
 
 
 def _test_parse_memory(spec, expected_memory):
-    with tempfile.NamedTemporaryFile('w') as f:
-        f.write(spec)
-        f.flush()
-        with sky.Dag():
-            task = sky.Task.from_yaml(f.name)
-            assert list(task.resources)[0].memory == expected_memory
+
+    def test_fn(task):
+        assert list(task.resources)[0].memory == expected_memory
+
+    _test_parse_task_yaml(spec, test_fn)
 
 
 def _test_parse_accelerators(spec, expected_accelerators):
-    with tempfile.NamedTemporaryFile('w') as f:
-        f.write(spec)
-        f.flush()
-        with sky.Dag():
-            task = sky.Task.from_yaml(f.name)
-            assert list(task.resources)[0].accelerators == expected_accelerators
+
+    def test_fn(task):
+        assert list(task.resources)[0].accelerators == expected_accelerators
+
+    _test_parse_task_yaml(spec, test_fn)
 
 
 # Monkey-patching is required because in the test environment, no cloud is
@@ -42,6 +50,8 @@ def _test_parse_accelerators(spec, expected_accelerators):
 # clouds are enabled, so we monkeypatch the `sky.global_user_state` module
 # to return all three clouds. We also monkeypatch `sky.check.check` so that
 # when the optimizer tries calling it to update enabled_clouds, it does not
+# TODO: Keep the cloud enabling in sync with the fixture enable_all_clouds
+# in tests/conftest.py
 # raise exceptions.
 def _make_resources(
     monkeypatch,
@@ -61,6 +71,10 @@ def _make_resources(
         prefix='tmp_backup_config_default', delete=False)
     monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
                         config_file_backup.name)
+    monkeypatch.setattr(
+        'sky.clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH',
+        config_file_backup.name)
+    monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
 
     # Should create Resources here, since it uses the enabled clouds.
     return sky.Resources(*resources_args, **resources_kwargs)
@@ -270,7 +284,7 @@ def test_instance_type_from_cpu_memory(monkeypatch, capfd):
     assert 'r6i.2xlarge' in stdout  # AWS, 8 vCPUs, 64 GB memory
     assert 'Standard_E8s_v5' in stdout  # Azure, 8 vCPUs, 64 GB memory
     assert 'n2-highmem-8' in stdout  # GCP, 8 vCPUs, 64 GB memory
-    assert 'gpu_1x_a6000' in stdout  # Lambda, 14 vCPUs, 100 GB memory
+    assert 'gpu_1x_a10' in stdout  # Lambda, 30 vCPUs, 200 GB memory
 
     _test_resources_launch(monkeypatch, cpus='4+', memory='4+')
     stdout, _ = capfd.readouterr()
@@ -315,11 +329,32 @@ def test_instance_type_mistmatches_accelerators(monkeypatch):
         ('m4.2xlarge', 'V100'),
     ]
     for instance, acc in bad_instance_and_accs:
-        with pytest.raises(ValueError) as e:
+        with pytest.raises(exceptions.ResourcesMismatchError) as e:
             _test_resources_launch(monkeypatch,
                                    sky.AWS(),
                                    instance_type=instance,
                                    accelerators=acc)
+        assert 'Infeasible resource demands found' in str(e.value)
+
+    with pytest.raises(exceptions.ResourcesMismatchError) as e:
+        _test_resources_launch(monkeypatch,
+                               sky.GCP(),
+                               instance_type='n2-standard-8',
+                               accelerators={'V100': 1})
+        assert 'can only be attached to N1 VMs,' in str(e.value), str(e.value)
+
+    with pytest.raises(exceptions.ResourcesMismatchError) as e:
+        _test_resources_launch(monkeypatch,
+                               sky.GCP(),
+                               instance_type='a2-highgpu-1g',
+                               accelerators={'A100': 2})
+        assert 'cannot be attached to' in str(e.value), str(e.value)
+
+    with pytest.raises(exceptions.ResourcesMismatchError) as e:
+        _test_resources_launch(monkeypatch,
+                               sky.AWS(),
+                               instance_type='p3.16xlarge',
+                               accelerators={'V100': 1})
         assert 'Infeasible resource demands found' in str(e.value)
 
 
@@ -332,11 +367,20 @@ def test_instance_type_matches_accelerators(monkeypatch):
                            sky.GCP(),
                            instance_type='n1-standard-2',
                            accelerators='V100')
-    # Partial use: Instance has 8 V100s, while the task needs 1 of them.
+
+    _test_resources_launch(monkeypatch,
+                           sky.GCP(),
+                           instance_type='n1-standard-8',
+                           accelerators='tpu-v3-8')
+    _test_resources_launch(monkeypatch,
+                           sky.GCP(),
+                           instance_type='a2-highgpu-1g',
+                           accelerators='a100')
+
     _test_resources_launch(monkeypatch,
                            sky.AWS(),
                            instance_type='p3.16xlarge',
-                           accelerators={'V100': 1})
+                           accelerators={'V100': 8})
 
 
 def test_invalid_instance_type(monkeypatch):
@@ -388,6 +432,13 @@ def test_invalid_region(monkeypatch):
             _test_resources(monkeypatch, cloud, region='invalid')
         assert 'Invalid region' in str(e.value)
 
+    with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+        _test_resources_launch(monkeypatch,
+                               sky.GCP(),
+                               region='us-west1',
+                               accelerators='tpu-v3-8')
+        assert 'No launchable resource found' in str(e.value)
+
 
 def test_invalid_zone(monkeypatch):
     for cloud in [sky.AWS(), sky.GCP()]:
@@ -437,7 +488,7 @@ def test_invalid_image(monkeypatch):
 
     with pytest.raises(ValueError) as e:
         _test_resources(monkeypatch, cloud=sky.Azure(), image_id='some-image')
-    assert 'only supported for AWS, GCP and IBM' in str(e.value)
+    assert 'only supported for AWS/GCP/IBM/OCI' in str(e.value)
 
 
 def test_valid_image(monkeypatch):
@@ -541,3 +592,60 @@ def test_invalid_num_nodes():
                 task = sky.Task()
                 task.num_nodes = invalid_value
             assert 'num_nodes should be a positive int' in str(e.value)
+
+
+def test_parse_empty_yaml():
+    spec = textwrap.dedent("""\
+        """)
+
+    def test_fn(task):
+        assert task.num_nodes == 1
+
+    _test_parse_task_yaml(spec, test_fn)
+
+
+def test_parse_name_only_yaml():
+    spec = textwrap.dedent("""\
+        name: test_task
+        """)
+
+    def test_fn(task):
+        assert task.name == 'test_task'
+
+    _test_parse_task_yaml(spec, test_fn)
+
+
+def test_parse_invalid_envs_yaml(monkeypatch):
+    spec = textwrap.dedent("""\
+        envs:
+          hello world: 1  # invalid key
+          123: val  # invalid key
+          good_key: val
+        """)
+    with pytest.raises(ValueError) as e:
+        _test_parse_task_yaml(spec)
+    assert '\'123\', \'hello world\' do not match any of the regexes' in str(
+        e.value)
+
+
+def test_parse_valid_envs_yaml(monkeypatch):
+    spec = textwrap.dedent("""\
+        envs:
+          hello_world: 1
+          HELLO: val
+          GOOD123: 123
+        """)
+    _test_parse_task_yaml(spec)
+
+
+def test_invalid_accelerators_regions(enable_all_clouds, monkeypatch):
+    task = sky.Task(run='echo hi')
+    task.set_resources(
+        sky.Resources(
+            sky.AWS(),
+            accelerators='A100:8',
+            region='us-west-1',
+        ))
+    with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+        sky.launch(task, cluster_name='should-fail', dryrun=True)
+        assert 'No launchable resource found for' in str(e.value), str(e.value)

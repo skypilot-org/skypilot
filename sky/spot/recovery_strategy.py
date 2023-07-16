@@ -8,6 +8,7 @@ import sky
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import status_lib
 from sky import backends
 from sky.backends import backend_utils
 from sky.skylet import job_lib
@@ -99,19 +100,24 @@ class StrategyExecutor:
         return SPOT_STRATEGIES[spot_recovery](cluster_name, backend, task,
                                               retry_until_up)
 
-    def launch(self) -> Optional[float]:
+    def launch(self) -> float:
         """Launch the spot cluster for the first time.
 
         It can fail if resource is not available. Need to check the cluster
         status, after calling.
 
-        Returns: The job's submit timestamp, or None if failed.
+        Returns: The job's submit timestamp, on success (otherwise, an
+            exception is raised).
 
         Raises: Please refer to the docstring of self._launch().
         """
+
         if self.retry_until_up:
-            return self._launch(max_retry=None)
-        return self._launch()
+            job_submit_at = self._launch(max_retry=None)
+        else:
+            job_submit_at = self._launch()
+        assert job_submit_at is not None
+        return job_submit_at
 
     def recover(self) -> float:
         """Relaunch the spot cluster after failure and wait until job starts.
@@ -130,13 +136,36 @@ class StrategyExecutor:
             return
         try:
             usage_lib.messages.usage.set_internal()
-            sky.cancel(cluster_name=self.cluster_name, all=True)
+            # Note that `sky.cancel()` may not go through for a variety of
+            # reasons:
+            # (1) head node is preempted; or
+            # (2) somehow user programs escape the cancel codepath's kill.
+            # The latter is silent and is a TODO.
+            #
+            # For the former, an exception will be thrown, in which case we
+            # fallback to terminate_cluster() in the except block below. This
+            # is because in the event of recovery on the same set of remaining
+            # worker nodes, we don't want to leave some old job processes
+            # running.
+            # TODO(zhwu): This is non-ideal and we should figure out another way
+            # to reliably cancel those processes and not have to down the
+            # remaining nodes first.
+            #
+            # In the case where the worker node is preempted, the `sky.cancel()`
+            # should be functional with the `_try_cancel_if_cluster_is_init`
+            # flag, i.e. it sends the cancel signal to the head node, which will
+            # then kill the user process on remaining worker nodes.
+            sky.cancel(cluster_name=self.cluster_name,
+                       all=True,
+                       _try_cancel_if_cluster_is_init=True)
         except Exception as e:  # pylint: disable=broad-except
-            # Ignore the failure as the cluster can be totally stopped, and the
-            # job canceling can get connection error.
-            logger.info('Ignoring the job cancellation failure; '
-                        'the spot cluster is likely completely stopped.'
-                        f'\n  Detailed exception: {e}')
+            logger.info('Failed to cancel the job on the cluster. The cluster '
+                        'might be already down or the head node is preempted.'
+                        '\n  Detailed exception: '
+                        f'{common_utils.format_exception(e)}\n'
+                        'Terminating the cluster explicitly to ensure no '
+                        'remaining job process interferes with recovery.')
+            terminate_cluster(self.cluster_name)
 
     def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
         """Wait for MAX_JOB_CHECKING_RETRY times until job starts on the cluster
@@ -153,7 +182,8 @@ class StrategyExecutor:
             try:
                 cluster_status, _ = (
                     backend_utils.refresh_cluster_status_handle(
-                        self.cluster_name, force_refresh=True))
+                        self.cluster_name,
+                        force_refresh_statuses=set(status_lib.ClusterStatus)))
             except Exception as e:  # pylint: disable=broad-except
                 # If any unexpected error happens, retry the job checking
                 # loop.
@@ -162,7 +192,7 @@ class StrategyExecutor:
                 logger.info(f'Unexpected exception: {e}\nFailed to get the '
                             'refresh the cluster status. Retrying.')
                 continue
-            if cluster_status != global_user_state.ClusterStatus.UP:
+            if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster can be preempted before the job is
                 # launched.
                 # Break to let the retry launch kick in.
@@ -202,7 +232,9 @@ class StrategyExecutor:
             time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
         return None
 
-    def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
+    def _launch(self,
+                max_retry: Optional[int] = 3,
+                raise_on_failure: bool = True) -> Optional[float]:
         """Implementation of launch().
 
         The function will wait until the job starts running, but will leave the
@@ -253,7 +285,8 @@ class StrategyExecutor:
                            _is_launched_by_spot_controller=True)
                 logger.info('Spot cluster launched.')
             except (exceptions.InvalidClusterNameError,
-                    exceptions.NoCloudAccessError) as e:
+                    exceptions.NoCloudAccessError,
+                    exceptions.ResourcesMismatchError) as e:
                 logger.error('Failure happened before provisioning. '
                              f'{common_utils.format_exception(e)}')
                 if raise_on_failure:
@@ -339,7 +372,9 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         self._launched_cloud_region: Optional[Tuple['sky.clouds.Cloud',
                                                     'sky.clouds.Region']] = None
 
-    def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
+    def _launch(self,
+                max_retry: Optional[int] = 3,
+                raise_on_failure: bool = True) -> Optional[float]:
         job_submitted_at = super()._launch(max_retry, raise_on_failure)
         if job_submitted_at is not None:
             # Only record the cloud/region if the launch is successful.

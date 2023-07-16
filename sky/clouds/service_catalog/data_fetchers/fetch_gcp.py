@@ -32,10 +32,6 @@ TPU_SERVICE_ID = 'E000-3F24-B8AA'
 # The number of digits to round the price to.
 PRICE_ROUNDING = 5
 
-# Refer to: https://github.com/skypilot-org/skypilot/issues/1006
-# G2 series has L4 GPU, which is not supported by SkyPilot yet
-UNSUPPORTED_SERIES = ['f1', 'm2', 'g2']
-
 # This zone is only for TPU v4, and does not appear in the skus yet.
 TPU_V4_ZONES = ['us-central2-b']
 # TPU v3 pods are available in us-east1-d, but hidden in the skus.
@@ -62,6 +58,9 @@ TPU_V4_HOST_DF = pd.read_csv(
  """)))
 
 # TODO(woosuk): Make this more robust.
+# Refer to: https://github.com/skypilot-org/skypilot/issues/1006
+# G2 series has L4 GPU, which is not supported by SkyPilot yet
+# Unsupported Series: 'f1', 'm2', 'g2'
 SERIES_TO_DISCRIPTION = {
     'a2': 'A2 Instance',
     'c2': 'Compute optimized',
@@ -82,6 +81,8 @@ SERIES_TO_DISCRIPTION = {
 creds, project_id = google.auth.default()
 gcp_client = discovery.build('compute', 'v1')
 tpu_client = discovery.build('tpu', 'v1')
+
+SINGLE_THREADED = False
 
 
 def get_skus(service_id: str) -> List[Dict[str, Any]]:
@@ -175,8 +176,11 @@ def _get_machine_type_for_zone(zone: str) -> pd.DataFrame:
 def _get_machine_types(region_prefix: str) -> pd.DataFrame:
     zones = _get_all_zones()
     zones = [zone for zone in zones if zone.startswith(region_prefix)]
-    with multiprocessing.Pool() as pool:
-        all_machine_dfs = pool.map(_get_machine_type_for_zone, zones)
+    if SINGLE_THREADED:
+        all_machine_dfs = [_get_machine_type_for_zone(zone) for zone in zones]
+    else:
+        with multiprocessing.Pool() as pool:
+            all_machine_dfs = pool.map(_get_machine_type_for_zone, zones)
     machine_df = pd.concat(all_machine_dfs, ignore_index=True)
     return machine_df
 
@@ -184,7 +188,8 @@ def _get_machine_types(region_prefix: str) -> pd.DataFrame:
 def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
     df = _get_machine_types(region_prefix)
     # Drop the unsupported series.
-    df = df[~df['InstanceType'].str.startswith(tuple(UNSUPPORTED_SERIES))]
+    df = df[df['InstanceType'].str.startswith(
+        tuple(f'{series}-' for series in SERIES_TO_DISCRIPTION))]
     df = df[~df['AvailabilityZone'].str.startswith(tuple(TPU_V4_ZONES))]
 
     # TODO(woosuk): Make this more efficient.
@@ -285,8 +290,11 @@ def _get_gpus_for_zone(zone: str) -> pd.DataFrame:
 def _get_gpus(region_prefix: str) -> pd.DataFrame:
     zones = _get_all_zones()
     zones = [zone for zone in zones if zone.startswith(region_prefix)]
-    with multiprocessing.Pool() as pool:
-        all_gpu_dfs = pool.map(_get_gpus_for_zone, zones)
+    if SINGLE_THREADED:
+        all_gpu_dfs = [_get_gpus_for_zone(zone) for zone in zones]
+    else:
+        with multiprocessing.Pool() as pool:
+            all_gpu_dfs = pool.map(_get_gpus_for_zone, zones)
     gpu_df = pd.concat(all_gpu_dfs, ignore_index=True)
     return gpu_df
 
@@ -368,8 +376,11 @@ def _get_tpus() -> pd.DataFrame:
     zones = _get_all_zones()
     # Add TPU-v4 zones.
     zones += TPU_V4_ZONES
-    with multiprocessing.Pool() as pool:
-        all_tpu_dfs = pool.map(_get_tpu_for_zone, zones)
+    if SINGLE_THREADED:
+        all_tpu_dfs = [_get_tpu_for_zone(zone) for zone in zones]
+    else:
+        with multiprocessing.Pool() as pool:
+            all_tpu_dfs = pool.map(_get_tpu_for_zone, zones)
     tpu_df = pd.concat(all_tpu_dfs, ignore_index=True)
     return tpu_df
 
@@ -478,7 +489,15 @@ if __name__ == '__main__':
         '--all-regions',
         action='store_true',
         help='Fetch all global regions, not just the U.S. ones.')
+    parser.add_argument('--single-threaded',
+                        action='store_true',
+                        help='Run in single-threaded mode. This is useful when '
+                        'running in github action, as the multiprocessing '
+                        'does not work well with the gcp client due '
+                        'to ssl issues.')
     args = parser.parse_args()
+
+    SINGLE_THREADED = args.single_threaded
 
     region_prefix_filter = '' if args.all_regions else 'us-'
     catalog_df = get_catalog_df(region_prefix_filter)

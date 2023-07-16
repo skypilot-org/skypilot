@@ -28,25 +28,26 @@ Task YAML
 
 To launch a spot job, you can simply reuse your task YAML (recommended to test it with :code:`sky launch` first).
 For example, we found the BERT fine-tuning YAML works with :code:`sky launch`, and want to
-launch it with SkyPilot managed spot jobs. 
+launch it with SkyPilot managed spot jobs.
 
 We can launch it with the following:
 
 .. code-block:: console
 
-    $ sky spot launch -n bert-qa bert_qa.yaml
+  $ sky spot launch -n bert-qa bert_qa.yaml
+
 
 .. code-block:: yaml
 
   # bert_qa.yaml
   name: bert_qa
-  
+
   resources:
     accelerators: V100:1
 
   # Assume your working directory is under `~/transformers`.
   # To make this example work, please run the following command:
-  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.18.0
+  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.30.1
   workdir: ~/transformers
 
   setup: |
@@ -73,6 +74,7 @@ We can launch it with the following:
     --max_seq_length 384 \
     --doc_stride 128 \
     --report_to wandb
+
 
 .. note::
 
@@ -104,13 +106,15 @@ The :code:`MOUNT` mode in :ref:`SkyPilot Storage <sky-storage>` ensures the chec
 Note that the application code should save program checkpoints periodically and reload those states when the job is restarted.
 This is typically achieved by reloading the latest checkpoint at the beginning of your program.
 
+.. _spot-jobs-end-to-end:
+
 An end-to-end example
 ---------------------
 
 Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a BERT model on a question-answering task with HuggingFace.
 
 .. code-block:: yaml
-  :emphasize-lines: 12-15,42-45
+  :emphasize-lines: 12-15,41-44
 
   # bert_qa.yaml
   name: bert_qa
@@ -120,7 +124,7 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
 
   # Assume your working directory is under `~/transformers`.
   # To make this example work, please run the following command:
-  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.18.0
+  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.30.1
   workdir: ~/transformers
 
   file_mounts:
@@ -152,23 +156,23 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
     --max_seq_length 384 \
     --doc_stride 128 \
     --report_to wandb \
-    --run_name $SKYPILOT_JOB_ID \
+    --run_name $SKYPILOT_TASK_ID \
     --output_dir /checkpoint/bert_qa/ \
     --save_total_limit 10 \
     --save_steps 1000
 
 
 
-As HuggingFace has built-in support for periodically checkpointing, we only need to pass the highlighted arguments for setting up 
-the output directory and frequency of checkpointing (see more 
+As HuggingFace has built-in support for periodically checkpointing, we only need to pass the highlighted arguments for setting up
+the output directory and frequency of checkpointing (see more
 on `Huggingface API <https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments.save_steps>`_).
-You may also refer to another example `here <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`_ for periodically checkpointing with PyTorch.
+You may also refer to another example `here <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`__ for periodically checkpointing with PyTorch.
 
-We also set :code:`--run_name` to :code:`$SKYPILOT_JOB_ID` so that the loggings will be saved
+We also set :code:`--run_name` to :code:`$SKYPILOT_TASK_ID` so that the logs for all recoveries of the same job will be saved
 to the same run in Weights & Biases.
 
 .. note::
-  The environment variable :code:`$SKYPILOT_JOB_ID` (example: "sky-2022-10-06-05-17-09-750781_spot_id-22") can be used to identify the same job, i.e., it is kept identical across all
+  The environment variable :code:`$SKYPILOT_TASK_ID` (example: "sky-2022-10-06-05-17-09-750781_spot_id-22") can be used to identify the same job, i.e., it is kept identical across all
   recoveries of the job.
   It can be accessed in the task's :code:`run` commands or directly in the program itself (e.g., access
   via :code:`os.environ` and pass to Weights & Biases for tracking purposes in your training script). It is made available to
@@ -179,7 +183,7 @@ cost savings from spot instances without worrying about preemption or losing pro
 
 .. code-block:: console
 
-    $ sky spot launch -n bert-qa bert_qa.yaml
+  $ sky spot launch -n bert-qa bert_qa.yaml
 
 
 Useful CLIs
@@ -191,53 +195,98 @@ See all spot jobs:
 
 .. code-block:: console
 
-    $ sky spot queue
+  $ sky spot queue
 
 .. code-block:: console
 
-    Fetching managed spot job statuses...
-    Managed spot jobs:
-    ID NAME     RESOURCES     SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
-    2  roberta  1x [A100:8]   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
-    1  bert-qa  1x [V100:1]   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
+  Fetching managed spot job statuses...
+  Managed spot jobs:
+  ID NAME     RESOURCES     SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
+  2  roberta  1x [A100:8]   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
+  1  bert-qa  1x [V100:1]   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
 
 Stream the logs of a running spot job:
 
 .. code-block:: console
 
-    $ sky spot logs -n bert-qa  # by name
-    $ sky spot logs 2           # by job ID
+  $ sky spot logs -n bert-qa  # by name
+  $ sky spot logs 2           # by job ID
 
 Cancel a spot job:
 
 .. code-block:: console
 
-    $ sky spot cancel -n bert-qa  # by name
-    $ sky spot cancel 2           # by job ID
+  $ sky spot cancel -n bert-qa  # by name
+  $ sky spot cancel 2           # by job ID
 
 .. note::
   If any failure happens for a spot job, you can check :code:`sky spot queue -a` for the brief reason
   of the failure. For more details, it would be helpful to check :code:`sky spot logs --controller <job_id>`.
 
+Dashboard
+-----------
+
+Use ``sky spot dashboard`` to open a dashboard to see all jobs:
+
+.. code-block:: console
+
+  $ sky spot dashboard
+
+This automatically opens a browser tab to show the dashboard:
+
+.. image:: ../images/spot-dashboard.png
+
+The UI shows the same information as the CLI ``sky spot queue -a``. The UI is
+especially useful when there are many in-progress jobs to monitor, which the
+terminal-based CLI may need more than one page to display.
 
 Real-world examples
 -------------------------
 
-* `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_, `YAML <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/train.yaml>`_
-* BERT (shown above): `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_
-* PyTorch DDP, ResNet: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/resnet.yaml>`_
-* PyTorch Lightning DDP, CIFAR-10: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/lightning_cifar10.yaml>`_
+* `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_, `YAML <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/train.yaml>`__
+* BERT (shown above): `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`__
+* PyTorch DDP, ResNet: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/resnet.yaml>`__
+* PyTorch Lightning DDP, CIFAR-10: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/lightning_cifar10.yaml>`__
 
-Spot controller (Advanced)
+Spot controller
 -------------------------------
 
-There will be a single spot controller VM (a small on-demand CPU VM) running in the background to manage all the spot jobs.
-It will be autostopped after all spot jobs finished and no new spot job is submitted for 10 minutes. Typically **no user intervention** is needed. 
-You can find the controller with :code:`sky status`, and refresh the status with :code:`sky status -r`.
+The spot controller is a small on-demand CPU VM running in the cloud that manages all spot jobs of a user.
+It is automatically launched when the first managed spot job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all spot jobs finish and no new spot job is submitted in that duration).
+Thus, **no user action is needed** to manage its lifecycle.
 
-Although, the cost of the spot controller is negligible (~$0.4/hour when running and less than $0.004/hour when stopped), 
-you can still tear it down manually with 
+You can see the controller with :code:`sky status` and refresh its status by using the :code:`-r/--refresh` flag.
+
+While the cost of the spot controller is negligible (~$0.4/hour when running and less than $0.004/hour when stopped),
+you can still tear it down manually with
 :code:`sky down <spot-controller-name>`, where the ``<spot-controller-name>`` can be found in the output of :code:`sky status`.
 
 .. note::
-  Tearing down the spot controller will lose all logs and status information for the spot jobs and can cause resource leakage when there are still in-progress spot jobs.
+  Tearing down the spot controller loses all logs and status information for the finished spot jobs. It is only allowed when there are no in-progress spot jobs to ensure no resource leakage.
+
+Customizing spot controller resources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You may customize the resources of the spot controller for the following reasons:
+
+1. Enforcing the spot controller to run on a specific location. (Default: cheapest location)
+2. Changing the maximum number of spot jobs that can be run concurrently. (Default: 16)
+3. Changing the disk_size of the spot controller to store more logs. (Default: 50GB)
+
+To achieve the above, you can specify custom configs in :code:`~/.sky/config.yaml` with the following fields:
+
+.. code-block:: yaml
+
+  spot:
+    controller:
+      resources:
+        # All configs below are optional
+        # 1. Specify the location of the spot controller.
+        cloud: gcp
+        region: us-central1
+        # 2. Specify the maximum number of spot jobs that can be run concurrently.
+        cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
+        # 3. Specify the disk_size of the spot controller.
+        disk_size: 100
+
+The :code:`resources` field has the same spec as a normal SkyPilot job; see `here <https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html>`__.
