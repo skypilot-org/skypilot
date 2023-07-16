@@ -767,8 +767,8 @@ class RetryingVmProvisioner(object):
             elif 'rsync: command not found' in stderr:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
-                        'rsync is not installed on the specific image. '
-                        'Please install rsync and try again.')
+                        '`rsync` command is not found in the specified image. '
+                        'Please use an image with rsync installed.')
             else:
                 logger.info('====== stdout ======')
                 for s in stdout.split('\n'):
