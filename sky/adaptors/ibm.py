@@ -23,6 +23,7 @@ ibm_botocore = None
 multiprocessing_lock = multiprocessing.Lock()
 threading_lock = threading.Lock()
 
+
 def import_package(func):
 
     @functools.wraps(func)
@@ -130,8 +131,9 @@ def tagging_client():
 @import_package
 def get_cos_client(region: str = 'us-east'):
     """Returns an IBM COS client object.
-      thread/process locks are needed. Although boto3.client is thread/process safe,
-      creating a session() (default session) indirectly through it isn't.
+      thread/process locks are needed.
+      Although boto3.client is thread/process safe, creating a
+      session() (default session) indirectly through it isn't.
     Args:
         region (str, optional): Client endpoint. Defaults to 'us-east'.
 
@@ -145,8 +147,8 @@ def get_cos_client(region: str = 'us-east'):
                 service_name='s3',
                 aws_access_key_id=access_key_id,
                 aws_secret_access_key=secret_access_key,
-                endpoint_url=f'https://s3.{region}.cloud-object-storage.appdomain.cloud'
-            )
+                endpoint_url=
+                f'https://s3.{region}.cloud-object-storage.appdomain.cloud')
 
 
 @import_package
@@ -167,5 +169,5 @@ def get_cos_resource(region: str = 'us-east'):
                 's3',
                 aws_access_key_id=access_key_id,
                 aws_secret_access_key=secret_access_key,
-                endpoint_url=f'https://s3.{region}.cloud-object-storage.appdomain.cloud'
-            )
+                endpoint_url=
+                f'https://s3.{region}.cloud-object-storage.appdomain.cloud')

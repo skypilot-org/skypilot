@@ -1,4 +1,5 @@
 """IBM Web Services."""
+import colorama
 import os
 import json
 import typing
