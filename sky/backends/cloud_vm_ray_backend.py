@@ -27,7 +27,7 @@ from sky import clouds
 from sky import cloud_stores
 from sky import exceptions
 from sky import global_user_state
-from sky import provision as provision_api
+from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import optimizer
@@ -3376,16 +3376,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'It might be because the cluster\'s head node has '
                         'already been terminated. It is fine to skip this.')
             try:
-                if terminate:
-                    provision_api.terminate_instances(
-                        repr(cloud),
-                        cluster_name,
-                        provider_config=config['provider'])
-                else:
-                    provision_api.stop_instances(
-                        repr(cloud),
-                        cluster_name,
-                        provider_config=config['provider'])
+                provision_lib.stop_or_terminate_instances(
+                    repr(cloud),
+                    cluster_name,
+                    provider_config=config['provider'],
+                    terminate=terminate)
             except Exception as e:  # pylint: disable=broad-except
                 if purge:
                     logger.warning(

@@ -36,13 +36,27 @@ def _route_to_cloud_impl(func):
 # TODO(suquark): Bring all other functions here from the
 
 
+def stop_or_terminate_instances(provider_name: str,
+                                cluster_name: str,
+                                provider_config: Optional[Dict[str,
+                                                               Any]] = None,
+                                worker_only: bool = False,
+                                terminate: bool = False) -> None:
+    """Stop or terminate running instances."""
+    if terminate:
+        terminate_instances(provider_name, cluster_name, provider_config,
+                            worker_only)
+    else:
+        stop_instances(provider_name, cluster_name, provider_config,
+                       worker_only)
+
+
 @_route_to_cloud_impl
 def stop_instances(
     provider_name: str,
     cluster_name: str,
     provider_config: Optional[Dict[str, Any]] = None,
-    included_instances: Optional[List[str]] = None,
-    excluded_instances: Optional[List[str]] = None,
+    worker_only: bool = False,
 ) -> None:
     """Stop running instances."""
     raise NotImplementedError
@@ -53,8 +67,7 @@ def terminate_instances(
     provider_name: str,
     cluster_name: str,
     provider_config: Optional[Dict[str, Any]] = None,
-    included_instances: Optional[List[str]] = None,
-    excluded_instances: Optional[List[str]] = None,
+    worker_only: bool = False,
 ) -> None:
     """Terminate running or stopped instances."""
     raise NotImplementedError

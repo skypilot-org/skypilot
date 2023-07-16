@@ -123,6 +123,16 @@ class AutostopEvent(SkyletEvent):
             autostop_lib.set_autostopping_started()
 
             config = common_utils.read_yaml(self._ray_yaml_path)
+
+            provider_type = config['provider']['type']
+            provider_search = re.search(r'providers\.(.*)\.', provider_type)
+            assert provider_search is not None, config
+            provider_name = provider_search.group(1).lower()
+
+            if provider_name in ['aws', 'gcp']:
+                self._stop_cluster_with_new_provisioner(config, provider_name)
+                return
+
             is_cluster_multinode = config['max_workers'] > 0
 
             # Even for !is_cluster_multinode, we want to call this to replace
@@ -183,6 +193,35 @@ class AutostopEvent(SkyletEvent):
                 env=env)
         else:
             raise NotImplementedError
+
+    def _stop_cluster_with_new_provisioner(self, autostop_config,
+                                           provider_name):
+        from sky import provision as provision_lib  # pylint: disable=import-outside-toplevel
+        autostop_lib.set_autostopping_started()
+
+        config = common_utils.read_yaml(self._ray_yaml_path)
+        cluster_name = config['cluster_name']
+        is_cluster_multinode = config['max_workers'] > 0
+
+        os.environ['RAY_USAGE_STATS_ENABLED'] = '0'
+        os.environ.pop('AWS_ACCESS_KEY_ID', None)
+        os.environ.pop('AWS_SECRET_ACCESS_KEY', None)
+
+        subprocess.run('ray stop', shell=True, check=True)
+
+        subprocess.run('ray stop', shell=True, check=True)
+        if is_cluster_multinode:
+            provision_lib.stop_or_terminate_instances(
+                provider_name=provider_name,
+                cluster_name=cluster_name,
+                provider_config=config['provider'],
+                worker_only=True,
+                terminate=autostop_config.down)
+        provision_lib.stop_or_terminate_instances(
+            provider_name=provider_name,
+            cluster_name=cluster_name,
+            provider_config=config['provider'],
+            terminate=autostop_config.down)
 
     def _replace_yaml_for_stopping(self, yaml_path: str, down: bool):
         with open(yaml_path, 'r') as f:
