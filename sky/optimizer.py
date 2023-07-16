@@ -994,11 +994,6 @@ def _fill_in_launchable_resources(
             for cloud in clouds_list:
                 (feasible_resources, fuzzy_candidate_list) = (
                     cloud.get_feasible_launchable_resources(resources))
-                # TODO(tian): Maybe implement a
-                # resources.get_required_cloud_implementation_features()
-                # function to return a list of
-                # clouds.CloudImplementationFeatures, and check if the cloud
-                # supports the required features. If not, continue the loop.
                 if len(feasible_resources) > 0:
                     # Assume feasible_resources is sorted by prices.
                     cheapest = feasible_resources[0]
