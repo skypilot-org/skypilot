@@ -33,6 +33,7 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 import urllib.parse
 import uuid
 import os
+import warnings
 
 import colorama
 import jinja2
@@ -2306,6 +2307,10 @@ def test_aws_zero_quota_failover():
     region = get_aws_region_for_quota_failover()
 
     if not region:
+        warnings.warn(
+            f'Unable to test zero quota failover optimization — quotas '
+            f'for EC2 P3 instances were found on all AWS regions. Is this '
+            f'expected for your account?')
         return
 
     test = Test(
@@ -2325,6 +2330,10 @@ def test_gcp_zero_quota_failover():
     region = get_gcp_region_for_quota_failover()
 
     if not region:
+        warnings.warn(
+            f'Unable to test zero quota failover optimization — quotas '
+            f'for A100 GPUs were found on all GCP regions. Is this '
+            f'expected for your account?')
         return
 
     test = Test(

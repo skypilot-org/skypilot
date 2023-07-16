@@ -1363,7 +1363,6 @@ class RetryingVmProvisioner(object):
         # Optimization - check if user has non-zero quota for
         # the instance type in the target region. If not, fail early
         # instead of trying to provision and failing later.
-
         try:
             need_provision = to_provision.cloud.check_quota_available(
                 to_provision)

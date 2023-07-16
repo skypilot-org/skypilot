@@ -808,7 +808,10 @@ class GCP(clouds.Cloud):
         """
 
         if not resources.accelerators:
+            # TODO(hriday): We currently only support checking quotas for GPUs.
+            # For CPU-only instances, we need to try provisioning to check quotas.
             return True
+
         accelerator = list(resources.accelerators.keys())[0]
         use_spot = resources.use_spot
         region = resources.region
@@ -821,21 +824,23 @@ class GCP(clouds.Cloud):
             # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
             return True
 
+        command = f'gcloud compute regions describe {region} |grep -B 1 "{quota_code}" | awk \'/limit/ {{print; exit}}\''
         try:
-            command = f'gcloud compute regions describe {region} |grep -B 1 "{quota_code}" | awk \'/limit/ {{print; exit}}\''
-            print(command)
             proc = subprocess_utils.run(cmd=command,
                                         stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE)
 
         except subprocess.CalledProcessError as e:
-            print(f'Command failed with exit code {e.returncode}')
+            logger.warning(f'Quota check command failed with error: '
+                           f'{e.stderr.decode()}')
+            return True
 
+        # Extract quota from output
+        # Example output:  "- limit: 16.0"
         out = proc.stdout.decode()
-        last_number = out.split('limit:')[-1].strip()
-        last_number_int = int(float(last_number))
+        quota = int(float(out.split('limit:')[-1].strip()))
 
-        if last_number_int == 0:
+        if quota == 0:
             return False
         # Quota found to be greater than zero, try provisioning
         return True
