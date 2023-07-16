@@ -189,7 +189,8 @@ class LambdaCloudClient:
         suffix_digits = [0]
         for key_info in candidate_keys:
             name = key_info.get('name', '')
-            if key_info.get('public_key', '') == pub_key:
+            if key_info.get('public_key', '').strip() == pub_key.strip():
+                # Pub key already exists. Use strip to avoid whitespace diffs.
                 return name, True
             if (len(name) > len(prefix) + 1 and name[len(prefix)] == '-' and
                     name[len(prefix) + 1:].isdigit()):

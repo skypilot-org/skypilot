@@ -81,3 +81,6 @@ def patch() -> None:
 
     from ray.autoscaler._private import updater
     _run_patch(updater.__file__, _to_absolute('updater.py.patch'))
+
+    from ray.dashboard.modules.job import job_head
+    _run_patch(job_head.__file__, _to_absolute('job_head.py.patch'))
