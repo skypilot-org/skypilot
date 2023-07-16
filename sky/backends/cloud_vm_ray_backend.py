@@ -764,6 +764,11 @@ class RetryingVmProvisioner(object):
                 logger.warning(f'Got \'resource not found\' in {zone.name}.')
                 self._blocked_resources.add(
                     launchable_resources.copy(zone=zone.name))
+            elif 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'rsync is not installed on the specific image. '
+                        'Please install rsync and try again.')
             else:
                 logger.info('====== stdout ======')
                 for s in stdout.split('\n'):
@@ -806,6 +811,11 @@ class RetryingVmProvisioner(object):
             line.startswith('<1/1> Setting up head node')
             for line in stdout_splits + stderr_splits)
         if not errors or head_node_up:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'rsync is not installed on the specific image. '
+                        'Please install rsync and try again.')
             # TODO: Got transient 'Failed to create security group' that goes
             # away after a few minutes.  Should we auto retry other regions, or
             # let the user retry.
@@ -858,6 +868,11 @@ class RetryingVmProvisioner(object):
                 in s.strip() or '(ReadOnlyDisabledSubscription)' in s.strip())
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'rsync is not installed on the specific image. '
+                        'Please install rsync and try again.')
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -891,6 +906,11 @@ class RetryingVmProvisioner(object):
             if 'LambdaCloudError:' in s.strip()
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'rsync is not installed on the specific image. '
+                        'Please install rsync and try again.')
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -927,6 +947,11 @@ class RetryingVmProvisioner(object):
             if 'SCPError:' in s.strip()
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'rsync is not installed on the specific image. '
+                        'Please install rsync and try again.')
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -964,6 +989,11 @@ class RetryingVmProvisioner(object):
             if 'ERR' in s.strip() or 'PANIC' in s.strip()
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'rsync is not installed on the specific image. '
+                        'Please install rsync and try again.')
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -995,6 +1025,11 @@ class RetryingVmProvisioner(object):
             if 'ERR' in s.strip() or 'PANIC' in s.strip()
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'rsync is not installed on the specific image. '
+                        'Please install rsync and try again.')
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -1030,6 +1065,11 @@ class RetryingVmProvisioner(object):
               'LimitExceeded' in s.strip() or 'NotAuthenticated' in s.strip()))
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'rsync is not installed on the specific image. '
+                        'Please install rsync and try again.')
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -1757,6 +1797,11 @@ class RetryingVmProvisioner(object):
                         'Retrying due to the possibly flaky RESOURCE_NOT_FOUND '
                         'error.')
                     return True
+
+            if 'rsync: command not found' in stderr:
+                logger.info('Skipping retry due to `rsync` not found in '
+                            'the specified image.')
+                return False
 
             if ('Processing file mounts' in stdout and
                     'Running setup commands' not in stdout and
