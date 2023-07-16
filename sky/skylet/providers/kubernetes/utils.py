@@ -29,6 +29,11 @@ def check_credentials(timeout: int = 3) -> Tuple[bool, Optional[str]]:
     try:
         kubernetes.core_api().list_namespace(_request_timeout=timeout)
         return True, None
+    except ImportError:
+        # TODO(romilb): Update these error strs to also include link to docs
+        #  when docs are ready.
+        return False, f'`kubernetes` package is not installed. ' \
+                      f'Install it with: pip install kubernetes'
     except kubernetes.api_exception() as e:
         # Check if the error is due to invalid credentials
         if e.status == 401:

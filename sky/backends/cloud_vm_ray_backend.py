@@ -2314,8 +2314,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             head_ip = state.pop('head_ip', None)
             state['stable_internal_external_ips'] = None
         if version < 4:
-            # Version 4 adds self.external_ssh_ports for Kubernetes support
-            head_ssh_port = state.pop('head_ssh_port', None)
+            # Version 4 adds self.stable_ssh_ports for Kubernetes support
             state['stable_ssh_ports'] = None
 
         self.__dict__.update(state)
@@ -2330,7 +2329,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # This occurs when an old cluster from was autostopped,
                 # so the head IP in the database is not updated.
                 pass
-        if version < 4 and head_ssh_port is not None:
+        if version < 4:
             self._update_stable_ssh_ports()
 
         self._update_cluster_region()
