@@ -4432,7 +4432,6 @@ def local_up():
         path_to_package = os.path.dirname(os.path.dirname(__file__))
         up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
                                       'create_cluster.sh')
-        subprocess_utils.run_no_outputs('chmod +x {}'.format(up_script_path))
         # Get directory of script and run it from there
         cwd = os.path.dirname(os.path.abspath(up_script_path))
         # Run script and don't print output
@@ -4480,7 +4479,6 @@ def local_down():
         path_to_package = os.path.dirname(os.path.dirname(__file__))
         down_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
                                         'delete_cluster.sh')
-        subprocess_utils.run_no_outputs('chmod +x {}'.format(down_script_path))
         try:
             subprocess_utils.run(down_script_path, capture_output=True)
             cluster_removed = True
