@@ -127,7 +127,7 @@ class Kubernetes(clouds.Cloud):
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
 
     # TODO(romilb): Make the timeout configurable.
-    TIMEOUT = 60  # Timeout for resource provisioning
+    TIMEOUT = 120  # Timeout for resource provisioning
 
     _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 1
@@ -148,8 +148,7 @@ class Kubernetes(clouds.Cloud):
     }
 
     IMAGE = 'us-central1-docker.pkg.dev/' \
-            'skypilot-375900/skypilotk8s/skypilot:latest'
-
+            'skypilot-375900/skypilotk8s/skypilot'
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
