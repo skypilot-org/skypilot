@@ -63,7 +63,7 @@ class Azure(clouds.Cloud):
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {cls._REPR}.',
             # TODO(zhwu): our azure subscription offer ID does not support spot.
             # Need to support it.
-            clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instance is not supported in {cls._REPR}.',
+            clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {cls._REPR}.',
         }
 
     @classmethod
