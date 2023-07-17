@@ -1092,9 +1092,10 @@ class S3Store(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
+            region = data_utils.get_s3_bucket_region(self.name)
             sync_command = (
-                'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
-                f'{src_dir_path} '
+                f's5cmd sync --destination-region {region} '
+                f'--no-follow-symlinks --exclude ".git/*" {src_dir_path} '
                 f's3://{self.name}/{dest_dir_name}')
             return sync_command
 

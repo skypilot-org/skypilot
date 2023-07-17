@@ -70,8 +70,10 @@ class S3CloudStorage(CloudStorage):
         # AWS Sync by default uses 10 threads to upload files to the bucket.
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
-        download_via_awscli = ('aws s3 sync --no-follow-symlinks '
-                               f'{source} {destination}')
+        bucket_name = source.replace('s3://','')
+        region = data_utils.get_s3_bucket_region(bucket_name)
+        download_via_awscli = (f's5cmd sync --destination-region {region} '
+                               f'--no-follow-symlinks {source} {destination}')
 
         all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)
@@ -79,7 +81,10 @@ class S3CloudStorage(CloudStorage):
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
-        download_via_awscli = f'aws s3 cp {source} {destination}'
+        bucket_name = source.replace('s3://','')
+        region = data_utils.get_s3_bucket_region(bucket_name)
+        download_via_awscli = (f's5cmd cp --destination-region {region} '
+                               f'{source} {destination}')
 
         all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)
