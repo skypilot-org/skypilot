@@ -42,6 +42,8 @@ class IBM(clouds.Cloud):
                 (f'Native docker is not supported in {cls._REPR}. '
                  'You can try running docker command inside the '
                  '`run` section in task.yaml.'),
+            clouds.CloudImplementationFeatures.CUSTOM_DOSK_TIER:
+                (f'Custom disk tier is not supported in {cls._REPR}.'),
         }
 
     @classmethod
@@ -250,8 +252,8 @@ class IBM(clouds.Cloud):
                                                          disk_tier=disk_tier,
                                                          clouds='ibm')
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
+    def _get_feasible_launchable_resources(
+            self, resources: 'resources_lib.Resources'):
         """Returns a list of feasible and launchable resources.
 
         Feasible resources refer to an offering respecting the resource

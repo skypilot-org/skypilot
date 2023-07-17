@@ -82,12 +82,15 @@ class Backend(Generic[_ResourceHandleType]):
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('execute')
-    def execute(self, handle: _ResourceHandleType, task: 'task_lib.Task',
-                detach_run: bool) -> None:
+    def execute(self,
+                handle: _ResourceHandleType,
+                task: 'task_lib.Task',
+                detach_run: bool,
+                dryrun: bool = False) -> None:
         usage_lib.record_cluster_name_for_current_operation(
             handle.get_cluster_name())
         usage_lib.messages.usage.update_actual_task(task)
-        return self._execute(handle, task, detach_run)
+        return self._execute(handle, task, detach_run, dryrun)
 
     @timeline.event
     def post_execute(self, handle: _ResourceHandleType, down: bool) -> None:
@@ -136,8 +139,11 @@ class Backend(Generic[_ResourceHandleType]):
                detach_setup: bool) -> None:
         raise NotImplementedError
 
-    def _execute(self, handle: _ResourceHandleType, task: 'task_lib.Task',
-                 detach_run: bool) -> None:
+    def _execute(self,
+                 handle: _ResourceHandleType,
+                 task: 'task_lib.Task',
+                 detach_run: bool,
+                 dryrun: bool = False) -> None:
         raise NotImplementedError
 
     def _post_execute(self, handle: _ResourceHandleType, down: bool) -> None:

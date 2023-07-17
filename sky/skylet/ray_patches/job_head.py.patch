@@ -1,0 +1,8 @@
+0a1,3
+> # From https://github.com/ray-project/ray/blob/ray-2.4.0/dashboard/modules/job/job_head.py
+> # Fix the issue for python 3.11: https://github.com/ray-project/ray/commit/ee64dbc03d6b21dcfefb893150ee5c7f1ebb705e
+> 
+211c214
+<             node_id = sample(set(agent_infos), 1)[0]
+---
+>             node_id = sample(sorted(agent_infos), 1)[0]
