@@ -949,7 +949,8 @@ class Resources:
         if self.disk_tier is not None:
             features.add(clouds.CloudImplementationFeatures.CUSTOM_DOSK_TIER)
         if self.extract_docker_image() is not None:
-            features.add(clouds.CloudImplementationFeatures.NATIVE_DOCKER_SUPPORT)
+            features.add(
+                clouds.CloudImplementationFeatures.NATIVE_DOCKER_SUPPORT)
         return features
 
     @classmethod
