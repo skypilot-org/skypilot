@@ -798,6 +798,7 @@ def _replace_yaml_dicts(
 def write_cluster_config(
         to_provision: 'resources.Resources',
         num_nodes: int,
+        ports: Optional[List[int]],
         cluster_config_template: str,
         cluster_name: str,
         local_wheel_path: pathlib.Path,
@@ -906,6 +907,7 @@ def write_cluster_config(
             **{
                 'cluster_name': cluster_name,
                 'num_nodes': num_nodes,
+                'ports': ports,
                 'disk_size': to_provision.disk_size,
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the
@@ -920,7 +922,8 @@ def write_cluster_config(
                 # users on shared-account scenarios.
                 'security_group': skypilot_config.get_nested(
                     ('aws', 'security_group_name'),
-                    f'sky-sg-{common_utils.user_and_hostname_hash()}'),
+                    (f'sky-sg-{common_utils.user_and_hostname_hash()}'
+                     f'-{cluster_name}')),
                 'vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
                                                        None),
                 'use_internal_ips': skypilot_config.get_nested(
@@ -937,6 +940,10 @@ def write_cluster_config(
 
                 # GCP only:
                 'gcp_project_id': gcp_project_id,
+
+                # Conda setup
+                'conda_installation_commands':
+                    constants.CONDA_INSTALLATION_COMMANDS,
 
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
@@ -2136,6 +2143,7 @@ def check_cluster_available(
     *,
     operation: str,
     check_cloud_vm_ray_backend: Literal[True] = True,
+    dryrun: bool = ...,
 ) -> 'cloud_vm_ray_backend.CloudVmRayResourceHandle':
     ...
 
@@ -2146,6 +2154,7 @@ def check_cluster_available(
     *,
     operation: str,
     check_cloud_vm_ray_backend: Literal[False],
+    dryrun: bool = ...,
 ) -> backends.ResourceHandle:
     ...
 
@@ -2155,6 +2164,7 @@ def check_cluster_available(
     *,
     operation: str,
     check_cloud_vm_ray_backend: bool = True,
+    dryrun: bool = False,
 ) -> backends.ResourceHandle:
     """Check if the cluster is available.
 
@@ -2168,6 +2178,10 @@ def check_cluster_available(
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
     """
+    if dryrun:
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        assert record is not None, cluster_name
+        return record['handle']
     try:
         cluster_status, handle = refresh_cluster_status_handle(cluster_name)
     except exceptions.ClusterStatusFetchingError as e:

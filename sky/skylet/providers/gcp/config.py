@@ -116,12 +116,13 @@ def wait_for_crm_operation(operation, crm):
     return result
 
 
-def wait_for_compute_global_operation(project_name, operation, compute):
+def wait_for_compute_global_operation(project_name, operation, compute, silent=False):
     """Poll for global compute operation until finished."""
-    logger.info(
-        "wait_for_compute_global_operation: "
-        "Waiting for operation {} to finish...".format(operation["name"])
-    )
+    if not silent:
+        logger.info(
+            "wait_for_compute_global_operation: "
+            "Waiting for operation {} to finish...".format(operation["name"])
+        )
 
     for _ in range(MAX_POLLS):
         result = (
@@ -136,7 +137,8 @@ def wait_for_compute_global_operation(project_name, operation, compute):
             raise Exception(result["error"])
 
         if result["status"] == "DONE":
-            logger.info("wait_for_compute_global_operation: Operation done.")
+            if not silent:
+                logger.info("wait_for_compute_global_operation: Operation done.")
             break
 
         time.sleep(POLL_INTERVAL)
@@ -622,9 +624,30 @@ def _configure_key_pair(config, compute):
     return config
 
 
+def _get_required_rules(config):
+    """Returns the required firewall rules."""
+    default_rules = FIREWALL_RULES_REQUIRED.copy()
+    ports = config["provider"].get("ports", [])
+    for port in ports:
+        # Not set targetTags here to avoid filtered by _merge_and_refine_rule
+        default_rules.append(
+            {
+                "direction": "INGRESS",
+                "allowed": [
+                    {
+                        "IPProtocol": "tcp",
+                        "ports": [str(port)],
+                    }
+                ],
+                "sourceRanges": ["0.0.0.0/0"],
+            }
+        )
+    return default_rules
+
+
 def _check_firewall_rules(vpc_name, config, compute):
     """Check if the firewall rules in the VPC are sufficient."""
-    required_rules = FIREWALL_RULES_REQUIRED.copy()
+    required_rules = _get_required_rules(config)
 
     operation = compute.networks().getEffectiveFirewalls(
         project=config["provider"]["project_id"], network=vpc_name
@@ -672,6 +695,16 @@ def _check_firewall_rules(vpc_name, config, compute):
         source2rules: Dict[Tuple[str, str], Dict[str, Set[int]]] = {}
         source2allowed_list: Dict[Tuple[str, str], List[Dict[str, str]]] = {}
         for rule in rules:
+            # Rules applied to specific VM (targetTags) may not work for the
+            # current VM, so should be skipped.
+            # Filter by targetTags == ['cluster_name']
+            # See https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.networks.html#getEffectiveFirewalls # pylint: disable=line-too-long
+            tags = rule.get("targetTags", None)
+            if tags is not None:
+                if len(tags) != 1:
+                    continue
+                if tags[0] != config["cluster_name"]:
+                    continue
             direction = rule.get("direction", "")
             sources = rule.get("sourceRanges", [])
             allowed = rule.get("allowed", [])
@@ -722,6 +755,84 @@ def _check_firewall_rules(vpc_name, config, compute):
     return True
 
 
+def _get_filewall_rules_template(config):
+    """Returns the firewall rules template."""
+    default_template = FIREWALL_RULES_TEMPLATE.copy()
+    ports = config["provider"].get("ports", [])
+    for port in ports:
+        suffix = f"-user-ports-{config['cluster_name']}-{port}"
+        default_template.append(
+            {
+                "name": "{VPC_NAME}" + suffix,
+                "description": f"Allow user-specified port {port} for cluster {config['cluster_name']}",
+                "network": "projects/{PROJ_ID}/global/networks/{VPC_NAME}",
+                "selfLink": "projects/{PROJ_ID}/global/firewalls/{VPC_NAME}" + suffix,
+                "direction": "INGRESS",
+                "priority": 65534,
+                "allowed": [
+                    {
+                        "IPProtocol": "tcp",
+                        "ports": [str(port)],
+                    },
+                ],
+                "sourceRanges": ["0.0.0.0/0"],
+                "targetTags": [config["cluster_name"]],
+            }
+        )
+    return default_template
+
+
+def _is_same_rule(template, existing, PROJ_ID, VPC_NAME):
+    # TODO(tian): simplify this function
+    if existing["disabled"]:
+        return False
+    if existing["name"] != template["name"].format(VPC_NAME=VPC_NAME):
+        return False
+    if not existing["network"].endswith(
+        template["network"].format(PROJ_ID=PROJ_ID, VPC_NAME=VPC_NAME)
+    ):
+        return False
+    if not existing["selfLink"].endswith(
+        template["selfLink"].format(PROJ_ID=PROJ_ID, VPC_NAME=VPC_NAME)
+    ):
+        return False
+    if existing["direction"] != template["direction"]:
+        return False
+    if existing["priority"] != template["priority"]:
+        return False
+    if len(existing["allowed"]) != len(template["allowed"]):
+        return False
+    cmp = lambda x: x["IPProtocol"]
+    for ea, ta in zip(
+        sorted(existing["allowed"], key=cmp), sorted(template["allowed"], key=cmp)
+    ):
+        if ea["IPProtocol"] != ta["IPProtocol"]:
+            return False
+        if "ports" in ea and "ports" not in ta:
+            return False
+        if "ports" not in ea and "ports" in ta:
+            return False
+        if "ports" in ea and "ports" in ta:
+            if sorted(ea["ports"]) != sorted(ta["ports"]):
+                return False
+    if len(existing["sourceRanges"]) != len(template["sourceRanges"]):
+        return False
+    for es, ts in zip(
+        sorted(existing["sourceRanges"]), sorted(template["sourceRanges"])
+    ):
+        if es != ts:
+            return False
+    if "sourceTags" not in existing:
+        # If sourceTags is empty, it apply to all instances in the network
+        return True
+    if len(existing["targetTags"]) != len(template["targetTags"]):
+        return False
+    for et, tt in zip(existing["targetTags"], template["targetTags"]):
+        if et != tt:
+            return False
+    return True
+
+
 def get_usable_vpc(config):
     """Return a usable VPC.
 
@@ -752,7 +863,10 @@ def get_usable_vpc(config):
             break
 
     if usable_vpc_name is None:
-        logger.info(f"Creating a default VPC network, {SKYPILOT_VPC_NAME}...")
+        st = time.time()
+        logger.info(
+            f"Creating or updating a default VPC network, {SKYPILOT_VPC_NAME}..."
+        )
 
         proj_id = config["provider"]["project_id"]
         # Create a SkyPilot VPC network if it doesn't exist
@@ -766,7 +880,8 @@ def get_usable_vpc(config):
             _create_vpcnet(config, compute, body)
 
         # Create firewall rules
-        for rule in FIREWALL_RULES_TEMPLATE:
+        opertaions = []
+        for rule in _get_filewall_rules_template(config):
             # Query firewall rule by its name (unique in a project).
             # If the rule already exists, delete it first.
             rule_name = rule["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
@@ -774,7 +889,20 @@ def get_usable_vpc(config):
                 config, compute, filter=f"(name={rule_name})"
             )
             if len(rule_list) > 0:
+                if len(rule_list) == 1 and _is_same_rule(
+                    rule, rule_list[0], proj_id, SKYPILOT_VPC_NAME
+                ):
+                    logger.info(f"Firewall rule {rule_name} already exists.")
+                    continue
+                logger.info(
+                    f"Firewall rule {rule_name} has a different "
+                    "definition. Deleting and recreating..."
+                )
+                logger.info(f"Template:\n{rule}")
+                logger.info(f"Eixsting:\n{rule_list[0]}")
                 _delete_firewall_rule(config, compute, rule_name)
+            else:
+                logger.info(f"Creating firewall rule {rule_name}...")
 
             body = rule.copy()
             body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
@@ -784,10 +912,15 @@ def get_usable_vpc(config):
             body["selfLink"] = body["selfLink"].format(
                 PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME
             )
-            _create_firewall_rule(config, compute, body)
+            op = _create_firewall_rule_submit(config, compute, body)
+            opertaions.append(op)
+        for op in opertaions:
+            _create_firewall_rule_wait(config, compute, op)
 
         usable_vpc_name = SKYPILOT_VPC_NAME
         logger.info(f"A VPC network {SKYPILOT_VPC_NAME} created.")
+        ed = time.time()
+        logger.info(f"Time to create a VPC network: {ed-st:.5f} sec")
 
     return usable_vpc_name
 
@@ -824,6 +957,7 @@ def _configure_subnet(config, compute):
                     "type": "ONE_TO_ONE_NAT",
                 }
             ],
+            "tags": {"items": [config["cluster_name"]]},
         }
     ]
 
@@ -838,31 +972,47 @@ def _configure_subnet(config, compute):
             node_config["networkConfig"] = copy.deepcopy(default_interfaces)[0]
             node_config["networkConfig"].pop("accessConfigs")
 
+        if "tags" not in node_config:
+            node_config["tags"] = {"items": []}
+        # Add cluster name to the tags so that firewall rules will apply to
+        # the created VM.
+        node_config["tags"]["items"].append(config["cluster_name"])
+
     return config
 
 
-def _create_firewall_rule(config, compute, body):
+def _create_firewall_rule_submit(config, compute, body):
     operation = (
         compute.firewalls()
         .insert(project=config["provider"]["project_id"], body=body)
         .execute()
     )
+    return operation
+
+
+def _create_firewall_rule_wait(config, compute, operation):
     response = wait_for_compute_global_operation(
         config["provider"]["project_id"], operation, compute
     )
     return response
 
 
-def _delete_firewall_rule(config, compute, name):
+def _delete_firewall_rule(config, compute, name, silent=False):
     operation = (
         compute.firewalls()
         .delete(project=config["provider"]["project_id"], firewall=name)
         .execute()
     )
     response = wait_for_compute_global_operation(
-        config["provider"]["project_id"], operation, compute
+        config["provider"]["project_id"], operation, compute, silent
     )
     return response
+
+
+def delete_firewall_rule_if_exist(config, compute, name, silent=False):
+    rule_list = _list_firewall_rules(config, compute, filter=f"(name={name})")
+    if len(rule_list) > 0:
+        _delete_firewall_rule(config, compute, name, silent)
 
 
 def _list_firewall_rules(config, compute, filter=None):

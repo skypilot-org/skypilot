@@ -38,6 +38,10 @@ class IBM(clouds.Cloud):
         return {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is not supported in {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.CUSTOM_DOSK_TIER:
+                (f'Custom disk tier is not supported in {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.OPEN_PORTS:
+                (f'Opening ports is not supported in {cls._REPR}.'),
         }
 
     @classmethod
@@ -246,8 +250,8 @@ class IBM(clouds.Cloud):
                                                          disk_tier=disk_tier,
                                                          clouds='ibm')
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
+    def _get_feasible_launchable_resources(
+            self, resources: 'resources_lib.Resources'):
         """Returns a list of feasible and launchable resources.
 
         Feasible resources refer to an offering respecting the resource

@@ -46,3 +46,14 @@ SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 #
 # Port on the remote spot controller that the dashboard is running on.
 SPOT_DASHBOARD_REMOTE_PORT = 5000
+
+# Install conda on the remote cluster if it is not already installed.
+# We do not install the latest conda with python 3.11 because ray has not
+# officially supported it yet.
+# https://github.com/ray-project/ray/issues/31606
+CONDA_INSTALLATION_COMMANDS = (
+    '(which conda > /dev/null 2>&1 && conda init > /dev/null) || '
+    '(wget -nc https://repo.anaconda.com/miniconda/Miniconda3-py39_23.5.2-0-Linux-x86_64.sh -O Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
+    'bash Miniconda3-Linux-x86_64.sh -b && '
+    'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
+    'conda config --set auto_activate_base true);')
