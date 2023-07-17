@@ -14,8 +14,8 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-import time
 import threading
+import time
 import typing
 from typing import Dict, Iterable, List, Optional, Tuple, Union, Set
 
