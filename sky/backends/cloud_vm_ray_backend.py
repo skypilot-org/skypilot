@@ -103,7 +103,7 @@ _TEARDOWN_PURGE_WARNING = (
     'Details: {details}'
     f'{colorama.Style.RESET_ALL}')
 
-_RSYNC_NOT_FOUND_WARNING = (
+_RSYNC_NOT_FOUND_MESSAGE = (
     '`rsync` command is not found in the specified image. '
     'Please use an image with rsync installed.')
 
@@ -770,7 +770,7 @@ class RetryingVmProvisioner(object):
                     launchable_resources.copy(zone=zone.name))
             elif 'rsync: command not found' in stderr:
                 with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_WARNING)
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             else:
                 logger.info('====== stdout ======')
                 for s in stdout.split('\n'):
@@ -815,7 +815,7 @@ class RetryingVmProvisioner(object):
         if not errors or head_node_up:
             if 'rsync: command not found' in stderr:
                 with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_WARNING)
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             # TODO: Got transient 'Failed to create security group' that goes
             # away after a few minutes.  Should we auto retry other regions, or
             # let the user retry.
@@ -870,7 +870,7 @@ class RetryingVmProvisioner(object):
         if not errors:
             if 'rsync: command not found' in stderr:
                 with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_WARNING)
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -906,7 +906,7 @@ class RetryingVmProvisioner(object):
         if not errors:
             if 'rsync: command not found' in stderr:
                 with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_WARNING)
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -945,7 +945,7 @@ class RetryingVmProvisioner(object):
         if not errors:
             if 'rsync: command not found' in stderr:
                 with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_WARNING)
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -985,7 +985,7 @@ class RetryingVmProvisioner(object):
         if not errors:
             if 'rsync: command not found' in stderr:
                 with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_WARNING)
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -1019,7 +1019,7 @@ class RetryingVmProvisioner(object):
         if not errors:
             if 'rsync: command not found' in stderr:
                 with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_WARNING)
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -1057,7 +1057,7 @@ class RetryingVmProvisioner(object):
         if not errors:
             if 'rsync: command not found' in stderr:
                 with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_WARNING)
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
