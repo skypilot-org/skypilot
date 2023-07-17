@@ -131,9 +131,10 @@ def tagging_client():
 @import_package
 def get_cos_client(region: str = 'us-east'):
     """Returns an IBM COS client object.
-      thread/process locks are needed.
-      Although boto3.client is thread/process safe, creating a
-      session() (default session) indirectly through it isn't.
+      Using thread&process locks to protect not multi thread/process
+      safe Boto3.session, which is invoked (default session) by
+      boto3.client.
+
     Args:
         region (str, optional): Client endpoint. Defaults to 'us-east'.
 
@@ -154,7 +155,8 @@ def get_cos_client(region: str = 'us-east'):
 @import_package
 def get_cos_resource(region: str = 'us-east'):
     """Returns an IBM COS Resource object.
-      thread/process locks are needed. boto3.Resource isn't thread/process safe.
+      Using thread&process locks to protect not multi thread/process safe
+      boto3.Resource.
 
     Args:
         region (str, optional): Resource Endpoint. Defaults to 'us-east'.
