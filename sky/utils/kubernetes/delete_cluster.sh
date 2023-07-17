@@ -24,3 +24,10 @@ fi
 
 kind delete cluster --name skypilot
 echo "Local cluster deleted!"
+
+# Switch to the first available context
+AVAILABLE_CONTEXT=$(kubectl config get-contexts -o name | head -n 1)
+if [ ! -z "$AVAILABLE_CONTEXT" ]; then
+    echo "Switching to context $AVAILABLE_CONTEXT"
+    kubectl config use-context $AVAILABLE_CONTEXT
+fi

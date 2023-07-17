@@ -4419,15 +4419,6 @@ def local():
 def local_up():
     """Creates a local cluster."""
     cluster_created = False
-    # Check if ~/.kube/config exists:
-    if os.path.exists(os.path.expanduser('~/.kube/config')):
-        # Check if kubeconfig is valid, `kind delete` leaves an empty kubeconfig
-        valid, reason = kubernetes_utils.check_credentials()
-        if valid or (not valid and 'Invalid configuration' not in reason):
-            # Could be a valid kubeconfig or a non-empty but non-functioning
-            # kubeconfig - check if user wants to overwrite it
-            prompt = 'Cluster config found at ~/.kube/config. Overwrite it?'
-            click.confirm(prompt, default=True, abort=True, show_default=True)
     with log_utils.safe_rich_status('Creating local cluster...'):
         path_to_package = os.path.dirname(os.path.dirname(__file__))
         up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
