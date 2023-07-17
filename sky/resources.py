@@ -946,6 +946,8 @@ class Resources:
             features.add(clouds.CloudImplementationFeatures.SPOT_INSTANCE)
         if self.disk_tier is not None:
             features.add(clouds.CloudImplementationFeatures.CUSTOM_DOSK_TIER)
+        if self.ports is not None:
+            features.add(clouds.CloudImplementationFeatures.OPEN_PORTS)
         return features
 
     @classmethod
