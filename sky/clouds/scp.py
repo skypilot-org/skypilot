@@ -234,8 +234,7 @@ class SCP(clouds.Cloud):
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
-        if (resources.use_spot or resources.disk_tier is not None or
-                resources.extract_docker_image() is not None):
+        if resources.use_spot or resources.disk_tier is not None:
             return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources

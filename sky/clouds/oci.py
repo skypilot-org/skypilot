@@ -281,9 +281,6 @@ class OCI(clouds.Cloud):
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
-        if (resources.disk_tier is not None or
-                resources.extract_docker_image() is not None):
-            return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)

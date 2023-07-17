@@ -260,9 +260,6 @@ class IBM(clouds.Cloud):
 
         Launchable resources require a cloud and an instance type be assigned.
         """
-        if (resources.disk_tier is not None or
-                resources.extract_docker_image() is not None):
-            return ([], [])
         fuzzy_candidate_list: Optional[List[str]] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
