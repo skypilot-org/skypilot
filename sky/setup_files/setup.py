@@ -76,7 +76,7 @@ install_requires = [
     'cryptography',
     # Cython 3.0 release breaks PyYAML and other dependencies.
     # https://github.com/yaml/pyyaml/issues/601
-    'Cython<0.3',
+    'Cython<3',
     # Jinja has a bug in older versions because of the lack of pinning
     # the version of the underlying markupsafe package. See:
     # https://github.com/pallets/jinja/issues/1585
