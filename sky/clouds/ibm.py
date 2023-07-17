@@ -40,6 +40,8 @@ class IBM(clouds.Cloud):
                 (f'Migrating disk is not supported in {cls._REPR}.'),
             clouds.CloudImplementationFeatures.CUSTOM_DOSK_TIER:
                 (f'Custom disk tier is not supported in {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.OPEN_PORTS:
+                (f'Opening ports is not supported in {cls._REPR}.'),
         }
 
     @classmethod
