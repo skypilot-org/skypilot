@@ -68,6 +68,8 @@ sky launch -c llama-serve -s chatbot-hf.yaml --env MODEL_SIZE=13
 sky launch -c llama-serve-70b -s chatbot-hf.yaml --env MODEL_SIZE=70 --gpus A100-80GB:2
 ```
 
+![70B model](https://i.imgur.com/jEM8w3r.png)
+
 
 ## How to run LLaMA 2 chatbot with the FAIR model?
 
