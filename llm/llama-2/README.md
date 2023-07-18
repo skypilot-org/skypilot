@@ -1,6 +1,6 @@
 # Host Your Private LLaMA 2 Chatbot
 
-The latest release of LLaMA 2 has been released with promising performance recently.
+[LLaMA 2](https://github.com/facebookresearch/llama/tree/main) is the top open-source models on the [Open LLM leaderboard](https://huggingface.co/spaces/HuggingFaceH4/open_llm_leaderboard) today. It has been released with a license that authorizes commercial use. You can deploy a private Llama 2 chatbot with SkyPilot in your own cloud with just one simple command.
 
 * [LLaMA 2 release](https://github.com/facebookresearch/llama/tree/main)
 * [LLaMA 2 paper](https://ai.meta.com/research/publications/llama-2-open-foundation-and-fine-tuned-chat-models/)
@@ -25,15 +25,15 @@ envs:
 ```
 
 
-## How to run LLaMA 2 chatbot (Huggingface model)?
+## Running your own LLaMA 2 chatbot with SkyPilot
 
 You can now host your own LLaMA 2 chatbot with SkyPilot using 1-click.
 
-1. Start the serving the LLaMA-7B-Chat 2 model on a single A100 GPU:
+1. Start serving the LLaMA-7B-Chat 2 model on a single A100 GPU:
 ```bash
 sky launch -c llama-serve -s chatbot-hf.yaml
 ```
-2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to chat with Vicuna.
+2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to chat with LLaMA 2.
 ```
 (task, pid=20933) 2023-04-12 22:08:49 | INFO | gradio_web_server | Namespace(host='0.0.0.0', port=None, controller_url='http://localhost:21001', concurrency_count=10, model_list_mode='once', share=True, moderate=False)
 (task, pid=20933) 2023-04-12 22:08:49 | INFO | stdout | Running on local URL:  http://0.0.0.0:7860
@@ -57,7 +57,7 @@ sky launch -c llama-serve -s chatbot-hf.yaml --env MODEL_SIZE=13
 
 ## How to run LLaMA 2 chatbot (FAIR model)?
 
-You can now host your own LLaMA 2 chatbot with SkyPilot using 1-click.
+You can also host the official FAIR model without using huggingface and gradio.
 
 
 1. Launch the LLaMA 2 chatbot on the cloud:
