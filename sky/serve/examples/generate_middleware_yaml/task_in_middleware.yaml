@@ -1,0 +1,12 @@
+resources:
+  cloud: gcp
+  ports:
+  - 8081
+
+workdir: ~/sky_workdir
+
+run: python3 server.py
+
+service:
+  port: 8081
+  readiness_probe: /health

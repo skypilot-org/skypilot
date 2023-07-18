@@ -1,0 +1,16 @@
+resources:
+  cloud: gcp
+  disk_size: 100
+  ports:
+    - {{port}}
+
+{% if workdir is not none %}
+workdir: {{workdir}}
+{% endif %}
+
+file_mounts:
+  ~/.sky/serve/service_{{service_id}}.yaml: {{modified_yaml_path}}
+
+# TODO(tian): add these two packages to dependency
+setup: |
+  pip install uvicorn fastapi

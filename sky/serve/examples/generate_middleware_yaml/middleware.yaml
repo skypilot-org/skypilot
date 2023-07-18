@@ -1,0 +1,16 @@
+resources:
+  cloud: gcp
+  disk_size: 100
+  ports:
+    - 8081
+
+
+workdir: /home/memory/skypilot-skyserve/sky/serve/examples/http_server
+
+
+file_mounts:
+  ~/.sky/serve/service_somerandomcharacters.yaml: task_in_middleware.yaml
+
+# TODO(tian): add these two packages to dependency
+setup: |
+  pip install uvicorn fastapi
