@@ -2609,3 +2609,24 @@ def check_rsync_installed() -> None:
                 ' it is not installed. For Debian/Ubuntu system, '
                 'install it with:\n'
                 '  $ sudo apt install rsync') from None
+
+
+def wait_and_terminate_csync(cluster_name: str) -> None:
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    if record is None:
+        return
+    handle = record['handle']
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        return
+    ip_list = handle.external_ips()
+    if ip_list is None:
+        return
+    ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
+    runners = command_runner.SSHCommandRunner.make_runner_list(
+        ip_list, **ssh_credentials)
+    csync_terminate_cmd = 'python -m sky.data.skystorage terminate >/dev/null 2>&1'
+
+    def _run_csync_terminate(runner):
+        runner.run(csync_terminate_cmd, stream_logs=False)
+
+    subprocess_utils.run_in_parallel(_run_csync_terminate, runners)

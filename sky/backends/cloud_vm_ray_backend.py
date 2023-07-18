@@ -4101,8 +4101,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         logger.debug(f'Storage mount sync took {end - start} seconds.')
 
     def _execute_storage_csync(self, handle: CloudVmRayResourceHandle,
-                                storage_mounts: Dict[Path,
-                                                     storage_lib.Storage]):
+                               storage_mounts: Dict[Path, storage_lib.Storage]):
         """Executes storage mounts: installing mounting tools and mounting."""
         # Process only mount mode objects here. COPY mode objects have been
         # converted to regular copy file mounts and thus have been handled
@@ -4120,7 +4119,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if isinstance(cloud, clouds.Local):
             logger.warning(
                 f'{colorama.Fore.YELLOW}Sky On-prem does not support '
-                f'storage syncing. No action will be taken.{colorama.Style.RESET_ALL}')
+                'storage syncing. No action will be taken.'
+                f'{colorama.Style.RESET_ALL}')
             return
 
         fore = colorama.Fore
@@ -4160,8 +4160,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             except exceptions.CommandError as e:
                 if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:
                     sync_path = (f'{colorama.Fore.RED}'
-                                  f'{colorama.Style.BRIGHT}{src}'
-                                  f'{colorama.Style.RESET_ALL}')
+                                 f'{colorama.Style.BRIGHT}{src}'
+                                 f'{colorama.Style.RESET_ALL}')
                     error_msg = (f'Sync path {sync_path} is non-empty.'
                                  f' {sync_path} may be a standard unix '
                                  f'path or may contain files from a previous'

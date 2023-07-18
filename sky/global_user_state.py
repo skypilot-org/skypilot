@@ -34,6 +34,7 @@ pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 CLUSTER_STORAGE_METADATA_NAME = 'storage'
 
+
 def create_table(cursor, conn):
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509

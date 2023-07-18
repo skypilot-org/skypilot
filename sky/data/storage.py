@@ -302,10 +302,12 @@ class AbstractStore:
           mount_path: str; Mount path on remote server
         """
         raise NotImplementedError
-    
-    def csync_command(self, csync_path: str, interval: int) -> str:
+
+    def csync_command(self,
+                      csync_path: str,
+                      interval: Optional[int] = 600) -> str:
         raise NotImplementedError
-    
+
     def __deepcopy__(self, memo):
         # S3 Client and GCS Client cannot be deep copied, hence the
         # original Store object is returned
@@ -418,9 +420,9 @@ class Storage(object):
           stores: Optional; Specify pre-initialized stores (S3Store, GcsStore).
           persistent: bool; Whether to persist across sky launches.
           mode: StorageMode; Specify how the storage object is manifested on
-            the remote VM. Can be either MOUNT, COPY, or C_SYNC. Defaults to 
+            the remote VM. Can be either MOUNT, COPY, or C_SYNC. Defaults to
             MOUNT.
-          interval: int; Used for C_SYNC mode only. Runs the sync command 
+          interval: int; Used for C_SYNC mode only. Runs the sync command
             continuously for every INTERVAL seconds.
           sync_on_reconstruction: bool; Whether to sync the data if the storage
             object is found in the global_user_state and reconstructed from
@@ -858,8 +860,8 @@ class Storage(object):
             # Make mode case insensitive, if specified
             mode_str = mode_str.upper()
             mode = StorageMode(mode_str)
-            if mode == StorageMode.C_SYNC:
-                interval = 600 if interval is None else interval
+            #if mode == StorageMode.C_SYNC:
+            #    interval = 600 if interval is None else interval
         else:
             # Make sure this keeps the same as the default mode in __init__
             mode = StorageMode.MOUNT
@@ -906,7 +908,7 @@ class Storage(object):
         if self.force_delete:
             config['_force_delete'] = True
         return config
-    
+
     def get_storage_name(self):
         return self.name
 
@@ -1223,7 +1225,9 @@ class S3Store(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
-    def csync_command(self, csync_path: str, interval: int) -> str:
+    def csync_command(self,
+                      csync_path: str,
+                      interval: Optional[int] = 600) -> str:
         csync_cmd = f'python -m sky.data.skystorage {csync_path} s3 {self.bucket.name} --interval {interval} --lock --delete'
         return csync_utils.get_csync_command(csync_cmd, csync_path)
 
@@ -1641,10 +1645,11 @@ class GcsStore(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
 
-    def csync_command(self, csync_path: str, interval: int) -> str:
+    def csync_command(self,
+                      csync_path: str,
+                      interval: Optional[int] = 600) -> str:
         csync_cmd = f'python -m sky.data.skystorage {csync_path} gcs {self.bucket.name} --interval {interval} --lock --delete'
         return csync_utils.get_csync_command(csync_cmd, csync_path)
-
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
@@ -1994,7 +1999,9 @@ class R2Store(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
-    def csync_command(self, csync_path: str, interval: int) -> str:
+    def csync_command(self,
+                      csync_path: str,
+                      interval: Optional[int] = 600) -> str:
         raise NotImplementedError
 
     def _create_r2_bucket(self,

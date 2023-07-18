@@ -787,7 +787,8 @@ class Task:
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
         for mnt_path, storage in storage_mounts.items():
-            if storage.mode == storage_lib.StorageMode.COPY or storage.mode == storage_lib.StorageMode.C_SYNC:
+            if (storage.mode == storage_lib.StorageMode.COPY or
+                    storage.mode == storage_lib.StorageMode.C_SYNC):
                 store_type = storage_plans[storage]
                 if store_type is storage_lib.StoreType.S3:
                     # TODO: allow for Storage mounting of different clouds
