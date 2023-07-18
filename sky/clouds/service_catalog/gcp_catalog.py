@@ -459,8 +459,7 @@ def check_accelerator_attachable_to_host(instance_type: str,
         return
 
     if acc_name in _ACC_INSTANCE_TYPE_DICTS:
-        matching_types: List[str] = sum(
-            _ACC_INSTANCE_TYPE_DICTS[acc_name][acc_counts].values(), [])
+        matching_types = _ACC_INSTANCE_TYPE_DICTS[acc_name][acc_count]
         if instance_type not in matching_types:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesMismatchError(
