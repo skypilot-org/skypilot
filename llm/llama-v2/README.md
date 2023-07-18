@@ -6,7 +6,33 @@ The latest release of LLaMA v2 has been released with promising performance rece
 [LLaMA v2 paper](https://ai.meta.com/research/publications/llama-2-open-foundation-and-fine-tuned-chat-models/)
 
 
-## How to run LLaMA v2 chatbot?
+## How to run LLaMA v2 chatbot (Huggingface model)?
+
+You can now host your own LLaMA v2 chatbot with SkyPilot using 1-click.
+
+1. Start the serving the LLaMA-7B-Chat v2 model on a single A100 GPU:
+```bash
+sky launch -c llama-serve -s llama-hf.yaml
+```
+2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to chat with Vicuna.
+```
+(task, pid=20933) 2023-04-12 22:08:49 | INFO | gradio_web_server | Namespace(host='0.0.0.0', port=None, controller_url='http://localhost:21001', concurrency_count=10, model_list_mode='once', share=True, moderate=False)
+(task, pid=20933) 2023-04-12 22:08:49 | INFO | stdout | Running on local URL:  http://0.0.0.0:7860
+(task, pid=20933) 2023-04-12 22:08:51 | INFO | stdout | Running on public URL: https://<random-hash>.gradio.live
+```
+
+3. [Optional] Try other GPUs:
+```bash
+sky launch -c llama-serve-v100 -s serve.yaml --gpus V100
+```
+
+4. [Optional] Serve the 13B model instead of the default 7B:
+```bash
+sky launch -c llama-serve -s serve.yaml --env MODEL_SIZE=13
+```
+
+
+## How to run LLaMA v2 chatbot (FAIR model)?
 
 You can now host your own LLaMA v2 chatbot with SkyPilot using 1-click.
 
@@ -35,3 +61,5 @@ Generate a read-only access token on huggingface [here](https://huggingface.co/s
 
 3. Open http://localhost:7681 in your browser and start chatting!
 <img src="https://imgur.com/Ay8sDhG.png" alt="LLaMA chatbot running on the cloud via SkyPilot"/>
+
+
