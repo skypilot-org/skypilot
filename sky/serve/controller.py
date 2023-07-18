@@ -108,8 +108,8 @@ if __name__ == '__main__':
                                        frequency=5,
                                        min_nodes=service_spec.min_replica,
                                        max_nodes=service_spec.max_replica,
-                                       upper_threshold=service_spec.qps_upper_threshold,
-                                       lower_threshold=service_spec.qps_lower_threshold,
+                                       upper_threshold=service_spec.qpm_upper_threshold,
+                                       lower_threshold=service_spec.qpm_lower_threshold,
                                        cooldown=60)
 
     # ======= Controller =========

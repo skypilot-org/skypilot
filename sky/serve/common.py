@@ -21,8 +21,8 @@ class SkyServiceSpec:
         self._app_port = str(self.service["port"])
         self._min_replica = self.service['replica_policy']['min_replica']
         self._max_replica = self.service['replica_policy'].get('max_replica', None)
-        self._qps_upper_threshold = self.service['replica_policy'].get('qps_upper_threshold', None)
-        self._qps_lower_threshold = self.service['replica_policy'].get('qps_lower_threshold', None)
+        self._qpm_upper_threshold = self.service['replica_policy'].get('qpm_upper_threshold', None)
+        self._qpm_lower_threshold = self.service['replica_policy'].get('qpm_lower_threshold', None)
 
     @property
     def readiness_path(self):
@@ -45,9 +45,9 @@ class SkyServiceSpec:
         return self._max_replica
 
     @property
-    def qps_upper_threshold(self):
-        return self._qps_upper_threshold
+    def qpm_upper_threshold(self):
+        return self._qpm_upper_threshold
 
     @property
-    def qps_lower_threshold(self):
-        return self._qps_lower_threshold
+    def qpm_lower_threshold(self):
+        return self._qpm_lower_threshold
