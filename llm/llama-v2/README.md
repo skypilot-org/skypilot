@@ -23,12 +23,12 @@ sky launch -c llama-serve -s llama-hf.yaml
 
 3. [Optional] Try other GPUs:
 ```bash
-sky launch -c llama-serve-v100 -s serve.yaml --gpus V100
+sky launch -c llama-serve-v100 -s llama-hf.yaml --gpus V100
 ```
 
 4. [Optional] Serve the 13B model instead of the default 7B:
 ```bash
-sky launch -c llama-serve -s serve.yaml --env MODEL_SIZE=13
+sky launch -c llama-serve -s llama-hf.yaml --env MODEL_SIZE=13
 ```
 
 
