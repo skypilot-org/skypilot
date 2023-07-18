@@ -11,6 +11,7 @@
 * Everything stays in your cloud account (your own VMs, cloud object store buckets)
 * No one else sees your chat history
 * Pay absolute minimum (no managed solution markups)
+
 …and you get all of this with 1 click — let SkyPilot automate the infra.
 
 ## Pre-requisites
