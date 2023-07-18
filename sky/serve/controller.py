@@ -83,10 +83,6 @@ if __name__ == '__main__':
                         type=int,
                         help='Port to run the controller',
                         default=8082)
-    parser.add_argument('--min-nodes',
-                        type=int,
-                        default=1,
-                        help='Minimum nodes to keep running')
     args = parser.parse_args()
 
     # ======= Infra Provider =========
@@ -98,7 +94,8 @@ if __name__ == '__main__':
     # Select the load balancing policy: RoundRobinLoadBalancer or LeastLoadedLoadBalancer
     load_balancer = RoundRobinLoadBalancer(
         infra_provider=infra_provider,
-        endpoint_path=service_spec.readiness_path)
+        endpoint_path=service_spec.readiness_path,
+        timeout=service_spec.readiness_timeout)
     # load_balancer = LeastLoadedLoadBalancer(n=5)
     # autoscaler = LatencyThresholdAutoscaler(load_balancer,
     #                                         upper_threshold=0.5,    # 500ms
@@ -109,10 +106,10 @@ if __name__ == '__main__':
     autoscaler = RequestRateAutoscaler(infra_provider,
                                        load_balancer,
                                        frequency=5,
-                                       query_interval=60,
-                                       lower_threshold=0,
-                                       upper_threshold=1,
-                                       min_nodes=args.min_nodes,
+                                       min_nodes=service_spec.min_replica,
+                                       max_nodes=service_spec.max_replica,
+                                       upper_threshold=service_spec.qps_upper_threshold,
+                                       lower_threshold=service_spec.qps_lower_threshold,
                                        cooldown=60)
 
     # ======= Controller =========

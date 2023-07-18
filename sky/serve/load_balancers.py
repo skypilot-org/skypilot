@@ -12,12 +12,13 @@ logger = logging.getLogger(__name__)
 
 class LoadBalancer:
 
-    def __init__(self, infra_provider, endpoint_path, post_data=None):
+    def __init__(self, infra_provider, endpoint_path, timeout, post_data=None):
         self.available_servers = []
         self.request_count = 0
         self.request_timestamps = deque()
         self.infra_provider = infra_provider
         self.endpoint_path = endpoint_path
+        self.timeout = timeout
         self.post_data = post_data
 
     def increment_request_count(self, count=1):
@@ -37,7 +38,6 @@ class RoundRobinLoadBalancer(LoadBalancer):
         super().__init__(*args, **kwargs)
         self.servers_queue = deque()
         self.first_unhealthy_time = {}
-        self.timeout = 18000
         logger.info(f'Endpoint path: {self.endpoint_path}')
 
     def probe_endpoints(self, endpoint_ips):

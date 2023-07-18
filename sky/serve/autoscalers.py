@@ -1,6 +1,8 @@
 import logging
 import time
 
+from typing import Optional
+
 from sky.serve.infra_providers import InfraProvider
 from sky.serve.load_balancers import LoadBalancer
 
@@ -78,10 +80,10 @@ class RequestRateAutoscaler(Autoscaler):
 
     def __init__(self,
                  *args,
-                 query_interval: int = 10,
-                 upper_threshold: int = 10,
-                 lower_threshold: int = 2,
                  min_nodes: int = 1,
+                 max_nodes: Optional[int] = 10,
+                 upper_threshold: Optional[int] = 1,
+                 lower_threshold: Optional[int] = 0,
                  cooldown: int = 60,
                  **kwargs):
         """
@@ -95,10 +97,11 @@ class RequestRateAutoscaler(Autoscaler):
         :param kwargs:
         """
         super().__init__(*args, **kwargs)
-        self.query_interval = query_interval
-        self.upper_threshold = upper_threshold
-        self.lower_threshold = lower_threshold
         self.min_nodes = min_nodes
+        self.max_nodes = max_nodes or 2 * min_nodes
+        self.query_interval = 1  # Therefore thresholds represent queries per second.
+        self.upper_threshold = upper_threshold or 1
+        self.lower_threshold = lower_threshold or 0
         self.cooldown = cooldown
         self.last_scale_operation = 0  # Time of last scale operation.
 
@@ -137,8 +140,9 @@ class RequestRateAutoscaler(Autoscaler):
             self.scale_up(1)
             self.last_scale_operation = current_time
         elif requests_per_node > self.upper_threshold:
-            self.scale_up(1)
-            self.last_scale_operation = current_time
+            if self.infra_provider.total_servers() < self.max_nodes:
+                self.scale_up(1)
+                self.last_scale_operation = current_time
         elif requests_per_node < self.lower_threshold:
             if self.infra_provider.total_servers() > self.min_nodes:
                 self.scale_down(1)
