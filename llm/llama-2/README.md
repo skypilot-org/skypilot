@@ -56,7 +56,7 @@ sky launch -c llama-serve -s chatbot-hf.yaml --env MODEL_SIZE=13
 
 5. **Optional**: Serve the **70B** LLaMA 2 model:
 ```bash
-sky launch -c llama-serve -s chatbot-hf.yaml --env MODEL_SIZE=70
+sky launch -c llama-serve-70b -s chatbot-hf.yaml --env MODEL_SIZE=70 --gpus A100-80GB:2
 ```
 
 

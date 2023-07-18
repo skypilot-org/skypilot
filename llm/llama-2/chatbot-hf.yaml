@@ -26,8 +26,7 @@ run: |
   echo 'Starting model worker...'
   python -u -m fastchat.serve.model_worker \
             --model-path meta-llama/Llama-2-${MODEL_SIZE}b-chat-hf \
-            --num-gpus $SKYPILOT_NUM_GPUS_PER_NODE \
-            --load-8bit 2>&1 \
+            --num-gpus $SKYPILOT_NUM_GPUS_PER_NODE 2>&1 \
             | tee model_worker.log &
 
   echo 'Waiting for model worker to start...'
