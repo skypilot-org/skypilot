@@ -466,8 +466,6 @@ def check_accelerator_attachable_to_host(instance_type: str,
                     f'{acc_name} GPUs cannot be attached to {instance_type}. '
                     f'Use one of {matching_types} instead. Please refer to '
                     'https://cloud.google.com/compute/docs/gpus')
-        return
-
     elif not instance_type.startswith('n1-'):
         # Other GPUs must be attached to N1 machines.
         # Refer to: https://cloud.google.com/compute/docs/machine-types#gpus
