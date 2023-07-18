@@ -260,6 +260,7 @@ def get_instance_type_for_accelerator(
     if memory is None:
         assert cpus is not None, (acc_name, acc_count)
         cpu_val = int(cpus.strip('+').strip('x'))
+        # The memory size should be at least 4x the requested number of vCPUs.
         memory = f'{cpu_val * _DEFAULT_MEMORY_CPU_RATIO}+'
     df = _df[_df['InstanceType'].notna()]
     df = df[df['InstanceType'].str.startswith(_DEFAULT_HOST_VM_FAMILY)]
