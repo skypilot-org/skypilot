@@ -12,7 +12,7 @@ from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import log_utils
 
-_COMMAND_TRUNC_LENGTH = 25
+COMMAND_TRUNC_LENGTH = 25
 NUM_COST_REPORT_LINES = 5
 
 # A record in global_user_state's 'clusters' table.
@@ -21,7 +21,7 @@ _ClusterRecord = Dict[str, Any]
 _ClusterCostReportRecord = Dict[str, Any]
 
 
-def _truncate_long_string(s: str, max_length: int = 35) -> str:
+def truncate_long_string(s: str, max_length: int = 35) -> str:
     if len(s) <= max_length:
         return s
     splits = s.split(' ')
@@ -56,7 +56,7 @@ class StatusColumn:
     def calc(self, record):
         val = self.calc_func(record)
         if self.trunc_length != 0:
-            val = _truncate_long_string(str(val), self.trunc_length)
+            val = truncate_long_string(str(val), self.trunc_length)
         return val
 
 
@@ -82,7 +82,7 @@ def show_status_table(cluster_records: List[_ClusterRecord],
         StatusColumn('AUTOSTOP', _get_autostop),
         StatusColumn('COMMAND',
                      _get_command,
-                     trunc_length=_COMMAND_TRUNC_LENGTH if not show_all else 0),
+                     trunc_length=COMMAND_TRUNC_LENGTH if not show_all else 0),
     ]
 
     columns = []
@@ -268,7 +268,7 @@ def show_local_status_table(local_clusters: List[str]):
             # RESOURCES
             resources_str,
             # COMMAND
-            _truncate_long_string(command_str, _COMMAND_TRUNC_LENGTH),
+            truncate_long_string(command_str, COMMAND_TRUNC_LENGTH),
         ]
         names.append(cluster_name)
         cluster_table.add_row(row)

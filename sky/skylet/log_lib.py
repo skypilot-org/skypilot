@@ -6,7 +6,6 @@ import copy
 import io
 import multiprocessing.pool
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -20,6 +19,7 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import log_utils
+from sky.utils import subprocess_utils
 
 _SKY_LOG_WAITING_GAP_SECONDS = 1
 _SKY_LOG_WAITING_MAX_RETRY = 5
@@ -259,10 +259,10 @@ def run_with_log(
                 return proc.returncode, stdout, stderr
             return proc.returncode
         except KeyboardInterrupt:
-            # Send SIGINT to the process directly, otherwise, the underlying
+            # Kill the subprocess directly, otherwise, the underlying
             # process will only be killed after the python program exits,
             # causing the stream handling stuck at `readline`.
-            os.killpg(proc.pid, signal.SIGINT)
+            subprocess_utils.kill_children_processes()
             raise
 
 
@@ -311,8 +311,8 @@ def add_ray_env_vars(
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
-                              job_owner: str,
-                              job_id: int,
+                              job_owner: Optional[str] = None,
+                              job_id: Optional[int] = None,
                               env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
                               with_ray: bool = False,
@@ -330,17 +330,19 @@ def run_bash_command_with_log(bash_command: str,
         inner_command = f'/bin/bash -i {script_path}'
 
         subprocess_cmd: Union[str, List[str]]
-        if use_sudo:
+        if use_sudo and job_owner is not None:
             subprocess.run(f'chmod a+rwx {script_path}', shell=True, check=True)
             subprocess_cmd = job_lib.make_job_command_with_user_switching(
                 job_owner, inner_command)
         else:
             subprocess_cmd = inner_command
 
+        ray_job_id = job_lib.make_ray_job_id(job_id,
+                                             job_owner) if job_id else None
         return run_with_log(
             subprocess_cmd,
             log_path,
-            ray_job_id=job_lib.make_ray_job_id(job_id, job_owner),
+            ray_job_id=ray_job_id,
             stream_logs=stream_logs,
             with_ray=with_ray,
             use_sudo=use_sudo,

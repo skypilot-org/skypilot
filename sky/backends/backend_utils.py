@@ -63,7 +63,8 @@ logger = sky_logging.init_logger(__name__)
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
-IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
+# Exclude subnet mask from IP address regex.
+IP_ADDR_REGEX = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?!/\d{1,2})\b'
 SKY_REMOTE_PATH = '~/.sky/wheels'
 SKY_USER_FILE_PATH = '~/.sky/generated'
 
@@ -937,6 +938,10 @@ def write_cluster_config(
                 # GCP only:
                 'gcp_project_id': gcp_project_id,
 
+                # Conda setup
+                'conda_installation_commands':
+                    constants.CONDA_INSTALLATION_COMMANDS,
+
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
                 'ray_port': constants.SKY_REMOTE_RAY_PORT,
@@ -1637,6 +1642,9 @@ def check_owner_identity(cluster_name: str) -> None:
         for i, (owner,
                 current) in enumerate(zip(owner_identity,
                                           current_user_identity)):
+            # Clean up the owner identiy for the backslash and newlines, caused
+            # by the cloud CLI output, e.g. gcloud.
+            owner = owner.replace('\n', '').replace('\\', '')
             if owner == current:
                 if i != 0:
                     logger.warning(
@@ -2132,6 +2140,7 @@ def check_cluster_available(
     *,
     operation: str,
     check_cloud_vm_ray_backend: Literal[True] = True,
+    dryrun: bool = ...,
 ) -> 'cloud_vm_ray_backend.CloudVmRayResourceHandle':
     ...
 
@@ -2142,6 +2151,7 @@ def check_cluster_available(
     *,
     operation: str,
     check_cloud_vm_ray_backend: Literal[False],
+    dryrun: bool = ...,
 ) -> backends.ResourceHandle:
     ...
 
@@ -2151,6 +2161,7 @@ def check_cluster_available(
     *,
     operation: str,
     check_cloud_vm_ray_backend: bool = True,
+    dryrun: bool = False,
 ) -> backends.ResourceHandle:
     """Check if the cluster is available.
 
@@ -2164,6 +2175,10 @@ def check_cluster_available(
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
     """
+    if dryrun:
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        assert record is not None, cluster_name
+        return record['handle']
     try:
         cluster_status, handle = refresh_cluster_status_handle(cluster_name)
     except exceptions.ClusterStatusFetchingError as e:

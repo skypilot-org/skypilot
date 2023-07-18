@@ -117,6 +117,7 @@ class Task:
         num_nodes: Optional[int] = None,
         # Advanced:
         docker_image: Optional[str] = None,
+        event_callback: Optional[str] = None,
     ):
         """Initializes a Task.
 
@@ -182,6 +183,7 @@ class Task:
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
+        self.event_callback = event_callback
         # Ignore type error due to a mypy bug.
         # https://github.com/python/mypy/issues/3004
         self.num_nodes = num_nodes  # type: ignore
@@ -304,6 +306,7 @@ class Task:
             setup=config.pop('setup', None),
             num_nodes=config.pop('num_nodes', None),
             envs=config.pop('envs', None),
+            event_callback=config.pop('event_callback', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -890,6 +893,7 @@ class Task:
 
         add_if_not_none('setup', self.setup)
         add_if_not_none('workdir', self.workdir)
+        add_if_not_none('event_callback', self.event_callback)
         add_if_not_none('run', self.run)
         add_if_not_none('envs', self.envs, no_empty=True)
 

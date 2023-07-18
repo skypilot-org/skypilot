@@ -154,8 +154,13 @@ def add_or_update_cluster(cluster_name: str,
 
     # if this is the cluster init or we are starting after a stop
     if not usage_intervals or usage_intervals[-1][-1] is not None:
-        assert cluster_launched_at is not None, (cluster_name, is_launch,
-                                                 usage_intervals)
+        if cluster_launched_at is None:
+            # This could happen when the cluster is restarted manually on the
+            # cloud console. In this case, we will use the current time as the
+            # cluster launched time.
+            # TODO(zhwu): We should use the time when the cluster is restarted
+            # to be more accurate.
+            cluster_launched_at = int(time.time())
         usage_intervals.append((cluster_launched_at, None))
 
     if requested_resources:
@@ -490,9 +495,10 @@ def _load_owner(record_owner: Optional[str]) -> Optional[List[str]]:
         if result is not None and not isinstance(result, list):
             # Backwards compatibility for old records, which were stored as
             # a string instead of a list. It is possible that json.loads
-            # will parse the string with all numbers as an int, so we need
-            # to convert it back to a list of strings.
-            return [str(result)]
+            # will parse the string with all numbers as an int or escape
+            # some characters, such as \n, so we need to use the original
+            # record_owner.
+            return [record_owner]
         return result
     except json.JSONDecodeError:
         # Backwards compatibility for old records, which were stored as
