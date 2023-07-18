@@ -203,7 +203,7 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
 def get_gcp_region_for_quota_failover() -> Optional[str]:
 
     candidate_regions = GCP.regions_with_offering(instance_type=None,
-                                                  accelerators={'A100': 1},
+                                                  accelerators={'A100-80GB': 1},
                                                   use_spot=True,
                                                   region=None,
                                                   zone=None)
@@ -212,7 +212,7 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
         if not GCP.check_quota_available(
                 sky.Resources(cloud=sky.GCP(),
                               region=region.name,
-                              accelerators={'A100': 1},
+                              accelerators={'A100-80GB': 1},
                               use_spot=True)):
             return region.name
 
@@ -2307,10 +2307,10 @@ def test_aws_zero_quota_failover():
     region = get_aws_region_for_quota_failover()
 
     if not region:
-        warnings.warn(
-            f'Unable to test zero quota failover optimization — quotas '
-            f'for EC2 P3 instances were found on all AWS regions. Is this '
-            f'expected for your account?')
+        pytest.xfail(
+            'Unable to test zero quota failover optimization — quotas '
+            'for EC2 P3 instances were found on all AWS regions. Is this '
+            'expected for your account?')
         return
 
     test = Test(
@@ -2330,16 +2330,16 @@ def test_gcp_zero_quota_failover():
     region = get_gcp_region_for_quota_failover()
 
     if not region:
-        warnings.warn(
-            f'Unable to test zero quota failover optimization — quotas '
-            f'for A100 GPUs were found on all GCP regions. Is this '
-            f'expected for your account?')
+        pytest.xfail(
+            'Unable to test zero quota failover optimization — quotas '
+            'for A100-80GB GPUs were found on all GCP regions. Is this '
+            'expected for your account?')
         return
 
     test = Test(
         'gcp-zero-quota-failover',
         [
-            f'sky launch -y -c {name} --cloud gcp --region {region} --gpus A100:1 --use-spot | grep "Found no quota"',
+            f'sky launch -y -c {name} --cloud gcp --region {region} --gpus A100-80GB:1 --use-spot | grep "Found no quota"',
         ],
         f'sky down -y {name}',
     )

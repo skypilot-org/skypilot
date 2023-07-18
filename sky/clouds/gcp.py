@@ -838,7 +838,12 @@ class GCP(clouds.Cloud):
         # Extract quota from output
         # Example output:  "- limit: 16.0"
         out = proc.stdout.decode()
-        quota = int(float(out.split('limit:')[-1].strip()))
+        try:
+            quota = int(float(out.split('limit:')[-1].strip()))
+        except (ValueError, IndexError, AttributeError) as e:
+            logger.warning('Parsing the subprocess output failed '
+                           f'with error: {e}')
+            return True
 
         if quota == 0:
             return False
