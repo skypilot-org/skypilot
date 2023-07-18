@@ -9,6 +9,9 @@ from sky.utils import common_utils
 
 CREDENTIALS_PATH = '~/.lambda_cloud/lambda_keys'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
+# TODO(tian): Determine best backoff factors.
+INITIAL_BACKOFF = 3
+MAX_BACKOFF_FACTOR = 10
 MAX_ATTEMPTS = 6
 
 
@@ -90,7 +93,8 @@ def raise_lambda_error(response: requests.Response) -> None:
 
 
 def try_post_with_backoff(url: str, data: str, headers: Dict[str, str]):
-    backoff = common_utils.Backoff(initial_backoff=3, max_backoff_factor=10)
+    backoff = common_utils.Backoff(initial_backoff=INITIAL_BACKOFF,
+                                   max_backoff_factor=MAX_BACKOFF_FACTOR)
     for i in range(MAX_ATTEMPTS):
         response = requests.post(url, data=data, headers=headers)
         # If rate limited, wait and try again
@@ -103,7 +107,8 @@ def try_post_with_backoff(url: str, data: str, headers: Dict[str, str]):
 
 
 def try_get_with_backoff(url: str, headers: Dict[str, str]):
-    backoff = common_utils.Backoff(initial_backoff=3, max_backoff_factor=10)
+    backoff = common_utils.Backoff(initial_backoff=INITIAL_BACKOFF,
+                                   max_backoff_factor=MAX_BACKOFF_FACTOR)
     for i in range(MAX_ATTEMPTS):
         response = requests.get(url, headers=headers)
         # If rate limited, wait and try again
