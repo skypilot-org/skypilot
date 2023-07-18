@@ -429,7 +429,7 @@ def check_accelerator_attachable_to_host(instance_type: str,
     if accelerators is None:
         for acc_name, val in _ACC_INSTANCE_TYPE_DICTS.items():
             if instance_type in sum(val.values(), []):
-                # NOTE: While it is allowed to use A2 VMs as CPU-only nodes,
+                # NOTE: While it is allowed to use A2/G2 VMs as CPU-only nodes,
                 # we exclude this case as it is uncommon and undesirable.
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesMismatchError(
@@ -460,7 +460,7 @@ def check_accelerator_attachable_to_host(instance_type: str,
 
     if acc_name in _ACC_INSTANCE_TYPE_DICTS:
         matching_types: List[str] = sum(
-            _ACC_INSTANCE_TYPE_DICTS[acc_name].values(), [])
+            _ACC_INSTANCE_TYPE_DICTS[acc_name][acc_counts].values(), [])
         if instance_type not in matching_types:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesMismatchError(
