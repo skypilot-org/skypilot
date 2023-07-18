@@ -40,7 +40,9 @@ sky launch -c llama-serve -s chatbot-hf.yaml
 (task, pid=20933) 2023-04-12 22:08:51 | INFO | stdout | Running on public URL: https://<random-hash>.gradio.live
 ```
 
-![](https://imgur.com/l5QX7D3.gif)
+<p align="center">
+  <img src="https://imgur.com/l5QX7D3.gif" alt="SkyPilot Demo"/>
+</p>
 
 3. [Optional] Try other GPUs:
 ```bash
