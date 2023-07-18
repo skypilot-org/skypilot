@@ -17,6 +17,13 @@ Go to the [application page](https://ai.meta.com/resources/models-and-libraries/
 
 Generate a read-only access token on huggingface [here](https://huggingface.co/settings/token), and make sure your huggingface account can access the LLaMA v2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main).
 
+Fill the access token in the [chatbot-hf.yaml](chatbot-hf.yaml) and [chatbot-meta.yaml](chatbot-meta.yaml) file.
+```yaml
+envs:
+  MODEL_SIZE: 7
+  HF_TOKEN: <your-huggingface-token>
+```
+
 ## How to run LLaMA v2 chatbot (Huggingface model)?
 
 You can now host your own LLaMA v2 chatbot with SkyPilot using 1-click.
