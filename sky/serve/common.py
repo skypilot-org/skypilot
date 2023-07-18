@@ -1,5 +1,8 @@
 import yaml
 
+# from sky.backends import backend_utils
+# from sky.utils import schemas
+
 
 class SkyServiceSpec:
 
@@ -12,6 +15,11 @@ class SkyServiceSpec:
             raise ValueError('Task YAML must have a "port" section')
         if 'readiness_probe' not in self.task['service']:
             raise ValueError('Task YAML must have a "readiness_probe" section')
+        # TODO(tian): Enable schema when refactoring current code to accept new
+        # version of service YAML.
+        # service = self.task['service']
+        # backend_utils.validate_schema(service, schemas.get_service_schema(),
+        #                               'Invalid service YAML:')
         self._readiness_path = self.get_readiness_path()
         self._app_port = self.get_app_port()
 
