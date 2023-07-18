@@ -58,35 +58,37 @@ _DEFAULT_GPU_MEMORY_CPU_RATIO = 4
 
 # TODO(zongheng): fix A100 info directly in catalog.
 # https://cloud.google.com/blog/products/compute/a2-vms-with-nvidia-a100-gpus-are-ga
-# count -> vm type
-_A100_INSTANCE_TYPE_DICTS = {
+
+# If A100 is used, host VM type must be A2; if L4 is used, VM type must be G2.
+# Conversely, A2 can only be used with A100, and G2 only with L4.
+# https://cloud.google.com/compute/docs/gpus
+# acc_type -> count -> vm types
+_ACC_INSTANCE_TYPE_DICTS = {
     'A100': {
-        1: 'a2-highgpu-1g',
-        2: 'a2-highgpu-2g',
-        4: 'a2-highgpu-4g',
-        8: 'a2-highgpu-8g',
-        16: 'a2-megagpu-16g',
+        1: ['a2-highgpu-1g'],
+        2: ['a2-highgpu-2g'],
+        4: ['a2-highgpu-4g'],
+        8: ['a2-highgpu-8g'],
+        16: ['a2-megagpu-16g'],
     },
     'A100-80GB': {
-        1: 'a2-ultragpu-1g',
-        2: 'a2-ultragpu-2g',
-        4: 'a2-ultragpu-4g',
-        8: 'a2-ultragpu-8g',
-    }
-}
-
-# gpu count -> [vm types]
-_L4_INSTANCE_TYPE_DICT = {
-    1: [
-        'g2-standard-4',
-        'g2-standard-8',
-        'g2-standard-12',
-        'g2-standard-16',
-        'g2-standard-32',
-    ],
-    2: ['g2-standard-24'],
-    4: ['g2-standard-48'],
-    8: ['g2-standard-96'],
+        1: ['a2-ultragpu-1g'],
+        2: ['a2-ultragpu-2g'],
+        4: ['a2-ultragpu-4g'],
+        8: ['a2-ultragpu-8g'],
+    },
+    'L4': {
+        1: [
+            'g2-standard-4',
+            'g2-standard-8',
+            'g2-standard-12',
+            'g2-standard-16',
+            'g2-standard-32',
+        ],
+        2: ['g2-standard-24'],
+        4: ['g2-standard-48'],
+        8: ['g2-standard-96'],
+    },
 }
 
 # Number of CPU cores per GPU based on the AWS setting.
@@ -178,18 +180,6 @@ def _closest_power_of_two(x: int) -> int:
     return 1 << ((x - 1).bit_length() - 1)
 
 
-def _need_specific_vm(acc_name: str, acc_count: int) -> Tuple[bool, List[str]]:
-    """Returns (false, []) if the accelerator doesn't need a specific VM type.
-       Otherwise returns (true, [possible vm types]). """
-    # See: https://cloud.google.com/compute/docs/gpus#a100-gpus
-    #      https://cloud.google.com/compute/docs/gpus#l4-gpus
-    if acc_name in _A100_INSTANCE_TYPE_DICTS:
-        return True, [_A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]]
-    if acc_name == 'L4':
-        return True, _L4_INSTANCE_TYPE_DICT[acc_count]
-    return False, []
-
-
 def instance_type_exists(instance_type: str) -> bool:
     """Check the existence of the instance type."""
     if instance_type == 'TPU-VM':
@@ -257,9 +247,9 @@ def get_instance_type_for_accelerator(
     if instance_list is None:
         return None, fuzzy_candidate_list
 
-    need_specific_vm, instance_types = _need_specific_vm(acc_name, acc_count)
-    if need_specific_vm:
+    if acc_name in _ACC_INSTANCE_TYPE_DICTS:
         df = _df[_df['InstanceType'].notna()]
+        instance_types = _ACC_INSTANCE_TYPE_DICTS[acc_name][acc_count]
         df = df[df['InstanceType'].isin(instance_types)]
 
         # Check the cpus and memory specified by the user.
@@ -368,7 +358,7 @@ def list_accelerators(
     for acc_name, acc_info in results.items():
         if (acc_name.startswith('tpu') or
                 acc_name in _NUM_ACC_TO_MAX_CPU_AND_MEMORY or
-                acc_name in _A100_INSTANCE_TYPE_DICTS or acc_name == 'L4'):
+                acc_name in _ACC_INSTANCE_TYPE_DICTS):
             new_results[acc_name] = acc_info
     results = new_results
 
@@ -377,16 +367,16 @@ def list_accelerators(
     # and L4 GPUs can only be attached to G2 VMs.
     # Thus, we can show their exact cost including the host VM prices.
 
-    acc_infos = results.get('A100', []) + results.get('A100-80GB', []) + \
-        results.get('L4', [])
+    acc_infos: List[common.InstanceTypeInfo] = sum(
+        [results.get(a, []) for a in _ACC_INSTANCE_TYPE_DICTS], [])
     if not acc_infos:
         return results
 
     new_infos = defaultdict(list)
     for info in acc_infos:
         assert pd.isna(info.instance_type) and pd.isna(info.memory), acc_infos
-        _, vm_types = _need_specific_vm(info.accelerator_name,
-                                        info.accelerator_count)
+        vm_types = _ACC_INSTANCE_TYPE_DICTS[info.accelerator_name][
+            info.accelerator_count]
         for vm_type in vm_types:
             df = _df[_df['InstanceType'] == vm_type]
             cpu_count = df['vCPUs'].iloc[0]
@@ -432,21 +422,15 @@ def check_host_accelerator_compatibility(
     to N1, A100 GPUs are attached to A2, and L4 GPUs are attached to G2.
     """
     if accelerators is None:
-        if instance_type.startswith('a2-'):
-            # NOTE: While it is allowed to use A2 machines as CPU-only nodes,
-            # we exclude this case as it is uncommon and undesirable.
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ResourcesMismatchError(
-                    'A2 instance types should be used with A100 GPUs. '
-                    'Either use other instance types or specify the '
-                    'accelerators as A100.')
-
-        elif instance_type.startswith('g2'):
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ResourcesMismatchError(
-                    'G2 instance types should be used with L4 GPUs. '
-                    'Either use other instance types or specify the '
-                    'accelerators as L4.')
+        for acc_name, val in _ACC_INSTANCE_TYPE_DICTS.items():
+            if instance_type in sum(val.values(), []):
+                # NOTE: While it is allowed to use A2 VMs as CPU-only nodes,
+                # we exclude this case as it is uncommon and undesirable.
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesMismatchError(
+                        f'{instance_type} instance types should be used with '
+                        f'{acc_name} GPUs. Either use other instance types or '
+                        f'specify the accelerators as {acc_name}.')
         return
 
     acc = list(accelerators.items())
@@ -469,27 +453,15 @@ def check_host_accelerator_compatibility(
                     'https://cloud.google.com/compute/docs/general-purpose-machines#n1_machines')  # pylint: disable=line-too-long
         return
 
-    # Treat A100 as a special case.
-    if acc_name in _A100_INSTANCE_TYPE_DICTS:
-        # A100 must be attached to A2 instance type.
-        if not instance_type.startswith('a2-'):
+    if acc_name in _ACC_INSTANCE_TYPE_DICTS:
+        matching_types: List[str] = sum(
+            _ACC_INSTANCE_TYPE_DICTS[acc_name].values(), [])
+        if instance_type not in matching_types:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesMismatchError(
-                    f'A100 GPUs cannot be attached to {instance_type}. '
-                    f'Use A2 machines instead. Please refer to '
-                    'https://cloud.google.com/compute/docs/gpus#a100-gpus')
-        return
-
-    # TODO(hzeng): instead of repeating code here, make abstraction
-    # Treat L4 as a special case.
-    if acc_name == 'L4':
-        # L4 must be attached to G2 instance type.
-        if not instance_type.startswith('g2-'):
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ResourcesMismatchError(
-                    f'L4 GPUs cannot be attached to {instance_type}. '
-                    f'Use G2 machines instead. Please refer to '
-                    'https://cloud.google.com/compute/docs/gpus#l4-gpus')
+                    f'{acc_name} GPUs cannot be attached to {instance_type}. '
+                    f'Use one of {matching_types} instead. Please refer to '
+                    'https://cloud.google.com/compute/docs/gpus')
         return
 
     # Other GPUs must be attached to N1 machines.
@@ -522,10 +494,8 @@ def check_accelerator_attachable_to_host(instance_type: str,
         assert instance_type == 'TPU-VM' or instance_type.startswith('n1-')
         return
 
-    if acc_name in _A100_INSTANCE_TYPE_DICTS:
-        valid_counts = list(_A100_INSTANCE_TYPE_DICTS[acc_name].keys())
-    elif acc_name == 'L4':
-        valid_counts = list(_L4_INSTANCE_TYPE_DICT.keys())
+    if acc_name in _ACC_INSTANCE_TYPE_DICTS:
+        valid_counts = list(_ACC_INSTANCE_TYPE_DICTS[acc_name].keys())
     else:
         assert acc_name in _NUM_ACC_TO_MAX_CPU_AND_MEMORY, acc_name
         valid_counts = list(_NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name].keys())
@@ -535,24 +505,15 @@ def check_accelerator_attachable_to_host(instance_type: str,
                 f'{acc_name}:{acc_count} is not launchable on GCP. '
                 f'The valid {acc_name} counts are {valid_counts}.')
 
-    if acc_name in _A100_INSTANCE_TYPE_DICTS:
-        a100_instance_type = _A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]
-        if instance_type != a100_instance_type:
+    if acc_name in _ACC_INSTANCE_TYPE_DICTS:
+        matching_types = _ACC_INSTANCE_TYPE_DICTS[acc_name][acc_count]
+        if instance_type not in matching_types:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesMismatchError(
-                    f'A100:{acc_count} cannot be attached to {instance_type}. '
-                    f'Use {a100_instance_type} instead. Please refer to '
-                    'https://cloud.google.com/compute/docs/gpus#a100-gpus')
-        return
-
-    if acc_name == 'L4':
-        l4_instance_types = _L4_INSTANCE_TYPE_DICT[acc_count]
-        if instance_type not in l4_instance_types:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ResourcesMismatchError(
-                    f'L4:{acc_count} cannot be attached to {instance_type}. '
-                    f'Use one of {l4_instance_types} instead. Please refer to '
-                    'https://cloud.google.com/compute/docs/gpus#l4-gpus')
+                    f'{acc_name}:{acc_count} cannot be attached to '
+                    f'{instance_type}. Use one of {matching_types} instead. '
+                    'Please refer to: '
+                    'https://cloud.google.com/compute/docs/gpus')
         return
 
     # Check maximum vCPUs and memory.
