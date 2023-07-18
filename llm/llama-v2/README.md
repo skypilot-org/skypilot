@@ -2,8 +2,8 @@
 
 The latest release of LLaMA v2 has been released with promising performance recently.
 
-[LLaMA v2 release](https://github.com/facebookresearch/llama/tree/main)
-[LLaMA v2 paper](https://ai.meta.com/research/publications/llama-2-open-foundation-and-fine-tuned-chat-models/)
+* [LLaMA v2 release](https://github.com/facebookresearch/llama/tree/main)
+* [LLaMA v2 paper](https://ai.meta.com/research/publications/llama-2-open-foundation-and-fine-tuned-chat-models/)
 
 
 ## Pre-requisites
