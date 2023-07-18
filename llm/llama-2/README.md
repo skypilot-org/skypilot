@@ -1,21 +1,21 @@
-# Host Your Private LLaMA v2 Chatbot
+# Host Your Private LLaMA 2 Chatbot
 
-The latest release of LLaMA v2 has been released with promising performance recently.
+The latest release of LLaMA 2 has been released with promising performance recently.
 
-* [LLaMA v2 release](https://github.com/facebookresearch/llama/tree/main)
-* [LLaMA v2 paper](https://ai.meta.com/research/publications/llama-2-open-foundation-and-fine-tuned-chat-models/)
+* [LLaMA 2 release](https://github.com/facebookresearch/llama/tree/main)
+* [LLaMA 2 paper](https://ai.meta.com/research/publications/llama-2-open-foundation-and-fine-tuned-chat-models/)
 
 
 ## Pre-requisites
 
-###  Step 1: Apply for the access to the LLaMA v2 model
+###  Step 1: Apply for the access to the LLaMA 2 model
 
 Go to the [application page](https://ai.meta.com/resources/models-and-libraries/llama-downloads/) and apply for the access to the model weights.
 
 
 ### Step 2: Get the access token from huggingface
 
-Generate a read-only access token on huggingface [here](https://huggingface.co/settings/token), and make sure your huggingface account can access the LLaMA v2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main).
+Generate a read-only access token on huggingface [here](https://huggingface.co/settings/token), and make sure your huggingface account can access the LLaMA 2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main).
 
 Fill the access token in the [chatbot-hf.yaml](chatbot-hf.yaml) and [chatbot-meta.yaml](chatbot-meta.yaml) file.
 ```yaml
@@ -25,11 +25,11 @@ envs:
 ```
 
 
-## How to run LLaMA v2 chatbot (Huggingface model)?
+## How to run LLaMA 2 chatbot (Huggingface model)?
 
-You can now host your own LLaMA v2 chatbot with SkyPilot using 1-click.
+You can now host your own LLaMA 2 chatbot with SkyPilot using 1-click.
 
-1. Start the serving the LLaMA-7B-Chat v2 model on a single A100 GPU:
+1. Start the serving the LLaMA-7B-Chat 2 model on a single A100 GPU:
 ```bash
 sky launch -c llama-serve -s chatbot-hf.yaml
 ```
@@ -41,7 +41,7 @@ sky launch -c llama-serve -s chatbot-hf.yaml
 ```
 
 <p align="center">
-  <img src="https://i.imgur.com/Isxocue.gif" alt="LLaMA v2 Demo"/>
+  <img src="https://i.imgur.com/Isxocue.gif" alt="LLaMA 2 Demo"/>
 </p>
 
 3. [Optional] Try other GPUs:
@@ -55,12 +55,12 @@ sky launch -c llama-serve -s chatbot-hf.yaml --env MODEL_SIZE=13
 ```
 
 
-## How to run LLaMA v2 chatbot (FAIR model)?
+## How to run LLaMA 2 chatbot (FAIR model)?
 
-You can now host your own LLaMA v2 chatbot with SkyPilot using 1-click.
+You can now host your own LLaMA 2 chatbot with SkyPilot using 1-click.
 
 
-1. Launch the LLaMA v2 chatbot on the cloud:
+1. Launch the LLaMA 2 chatbot on the cloud:
 
     ```bash
     sky launch -c llama chatbot-meta.yaml
