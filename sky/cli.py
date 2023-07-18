@@ -224,7 +224,8 @@ def _interactive_node_cli_command(cli_func):
                              help=('OS disk size in GBs.'))
     disk_tier = click.option('--disk-tier',
                              default=None,
-                             type=str,
+                             type=click.Choice(['low', 'medium', 'high'],
+                                               case_sensitive=False),
                              required=False,
                              help=('OS disk tier. Could be one of "low", '
                                    '"medium", "high". Default: medium'))
@@ -1227,7 +1228,7 @@ def cli():
 @click.option(
     '--disk-tier',
     default=None,
-    type=str,
+    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
     required=False,
     help=(
         'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
@@ -3004,8 +3005,13 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
 
 @cli.command()
+@click.option('--verbose',
+              '-v',
+              is_flag=True,
+              default=False,
+              help='Show the activated account for each cloud.')
 @usage_lib.entrypoint
-def check():
+def check(verbose: bool):
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
@@ -3015,7 +3021,7 @@ def check():
     The enabled clouds are cached and form the "search space" to be considered
     for each task.
     """
-    sky_check.check()
+    sky_check.check(verbose=verbose)
 
 
 @cli.command()
@@ -3234,11 +3240,18 @@ def storage():
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
 @usage_lib.entrypoint
-def storage_ls():
-    """List storage objects created."""
+# pylint: disable=redefined-builtin
+def storage_ls(all: bool):
+    """List storage objects managed by SkyPilot."""
     storages = sky.storage_ls()
-    storage_table = storage_utils.format_storage_table(storages)
+    storage_table = storage_utils.format_storage_table(storages, show_all=all)
     click.echo(storage_table)
 
 
@@ -3399,7 +3412,7 @@ def spot():
 @click.option(
     '--disk-tier',
     default=None,
-    type=str,
+    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
     required=False,
     help=(
         'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
@@ -3859,7 +3872,7 @@ def bench():
 @click.option(
     '--disk-tier',
     default=None,
-    type=str,
+    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
     required=False,
     help=(
         'OS disk tier. Could be one of "low", "medium", "high". Default: medium'

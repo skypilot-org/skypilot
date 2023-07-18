@@ -189,7 +189,7 @@ def validate_region_zone_impl(
 
     filter_df = df
     if region is not None:
-        filter_df = filter_df[filter_df['Region'].str.lower() == region.lower()]
+        filter_df = _filter_region_zone(filter_df, region, zone=None)
         if len(filter_df) == 0:
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid region {region!r}')
@@ -335,6 +335,15 @@ def _filter_with_mem(df: pd.DataFrame,
         return df[df['MemoryGiB'] == memory]
 
 
+def _filter_region_zone(df: pd.DataFrame, region: Optional[str],
+                        zone: Optional[str]) -> pd.DataFrame:
+    if region is not None:
+        df = df[df['Region'].str.lower() == region.lower()]
+    if zone is not None:
+        df = df[df['AvailabilityZone'].str.lower() == zone.lower()]
+    return df
+
+
 def get_instance_type_for_cpus_mem_impl(
         df: pd.DataFrame, cpus: Optional[str],
         memory_gb_or_ratio: Optional[str]) -> Optional[str]:
@@ -391,10 +400,12 @@ def get_instance_type_for_accelerator_impl(
     """
     result = df[(df['AcceleratorName'].str.fullmatch(acc_name, case=False)) &
                 (df['AcceleratorCount'] == acc_count)]
+    result = _filter_region_zone(result, region, zone)
     if len(result) == 0:
         fuzzy_result = df[
             (df['AcceleratorName'].str.contains(acc_name, case=False)) &
             (df['AcceleratorCount'] >= acc_count)]
+        fuzzy_result = _filter_region_zone(fuzzy_result, region, zone)
         fuzzy_result = fuzzy_result.sort_values('Price', ascending=True)
         fuzzy_result = fuzzy_result[['AcceleratorName',
                                      'AcceleratorCount']].drop_duplicates()
@@ -407,11 +418,7 @@ def get_instance_type_for_accelerator_impl(
 
     result = _filter_with_cpus(result, cpus)
     result = _filter_with_mem(result, memory)
-    if region is not None:
-        result = result[result['Region'].str.lower() == region]
-    if zone is not None:
-        # NOTE: For Azure regions, zone must be None.
-        result = result[result['AvailabilityZone'] == zone]
+    result = _filter_region_zone(result, region, zone)
     if len(result) == 0:
         return ([], [])
 
@@ -569,8 +576,7 @@ def get_image_id_from_tag_impl(df: pd.DataFrame, tag: str,
     an image that matches the tag.
     """
     df = df[df['Tag'] == tag]
-    if region is not None:
-        df = df[df['Region'].str.lower() == region.lower()]
+    df = _filter_region_zone(df, region, zone=None)
     assert len(df) <= 1, ('Multiple images found for tag '
                           f'{tag} in region {region}')
     if len(df) == 0:
@@ -585,7 +591,6 @@ def is_image_tag_valid_impl(df: pd.DataFrame, tag: str,
                             region: Optional[str]) -> bool:
     """Returns True if the image tag is valid."""
     df = df[df['Tag'] == tag]
-    if region is not None:
-        df = df[df['Region'].str.lower() == region.lower()]
+    df = _filter_region_zone(df, region, zone=None)
     df = df.dropna(subset=['ImageId'])
     return len(df) > 0

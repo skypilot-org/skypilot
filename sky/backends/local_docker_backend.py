@@ -265,8 +265,11 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
             requested_resources=task.resources,
             ready=True)
 
-    def _execute(self, handle: LocalDockerResourceHandle, task: 'task_lib.Task',
-                 detach_run: bool) -> None:
+    def _execute(self,
+                 handle: LocalDockerResourceHandle,
+                 task: 'task_lib.Task',
+                 detach_run: bool,
+                 dryrun: bool = False) -> None:
         """ Launches the container."""
 
         if detach_run:
@@ -281,6 +284,10 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         # Handle a basic task
         if task.run is None:
             logger.info(f'Nothing to run; run command not specified:\n{task}')
+            return
+
+        if dryrun:
+            logger.info(f'Dryrun complete. Would have run:\n{task}')
             return
 
         self._execute_task_one_node(handle, task)

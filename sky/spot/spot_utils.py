@@ -270,7 +270,7 @@ def cancel_job_by_name(job_name: str) -> str:
 def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     """Stream logs by job id."""
     controller_status = job_lib.get_status(job_id)
-    status_msg = ('[bold cyan]Waiting for controller process to be RUNNING '
+    status_msg = ('[bold cyan]Waiting for controller process to be RUNNING'
                   '{status_str}[/].')
     status_display = log_utils.safe_rich_status(
         status_msg.format(status_str=''))
