@@ -1,4 +1,4 @@
-# Run LLaMA v2 LLM on any cloud with one click
+# Host Your Private LLaMA v2 Chatbot
 
 The latest release of LLaMA v2 has been released with promising performance recently.
 
@@ -24,6 +24,7 @@ envs:
   HF_TOKEN: <your-huggingface-token>
 ```
 
+
 ## How to run LLaMA v2 chatbot (Huggingface model)?
 
 You can now host your own LLaMA v2 chatbot with SkyPilot using 1-click.
@@ -38,6 +39,8 @@ sky launch -c llama-serve -s chatbot-hf.yaml
 (task, pid=20933) 2023-04-12 22:08:49 | INFO | stdout | Running on local URL:  http://0.0.0.0:7860
 (task, pid=20933) 2023-04-12 22:08:51 | INFO | stdout | Running on public URL: https://<random-hash>.gradio.live
 ```
+
+![](https://imgur.com/l5QX7D3.gif)
 
 3. [Optional] Try other GPUs:
 ```bash
