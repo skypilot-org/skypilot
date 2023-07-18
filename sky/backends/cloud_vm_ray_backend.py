@@ -1366,8 +1366,7 @@ class RetryingVmProvisioner(object):
         # instead of trying to provision and failing later.
         try:
             need_provision = to_provision.cloud.check_quota_available(
-                to_provision.region, to_provision.instance_type,
-                to_provision.use_spot)
+                to_provision)
 
         except Exception as e:  # pylint: disable=broad-except
             need_provision = True
@@ -1385,7 +1384,8 @@ class RetryingVmProvisioner(object):
             raise exceptions.ResourcesUnavailableError(
                 f'{colorama.Fore.YELLOW}Found no quota for '
                 f'{to_provision.instance_type} {instance_descriptor} '
-                f'instances in region {to_provision.region}. '
+                f'instances in region {to_provision.region} '
+                f'in {to_provision.cloud}. '
                 f'{colorama.Style.RESET_ALL}'
                 f'To request quotas, check the instruction: '
                 f'https://skypilot.readthedocs.io/en/latest/cloud-setup/quota.html.'  # pylint: disable=line-too-long
