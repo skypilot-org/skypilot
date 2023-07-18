@@ -24,7 +24,7 @@ run: |
   sleep 10
   echo 'Starting model worker...'
   python -u -m fastchat.serve.model_worker \
-            --model-path meta-llama/Llama-2-${MODEL_SIZE}b-chat 2>&1 \
+            --model-path meta-llama/Llama-2-${MODEL_SIZE}b-chat-hf 2>&1 \
             | tee model_worker.log &
 
   echo 'Waiting for model worker to start...'
