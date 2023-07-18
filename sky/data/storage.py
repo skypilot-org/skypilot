@@ -306,6 +306,14 @@ class AbstractStore:
     def csync_command(self,
                       csync_path: str,
                       interval: Optional[int] = 600) -> str:
+        """
+        Returns the command to continuously sync from CSYNC_PATH to
+        Storage bucket.
+
+        Args:
+          csync_path: str; Path to continuously sync the bucket to.
+          interval: int; runs the sync command every INTERVAL seconds
+        """
         raise NotImplementedError
 
     def __deepcopy__(self, memo):
@@ -860,8 +868,6 @@ class Storage(object):
             # Make mode case insensitive, if specified
             mode_str = mode_str.upper()
             mode = StorageMode(mode_str)
-            #if mode == StorageMode.C_SYNC:
-            #    interval = 600 if interval is None else interval
         else:
             # Make sure this keeps the same as the default mode in __init__
             mode = StorageMode.MOUNT
@@ -1228,6 +1234,14 @@ class S3Store(AbstractStore):
     def csync_command(self,
                       csync_path: str,
                       interval: Optional[int] = 600) -> str:
+        """
+        Returns the command to continuously sync from CSYNC_PATH to
+        Storage bucket.
+
+        Args:
+          csync_path: str; Path to continuously sync the bucket to.
+          interval: int; runs the sync command every INTERVAL seconds
+        """
         csync_cmd = f'python -m sky.data.skystorage {csync_path} s3 {self.bucket.name} --interval {interval} --lock --delete'
         return csync_utils.get_csync_command(csync_cmd, csync_path)
 
@@ -1648,6 +1662,14 @@ class GcsStore(AbstractStore):
     def csync_command(self,
                       csync_path: str,
                       interval: Optional[int] = 600) -> str:
+        """
+        Returns the command to continuously sync from CSYNC_PATH to
+        Storage bucket.
+
+        Args:
+          csync_path: str; Path to continuously sync the bucket to.
+          interval: int; runs the sync command every INTERVAL seconds
+        """
         csync_cmd = f'python -m sky.data.skystorage {csync_path} gcs {self.bucket.name} --interval {interval} --lock --delete'
         return csync_utils.get_csync_command(csync_cmd, csync_path)
 
@@ -2002,6 +2024,14 @@ class R2Store(AbstractStore):
     def csync_command(self,
                       csync_path: str,
                       interval: Optional[int] = 600) -> str:
+        """
+        Returns the command to continuously sync from CSYNC_PATH to
+        Storage bucket.
+
+        Args:
+          csync_path: str; Path to continuously sync the bucket to.
+          interval: int; runs the sync command every INTERVAL seconds
+        """
         raise NotImplementedError
 
     def _create_r2_bucket(self,

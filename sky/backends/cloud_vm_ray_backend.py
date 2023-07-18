@@ -4026,9 +4026,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 storage_mounts: Dict[Path,
                                                      storage_lib.Storage]):
         """Executes storage mounts: installing mounting tools and mounting."""
-        # Process only mount mode objects here. COPY mode objects have been
+        # Process only MOUNT mode objects here. COPY mode objects have been
         # converted to regular copy file mounts and thus have been handled
-        # in the '__execute_file_mounts' method.
+        # in the '_execute_file_mounts' method.
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
@@ -4100,12 +4100,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
 
-    def _execute_storage_csync(self, handle: CloudVmRayResourceHandle,
-                               storage_mounts: Dict[Path, storage_lib.Storage]):
-        """Executes storage mounts: installing mounting tools and mounting."""
-        # Process only mount mode objects here. COPY mode objects have been
-        # converted to regular copy file mounts and thus have been handled
-        # in the '__execute_file_mounts' method.
+    def _execute_storage_csync(
+            self, handle: CloudVmRayResourceHandle,
+            storage_mounts: Dict[Path, storage_lib.Storage]) -> None:
+        """Executes C_SYNC on storages: running the CSYNC command on storages.
+
+        This function only runs the CSYNC daemon on the given storage
+        and the files/dirs to be copied to remote node are handled in
+        the _execute_file_mounts.
+
+        """
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
@@ -4147,27 +4151,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
                 src_print = ', '.join(src_print)
-            try:
-                backend_utils.parallel_data_transfer_to_nodes(
-                    runners,
-                    source=src_print,
-                    target=src,
-                    cmd=csync_cmd,
-                    run_rsync=False,
-                    action_message='Setting cont. sync',
-                    log_path=log_path,
-                )
-            except exceptions.CommandError as e:
-                if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:
-                    sync_path = (f'{colorama.Fore.RED}'
-                                 f'{colorama.Style.BRIGHT}{src}'
-                                 f'{colorama.Style.RESET_ALL}')
-                    error_msg = (f'Sync path {sync_path} is non-empty.'
-                                 f' {sync_path} may be a standard unix '
-                                 f'path or may contain files from a previous'
-                                 f' task. To fix, change the mount path'
-                                 f' to an empty or non-existent path.')
-                    raise RuntimeError(error_msg) from None
+            backend_utils.parallel_data_transfer_to_nodes(
+                runners,
+                source=src_print,
+                target=src,
+                cmd=csync_cmd,
+                run_rsync=False,
+                action_message='Setting cont. sync',
+                log_path=log_path,
+            )
 
         end = time.time()
         logger.debug(f'Storage Sync setup took {end - start} seconds.')

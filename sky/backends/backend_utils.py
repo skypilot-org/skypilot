@@ -2612,6 +2612,14 @@ def check_rsync_installed() -> None:
 
 
 def wait_and_terminate_csync(cluster_name: str) -> None:
+    """ Invokes TERMINATE on every nodes in given cluster name.
+
+    Terminatese all the CSYNC commands running in each node after
+    waiting for the sync process launched by CSYNC to complete.
+
+    Args:
+        cluster_name: Cluster name (see `sky status`)
+    """
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return
@@ -2619,12 +2627,12 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return
     ip_list = handle.external_ips()
-    if ip_list is None:
-        return
+    assert ip_list is not None, 'external_ips is not cached in handle'
     ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
     runners = command_runner.SSHCommandRunner.make_runner_list(
         ip_list, **ssh_credentials)
-    csync_terminate_cmd = 'python -m sky.data.skystorage terminate >/dev/null 2>&1'
+    csync_terminate_cmd = ('python -m sky.data.skystorage terminate '
+                           '>/dev/null 2>&1')
 
     def _run_csync_terminate(runner):
         runner.run(csync_terminate_cmd, stream_logs=False)

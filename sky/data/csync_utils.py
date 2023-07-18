@@ -3,19 +3,32 @@ import random
 import textwrap
 
 
-def get_csync_command(csync_cmd: str, sync_path: str):
+def get_csync_command(csync_cmd: str, csync_path: str) -> str:
+    """
+    Generates the C_SYNC command for a given bucket. Generated script first
+    creates the CSYNC_PATH if it does not exist, and finally runs C_SYNC
+    daemon on CSYNC_PATH to the bucket.
+
+    Args:
+        csync_path: Path to run CSYNC daemon to the bucket at.
+        mount_cmd: Command to run CSYNC daemon to the bucket.
+            Should be single line.
+
+    Returns:
+        str: CSYNC command with the script as a heredoc.
+    """
 
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash
         set -e               
 
-        SYNC_PATH={sync_path}
+        CSYNC_PATH={csync_path}
 
-        # Check if sync path exists
-        if [ ! -d "$SYNC_PATH" ]; then
-          echo "Sync path $SYNC_PATH does not exist. Creating..."
-          sudo mkdir -p $SYNC_PATH
-          sudo chmod 777 $SYNC_PATH
+        # Check if csync path exists
+        if [ ! -d "$CSYNC_PATH" ]; then
+          echo "C_SYNC path $CSYNC_PATH does not exist. Creating..."
+          sudo mkdir -p $CSYNC_PATH
+          sudo chmod 777 $CSYNC_PATH
         fi
 
         setsid {csync_cmd} >/dev/null 2>&1 &

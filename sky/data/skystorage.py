@@ -16,7 +16,7 @@ def main():
     pass
 
 
-def update_interval(interval, elapsed_time):
+def update_interval(interval: int, elapsed_time: int):
     diff = interval - elapsed_time
     if diff <= 0:
         return 0
@@ -24,7 +24,8 @@ def update_interval(interval, elapsed_time):
         return diff
 
 
-def is_locked(file_path):
+def is_locked(file_path: str):
+    """Checks if the given lock file is locked"""
     locked = False
     if os.path.exists(file_path):
         lock = filelock.FileLock(file_path)
@@ -38,7 +39,8 @@ def is_locked(file_path):
     return locked
 
 
-def set_s3_sync_cmd(src_path, bucketname, num_threads, delete):
+def set_s3_sync_cmd(src_path: str, bucketname: str, num_threads: int,
+                    delete: bool):
     config_cmd = ('aws configure set default.s3.max_concurrent_requests '
                   f'{num_threads}')
     subprocess.check_output(config_cmd, shell=True)
@@ -48,7 +50,8 @@ def set_s3_sync_cmd(src_path, bucketname, num_threads, delete):
     return sync_cmd
 
 
-def set_gcs_sync_cmd(src_path, bucketname, num_threads, delete):
+def set_gcs_sync_cmd(src_path: str, bucketname: str, num_threads: int,
+                     delete: bool):
     sync_cmd = (f'gsutil -m -o \'GSUtil:parallel_thread_count={num_threads}\' '
                 'rsync -r')
     if delete:
@@ -57,7 +60,11 @@ def set_gcs_sync_cmd(src_path, bucketname, num_threads, delete):
     return sync_cmd
 
 
-def run_sync(src, storetype, bucketname, num_threads, delete):
+def run_sync(src: str, storetype: str, bucketname: str, num_threads: int,
+             delete: bool):
+    """
+    Runs the sync command to from SRC to STORETYPE bucket
+    """
     #TODO: add enum type class to handle storetypes
     storetype = storetype.lower()
     if storetype == 's3':
@@ -66,7 +73,7 @@ def run_sync(src, storetype, bucketname, num_threads, delete):
         sync_cmd = set_gcs_sync_cmd(src, bucketname, num_threads, delete)
     else:
         raise ValueError(f'Unknown store type: {storetype}')
-    #run the sync command
+
     #TODO: add try-except block
     subprocess.run(sync_cmd, shell=True, check=True)
 
@@ -95,8 +102,13 @@ def run_sync(src, storetype, bucketname, num_threads, delete):
               type=bool,
               is_flag=True,
               help='')
-def csync(src, storetype, bucketname, num_threads, interval, delete, lock):
-    base_dir = os.path.expanduser('~/.skystorage')
+def csync(src: str, storetype: str, bucketname: str, num_threads: int,
+          interval: int, delete: bool, lock: bool):
+    """
+    Syncs the source to the bucket every INTERVAL seconds. Creates a lock file
+    while sync command is runninng and removes it when completed.
+    """
+    base_dir = os.path.expanduser(C_SYNC_FILE_PATH)
     os.makedirs(base_dir, exist_ok=True)
     lock_file_name = f'csync_{storetype}_{bucketname}.lock'
     lock_path = os.path.expanduser(os.path.join(base_dir, lock_file_name))
@@ -114,7 +126,8 @@ def csync(src, storetype, bucketname, num_threads, interval, delete, lock):
             # TODO: add try-except block
             run_sync(src, storetype, bucketname, num_threads, delete)
             end_time = time.time()
-        elapsed_time = start_time - end_time
+        # the time took to sync gets reflected to the INTERVAL
+        elapsed_time = int(end_time - start_time)
         updated_interval = update_interval(interval, elapsed_time)
         if lock and os.path.exists(lock_path):
             os.remove(lock_path)
@@ -123,8 +136,17 @@ def csync(src, storetype, bucketname, num_threads, interval, delete, lock):
 
 @main.command()
 def terminate() -> None:
+    """
+    Terminates all the CSYNC daemon running after checking if all the
+    sync process has completed.
+    """
+    # TODO: Currently, this terminates all the CSYNC daemon by default.
+    # Make an option of --all to terminate all and make the default
+    # behavior to take a source name to terminate only one daemon.
     # Call the function to terminate the csync processes here
     process_dict: Dict[int, Tuple[str, str]] = {}
+
+    # check all the running processes to see if CSYNC daemon is running
     for proc in psutil.process_iter(['cmdline']):
         cmd = proc.info['cmdline']
         if 'csync' in cmd:
@@ -143,9 +165,8 @@ def terminate() -> None:
                 lock_file_path = os.path.expanduser(
                     os.path.join(C_SYNC_FILE_PATH, lock_file_name))
                 if not os.path.exists(lock_file_path):
-                    # kill c_sync process
+                    # kill csync process
                     psutil.Process(pid).terminate()
-                    # remove from c_sync_locks
                     del process_dict[pid]
             time.sleep(5)
 
