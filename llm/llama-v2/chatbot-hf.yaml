@@ -14,6 +14,7 @@ setup: |
   pip install torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
   pip install git+https://github.com/lm-sys/FastChat.git
 
+  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}', add_to_git_credential=True)"
 
 run: |
   conda activate chatbot
@@ -34,3 +35,4 @@ run: |
 
 envs:
   MODEL_SIZE: 7
+  HF_TOKEN: # Huggingface token
