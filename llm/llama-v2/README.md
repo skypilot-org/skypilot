@@ -41,7 +41,7 @@ sky launch -c llama-serve -s chatbot-hf.yaml
 ```
 
 <p align="center">
-  <img src="https://imgur.com/l5QX7D3.gif" alt="LLaMA v2 Demo"/>
+  <img src="https://i.imgur.com/l5QX7D3.gif" alt="LLaMA v2 Demo"/>
 </p>
 
 3. [Optional] Try other GPUs:
