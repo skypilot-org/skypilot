@@ -11,7 +11,6 @@ setup: |
   fi
 
   # Install dependencies
-  pip install torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
   pip install git+https://github.com/lm-sys/FastChat.git
 
 
