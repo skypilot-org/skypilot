@@ -938,6 +938,10 @@ def write_cluster_config(
                 # GCP only:
                 'gcp_project_id': gcp_project_id,
 
+                # Conda setup
+                'conda_installation_commands':
+                    constants.CONDA_INSTALLATION_COMMANDS,
+
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
                 'ray_port': constants.SKY_REMOTE_RAY_PORT,

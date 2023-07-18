@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import typing
 from typing import Dict, Iterable, List, Optional, Tuple, Union, Set
@@ -3262,8 +3263,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
-        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
-        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+            signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
         try:
             returncode = self.run_on_head(
                 handle,
@@ -3296,8 +3298,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
-        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
-        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+            signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
         # Refer to the notes in tail_logs.
         self.run_on_head(

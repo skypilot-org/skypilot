@@ -61,6 +61,9 @@ class Azure(clouds.Cloud):
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
         return {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {cls._REPR}.',
+            # TODO(zhwu): our azure subscription offer ID does not support spot.
+            # Need to support it.
+            clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {cls._REPR}.',
         }
 
     @classmethod
@@ -282,10 +285,6 @@ class Azure(clouds.Cloud):
             else:
                 return True, None
 
-        if resources.use_spot:
-            # TODO(zhwu): our azure subscription offer ID does not support spot.
-            # Need to support it.
-            return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             ok, disk_tier = failover_disk_tier(resources.instance_type,

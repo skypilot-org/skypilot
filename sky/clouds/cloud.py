@@ -28,6 +28,8 @@ class CloudImplementationFeatures(enum.Enum):
     AUTOSTOP = 'autostop'
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
+    SPOT_INSTANCE = 'spot_instance'
+    CUSTOM_DOSK_TIER = 'custom_disk_tier'
 
 
 class Region(collections.namedtuple('Region', ['name'])):
@@ -296,6 +298,11 @@ class Cloud:
         """
         if resources.is_launchable():
             self._check_instance_type_accelerators_combination(resources)
+        resources_required_features = resources.get_required_cloud_features()
+        try:
+            self.check_features_are_supported(resources_required_features)
+        except exceptions.NotSupportedError:
+            return ([], [])
         return self._get_feasible_launchable_resources(resources)
 
     def _get_feasible_launchable_resources(self, resources):
