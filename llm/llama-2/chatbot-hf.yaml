@@ -14,7 +14,7 @@ setup: |
   pip install torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
   pip install git+https://github.com/lm-sys/FastChat.git
 
-  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}', add_to_git_credential=True)"
+  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
 run: |
   conda activate chatbot
@@ -24,7 +24,8 @@ run: |
   sleep 10
   echo 'Starting model worker...'
   python -u -m fastchat.serve.model_worker \
-            --model-path meta-llama/Llama-2-${MODEL_SIZE}b-chat-hf 2>&1 \
+            --model-path meta-llama/Llama-2-${MODEL_SIZE}b-chat-hf \
+            --num-gpus $SKYPILOT_NUM_GPUS_PER_NODE 2>&1 \
             | tee model_worker.log &
 
   echo 'Waiting for model worker to start...'

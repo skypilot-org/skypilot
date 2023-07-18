@@ -41,21 +41,26 @@ sky launch -c llama-serve -s chatbot-hf.yaml
 ```
 
 <p align="center">
-  <img src="https://i.imgur.com/RmUjpX2.gif" alt="LLaMA 2 Demo"/>
+  <img src="https://i.imgur.com/cLqulb0.gif" alt="LLaMA 2 Demo"/>
 </p>
 
-3. [Optional] Try other GPUs:
+3. **Optional**: Try other GPUs:
 ```bash
-sky launch -c llama-serve-v100 -s chatbot-hf.yaml --gpus V100
+sky launch -c llama-serve-v100 -s chatbot-hf.yaml --gpus V100:8
 ```
 
-4. [Optional] Serve the 13B model instead of the default 7B:
+4. **Optional**: Serve the 13B model instead of the default 7B:
 ```bash
 sky launch -c llama-serve -s chatbot-hf.yaml --env MODEL_SIZE=13
 ```
 
+5. **Optional**: Serve the **70B** LLaMA 2 model:
+```bash
+sky launch -c llama-serve -s chatbot-hf.yaml --env MODEL_SIZE=70
+```
 
-## How to run LLaMA 2 chatbot (FAIR model)?
+
+## How to run LLaMA 2 chatbot with the FAIR model?
 
 You can also host the official FAIR model without using huggingface and gradio.
 
