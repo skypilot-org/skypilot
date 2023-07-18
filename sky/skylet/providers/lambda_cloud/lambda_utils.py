@@ -2,10 +2,14 @@
 import json
 import os
 import requests
+import time
 from typing import Any, Dict, List, Optional, Tuple
+
+from sky.utils import common_utils
 
 CREDENTIALS_PATH = '~/.lambda_cloud/lambda_keys'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
+MAX_ATTEMPTS = 6
 
 
 class LambdaCloudError(Exception):
@@ -85,6 +89,32 @@ def raise_lambda_error(response: requests.Response) -> None:
     raise LambdaCloudError(f'{code}: {message}')
 
 
+def try_post_with_backoff(url: str, data: str, headers: Dict[str, str]):
+    backoff = common_utils.Backoff(initial_backoff=3, max_backoff_factor=10)
+    for i in range(MAX_ATTEMPTS):
+        response = requests.post(url, data=data, headers=headers)
+        # If rate limited, wait and try again
+        if response.status_code == 429 and i != MAX_ATTEMPTS - 1:
+            time.sleep(backoff.current_backoff())
+            continue
+        if response.status_code == 200:
+            return response
+        raise_lambda_error(response)
+
+
+def try_get_with_backoff(url: str, headers: Dict[str, str]):
+    backoff = common_utils.Backoff(initial_backoff=3, max_backoff_factor=10)
+    for i in range(MAX_ATTEMPTS):
+        response = requests.get(url, headers=headers)
+        # If rate limited, wait and try again
+        if response.status_code == 429 and i != MAX_ATTEMPTS - 1:
+            time.sleep(backoff.current_backoff())
+            continue
+        if response.status_code == 200:
+            return response
+        raise_lambda_error(response)
+
+
 class LambdaCloudClient:
     """Wrapper functions for Lambda Cloud API."""
 
@@ -133,10 +163,10 @@ class LambdaCloudClient:
             'quantity': quantity,
             'name': name
         })
-        response = requests.post(f'{API_ENDPOINT}/instance-operations/launch',
-                                 data=data,
-                                 headers=self.headers)
-        raise_lambda_error(response)
+        response = try_post_with_backoff(
+            f'{API_ENDPOINT}/instance-operations/launch',
+            data=data,
+            headers=self.headers)
         return response.json().get('data', []).get('instance_ids', [])
 
     def remove_instances(self, *instance_ids: str) -> Dict[str, Any]:
@@ -146,25 +176,22 @@ class LambdaCloudClient:
                 instance_ids[0]  # TODO(ewzeng) don't hardcode
             ]
         })
-        response = requests.post(
+        response = try_post_with_backoff(
             f'{API_ENDPOINT}/instance-operations/terminate',
             data=data,
             headers=self.headers)
-        raise_lambda_error(response)
         return response.json().get('data', []).get('terminated_instances', [])
 
     def list_instances(self) -> List[Dict[str, Any]]:
         """List existing instances."""
-        response = requests.get(f'{API_ENDPOINT}/instances',
-                                headers=self.headers)
-        raise_lambda_error(response)
+        response = try_get_with_backoff(f'{API_ENDPOINT}/instances',
+                                        headers=self.headers)
         return response.json().get('data', [])
 
     def list_ssh_keys(self) -> List[Dict[str, str]]:
         """List ssh keys."""
-        response = requests.get(f'{API_ENDPOINT}/ssh-keys',
-                                headers=self.headers)
-        raise_lambda_error(response)
+        response = try_get_with_backoff(f'{API_ENDPOINT}/ssh-keys',
+                                        headers=self.headers)
         return response.json().get('data', [])
 
     def get_unique_ssh_key_name(self, prefix: str,
@@ -200,14 +227,12 @@ class LambdaCloudClient:
     def register_ssh_key(self, name: str, pub_key: str) -> None:
         """Register ssh key with Lambda."""
         data = json.dumps({'name': name, 'public_key': pub_key})
-        response = requests.post(f'{API_ENDPOINT}/ssh-keys',
-                                 data=data,
-                                 headers=self.headers)
-        raise_lambda_error(response)
+        try_post_with_backoff(f'{API_ENDPOINT}/ssh-keys',
+                              data=data,
+                              headers=self.headers)
 
     def list_catalog(self) -> Dict[str, Any]:
         """List offered instances and their availability."""
-        response = requests.get(f'{API_ENDPOINT}/instance-types',
-                                headers=self.headers)
-        raise_lambda_error(response)
+        response = try_get_with_backoff(f'{API_ENDPOINT}/instance-types',
+                                        headers=self.headers)
         return response.json().get('data', [])
