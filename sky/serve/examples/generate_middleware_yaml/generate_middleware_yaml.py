@@ -29,6 +29,8 @@ if 'resources' in original:
     # TODO(tian): Maybe ignore any ports specified in the original resoureces?
     if 'ports' in original['resources']:
         assert len(original['resources']['ports']) == 1 and original['resources']['ports'][0] == service['port']
+    else:
+        original['resources']['ports'] = [service['port']]
 common_utils.dump_yaml(modified_yaml_path, original)
 
 variables = {
