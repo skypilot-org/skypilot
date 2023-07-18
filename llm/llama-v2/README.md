@@ -12,7 +12,7 @@ You can now host your own LLaMA v2 chatbot with SkyPilot using 1-click.
 
 1. Start the serving the LLaMA-7B-Chat v2 model on a single A100 GPU:
 ```bash
-sky launch -c llama-serve -s llama-hf.yaml
+sky launch -c llama-serve -s chatbot-hf.yaml
 ```
 2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to chat with Vicuna.
 ```
@@ -23,12 +23,12 @@ sky launch -c llama-serve -s llama-hf.yaml
 
 3. [Optional] Try other GPUs:
 ```bash
-sky launch -c llama-serve-v100 -s llama-hf.yaml --gpus V100
+sky launch -c llama-serve-v100 -s chatbot-hf.yaml --gpus V100
 ```
 
 4. [Optional] Serve the 13B model instead of the default 7B:
 ```bash
-sky launch -c llama-serve -s llama-hf.yaml --env MODEL_SIZE=13
+sky launch -c llama-serve -s chatbot-hf.yaml --env MODEL_SIZE=13
 ```
 
 
@@ -50,7 +50,7 @@ Generate a read-only access token on huggingface [here](https://huggingface.co/s
 1. Launch the LLaMA v2 chatbot on the cloud:
 
     ```bash
-    sky launch -c llama-v2-chatbot chatbot.yaml
+    sky launch -c llama chatbot-meta.yaml
     ```
 
 2. Open another terminal and run:
