@@ -328,24 +328,24 @@ def _execute(
                                            cluster_name=cluster_name,
                                            retry_until_up=retry_until_up)
 
-        if dryrun:
-            logger.info('Dry run finished.')
+        if dryrun and handle is None:
+            logger.info('Dryrun finished.')
             return
 
-        if Stage.SYNC_WORKDIR in stages:
+        if Stage.SYNC_WORKDIR in stages and not dryrun:
             if task.workdir is not None:
                 backend.sync_workdir(handle, task.workdir)
 
-        if Stage.SYNC_FILE_MOUNTS in stages:
+        if Stage.SYNC_FILE_MOUNTS in stages and not dryrun:
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
 
         if no_setup:
             logger.info('Setup commands skipped.')
-        elif Stage.SETUP in stages:
+        elif Stage.SETUP in stages and not dryrun:
             backend.setup(handle, task, detach_setup=detach_setup)
 
-        if Stage.PRE_EXEC in stages:
+        if Stage.PRE_EXEC in stages and not dryrun:
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 backend.set_autostop(handle,
@@ -355,12 +355,12 @@ def _execute(
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
-                backend.execute(handle, task, detach_run)
+                backend.execute(handle, task, detach_run, dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
 
-        if Stage.DOWN in stages:
+        if Stage.DOWN in stages and not dryrun:
             if down and idle_minutes_to_autostop is None:
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
@@ -570,7 +570,8 @@ def exec(  # pylint: disable=redefined-builtin
     handle = backend_utils.check_cluster_available(
         cluster_name,
         operation='executing tasks',
-        check_cloud_vm_ray_backend=False)
+        check_cloud_vm_ray_backend=False,
+        dryrun=dryrun)
     _execute(entrypoint=entrypoint,
              dryrun=dryrun,
              down=down,
