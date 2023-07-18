@@ -1,4 +1,4 @@
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Union
 
 from sky import status_lib
 from sky.adaptors import kubernetes
@@ -66,3 +66,18 @@ def get_cluster_status(cluster_name: str,
             cluster_status.append(status_lib.ClusterStatus.INIT)
     # If pods are not found, we don't add them to the return list
     return cluster_status
+
+
+def get_current_kube_config_context() -> Union[str, None]:
+    """
+    Get the current kubernetes context from the kubeconfig file
+
+    Returns:
+        str | None: The current kubernetes context if it exists, None otherwise
+    """
+    k8s = kubernetes.get_kubernetes()
+    try:
+        _, current_context = k8s.config.list_kube_config_contexts()
+        return current_context['name']
+    except k8s.config.config_exception.ConfigException:
+        return None
