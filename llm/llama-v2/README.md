@@ -21,10 +21,17 @@ Generate a read-only access token on huggingface [here](https://huggingface.co/s
 
 ### Step 3: Deploy the model on SkyPilot
 
-```
-sky launch -c llama-v2-chatbot chatbot.yaml
-```
+1. Launch the LLaMA v2 chatbot on the cloud:
 
+    ```bash
+    sky launch -c llama-v2-chatbot chatbot.yaml
+    ```
 
+2. Open another terminal and run:
 
+    ```bash
+    ssh -L 7681:localhost:7681 llama
+    ```
 
+3. Open http://localhost:7681 in your browser and start chatting!
+<img src="https://imgur.com/Ay8sDhG.png" alt="LLaMA chatbot running on the cloud via SkyPilot"/>
