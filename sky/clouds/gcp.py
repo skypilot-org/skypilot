@@ -358,8 +358,8 @@ class GCP(clouds.Cloud):
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
-                if acc == 'A100-80GB':
-                    # A100-80GB has a different name pattern.
+                if acc in ('A100-80GB', 'L4'):
+                    # A100-80GB and L4 have a different name pattern.
                     resources_vars['gpu'] = 'nvidia-{}'.format(acc.lower())
                 else:
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
@@ -370,6 +370,9 @@ class GCP(clouds.Cloud):
                     # versions of CUDA as noted below.
                     # CUDA driver version 470.57.02, CUDA Library 11.4
                     image_id = 'skypilot:k80-debian-10'
+                elif acc == 'L4':
+                    # CUDA driver version 525.105.17, CUDA Library 11.8
+                    image_id = 'skypilot:cuda118-debian-11'
                 else:
                     # Though the image is called cu113, it actually has later
                     # versions of CUDA as noted below.
