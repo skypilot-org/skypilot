@@ -48,12 +48,15 @@ _DEFAULT_INSTANCE_FAMILY = [
     # Memory: 1 GiB RAM per 1 vCPU;
     'n2-highcpu',
 ]
+# n2 is not allowed for launching GPUs for now.
+_DEFAULT_HOST_VM_FAMILY = (
+    'n1-standard',
+    'n1-highmem',
+    'n1-highcpu',
+)
 _DEFAULT_NUM_VCPUS = 8
 _DEFAULT_MEMORY_CPU_RATIO = 4
 
-# This can be switched between n1 and n2.
-# n2 is not allowed for launching GPUs.
-_DEFAULT_HOST_VM_FAMILY = 'n1'
 _DEFAULT_GPU_MEMORY_CPU_RATIO = 4
 
 # TODO(zongheng): fix A100 info directly in catalog.
@@ -262,14 +265,18 @@ def get_instance_type_for_accelerator(
     if acc_name not in _NUM_ACC_TO_NUM_CPU:
         acc_name = 'DEFAULT'
 
-    assert _DEFAULT_HOST_VM_FAMILY == 'n1'
-
+    default_host_cpus = _NUM_ACC_TO_NUM_CPU[acc_name].get(acc_count, None)
     if cpus is None and memory is None:
-        cpus = f'{_NUM_ACC_TO_NUM_CPU[acc_name].get(acc_count, None)}+'
+        assert default_host_cpus is not None, (acc_name, acc_count)
+        cpus = f'{default_host_cpus}+'
     if memory is None:
-        memory = f'{_DEFAULT_GPU_MEMORY_CPU_RATIO}x'
+        assert cpus is not None, (acc_name, acc_count)
+        cpu_val = int(cpus.strip('+').strip('x'))
+        # The memory size should be at least 4x the requested number of vCPUs
+        # to be consistent with all other clouds.
+        memory = f'{cpu_val * _DEFAULT_GPU_MEMORY_CPU_RATIO}+'
     df = _df[_df['InstanceType'].notna()]
-    df = df[df['InstanceType'].str.startswith(f'{_DEFAULT_HOST_VM_FAMILY}-')]
+    df = df[df['InstanceType'].str.startswith(_DEFAULT_HOST_VM_FAMILY)]
 
     instance_type = common.get_instance_type_for_cpus_mem_impl(df, cpus, memory)
     # The fuzzy candidate should have already been fetched in the caller.
