@@ -172,7 +172,8 @@ def cleanup_ports(
     handler_to_instances = _filter_instances(handlers, project_id, zone,
                                              name_filter, lambda _: None, None,
                                              None)
-    assert len(handler_to_instances) == 1, handler_to_instances
+    # When launching process is interrupted, there may be no instances.
+    assert len(handler_to_instances) <= 1, handler_to_instances
 
     for handler, instances in handler_to_instances.items():
         # all instances should be in the same VPC
