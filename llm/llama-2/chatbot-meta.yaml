@@ -3,6 +3,10 @@ resources:
   disk_size: 1024
   disk_tier: high
 
+envs:
+  MODEL_SIZE: 7
+  HF_TOKEN: <your-huggingface-token> # TODO: Replace with huggingface token
+
 setup: |
   set -ex
 
@@ -33,8 +37,3 @@ setup: |
 run: |
   cd sky-llama
   ttyd /bin/bash -c "torchrun --nproc_per_node $SKYPILOT_NUM_GPUS_PER_NODE chat.py --ckpt_dir ~/sky_workdir/Llama-2-${MODEL_SIZE}b-chat --tokenizer_path ~/sky_workdir/Llama-2-${MODEL_SIZE}b-chat/tokenizer.model"
-
-
-envs:
-  MODEL_SIZE: 7
-  HF_TOKEN: # Huggingface token

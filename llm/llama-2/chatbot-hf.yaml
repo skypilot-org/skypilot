@@ -3,6 +3,10 @@ resources:
   disk_size: 1024
   disk_tier: high
 
+envs:
+  MODEL_SIZE: 7
+  HF_TOKEN: <your-huggingface-token> # TODO: Replace with huggingface token
+
 setup: |
   conda activate chatbot
   if [ $? -ne 0 ]; then
@@ -34,7 +38,3 @@ run: |
 
   echo 'Starting gradio server...'
   python -u -m fastchat.serve.gradio_web_server --share | tee ~/gradio.log
-
-envs:
-  MODEL_SIZE: 7
-  HF_TOKEN: # Huggingface token
