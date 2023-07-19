@@ -15,6 +15,7 @@ from sky import global_user_state
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 from sky.data import data_utils
+from sky.serve import common
 from sky.skylet import constants
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -365,10 +366,12 @@ class Task:
         resources = config.pop('resources', None)
         resources = sky.Resources.from_yaml_config(resources)
 
-        # FIXME: find a better way to exclude unused fields.
-        config.pop('service', None)
-
         task.set_resources({resources})
+
+        service = config.pop('service', None)
+        service = common.SkyServiceSpec.from_yaml_config(service)
+        task.service = service
+
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 

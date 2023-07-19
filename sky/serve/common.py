@@ -30,7 +30,7 @@ class SkyServiceSpec:
     @classmethod
     def from_yaml_config(cls, config: Optional[Dict[str, str]]):
         if config is None:
-            return SkyServiceSpec()
+            return None
 
         backend_utils.validate_schema(config, schemas.get_service_schema(),
                                       'Invalid service YAML:')
