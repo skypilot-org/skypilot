@@ -7,22 +7,22 @@
 
 ## Why use SkyPilot to deploy over commercial hosted solutions?
 
-* No lock-in: run on any supported cloud, region
-* Everything stays in your cloud account (your own VMs, cloud object store buckets)
+* No lock-in: run on any supported cloud, region (the Sky ecosystem)
+* Everything stays in your cloud account (your VMs & buckets)
 * No one else sees your chat history
-* Pay absolute minimum (no managed solution markups)
+* Pay absolute minimum — no managed solution markups
 * Freely choose your own model size, GPU type, number of GPUs, etc, based on needs and budget.
 
-…and you get all of this with 1 click — let SkyPilot automate the infra.
+…and you get all of this with 1 click — let SkyPilot automate the infra. 
 
 ## Pre-requisites
 
-###  Step 1: Apply for the access to the LLaMA 2 model
+1. Apply for the access to the LLaMA 2 model
 
 Go to the [application page](https://ai.meta.com/resources/models-and-libraries/llama-downloads/) and apply for the access to the model weights.
 
 
-### Step 2: Get the access token from huggingface
+2. Get the access token from huggingface
 
 Generate a read-only access token on huggingface [here](https://huggingface.co/settings/token), and make sure your huggingface account can access the LLaMA 2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main).
 
