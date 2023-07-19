@@ -11,7 +11,7 @@
 * Everything stays in your cloud account (your VMs & buckets)
 * No one else sees your chat history
 * Pay absolute minimum — no managed solution markups
-* Freely choose your own model size, GPU type, number of GPUs, etc, based on needs and budget.
+* Freely choose your own model size, GPU type, number of GPUs, etc, based on scale and budget.
 
 …and you get all of this with 1 click — let SkyPilot automate the infra. 
 
