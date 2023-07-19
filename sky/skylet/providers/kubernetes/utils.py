@@ -1,4 +1,4 @@
-from typing import List, Tuple, Optional, Union
+from typing import List, Tuple, Optional
 
 from sky import status_lib
 from sky.adaptors import kubernetes
@@ -68,7 +68,7 @@ def get_cluster_status(cluster_name: str,
     return cluster_status
 
 
-def get_current_kube_config_context() -> Union[str, None]:
+def get_current_kube_config_context() -> Optional[str]:
     """
     Get the current kubernetes context from the kubeconfig file
 
