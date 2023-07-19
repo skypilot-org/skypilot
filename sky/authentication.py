@@ -405,7 +405,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             raise
 
     sshjump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-    sshjump_image =  clouds.Kubernetes.SSH_JUMP_IMAGE
+    sshjump_image =  clouds.Kubernetes.IMAGE
 
     template_path = os.path.join(sky.__root_dir__, 'templates', 'kubernetes-sshjump.j2')
     if not os.path.exists(template_path):

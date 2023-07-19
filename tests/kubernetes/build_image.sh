@@ -6,7 +6,6 @@
 # -p: Push the image to the registry
 
 TAG=us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest
-TAG_SSHJUMP=us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/sshjump:latest
 
 # Parse command line arguments
 while getopts ":p" opt; do
@@ -28,18 +27,15 @@ if [[ $push ]]; then
   echo "Building and pushing for amd64 and arm64"
   # Push both platforms as one image manifest list
   docker buildx build --push --platform linux/amd64,linux/arm64 -t $TAG -f Dockerfile_k8s ./sky
-  docker buildx build --push --platform linux/amd64,linux/arm64 -t $TAG_SSHJUMP -f Dockerfile_k8s_sshjump ./sky
 fi
 
 # Load the right image depending on the architecture of the host machine (Apple Silicon or Intel)
 if [[ $(uname -m) == "arm64" ]]; then
   echo "Loading image for arm64 (Apple Silicon etc.)"
   docker buildx build --load --platform linux/arm64 -t $TAG -f Dockerfile_k8s ./sky
-  docker buildx build --load --platform linux/arm64 -t $TAG_SSHJUMP -f Dockerfile_k8s_sshjump ./sky
 elif [[ $(uname -m) == "x86_64" ]]; then
   echo "Building for amd64 (Intel CPUs)"
   docker buildx build --load --platform linux/amd64 -t $TAG -f Dockerfile_k8s ./sky
-  docker buildx build --load --platform linux/amd64 -t $TAG_SSHJUMP -f Dockerfile_k8s_sshjump ./sky
 else
   echo "Unsupported architecture: $(uname -m)"
   exit 1
@@ -47,5 +43,3 @@ fi
 
 echo "Tagging image as skypilot:latest"
 docker tag $TAG skypilot:latest
-echo "Tagging image as sshjump:latest"
-docker tag $TAG_SSHJUMP sshjump:latest

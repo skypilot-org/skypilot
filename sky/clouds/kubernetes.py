@@ -150,8 +150,6 @@ class Kubernetes(clouds.Cloud):
 
     IMAGE = 'us-central1-docker.pkg.dev/' \
             'skypilot-375900/skypilotk8s/skypilot:latest'
-    SSH_JUMP_IMAGE = 'us-central1-docker.pkg.dev/' \
-            'skypilot-375900/skypilotk8s/sshjump:latest'
 
     @classmethod
     def _cloud_unsupported_features(
