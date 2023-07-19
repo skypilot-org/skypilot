@@ -27,6 +27,7 @@
 
 ----
 :fire: *News* :fire:
+- [July, 2023] Self-Hosted **LLaMA 2 Chatbot** on Any Cloud: [**example**](./llm/llama-2/)
 - [June, 2023] Serving LLM **24x Faster On the Cloud** with vLLM and SkyPilot: [**example**](./llm/vllm/), [**blog post**](https://blog.skypilot.co/serving-llm-24x-faster-on-the-cloud-with-vllm-and-skypilot/)
 - [June, 2023] [**Two new clouds supported**](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html): Samsung SCP and Oracle OCI!
 - [April, 2023] **[**SkyPilot YAMLs released**](./llm/vicuna/) for finetuning & serving the Vicuna model with a single command**!
@@ -130,6 +131,7 @@ To learn more, see our [Documentation](https://skypilot.readthedocs.io/en/latest
 
 Runnable examples:
 - LLMs on SkyPilot
+  - [Self-Hosted LLaMA 2 Chatbot](./llm/llama-2/)
   - [Vicuna chatbots: Training & Serving](./llm/vicuna/) (from official Vicuna team)
   - [vLLM: Serving LLM 24x Faster On the Cloud](./llm/vllm/) (from official vLLM team)
   - [QLoRA](https://github.com/artidoro/qlora/pull/132)

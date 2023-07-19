@@ -796,6 +796,64 @@ class GCP(clouds.Cloud):
         return ' '.join(f'labels.{k}={v}' for k, v in tag_filters.items())
 
     @classmethod
+    def check_quota_available(cls, resources: 'resources.Resources') -> bool:
+        """Check if GCP quota is available based on `resources`.
+
+        GCP-specific implementation of check_quota_available. The function works by
+        matching the `accelerator` to the a corresponding GCP keyword, and then using
+        the GCP CLI commands to query for the specific quota (the `accelerator` as
+        defined by `resources`).
+
+        Returns:
+            False if the quota is found to be zero, and True otherwise.
+        Raises:
+            CalledProcessError: error with the GCP CLI command.
+        """
+
+        if not resources.accelerators:
+            # TODO(hriday): We currently only support checking quotas for GPUs.
+            # For CPU-only instances, we need to try provisioning to check quotas.
+            return True
+
+        accelerator = list(resources.accelerators.keys())[0]
+        use_spot = resources.use_spot
+        region = resources.region
+
+        from sky.clouds.service_catalog import gcp_catalog  # pylint: disable=import-outside-toplevel
+
+        quota_code = gcp_catalog.get_quota_code(accelerator, use_spot)
+
+        if quota_code is None:
+            # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
+            return True
+
+        command = f'gcloud compute regions describe {region} |grep -B 1 "{quota_code}" | awk \'/limit/ {{print; exit}}\''
+        try:
+            proc = subprocess_utils.run(cmd=command,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE)
+
+        except subprocess.CalledProcessError as e:
+            logger.warning(f'Quota check command failed with error: '
+                           f'{e.stderr.decode()}')
+            return True
+
+        # Extract quota from output
+        # Example output:  "- limit: 16.0"
+        out = proc.stdout.decode()
+        try:
+            quota = int(float(out.split('limit:')[-1].strip()))
+        except (ValueError, IndexError, AttributeError) as e:
+            logger.warning('Parsing the subprocess output failed '
+                           f'with error: {e}')
+            return True
+
+        if quota == 0:
+            return False
+        # Quota found to be greater than zero, try provisioning
+        return True
+
+    @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
