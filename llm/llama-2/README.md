@@ -58,7 +58,7 @@ sky launch -c llama-serve -s chatbot-hf.yaml
 sky launch -c llama-serve-l4 -s chatbot-hf.yaml --gpus L4
 ```
 
-Here L4 is a GPU that is cost-effective for inference. You can find more details about the GPU types [here](https://cloud.google.com/blog/products/compute/introducing-g2-vms-with-nvidia-l4-gpus).
+L4 is the latest generation GPU built for large inference AI workloads. Find more details [here](https://cloud.google.com/blog/products/compute/introducing-g2-vms-with-nvidia-l4-gpus).
 
 4. **Optional**: Serve the 13B model instead of the default 7B:
 ```bash
