@@ -22,7 +22,7 @@ Try `sky show-gpus --all` for supported GPUs.
 
 We can start the finetuning of Falcon model on Open Assistant's [Guanaco](https://huggingface.co/datasets/timdettmers/openassistant-guanaco) data **with a single command**. It will automatically find the available cheapest VM on any cloud.
 
-**To finetune using different data**, simply replace the path in `timdettmers/openassistant-guanaco`
+**To finetune using different data**, simply replace the path in `timdettmers/openassistant-guanaco` with any other huggingface dataset.
 
 Steps for training on your cloud(s):
 
