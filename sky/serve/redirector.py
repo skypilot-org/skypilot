@@ -1,5 +1,6 @@
 import time
 import logging
+import yaml
 from collections import deque
 
 from sky.serve.common import SkyServiceSpec
@@ -113,7 +114,13 @@ if __name__ == '__main__':
                         help='Controller address (ip:port).')
     args = parser.parse_args()
 
-    service_spec = SkyServiceSpec(args.task_yaml)
+    with open(args.task_yaml, 'r') as f:
+        task = yaml.safe_load(f)
+    if 'service' not in task:
+        raise ValueError('Task YAML must have a "service" section')
+    service_config = task['service']
+    service_spec = SkyServiceSpec.from_yaml_config(service_config)
+
     redirector = SkyServeRedirector(controller_url=args.controller_addr,
                                     service_spec=service_spec,
                                     port=args.port)

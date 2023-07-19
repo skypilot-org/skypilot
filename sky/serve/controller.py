@@ -9,6 +9,7 @@ from sky.serve.load_balancers import RoundRobinLoadBalancer, LoadBalancer
 
 import time
 import threading
+import yaml
 
 from typing import Optional
 
@@ -90,7 +91,12 @@ if __name__ == '__main__':
     infra_provider = SkyPilotInfraProvider(args.task_yaml)
 
     # ======= Load Balancer =========
-    service_spec = SkyServiceSpec(args.task_yaml)
+    with open(args.task_yaml, 'r') as f:
+        task = yaml.safe_load(f)
+    if 'service' not in task:
+        raise ValueError('Task YAML must have a "service" section')
+    service_config = task['service']
+    service_spec = SkyServiceSpec.from_yaml_config(service_config)
     # Select the load balancing policy: RoundRobinLoadBalancer or LeastLoadedLoadBalancer
     load_balancer = RoundRobinLoadBalancer(
         infra_provider=infra_provider,
