@@ -23,6 +23,8 @@ fi
 # Check if the local cluster already exists
 if kind get clusters | grep -q skypilot; then
     echo "Local cluster already exists. Exiting."
+    # Switch context to the local cluster
+    kubectl config use-context kind-skypilot
     exit 100
 fi
 
