@@ -407,7 +407,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     sshjump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
     sshjump_image =  clouds.Kubernetes.IMAGE
 
-    template_path = os.path.join(sky.__root_dir__, 'templates', 'kubernetes-sshjump.j2')
+    template_path = os.path.join(sky.__root_dir__, 'templates', 'kubernetes-sshjump.yml.j2')
     if not os.path.exists(template_path):
         raise FileNotFoundError('Template "kubernetes-sshjump.j2" does not exist.')
     with open(template_path) as fin:
@@ -415,7 +415,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     j2_template = jinja2.Template(template)
     _content = j2_template.render(name=sshjump_name, image=sshjump_image, secret=key_label)
 
-    content = json.loads(_content)
+    content = yaml.safe_load(_content)
 
     try:
         kubernetes.core_api().create_namespaced_pod('default', content['pod_spec'])

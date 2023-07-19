@@ -1,0 +1,44 @@
+pod_spec:
+    apiVersion: v1
+    kind: Pod
+    metadata:
+        name: {{ name }}
+        labels:
+            component: {{ name }}
+            parent: skypilot
+    spec:
+        volumes:
+          - name: secret-volume
+            secret:
+                secretName: {{ secret }}
+        containers:
+          - name: {{ name }}
+            imagePullPolicy: Always
+            image: {{ image }}
+            command: ["/bin/bash", "-c", "--"]
+            args: ["trap : TERM INT; sleep infinity & wait;"]
+            ports:
+              - containerPort: 22
+            volumeMounts:
+              - name: secret-volume
+                readOnly: true
+                mountPath: /etc/secret-volume
+            lifecycle:
+                postStart:
+                    exec:
+                        command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && sudo service ssh restart"]
+service_spec:
+    apiVersion: v1
+    kind: Service
+    metadata:
+        name: {{ name }}
+        labels:
+            parent: skypilot
+    spec:
+        type: NodePort
+        selector:
+            component: {{ name }}
+        ports:
+          - protocol: TCP
+            port: 22
+            targetPort: 22
