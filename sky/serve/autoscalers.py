@@ -98,7 +98,7 @@ class RequestRateAutoscaler(Autoscaler):
         """
         super().__init__(*args, **kwargs)
         self.min_nodes = min_nodes
-        self.max_nodes = max_nodes or 2 * min_nodes
+        self.max_nodes = max_nodes or min_nodes
         self.query_interval = 60  # Therefore thresholds represent queries per minute.
         self.upper_threshold = upper_threshold or 1
         self.lower_threshold = lower_threshold or 0
