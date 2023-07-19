@@ -1326,6 +1326,12 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{get_cleaned_username()}'
 
 
+def generate_service_name():
+    # TODO: change this ID formatting to something more pleasant.
+    # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
+    return f'sky-service-{uuid.uuid4().hex[:4]}-{get_cleaned_username()}'
+
+
 def get_cleaned_username() -> str:
     """Cleans the current username to be used as part of a cluster name.
 

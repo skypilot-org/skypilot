@@ -109,14 +109,15 @@ if __name__ == '__main__':
 
     # ======= Autoscaler =========
     # Create an autoscaler with the RequestRateAutoscaler policy. Thresholds are defined as requests per node in the defined interval.
-    autoscaler = RequestRateAutoscaler(infra_provider,
-                                       load_balancer,
-                                       frequency=5,
-                                       min_nodes=service_spec.min_replica,
-                                       max_nodes=service_spec.max_replica,
-                                       upper_threshold=service_spec.qpm_upper_threshold,
-                                       lower_threshold=service_spec.qpm_lower_threshold,
-                                       cooldown=60)
+    autoscaler = RequestRateAutoscaler(
+        infra_provider,
+        load_balancer,
+        frequency=5,
+        min_nodes=service_spec.min_replica,
+        max_nodes=service_spec.max_replica,
+        upper_threshold=service_spec.qpm_upper_threshold,
+        lower_threshold=service_spec.qpm_lower_threshold,
+        cooldown=60)
 
     # ======= Controller =========
     # Create a controller object and run it.

@@ -2924,7 +2924,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     '\nTo view the spot job dashboard:\t'
                     f'{backend_utils.BOLD}sky spot dashboard'
                     f'{backend_utils.RESET_BOLD}')
-            else:
+            elif not name.startswith('middleware-'):
+                # Skip logging for submit controller & redirector jobs
+                # to middleware
                 logger.info(f'{fore.CYAN}Job ID: '
                             f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
                             '\nTo cancel the job:\t'
@@ -3039,7 +3041,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         fore = colorama.Fore
         style = colorama.Style
         name = handle.cluster_name
-        if name == spot_lib.SPOT_CONTROLLER_NAME or down:
+        if (name == spot_lib.SPOT_CONTROLLER_NAME or down or
+                name.startswith('middleware-')):
             return
         stop_str = ('\nTo stop the cluster:'
                     f'\t{backend_utils.BOLD}sky stop {name}'

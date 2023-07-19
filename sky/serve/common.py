@@ -1,5 +1,5 @@
 import yaml
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 
 from sky.backends import backend_utils
 from sky.utils import schemas
@@ -8,14 +8,14 @@ from sky.utils import schemas
 class SkyServiceSpec:
 
     def __init__(
-            self,
-            readiness_path: str,
-            readiness_timeout: int,
-            app_port: int,
-            min_replica: int,
-            max_replica: Optional[int] = None,
-            qpm_upper_threshold: Optional[int] = None,
-            qpm_lower_threshold: Optional[int] = None,
+        self,
+        readiness_path: str,
+        readiness_timeout: int,
+        app_port: int,
+        min_replica: int,
+        max_replica: Optional[int] = None,
+        qpm_upper_threshold: Optional[int] = None,
+        qpm_lower_threshold: Optional[int] = None,
     ):
         # TODO: check if the path is valid
         self._readiness_path = f':{app_port}{readiness_path}'
@@ -28,7 +28,7 @@ class SkyServiceSpec:
         self._qpm_lower_threshold = qpm_lower_threshold
 
     @classmethod
-    def from_yaml_config(cls, config: Optional[Dict[str, str]]):
+    def from_yaml_config(cls, config: Optional[Dict[str, Any]]):
         if config is None:
             return None
 
@@ -37,12 +37,16 @@ class SkyServiceSpec:
 
         service_config = {}
         service_config['readiness_path'] = config['readiness_probe']['path']
-        service_config['readiness_timeout'] = config['readiness_probe']['timeout']
+        service_config['readiness_timeout'] = config['readiness_probe'][
+            'timeout']
         service_config['app_port'] = config['port']
         service_config['min_replica'] = config['replica_policy']['min_replica']
-        service_config['max_replica'] = config['replica_policy'].get('max_replica', None)
-        service_config['qpm_upper_threshold'] = config['replica_policy'].get('qpm_upper_threshold', None)
-        service_config['qpm_lower_threshold'] = config['replica_policy'].get('qpm_lower_threshold', None)
+        service_config['max_replica'] = config['replica_policy'].get(
+            'max_replica', None)
+        service_config['qpm_upper_threshold'] = config['replica_policy'].get(
+            'qpm_upper_threshold', None)
+        service_config['qpm_lower_threshold'] = config['replica_policy'].get(
+            'qpm_lower_threshold', None)
 
         return SkyServiceSpec(**service_config)
 

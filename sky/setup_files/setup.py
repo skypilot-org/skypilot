@@ -112,7 +112,10 @@ install_requires = [
     'pulp',
     # Ray job has an issue with pydantic>2.0.0, due to API changes of pydantic. See
     # https://github.com/ray-project/ray/issues/36990
-    'pydantic<2.0'
+    'pydantic<2.0',
+    # Required by the SkyServe library
+    'uvicorn',
+    'fastapi'
 ]
 
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the

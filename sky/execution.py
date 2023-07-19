@@ -365,7 +365,9 @@ def _execute(
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
-        if cluster_name != spot.SPOT_CONTROLLER_NAME:
+        if (cluster_name != spot.SPOT_CONTROLLER_NAME and
+                cluster_name is not None and
+                not cluster_name.startswith('middleware-')):
             # UX: print live clusters to make users aware (to save costs).
             #
             # Don't print if this job is launched by the spot controller,
@@ -942,3 +944,106 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
                     raise exceptions.NotSupportedError(
                         f'Unsupported store type: {store_type}')
             storage_obj.force_delete = True
+
+
+@usage_lib.entrypoint
+def serve_up(
+    task: 'sky.Task',
+    name: str,
+    original_yaml_path: str,
+):
+    """Serve up a task as a RESTful API.
+
+    Please refer to the sky.cli.serve_up for the document.
+
+    Args:
+        task: sky.Task to serve up.
+        name: Name of the RESTful API.
+
+    Raises:
+    """
+    # TODO(tian): use `task` directly
+    original = common_utils.read_yaml(original_yaml_path)
+    original_workdir = original.get('workdir', None)
+    workdir_abs_path = None
+    # TODO(tian): use _maybe_translate_local_file_mounts_and_sync_up instead
+    if original_workdir is not None:
+        # Upload the workdir to middleware:~/sky_workdir
+        # Then upload middleware:~/sky_workdir to the endpoint replica
+        workdir_path = os.path.join(os.path.dirname(original_yaml_path),
+                                    original_workdir)
+        workdir_abs_path = os.path.abspath(workdir_path)
+        original['workdir'] = '~/sky_workdir'
+    service = original['service']
+    if 'resources' not in original:
+        original['resources'] = {}
+    original['resources']['ports'] = [service['port']]
+    with tempfile.NamedTemporaryFile(prefix=f'task-in-middleware-{name}-',
+                                     mode='w') as f:
+        common_utils.dump_yaml(f.name, original)
+        remote_task_yaml_path = f'~/.sky/serve/service_{name}.yaml'
+        vars_to_fill = {
+            'port': service['port'],
+            'workdir': workdir_abs_path,
+            'remote_task_yaml_path': remote_task_yaml_path,
+            'modified_yaml_path': f.name,
+        }
+        middleware_yaml_path = os.path.join('~/.sky/serve', f'{name}.yaml')
+        backend_utils.fill_template('middleware.yaml.j2',
+                                    vars_to_fill,
+                                    output_path=middleware_yaml_path)
+        middleware_task = task_lib.Task.from_yaml(middleware_yaml_path)
+        assert len(middleware_task.resources) == 1, middleware_task
+        print(f'{colorama.Fore.YELLOW}'
+              f'Launching middleware for {name}...'
+              f'{colorama.Style.RESET_ALL}')
+
+        middleware_cluster_name = f'middleware-{name}'
+
+        _execute(
+            entrypoint=middleware_task,
+            stream_logs=True,
+            cluster_name=middleware_cluster_name,
+            retry_until_up=True,
+        )
+
+        handle = global_user_state.get_handle_from_cluster_name(
+            middleware_cluster_name)
+        assert isinstance(handle, backends.CloudVmRayResourceHandle)
+
+        print(f'{colorama.Fore.YELLOW}'
+              'Launching controller process on middleware...'
+              f'{colorama.Style.RESET_ALL}')
+        _execute(
+            entrypoint=sky.Task(
+                name='run-middleware-controller',
+                run='python -m sky.serve.controller --task-yaml '
+                f'{remote_task_yaml_path}'),
+            stream_logs=False,
+            handle=handle,
+            stages=[Stage.EXEC],
+            cluster_name=middleware_cluster_name,
+            detach_run=True,
+        )
+
+        print(f'{colorama.Fore.YELLOW}'
+              'Launching redirector process on middleware...'
+              f'{colorama.Style.RESET_ALL}')
+        _execute(
+            entrypoint=sky.Task(
+                name='run-middleware-redirector',
+                run='python -m sky.serve.redirector --task-yaml '
+                f'{remote_task_yaml_path}'),
+            stream_logs=False,
+            handle=handle,
+            stages=[Stage.EXEC],
+            cluster_name=middleware_cluster_name,
+            detach_run=True,
+        )
+
+        print(f'{colorama.Style.BRIGHT}{colorama.Fore.CYAN}Serving at '
+              f'{colorama.Style.RESET_ALL}{colorama.Fore.CYAN}'
+              f'{handle.head_ip}:{task.service.app_port}'
+              f'{colorama.Style.BRIGHT}.\n'
+              'Submit at least one request to bootstrap the service.'
+              f'{colorama.Style.RESET_ALL}')

@@ -1,0 +1,12 @@
+resources:
+  cloud: gcp
+  disk_size: 100
+  ports:
+    - {{port}}
+
+{% if workdir is not none %}
+workdir: {{workdir}}
+{% endif %}
+
+file_mounts:
+  {{remote_task_yaml_path}}: {{modified_yaml_path}}
