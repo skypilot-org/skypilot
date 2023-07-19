@@ -1596,8 +1596,7 @@ def check_network_connection():
             return
         except (requests.Timeout, requests.exceptions.ConnectionError) as e:
             if i == len(_TEST_IP_LIST) - 1:
-                raise exceptions.NetworkError('Could not refresh the cluster. '
-                                              'Network seems down.') from e
+                raise exceptions.NetworkError('Network seems down.') from e
 
 
 def check_owner_identity(cluster_name: str) -> None:
