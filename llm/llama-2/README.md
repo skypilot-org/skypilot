@@ -7,7 +7,7 @@
 
 ## Why use SkyPilot to deploy over commercial hosted solutions?
 
-* No lock-in: run on any supported cloud, region (the Sky ecosystem)
+* No lock-in: run on any supported cloud - AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI
 * Everything stays in your cloud account (your VMs & buckets)
 * No one else sees your chat history
 * Pay absolute minimum — no managed solution markups
