@@ -34,7 +34,7 @@ setup: |
   cd FastChat
   pip install -e .
   if [ $USE_XFORMERS -eq 1 ]; then
-    conda install xformers -c xformers
+    conda install xformers -c xformers -y
   fi
 
   # Download the ShareGPT dataset
