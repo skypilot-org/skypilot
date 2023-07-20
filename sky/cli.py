@@ -3897,8 +3897,9 @@ def serve_up(
     usage_lib.messages.usage.update_user_task_yaml(entrypoint)
     dag = dag_utils.load_chain_dag_from_yaml(entrypoint)
     if len(dag.tasks) > 1:
-        click.secho('Only the first task in the YAML file will be served.',
-                    fg='yellow')
+        click.secho('Multiple tasks found in the YAML file.',
+                    fg='red')
+        return
     task = dag.tasks[0]
 
     if not yes:
