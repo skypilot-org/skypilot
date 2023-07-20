@@ -64,8 +64,7 @@ _apply_az_mapping_lock = threading.Lock()
 _image_df = common.read_catalog('aws/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
-_quotas_df = common.read_catalog('aws/instance_quota_mapping.csv',
-                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+_quotas_df = common.read_catalog('aws/instance_quota_mapping.csv')
 
 
 def _get_az_mappings(aws_user_hash: str) -> Optional[pd.DataFrame]:
@@ -159,9 +158,12 @@ def _get_df() -> pd.DataFrame:
 
 
 def get_quota_code(instance_type: str, use_spot: bool) -> Optional[str]:
-    # Get the quota code from the accelerator instance type
-    # This will be used in the botocore command to check for
-    # a non-zero quota
+    """Get the quota code based on `instance_type` and `use_spot`.
+
+    The quota code is fetched from `_quotas_df` based on the instance type
+    specified, and will then be utilized in a botocore API command in order
+    to check its quota.
+    """
 
     if use_spot:
         spot_header = 'SpotInstanceCode'

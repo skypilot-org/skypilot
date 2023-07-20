@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import typing
 from typing import Dict, Iterable, List, Optional, Tuple, Union, Set
@@ -1365,8 +1366,7 @@ class RetryingVmProvisioner(object):
         # instead of trying to provision and failing later.
         try:
             need_provision = to_provision.cloud.check_quota_available(
-                to_provision.region, to_provision.instance_type,
-                to_provision.use_spot)
+                to_provision)
 
         except Exception as e:  # pylint: disable=broad-except
             need_provision = True
@@ -1384,7 +1384,8 @@ class RetryingVmProvisioner(object):
             raise exceptions.ResourcesUnavailableError(
                 f'{colorama.Fore.YELLOW}Found no quota for '
                 f'{to_provision.instance_type} {instance_descriptor} '
-                f'instances in region {to_provision.region}. '
+                f'instances in region {to_provision.region} '
+                f'in {to_provision.cloud}. '
                 f'{colorama.Style.RESET_ALL}'
                 f'To request quotas, check the instruction: '
                 f'https://skypilot.readthedocs.io/en/latest/cloud-setup/quota.html.'  # pylint: disable=line-too-long
@@ -3262,8 +3263,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
-        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
-        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+            signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
         try:
             returncode = self.run_on_head(
                 handle,
@@ -3296,8 +3298,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
-        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
-        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+            signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
         # Refer to the notes in tail_logs.
         self.run_on_head(
