@@ -101,7 +101,7 @@ if __name__ == '__main__':
     load_balancer = RoundRobinLoadBalancer(
         infra_provider=infra_provider,
         endpoint_path=service_spec.readiness_path,
-        timeout=service_spec.readiness_timeout)
+        readiness_timeout=service_spec.readiness_timeout)
     # load_balancer = LeastLoadedLoadBalancer(n=5)
     # autoscaler = LatencyThresholdAutoscaler(load_balancer,
     #                                         upper_threshold=0.5,    # 500ms

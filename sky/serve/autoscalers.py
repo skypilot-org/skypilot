@@ -81,9 +81,9 @@ class RequestRateAutoscaler(Autoscaler):
     def __init__(self,
                  *args,
                  min_nodes: int = 1,
-                 max_nodes: Optional[int] = 10,
-                 upper_threshold: Optional[int] = 1,
-                 lower_threshold: Optional[int] = 0,
+                 max_nodes: Optional[int] = None,
+                 upper_threshold: Optional[int] = None,
+                 lower_threshold: Optional[int] = None,
                  cooldown: int = 60,
                  **kwargs):
         """
@@ -100,8 +100,8 @@ class RequestRateAutoscaler(Autoscaler):
         self.min_nodes = min_nodes
         self.max_nodes = max_nodes or min_nodes
         self.query_interval = 60  # Therefore thresholds represent queries per minute.
-        self.upper_threshold = upper_threshold or 1
-        self.lower_threshold = lower_threshold or 0
+        self.upper_threshold = upper_threshold
+        self.lower_threshold = lower_threshold
         self.cooldown = cooldown
         self.last_scale_operation = 0  # Time of last scale operation.
 
@@ -139,11 +139,11 @@ class RequestRateAutoscaler(Autoscaler):
             logger.info(f'Bootstrapping autoscaler.')
             self.scale_up(1)
             self.last_scale_operation = current_time
-        elif requests_per_node > self.upper_threshold:
+        elif self.upper_threshold is not None and requests_per_node > self.upper_threshold:
             if self.infra_provider.total_servers() < self.max_nodes:
                 self.scale_up(1)
                 self.last_scale_operation = current_time
-        elif requests_per_node < self.lower_threshold:
+        elif self.lower_threshold is not None and requests_per_node < self.lower_threshold:
             if self.infra_provider.total_servers() > self.min_nodes:
                 self.scale_down(1)
                 self.last_scale_operation = current_time

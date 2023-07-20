@@ -1,8 +1,8 @@
-import yaml
 from typing import Optional, Dict, Any
 
 from sky.backends import backend_utils
 from sky.utils import schemas
+from sky.utils import ux_utils
 
 
 class SkyServiceSpec:
@@ -17,6 +17,10 @@ class SkyServiceSpec:
         qpm_upper_threshold: Optional[int] = None,
         qpm_lower_threshold: Optional[int] = None,
     ):
+        if max_replica is not None and max_replica < min_replica:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'max_replica must be greater than or equal to min_replica')
         # TODO: check if the path is valid
         self._readiness_path = f':{app_port}{readiness_path}'
         self._readiness_timeout = readiness_timeout
@@ -38,7 +42,7 @@ class SkyServiceSpec:
         service_config = {}
         service_config['readiness_path'] = config['readiness_probe']['path']
         service_config['readiness_timeout'] = config['readiness_probe'][
-            'timeout']
+            'readiness_timeout']
         service_config['app_port'] = config['port']
         service_config['min_replica'] = config['replica_policy']['min_replica']
         service_config['max_replica'] = config['replica_policy'].get(
