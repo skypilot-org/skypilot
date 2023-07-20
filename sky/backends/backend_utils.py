@@ -2623,7 +2623,7 @@ def check_rsync_installed() -> None:
 
 
 def wait_and_terminate_csync(cluster_name: str) -> None:
-    """ 
+    """
     Terminatese all the CSYNC process running in each node after
     waiting for the sync process launched by CSYNC complete.
 
