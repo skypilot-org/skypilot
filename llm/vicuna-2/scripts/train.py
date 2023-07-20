@@ -103,15 +103,26 @@ def preprocess(
     # Apply prompt templates
     conversations = []
     for i, source in enumerate(sources):
+        if not source or source[0]["from"] not in roles:
+            continue
         if roles[source[0]["from"]] != conv.roles[0]:
             # Skip the first one if it is not from human
             source = source[1:]
 
         conv.messages = []
-        for j, sentence in enumerate(source):
+        role_id = 0
+        for sentence in source:
             role = roles[sentence["from"]]
-            assert role == conv.roles[j % 2], f"{i}"
+            if role != conv.roles[role_id % 2]:
+                print(f"Skip duplicated role {role!r}")
+                continue
+            role_id += 1
             conv.append_message(role, sentence["value"])
+        else:
+            conversations.append(conv.get_prompt())
+    if not conversations:
+        conv.append_message(conv.roles[0], '')
+        conv.append_message(conv.roles[1], '')
         conversations.append(conv.get_prompt())
 
     # Tokenize conversations

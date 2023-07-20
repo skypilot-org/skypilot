@@ -42,9 +42,8 @@ envs:
 
 ### Kick Start the Training on Any Cloud
 
-1. Setup the environment variables:
-
-
 ```bash
-sky launch -c 
+sky launch -c vicuna-2 train.yaml --env ARTIFACT_BUCKET_NAME=<your-bucket-name> --env WANDB_API_KEY=<your-wandb-api-key>
 ```
+
+This will launch the training job on the cloud whereever there is available 8x A100-80GB GPUs. 
