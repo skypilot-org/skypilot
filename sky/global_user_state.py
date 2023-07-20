@@ -92,6 +92,13 @@ def create_table(cursor, conn):
         handle BLOB,
         last_use TEXT,
         status TEXT)""")
+    # Table for Services
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS services (
+        name TEXT PRIMARY KEY,
+        middleware_cluster_name TEXT,
+        endpoint TEXT,
+        num_healthy_replicas INTEGER DEFAULT 0)""")
     # For backward compatibility.
     # TODO(zhwu): Remove this function after all users have migrated to
     # the latest version of SkyPilot.
@@ -272,6 +279,35 @@ def add_or_update_cluster(cluster_name: str,
     _DB.conn.commit()
 
 
+def add_or_update_service(name: str, middleware_cluster_name: str,
+                          endpoint: str, num_healthy_replicas: int):
+    _DB.cursor.execute(
+        'INSERT or REPLACE INTO services'
+        '(name, middleware_cluster_name, endpoint, num_healthy_replicas) '
+        'VALUES ('
+        # name
+        '?, '
+        # middleware_cluster_name
+        '?, '
+        # endpoint
+        '?, '
+        # num_healthy_replicas
+        '?'
+        ')',
+        (
+            # name
+            name,
+            # middleware_cluster_name
+            middleware_cluster_name,
+            # endpoint
+            endpoint,
+            # num_healthy_replicas
+            num_healthy_replicas,
+        ))
+
+    _DB.conn.commit()
+
+
 def update_last_use(cluster_name: str):
     """Updates the last used command for the cluster."""
     _DB.cursor.execute('UPDATE clusters SET last_use=(?) WHERE name=(?)',
@@ -311,6 +347,23 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
                 cluster_name,
             ))
     _DB.conn.commit()
+
+
+def remove_service(service_name: str):
+    _DB.cursor.execute('DELETE FROM services WHERE name=(?)', (service_name,))
+    _DB.conn.commit()
+
+
+def set_service_num_health_replicas(service_name: str,
+                                    num_healthy_replicas: int):
+    _DB.cursor.execute(
+        'UPDATE services SET num_healthy_replicas=(?) '
+        'WHERE name=(?)', (num_healthy_replicas, service_name))
+    count = _DB.cursor.rowcount
+    _DB.conn.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Service {service_name} not found.')
 
 
 def get_handle_from_cluster_name(
@@ -534,6 +587,27 @@ def get_cluster_from_name(
     return None
 
 
+def get_service_from_name(
+        service_name: Optional[str]) -> Optional[Dict[str, Any]]:
+    rows = _DB.cursor.execute('SELECT * FROM services WHERE name=(?)',
+                              (service_name,)).fetchall()
+    for row in rows:
+        # Explicitly specify the number of fields to unpack, so that
+        # we can add new fields to the database in the future without
+        # breaking the previous code.
+        (name, middleware_cluster_name, endpoint,
+         num_healthy_replicas) = row[:4]
+        # TODO: use namedtuple instead of dict
+        record = {
+            'name': name,
+            'middleware_cluster_name': middleware_cluster_name,
+            'endpoint': endpoint,
+            'num_healthy_replicas': num_healthy_replicas,
+        }
+        return record
+    return None
+
+
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
         'select * from clusters order by launched_at desc').fetchall()
@@ -554,6 +628,25 @@ def get_clusters() -> List[Dict[str, Any]]:
             'owner': _load_owner(owner),
             'metadata': json.loads(metadata),
             'cluster_hash': cluster_hash,
+        }
+
+        records.append(record)
+    return records
+
+
+def get_services() -> List[Dict[str, Any]]:
+    rows = _DB.cursor.execute('select * from services').fetchall()
+    records = []
+    for row in rows:
+        (name, middleware_cluster_name, endpoint,
+         num_healthy_replicas) = row[:4]
+        # TODO: use namedtuple instead of dict
+
+        record = {
+            'name': name,
+            'middleware_cluster_name': middleware_cluster_name,
+            'endpoint': endpoint,
+            'num_healthy_replicas': num_healthy_replicas,
         }
 
         records.append(record)
@@ -607,6 +700,12 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
 
 def get_cluster_names_start_with(starts_with: str) -> List[str]:
     rows = _DB.cursor.execute('SELECT name FROM clusters WHERE name LIKE (?)',
+                              (f'{starts_with}%',))
+    return [row[0] for row in rows]
+
+
+def get_service_names_start_with(starts_with: str) -> List[str]:
+    rows = _DB.cursor.execute('SELECT name FROM services WHERE name LIKE (?)',
                               (f'{starts_with}%',))
     return [row[0] for row in rows]
 

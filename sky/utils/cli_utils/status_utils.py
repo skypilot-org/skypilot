@@ -19,6 +19,8 @@ NUM_COST_REPORT_LINES = 5
 _ClusterRecord = Dict[str, Any]
 # A record returned by core.cost_report(); see its docstr for all fields.
 _ClusterCostReportRecord = Dict[str, Any]
+# A record in global_user_state's 'services' table.
+_ServiceRecord = Dict[str, Any]
 
 
 def truncate_long_string(s: str, max_length: int = 35) -> str:
@@ -105,6 +107,33 @@ def show_status_table(cluster_records: List[_ClusterRecord],
     else:
         click.echo('No existing clusters.')
     return num_pending_autostop
+
+
+def show_service_table(service_records: List[_ServiceRecord]):
+    # TODO(tian): Refactor.
+    status_columns = [
+        StatusColumn('NAME', lambda service_record: service_record['name']),
+        StatusColumn(
+            'MIDDLEWARE_CLUSTER_NAME',
+            lambda service_record: service_record['middleware_cluster_name']),
+        StatusColumn('ENDPOINT',
+                     lambda service_record: service_record['endpoint']),
+        StatusColumn(
+            '#HEALTHY_REPLICAS',
+            lambda service_record: service_record['num_healthy_replicas']),
+    ]
+
+    columns = [status_column.name for status_column in status_columns]
+    service_table = log_utils.create_table(columns)
+    for record in service_records:
+        row = []
+        for status_column in status_columns:
+            row.append(status_column.calc(record))
+        service_table.add_row(row)
+    if service_records:
+        click.echo(service_table)
+    else:
+        click.echo('No existing services.')
 
 
 def get_total_cost_of_displayed_records(

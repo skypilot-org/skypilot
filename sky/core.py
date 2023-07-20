@@ -1,6 +1,7 @@
 """SDK functions for cluster/job management."""
 import getpass
 import sys
+import re
 from typing import Any, Dict, List, Optional, Union
 
 import colorama
@@ -19,6 +20,7 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
+from sky.utils import command_runner
 from sky.utils import log_utils
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
@@ -107,6 +109,48 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
     return backend_utils.get_clusters(include_reserved=True,
                                       refresh=refresh,
                                       cluster_names=cluster_names)
+
+
+@usage_lib.entrypoint
+def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
+    # TODO(tian): Maybe refactor to backend_utils?
+    if service is None:
+        service_records = global_user_state.get_services()
+    else:
+        service_record = global_user_state.get_service_from_name(service)
+        if service_record is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Service {service} does not exist.')
+        service_records = [service_record]
+    # TODO(tian): Make it run in parallel.
+    for record in service_records:
+        middleware_cluster_name = record['middleware_cluster_name']
+        handle = global_user_state.get_handle_from_cluster_name(
+            middleware_cluster_name)
+        assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+        external_ips = handle.external_ips(use_cached_ips=True)
+        if external_ips is None:
+            # Cases for cluster not ready yet.
+            continue
+        assert len(external_ips) == 1, external_ips
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml)
+        runner = command_runner.SSHCommandRunner(external_ips[0],
+                                                 **ssh_credentials)
+        rc, output, stderr = runner.run('sky status',
+                                        stream_logs=False,
+                                        require_outputs=True,
+                                        separate_stderr=True)
+        if rc:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Failed to refresh status of service: {service}.\n'
+                    f'Error: {stderr}')
+        healthy_pattern = re.compile(r'(skyserve-\d+.*UP)')
+        healthy_result = healthy_pattern.findall(output)
+        record['num_healthy_replicas'] = len(healthy_result)
+        global_user_state.add_or_update_service(**record)
+    return service_records
 
 
 @usage_lib.entrypoint
