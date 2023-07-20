@@ -50,7 +50,7 @@ envs:
     --env WANDB_API_KEY=<your-wandb-api-key>
   ```
 
-This will launch the training job on the cloud whereever there is available 8x A100-80GB GPUs. 
+This will launch the training job on the cloud whereever there is available 8x A100-80GB spot GPUs. 
 
 2. **Optional**: Try out the training for the 13B model:
 
@@ -60,4 +60,12 @@ This will launch the training job on the cloud whereever there is available 8x A
     --env WANDB_API_KEY=<your-wandb-api-key> \
     --env MODEL_SIZE=13
   ```
+
+### Automatically Recover from Spot Interruptions
+
+```bash
+sky spot launch -n vicuna-2 train.yaml \
+  --env ARTIFACT_BUCKET_NAME=<your-bucket-name> \
+  --env WANDB_API_KEY=<your-wandb-api-key>
+```
 
