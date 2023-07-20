@@ -67,6 +67,10 @@ This will launch the training job on the cloud whereever there is available 8x A
 
 ### Automatically Recover from Spot Interruptions
 
+[SkyPilot Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html) is a library built on top of SkyPilot that helps users to run jobs on spot instances without worrying about the  interruptions. That is the tool used by the LMSYS organization to train the first version of Vicuna (more details can be found in their launching [blog post](https://lmsys.org/blog/2023-03-30-vicuna/) and [example](../vicuna)). With this, the training cost can be reduced from $1000 to **\$300**.
+
+To use SkyPilot Managed Spot, you can simply replace `sky launch` with `sky spot launch` in the above command:
+
 ```bash
 sky spot launch -n vicuna-2 train.yaml \
   --env ARTIFACT_BUCKET_NAME=<your-bucket-name> \
