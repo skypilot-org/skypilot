@@ -25,15 +25,26 @@ envs:
 ## Train your own Vicuna on LLaMA 2
 
 
-By default, we use the ShareGPT data and the identifier questions in [hardcoded_questions.py](./scripts/hardcoded_questions.py). 
+### Check Your Training Data
 
-1. **Optional**: To use custome data, you can change the data by change the following line in [train.yaml](train.yaml).
+  By default, we use the ShareGPT data and the identity questions in [hardcoded_questions.py](./scripts/hardcoded_questions.py). 
 
-```yaml
-setup: |
-  ...
-  wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json  -O $HOME/data/sharegpt.json
-  ...
+  * **Optional**: To use custome data, you can change the data by change the following line in [train.yaml](train.yaml).
+
+  ```yaml
+  setup: |
+    ...
+    wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json  -O $HOME/data/sharegpt.json
+    ...
+  ```
+
+  * **Optional**: To make the model know about its identity, you can change the hardcoded questions [hardcoded_questiosn.py](./scripts/hardcoded_questions.py)
+
+### Kick Start the Training on Any Cloud
+
+1. Setup the environment variables:
+
+
+```bash
+sky launch -c 
 ```
-
-2. **Optional**: 

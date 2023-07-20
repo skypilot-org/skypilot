@@ -22,27 +22,22 @@ file_mounts:
 workdir: .
 
 setup: |
+  # Download the ShareGPT dataset
+  # Change to your OWN dataset if you want to train your own model
+  mkdir -p $HOME/data
+  wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json  -O $HOME/data/sharegpt.json
+
   # Setup the environment
   conda activate chatbot
   if [ $? -ne 0 ]; then
     conda create -n chatbot python=3.10 -y
     conda activate chatbot
   fi
-
-  # Install fastchat
-  git clone https://github.com/lm-sys/FastChat.git
-  cd FastChat
-  pip install -e .
-  if [ $USE_XFORMERS -eq 1 ]; then
-    conda install xformers -c xformers -y
-  fi
-
-  # Download the ShareGPT dataset
-  # Change to your OWN dataset if you want to train your own model
-  mkdir -p $HOME/data
-  wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json  -O $HOME/data/sharegpt.json
-
   cd ./scripts
+  pip install git+https://github.com/lm-sys/FastChat.git@ad58169a996cb5e9fe4942969886e9a625ef3bcf
+  if [ $USE_XFORMERS -eq 1 ]; then
+    pip install -U xformers
+  fi
   python hardcoded_questions.py
   python -m fschat.data.merge --in $HOME/data/sharegpt.json hardcoded.json --out $HOME/data/mydata.json
 
