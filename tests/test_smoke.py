@@ -1148,7 +1148,7 @@ def test_ibm_job_queue_multinode():
             f'sky logs {name} 7 --status',
         ],
         f'sky down -y {name}',
-        timoeout=20 * 60,  # 20 mins
+        timeout=20 * 60,  # 20 mins
     )
     run_one_test(test)
 
