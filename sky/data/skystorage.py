@@ -40,37 +40,41 @@ def is_locked(file_path: str):
 
 
 def set_s3_sync_cmd(src_path: str, bucketname: str, num_threads: int,
-                    delete: bool):
+                    delete: bool, no_follow_symlinks: bool):
     config_cmd = ('aws configure set default.s3.max_concurrent_requests '
                   f'{num_threads}')
     subprocess.check_output(config_cmd, shell=True)
     sync_cmd = f'aws s3 sync {src_path} s3://{bucketname}'
     if delete:
         sync_cmd += ' --delete'
+    if no_follow_symlinks:
+        sync_cmd += ' --no-follow-symlinks'
     return sync_cmd
 
 
 def set_gcs_sync_cmd(src_path: str, bucketname: str, num_threads: int,
-                     delete: bool):
+                     delete: bool, no_follow_symlinks: bool):
     sync_cmd = (f'gsutil -m -o \'GSUtil:parallel_thread_count={num_threads}\' '
                 'rsync -r')
     if delete:
         sync_cmd += ' -d'
+    if no_follow_symlinks:
+        sync_cmd += ' -e'
     sync_cmd += f' {src_path} gs://{bucketname}'
     return sync_cmd
 
 
 def run_sync(src: str, storetype: str, bucketname: str, num_threads: int,
-             delete: bool):
+             delete: bool, no_follow_symlinks: bool):
     """
     Runs the sync command to from SRC to STORETYPE bucket
     """
     #TODO: add enum type class to handle storetypes
     storetype = storetype.lower()
     if storetype == 's3':
-        sync_cmd = set_s3_sync_cmd(src, bucketname, num_threads, delete)
+        sync_cmd = set_s3_sync_cmd(src, bucketname, num_threads, delete, no_follow_symlinks)
     elif storetype == 'gcs':
-        sync_cmd = set_gcs_sync_cmd(src, bucketname, num_threads, delete)
+        sync_cmd = set_gcs_sync_cmd(src, bucketname, num_threads, delete, no_follow_symlinks)
     else:
         raise ValueError(f'Unknown store type: {storetype}')
 
@@ -102,8 +106,14 @@ def run_sync(src: str, storetype: str, bucketname: str, num_threads: int,
               type=bool,
               is_flag=True,
               help='')
+@click.option('--no-follow-symlinks',
+              required=False,
+              default=False,
+              type=bool,
+              is_flag=True,
+              help='')
 def csync(src: str, storetype: str, bucketname: str, num_threads: int,
-          interval: int, delete: bool, lock: bool):
+          interval: int, delete: bool, lock: bool, no_follow_symlinks: bool):
     """
     Syncs the source to the bucket every INTERVAL seconds. Creates a lock file
     while sync command is runninng and removes it when completed.
@@ -124,7 +134,7 @@ def csync(src: str, storetype: str, bucketname: str, num_threads: int,
                 stack.enter_context(filelock.FileLock(lock_path))
             start_time = time.time()
             # TODO: add try-except block
-            run_sync(src, storetype, bucketname, num_threads, delete)
+            run_sync(src, storetype, bucketname, num_threads, delete, no_follow_symlinks)
             end_time = time.time()
         # the time took to sync gets reflected to the INTERVAL
         elapsed_time = int(end_time - start_time)

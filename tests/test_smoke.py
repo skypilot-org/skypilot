@@ -65,9 +65,9 @@ SCP_TYPE = '--cloud scp'
 SCP_GPU_V100 = '--gpus V100-32GB'
 
 storage_setup_commands = [
-    'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
+    'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir', 'mkdir -p ~/tmp-workdir-2',
     'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/tmp\ file2',
-    'touch ~/tmp-workdir/foo',
+    'touch ~/tmp-workdir/foo', 'touch ~/tmp-workdir-2/tmp\ file',
     'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
     'touch ~/.ssh/id_rsa.pub'
 ]
@@ -778,6 +778,7 @@ def test_aws_storage_mounts():
             f'sky launch -y -c {name} --cloud aws {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt',
+            f'aws s3 ls {storage_name}/bye.txt',
         ]
         test = Test(
             'aws_storage_mounts',
@@ -805,6 +806,7 @@ def test_gcp_storage_mounts():
             f'sky launch -y -c {name} --cloud gcp {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'gsutil ls gs://{storage_name}/hello.txt',
+            f'gsutil ls gs://{storage_name}/bye.txt',
         ]
         test = Test(
             'gcp_storage_mounts',
