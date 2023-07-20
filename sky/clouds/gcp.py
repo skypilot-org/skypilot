@@ -407,6 +407,7 @@ class GCP(clouds.Cloud):
 
         assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
+        resources_vars['machine_image'] = None
 
         if self._is_machine_image(image_id):
             resources_vars['machine_image'] = image_id
