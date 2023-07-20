@@ -145,6 +145,13 @@ class Kubernetes(clouds.Cloud):
                                                        'supported by the '
                                                        'Kubernetes '
                                                        'implementation yet.',
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
+                                                          'not supported in '
+                                                          'Kubernetes.',
+        clouds.CloudImplementationFeatures.CUSTOM_DOSK_TIER: 'Custom disk '
+                                                             'tiers are not '
+                                                             'supported in '
+                                                             'Kubernetes.',
     }
 
     IMAGE = 'us-central1-docker.pkg.dev/' \
