@@ -20,7 +20,7 @@ See the Vicuna SkyPilot YAMLs: for [training](train.yaml) and for [serving](serv
 
 ## Serve the official Vicuna model by yourself with SkyPilot
 
-1. Start the serving the Vicuna-7B model on a single A100 GPU:
+1. Start serving the Vicuna-7B model on a single A100 GPU:
 ```bash
 sky launch -c vicuna-serve -s serve.yaml
 ```

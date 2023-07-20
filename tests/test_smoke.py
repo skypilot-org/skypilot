@@ -33,6 +33,7 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 import urllib.parse
 import uuid
 import os
+import warnings
 
 import colorama
 import jinja2
@@ -182,7 +183,6 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
 
 
 def get_aws_region_for_quota_failover() -> Optional[str]:
-
     candidate_regions = AWS.regions_with_offering(instance_type='p3.16xlarge',
                                                   accelerators=None,
                                                   use_spot=True,
@@ -190,8 +190,30 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
                                                   zone=None)
 
     for region in candidate_regions:
-        if not AWS.check_quota_available(
-                region=region.name, instance_type='p3.16xlarge', use_spot=True):
+        resources = sky.Resources(cloud=sky.AWS(),
+                                  instance_type='p3.16xlarge',
+                                  region=region.name,
+                                  use_spot=True)
+        if not AWS.check_quota_available(resources):
+            return region.name
+
+    return None
+
+
+def get_gcp_region_for_quota_failover() -> Optional[str]:
+
+    candidate_regions = GCP.regions_with_offering(instance_type=None,
+                                                  accelerators={'A100-80GB': 1},
+                                                  use_spot=True,
+                                                  region=None,
+                                                  zone=None)
+
+    for region in candidate_regions:
+        if not GCP.check_quota_available(
+                sky.Resources(cloud=sky.GCP(),
+                              region=region.name,
+                              accelerators={'A100-80GB': 1},
+                              use_spot=True)):
             return region.name
 
     return None
@@ -2353,12 +2375,39 @@ def test_aws_zero_quota_failover():
     region = get_aws_region_for_quota_failover()
 
     if not region:
+        pytest.xfail(
+            'Unable to test zero quota failover optimization — quotas '
+            'for EC2 P3 instances were found on all AWS regions. Is this '
+            'expected for your account?')
         return
 
     test = Test(
         'aws-zero-quota-failover',
         [
             f'sky launch -y -c {name} --cloud aws --region {region} --gpus V100:8 --use-spot | grep "Found no quota"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_gcp_zero_quota_failover():
+
+    name = _get_cluster_name()
+    region = get_gcp_region_for_quota_failover()
+
+    if not region:
+        pytest.xfail(
+            'Unable to test zero quota failover optimization — quotas '
+            'for A100-80GB GPUs were found on all GCP regions. Is this '
+            'expected for your account?')
+        return
+
+    test = Test(
+        'gcp-zero-quota-failover',
+        [
+            f'sky launch -y -c {name} --cloud gcp --region {region} --gpus A100-80GB:1 --use-spot | grep "Found no quota"',
         ],
         f'sky down -y {name}',
     )
@@ -2666,7 +2715,9 @@ class TestStorageWithCredentials:
         assert all([item in out for item in storage_obj_name])
 
         # Run sky storage delete all to delete all storage objects
-        subprocess.check_output(['sky', 'storage', 'delete', '-a'])
+        delete_cmd = ['sky', 'storage', 'delete']
+        delete_cmd += storage_obj_name
+        subprocess.check_output(delete_cmd)
 
         # Run sky storage ls to check if all storage objects filtered by store
         # type are deleted
