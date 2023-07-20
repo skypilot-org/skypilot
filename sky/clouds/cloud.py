@@ -29,7 +29,7 @@ class CloudImplementationFeatures(enum.Enum):
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
     SPOT_INSTANCE = 'spot_instance'
-    CUSTOM_DOSK_TIER = 'custom_disk_tier'
+    CUSTOM_DISK_TIER = 'custom_disk_tier'
 
 
 class Region(collections.namedtuple('Region', ['name'])):
