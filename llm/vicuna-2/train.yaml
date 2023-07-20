@@ -8,9 +8,10 @@ num_nodes: 1
 
 envs:
   MODEL_SIZE: 7
-  USE_FLASH_ATTN: 1
+  USE_XFORMERS: 1
   WANDB_API_KEY: "" # Change to your own wandb api key
   ARTIFACT_BUCKET_NAME: YOUR_OWN_BUCKET_NAME # Change to your own bucket name
+  HF_TOKEN: <your-huggingface-token> # Change to your own huggingface token
 
 
 file_mounts:
@@ -32,8 +33,8 @@ setup: |
   git clone https://github.com/lm-sys/FastChat.git
   cd FastChat
   pip install -e .
-  if [ $USE_FLASH_ATTN -eq 1 ]; then
-    pip install flash-attn
+  if [ $USE_XFORMERS -eq 1 ]; then
+    conda install xformers -c xformers
   fi
 
   # Download the ShareGPT dataset
@@ -41,11 +42,13 @@ setup: |
   mkdir -p /data
   wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_unfiltered_cleaned_split.json  -O /data/mydata.json
 
+  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
+
 run: |
   cd scripts
   conda activate chatbot
-  if [ $USE_FLASH_ATTN -eq 1 ]; then
-    TRAIN_SCRIPT=fastchat/train/train_flash_attn.py
+  if [ $USE_XFORMERS -eq 1 ]; then
+    TRAIN_SCRIPT=fastchat/train/train_xformers.py
   else
     TRAIN_SCRIPT=fastchat/train/train.py
   fi
