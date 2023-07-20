@@ -46,6 +46,9 @@ available_node_types:
   {%- endif %}
 {%- else %}
       machineType: {{instance_type}}
+    {%- if machine_image is not none %}
+      sourceMachineImage: {{machine_image}}
+    {%- endif %}
       disks:
         - boot: true
           autoDelete: true
@@ -53,7 +56,9 @@ available_node_types:
           initializeParams:
             diskSizeGb: {{disk_size}}
             # See https://cloud.google.com/deep-learning-vm/docs/images
+          {%- if machine_image is none %}
             sourceImage: {{image_id}}
+          {%- endif %}
             diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
   {%- if gpu is not none %}
       guestAccelerators:
@@ -96,6 +101,9 @@ available_node_types:
     {%- endif %}
   {%- else %}
       machineType: {{instance_type}}
+    {%- if machine_image is not none %}
+      sourceMachineImage: {{machine_image}}
+    {%- endif %}
       disks:
         - boot: true
           autoDelete: true
@@ -103,7 +111,9 @@ available_node_types:
           initializeParams:
             diskSizeGb: {{disk_size}}
             # See https://cloud.google.com/deep-learning-vm/docs/images
+          {%- if machine_image is none %}
             sourceImage: {{image_id}}
+          {%- endif %}
             diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
     {%- if gpu is not none %}
       guestAccelerators:
