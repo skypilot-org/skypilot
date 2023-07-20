@@ -42,8 +42,22 @@ envs:
 
 ### Kick Start the Training on Any Cloud
 
-```bash
-sky launch -c vicuna-2 train.yaml --env ARTIFACT_BUCKET_NAME=<your-bucket-name> --env WANDB_API_KEY=<your-wandb-api-key>
-```
+1. Start the training with a single command
+
+  ```bash
+  sky launch -c vicuna-2 train.yaml \
+    --env ARTIFACT_BUCKET_NAME=<your-bucket-name> \
+    --env WANDB_API_KEY=<your-wandb-api-key>
+  ```
 
 This will launch the training job on the cloud whereever there is available 8x A100-80GB GPUs. 
+
+2. **Optional**: Try out the training for the 13B model:
+
+  ```bash
+  sky launch -c vicuna-2 train.yaml \
+    --env ARTIFACT_BUCKET_NAME=<your-bucket-name> \
+    --env WANDB_API_KEY=<your-wandb-api-key> \
+    --env MODEL_SIZE=13
+  ```
+
