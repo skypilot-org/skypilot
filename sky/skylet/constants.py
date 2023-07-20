@@ -59,5 +59,5 @@ CONDA_INSTALLATION_COMMANDS = (
     'conda config --set auto_activate_base true); '
     # Only run `conda init` if the conda is not installed under /opt/conda,
     # which is the case for VMs created on GCP, and running `conda init` will
-    # cause error and waiting for the error to be reported.
+    # cause error and waiting for the error to be reported: #2273.
     'which conda | grep /opt/conda || conda init > /dev/null;')
