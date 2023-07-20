@@ -984,6 +984,7 @@ def test_ibm_job_queue():
             f'sky cancel -y {name} 3',
         ],
         f'sky down -y {name}',
+        timeout=20 * 60,  # 20 mins
     )
     run_one_test(test)
 
