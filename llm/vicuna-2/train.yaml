@@ -39,8 +39,8 @@ setup: |
 
   # Download the ShareGPT dataset
   # Change to your OWN dataset if you want to train your own model
-  mkdir -p /data
-  wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_unfiltered_cleaned_split.json  -O /data/mydata.json
+  mkdir -p $HOME/data
+  wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_unfiltered_cleaned_split.json  -O $HOME/data/mydata.json
 
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
@@ -71,7 +71,7 @@ run: |
     --node_rank=${SKYPILOT_NODE_RANK} \
     $TRAIN_SCRIPT \
     --model_name_or_path meta-llama/Llama-2-${MODEL_SIZE}b-hf \
-    --data_path /data/mydata.json \
+    --data_path $HOME/data/mydata.json \
     --bf16 True \
     --output_dir /artifacts/chatbot/${MODEL_SIZE}b \
     --num_train_epochs 3 \
