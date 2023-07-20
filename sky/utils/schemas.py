@@ -155,7 +155,7 @@ def get_service_schema():
             },
             'readiness_probe': {
                 'type': 'object',
-                'required': ['path', 'timeout'],
+                'required': ['path', 'readiness_timeout'],
                 'additionalProperties': False,
                 'properties': {
                     'path': {
