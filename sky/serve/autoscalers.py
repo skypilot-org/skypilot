@@ -124,7 +124,8 @@ class RequestRateAutoscaler(Autoscaler):
             self.load_balancer.request_timestamps.popleft()
 
         num_requests = len(self.load_balancer.request_timestamps)
-        num_requests = float(num_requests) / 60  # Convert to requests per second.
+        num_requests = float(
+            num_requests) / 60  # Convert to requests per second.
         num_nodes = self.infra_provider.total_servers()
         requests_per_node = num_requests / num_nodes if num_nodes else num_requests  # To account for zero case.
 
