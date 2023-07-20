@@ -73,6 +73,10 @@ To use AWS IAM Identity Center (AWS SSO), see :ref:`here<aws-sso>` for instructi
 
 **Optional**: To create a new AWS user with minimal permissions for SkyPilot, see :ref:`AWS User Creation <cloud-permissions-aws>`.
 
+.. tip::
+
+  If you are using S3 storage, consider installing :code:`s5cmd` for improved performance on syncing local machine to S3 bucket. (See `s5cmd repository <https://github.com/peak/s5cmd#installation>`_ for installation).
+
 .. _installation-gcp:
 
 Google Cloud Platform (GCP)

@@ -38,10 +38,14 @@ class CloudStorage:
 class S3CloudStorage(CloudStorage):
     """AWS Cloud Storage."""
 
-    # List of commands to install AWS CLI
-    _GET_AWSCLI = [
-        'aws --version >/dev/null 2>&1 || pip3 install awscli',
-    ]
+    # List of commands to install s5cmd
+    _S5CMD_VERSION = '2.1.0'
+    _GET_S5CMD = (
+        's5cmd version &> /dev/null || '
+        '{ wget -nc https://github.com/peak/s5cmd/releases/download/'
+        f'v{_S5CMD_VERSION}/s5cmd_{_S5CMD_VERSION}_linux_amd64.deb '
+        '-O /tmp/s5cmd.deb && sudo dpkg --install /tmp/s5cmd.deb; }'
+    )
 
     def is_directory(self, url: str) -> bool:
         """Returns whether S3 'url' is a directory.
@@ -70,12 +74,13 @@ class S3CloudStorage(CloudStorage):
         # AWS Sync by default uses 10 threads to upload files to the bucket.
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
+
         bucket_name = source.replace('s3://', '')
         region = data_utils.get_s3_bucket_region(bucket_name)
         download_via_awscli = (f's5cmd sync --destination-region {region} '
-                               f'--no-follow-symlinks {source} {destination}')
+                            f'--no-follow-symlinks {source} {destination}')
 
-        all_commands = list(self._GET_AWSCLI)
+        all_commands = list(self._GET_S5CMD)
         all_commands.append(download_via_awscli)
         return ' && '.join(all_commands)
 
@@ -86,7 +91,7 @@ class S3CloudStorage(CloudStorage):
         download_via_awscli = (f's5cmd cp --destination-region {region} '
                                f'{source} {destination}')
 
-        all_commands = list(self._GET_AWSCLI)
+        all_commands = list(self._GET_S5CMD)
         all_commands.append(download_via_awscli)
         return ' && '.join(all_commands)
 

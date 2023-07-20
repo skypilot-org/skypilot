@@ -232,3 +232,15 @@ def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
                 raise exceptions.StorageUploadError(
                     f'Upload to bucket failed for store {bucket_name}. '
                     'Please check the logs.')
+
+def s5cmd_installed() -> bool:
+    """Checks if s5cmd is installed in local machine."""
+    try:
+        subprocess.run('s5cmd version',
+                       shell=True,
+                       check=True,
+                       stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE)
+        return True
+    except subprocess.CalledProcessError:
+        return False

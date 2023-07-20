@@ -1083,6 +1083,8 @@ class S3Store(AbstractStore):
         """
 
         def get_file_sync_command(base_dir_path, file_names):
+            # TODO: Add s5cmd when it supports --include option
+            # Issue reference: https://github.com/peak/s5cmd/issues/516
             includes = ' '.join(
                 [f'--include "{file_name}"' for file_name in file_names])
             sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
@@ -1091,14 +1093,26 @@ class S3Store(AbstractStore):
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
-            if not src_dir_path.endswith('/'):
-                src_dir_path += '/'
-            region = data_utils.get_s3_bucket_region(self.name)
-            # we exclude .git directory from the sync
-            sync_command = (
-                f's5cmd sync --destination-region {region} '
-                f'--no-follow-symlinks --exclude ".git/*" {src_dir_path} '
-                f's3://{self.name}/{dest_dir_name}')
+            if data_utils.s5cmd_installed():
+                if not src_dir_path.endswith('/'):
+                    src_dir_path += '/'
+                if dest_dir_name and not dest_dir_name.endswith('/'):
+                    dest_dir_name += '/'
+                region = data_utils.get_s3_bucket_region(self.name)
+                # we exclude .git directory from the sync
+                sync_command = (
+                    f's5cmd sync --destination-region {self.region} '
+                    f'--no-follow-symlinks --exclude ".git/*" {src_dir_path} '
+                    f's3://{self.name}/{dest_dir_name}')
+            else:
+                logger.info('Consider installing \'s5cmd\' for improved '
+                            'performance on syncing local machine to '
+                            's3 bucket. For more info: '
+                            'https://github.com/peak/s5cmd#installation')
+                sync_command = (
+                    'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
+                    f'{src_dir_path} '
+                    f's3://{self.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
