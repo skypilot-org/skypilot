@@ -300,8 +300,8 @@ class GCP(clouds.Cloud):
                 # The VM launching in a different region than the machine
                 # image is supported by GCP, so we do not need to check the
                 # storageLocations.
-                return float(image_infos['instanceProperties']['disks'][0][
-                    'diskSizeGb'])
+                return float(
+                    image_infos['instanceProperties']['disks'][0]['diskSizeGb'])
             else:
                 image_infos = compute.images().get(project=project,
                                                    image=image_name).execute()
