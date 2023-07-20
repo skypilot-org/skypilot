@@ -29,7 +29,7 @@ file_mounts:
 
   # Mounting a private bucket in C_SYNC mode
   /mount_private_csync:
-    name: {{storage_name}}
+    name: {{csync_storage_name}}
     source: ~/tmp-workdir-2
     mode: C_SYNC
     interval: 5

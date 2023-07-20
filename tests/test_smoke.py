@@ -765,10 +765,12 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
 def test_aws_storage_mounts():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
+    time.sleep(1)
+    csync_storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
+    content = template.render(storage_name=storage_name, csync_storage_name=csync_storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
@@ -778,12 +780,12 @@ def test_aws_storage_mounts():
             f'sky launch -y -c {name} --cloud aws {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt',
-            f'aws s3 ls {storage_name}/bye.txt',
+            f'aws s3 ls {csync_storage_name}/bye.txt',
         ]
         test = Test(
             'aws_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete {storage_name};  sky storage delete {csync_storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -793,10 +795,12 @@ def test_aws_storage_mounts():
 def test_gcp_storage_mounts():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
+    time.sleep(1)
+    csync_storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
+    content = template.render(storage_name=storage_name, csync_storage_name=csync_storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
@@ -806,12 +810,12 @@ def test_gcp_storage_mounts():
             f'sky launch -y -c {name} --cloud gcp {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'gsutil ls gs://{storage_name}/hello.txt',
-            f'gsutil ls gs://{storage_name}/bye.txt',
+            f'gsutil ls gs://{csync_storage_name}/bye.txt',
         ]
         test = Test(
             'gcp_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete {storage_name};  sky storage delete {csync_storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
