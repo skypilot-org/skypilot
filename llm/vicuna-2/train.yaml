@@ -40,7 +40,11 @@ setup: |
   # Download the ShareGPT dataset
   # Change to your OWN dataset if you want to train your own model
   mkdir -p $HOME/data
-  wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_unfiltered_cleaned_split.json  -O $HOME/data/mydata.json
+  wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json  -O $HOME/data/sharegpt.json
+
+  cd ./scripts
+  python hardcoded_questions.py
+  python -m fschat.data.merge --in $HOME/data/sharegpt.json hardcoded.json --out $HOME/data/mydata.json
 
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
