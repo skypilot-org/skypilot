@@ -41,6 +41,7 @@ def is_locked(file_path: str):
 
 def set_s3_sync_cmd(src_path: str, bucketname: str, num_threads: int,
                     delete: bool, no_follow_symlinks: bool):
+    """Builds sync command for aws s3"""
     config_cmd = ('aws configure set default.s3.max_concurrent_requests '
                   f'{num_threads}')
     subprocess.check_output(config_cmd, shell=True)
@@ -54,6 +55,7 @@ def set_s3_sync_cmd(src_path: str, bucketname: str, num_threads: int,
 
 def set_gcs_sync_cmd(src_path: str, bucketname: str, num_threads: int,
                      delete: bool, no_follow_symlinks: bool):
+    """Builds sync command for gcp gcs"""
     sync_cmd = (f'gsutil -m -o \'GSUtil:parallel_thread_count={num_threads}\' '
                 'rsync -r')
     if delete:

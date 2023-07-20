@@ -2623,10 +2623,9 @@ def check_rsync_installed() -> None:
 
 
 def wait_and_terminate_csync(cluster_name: str) -> None:
-    """ Invokes TERMINATE on every nodes in given cluster name.
-
-    Terminatese all the CSYNC commands running in each node after
-    waiting for the sync process launched by CSYNC to complete.
+    """ 
+    Terminatese all the CSYNC process running in each node after
+    waiting for the sync process launched by CSYNC complete.
 
     Args:
         cluster_name: Cluster name (see `sky status`)

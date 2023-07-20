@@ -866,8 +866,7 @@ class Storage(object):
 
         if isinstance(mode_str, str):
             # Make mode case insensitive, if specified
-            mode_str = mode_str.upper()
-            mode = StorageMode(mode_str)
+            mode = StorageMode(mode_str.upper())
         else:
             # Make sure this keeps the same as the default mode in __init__
             mode = StorageMode.MOUNT

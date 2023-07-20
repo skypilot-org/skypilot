@@ -4088,7 +4088,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _execute_storage_csync(
             self, handle: CloudVmRayResourceHandle,
             storage_mounts: Dict[Path, storage_lib.Storage]) -> None:
-        """Executes C_SYNC on storages: running the CSYNC command on storages.
+        """Executes continuous syncing on storages.
 
         This function only runs the CSYNC daemon on the given storage
         and the files/dirs to be copied to remote node are handled in
