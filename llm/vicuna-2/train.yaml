@@ -52,9 +52,9 @@ run: |
   cd scripts
   conda activate chatbot
   if [ $USE_XFORMERS -eq 1 ]; then
-    TRAIN_SCRIPT=fastchat/train/train_xformers.py
+    TRAIN_SCRIPT=train_xformers.py
   else
-    TRAIN_SCRIPT=fastchat/train/train.py
+    TRAIN_SCRIPT=train.py
   fi
 
   PER_DEVICE_BATCH_SIZE=4

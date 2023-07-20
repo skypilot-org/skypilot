@@ -25,3 +25,15 @@ envs:
 ## Train your own Vicuna on LLaMA 2
 
 
+By default, we use the ShareGPT data and the identifier questions in [hardcoded_questions.py](./scripts/hardcoded_questions.py). 
+
+1. **Optional**: To use custome data, you can change the data by change the following line in [train.yaml](train.yaml).
+
+```yaml
+setup: |
+  ...
+  wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json  -O $HOME/data/sharegpt.json
+  ...
+```
+
+2. **Optional**: 
