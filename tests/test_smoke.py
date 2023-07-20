@@ -770,7 +770,8 @@ def test_aws_storage_mounts():
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name, csync_storage_name=csync_storage_name)
+    content = template.render(storage_name=storage_name,
+                              csync_storage_name=csync_storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
@@ -800,7 +801,8 @@ def test_gcp_storage_mounts():
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name, csync_storage_name=csync_storage_name)
+    content = template.render(storage_name=storage_name,
+                              csync_storage_name=csync_storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()

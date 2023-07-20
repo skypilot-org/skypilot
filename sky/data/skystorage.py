@@ -72,9 +72,11 @@ def run_sync(src: str, storetype: str, bucketname: str, num_threads: int,
     #TODO: add enum type class to handle storetypes
     storetype = storetype.lower()
     if storetype == 's3':
-        sync_cmd = set_s3_sync_cmd(src, bucketname, num_threads, delete, no_follow_symlinks)
+        sync_cmd = set_s3_sync_cmd(src, bucketname, num_threads, delete,
+                                   no_follow_symlinks)
     elif storetype == 'gcs':
-        sync_cmd = set_gcs_sync_cmd(src, bucketname, num_threads, delete, no_follow_symlinks)
+        sync_cmd = set_gcs_sync_cmd(src, bucketname, num_threads, delete,
+                                    no_follow_symlinks)
     else:
         raise ValueError(f'Unknown store type: {storetype}')
 
@@ -134,7 +136,8 @@ def csync(src: str, storetype: str, bucketname: str, num_threads: int,
                 stack.enter_context(filelock.FileLock(lock_path))
             start_time = time.time()
             # TODO: add try-except block
-            run_sync(src, storetype, bucketname, num_threads, delete, no_follow_symlinks)
+            run_sync(src, storetype, bucketname, num_threads, delete,
+                     no_follow_symlinks)
             end_time = time.time()
         # the time took to sync gets reflected to the INTERVAL
         elapsed_time = int(end_time - start_time)

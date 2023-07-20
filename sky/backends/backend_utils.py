@@ -2638,7 +2638,8 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return
     ip_list = handle.external_ips()
-    assert ip_list is not None, 'external_ips is not cached in handle'
+    if not ip_list:
+        return
     ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
     runners = command_runner.SSHCommandRunner.make_runner_list(
         ip_list, **ssh_credentials)

@@ -1242,7 +1242,9 @@ class S3Store(AbstractStore):
           csync_path: str; Path to continuously sync the bucket to.
           interval: int; runs the sync command every INTERVAL seconds
         """
-        csync_cmd = f'python -m sky.data.skystorage csync {csync_path} s3 {self.bucket.name} --interval {interval} --lock --delete'
+        csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
+                     f's3 {self.bucket.name} --interval {interval} '
+                     '--lock --delete')
         return csync_utils.get_csync_command(csync_cmd, csync_path)
 
     def _create_s3_bucket(self,
@@ -1670,7 +1672,9 @@ class GcsStore(AbstractStore):
           csync_path: str; Path to continuously sync the bucket to.
           interval: int; runs the sync command every INTERVAL seconds
         """
-        csync_cmd = f'python -m sky.data.skystorage csync {csync_path} gcs {self.bucket.name} --interval {interval} --lock --delete'
+        csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
+                     f'gcs {self.bucket.name} --interval {interval} '
+                     '--lock --delete')
         return csync_utils.get_csync_command(csync_cmd, csync_path)
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
