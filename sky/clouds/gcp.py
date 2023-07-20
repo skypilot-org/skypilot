@@ -273,8 +273,7 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def _is_machine_image(cls, image_id: str) -> bool:
-        find_machine = re.match(r'projects/.*/.*/machineImages/.*',
-                                image_id)
+        find_machine = re.match(r'projects/.*/.*/machineImages/.*', image_id)
         return find_machine is not None
 
     def get_image_size(self, image_id: str, region: Optional[str]) -> float:
