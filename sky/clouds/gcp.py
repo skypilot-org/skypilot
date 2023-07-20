@@ -297,14 +297,9 @@ class GCP(clouds.Cloud):
             if self._is_machine_image(image_id):
                 image_infos = compute.machineImages().get(
                     project=project, machineImage=image_name).execute()
-                # TODO(zhwu): Need to check the storage location of the
-                # machine image to include the region, otherwise the image
-                # is not available. We need to fix the upper level
-                # implementation to make sure that the failover only goes
-                # to regions that have the image.
-                # Currently, we rely on the failure of the launching during
-                # the provisioning to failover to other regions.
-                # storage_locations = image_infos['storageLocations']
+                # The VM launching in a different region than the machine
+                # image is supported by GCP, so we do not need to check the
+                # storageLocations.
                 return float(image_infos['instanceProperties']['disks'][0][
                     'diskSizeGb'])
             else:
