@@ -82,8 +82,8 @@ class RequestRateAutoscaler(Autoscaler):
                  *args,
                  min_nodes: int = 1,
                  max_nodes: Optional[int] = None,
-                 upper_threshold: Optional[int] = None,
-                 lower_threshold: Optional[int] = None,
+                 upper_threshold: Optional[float] = None,
+                 lower_threshold: Optional[float] = None,
                  cooldown: int = 60,
                  **kwargs):
         """
@@ -124,12 +124,13 @@ class RequestRateAutoscaler(Autoscaler):
             self.load_balancer.request_timestamps.popleft()
 
         num_requests = len(self.load_balancer.request_timestamps)
+        num_requests = float(num_requests) / 60  # Convert to requests per second.
         num_nodes = self.infra_provider.total_servers()
         requests_per_node = num_requests / num_nodes if num_nodes else num_requests  # To account for zero case.
 
         logger.info(f'Requests per node: {requests_per_node}')
         logger.info(
-            f'Upper threshold: {self.upper_threshold} q/node, lower threshold: {self.lower_threshold} q/node, queries per node: {requests_per_node} q/node'
+            f'Upper threshold: {self.upper_threshold} qps/node, lower threshold: {self.lower_threshold} qps/node, queries per node: {requests_per_node} qps/node'
         )
 
         scaled = True

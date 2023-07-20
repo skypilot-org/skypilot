@@ -14,8 +14,8 @@ class SkyServiceSpec:
         app_port: int,
         min_replica: int,
         max_replica: Optional[int] = None,
-        qpm_upper_threshold: Optional[int] = None,
-        qpm_lower_threshold: Optional[int] = None,
+        qps_upper_threshold: Optional[float] = None,
+        qps_lower_threshold: Optional[float] = None,
     ):
         if max_replica is not None and max_replica < min_replica:
             with ux_utils.print_exception_no_traceback():
@@ -28,8 +28,8 @@ class SkyServiceSpec:
         self._app_port = str(app_port)
         self._min_replica = min_replica
         self._max_replica = max_replica
-        self._qpm_upper_threshold = qpm_upper_threshold
-        self._qpm_lower_threshold = qpm_lower_threshold
+        self._qps_upper_threshold = qps_upper_threshold
+        self._qps_lower_threshold = qps_lower_threshold
 
     @classmethod
     def from_yaml_config(cls, config: Optional[Dict[str, Any]]):
@@ -47,10 +47,10 @@ class SkyServiceSpec:
         service_config['min_replica'] = config['replica_policy']['min_replica']
         service_config['max_replica'] = config['replica_policy'].get(
             'max_replica', None)
-        service_config['qpm_upper_threshold'] = config['replica_policy'].get(
-            'qpm_upper_threshold', None)
-        service_config['qpm_lower_threshold'] = config['replica_policy'].get(
-            'qpm_lower_threshold', None)
+        service_config['qps_upper_threshold'] = config['replica_policy'].get(
+            'qps_upper_threshold', None)
+        service_config['qps_lower_threshold'] = config['replica_policy'].get(
+            'qps_lower_threshold', None)
 
         return SkyServiceSpec(**service_config)
 
@@ -75,9 +75,9 @@ class SkyServiceSpec:
         return self._max_replica
 
     @property
-    def qpm_upper_threshold(self):
-        return self._qpm_upper_threshold
+    def qps_upper_threshold(self):
+        return self._qps_upper_threshold
 
     @property
-    def qpm_lower_threshold(self):
-        return self._qpm_lower_threshold
+    def qps_lower_threshold(self):
+        return self._qps_lower_threshold

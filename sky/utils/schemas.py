@@ -177,10 +177,10 @@ def get_service_schema():
                     'max_replica': {
                         'type': 'integer',
                     },
-                    'qpm_upper_threshold': {
+                    'qps_upper_threshold': {
                         'type': 'number',
                     },
-                    'qpm_lower_threshold': {
+                    'qps_lower_threshold': {
                         'type': 'number',
                     },
                 }
