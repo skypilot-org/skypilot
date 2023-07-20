@@ -1,8 +1,12 @@
 # Train Your Own Vicuna on Llama-2
 
-[LLaMA 2](https://github.com/facebookresearch/llama/tree/main) is the top open-source models on the [Open LLM leaderboard](https://huggingface.co/spaces/HuggingFaceH4/open_llm_leaderboard) today. It has been released with a license that authorizes commercial use.
+[Vicuna](https://lmsys.org/blog/2023-03-30-vicuna/) is the first open-source chatbot that performs closely to the ChatGPT, and still is leading the [LLM leaderboard](https://huggingface.co/spaces/lmsys/chatbot-arena-leaderboard) today comparing to all other open-source models.
 
-With the license, you can now train your own Vicuna on LLaMA 2 for commercial use. This is a step-by-step guide to train your own Vicuna on LLaMA 2.
+However, since the LLaMA model it was trained on cannot be used in commercial products, the usage of Vicuna is limited.
+
+[LLaMA 2](https://github.com/facebookresearch/llama/tree/main) comes as a rescue with with a license that authorizes commercial use. We are now closing to see the full potential of the open-source Vicuna.
+
+In this tutorial, we will show you how to train your own Vicuna on LLaMA 2, with your own data, on any cloud, with the help of SkyPilot.
 
 ## Pre-requisites
 
