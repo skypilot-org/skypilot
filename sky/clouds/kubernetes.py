@@ -293,8 +293,8 @@ class Kubernetes(clouds.Cloud):
             'image_id': self.IMAGE,
         }
 
-    def _get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
+    def _get_feasible_launchable_resources(
+            self, resources: 'resources_lib.Resources'):
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources

@@ -15,6 +15,7 @@ _auth_api = None
 _networking_api = None
 _custom_objects_api = None
 
+
 def import_package(func):
 
     @functools.wraps(func)
@@ -56,18 +57,15 @@ def _load_config():
                 suffix += f' Error: {str(e)}'
             # Check if exception was due to no current-context
             if 'Expected key current-context' in str(e):
-                err_str = (
-                    'Failed to load Kubernetes configuration. '
-                    'Kubeconfig does not contain any valid context(s).'
-                    f'{suffix}\n'
-                    '    If you were running a local Kubernetes '
-                    'cluster, run `sky local up` to start the cluster.'
-                )
+                err_str = ('Failed to load Kubernetes configuration. '
+                           'Kubeconfig does not contain any valid context(s).'
+                           f'{suffix}\n'
+                           '    If you were running a local Kubernetes '
+                           'cluster, run `sky local up` to start the cluster.')
             else:
                 err_str = (
                     'Failed to load Kubernetes configuration. '
-                    f'Please check if your kubeconfig file is valid.{suffix}'
-                )
+                    f'Please check if your kubeconfig file is valid.{suffix}')
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(err_str) from None
     _configured = True
