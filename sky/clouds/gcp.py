@@ -273,7 +273,7 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def _is_machine_image(cls, image_id: str) -> bool:
-        find_machine = re.match(r'projects/.*/global/machineImages/.*',
+        find_machine = re.match(r'projects/.*/.*/machineImages/.*',
                                 image_id)
         return find_machine is not None
 
