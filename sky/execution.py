@@ -25,6 +25,7 @@ import colorama
 import sky
 from sky import backends
 from sky import clouds
+from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
@@ -953,7 +954,7 @@ def serve_up(
     name: str,
     original_yaml_path: str,
 ):
-    """Serve up a task as a RESTful API.
+    """Serve up a service.
 
     Please refer to the sky.cli.serve_up for the document.
 
@@ -1051,3 +1052,44 @@ def serve_up(
               f'{colorama.Style.RESET_ALL}{colorama.Fore.CYAN}'
               f'{handle.head_ip}:{task.service.app_port}\n'
               f'{colorama.Style.RESET_ALL}')
+
+
+def serve_down(
+    name: str,
+):
+    """Teardown a service.
+    
+    Please refer to the sky.cli.serve_down for the document.
+    
+    Args:
+        name: Name of the service.
+    
+    Raises:
+    """
+    middleware_cluster_name = serve.MIDDLEWARE_PREFIX + name
+    handle = global_user_state.get_handle_from_cluster_name(
+        middleware_cluster_name)
+    
+    print(f'{colorama.Fore.YELLOW}'
+          f'Stopping controller and redirector processes on middleware...'
+          f'{colorama.Style.RESET_ALL}')
+    core.cancel(middleware_cluster_name, all=True)
+
+    print(f'{colorama.Fore.YELLOW}'
+          'Tearing down all replicas...'
+          f'{colorama.Style.RESET_ALL}')
+    _execute(
+        entrypoint=sky.Task(
+            name='teardown-all-replicas',
+            run='sky down -a -y'),
+        stream_logs=False,
+        handle=handle,
+        stages=[Stage.EXEC],
+        cluster_name=middleware_cluster_name,
+        detach_run=False,
+    )
+
+    print(f'{colorama.Fore.YELLOW}'
+          'Teardown middleware...'
+          f'{colorama.Style.RESET_ALL}')
+    core.down(middleware_cluster_name, purge=True)
