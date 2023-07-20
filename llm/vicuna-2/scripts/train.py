@@ -112,6 +112,9 @@ def preprocess(
         conv.messages = []
         role_id = 0
         for sentence in source:
+            if sentence["from"] not in roles:
+                print(f"Skip unknown role {sentence['from']!r}")
+                continue
             role = roles[sentence["from"]]
             if role != conv.roles[role_id % 2]:
                 print(f"Skip duplicated role {role!r}")
