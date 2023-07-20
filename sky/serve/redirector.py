@@ -107,11 +107,12 @@ if __name__ == '__main__':
                         '-p',
                         type=int,
                         help='Port to run the redirector on',
-                        default=8081)
+                        required=True)
     parser.add_argument('--controller-addr',
                         default='http://localhost:8082',
                         type=str,
-                        help='Controller address (ip:port).')
+                        help='Controller address (ip:port).',
+                        required=True)
     args = parser.parse_args()
 
     with open(args.task_yaml, 'r') as f:

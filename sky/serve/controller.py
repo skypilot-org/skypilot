@@ -83,7 +83,7 @@ if __name__ == '__main__':
                         '-p',
                         type=int,
                         help='Port to run the controller',
-                        default=8082)
+                        required=True)
     args = parser.parse_args()
 
     # ======= Infra Provider =========

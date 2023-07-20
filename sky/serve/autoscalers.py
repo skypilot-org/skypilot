@@ -135,7 +135,7 @@ class RequestRateAutoscaler(Autoscaler):
         scaled = True
         # Bootstrap case
         logger.info(f'Number of nodes: {num_nodes}')
-        if num_nodes == 0 and requests_per_node > 0:
+        if num_nodes < self.min_nodes:
             logger.info(f'Bootstrapping autoscaler.')
             self.scale_up(1)
             self.last_scale_operation = current_time

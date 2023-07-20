@@ -975,15 +975,16 @@ def serve_up(
         workdir_abs_path = os.path.abspath(workdir_path)
         original['workdir'] = '~/sky_workdir'
     service = original['service']
+    app_port = service['port']
     if 'resources' not in original:
         original['resources'] = {}
-    original['resources']['ports'] = [service['port']]
+    original['resources']['ports'] = [app_port]
     with tempfile.NamedTemporaryFile(prefix=f'task-in-middleware-{name}-',
                                      mode='w') as f:
         common_utils.dump_yaml(f.name, original)
         remote_task_yaml_path = f'~/.sky/serve/service_{name}.yaml'
         vars_to_fill = {
-            'port': service['port'],
+            'port': app_port,
             'workdir': workdir_abs_path,
             'remote_task_yaml_path': remote_task_yaml_path,
             'modified_yaml_path': f.name,
@@ -1011,6 +1012,8 @@ def serve_up(
             middleware_cluster_name)
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
 
+        # Some random port that unlikely to be used by other processes.
+        controller_port = 33828
         print(f'{colorama.Fore.YELLOW}'
               'Launching controller process on middleware...'
               f'{colorama.Style.RESET_ALL}')
@@ -1018,7 +1021,7 @@ def serve_up(
             entrypoint=sky.Task(
                 name='run-middleware-controller',
                 run='python -m sky.serve.controller --task-yaml '
-                f'{remote_task_yaml_path}'),
+                f'{remote_task_yaml_path} --port {controller_port}'),
             stream_logs=False,
             handle=handle,
             stages=[Stage.EXEC],
@@ -1033,7 +1036,8 @@ def serve_up(
             entrypoint=sky.Task(
                 name='run-middleware-redirector',
                 run='python -m sky.serve.redirector --task-yaml '
-                f'{remote_task_yaml_path}'),
+                f'{remote_task_yaml_path} --port {app_port} '
+                f'--controller-addr http://localhost:{controller_port}'),
             stream_logs=False,
             handle=handle,
             stages=[Stage.EXEC],
@@ -1043,7 +1047,5 @@ def serve_up(
 
         print(f'{colorama.Style.BRIGHT}{colorama.Fore.CYAN}Serving at '
               f'{colorama.Style.RESET_ALL}{colorama.Fore.CYAN}'
-              f'{handle.head_ip}:{task.service.app_port}'
-              f'{colorama.Style.BRIGHT}.\n'
-              'Submit at least one request to bootstrap the service.'
+              f'{handle.head_ip}:{task.service.app_port}\n'
               f'{colorama.Style.RESET_ALL}')
