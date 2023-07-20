@@ -12,7 +12,11 @@ logger = logging.getLogger(__name__)
 
 class LoadBalancer:
 
-    def __init__(self, infra_provider, endpoint_path, readiness_timeout, post_data=None):
+    def __init__(self,
+                 infra_provider,
+                 endpoint_path,
+                 readiness_timeout,
+                 post_data=None):
         self.available_servers = []
         self.request_count = 0
         self.request_timestamps = deque()

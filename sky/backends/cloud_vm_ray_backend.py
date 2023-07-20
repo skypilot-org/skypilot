@@ -33,6 +33,7 @@ from sky import sky_logging
 from sky import optimizer
 from sky import skypilot_config
 from sky import spot as spot_lib
+from sky import serve as serve_lib
 from sky import status_lib
 from sky import task as task_lib
 from sky.data import data_utils
@@ -2924,7 +2925,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     '\nTo view the spot job dashboard:\t'
                     f'{backend_utils.BOLD}sky spot dashboard'
                     f'{backend_utils.RESET_BOLD}')
-            elif not name.startswith('middleware-'):
+            elif not name.startswith(serve_lib.MIDDLEWARE_PREFIX):
                 # Skip logging for submit controller & redirector jobs
                 # to middleware
                 logger.info(f'{fore.CYAN}Job ID: '
@@ -3042,7 +3043,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         style = colorama.Style
         name = handle.cluster_name
         if (name == spot_lib.SPOT_CONTROLLER_NAME or down or
-                name.startswith('middleware-')):
+                name.startswith(serve_lib.MIDDLEWARE_PREFIX)):
             return
         stop_str = ('\nTo stop the cluster:'
                     f'\t{backend_utils.BOLD}sky stop {name}'

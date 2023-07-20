@@ -3897,8 +3897,7 @@ def serve_up(
     usage_lib.messages.usage.update_user_task_yaml(entrypoint)
     dag = dag_utils.load_chain_dag_from_yaml(entrypoint)
     if len(dag.tasks) > 1:
-        click.secho('Multiple tasks found in the YAML file.',
-                    fg='red')
+        click.secho('Multiple tasks found in the YAML file.', fg='red')
         return
     task = dag.tasks[0]
 

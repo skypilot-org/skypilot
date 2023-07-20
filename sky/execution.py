@@ -31,6 +31,7 @@ from sky import optimizer
 from sky import skypilot_config
 from sky import sky_logging
 from sky import spot
+from sky import serve
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import gcp
@@ -367,7 +368,7 @@ def _execute(
     finally:
         if (cluster_name != spot.SPOT_CONTROLLER_NAME and
                 cluster_name is not None and
-                not cluster_name.startswith('middleware-')):
+                not cluster_name.startswith(serve.MIDDLEWARE_PREFIX)):
             # UX: print live clusters to make users aware (to save costs).
             #
             # Don't print if this job is launched by the spot controller,
@@ -979,18 +980,19 @@ def serve_up(
     if 'resources' not in original:
         original['resources'] = {}
     original['resources']['ports'] = [app_port]
-    with tempfile.NamedTemporaryFile(prefix=f'task-in-middleware-{name}-',
+    with tempfile.NamedTemporaryFile(prefix=f'serve-task-{name}-',
                                      mode='w') as f:
         common_utils.dump_yaml(f.name, original)
-        remote_task_yaml_path = f'~/.sky/serve/service_{name}.yaml'
+        remote_task_yaml_path = f'{serve.SERVICE_YAML_PREFIX}/service_{name}.yaml'
         vars_to_fill = {
             'port': app_port,
             'workdir': workdir_abs_path,
             'remote_task_yaml_path': remote_task_yaml_path,
             'modified_yaml_path': f.name,
         }
-        middleware_yaml_path = os.path.join('~/.sky/serve', f'{name}.yaml')
-        backend_utils.fill_template('middleware.yaml.j2',
+        middleware_yaml_path = os.path.join(serve.MIDDLEWARE_YAML_PREFIX,
+                                            f'{name}.yaml')
+        backend_utils.fill_template(serve.MIDDLEWARE_TEMPLATE,
                                     vars_to_fill,
                                     output_path=middleware_yaml_path)
         middleware_task = task_lib.Task.from_yaml(middleware_yaml_path)
@@ -999,7 +1001,7 @@ def serve_up(
               f'Launching middleware for {name}...'
               f'{colorama.Style.RESET_ALL}')
 
-        middleware_cluster_name = f'middleware-{name}'
+        middleware_cluster_name = serve.MIDDLEWARE_PREFIX + name
 
         _execute(
             entrypoint=middleware_task,
