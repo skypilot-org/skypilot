@@ -47,6 +47,8 @@ def check_credentials(timeout: int = 3) -> Tuple[bool, Optional[str]]:
         return False, 'Failed to communicate with the cluster - timeout. ' \
                       'Check if your cluster is running and your network ' \
                       'is stable.'
+    except ValueError as e:
+        return False, str(e)
     except Exception as e:
         return False, f'An error occurred: {str(e)}'
 

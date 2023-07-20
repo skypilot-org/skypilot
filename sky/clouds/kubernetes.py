@@ -148,7 +148,7 @@ class Kubernetes(clouds.Cloud):
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Kubernetes.',
-        clouds.CloudImplementationFeatures.CUSTOM_DOSK_TIER: 'Custom disk '
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: 'Custom disk '
                                                              'tiers are not '
                                                              'supported in '
                                                              'Kubernetes.',
@@ -293,10 +293,8 @@ class Kubernetes(clouds.Cloud):
             'image_id': self.IMAGE,
         }
 
-    def get_feasible_launchable_resources(self,
+    def _get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
-        if resources.use_spot or resources.disk_tier is not None:
-            return ([], [])
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
