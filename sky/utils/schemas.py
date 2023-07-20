@@ -161,8 +161,8 @@ def get_service_schema():
                     'path': {
                         'type': 'string',
                     },
-                    'timeout': {
-                        'type': 'integer',
+                    'readiness_timeout': {
+                        'type': 'number',
                     },
                 }
             },
@@ -178,10 +178,10 @@ def get_service_schema():
                         'type': 'integer',
                     },
                     'qpm_upper_threshold': {
-                        'type': 'integer',
+                        'type': 'number',
                     },
                     'qpm_lower_threshold': {
-                        'type': 'integer',
+                        'type': 'number',
                     },
                 }
             }

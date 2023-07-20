@@ -101,7 +101,7 @@ if __name__ == '__main__':
     load_balancer = RoundRobinLoadBalancer(
         infra_provider=infra_provider,
         endpoint_path=service_spec.readiness_path,
-        timeout=service_spec.readiness_timeout)
+        readiness_timeout=service_spec.readiness_timeout)
     # load_balancer = LeastLoadedLoadBalancer(n=5)
     # autoscaler = LatencyThresholdAutoscaler(load_balancer,
     #                                         upper_threshold=0.5,    # 500ms
@@ -109,14 +109,15 @@ if __name__ == '__main__':
 
     # ======= Autoscaler =========
     # Create an autoscaler with the RequestRateAutoscaler policy. Thresholds are defined as requests per node in the defined interval.
-    autoscaler = RequestRateAutoscaler(infra_provider,
-                                       load_balancer,
-                                       frequency=5,
-                                       min_nodes=service_spec.min_replica,
-                                       max_nodes=service_spec.max_replica,
-                                       upper_threshold=service_spec.qpm_upper_threshold,
-                                       lower_threshold=service_spec.qpm_lower_threshold,
-                                       cooldown=60)
+    autoscaler = RequestRateAutoscaler(
+        infra_provider,
+        load_balancer,
+        frequency=5,
+        min_nodes=service_spec.min_replica,
+        max_nodes=service_spec.max_replica,
+        upper_threshold=service_spec.qpm_upper_threshold,
+        lower_threshold=service_spec.qpm_lower_threshold,
+        cooldown=60)
 
     # ======= Controller =========
     # Create a controller object and run it.
