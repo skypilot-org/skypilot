@@ -1030,7 +1030,7 @@ def serve_up(
 
         print(f'{colorama.Fore.YELLOW}'
               'Launching controller process on middleware...'
-              f'{colorama.Style.RESET_ALL}')
+              f'{colorama.Style.RESET_ALL}', end='')
         _execute(
             entrypoint=sky.Task(
                 name='run-middleware-controller',
@@ -1045,7 +1045,7 @@ def serve_up(
 
         print(f'{colorama.Fore.YELLOW}'
               'Launching redirector process on middleware...'
-              f'{colorama.Style.RESET_ALL}')
+              f'{colorama.Style.RESET_ALL}', end='')
         _execute(
             entrypoint=sky.Task(
                 name='run-middleware-redirector',

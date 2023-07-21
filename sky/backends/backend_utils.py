@@ -1,4 +1,5 @@
 """Util constants/functions for the backends."""
+import base64
 from datetime import datetime
 import difflib
 import enum
@@ -6,6 +7,7 @@ import getpass
 import json
 import os
 import pathlib
+import pickle
 import re
 import subprocess
 import tempfile
@@ -37,6 +39,7 @@ from sky import global_user_state
 from sky import skypilot_config
 from sky import sky_logging
 from sky import spot as spot_lib
+from sky import serve as serve_lib
 from sky import status_lib
 from sky.backends import onprem_utils
 from sky.skylet import constants
@@ -2426,38 +2429,42 @@ def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
     # TODO(tian): Make it run in parallel.
     for record in service_records:
         middleware_cluster_name = record['middleware_cluster_name']
-        handle = global_user_state.get_handle_from_cluster_name(
-            middleware_cluster_name)
-        assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
-        external_ips = handle.external_ips(use_cached_ips=True)
-        if external_ips is None:
-            # Cases for cluster not ready yet.
+        endpoint = record['endpoint']
+        if not endpoint:
             continue
-        assert len(external_ips) == 1, external_ips
-        ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
-        runner = command_runner.SSHCommandRunner(external_ips[0],
-                                                 **ssh_credentials)
-        rc, output, stderr = runner.run('sky status',
-                                        stream_logs=False,
-                                        require_outputs=True,
-                                        separate_stderr=True)
-        if rc:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'Failed to refresh status of service: {service}.\n'
-                    f'Error: {stderr}')
-        healthy_pattern = re.compile(r'(skyserve-\d+.*UP)')
-        healthy_result = healthy_pattern.findall(output)
-        record['num_healthy_replicas'] = len(healthy_result)
-        unhealthy_pattern = re.compile(r'(skyserve-\d+.*INIT)')
-        unhealthy_result = unhealthy_pattern.findall(output)
-        record['num_unhealthy_replicas'] = len(unhealthy_result)
-        if len(healthy_result) > 0:
-            record['status'] = status_lib.ServiceStatus.RUNNING
-        global_user_state.add_or_update_service(**record)
-        if service is not None:
-            # TODO(tian): fetch from controller
-            record['replica_info'] = None
+        # TODO(tian): Refactor: store ip and app_port separately.
+        middleware_ip = endpoint.split(':')[0]
+        with requests.Session() as session:
+            try:
+                resp = session.get(
+                    f'http://{middleware_ip}:{serve_lib.CONTROLLER_PORT}/controller/get_replica_nums',
+                    timeout=5)
+            except requests.RequestException:
+                pass
+                # record['status'] = status_lib.ServiceStatus.FAILED
+            else:
+                record.update(resp.json())
+                if record['num_healthy_replicas'] > 0:
+                    record['status'] = status_lib.ServiceStatus.RUNNING
+                elif record['num_unhealthy_replicas'] > 0:
+                    record['status'] = status_lib.ServiceStatus.REPLICA_INIT
+            global_user_state.add_or_update_service(**record)
+            if service is not None:
+                assert record['name'] == service
+                try:
+                    resp = session.get(
+                        f'http://{middleware_ip}:{serve_lib.CONTROLLER_PORT}/controller/get_replica_info',
+                        timeout=5)
+                except requests.RequestException as e:
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError(
+                            f'Failed to refresh status of service: {service}.'
+                        ) from e
+                else:
+                    record['replica_info'] = resp.json()['replica_info']
+                    for rec in record['replica_info']:
+                        rec['status'] = pickle.loads(base64.b64decode(rec['status']))
+                        rec['handle'] = pickle.loads(base64.b64decode(rec['handle']))
     return service_records
 
 

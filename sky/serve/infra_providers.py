@@ -1,6 +1,8 @@
 import logging
 from typing import List
 import time
+import pickle
+import base64
 
 import sky
 from sky.backends import backend_utils
@@ -121,6 +123,19 @@ class SkyPilotInfraProvider(InfraProvider):
                     continue
         return ip_clusname_map
 
+    def get_replica_info(self):
+        clusters = sky.global_user_state.get_clusters()
+        infos = []
+        for cluster in clusters:
+            name = cluster['name']
+            if self.CLUSTER_NAME_PREFIX in name:
+                infos.append({
+                    'name': name,
+                    'handle': base64.b64encode(pickle.dumps(cluster['handle'])).decode('utf-8'),
+                    'status': base64.b64encode(pickle.dumps(cluster['status'])).decode('utf-8'),
+                })
+        return infos
+
     def _get_server_ips(self):
         return list(self._get_ip_clusname_map().keys())
 
@@ -140,7 +155,8 @@ class SkyPilotInfraProvider(InfraProvider):
         for i in range(0, n):
             cluster_name = f'{self.CLUSTER_NAME_PREFIX}{self.id_counter}'
             logger.info(f'Creating SkyPilot cluster {cluster_name}')
-            sky.launch(task, cluster_name=cluster_name,
+            sky.launch(task,
+                       cluster_name=cluster_name,
                        detach_run=True,
                        retry_until_up=True)  # TODO - make the launch parallel
             self.id_counter += 1

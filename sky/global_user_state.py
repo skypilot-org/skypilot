@@ -387,7 +387,7 @@ def remove_service(service_name: str):
 
 def set_service_status(service_name: str, status: status_lib.ServiceStatus):
     _DB.cursor.execute('UPDATE services SET status=(?) '
-                       'WHERE name=(?)', (status, service_name))
+                       'WHERE name=(?)', (status.value, service_name))
     count = _DB.cursor.rowcount
     _DB.conn.commit()
     assert count <= 1, count

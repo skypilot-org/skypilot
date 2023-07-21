@@ -60,6 +60,22 @@ class Controller:
         def get_server_ips():
             return {'server_ips': list(self.load_balancer.servers_queue)}
 
+        @self.app.get('/controller/get_replica_info')
+        def get_replica_info():
+            return {'replica_info': self.infra_provider.get_replica_info()}
+
+        @self.app.get('/controller/get_replica_nums')
+        def get_replica_nums():
+            return {
+                'num_healthy_replicas': len(self.load_balancer.available_servers
+                                           ),
+                'num_unhealthy_replicas':
+                    self.infra_provider.total_servers() -
+                    len(self.load_balancer.available_servers),
+                # TODO(tian): Detect error replicas
+                'num_failed_replicas': 0
+            }
+
         # Run server_monitor and autoscaler.monitor (if autoscaler is defined) in separate threads in the background. This should not block the main thread.
         server_fetcher_thread = threading.Thread(target=self.server_fetcher,
                                                  daemon=True)

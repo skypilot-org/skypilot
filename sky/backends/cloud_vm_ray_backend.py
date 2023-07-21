@@ -2893,8 +2893,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                            f'Failed to submit job {job_id}.',
                                            stderr=stdout + stderr)
 
-        logger.info('Job submitted with Job ID: '
-                    f'{style.BRIGHT}{job_id}{style.RESET_ALL}')
+        if not handle.cluster_name.startswith(serve_lib.MIDDLEWARE_PREFIX):
+            logger.info('Job submitted with Job ID: '
+                        f'{style.BRIGHT}{job_id}{style.RESET_ALL}')
 
         try:
             if not detach_run:

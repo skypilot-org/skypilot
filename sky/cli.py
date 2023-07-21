@@ -3940,6 +3940,8 @@ def serve_status(all: bool, service: Optional[str]):
         assert len(service_records) == 1, service_records
         service_record = service_records[0]
         assert 'replica_info' in service_record, service_record
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Replicas of {service}'
+                   f'{colorama.Style.RESET_ALL}')
         status_utils.show_replica_table(service_record['replica_info'], all)
 
 

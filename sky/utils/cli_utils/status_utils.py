@@ -120,7 +120,8 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
         StatusColumn('STATUS', _get_service_status_colored),
         StatusColumn('#HEALTHY_REPLICAS', _get_healthy_replicas),
         StatusColumn('#UNHEALTHY_REPLICAS', _get_unhealthy_replicas),
-        StatusColumn('#FAILED_REPLICAS', _get_failed_replicas),
+        # TODO(tian): After we have a better way to detect failed replicas
+        # StatusColumn('#FAILED_REPLICAS', _get_failed_replicas),
         StatusColumn('POLICY', _get_policy, show_by_default=False),
         StatusColumn('REQUESTED RESOURCES',
                      _get_requested_resources,
@@ -145,7 +146,30 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
 
 
 def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
-    pass
+    status_columns = [
+        StatusColumn('NAME', _get_name),
+        StatusColumn('STATUS', _get_status_colored),
+        StatusColumn('RESOURCES',
+                     _get_resources,
+                     trunc_length=70 if not show_all else 0),
+        StatusColumn('REGION', _get_region),
+    ]
+
+    columns = []
+    for status_column in status_columns:
+        if status_column.show_by_default or show_all:
+            columns.append(status_column.name)
+    replica_table = log_utils.create_table(columns)
+    for record in replica_records:
+        row = []
+        for status_column in status_columns:
+            if status_column.show_by_default or show_all:
+                row.append(status_column.calc(record))
+        replica_table.add_row(row)
+    if replica_records:
+        click.echo(replica_table)
+    else:
+        click.echo('No existing replicas.')
 
 
 def get_total_cost_of_displayed_records(
