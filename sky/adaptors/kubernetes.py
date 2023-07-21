@@ -27,8 +27,11 @@ def import_package(func):
                 import kubernetes as _kubernetes
                 import urllib3 as _urllib3
             except ImportError:
+                # TODO(romilb): Update this message to point to installation
+                #  docs when they are ready.
                 raise ImportError('Fail to import dependencies for Kubernetes. '
-                                  'See README for how to install it.') from None
+                                  'Run `pip install kubernetes` to '
+                                  'install them.') from None
             kubernetes = _kubernetes
             urllib3 = _urllib3
         return func(*args, **kwargs)
