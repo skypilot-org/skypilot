@@ -1034,8 +1034,9 @@ def serve_up(
         _execute(
             entrypoint=sky.Task(
                 name='run-middleware-controller',
-                run='python -m sky.serve.controller --task-yaml '
-                f'{remote_task_yaml_path} --port {serve.CONTROLLER_PORT}'),
+                run='python -m sky.serve.controller --service-name '
+                f'{name} --task-yaml {remote_task_yaml_path} '
+                f'--port {serve.CONTROLLER_PORT}'),
             stream_logs=False,
             handle=handle,
             stages=[Stage.EXEC],

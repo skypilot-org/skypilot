@@ -79,10 +79,9 @@ class DummyInfraProvider(InfraProvider):
 
 
 class SkyPilotInfraProvider(InfraProvider):
-    CLUSTER_NAME_PREFIX = 'skyserve-'
-
-    def __init__(self, task_yaml_path: str):
+    def __init__(self, task_yaml_path: str, cluster_name_prefix: str):
         self.task_yaml_path = task_yaml_path
+        self.cluster_name_prefix = cluster_name_prefix
         self.id_counter = self._get_id_start()
 
     def _get_id_start(self):
@@ -93,7 +92,7 @@ class SkyPilotInfraProvider(InfraProvider):
         # Filter out clusters that don't have the prefix
         clusters = [
             cluster for cluster in clusters
-            if self.CLUSTER_NAME_PREFIX in cluster['name']
+            if self.cluster_name_prefix in cluster['name']
         ]
         # Get the greatest id
         max_id = 0
@@ -110,7 +109,7 @@ class SkyPilotInfraProvider(InfraProvider):
         ip_clusname_map = {}
         for cluster in clusters:
             name = cluster['name']
-            if self.CLUSTER_NAME_PREFIX in name:
+            if self.cluster_name_prefix in name:
                 handle = cluster['handle']
                 try:
                     # Get the head node ip
@@ -128,7 +127,7 @@ class SkyPilotInfraProvider(InfraProvider):
         infos = []
         for cluster in clusters:
             name = cluster['name']
-            if self.CLUSTER_NAME_PREFIX in name:
+            if self.cluster_name_prefix in name:
                 infos.append({
                     'name': name,
                     'handle': base64.b64encode(pickle.dumps(cluster['handle'])).decode('utf-8'),
@@ -145,7 +144,7 @@ class SkyPilotInfraProvider(InfraProvider):
         # FIXME - this is a hack to get around. should implement a better filtering mechanism
         clusters = [
             cluster for cluster in clusters
-            if self.CLUSTER_NAME_PREFIX in cluster['name']
+            if self.cluster_name_prefix in cluster['name']
         ]
         return len(clusters)
 
@@ -153,7 +152,7 @@ class SkyPilotInfraProvider(InfraProvider):
         # Launch n new clusters
         task = sky.Task.from_yaml(self.task_yaml_path)
         for i in range(0, n):
-            cluster_name = f'{self.CLUSTER_NAME_PREFIX}{self.id_counter}'
+            cluster_name = f'{self.cluster_name_prefix}{self.id_counter}'
             logger.info(f'Creating SkyPilot cluster {cluster_name}')
             sky.launch(task,
                        cluster_name=cluster_name,
@@ -168,7 +167,7 @@ class SkyPilotInfraProvider(InfraProvider):
         # Filter out clusters that don't have the prefix
         clusters = [
             cluster for cluster in clusters
-            if self.CLUSTER_NAME_PREFIX in cluster['name']
+            if self.cluster_name_prefix in cluster['name']
         ]
         num_clusters = len(clusters)
         if num_clusters > 0:

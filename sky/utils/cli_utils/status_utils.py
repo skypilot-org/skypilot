@@ -148,11 +148,11 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
 def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
     status_columns = [
         StatusColumn('NAME', _get_name),
-        StatusColumn('STATUS', _get_status_colored),
         StatusColumn('RESOURCES',
                      _get_resources,
                      trunc_length=70 if not show_all else 0),
         StatusColumn('REGION', _get_region),
+        StatusColumn('STATUS', _get_status_colored),
     ]
 
     columns = []

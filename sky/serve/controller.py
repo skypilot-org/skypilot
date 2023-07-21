@@ -92,6 +92,10 @@ class Controller:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='SkyServe Server')
+    parser.add_argument('--service-name',
+                        type=str,
+                        help='Name of the service',
+                        required=True)
     parser.add_argument('--task-yaml',
                         type=str,
                         help='Task YAML file',
@@ -105,7 +109,7 @@ if __name__ == '__main__':
 
     # ======= Infra Provider =========
     # infra_provider = DummyInfraProvider()
-    infra_provider = SkyPilotInfraProvider(args.task_yaml)
+    infra_provider = SkyPilotInfraProvider(args.task_yaml, args.service_name)
 
     # ======= Load Balancer =========
     with open(args.task_yaml, 'r') as f:
