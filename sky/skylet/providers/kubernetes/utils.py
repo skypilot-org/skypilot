@@ -3,6 +3,8 @@ from typing import List, Tuple, Optional
 from sky import status_lib
 from sky.adaptors import kubernetes
 
+DEFAULT_NAMESPACE = 'default'
+
 
 def get_head_ssh_port(cluster_name, namespace):
     svc_name = f'{cluster_name}-ray-head-ssh'
@@ -27,7 +29,7 @@ def check_credentials(timeout: int = 3) -> Tuple[bool, Optional[str]]:
         str: Error message if credentials are invalid, None otherwise
     """
     try:
-        kubernetes.core_api().list_namespace(_request_timeout=timeout)
+        kubernetes.core_api().list_namespaced_pod(_request_timeout=timeout)
         return True, None
     except ImportError:
         # TODO(romilb): Update these error strs to also include link to docs
@@ -70,7 +72,7 @@ def get_cluster_status(cluster_name: str,
     return cluster_status
 
 
-def get_current_kube_config_context() -> Optional[str]:
+def get_current_kube_config_context_name() -> Optional[str]:
     """
     Get the current kubernetes context from the kubeconfig file
 
@@ -83,3 +85,22 @@ def get_current_kube_config_context() -> Optional[str]:
         return current_context['name']
     except k8s.config.config_exception.ConfigException:
         return None
+
+
+def get_current_kube_config_context_namespace() -> Optional[str]:
+    """
+    Get the current kubernetes context namespace from the kubeconfig file
+
+    Returns:
+        str | None: The current kubernetes context namespace if it exists, else
+            the default namespace.
+    """
+    k8s = kubernetes.get_kubernetes()
+    try:
+        _, current_context = k8s.config.list_kube_config_contexts()
+        if 'namespace' in current_context:
+            return current_context['namespace']
+        else:
+            return DEFAULT_NAMESPACE
+    except k8s.config.config_exception.ConfigException:
+        return DEFAULT_NAMESPACE

@@ -3,6 +3,7 @@
 # pylint: disable=import-outside-toplevel
 
 import functools
+import os
 
 from sky.utils import ux_utils, env_options
 
@@ -50,6 +51,13 @@ def _load_config():
     if _configured:
         return
     try:
+        # Load in-cluster config if running in a pod
+        # Kubernetes set environment variables for service discovery do not
+        # show up in SkyPilot tasks. For now, we work around by using
+        # DNS name instead of environment variables.
+        # See issue: https://github.com/skypilot-org/skypilot/issues/2287
+        os.environ['KUBERNETES_SERVICE_HOST'] = 'kubernetes.default.svc'
+        os.environ['KUBERNETES_SERVICE_PORT'] = '443'
         kubernetes.config.load_incluster_config()
     except kubernetes.config.config_exception.ConfigException:
         try:

@@ -4421,7 +4421,7 @@ def local_up():
     cluster_created = False
     # Check if ~/.kube/config exists:
     if os.path.exists(os.path.expanduser('~/.kube/config')):
-        current_context = kubernetes_utils.get_current_kube_config_context()
+        current_context = kubernetes_utils.get_current_kube_config_context_name()
         skypilot_context = 'kind-skypilot'
         if current_context is not None and current_context != skypilot_context:
             click.echo(

@@ -19,10 +19,6 @@ provider:
     # Use False if running from outside of k8s cluster
     use_internal_ips: false
 
-    # Namespace to use for all resources created.
-    # TODO(romilb): Make the namespace configurable.
-    namespace: default
-
     timeout: {{timeout}}
 
     # ServiceAccount created by the autoscaler for the head node pod that it
@@ -48,8 +44,11 @@ provider:
             name: autoscaler
         rules:
         - apiGroups: [""]
-          resources: ["pods", "pods/status", "pods/exec"]
-          verbs: ["get", "watch", "list", "create", "delete", "patch"]
+          resources: ["pods", "pods/status", "pods/exec", "services"]
+          verbs: ["get", "watch", "list", "create", "delete", "patch", "update"]
+        - apiGroups: ["apps"]
+          resources: ["deployments"]
+          verbs: ["get", "watch", "list", "create", "delete", "patch", "update"]
 
     # RoleBinding created by the autoscaler for the head node pod that it runs
     # in. If this field isn't provided, the head pod config below must contain
@@ -210,6 +209,7 @@ available_node_types:
         # Automatically generates a name for the pod with this prefix.
         generateName: {{cluster_name}}-ray-worker-
       spec:
+        serviceAccountName: skypilot-service-account
         restartPolicy: Never
         volumes:
         - name: secret-volume

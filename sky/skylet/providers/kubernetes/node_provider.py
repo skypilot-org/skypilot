@@ -6,8 +6,9 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from sky.adaptors import kubernetes
-from sky.skylet.providers.kubernetes import get_head_ssh_port
 from sky.skylet.providers.kubernetes import config
+from sky.skylet.providers.kubernetes import get_head_ssh_port
+from sky.skylet.providers.kubernetes import utils
 from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler._private.cli_logger import cli_logger
 from ray.autoscaler.node_provider import NodeProvider
@@ -50,7 +51,7 @@ class KubernetesNodeProvider(NodeProvider):
         self.cluster_name = cluster_name
 
         # Kubernetes namespace to user
-        self.namespace = provider_config['namespace']
+        self.namespace = utils.get_current_kube_config_context_namespace()
 
         # Timeout for resource provisioning. If it takes longer than this
         # timeout, the resource provisioning will be considered failed.
