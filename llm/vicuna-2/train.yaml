@@ -39,7 +39,7 @@ setup: |
     pip install -U xformers
   fi
   python hardcoded_questions.py
-  python -m fschat.data.merge --in $HOME/data/sharegpt.json hardcoded.json --out $HOME/data/mydata.json
+  python -m fastchat.data.merge --in $HOME/data/sharegpt.json hardcoded.json --out $HOME/data/mydata.json
 
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 

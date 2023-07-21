@@ -23,7 +23,7 @@ def identity_questions():
     content = []
 
     name = "Vicuna-2"
-    org = "LMSYS Organization and SkyPilot Team"
+    org = "Sky Computing Lab and SkyPilot Team"
     base = "Llama-2"
 
     def generate_conversations(questions, answers):
