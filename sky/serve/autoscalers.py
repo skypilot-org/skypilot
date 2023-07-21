@@ -111,7 +111,9 @@ class RequestRateAutoscaler(Autoscaler):
         # Check if cooldown period has passed since the last scaling operation
         if current_time - self.last_scale_operation < self.cooldown:
             logger.info(
-                f'Current time: {current_time}, last scale operation: {self.last_scale_operation}, cooldown: {self.cooldown}'
+                f'Current time: {current_time}, '
+                f'last scale operation: {self.last_scale_operation}, '
+                f'cooldown: {self.cooldown}'
             )
             logger.info(
                 f'Cooldown period has not passed since last scaling operation. Skipping scaling.'
@@ -131,7 +133,9 @@ class RequestRateAutoscaler(Autoscaler):
 
         logger.info(f'Requests per node: {requests_per_node}')
         logger.info(
-            f'Upper threshold: {self.upper_threshold} qps/node, lower threshold: {self.lower_threshold} qps/node, queries per node: {requests_per_node} qps/node'
+            f'Upper threshold: {self.upper_threshold} qps/node, '
+            f'lower threshold: {self.lower_threshold} qps/node, '
+            f'queries per node: {requests_per_node} qps/node'
         )
 
         scaled = True

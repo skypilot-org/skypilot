@@ -1083,6 +1083,7 @@ def serve_down(name: str,):
     core.cancel(middleware_cluster_name, all=True)
 
     plural = ''
+    # TODO(tian): Change to #num replica (including unhealthy one)
     if num_healthy_replicas > 1:
         plural = 's'
     print(f'{colorama.Fore.YELLOW}'
