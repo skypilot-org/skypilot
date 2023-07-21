@@ -1,9 +1,11 @@
 """Azure cli adaptor"""
 
 # pylint: disable=import-outside-toplevel
-from functools import wraps
+import threading
+from functools import wraps, lru_cache
 
 azure = None
+_session_creation_lock = threading.RLock()
 
 
 def import_package(func):
@@ -35,3 +37,26 @@ def get_current_account_user() -> str:
     """Get the default account user."""
     from azure.common import credentials
     return credentials.get_cli_profile().get_current_account_user()
+
+
+@lru_cache()
+@import_package
+def get_client(name: str, subscription_id: str):
+    # Sky only supports Azure CLI credential for now.
+    # Increase the timeout to fix the Azure get-access-token timeout issue.
+    # Tracked in
+    # https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
+    from azure.identity import AzureCliCredential
+    from azure.mgmt.network import NetworkManagementClient
+    from azure.mgmt.resource import ResourceManagementClient
+    with _session_creation_lock:
+        credential = AzureCliCredential(process_timeout=30)
+        if name == 'compute':
+            from azure.mgmt.compute import ComputeManagementClient
+            return ComputeManagementClient(credential, subscription_id)
+        elif name == 'network':
+            return NetworkManagementClient(credential, subscription_id)
+        elif name == 'resource':
+            return ResourceManagementClient(credential, subscription_id)
+        else:
+            raise ValueError(f'Client not supported: "{name}"')

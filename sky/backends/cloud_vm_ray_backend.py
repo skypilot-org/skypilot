@@ -3646,7 +3646,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         stderr = ''
 
         # Use the new provisioner for AWS.
-        if isinstance(cloud, (clouds.AWS, clouds.GCP)):
+        if isinstance(cloud, (clouds.AWS, clouds.GCP, clouds.Azure)):
             # Stop the ray autoscaler first to avoid the head node trying to
             # re-launch the worker nodes, during the termination of the
             # cluster.
@@ -3685,21 +3685,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 self.post_teardown_cleanup(handle, terminate, purge)
             return
 
-        if terminate and isinstance(cloud, clouds.Azure):
-            # Here we handle termination of Azure by ourselves instead of Ray
-            # autoscaler.
-            resource_group = config['provider']['resource_group']
-            terminate_cmd = f'az group delete -y --name {resource_group}'
-            with log_utils.safe_rich_status(f'[bold cyan]Terminating '
-                                            f'[green]{cluster_name}'):
-                returncode, stdout, stderr = log_lib.run_with_log(
-                    terminate_cmd,
-                    log_abs_path,
-                    shell=True,
-                    stream_logs=False,
-                    require_outputs=True)
-
-        elif (isinstance(cloud, clouds.IBM) and terminate and
+        if (isinstance(cloud, clouds.IBM) and terminate and
               prev_cluster_status == status_lib.ClusterStatus.STOPPED):
             # pylint: disable= W0622 W0703 C0415
             from sky.adaptors import ibm
