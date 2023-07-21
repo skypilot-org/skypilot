@@ -32,33 +32,6 @@ def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
     return func
 
 
-#
-# def _filter_instances(
-#     handlers: Iterable[Type[instance_utils.GCPInstance]],
-#     project_id: str,
-#     zone: str,
-#     label_filters: Dict[str, str],
-#     status_filters_fn: Callable[[Type[instance_utils.GCPInstance]],
-#                                 Optional[List[str]]],
-#     included_instances: Optional[List[str]] = None,
-#     excluded_instances: Optional[List[str]] = None,
-# ) -> Dict[Type[instance_utils.GCPInstance], List[str]]:
-#     """Filter instances using all instance handlers."""
-#     instances = set()
-#     logger.debug(f'handlers: {handlers}')
-#     for instance_handler in handlers:
-#         instances |= set(
-#             instance_handler.filter(project_id, zone, label_filters,
-#                                     status_filters_fn(instance_handler),
-#                                     included_instances, excluded_instances))
-#     handler_to_instances = collections.defaultdict(list)
-#     for instance in instances:
-#         handler = instance_utils.instance_to_handler(instance)
-#         handler_to_instances[handler].append(instance)
-#     logger.debug(f'handler_to_instances: {handler_to_instances}')
-#     return handler_to_instances
-
-
 def _extract_metadata(vm, provider_config):
     # get tags
     metadata = {'name': vm.name, 'tags': vm.tags, 'status': ''}
