@@ -13,7 +13,6 @@ from sky import clouds
 from sky import exceptions
 from sky import provision as provision_lib
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import aws
 from sky.clouds import service_catalog
 from sky.utils import common_utils
@@ -24,6 +23,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
+    from sky import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -796,7 +796,7 @@ class AWS(clouds.Cloud):
         wait_image_cmd = (
             f'aws ec2 wait image-available --region {region} --image-ids {image_id}'
         )
-        returncode, stdout, stderr = subprocess_utils.run_with_retries(
+        returncode, _, stderr = subprocess_utils.run_with_retries(
             wait_image_cmd,
             retry_returncode=[255],
         )
