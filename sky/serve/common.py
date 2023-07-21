@@ -55,7 +55,7 @@ class SkyServiceSpec:
         return SkyServiceSpec(**service_config)
 
     def policy_str(self):
-        if self.max_replica == self.min_replica:
+        if self.max_replica == self.min_replica or self.max_replica is None:
             plural = ''
             if self.min_replica > 1:
                 plural = 'S'
