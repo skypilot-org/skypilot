@@ -2456,10 +2456,7 @@ def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
                         f'http://{middleware_ip}:{serve_lib.CONTROLLER_PORT}/controller/get_replica_info',
                         timeout=5)
                 except requests.RequestException as e:
-                    with ux_utils.print_exception_no_traceback():
-                        raise RuntimeError(
-                            f'Failed to refresh status of service: {service}.'
-                        ) from e
+                    pass
                 else:
                     record['replica_info'] = resp.json()['replica_info']
                     for rec in record['replica_info']:

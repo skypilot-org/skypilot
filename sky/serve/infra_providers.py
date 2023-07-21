@@ -81,13 +81,13 @@ class DummyInfraProvider(InfraProvider):
 class SkyPilotInfraProvider(InfraProvider):
     def __init__(self, task_yaml_path: str, cluster_name_prefix: str):
         self.task_yaml_path = task_yaml_path
-        self.cluster_name_prefix = cluster_name_prefix
+        self.cluster_name_prefix = cluster_name_prefix + '-'
         self.id_counter = self._get_id_start()
 
     def _get_id_start(self):
-        '''
+        """
         Returns the id to start from when creating a new cluster
-        '''
+        """
         clusters = sky.global_user_state.get_clusters()
         # Filter out clusters that don't have the prefix
         clusters = [
