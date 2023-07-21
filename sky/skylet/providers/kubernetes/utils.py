@@ -56,23 +56,6 @@ def check_credentials(timeout: int = 3) -> Tuple[bool, Optional[str]]:
         return False, f'An error occurred: {str(e)}'
 
 
-def get_cluster_status(cluster_name: str,
-                       namespace: str) -> List[status_lib.ClusterStatus]:
-    # Get all the pods with the label skypilot-cluster: <cluster_name>
-    pods = kubernetes.core_api().list_namespaced_pod(
-        namespace, label_selector=f'skypilot-cluster={cluster_name}').items
-
-    # Check if the pods are running or pending
-    cluster_status = []
-    for pod in pods:
-        if pod.status.phase == 'Running':
-            cluster_status.append(status_lib.ClusterStatus.UP)
-        elif pod.status.phase == 'Pending':
-            cluster_status.append(status_lib.ClusterStatus.INIT)
-    # If pods are not found, we don't add them to the return list
-    return cluster_status
-
-
 def get_current_kube_config_context_name() -> Optional[str]:
     """
     Get the current kubernetes context from the kubeconfig file
@@ -88,7 +71,7 @@ def get_current_kube_config_context_name() -> Optional[str]:
         return None
 
 
-def get_current_kube_config_context_namespace() -> Optional[str]:
+def get_current_kube_config_context_namespace() -> str:
     """
     Get the current kubernetes context namespace from the kubeconfig file
 

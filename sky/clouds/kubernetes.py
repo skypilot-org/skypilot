@@ -5,7 +5,9 @@ import re
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
-from sky import clouds, status_lib
+from sky import clouds
+from sky import status_lib
+from sky.adaptors import kubernetes
 from sky.utils import common_utils
 from sky.skylet.providers.kubernetes import utils as kubernetes_utils
 
@@ -372,4 +374,17 @@ class Kubernetes(clouds.Cloud):
                      **kwargs) -> List['status_lib.ClusterStatus']:
         del tag_filters, region, zone, kwargs  # Unused.
         namespace = kubernetes_utils.get_current_kube_config_context_namespace()
-        return kubernetes_utils.get_cluster_status(name, namespace)
+
+        # Get all the pods with the label skypilot-cluster: <cluster_name>
+        pods = kubernetes.core_api().list_namespaced_pod(
+            namespace, label_selector=f'skypilot-cluster={name}').items
+
+        # Check if the pods are running or pending
+        cluster_status = []
+        for pod in pods:
+            if pod.status.phase == 'Running':
+                cluster_status.append(status_lib.ClusterStatus.UP)
+            elif pod.status.phase == 'Pending':
+                cluster_status.append(status_lib.ClusterStatus.INIT)
+        # If pods are not found, we don't add them to the return list
+        return cluster_status
