@@ -29,7 +29,8 @@ def check_credentials(timeout: int = 3) -> Tuple[bool, Optional[str]]:
         str: Error message if credentials are invalid, None otherwise
     """
     try:
-        kubernetes.core_api().list_namespaced_pod(_request_timeout=timeout)
+        ns = get_current_kube_config_context_namespace()
+        kubernetes.core_api().list_namespaced_pod(ns, _request_timeout=timeout)
         return True, None
     except ImportError:
         # TODO(romilb): Update these error strs to also include link to docs

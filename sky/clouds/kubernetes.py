@@ -370,7 +370,6 @@ class Kubernetes(clouds.Cloud):
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
-        # TODO(romilb): Implement this. For now, we return UP as the status.
-        #  Assuming single node cluster.
         del tag_filters, region, zone, kwargs  # Unused.
-        return [status_lib.ClusterStatus.UP]
+        namespace = kubernetes_utils.get_current_kube_config_context_namespace()
+        return kubernetes_utils.get_cluster_status(name, namespace)
