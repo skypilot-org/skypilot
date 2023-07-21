@@ -1094,14 +1094,17 @@ class S3Store(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             if data_utils.s5cmd_installed():
+                # s5cmd copies the directory itself as well without
+                # / appeneded to the end of src path unlike aws s3 sync
                 if not src_dir_path.endswith('/'):
                     src_dir_path += '/'
                 if dest_dir_name and not dest_dir_name.endswith('/'):
                     dest_dir_name += '/'
                 region = data_utils.get_s3_bucket_region(self.name)
+                d = self.region
                 # we exclude .git directory from the sync
                 sync_command = (
-                    f's5cmd sync --destination-region {self.region} '
+                    f's5cmd sync --destination-region {region} '
                     f'--no-follow-symlinks --exclude ".git/*" {src_dir_path} '
                     f's3://{self.name}/{dest_dir_name}')
             else:
