@@ -3,6 +3,7 @@ from typing import Dict, List, Any, Optional
 
 from botocore import config
 from sky.adaptors import aws
+from sky import status_lib
 
 BOTO_MAX_RETRIES = 12
 # Tag uniquely identifying all nodes of a cluster
@@ -26,6 +27,40 @@ def _filter_instances(ec2, filters: List[Dict[str, Any]],
                 included_instances.append(inst.id)
         instances = instances.filter(InstanceIds=included_instances)
     return instances
+
+
+def query_instances(
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+    assert provider_config is not None, (cluster_name, provider_config)
+    region = provider_config['region']
+    ec2 = aws.resource(
+        'ec2',
+        region_name=region,
+        config=config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}))
+    filters = [
+        {
+            'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
+            'Values': [cluster_name],
+        },
+    ]
+    instances = ec2.instances.filter(Filters=filters)
+    status_map = {
+        'pending': status_lib.ClusterStatus.INIT,
+        'running': status_lib.ClusterStatus.UP,
+        # TODO(zhwu): stopping and shutting-down could occasionally fail
+        # due to internal errors of AWS. We should cover that case.
+        'stopping': status_lib.ClusterStatus.STOPPED,
+        'stopped': status_lib.ClusterStatus.STOPPED,
+        'shutting-down': None,
+        'terminated': None,
+    }
+    statuses = {}
+    for inst in instances:
+        state = inst.state['Name']
+        statuses[inst.id] = status_map[state]
+    return statuses
 
 
 def stop_instances(
