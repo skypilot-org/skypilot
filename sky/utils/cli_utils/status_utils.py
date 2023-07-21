@@ -21,6 +21,7 @@ _ClusterRecord = Dict[str, Any]
 _ClusterCostReportRecord = Dict[str, Any]
 # A record in global_user_state's 'services' table.
 _ServiceRecord = Dict[str, Any]
+_ReplicaRecord = Dict[str, Any]
 
 
 def truncate_long_string(s: str, max_length: int = 35) -> str:
@@ -109,31 +110,42 @@ def show_status_table(cluster_records: List[_ClusterRecord],
     return num_pending_autostop
 
 
-def show_service_table(service_records: List[_ServiceRecord]):
-    # TODO(tian): Refactor.
+def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
     status_columns = [
-        StatusColumn('NAME', lambda service_record: service_record['name']),
-        StatusColumn(
-            'MIDDLEWARE_CLUSTER_NAME',
-            lambda service_record: service_record['middleware_cluster_name']),
-        StatusColumn('ENDPOINT',
-                     lambda service_record: service_record['endpoint']),
-        StatusColumn(
-            '#HEALTHY_REPLICAS',
-            lambda service_record: service_record['num_healthy_replicas']),
+        StatusColumn('NAME', _get_name),
+        StatusColumn('MIDDLEWARE_CLUSTER_NAME',
+                     _get_middleware_cluster_name,
+                     show_by_default=False),
+        StatusColumn('ENDPOINT', _get_endpoint),
+        StatusColumn('STATUS', _get_service_status_colored),
+        StatusColumn('#HEALTHY_REPLICAS', _get_healthy_replicas),
+        StatusColumn('#UNHEALTHY_REPLICAS', _get_unhealthy_replicas),
+        StatusColumn('#FAILED_REPLICAS', _get_failed_replicas),
+        StatusColumn('POLICY', _get_policy, show_by_default=False),
+        StatusColumn('REQUESTED RESOURCES',
+                     _get_requested_resources,
+                     show_by_default=False),
     ]
 
-    columns = [status_column.name for status_column in status_columns]
+    columns = []
+    for status_column in status_columns:
+        if status_column.show_by_default or show_all:
+            columns.append(status_column.name)
     service_table = log_utils.create_table(columns)
     for record in service_records:
         row = []
         for status_column in status_columns:
-            row.append(status_column.calc(record))
+            if status_column.show_by_default or show_all:
+                row.append(status_column.calc(record))
         service_table.add_row(row)
     if service_records:
         click.echo(service_table)
     else:
         click.echo('No existing services.')
+
+
+def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
+    pass
 
 
 def get_total_cost_of_displayed_records(
@@ -336,6 +348,27 @@ _get_region = (
 _get_command = (lambda cluster_record: cluster_record['last_use'])
 _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
+_get_middleware_cluster_name = (
+    lambda service_record: service_record['middleware_cluster_name'])
+_get_endpoint = (lambda service_record: service_record['endpoint'])
+_get_healthy_replicas = (
+    lambda service_record: service_record['num_healthy_replicas'])
+_get_unhealthy_replicas = (
+    lambda service_record: service_record['num_unhealthy_replicas'])
+_get_failed_replicas = (
+    lambda service_record: service_record['num_failed_replicas'])
+_get_policy = (lambda service_record: service_record['policy'])
+_get_requested_resources = (
+    lambda service_record: service_record['requested_resources'])
+
+
+def _get_service_status(
+        service_record: _ServiceRecord) -> status_lib.ServiceStatus:
+    return service_record['status']
+
+
+def _get_service_status_colored(service_record: _ServiceRecord) -> str:
+    return _get_service_status(service_record).colored_str()
 
 
 def _get_status(cluster_record: _ClusterRecord) -> status_lib.ClusterStatus:

@@ -141,7 +141,8 @@ class SkyPilotInfraProvider(InfraProvider):
             cluster_name = f'{self.CLUSTER_NAME_PREFIX}{self.id_counter}'
             logger.info(f'Creating SkyPilot cluster {cluster_name}')
             sky.launch(task, cluster_name=cluster_name,
-                       detach_run=True)  # TODO - make the launch parallel
+                       detach_run=True,
+                       retry_until_up=True)  # TODO - make the launch parallel
             self.id_counter += 1
 
     def _scale_down(self, n):

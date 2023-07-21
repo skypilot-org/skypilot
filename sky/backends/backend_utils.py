@@ -2414,6 +2414,53 @@ def get_clusters(
     return kept_records
 
 
+def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
+    if service is None:
+        service_records = global_user_state.get_services()
+    else:
+        service_record = global_user_state.get_service_from_name(service)
+        if service_record is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Service {service} does not exist.')
+        service_records = [service_record]
+    # TODO(tian): Make it run in parallel.
+    for record in service_records:
+        middleware_cluster_name = record['middleware_cluster_name']
+        handle = global_user_state.get_handle_from_cluster_name(
+            middleware_cluster_name)
+        assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+        external_ips = handle.external_ips(use_cached_ips=True)
+        if external_ips is None:
+            # Cases for cluster not ready yet.
+            continue
+        assert len(external_ips) == 1, external_ips
+        ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
+        runner = command_runner.SSHCommandRunner(external_ips[0],
+                                                 **ssh_credentials)
+        rc, output, stderr = runner.run('sky status',
+                                        stream_logs=False,
+                                        require_outputs=True,
+                                        separate_stderr=True)
+        if rc:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Failed to refresh status of service: {service}.\n'
+                    f'Error: {stderr}')
+        healthy_pattern = re.compile(r'(skyserve-\d+.*UP)')
+        healthy_result = healthy_pattern.findall(output)
+        record['num_healthy_replicas'] = len(healthy_result)
+        unhealthy_pattern = re.compile(r'(skyserve-\d+.*INIT)')
+        unhealthy_result = unhealthy_pattern.findall(output)
+        record['num_unhealthy_replicas'] = len(unhealthy_result)
+        if len(healthy_result) > 0:
+            record['status'] = status_lib.ServiceStatus.RUNNING
+        global_user_state.add_or_update_service(**record)
+        if service is not None:
+            # TODO(tian): fetch from controller
+            record['replica_info'] = None
+    return service_records
+
+
 @typing.overload
 def get_backend_from_handle(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'

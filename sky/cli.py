@@ -3904,6 +3904,9 @@ def serve_up(
         click.secho('Multiple tasks found in the YAML file.', fg='red')
         return
     task = dag.tasks[0]
+    if task.service is None:
+        click.secho('Service section not found in the YAML file.', fg='red')
+        return
 
     if not yes:
         prompt = f'Launching a new service {service}. Proceed?'
@@ -3914,17 +3917,30 @@ def serve_up(
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
 @click.argument('service',
                 required=False,
                 type=str,
                 **_get_shell_complete_args(_complete_service_name))
 @usage_lib.entrypoint
-def serve_status(service: Optional[str]):
-    service_records = core.refresh_service_status(service)
+# pylint: disable=redefined-builtin
+def serve_status(all: bool, service: Optional[str]):
+    service_records = core.service_status(service)
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Services'
                f'{colorama.Style.RESET_ALL}')
-    status_utils.show_service_table(service_records)
-    # TODO(tian): Show more detailed replica status when service is specified
+    status_utils.show_service_table(service_records, all)
+    if service is not None:
+        # If service not exist, we should already raise an error in
+        # core.service_status.
+        assert len(service_records) == 1, service_records
+        service_record = service_records[0]
+        assert 'replica_info' in service_record, service_record
+        status_utils.show_replica_table(service_record['replica_info'], all)
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)

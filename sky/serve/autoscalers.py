@@ -45,7 +45,7 @@ class LatencyThresholdAutoscaler(Autoscaler):
                  lower_threshold: int = 1,
                  min_nodes: int = 1,
                  **kwargs):
-        '''
+        """
         Autoscaler that scales up when the average latency of all servers is above the upper threshold and scales down
         when the average latency of all servers is below the lower threshold.
         :param args:
@@ -53,7 +53,7 @@ class LatencyThresholdAutoscaler(Autoscaler):
         :param lower_threshold: lower threshold for latency in seconds
         :param min_nodes: minimum number of nodes to keep running
         :param kwargs:
-        '''
+        """
         super().__init__(*args, **kwargs)
         self.upper_threshold = upper_threshold
         self.lower_threshold = lower_threshold
@@ -110,13 +110,11 @@ class RequestRateAutoscaler(Autoscaler):
 
         # Check if cooldown period has passed since the last scaling operation
         if current_time - self.last_scale_operation < self.cooldown:
+            logger.info(f'Current time: {current_time}, '
+                        f'last scale operation: {self.last_scale_operation}, '
+                        f'cooldown: {self.cooldown}')
             logger.info(
-                f'Current time: {current_time}, '
-                f'last scale operation: {self.last_scale_operation}, '
-                f'cooldown: {self.cooldown}'
-            )
-            logger.info(
-                f'Cooldown period has not passed since last scaling operation. Skipping scaling.'
+                'Cooldown period has not passed since last scaling operation. Skipping scaling.'
             )
             return
 
@@ -132,17 +130,15 @@ class RequestRateAutoscaler(Autoscaler):
         requests_per_node = num_requests / num_nodes if num_nodes else num_requests  # To account for zero case.
 
         logger.info(f'Requests per node: {requests_per_node}')
-        logger.info(
-            f'Upper threshold: {self.upper_threshold} qps/node, '
-            f'lower threshold: {self.lower_threshold} qps/node, '
-            f'queries per node: {requests_per_node} qps/node'
-        )
+        logger.info(f'Upper threshold: {self.upper_threshold} qps/node, '
+                    f'lower threshold: {self.lower_threshold} qps/node, '
+                    f'queries per node: {requests_per_node} qps/node')
 
         scaled = True
         # Bootstrap case
         logger.info(f'Number of nodes: {num_nodes}')
         if num_nodes < self.min_nodes:
-            logger.info(f'Bootstrapping autoscaler.')
+            logger.info('Bootstrapping autoscaler.')
             self.scale_up(1)
             self.last_scale_operation = current_time
         elif self.upper_threshold is not None and requests_per_node > self.upper_threshold:
@@ -154,4 +150,4 @@ class RequestRateAutoscaler(Autoscaler):
                 self.scale_down(1)
                 self.last_scale_operation = current_time
         else:
-            logger.info(f'No scaling needed.')
+            logger.info('No scaling needed.')

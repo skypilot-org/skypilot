@@ -6,3 +6,5 @@ MIDDLEWARE_TEMPLATE = 'middleware.yaml.j2'
 MIDDLEWARE_YAML_PREFIX = '~/.sky/serve'
 
 SERVICE_YAML_PREFIX = '~/.sky/service'
+
+CONTROLLER_PORT = 31001

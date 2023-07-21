@@ -370,7 +370,7 @@ class Task:
 
         service = config.pop('service', None)
         service = common.SkyServiceSpec.from_yaml_config(service)
-        task.service = service
+        task.set_service(service)
 
         assert not config, f'Invalid task args: {config.keys()}'
         return task
@@ -530,6 +530,22 @@ class Task:
 
     def get_resources(self):
         return self.resources
+
+    @property
+    def service(self) -> Optional[common.SkyServiceSpec]:
+        return self._service
+
+    def set_service(self, service: Optional[common.SkyServiceSpec]) -> 'Task':
+        """Sets the service spec for this task.
+
+        Args:
+          service: a SkyServiceSpec object.
+
+        Returns:
+          self: The current task, with service set.
+        """
+        self._service = service
+        return self
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
                                                 int]) -> 'Task':

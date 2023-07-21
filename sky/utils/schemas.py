@@ -253,9 +253,6 @@ def get_task_schema():
                 'additionalProperties': {
                     'type': 'number'
                 }
-            },
-            'service': {
-                'type': 'object',
             }
         }
     }

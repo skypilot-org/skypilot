@@ -54,6 +54,15 @@ class SkyServiceSpec:
 
         return SkyServiceSpec(**service_config)
 
+    def policy_str(self):
+        if self.max_replica == self.min_replica:
+            plural = ''
+            if self.min_replica > 1:
+                plural = 'S'
+            return f'FIXED NODE{plural}: {self.min_replica}'
+        # TODO(tian): Refactor to contain more information
+        return f'AUTOSCALE [{self.min_replica}, {self.max_replica}]'
+
     @property
     def readiness_path(self):
         return self._readiness_path

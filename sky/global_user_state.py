@@ -26,6 +26,7 @@ from sky.utils import db_utils
 if typing.TYPE_CHECKING:
     from sky import backends
     from sky.data import Storage
+    from sky import resources as resources_lib
 
 _ENABLED_CLOUDS_KEY = 'enabled_clouds'
 
@@ -98,7 +99,12 @@ def create_table(cursor, conn):
         name TEXT PRIMARY KEY,
         middleware_cluster_name TEXT,
         endpoint TEXT,
-        num_healthy_replicas INTEGER DEFAULT 0)""")
+        status TEXT,
+        num_healthy_replicas INTEGER DEFAULT 0,
+        num_unhealthy_replicas INTEGER DEFAULT 0,
+        num_failed_replicas INTEGER DEFAULT 0,
+        policy TEXT,
+        requested_resources BLOB)""")
     # For backward compatibility.
     # TODO(zhwu): Remove this function after all users have migrated to
     # the latest version of SkyPilot.
@@ -279,11 +285,16 @@ def add_or_update_cluster(cluster_name: str,
     _DB.conn.commit()
 
 
-def add_or_update_service(name: str, middleware_cluster_name: str,
-                          endpoint: str, num_healthy_replicas: int):
+def add_or_update_service(
+        name: str, middleware_cluster_name: str, endpoint: str,
+        status: status_lib.ServiceStatus, num_healthy_replicas: int,
+        num_unhealthy_replicas: int, num_failed_replicas, policy: str,
+        requested_resources: Optional['resources_lib.Resources']):
     _DB.cursor.execute(
         'INSERT or REPLACE INTO services'
-        '(name, middleware_cluster_name, endpoint, num_healthy_replicas) '
+        '(name, middleware_cluster_name, endpoint, status, '
+        'num_healthy_replicas, num_unhealthy_replicas, '
+        'num_failed_replicas, policy, requested_resources) '
         'VALUES ('
         # name
         '?, '
@@ -291,7 +302,17 @@ def add_or_update_service(name: str, middleware_cluster_name: str,
         '?, '
         # endpoint
         '?, '
+        # status
+        '?, '
         # num_healthy_replicas
+        '?, '
+        # num_unhealthy_replicas
+        '?, '
+        # num_failed_replicas
+        '?, '
+        # policy
+        '?, '
+        # requested_resources
         '?'
         ')',
         (
@@ -301,8 +322,18 @@ def add_or_update_service(name: str, middleware_cluster_name: str,
             middleware_cluster_name,
             # endpoint
             endpoint,
+            # status
+            status.value,
             # num_healthy_replicas
             num_healthy_replicas,
+            # num_unhealthy_replicas
+            num_unhealthy_replicas,
+            # num_failed_replicas
+            num_failed_replicas,
+            # policy
+            policy,
+            # requested_resources
+            pickle.dumps(requested_resources),
         ))
 
     _DB.conn.commit()
@@ -354,11 +385,9 @@ def remove_service(service_name: str):
     _DB.conn.commit()
 
 
-def set_service_num_health_replicas(service_name: str,
-                                    num_healthy_replicas: int):
-    _DB.cursor.execute(
-        'UPDATE services SET num_healthy_replicas=(?) '
-        'WHERE name=(?)', (num_healthy_replicas, service_name))
+def set_service_status(service_name: str, status: status_lib.ServiceStatus):
+    _DB.cursor.execute('UPDATE services SET status=(?) '
+                       'WHERE name=(?)', (status, service_name))
     count = _DB.cursor.rowcount
     _DB.conn.commit()
     assert count <= 1, count
@@ -595,14 +624,20 @@ def get_service_from_name(
         # Explicitly specify the number of fields to unpack, so that
         # we can add new fields to the database in the future without
         # breaking the previous code.
-        (name, middleware_cluster_name, endpoint,
-         num_healthy_replicas) = row[:4]
+        (name, middleware_cluster_name, endpoint, status, num_healthy_replicas,
+         num_unhealthy_replicas, num_failed_replicas, policy,
+         requested_resources) = row[:9]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
             'middleware_cluster_name': middleware_cluster_name,
             'endpoint': endpoint,
+            'status': status_lib.ServiceStatus[status],
             'num_healthy_replicas': num_healthy_replicas,
+            'num_unhealthy_replicas': num_unhealthy_replicas,
+            'num_failed_replicas': num_failed_replicas,
+            'policy': policy,
+            'requested_resources': pickle.loads(requested_resources),
         }
         return record
     return None
@@ -638,15 +673,21 @@ def get_services() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('select * from services').fetchall()
     records = []
     for row in rows:
-        (name, middleware_cluster_name, endpoint,
-         num_healthy_replicas) = row[:4]
+        (name, middleware_cluster_name, endpoint, status, num_healthy_replicas,
+         num_unhealthy_replicas, num_failed_replicas, policy,
+         requested_resources) = row[:9]
         # TODO: use namedtuple instead of dict
 
         record = {
             'name': name,
             'middleware_cluster_name': middleware_cluster_name,
             'endpoint': endpoint,
+            'status': status_lib.ServiceStatus[status],
             'num_healthy_replicas': num_healthy_replicas,
+            'num_unhealthy_replicas': num_unhealthy_replicas,
+            'num_failed_replicas': num_failed_replicas,
+            'policy': policy,
+            'requested_resources': pickle.loads(requested_resources),
         }
 
         records.append(record)

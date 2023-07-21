@@ -2,6 +2,7 @@ import time
 import logging
 import yaml
 from collections import deque
+from typing import List, Deque
 
 from sky.serve.common import SkyServiceSpec
 
@@ -31,8 +32,8 @@ class SkyServeRedirector:
         self.controller_url = controller_url
         self.port = port
         self.app_port = service_spec.app_port
-        self.server_ips = []
-        self.servers_queue = deque()
+        self.server_ips: List[str] = []
+        self.servers_queue: Deque[str] = deque()
         self.app = FastAPI()
         self.request_count = 0
         self.controller_sync_timeout = 20

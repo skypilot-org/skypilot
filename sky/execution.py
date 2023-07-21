@@ -33,6 +33,7 @@ from sky import skypilot_config
 from sky import sky_logging
 from sky import spot
 from sky import serve
+from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import gcp
@@ -965,8 +966,14 @@ def serve_up(
     Raises:
     """
     middleware_cluster_name = serve.MIDDLEWARE_PREFIX + name
-    global_user_state.add_or_update_service(name, middleware_cluster_name, '',
-                                            0)
+    assert task.service is not None, task
+    policy = task.service.policy_str()
+    assert len(task.resources) == 1
+    requested_resources = list(task.resources)[0]
+    global_user_state.add_or_update_service(
+        name, middleware_cluster_name, '',
+        status_lib.ServiceStatus.MIDDLEWARE_INIT, 0, 0, 0, policy,
+        requested_resources)
     # TODO(tian): use `task` directly
     original = common_utils.read_yaml(original_yaml_path)
     original_workdir = original.get('workdir', None)
@@ -989,10 +996,10 @@ def serve_up(
         common_utils.dump_yaml(f.name, original)
         remote_task_yaml_path = f'{serve.SERVICE_YAML_PREFIX}/service_{name}.yaml'
         vars_to_fill = {
-            'port': app_port,
+            'ports': [app_port, serve.CONTROLLER_PORT],
             'workdir': workdir_abs_path,
             'remote_task_yaml_path': remote_task_yaml_path,
-            'modified_yaml_path': f.name,
+            'local_task_yaml_path': f.name,
         }
         middleware_yaml_path = os.path.join(serve.MIDDLEWARE_YAML_PREFIX,
                                             f'{name}.yaml')
@@ -1016,11 +1023,11 @@ def serve_up(
             middleware_cluster_name)
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         endpoint = f'{handle.head_ip}:{task.service.app_port}'
-        global_user_state.add_or_update_service(name, middleware_cluster_name,
-                                                endpoint, 0)
+        global_user_state.add_or_update_service(
+            name, middleware_cluster_name, endpoint,
+            status_lib.ServiceStatus.REPLICA_INIT, 0, 0, 0, policy,
+            requested_resources)
 
-        # Some random port that unlikely to be used by other processes.
-        controller_port = 33828
         print(f'{colorama.Fore.YELLOW}'
               'Launching controller process on middleware...'
               f'{colorama.Style.RESET_ALL}')
@@ -1028,7 +1035,7 @@ def serve_up(
             entrypoint=sky.Task(
                 name='run-middleware-controller',
                 run='python -m sky.serve.controller --task-yaml '
-                f'{remote_task_yaml_path} --port {controller_port}'),
+                f'{remote_task_yaml_path} --port {serve.CONTROLLER_PORT}'),
             stream_logs=False,
             handle=handle,
             stages=[Stage.EXEC],
@@ -1044,7 +1051,7 @@ def serve_up(
                 name='run-middleware-redirector',
                 run='python -m sky.serve.redirector --task-yaml '
                 f'{remote_task_yaml_path} --port {app_port} '
-                f'--controller-addr http://localhost:{controller_port}'),
+                f'--controller-addr http://0.0.0.0:{serve.CONTROLLER_PORT}'),
             stream_logs=False,
             handle=handle,
             stages=[Stage.EXEC],
@@ -1058,14 +1065,14 @@ def serve_up(
               f'{colorama.Style.RESET_ALL}')
 
 
-def serve_down(name: str,):
+def serve_down(name: str):
     """Teardown a service.
-    
+
     Please refer to the sky.cli.serve_down for the document.
-    
+
     Args:
         name: Name of the service.
-    
+
     Raises:
     """
     service_record = global_user_state.get_service_from_name(name)
@@ -1074,8 +1081,12 @@ def serve_down(name: str,):
             raise ValueError(f'Service {name} does not exist.')
     middleware_cluster_name = service_record['middleware_cluster_name']
     num_healthy_replicas = service_record['num_healthy_replicas']
+    num_unhealthy_replicas = service_record['num_unhealthy_replicas']
+    num_replicas = num_healthy_replicas + num_unhealthy_replicas
     handle = global_user_state.get_handle_from_cluster_name(
         middleware_cluster_name)
+    global_user_state.set_service_status(name,
+                                         status_lib.ServiceStatus.SHUTTING_DOWN)
 
     print(f'{colorama.Fore.YELLOW}'
           f'Stopping controller and redirector processes on middleware...'
@@ -1084,10 +1095,10 @@ def serve_down(name: str,):
 
     plural = ''
     # TODO(tian): Change to #num replica (including unhealthy one)
-    if num_healthy_replicas > 1:
+    if num_replicas > 1:
         plural = 's'
     print(f'{colorama.Fore.YELLOW}'
-          f'Tearing down {num_healthy_replicas} replica{plural}...'
+          f'Tearing down {num_replicas} replica{plural}...'
           f'{colorama.Style.RESET_ALL}')
     _execute(
         entrypoint=sky.Task(name='teardown-all-replicas', run='sky down -a -y'),
