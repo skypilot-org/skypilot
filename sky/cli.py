@@ -4421,12 +4421,11 @@ def local_up():
     cluster_created = False
     # Check if ~/.kube/config exists:
     if os.path.exists(os.path.expanduser('~/.kube/config')):
-        current_context = kubernetes_utils.get_current_kube_config_context_name(
-        )
+        curr_context = kubernetes_utils.get_current_kube_config_context_name()
         skypilot_context = 'kind-skypilot'
-        if current_context is not None and current_context != skypilot_context:
+        if curr_context is not None and curr_context != skypilot_context:
             click.echo(
-                f'Current context in kube config: {current_context}'
+                f'Current context in kube config: {curr_context}'
                 '\nWill automatically switch to kind-skypilot after the local '
                 'cluster is created.')
     with log_utils.safe_rich_status('Creating local cluster...'):
