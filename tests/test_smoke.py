@@ -1488,7 +1488,7 @@ def test_autostop(generic_cloud: str):
 
 # ---------- Testing Autodowning ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
-@pytest.mark.no_kubernetes  # Kubernetes does not support autodown yet
+@pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1 yet. Run test_scp_kubernetes instead.
 def test_autodown(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1557,6 +1557,40 @@ def test_scp_autodown():
     )
     run_one_test(test)
 
+
+@pytest.mark.kubernetes
+def test_kubernetes_autodown():
+    name = _get_cluster_name()
+    test = Test(
+        'kubernetes_autodown',
+        [
+            f'sky launch -y -d -c {name} --cloud kubernetes tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} --down -i 1',
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "1m (down)"',
+            # Ensure the cluster is not terminated early.
+            'sleep 45',
+            f'sky status --refresh | grep {name} | grep UP',
+            # Ensure the cluster is terminated.
+            'sleep 200',
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} --cloud kubernetes --down tests/test_yamls/minimal.yaml',
+            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
+            f'sky exec {name} --cloud kubernetes tests/test_yamls/minimal.yaml',
+            f'sky status | grep {name} | grep "1m (down)"',
+            'sleep 200',
+            # Ensure the cluster is terminated.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} --cloud kubernetes --down tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} --cancel',
+            'sleep 200',
+            # Ensure the cluster is still UP.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && echo "$s" | grep {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=25 * 60,
+    )
+    run_one_test(test)
 
 def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
     test = Test(
