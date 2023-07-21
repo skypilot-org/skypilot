@@ -31,15 +31,32 @@ envs:
 
 ### Check Your Training Data
 
-  By default, we use the ShareGPT data and the identity questions in [hardcoded_questions.py](./scripts/hardcoded_questions.py). 
+  By default, we use the ShareGPT data and the identity questions in [hardcoded_questions.py](./scripts/hardcoded_questions.py).
 
-  * **Optional**: To use custome data, you can change the data by change the following line in [train.yaml](train.yaml).
+  * **Optional**: To use custom data, you can change the data by change the following line in [train.yaml](train.yaml).
 
   ```yaml
   setup: |
     ...
     wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json  -O $HOME/data/sharegpt.json
     ...
+  ```
+
+  The above json file is an array, each element of which has the following format:
+  ```json
+  {
+    "id": "i6IyJda_0",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "How to tell if a customer segment is well segmented? In 3 bullet points."
+      },
+      {
+        "from": "gpt",
+        "value": "1. Homogeneity: The segment should consist of customers who share similar characteristics and behaviors.\n2. Distinctiveness: The segment should be different from other segments in terms of their characteristics and behaviors.\n3. Stability: The segment should remain relatively stable over time and not change drastically. The characteristics and behaviors of customers within the segment should not change significantly."
+      }
+    ]
+  },
   ```
 
   * **Optional**: To make the model know about its identity, you can change the hardcoded questions [hardcoded_questiosn.py](./scripts/hardcoded_questions.py)
@@ -49,12 +66,16 @@ envs:
 1. Start the training with a single command
 
   ```bash
-  sky launch -c vicuna-2 train.yaml \
+  sky launch --down -c vicuna-2 train.yaml \
     --env ARTIFACT_BUCKET_NAME=<your-bucket-name> \
     --env WANDB_API_KEY=<your-wandb-api-key>
   ```
 
-This will launch the training job on the cloud whereever there is available 8x A100-80GB spot GPUs. 
+This will launch the training job on the cloud wherever there is available 8x A100-80GB spot GPUs.
+
+> **Tip**: You can get `WANDB_API_KEY` at https://wandb.ai/settings. To disable Weights & Biases, simply leave out that --env flag.
+
+> **Tip**: You can set `ARTIFACT_BUCKET_NAME` to a new bucket name, such as `temp-bucket-1234`, and SkyPilot will create the bucket for you.
 
 2. **Optional**: Try out the training for the 13B model:
 
