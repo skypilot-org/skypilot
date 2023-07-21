@@ -97,6 +97,7 @@ class StrategyExecutor:
         # Remove the spot_recovery field from the resources, as the strategy
         # will be handled by the strategy class.
         task.set_resources({resources.copy(spot_recovery=None)})
+        logger.info(f'Using spot recovery strategy: {spot_recovery}')
         return SPOT_STRATEGIES[spot_recovery](cluster_name, backend, task,
                                               retry_until_up)
 
@@ -119,7 +120,7 @@ class StrategyExecutor:
         assert job_submit_at is not None
         return job_submit_at
 
-    def recover(self) -> float:
+    def recover(self, task_id=None) -> float:
         """Relaunch the spot cluster after failure and wait until job starts.
 
         When recover() is called the cluster should be in STOPPED status (i.e.
@@ -387,7 +388,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
                                            launched_resources.region)
         return job_submitted_at
 
-    def recover(self) -> float:
+    def recover(self, task_id=None) -> float:
         # 1. Cancel the jobs and launch the cluster with the STOPPED status,
         #    so that it will try on the current region first until timeout.
         # 2. Tear down the cluster, if the step 1 failed to launch the cluster.
@@ -445,3 +446,42 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
                         f'{self._MAX_RETRY_CNT} times.')
 
             return job_submitted_at
+
+
+class OnDemandFailOverStrategyExecutor(FailoverStrategyExecutor,
+                                       name='ON_DEMAND',
+                                       default=False):
+    """On Demand failover strategy
+    This strategy is an extension of the failover strategy.
+    It relaunches the terminated spot with on-demand.
+    This strategy is useful when the user wants to ensure availability.
+    """
+
+    def recover(self, task_id=None) -> float:
+
+        # 1. Cancel the jobs and launch the cluster with the STOPPED status
+        # 2. Launch the cluster with on-demand instances
+        logger.info('OnDemandFailOverStrategyExecutor started')
+
+        task = self.dag.tasks[task_id]
+        resources = list(task.resources)[0]
+
+        assert self._launched_cloud_region is not None
+        launched_cloud, launched_region = self._launched_cloud_region
+
+        # Step 1
+        logger.info('OnDemandFailOverStrategyExecutor _try_cancel_all_jobs')
+        self._try_cancel_all_jobs()
+
+        # Step 2. Launch on_demand
+        new_resources = resources.copy(cloud=launched_cloud,
+                                       region=launched_region,
+                                       use_spot=False)
+        task.set_resources({new_resources})
+        # Not using self.launch to avoid the retry until up logic.
+        logger.info('OnDemandFailOverStrategyExecutor try launch on_demand')
+        job_submitted_at = self._launch(max_retry=self._MAX_RETRY_CNT,
+                                        raise_on_failure=False)
+
+        assert job_submitted_at is not None
+        return job_submitted_at

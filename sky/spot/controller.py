@@ -281,7 +281,7 @@ class SpotController:
             spot_state.set_recovering(job_id=self._job_id,
                                       task_id=task_id,
                                       callback_func=callback_func)
-            recovered_time = self._strategy_executor.recover()
+            recovered_time = self._strategy_executor.recover(task_id=task_id)
             spot_state.set_recovered(self._job_id,
                                      task_id,
                                      recovered_time=recovered_time,
