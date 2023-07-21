@@ -200,11 +200,13 @@ IAM Role Creation
 
 Using a specific VPC
 -----------------------
+By default, SkyPilot uses the "default" VPC in each region.
 
 To instruct SkyPilot to use a specific VPC, you can use SkyPilot's global config
 file ``~/.sky/config.yaml`` to specify the VPC name. See the ``aws.vpc_name``
-field in :ref:`config-yaml`.
+field in :ref:`config-yaml`.  Example use cases include using a private VPC or a
+VPC with fine-grained constraints, typically created via Terraform or manually.
 
-Example use cases include using a private VPC or a VPC with fine-grained
-constraints, typically created via Terraform or manually. By default, SkyPilot
-uses the "default" VPC in each region.
+To manually create a private VPC (i.e., all nodes will have internal IPs only),
+you can use the AWS console; see instructions `here
+<https://github.com/skypilot-org/skypilot/pull/1512>`_.
