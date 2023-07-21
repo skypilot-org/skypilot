@@ -81,3 +81,5 @@ _SERVICE_STATUS_TO_COLOR = {
     ServiceStatus.SHUTTING_DOWN: colorama.Fore.YELLOW,
     ServiceStatus.FAILED: colorama.Fore.RED,
 }
+
+# TODO(tian): Add status for replicas to distinguish 'skypilot UP' and 'health probe succeeded'
