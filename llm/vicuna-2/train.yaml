@@ -1,18 +1,16 @@
-resources:
-  accelerators: A100-80GB:8
-  disk_size: 1000
-  use_spot: true
-  disk_tier: high
-
-num_nodes: 1
-
 envs:
+  HF_TOKEN: <your-huggingface-token> # Change to your own huggingface token
+  ARTIFACT_BUCKET_NAME: YOUR_OWN_BUCKET_NAME # Change to your own bucket name
+  WANDB_API_KEY: "" # Change to your own wandb api key
   MODEL_SIZE: 7
   USE_XFORMERS: 1
-  WANDB_API_KEY: "" # Change to your own wandb api key
-  ARTIFACT_BUCKET_NAME: YOUR_OWN_BUCKET_NAME # Change to your own bucket name
-  HF_TOKEN: <your-huggingface-token> # Change to your own huggingface token
 
+resources:
+  accelerators: A100-80GB:8
+  disk_size: 1024
+  use_spot: true
+
+num_nodes: 1
 
 file_mounts:
   /artifacts:
