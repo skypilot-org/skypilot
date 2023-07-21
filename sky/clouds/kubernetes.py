@@ -126,8 +126,15 @@ class Kubernetes(clouds.Cloud):
 
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
 
+    # Timeout for resource provisioning. This timeout determines how long to
+    # wait for pod to be in pending status before giving up.
+    # Larger timeout may be required for autoscaling clusters, since autoscaler
+    # may take some time to provision new nodes.
+    # Note that this timeout includes time taken by the Kubernetes scheduler
+    # itself, which can be upto 2-3 seconds.
+    # For non-autoscaling clusters, we conservatively set this to 10s.
     # TODO(romilb): Make the timeout configurable.
-    TIMEOUT = 60  # Timeout for resource provisioning
+    TIMEOUT = 10
 
     _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 1

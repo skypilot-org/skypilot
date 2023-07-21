@@ -235,25 +235,29 @@ class KubernetesNodeProvider(NodeProvider):
                     'Cluster may be out of resources or '
                     'may be too slow to autoscale.')
             all_ready = True
+
             for node in new_nodes:
                 pod = kubernetes.core_api().read_namespaced_pod(
                     node.metadata.name, self.namespace)
                 if pod.status.phase == 'Pending':
-                    # Check conditions for more detailed status
-                    if pod.status.conditions is not None:
-                        for condition in pod.status.conditions:
-                            if condition.reason == 'ContainerCreating':
-                                # Container is creating, so we can assume resources
-                                # have been allocated. Safe to exit.
-                                break
+                    # Iterate over each pod to check their status
+                    if pod.status.container_statuses is not None:
+                        for container_status in pod.status.container_statuses:
+                            # Continue if container status is ContainerCreating
+                            # This indicates this pod has been scheduled.
+                            if container_status.state.waiting is not None and container_status.state.waiting.reason == 'ContainerCreating':
+                                continue
                             else:
-                                # Pod is pending but not in 'ContainerCreating' state
+                                # If the container wasn't in creating state,
+                                # then we know pod wasn't scheduled or had some
+                                # other error, such as image pull error.
+                                # See list of possible reasons for waiting here:
+                                # https://stackoverflow.com/a/57886025
                                 all_ready = False
-                                break
                     else:
-                        # No conditions also indicates that the pod is pending
+                        # If container_statuses is None, then the pod hasn't
+                        # been scheduled yet.
                         all_ready = False
-                        break
             if all_ready:
                 break
             time.sleep(1)
