@@ -22,7 +22,7 @@ def identity_questions():
     """
     content = []
 
-    name = "Vicuna-2"
+    name = "SkyPilot-Vicuna"
     org = "Sky Computing Lab and SkyPilot Team"
     base = "Llama-2"
 
