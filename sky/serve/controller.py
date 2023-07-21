@@ -44,6 +44,7 @@ class Controller:
             self.load_balancer.probe_endpoints(server_ips)
             time.sleep(10)
 
+    # TODO(tian): Authentication!!!
     def run(self):
 
         @self.app.post('/controller/increment_request_count')
