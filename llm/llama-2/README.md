@@ -13,7 +13,7 @@
 * Pay absolute minimum — no managed solution markups
 * Freely choose your own model size, GPU type, number of GPUs, etc, based on scale and budget.
 
-…and you get all of this with 1 click — let SkyPilot automate the infra. 
+…and you get all of this with 1 click — let SkyPilot automate the infra.
 
 ## Pre-requisites
 

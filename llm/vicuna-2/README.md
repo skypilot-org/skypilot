@@ -15,9 +15,9 @@ In this tutorial, we will show you how to train your own Vicuna on LLaMA 2, with
 Go to the [application page](https://ai.meta.com/resources/models-and-libraries/llama-downloads/) and apply for the access to the model weights.
 
 
-2. Get the access token from huggingface
+2. Get the access token from HuggingFace
 
-Generate a read-only access token on huggingface [here](https://huggingface.co/settings/token), and make sure your huggingface account can access the LLaMA 2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main).
+Generate a read-only access token on HuggingFace [here](https://huggingface.co/settings/token), and make sure your HuggingFace account can access the LLaMA 2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main).
 
 Fill the access token in the [chatbot-hf.yaml](chatbot-hf.yaml) and [chatbot-meta.yaml](chatbot-meta.yaml) file.
 ```yaml
@@ -29,7 +29,7 @@ envs:
 ## Train your own Vicuna on LLaMA 2
 
 
-### Check Your Training Data
+### Check training data
 
   By default, we use the ShareGPT data and the identity questions in [hardcoded_questions.py](./scripts/hardcoded_questions.py).
 
@@ -59,11 +59,11 @@ envs:
   },
   ```
 
-  * **Optional**: To make the model know about its identity, you can change the hardcoded questions [hardcoded_questiosn.py](./scripts/hardcoded_questions.py)
+  * **Optional**: To make the model know about its identity, you can change the hardcoded questions [hardcoded_questions.py](./scripts/hardcoded_questions.py)
 
-### Kick Start the Training on Any Cloud
+### Kick start the training on any cloud
 
-1. Start the training with a single command
+1. Start training with a single command
 
   ```bash
   sky launch --down -c vicuna-2 train.yaml \
@@ -76,6 +76,21 @@ This will launch the training job on the cloud wherever there is available 8x A1
 > **Tip**: You can get `WANDB_API_KEY` at https://wandb.ai/settings. To disable Weights & Biases, simply leave out that --env flag.
 
 > **Tip**: You can set `ARTIFACT_BUCKET_NAME` to a new bucket name, such as `temp-bucket-1234`, and SkyPilot will create the bucket for you.
+
+*Use on-demand instead to unlock more clouds*: Inside ``train.yaml`` we requested using spot instances:
+```yaml
+resources:
+  accelerators: A100-80GB:8
+  disk_size: 1000
+  use_spot: true
+  disk_tier: high
+```
+However, spot A100-80GB:8 is currently only supported on GCP. On-demand versions are supported on AWS, Azure, GCP, and Lambda (hint: check out the handy outputs of `sky show-gpus A100-80GB:8`!).
+
+To use these clouds, add the `--no-use-spot` flag to request on-demand instances:
+```console
+sky launch --no-use-spot ...
+```
 
 2. **Optional**: Try out the training for the 13B model:
 
