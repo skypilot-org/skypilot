@@ -1110,6 +1110,7 @@ class S3Store(AbstractStore):
                             'performance on syncing local machine to '
                             's3 bucket. For more info: '
                             'https://github.com/peak/s5cmd#installation')
+                # we exclude .git directory from the sync
                 sync_command = (
                     'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
                     f'{src_dir_path} '
