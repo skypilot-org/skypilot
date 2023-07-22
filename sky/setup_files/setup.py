@@ -129,7 +129,6 @@ aws_dependencies = [
     'boto3',
     # 'Crypto' module used in authentication.py for AWS.
     'pycryptodome==3.12.0',
-    's5cmd',
 ]
 extras_require: Dict[str, List[str]] = {
     'aws': aws_dependencies,
