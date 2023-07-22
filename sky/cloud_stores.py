@@ -73,7 +73,7 @@ class S3CloudStorage(CloudStorage):
         if not source.endswith('/'):
             source += '/'
         if not source.endswith('*'):
-            source += '*'    
+            source += '*'
         bucket_name, _ = data_utils.split_s3_path(source)
         region = data_utils.get_s3_bucket_region(bucket_name)
         download_via_awscli = (f's5cmd sync --destination-region {region} '
