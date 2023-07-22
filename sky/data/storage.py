@@ -1095,7 +1095,7 @@ class S3Store(AbstractStore):
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             if data_utils.s5cmd_installed():
                 # s5cmd copies the directory itself as well without
-                # / appeneded to the end of src path unlike aws s3 sync
+                # '/' appeneded to the end of src path unlike aws s3 sync
                 if not src_dir_path.endswith('/'):
                     src_dir_path += '/'
                 if dest_dir_name and not dest_dir_name.endswith('/'):

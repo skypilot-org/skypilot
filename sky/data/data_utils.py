@@ -73,6 +73,7 @@ def verify_s3_bucket(name: str) -> bool:
 
 
 def get_s3_bucket_region(bucket_name: str) -> bool:
+    """Returns the region of the given S3 Bucket name"""
     s3 = aws.client('s3')
     bucket_location = s3.get_bucket_location(Bucket=bucket_name)
     region = bucket_location['LocationConstraint']
