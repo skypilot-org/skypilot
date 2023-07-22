@@ -5,7 +5,6 @@ pod_spec:
         name: {{ name }}
         labels:
             component: {{ name }}
-            parent: skypilot
     spec:
         serviceAccountName: {{ name }}
         volumes:
@@ -16,7 +15,7 @@ pod_spec:
           - name: {{ name }}
             imagePullPolicy: Always
             image: {{ image }}
-            command: ["python3", "/skypilot/sky/utils/kubernetes/sshjump-lcm.py"]
+            command: ["python3", "-u", "/skypilot/sky/utils/kubernetes/sshjump-lcm.py"]
             ports:
               - containerPort: 22
             volumeMounts:
@@ -32,8 +31,6 @@ service_spec:
     kind: Service
     metadata:
         name: {{ name }}
-        labels:
-            parent: skypilot
     spec:
         type: NodePort
         selector:
@@ -53,8 +50,6 @@ role:
     kind: Role
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
-        labels:
-            parent: skypilot
         name: {{ name }}
     rules:
       - apiGroups: [""]
@@ -64,8 +59,6 @@ role_binding:
     apiVersion: rbac.authorization.k8s.io/v1
     kind: RoleBinding
     metadata:
-        labels:
-            parent: skypilot
         name: {{ name }}
     subjects:
     - kind: ServiceAccount
