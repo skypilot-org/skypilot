@@ -72,6 +72,18 @@ def verify_s3_bucket(name: str) -> bool:
     return bucket in s3.buckets.all()
 
 
+def get_s3_bucket_region(bucket_name: str) -> bool:
+    s3 = aws.client('s3')
+    bucket_location = s3.get_bucket_location(Bucket=bucket_name)
+    region = bucket_location['LocationConstraint']
+    # If the bucket is located in us-east-1, then LocationConstraint
+    # returns None as mentioned in the following doc:
+    # https://aws.amazon.com/fr/blogs/developer/leveraging-the-s3-and-s3api-commands/
+    if region == None:
+        region = 'us-east-1'
+    return region
+
+
 def verify_gcs_bucket(name: str) -> bool:
     """Helper method that checks if the GCS bucket exists
 

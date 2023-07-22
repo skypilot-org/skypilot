@@ -40,12 +40,12 @@ class S3CloudStorage(CloudStorage):
 
     # List of commands to install s5cmd
     _S5CMD_VERSION = '2.1.0'
-    _GET_S5CMD = (
+    _GET_S5CMD = [(
         's5cmd version &> /dev/null || '
         '{ wget -nc https://github.com/peak/s5cmd/releases/download/'
         f'v{_S5CMD_VERSION}/s5cmd_{_S5CMD_VERSION}_linux_amd64.deb '
-        '-O /tmp/s5cmd.deb && sudo dpkg --install /tmp/s5cmd.deb; }'
-    )
+        '-O /tmp/s5cmd.deb && sudo dpkg --install /tmp/s5cmd.deb; }')
+    ]
 
     def is_directory(self, url: str) -> bool:
         """Returns whether S3 'url' is a directory.
@@ -75,10 +75,10 @@ class S3CloudStorage(CloudStorage):
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
 
-        bucket_name = source.replace('s3://', '')
+        bucket_name, _ = data_utils.split_s3_path(source)
         region = data_utils.get_s3_bucket_region(bucket_name)
         download_via_awscli = (f's5cmd sync --destination-region {region} '
-                            f'--no-follow-symlinks {source} {destination}')
+                            f'--no-follow-symlinks {source}/* {destination}')
 
         all_commands = list(self._GET_S5CMD)
         all_commands.append(download_via_awscli)
@@ -86,13 +86,13 @@ class S3CloudStorage(CloudStorage):
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
-        bucket_name = source.replace('s3://', '')
+        bucket_name, path = data_utils.split_s3_path(source)
         region = data_utils.get_s3_bucket_region(bucket_name)
-        download_via_awscli = (f's5cmd cp --destination-region {region} '
+        download_via_s5cmd = (f's5cmd cp --destination-region {region} '
                                f'{source} {destination}')
 
         all_commands = list(self._GET_S5CMD)
-        all_commands.append(download_via_awscli)
+        all_commands.append(download_via_s5cmd)
         return ' && '.join(all_commands)
 
 
