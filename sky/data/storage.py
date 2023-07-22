@@ -1100,11 +1100,9 @@ class S3Store(AbstractStore):
                     src_dir_path += '/'
                 if dest_dir_name and not dest_dir_name.endswith('/'):
                     dest_dir_name += '/'
-                region = data_utils.get_s3_bucket_region(self.name)
-                d = self.region
                 # we exclude .git directory from the sync
                 sync_command = (
-                    f's5cmd sync --destination-region {region} '
+                    f's5cmd sync --destination-region {self.region} '
                     f'--no-follow-symlinks --exclude ".git/*" {src_dir_path} '
                     f's3://{self.name}/{dest_dir_name}')
             else:
