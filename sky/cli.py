@@ -3176,23 +3176,47 @@ def show_gpus(
             else:
                 name, quantity = accelerator_str, None
 
+        # Case-sensitive initially
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=name,
                                                    quantity_filter=quantity,
                                                    region_filter=region,
-                                                   clouds=cloud)
+                                                   clouds=cloud,
+                                                   case_sensitive=True)
+        note_included = False
+
         if len(result) == 0:
-            quantity_str = (f' with requested quantity {quantity}'
-                            if quantity else '')
-            yield f'Resources \'{name}\'{quantity_str} not found. '
-            yield 'Try \'sky show-gpus --all\' '
-            yield 'to show available accelerators.'
-            return
+            result_not_case_sensitive = service_catalog.list_accelerators(gpus_only=True,
+                                                   name_filter=name,
+                                                   quantity_filter=quantity,
+                                                   region_filter=region,
+                                                   clouds=cloud,
+                                                   case_sensitive=False)
+            if len(result_not_case_sensitive) > 0:
+                result = result_not_case_sensitive
+                yield '*NOTE*: be cautious of the capitalization '
+                yield 'of your accelerator selection. '
+                yield 'Please double check that the identified '
+                yield 'accelerator is the one you intended \n'
+                note_included = True
+
+            else:
+                quantity_str = (f' with requested quantity {quantity}'
+                                if quantity else '')
+                yield f'Resources \'{name}\'{quantity_str} not found. '
+                yield 'Try \'sky show-gpus --all\' '
+                yield 'to show available accelerators.'
+                return
 
         if cloud is None or cloud.lower() == 'gcp':
             yield '*NOTE*: for most GCP accelerators, '
             yield 'INSTANCE_TYPE == (attachable) means '
-            yield 'the host VM\'s cost is not included.\n\n'
+            yield 'the host VM\'s cost is not included.\n'
+            note_included = True
+
+        # for spacing above the accelerator table
+        if note_included:
+            yield '\n'
 
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
