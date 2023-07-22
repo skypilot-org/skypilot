@@ -12,14 +12,14 @@ In this tutorial, we will show you how to train your own Vicuna on LLaMA 2, with
 
 1. Apply for the access to the LLaMA 2 model
 
-Go to the [application page](https://ai.meta.com/resources/models-and-libraries/llama-downloads/) and apply for the access to the model weights.
+Go to the [application page](https://ai.meta.com/resources/models-and-libraries/llama-downloads/) and apply for the access to the model weights. Ensure your huggingface email is the same as the email on the Meta request (the huggingface access may take 1-2 days for approval).
 
 
 2. Get the access token from HuggingFace
 
 Generate a read-only access token on HuggingFace [here](https://huggingface.co/settings/token), and make sure your HuggingFace account can access the LLaMA 2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main).
 
-Fill the access token in the [chatbot-hf.yaml](chatbot-hf.yaml) and [chatbot-meta.yaml](chatbot-meta.yaml) file.
+Fill the access token in the [train.yaml](train.yaml).
 ```yaml
 envs:
   MODEL_SIZE: 7

@@ -1,3 +1,6 @@
+envs:
+  MODEL_SIZE: 7
+  MODEL_CKPT: <bucket-path-to-your-model-ckpt>
 resources:
   accelerators: A100:1
   disk_size: 1024
@@ -37,6 +40,3 @@ run: |
   echo 'Starting gradio server...'
   python -u -m fastchat.serve.gradio_web_server --share | tee ~/gradio.log
 
-envs:
-  MODEL_SIZE: 7
-  MODEL_CKPT: <bucket-path-to-your-model-ckpt>

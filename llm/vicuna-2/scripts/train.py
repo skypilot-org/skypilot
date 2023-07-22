@@ -33,9 +33,9 @@
 from dataclasses import dataclass, field
 import json
 import pathlib
+import os
 from typing import Dict, Optional
 
-import numpy as np
 import torch
 from torch.utils.data import Dataset
 import transformers
@@ -46,6 +46,7 @@ from fastchat.conversation import SeparatorStyle
 from fastchat.model.model_adapter import get_conversation_template
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
+resume_from_checkpoint = False
 
 
 @dataclass
@@ -261,6 +262,33 @@ def make_supervised_data_module(
 
     return dict(train_dataset=train_dataset, eval_dataset=eval_dataset)
 
+class CheckpointCallback(transformers.TrainerCallback):
+    def on_save(self, args, state, control, **kwargs):
+        """Add complete indicator to avoid incomplete checkpoints."""
+        if local_rank == 0:
+            with open(os.path.join(args.output_dir, f'checkpoint-{state.global_step}', 'complete'), 'w') as f:
+                f.write('')
+        
+    def on_train_end(self, args, state, control, **kwargs):
+        """Add complete indicator to avoid incomplete checkpoints."""
+        if local_rank == 0:
+            with open(os.path.join(args.output_dir, 'complete'), 'w') as f:
+                f.write('')
+        
+def cleanup_incomplete_checkpoints(output_dir):
+    """Remove incomplete checkpoints."""
+    global resume_from_checkpoint
+    checkpoints = list(pathlib.Path(output_dir).glob('checkpoint-*'))
+    checkpoints = [c for c in checkpoints if c.name.split('-')[-1].isdigit()]
+    checkpoints = sorted(checkpoints, key=lambda x: int(x.name.split('-')[-1]), reverse=True)
+    for checkpoint in checkpoints:
+        if not (checkpoint / 'complete').exists():
+            print(f'Renaming incomplete checkpoint {checkpoint}')
+            checkpoint.rename(checkpoint.with_suffix('.incomplete'))
+        else:
+            break
+    if checkpoints:
+        resume_from_checkpoint = True
 
 def train():
     global local_rank
@@ -270,6 +298,9 @@ def train():
     )
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     local_rank = training_args.local_rank
+    if local_rank == 0:
+        cleanup_incomplete_checkpoints(training_args.output_dir)
+    torch.distributed.barrier()
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
@@ -288,11 +319,9 @@ def train():
     trainer = Trainer(
         model=model, tokenizer=tokenizer, args=training_args, **data_module
     )
+    trainer.add_callback(CheckpointCallback())
 
-    if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
-        trainer.train(resume_from_checkpoint=True)
-    else:
-        trainer.train()
+    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     trainer.save_state()
     safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
 
