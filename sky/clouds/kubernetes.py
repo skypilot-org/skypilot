@@ -5,7 +5,9 @@ import re
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
-from sky import clouds, status_lib
+from sky import clouds
+from sky import status_lib
+from sky.adaptors import kubernetes
 from sky.utils import common_utils
 from sky.skylet.providers.kubernetes import utils as kubernetes_utils
 
@@ -127,8 +129,15 @@ class Kubernetes(clouds.Cloud):
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
     SKY_SSH_JUMP_NAME = f'sshjump-{common_utils.get_user_hash()}'
 
+    # Timeout for resource provisioning. This timeout determines how long to
+    # wait for pod to be in pending status before giving up.
+    # Larger timeout may be required for autoscaling clusters, since autoscaler
+    # may take some time to provision new nodes.
+    # Note that this timeout includes time taken by the Kubernetes scheduler
+    # itself, which can be upto 2-3 seconds.
+    # For non-autoscaling clusters, we conservatively set this to 10s.
     # TODO(romilb): Make the timeout configurable.
-    TIMEOUT = 60  # Timeout for resource provisioning
+    TIMEOUT = 10
 
     _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 1
@@ -146,6 +155,13 @@ class Kubernetes(clouds.Cloud):
                                                        'supported by the '
                                                        'Kubernetes '
                                                        'implementation yet.',
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
+                                                          'not supported in '
+                                                          'Kubernetes.',
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: 'Custom disk '
+                                                             'tiers are not '
+                                                             'supported in '
+                                                             'Kubernetes.',
     }
 
     IMAGE = 'us-central1-docker.pkg.dev/' \
@@ -291,10 +307,8 @@ class Kubernetes(clouds.Cloud):
             'image_id': self.IMAGE,
         }
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
-        if resources.use_spot:
-            return ([], [])
+    def _get_feasible_launchable_resources(
+            self, resources: 'resources_lib.Resources'):
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
@@ -363,7 +377,19 @@ class Kubernetes(clouds.Cloud):
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
-        # TODO(romilb): Implement this. For now, we return UP as the status.
-        #  Assuming single node cluster.
         del tag_filters, region, zone, kwargs  # Unused.
-        return [status_lib.ClusterStatus.UP]
+        namespace = kubernetes_utils.get_current_kube_config_context_namespace()
+
+        # Get all the pods with the label skypilot-cluster: <cluster_name>
+        pods = kubernetes.core_api().list_namespaced_pod(
+            namespace, label_selector=f'skypilot-cluster={name}').items
+
+        # Check if the pods are running or pending
+        cluster_status = []
+        for pod in pods:
+            if pod.status.phase == 'Running':
+                cluster_status.append(status_lib.ClusterStatus.UP)
+            elif pod.status.phase == 'Pending':
+                cluster_status.append(status_lib.ClusterStatus.INIT)
+        # If pods are not found, we don't add them to the return list
+        return cluster_status

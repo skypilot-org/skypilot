@@ -61,6 +61,9 @@ class Azure(clouds.Cloud):
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
         return {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {cls._REPR}.',
+            # TODO(zhwu): our azure subscription offer ID does not support spot.
+            # Need to support it.
+            clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {cls._REPR}.',
         }
 
     @classmethod
@@ -248,7 +251,7 @@ class Azure(clouds.Cloud):
             'disk_tier': Azure._get_disk_type(r.disk_tier)
         }
 
-    def get_feasible_launchable_resources(self, resources):
+    def _get_feasible_launchable_resources(self, resources):
 
         def failover_disk_tier(
                 instance_type: str,
@@ -282,17 +285,17 @@ class Azure(clouds.Cloud):
             else:
                 return True, None
 
-        if resources.use_spot:
-            # TODO(zhwu): our azure subscription offer ID does not support spot.
-            # Need to support it.
-            return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
-            # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
+            ok, disk_tier = failover_disk_tier(resources.instance_type,
+                                               resources.disk_tier)
+            if not ok:
+                return ([], [])
+            # Treat Resources(Azure, Standard_NC4as_T4_v3, T4) as
+            # Resources(Azure, Standard_NC4as_T4_v3).
             resources = resources.copy(
                 accelerators=None,
-                disk_tier=failover_disk_tier(resources.instance_type,
-                                             resources.disk_tier),
+                disk_tier=disk_tier,
             )
             return ([resources], [])
 

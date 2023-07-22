@@ -19,10 +19,6 @@ provider:
     # Use False if running from outside of k8s cluster
     use_internal_ips: true
 
-    # Namespace to use for all resources created.
-    # TODO(romilb): Make the namespace configurable.
-    namespace: default
-
     timeout: {{timeout}}
 
     # ServiceAccount created by the autoscaler for the head node pod that it
@@ -46,10 +42,12 @@ provider:
             labels:
                 parent: skypilot
             name: autoscaler
+        # TODO(romilb): This is a very permissive role - gives all access in the
+        #  namespace. We should restrict this.
         rules:
-        - apiGroups: [""]
-          resources: ["pods", "pods/status", "pods/exec"]
-          verbs: ["get", "watch", "list", "create", "delete", "patch"]
+        - apiGroups: ["*"]
+          resources: ["*"]
+          verbs: ["*"]
 
     # RoleBinding created by the autoscaler for the head node pod that it runs
     # in. If this field isn't provided, the head pod config below must contain
@@ -111,10 +109,10 @@ provider:
                   targetPort: 8265
 
 # Specify the pod type for the ray head node (as configured below).
-head_node_type: head_node
+head_node_type: ray_head_default
 # Specify the allowed pod types for this ray cluster and the resources they provide.
 available_node_types:
-  head_node:
+  ray_head_default:
     node_config:
       apiVersion: v1
       kind: Pod
@@ -148,7 +146,7 @@ available_node_types:
             path: /dev/fuse
         containers:
         - name: ray-node
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           image: {{image_id}}
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
@@ -191,7 +189,7 @@ available_node_types:
               # cause problems for other pods.
               cpu: {{cpus}}
               memory: {{memory}}G
-  worker_node:
+  ray_worker_default:
     # Minimum number of Ray workers of this Pod type.
     min_workers: {{num_nodes - 1}}
     # Maximum number of Ray workers of this Pod type. Takes precedence over min_workers.
@@ -209,6 +207,7 @@ available_node_types:
         # Automatically generates a name for the pod with this prefix.
         generateName: {{cluster_name}}-ray-worker-
       spec:
+        serviceAccountName: skypilot-service-account
         restartPolicy: Never
         volumes:
         - name: secret-volume
@@ -222,7 +221,7 @@ available_node_types:
             path: /dev/fuse
         containers:
         - name: ray-node
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           image: {{image_id}}
           command: ["/bin/bash", "-c", "--"]
           args: ["trap : TERM INT; sleep infinity & wait;"]
@@ -271,7 +270,7 @@ setup_commands:
     pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
-    which conda > /dev/null 2>&1 || (wget -nc https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b && eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true);
+    {{ conda_installation_commands }}
     source ~/.bashrc;
     mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful;
     (pip3 list | grep skypilot && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);

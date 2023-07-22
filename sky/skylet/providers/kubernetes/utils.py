@@ -5,6 +5,8 @@ from urllib.parse import urlparse
 from sky import status_lib
 from sky.adaptors import kubernetes
 
+DEFAULT_NAMESPACE = 'default'
+
 
 def get_head_ssh_port(cluster_name, namespace):
     svc_name = f'{cluster_name}-ray-head-ssh'
@@ -43,8 +45,14 @@ def check_credentials(timeout: int = 3) -> Tuple[bool, Optional[str]]:
         str: Error message if credentials are invalid, None otherwise
     """
     try:
-        kubernetes.core_api().list_namespace(_request_timeout=timeout)
+        ns = get_current_kube_config_context_namespace()
+        kubernetes.core_api().list_namespaced_pod(ns, _request_timeout=timeout)
         return True, None
+    except ImportError:
+        # TODO(romilb): Update these error strs to also include link to docs
+        #  when docs are ready.
+        return False, f'`kubernetes` package is not installed. ' \
+                      f'Install it with: pip install kubernetes'
     except kubernetes.api_exception() as e:
         # Check if the error is due to invalid credentials
         if e.status == 401:
@@ -58,22 +66,41 @@ def check_credentials(timeout: int = 3) -> Tuple[bool, Optional[str]]:
         return False, 'Failed to communicate with the cluster - timeout. ' \
                       'Check if your cluster is running and your network ' \
                       'is stable.'
+    except ValueError as e:
+        return False, str(e)
     except Exception as e:
         return False, f'An error occurred: {str(e)}'
 
 
-def get_cluster_status(cluster_name: str,
-                       namespace: str) -> List[status_lib.ClusterStatus]:
-    # Get all the pods with the label skypilot-cluster: <cluster_name>
-    pods = kubernetes.core_api().list_namespaced_pod(
-        namespace, label_selector=f'skypilot-cluster={cluster_name}').items
+def get_current_kube_config_context_name() -> Optional[str]:
+    """
+    Get the current kubernetes context from the kubeconfig file
 
-    # Check if the pods are running or pending
-    cluster_status = []
-    for pod in pods:
-        if pod.status.phase == 'Running':
-            cluster_status.append(status_lib.ClusterStatus.UP)
-        elif pod.status.phase == 'Pending':
-            cluster_status.append(status_lib.ClusterStatus.INIT)
-    # If pods are not found, we don't add them to the return list
-    return cluster_status
+    Returns:
+        str | None: The current kubernetes context if it exists, None otherwise
+    """
+    k8s = kubernetes.get_kubernetes()
+    try:
+        _, current_context = k8s.config.list_kube_config_contexts()
+        return current_context['name']
+    except k8s.config.config_exception.ConfigException:
+        return None
+
+
+def get_current_kube_config_context_namespace() -> str:
+    """
+    Get the current kubernetes context namespace from the kubeconfig file
+
+    Returns:
+        str | None: The current kubernetes context namespace if it exists, else
+            the default namespace.
+    """
+    k8s = kubernetes.get_kubernetes()
+    try:
+        _, current_context = k8s.config.list_kube_config_contexts()
+        if 'namespace' in current_context:
+            return current_context['namespace']
+        else:
+            return DEFAULT_NAMESPACE
+    except k8s.config.config_exception.ConfigException:
+        return DEFAULT_NAMESPACE

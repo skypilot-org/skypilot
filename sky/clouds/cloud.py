@@ -12,7 +12,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import status_lib
-    from sky import resources
+    from sky import resources as resources_lib
 
 
 class CloudImplementationFeatures(enum.Enum):
@@ -28,6 +28,8 @@ class CloudImplementationFeatures(enum.Enum):
     AUTOSTOP = 'autostop'
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
+    SPOT_INSTANCE = 'spot_instance'
+    CUSTOM_DISK_TIER = 'custom_disk_tier'
 
 
 class Region(collections.namedtuple('Region', ['name'])):
@@ -219,7 +221,7 @@ class Cloud:
 
     def make_deploy_resources_variables(
         self,
-        resources: 'resources.Resources',
+        resources: 'resources_lib.Resources',
         region: 'Region',
         zones: Optional[List['Zone']],
     ) -> Dict[str, Optional[str]]:
@@ -294,6 +296,16 @@ class Cloud:
 
         Launchable resources require a cloud and an instance type be assigned.
         """
+        if resources.is_launchable():
+            self._check_instance_type_accelerators_combination(resources)
+        resources_required_features = resources.get_required_cloud_features()
+        try:
+            self.check_features_are_supported(resources_required_features)
+        except exceptions.NotSupportedError:
+            return ([], [])
+        return self._get_feasible_launchable_resources(resources)
+
+    def _get_feasible_launchable_resources(self, resources):
         raise NotImplementedError
 
     @classmethod
@@ -395,8 +407,8 @@ class Cloud:
         """Returns whether the accelerator is valid in the region or zone."""
         raise NotImplementedError
 
-    def need_cleanup_after_preemption(self,
-                                      resource: 'resources.Resources') -> bool:
+    def need_cleanup_after_preemption(
+            self, resource: 'resources_lib.Resources') -> bool:
         """Returns whether a spot resource needs cleanup after preeemption.
 
         In most cases, spot resources do not need cleanup after preemption,
@@ -478,23 +490,68 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    # pylint: disable=unused-argument
-    def check_quota_available(cls,
-                              region: str,
-                              instance_type: str,
-                              use_spot: bool = False) -> bool:
-        """Check if quota is available for `instance_type` in `region`.
+    def _check_instance_type_accelerators_combination(
+            cls, resources: 'resources_lib.Resources') -> None:
+        """Errors out if the accelerator is not supported by the instance type.
 
-        (Currently, check_quota_available is only implemented for AWS.)
+        This function is overridden by GCP for host-accelerator logic.
+
+        Raises:
+            ResourcesMismatchError: If the accelerator is not supported.
+        """
+        assert resources.is_launchable(), resources
+
+        def _equal_accelerators(
+                acc_requested: Optional[Dict[str, int]],
+                acc_from_instance_type: Optional[Dict[str, int]]) -> bool:
+            """Check the requested accelerators equals to the instance type
+
+            Check the requested accelerators equals to the accelerators
+            from the instance type (both the accelerator type and the
+            count).
+            """
+            if acc_requested is None:
+                return acc_from_instance_type is None
+            if acc_from_instance_type is None:
+                return False
+
+            for acc in acc_requested:
+                if acc not in acc_from_instance_type:
+                    return False
+                if acc_requested[acc] != acc_from_instance_type[acc]:
+                    return False
+            return True
+
+        acc_from_instance_type = (cls.get_accelerators_from_instance_type(
+            resources.instance_type))
+        if not _equal_accelerators(resources.accelerators,
+                                   acc_from_instance_type):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    'Infeasible resource demands found:'
+                    '\n  Instance type requested: '
+                    f'{resources.instance_type}\n'
+                    f'  Accelerators for {resources.instance_type}: '
+                    f'{acc_from_instance_type}\n'
+                    f'  Accelerators requested: {resources.accelerators}\n'
+                    f'To fix: either only specify instance_type, or '
+                    'change the accelerators field to be consistent.')
+
+    @classmethod
+    def check_quota_available(cls,
+                              resources: 'resources_lib.Resources') -> bool:
+        """Check if quota is available based on `resources`.
 
         The _retry_zones function in cloud_vm_ray_backend goes through different
-        candidate regions and attempts to provision the requested instance_type
-        accelerators in the region, until a successful provisioning happens
-        or all regions with the requested accelerator have been looked at.
-        Previously, SkyPilot would attempt to provision resources in all of
-        these regions. However, many regions would have a zero quota or
-        inadequate quota, meaning these attempted provisions were destined
-        to fail from the get-go.
+        candidate regions and attempts to provision the requested
+        `instance_type` or `accelerator` accelerators in the `region`
+        (the `instance_type` or `accelerator`, and `region`, as defined in
+        `resources`) until a successful provisioning happens or all regions
+        with the requested accelerator have been looked at. Previously,
+        SkyPilot would attempt to provision resources in all of these regions.
+        However, many regions would have a zero quota or inadequate quota,
+        meaning these attempted provisions were destined to fail from
+        the get-go.
 
         Checking the quota is substantially faster than attempting a failed
         provision (~1 second vs 30+ seconds) so this function attempts to
@@ -506,7 +563,7 @@ class Cloud:
         quota utilization because many cloud providers' APIs don't have a
         built-in command for checking the real-time utilization. Checking
         real-time utilization is a more difficult endeavor that involves
-        monitoring etc., so we are holding off on that for now.
+        observability etc., so we are holding off on that for now.
 
         If for at any point the function fails, whether it's because we can't
         import the necessary dependencies or a query using a cloud provider's
@@ -526,6 +583,7 @@ class Cloud:
         Returns:
             False if the quota is found to be zero, and true otherwise.
         """
+        del resources  # unused
 
         return True
 

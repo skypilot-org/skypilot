@@ -1,5 +1,5 @@
 """Resources: compute requirements of Tasks."""
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Set
 from typing_extensions import Literal
 
 import colorama
@@ -162,7 +162,6 @@ class Resources:
         self._try_validate_local()
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
-        self._try_validate_accelerators()
         self._try_validate_spot()
         self._try_validate_image_id()
         self._try_validate_disk_tier()
@@ -505,7 +504,8 @@ class Resources:
         may have restricted the regions to be considered (e.g., a
         ssh_proxy_command dict with region names as keys).
         """
-        assert self.is_launchable()
+        assert self.is_launchable(), self
+
         regions = self._cloud.regions_with_offering(self._instance_type,
                                                     self.accelerators,
                                                     self._use_spot,
@@ -623,56 +623,6 @@ class Resources:
                             f'{self.instance_type} does not have the requested '
                             f'memory. {self.instance_type} has {mem} GB '
                             f'memory, but {self.memory} is requested.')
-
-    def _try_validate_accelerators(self) -> None:
-        """Validate accelerators against the instance type and region/zone."""
-        acc_requested = self.accelerators
-        if (isinstance(self.cloud, clouds.GCP) and
-                self.instance_type is not None):
-            # Do this check even if acc_requested is None.
-            clouds.GCP.check_host_accelerator_compatibility(
-                self.instance_type, acc_requested)
-
-        if acc_requested is None:
-            return
-
-        if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
-            # GCP attaches accelerators to VMs, so no need for this check.
-            acc_requested = self.accelerators
-            acc_from_instance_type = (
-                self.cloud.get_accelerators_from_instance_type(
-                    self._instance_type))
-            if not Resources(accelerators=acc_requested).less_demanding_than(
-                    Resources(accelerators=acc_from_instance_type)):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Infeasible resource demands found:\n'
-                        f'  Instance type requested: {self._instance_type}\n'
-                        f'  Accelerators for {self._instance_type}: '
-                        f'{acc_from_instance_type}\n'
-                        f'  Accelerators requested: {acc_requested}\n'
-                        f'To fix: either only specify instance_type, or change '
-                        'the accelerators field to be consistent.')
-            # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
-            # because e.g., the instance may have 4 GPUs, while the task
-            # specifies to use 1 GPU.
-
-        # Validate whether accelerator is available in specified region/zone.
-        acc, acc_count = list(acc_requested.items())[0]
-        # Fractional accelerators are temporarily bumped up to 1.
-        if 0 < acc_count < 1:
-            acc_count = 1
-        if self.region is not None or self.zone is not None:
-            if not self._cloud.accelerator_in_region_or_zone(
-                    acc, acc_count, self.region, self.zone):
-                error_str = (f'Accelerator "{acc}" is not available in '
-                             '"{}".')
-                if self.zone:
-                    error_str = error_str.format(self.zone)
-                else:
-                    error_str = error_str.format(self.region)
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(error_str)
 
     def _try_validate_spot(self) -> None:
         if self._spot_recovery is None:
@@ -940,6 +890,16 @@ class Resources:
             if None not in self.image_id and region not in self.image_id:
                 return False
         return True
+
+    def get_required_cloud_features(
+            self) -> Set[clouds.CloudImplementationFeatures]:
+        """Returns the set of cloud features required by this Resources."""
+        features = set()
+        if self.use_spot:
+            features.add(clouds.CloudImplementationFeatures.SPOT_INSTANCE)
+        if self.disk_tier is not None:
+            features.add(clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
+        return features
 
     @classmethod
     def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':

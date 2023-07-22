@@ -1,3 +1,4 @@
+#!/bin/bash
 # Creates a local Kubernetes cluster using kind
 # Usage: ./create_cluster.sh
 # Invokes generate_kind_config.py to generate a kind-cluster.yaml with NodePort mappings
@@ -22,6 +23,8 @@ fi
 # Check if the local cluster already exists
 if kind get clusters | grep -q skypilot; then
     echo "Local cluster already exists. Exiting."
+    # Switch context to the local cluster
+    kubectl config use-context kind-skypilot
     exit 100
 fi
 

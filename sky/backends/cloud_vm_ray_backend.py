@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import typing
 from typing import Dict, Iterable, List, Optional, Tuple, Union, Set
@@ -71,7 +72,7 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.AWS: 90,
     clouds.Azure: 90,
-    clouds.GCP: 120,
+    clouds.GCP: 240,
     clouds.Lambda: 150,
     clouds.IBM: 160,
     clouds.Local: 90,
@@ -102,6 +103,10 @@ _TEARDOWN_PURGE_WARNING = (
     'Make sure resources are manually deleted.\n'
     'Details: {details}'
     f'{colorama.Style.RESET_ALL}')
+
+_RSYNC_NOT_FOUND_MESSAGE = (
+    '`rsync` command is not found in the specified image. '
+    'Please use an image with rsync installed.')
 
 _TPU_NOT_FOUND_ERROR = 'ERROR: (gcloud.compute.tpus.delete) NOT_FOUND'
 
@@ -765,6 +770,9 @@ class RetryingVmProvisioner(object):
                 logger.warning(f'Got \'resource not found\' in {zone.name}.')
                 self._blocked_resources.add(
                     launchable_resources.copy(zone=zone.name))
+            elif 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             else:
                 logger.info('====== stdout ======')
                 for s in stdout.split('\n'):
@@ -807,6 +815,9 @@ class RetryingVmProvisioner(object):
             line.startswith('<1/1> Setting up head node')
             for line in stdout_splits + stderr_splits)
         if not errors or head_node_up:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             # TODO: Got transient 'Failed to create security group' that goes
             # away after a few minutes.  Should we auto retry other regions, or
             # let the user retry.
@@ -859,6 +870,9 @@ class RetryingVmProvisioner(object):
                 in s.strip() or '(ReadOnlyDisabledSubscription)' in s.strip())
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -892,6 +906,9 @@ class RetryingVmProvisioner(object):
             if 'LambdaCloudError:' in s.strip()
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -956,6 +973,9 @@ class RetryingVmProvisioner(object):
             if 'SCPError:' in s.strip()
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -993,6 +1013,9 @@ class RetryingVmProvisioner(object):
             if 'ERR' in s.strip() or 'PANIC' in s.strip()
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -1024,6 +1047,9 @@ class RetryingVmProvisioner(object):
             if 'ERR' in s.strip() or 'PANIC' in s.strip()
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -1059,6 +1085,9 @@ class RetryingVmProvisioner(object):
               'LimitExceeded' in s.strip() or 'NotAuthenticated' in s.strip()))
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -1395,8 +1424,7 @@ class RetryingVmProvisioner(object):
         # instead of trying to provision and failing later.
         try:
             need_provision = to_provision.cloud.check_quota_available(
-                to_provision.region, to_provision.instance_type,
-                to_provision.use_spot)
+                to_provision)
 
         except Exception as e:  # pylint: disable=broad-except
             need_provision = True
@@ -1414,7 +1442,8 @@ class RetryingVmProvisioner(object):
             raise exceptions.ResourcesUnavailableError(
                 f'{colorama.Fore.YELLOW}Found no quota for '
                 f'{to_provision.instance_type} {instance_descriptor} '
-                f'instances in region {to_provision.region}. '
+                f'instances in region {to_provision.region} '
+                f'in {to_provision.cloud}. '
                 f'{colorama.Style.RESET_ALL}'
                 f'To request quotas, check the instruction: '
                 f'https://skypilot.readthedocs.io/en/latest/cloud-setup/quota.html.'  # pylint: disable=line-too-long
@@ -1470,7 +1499,7 @@ class RetryingVmProvisioner(object):
                     f'Failed to find catalog in region {region.name}: {e}')
                 continue
             if dryrun:
-                return
+                return config_dict
             cluster_config_file = config_dict['ray']
 
             # Record early, so if anything goes wrong, 'sky status' will show
@@ -1790,6 +1819,11 @@ class RetryingVmProvisioner(object):
                         'Retrying due to the possibly flaky RESOURCE_NOT_FOUND '
                         'error.')
                     return True
+
+            if 'rsync: command not found' in stderr:
+                logger.info('Skipping retry due to `rsync` not found in '
+                            'the specified image.')
+                return False
 
             if ('Processing file mounts' in stdout and
                     'Running setup commands' not in stdout and
@@ -2314,8 +2348,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             head_ip = state.pop('head_ip', None)
             state['stable_internal_external_ips'] = None
         if version < 4:
-            # Version 4 adds self.external_ssh_ports for Kubernetes support
-            head_ssh_port = state.pop('head_ssh_port', None)
+            # Version 4 adds self.stable_ssh_ports for Kubernetes support
             state['stable_ssh_ports'] = None
 
         self.__dict__.update(state)
@@ -2330,7 +2363,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # This occurs when an old cluster from was autostopped,
                 # so the head IP in the database is not updated.
                 pass
-        if version < 4 and head_ssh_port is not None:
+        if version < 4:
             self._update_stable_ssh_ports()
 
         self._update_cluster_region()
@@ -2488,10 +2521,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 to_provision,
                 task.num_nodes,
                 prev_cluster_status=None)
-            if not dryrun:  # dry run doesn't need to check existing cluster.
-                # Try to launch the exiting cluster first
-                to_provision_config = self._check_existing_cluster(
-                    task, to_provision, cluster_name)
+            # Try to launch the exiting cluster first
+            to_provision_config = self._check_existing_cluster(
+                task, to_provision, cluster_name, dryrun)
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
 
@@ -2569,7 +2601,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             error_message,
                             failover_history=e.failover_history) from None
             if dryrun:
-                return None
+                record = global_user_state.get_cluster_from_name(cluster_name)
+                return record['handle'] if record is not None else None
             cluster_config_file = config_dict['ray']
 
             handle = CloudVmRayResourceHandle(
@@ -3090,6 +3123,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         task: task_lib.Task,
         detach_run: bool,
+        dryrun: bool = False,
     ) -> None:
         if task.run is None:
             logger.info('Run commands not specified or empty.')
@@ -3099,6 +3133,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self.check_resources_fit_cluster(handle, task)
 
         resources_str = backend_utils.get_task_resources_str(task)
+
+        if dryrun:
+            logger.info(f'Dryrun complete. Would have run:\n{task}')
+            return
+
         job_id = self._add_job(handle, task.name, resources_str)
 
         is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
@@ -3341,8 +3380,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
-        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
-        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+            signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
         try:
             returncode = self.run_on_head(
                 handle,
@@ -3375,8 +3415,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
-        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
-        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+            signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
         # Refer to the notes in tail_logs.
         self.run_on_head(
@@ -3429,7 +3470,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cloud = handle.launched_resources.cloud
         config = common_utils.read_yaml(handle.cluster_yaml)
         cluster_name = handle.cluster_name
-        use_tpu_vm = config['provider'].get('_has_tpus', False)
 
         # Avoid possibly unbound warnings. Code below must overwrite these vars:
         returncode = 0
@@ -3437,8 +3477,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         stderr = ''
 
         # Use the new provisioner for AWS.
-        if isinstance(cloud, clouds.AWS):
-            region = config['provider']['region']
+        if isinstance(cloud, (clouds.AWS, clouds.GCP)):
             # Stop the ray autoscaler first to avoid the head node trying to
             # re-launch the worker nodes, during the termination of the
             # cluster.
@@ -3458,11 +3497,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'already been terminated. It is fine to skip this.')
             try:
                 if terminate:
-                    provision_api.terminate_instances(repr(cloud), region,
-                                                      cluster_name)
+                    provision_api.terminate_instances(
+                        repr(cloud),
+                        cluster_name,
+                        provider_config=config['provider'])
                 else:
-                    provision_api.stop_instances(repr(cloud), region,
-                                                 cluster_name)
+                    provision_api.stop_instances(
+                        repr(cloud),
+                        cluster_name,
+                        provider_config=config['provider'])
             except Exception as e:  # pylint: disable=broad-except
                 if purge:
                     logger.warning(
@@ -3564,39 +3607,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             # To avoid undefined local variables error.
             stdout = stderr = ''
-        elif (terminate and
-              (prev_cluster_status == status_lib.ClusterStatus.STOPPED or
-               use_tpu_vm)):
-            # For TPU VMs, gcloud CLI is used for VM termination.
-            if isinstance(cloud, clouds.GCP):
-                zone = config['provider']['availability_zone']
-                # TODO(wei-lin): refactor by calling functions of node provider
-                # that uses Python API rather than CLI
-                if use_tpu_vm:
-                    terminate_cmd = tpu_utils.terminate_tpu_vm_cluster_cmd(
-                        cluster_name, zone, log_abs_path)
-                else:
-                    query_cmd = (f'gcloud compute instances list --filter='
-                                 f'"(labels.ray-cluster-name={cluster_name})" '
-                                 f'--zones={zone} --format=value\\(name\\)')
-                    # If there are no instances, exit with 0 rather than causing
-                    # the delete command to fail.
-                    terminate_cmd = (
-                        f'VMS=$({query_cmd}) && [ -n "$VMS" ] && '
-                        f'gcloud compute instances delete --zone={zone} --quiet'
-                        ' $VMS || echo "No instances to delete."')
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Unsupported cloud {cloud} for stopped '
-                                     f'cluster {cluster_name!r}.')
-            with log_utils.safe_rich_status(f'[bold cyan]Terminating '
-                                            f'[green]{cluster_name}'):
-                returncode, stdout, stderr = log_lib.run_with_log(
-                    terminate_cmd,
-                    log_abs_path,
-                    shell=True,
-                    stream_logs=False,
-                    require_outputs=True)
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',
@@ -3856,9 +3866,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     @timeline.event
     def _check_existing_cluster(
-            self, task: task_lib.Task,
+            self,
+            task: task_lib.Task,
             to_provision: Optional[resources_lib.Resources],
-            cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
+            cluster_name: str,
+            dryrun: bool = False) -> RetryingVmProvisioner.ToProvisionConfig:
         """Checks if the cluster exists and returns the provision config.
 
         Raises:
@@ -3871,25 +3883,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle_before_refresh = None if record is None else record['handle']
         status_before_refresh = None if record is None else record['status']
 
-        prev_cluster_status, handle = (
-            backend_utils.refresh_cluster_status_handle(
-                cluster_name,
-                # We force refresh for the init status to determine the actual
-                # state of a previous cluster in INIT state.
-                #
-                # This is important for the case, where an existing cluster is
-                # transitioned into INIT state due to key interruption during
-                # launching, with the following steps:
-                # (1) launch, after answering prompt immediately ctrl-c;
-                # (2) launch again.
-                # If we don't refresh the state of the cluster and reset it back
-                # to STOPPED, our failover logic will consider it as an abnormal
-                # cluster after hitting resources capacity limit on the cloud,
-                # and will start failover. This is not desired, because the user
-                # may want to keep the data on the disk of that cluster.
-                force_refresh_statuses={status_lib.ClusterStatus.INIT},
-                acquire_per_cluster_status_lock=False,
-            ))
+        prev_cluster_status, handle = (status_before_refresh,
+                                       handle_before_refresh)
+
+        if not dryrun:
+            prev_cluster_status, handle = (
+                backend_utils.refresh_cluster_status_handle(
+                    cluster_name,
+                    # We force refresh for the init status to determine the
+                    # actual state of a previous cluster in INIT state.
+                    #
+                    # This is important for the case, where an existing cluster
+                    # is transitioned into INIT state due to key interruption
+                    # during launching, with the following steps:
+                    # (1) launch, after answering prompt immediately ctrl-c;
+                    # (2) launch again.
+                    # If we don't refresh the state of the cluster and reset it
+                    # back to STOPPED, our failover logic will consider it as an
+                    # abnormal cluster after hitting resources capacity limit on
+                    # the cloud, and will start failover. This is not desired,
+                    # because the user may want to keep the data on the disk of
+                    # that cluster.
+                    force_refresh_statuses={status_lib.ClusterStatus.INIT},
+                    acquire_per_cluster_status_lock=False,
+                ))
         if prev_cluster_status is not None:
             assert handle is not None
             # Cluster already exists.

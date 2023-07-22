@@ -4421,18 +4421,17 @@ def local_up():
     cluster_created = False
     # Check if ~/.kube/config exists:
     if os.path.exists(os.path.expanduser('~/.kube/config')):
-        # Check if kubeconfig is valid, `kind delete` leaves an empty kubeconfig
-        valid, reason = kubernetes_utils.check_credentials()
-        if valid or (not valid and 'Invalid configuration' not in reason):
-            # Could be a valid kubeconfig or a non-empty but non-functioning
-            # kubeconfig - check if user wants to overwrite it
-            prompt = 'Cluster config found at ~/.kube/config. Overwrite it?'
-            click.confirm(prompt, default=True, abort=True, show_default=True)
+        curr_context = kubernetes_utils.get_current_kube_config_context_name()
+        skypilot_context = 'kind-skypilot'
+        if curr_context is not None and curr_context != skypilot_context:
+            click.echo(
+                f'Current context in kube config: {curr_context}'
+                '\nWill automatically switch to kind-skypilot after the local '
+                'cluster is created.')
     with log_utils.safe_rich_status('Creating local cluster...'):
         path_to_package = os.path.dirname(os.path.dirname(__file__))
         up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
                                       'create_cluster.sh')
-        subprocess_utils.run_no_outputs('chmod +x {}'.format(up_script_path))
         # Get directory of script and run it from there
         cwd = os.path.dirname(os.path.abspath(up_script_path))
         # Run script and don't print output
@@ -4480,7 +4479,6 @@ def local_down():
         path_to_package = os.path.dirname(os.path.dirname(__file__))
         down_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
                                         'delete_cluster.sh')
-        subprocess_utils.run_no_outputs('chmod +x {}'.format(down_script_path))
         try:
             subprocess_utils.run(down_script_path, capture_output=True)
             cluster_removed = True

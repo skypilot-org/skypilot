@@ -329,11 +329,32 @@ def test_instance_type_mistmatches_accelerators(monkeypatch):
         ('m4.2xlarge', 'V100'),
     ]
     for instance, acc in bad_instance_and_accs:
-        with pytest.raises(ValueError) as e:
+        with pytest.raises(exceptions.ResourcesMismatchError) as e:
             _test_resources_launch(monkeypatch,
                                    sky.AWS(),
                                    instance_type=instance,
                                    accelerators=acc)
+        assert 'Infeasible resource demands found' in str(e.value)
+
+    with pytest.raises(exceptions.ResourcesMismatchError) as e:
+        _test_resources_launch(monkeypatch,
+                               sky.GCP(),
+                               instance_type='n2-standard-8',
+                               accelerators={'V100': 1})
+        assert 'can only be attached to N1 VMs,' in str(e.value), str(e.value)
+
+    with pytest.raises(exceptions.ResourcesMismatchError) as e:
+        _test_resources_launch(monkeypatch,
+                               sky.GCP(),
+                               instance_type='a2-highgpu-1g',
+                               accelerators={'A100': 2})
+        assert 'cannot be attached to' in str(e.value), str(e.value)
+
+    with pytest.raises(exceptions.ResourcesMismatchError) as e:
+        _test_resources_launch(monkeypatch,
+                               sky.AWS(),
+                               instance_type='p3.16xlarge',
+                               accelerators={'V100': 1})
         assert 'Infeasible resource demands found' in str(e.value)
 
 
@@ -346,11 +367,20 @@ def test_instance_type_matches_accelerators(monkeypatch):
                            sky.GCP(),
                            instance_type='n1-standard-2',
                            accelerators='V100')
-    # Partial use: Instance has 8 V100s, while the task needs 1 of them.
+
+    _test_resources_launch(monkeypatch,
+                           sky.GCP(),
+                           instance_type='n1-standard-8',
+                           accelerators='tpu-v3-8')
+    _test_resources_launch(monkeypatch,
+                           sky.GCP(),
+                           instance_type='a2-highgpu-1g',
+                           accelerators='a100')
+
     _test_resources_launch(monkeypatch,
                            sky.AWS(),
                            instance_type='p3.16xlarge',
-                           accelerators={'V100': 1})
+                           accelerators={'V100': 8})
 
 
 def test_invalid_instance_type(monkeypatch):
@@ -401,6 +431,13 @@ def test_invalid_region(monkeypatch):
         with pytest.raises(ValueError) as e:
             _test_resources(monkeypatch, cloud, region='invalid')
         assert 'Invalid region' in str(e.value)
+
+    with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+        _test_resources_launch(monkeypatch,
+                               sky.GCP(),
+                               region='us-west1',
+                               accelerators='tpu-v3-8')
+        assert 'No launchable resource found' in str(e.value)
 
 
 def test_invalid_zone(monkeypatch):
@@ -599,3 +636,16 @@ def test_parse_valid_envs_yaml(monkeypatch):
           GOOD123: 123
         """)
     _test_parse_task_yaml(spec)
+
+
+def test_invalid_accelerators_regions(enable_all_clouds, monkeypatch):
+    task = sky.Task(run='echo hi')
+    task.set_resources(
+        sky.Resources(
+            sky.AWS(),
+            accelerators='A100:8',
+            region='us-west-1',
+        ))
+    with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+        sky.launch(task, cluster_name='should-fail', dryrun=True)
+        assert 'No launchable resource found for' in str(e.value), str(e.value)
