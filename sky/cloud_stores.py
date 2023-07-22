@@ -77,7 +77,7 @@ class S3CloudStorage(CloudStorage):
         bucket_name, _ = data_utils.split_s3_path(source)
         region = data_utils.get_s3_bucket_region(bucket_name)
         download_via_s5cmd = (f's5cmd sync --destination-region {region} '
-                               f'--no-follow-symlinks {source} {destination}')
+                              f'--no-follow-symlinks {source} {destination}')
 
         all_commands = list(self._GET_S5CMD)
         all_commands.append(download_via_s5cmd)
