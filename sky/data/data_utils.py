@@ -79,7 +79,7 @@ def get_s3_bucket_region(bucket_name: str) -> bool:
     # If the bucket is located in us-east-1, then LocationConstraint
     # returns None as mentioned in the following doc:
     # https://aws.amazon.com/fr/blogs/developer/leveraging-the-s3-and-s3api-commands/
-    if region == None:
+    if region is None:
         region = 'us-east-1'
     return region
 
@@ -237,6 +237,7 @@ def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
                 raise exceptions.StorageUploadError(
                     f'Upload to bucket failed for store {bucket_name}. '
                     'Please check the logs.')
+
 
 def s5cmd_installed() -> bool:
     """Checks if s5cmd is installed in local machine."""

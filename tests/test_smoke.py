@@ -2578,7 +2578,10 @@ class TestStorageWithCredentials:
         # Creates a temporary bucket using awscli
         # Region is set to us-east-2 as it is the region set as default
         # when bucket is created within Skypilot
-        subprocess.check_call(['aws', 's3', 'mb', f's3://{tmp_bucket_name}', '--region', 'us-east-2'])
+        subprocess.check_call([
+            'aws', 's3', 'mb', f's3://{tmp_bucket_name}', '--region',
+            'us-east-2'
+        ])
         yield tmp_bucket_name
         subprocess.check_call(
             ['aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force'])
