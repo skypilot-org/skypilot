@@ -97,7 +97,7 @@ class GcsCloudStorage(CloudStorage):
     _INSTALL_GSUTIL = gcp.GOOGLE_SDK_INSTALLATION_COMMAND
 
     @property
-    def _get_gsutil_command(self):
+    def _gsutil_command(self):
         gsutil_alias, alias_gen = data_utils.get_gsutil_command()
         return (f'{alias_gen}; GOOGLE_APPLICATION_CREDENTIALS='
                 f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH} {gsutil_alias}')
@@ -108,7 +108,7 @@ class GcsCloudStorage(CloudStorage):
         name is a prefix of other objects.
         """
         commands = [self._INSTALL_GSUTIL]
-        commands.append(f'{self._get_gsutil_command()} ls -d {url}')
+        commands.append(f'{self._gsutil_command} ls -d {url}')
         command = ' && '.join(commands)
         p = subprocess.run(command,
                            stdout=subprocess.PIPE,
@@ -135,7 +135,7 @@ class GcsCloudStorage(CloudStorage):
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads a directory using gsutil."""
-        download_via_gsutil = (f'{self._get_gsutil_command()} '
+        download_via_gsutil = (f'{self._gsutil_command} '
                                f'rsync -e -r {source} {destination}')
         all_commands = [self._INSTALL_GSUTIL]
         all_commands.append(download_via_gsutil)
@@ -143,7 +143,7 @@ class GcsCloudStorage(CloudStorage):
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using gsutil."""
-        download_via_gsutil = f'{self._get_gsutil_command()} ' \
+        download_via_gsutil = f'{self._gsutil_command} ' \
                               f'cp {source} {destination}'
         all_commands = [self._INSTALL_GSUTIL]
         all_commands.append(download_via_gsutil)
