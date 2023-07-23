@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 import json
 import pathlib
 import os
+import shutil
 from typing import Dict, Optional
 
 import torch
@@ -284,7 +285,7 @@ def cleanup_incomplete_checkpoints(output_dir):
     for checkpoint in checkpoints:
         if not (checkpoint / 'complete').exists():
             print(f'Renaming incomplete checkpoint {checkpoint}')
-            checkpoint.rename(checkpoint.with_suffix('.incomplete'))
+            shutil.rmtree(checkpoint)
         else:
             resume_from_checkpoint = True
             break
