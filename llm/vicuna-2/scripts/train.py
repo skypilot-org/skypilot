@@ -286,9 +286,8 @@ def cleanup_incomplete_checkpoints(output_dir):
             print(f'Renaming incomplete checkpoint {checkpoint}')
             checkpoint.rename(checkpoint.with_suffix('.incomplete'))
         else:
+            resume_from_checkpoint = True
             break
-    if checkpoints:
-        resume_from_checkpoint = True
 
 def train():
     global local_rank
