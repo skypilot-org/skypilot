@@ -226,7 +226,7 @@ def get_gsutil_command() -> Tuple[str, str]:
     # This function will behave just like alias, but can be called immediately
     # after its definition on the same line
     alias_gen = (f'[[ "$(uname)" == "Darwin" ]] && {gsutil_alias}() {{ '
-                 f'gsutil -m {disable_multiprocessing_flag!r} "$@"; }} '
+                 f'gsutil -m {disable_multiprocessing_flag} "$@"; }} '
                  f'|| {gsutil_alias}() {{ gsutil -m "$@"; }}')
 
     return gsutil_alias, alias_gen
