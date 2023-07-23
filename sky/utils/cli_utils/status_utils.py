@@ -117,11 +117,11 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
                      _get_middleware_cluster_name,
                      show_by_default=False),
         StatusColumn('ENDPOINT', _get_endpoint),
-        StatusColumn('STATUS', _get_service_status_colored),
         StatusColumn('#HEALTHY_REPLICAS', _get_healthy_replicas),
         StatusColumn('#UNHEALTHY_REPLICAS', _get_unhealthy_replicas),
         # TODO(tian): After we have a better way to detect failed replicas
         # StatusColumn('#FAILED_REPLICAS', _get_failed_replicas),
+        StatusColumn('STATUS', _get_service_status_colored),
         StatusColumn('POLICY', _get_policy, show_by_default=False),
         StatusColumn('REQUESTED RESOURCES',
                      _get_requested_resources,
