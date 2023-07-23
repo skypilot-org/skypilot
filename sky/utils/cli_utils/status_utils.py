@@ -113,8 +113,8 @@ def show_status_table(cluster_records: List[_ClusterRecord],
 def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
     status_columns = [
         StatusColumn('NAME', _get_name),
-        StatusColumn('MIDDLEWARE_CLUSTER_NAME',
-                     _get_middleware_cluster_name,
+        StatusColumn('CONTROLLER_CLUSTER_NAME',
+                     _get_controller_cluster_name,
                      show_by_default=False),
         StatusColumn('ENDPOINT', _get_endpoint),
         StatusColumn('#HEALTHY_REPLICAS', _get_healthy_replicas),
@@ -123,7 +123,7 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
         # StatusColumn('#FAILED_REPLICAS', _get_failed_replicas),
         StatusColumn('STATUS', _get_service_status_colored),
         StatusColumn('POLICY', _get_policy, show_by_default=False),
-        StatusColumn('REQUESTED RESOURCES',
+        StatusColumn('REQUESTED_RESOURCES',
                      _get_requested_resources,
                      show_by_default=False),
     ]
@@ -372,8 +372,8 @@ _get_region = (
 _get_command = (lambda cluster_record: cluster_record['last_use'])
 _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
-_get_middleware_cluster_name = (
-    lambda service_record: service_record['middleware_cluster_name'])
+_get_controller_cluster_name = (
+    lambda service_record: service_record['controller_cluster_name'])
 _get_endpoint = (lambda service_record: service_record['endpoint'])
 _get_healthy_replicas = (
     lambda service_record: service_record['num_healthy_replicas'])

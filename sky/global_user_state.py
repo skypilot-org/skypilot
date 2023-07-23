@@ -97,7 +97,7 @@ def create_table(cursor, conn):
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS services (
         name TEXT PRIMARY KEY,
-        middleware_cluster_name TEXT,
+        controller_cluster_name TEXT,
         endpoint TEXT,
         status TEXT,
         num_healthy_replicas INTEGER DEFAULT 0,
@@ -286,19 +286,19 @@ def add_or_update_cluster(cluster_name: str,
 
 
 def add_or_update_service(
-        name: str, middleware_cluster_name: str, endpoint: str,
+        name: str, controller_cluster_name: str, endpoint: str,
         status: status_lib.ServiceStatus, num_healthy_replicas: int,
         num_unhealthy_replicas: int, num_failed_replicas, policy: str,
         requested_resources: Optional['resources_lib.Resources']):
     _DB.cursor.execute(
         'INSERT or REPLACE INTO services'
-        '(name, middleware_cluster_name, endpoint, status, '
+        '(name, controller_cluster_name, endpoint, status, '
         'num_healthy_replicas, num_unhealthy_replicas, '
         'num_failed_replicas, policy, requested_resources) '
         'VALUES ('
         # name
         '?, '
-        # middleware_cluster_name
+        # controller_cluster_name
         '?, '
         # endpoint
         '?, '
@@ -318,8 +318,8 @@ def add_or_update_service(
         (
             # name
             name,
-            # middleware_cluster_name
-            middleware_cluster_name,
+            # controller_cluster_name
+            controller_cluster_name,
             # endpoint
             endpoint,
             # status
@@ -624,13 +624,13 @@ def get_service_from_name(
         # Explicitly specify the number of fields to unpack, so that
         # we can add new fields to the database in the future without
         # breaking the previous code.
-        (name, middleware_cluster_name, endpoint, status, num_healthy_replicas,
+        (name, controller_cluster_name, endpoint, status, num_healthy_replicas,
          num_unhealthy_replicas, num_failed_replicas, policy,
          requested_resources) = row[:9]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
-            'middleware_cluster_name': middleware_cluster_name,
+            'controller_cluster_name': controller_cluster_name,
             'endpoint': endpoint,
             'status': status_lib.ServiceStatus[status],
             'num_healthy_replicas': num_healthy_replicas,
@@ -673,14 +673,14 @@ def get_services() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('select * from services').fetchall()
     records = []
     for row in rows:
-        (name, middleware_cluster_name, endpoint, status, num_healthy_replicas,
+        (name, controller_cluster_name, endpoint, status, num_healthy_replicas,
          num_unhealthy_replicas, num_failed_replicas, policy,
          requested_resources) = row[:9]
         # TODO: use namedtuple instead of dict
 
         record = {
             'name': name,
-            'middleware_cluster_name': middleware_cluster_name,
+            'controller_cluster_name': controller_cluster_name,
             'endpoint': endpoint,
             'status': status_lib.ServiceStatus[status],
             'num_healthy_replicas': num_healthy_replicas,

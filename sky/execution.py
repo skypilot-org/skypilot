@@ -370,7 +370,7 @@ def _execute(
     finally:
         if (cluster_name != spot.SPOT_CONTROLLER_NAME and
                 cluster_name is not None and
-                not cluster_name.startswith(serve.MIDDLEWARE_PREFIX)):
+                not cluster_name.startswith(serve.CONTROLLER_PREFIX)):
             # UX: print live clusters to make users aware (to save costs).
             #
             # Don't print if this job is launched by the spot controller,
@@ -965,14 +965,14 @@ def serve_up(
 
     Raises:
     """
-    middleware_cluster_name = serve.MIDDLEWARE_PREFIX + name
+    controller_cluster_name = serve.CONTROLLER_PREFIX + name
     assert task.service is not None, task
     policy = task.service.policy_str()
     assert len(task.resources) == 1
     requested_resources = list(task.resources)[0]
     global_user_state.add_or_update_service(
-        name, middleware_cluster_name, '',
-        status_lib.ServiceStatus.MIDDLEWARE_INIT, 0, 0, 0, policy,
+        name, controller_cluster_name, '',
+        status_lib.ServiceStatus.CONTROLLER_INIT, 0, 0, 0, policy,
         requested_resources)
     # TODO(tian): use `task` directly
     original = common_utils.read_yaml(original_yaml_path)
@@ -980,8 +980,8 @@ def serve_up(
     workdir_abs_path = None
     # TODO(tian): use _maybe_translate_local_file_mounts_and_sync_up instead
     if original_workdir is not None:
-        # Upload the workdir to middleware:~/sky_workdir
-        # Then upload middleware:~/sky_workdir to the endpoint replica
+        # Upload the workdir to controller:~/sky_workdir
+        # Then upload controller:~/sky_workdir to the endpoint replica
         workdir_path = os.path.join(os.path.dirname(original_yaml_path),
                                     original_workdir)
         workdir_abs_path = os.path.abspath(workdir_path)
@@ -1001,36 +1001,36 @@ def serve_up(
             'remote_task_yaml_path': remote_task_yaml_path,
             'local_task_yaml_path': f.name,
         }
-        middleware_yaml_path = os.path.join(serve.MIDDLEWARE_YAML_PREFIX,
+        controller_yaml_path = os.path.join(serve.CONTROLLER_YAML_PREFIX,
                                             f'{name}.yaml')
-        backend_utils.fill_template(serve.MIDDLEWARE_TEMPLATE,
+        backend_utils.fill_template(serve.CONTROLLER_TEMPLATE,
                                     vars_to_fill,
-                                    output_path=middleware_yaml_path)
-        middleware_task = task_lib.Task.from_yaml(middleware_yaml_path)
-        assert len(middleware_task.resources) == 1, middleware_task
+                                    output_path=controller_yaml_path)
+        controller_task = task_lib.Task.from_yaml(controller_yaml_path)
+        assert len(controller_task.resources) == 1, controller_task
         print(f'{colorama.Fore.YELLOW}'
-              f'Launching middleware for {name}...'
+              f'Launching controller for {name}...'
               f'{colorama.Style.RESET_ALL}')
 
         _execute(
-            entrypoint=middleware_task,
+            entrypoint=controller_task,
             stream_logs=True,
-            cluster_name=middleware_cluster_name,
+            cluster_name=controller_cluster_name,
             retry_until_up=True,
         )
 
         handle = global_user_state.get_handle_from_cluster_name(
-            middleware_cluster_name)
+            controller_cluster_name)
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         endpoint = f'{handle.head_ip}:{task.service.app_port}'
         global_user_state.add_or_update_service(
-            name, middleware_cluster_name, endpoint,
+            name, controller_cluster_name, endpoint,
             status_lib.ServiceStatus.REPLICA_INIT, 0, 0, 0, policy,
             requested_resources)
 
         print(
             f'{colorama.Fore.YELLOW}'
-            'Launching control plane process on middleware...'
+            'Launching control plane process on controller...'
             f'{colorama.Style.RESET_ALL}',
             end='')
         _execute(
@@ -1042,13 +1042,13 @@ def serve_up(
             stream_logs=False,
             handle=handle,
             stages=[Stage.EXEC],
-            cluster_name=middleware_cluster_name,
+            cluster_name=controller_cluster_name,
             detach_run=True,
         )
 
         print(
             f'{colorama.Fore.YELLOW}'
-            'Launching redirector process on middleware...'
+            'Launching redirector process on controller...'
             f'{colorama.Style.RESET_ALL}',
             end='')
         _execute(
@@ -1061,7 +1061,7 @@ def serve_up(
             stream_logs=False,
             handle=handle,
             stages=[Stage.EXEC],
-            cluster_name=middleware_cluster_name,
+            cluster_name=controller_cluster_name,
             detach_run=True,
         )
 
@@ -1085,19 +1085,19 @@ def serve_down(name: str):
     if service_record is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {name} does not exist.')
-    middleware_cluster_name = service_record['middleware_cluster_name']
+    controller_cluster_name = service_record['controller_cluster_name']
     num_healthy_replicas = service_record['num_healthy_replicas']
     num_unhealthy_replicas = service_record['num_unhealthy_replicas']
     num_replicas = num_healthy_replicas + num_unhealthy_replicas
     handle = global_user_state.get_handle_from_cluster_name(
-        middleware_cluster_name)
+        controller_cluster_name)
     global_user_state.set_service_status(name,
                                          status_lib.ServiceStatus.SHUTTING_DOWN)
 
     print(f'{colorama.Fore.YELLOW}'
-          f'Stopping control plane and redirector processes on middleware...'
+          f'Stopping control plane and redirector processes on controller...'
           f'{colorama.Style.RESET_ALL}')
-    core.cancel(middleware_cluster_name, all=True)
+    core.cancel(controller_cluster_name, all=True)
 
     plural = ''
     # TODO(tian): Change to #num replica (including unhealthy one)
@@ -1111,14 +1111,14 @@ def serve_down(name: str):
         stream_logs=False,
         handle=handle,
         stages=[Stage.EXEC],
-        cluster_name=middleware_cluster_name,
+        cluster_name=controller_cluster_name,
         detach_run=False,
     )
 
     print(f'{colorama.Fore.YELLOW}'
-          'Teardown middleware...'
+          'Teardown controller...'
           f'{colorama.Style.RESET_ALL}')
-    core.down(middleware_cluster_name, purge=True)
+    core.down(controller_cluster_name, purge=True)
 
     global_user_state.remove_service(name)
 

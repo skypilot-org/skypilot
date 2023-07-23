@@ -1,9 +1,9 @@
 """Constants used for SkyServe."""
 
-MIDDLEWARE_PREFIX = 'middleware-'
+CONTROLLER_PREFIX = 'controller-'
 
-MIDDLEWARE_TEMPLATE = 'middleware.yaml.j2'
-MIDDLEWARE_YAML_PREFIX = '~/.sky/serve'
+CONTROLLER_TEMPLATE = 'skyserve-controller.yaml.j2'
+CONTROLLER_YAML_PREFIX = '~/.sky/serve'
 
 SERVICE_YAML_PREFIX = '~/.sky/service'
 

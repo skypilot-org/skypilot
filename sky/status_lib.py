@@ -55,7 +55,7 @@ class ServiceStatus(enum.Enum):
     """Service status as recorded in table 'services'."""
 
     # Middleware is initializing
-    MIDDLEWARE_INIT = 'MIDDLEWARE_INIT'
+    CONTROLLER_INIT = 'CONTROLLER_INIT'
 
     # Replica is initializing
     REPLICA_INIT = 'REPLICA_INIT'
@@ -75,7 +75,7 @@ class ServiceStatus(enum.Enum):
 
 
 _SERVICE_STATUS_TO_COLOR = {
-    ServiceStatus.MIDDLEWARE_INIT: colorama.Fore.BLUE,
+    ServiceStatus.CONTROLLER_INIT: colorama.Fore.BLUE,
     ServiceStatus.REPLICA_INIT: colorama.Fore.BLUE,
     ServiceStatus.RUNNING: colorama.Fore.GREEN,
     ServiceStatus.SHUTTING_DOWN: colorama.Fore.YELLOW,

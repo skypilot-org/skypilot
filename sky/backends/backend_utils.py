@@ -2428,16 +2428,16 @@ def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
         service_records = [service_record]
     # TODO(tian): Make it run in parallel.
     for record in service_records:
-        middleware_cluster_name = record['middleware_cluster_name']
+        controller_cluster_name = record['controller_cluster_name']
         endpoint = record['endpoint']
         if not endpoint:
             continue
         # TODO(tian): Refactor: store ip and app_port separately.
-        middleware_ip = endpoint.split(':')[0]
+        controller_ip = endpoint.split(':')[0]
         with requests.Session() as session:
             try:
                 resp = session.get(
-                    f'http://{middleware_ip}:{serve_lib.CONTROL_PLANE_PORT}/control_plane/get_replica_nums',
+                    f'http://{controller_ip}:{serve_lib.CONTROL_PLANE_PORT}/control_plane/get_replica_nums',
                     timeout=5)
             except requests.RequestException:
                 pass
@@ -2452,7 +2452,7 @@ def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
                 assert record['name'] == service
                 try:
                     resp = session.get(
-                        f'http://{middleware_ip}:{serve_lib.CONTROL_PLANE_PORT}/control_plane/get_replica_info',
+                        f'http://{controller_ip}:{serve_lib.CONTROL_PLANE_PORT}/control_plane/get_replica_info',
                         timeout=5)
                 except requests.RequestException:
                     pass
