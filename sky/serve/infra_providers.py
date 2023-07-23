@@ -79,6 +79,7 @@ class DummyInfraProvider(InfraProvider):
 
 
 class SkyPilotInfraProvider(InfraProvider):
+
     def __init__(self, task_yaml_path: str, cluster_name_prefix: str):
         self.task_yaml_path = task_yaml_path
         self.cluster_name_prefix = cluster_name_prefix + '-'
@@ -130,8 +131,10 @@ class SkyPilotInfraProvider(InfraProvider):
             if self.cluster_name_prefix in name:
                 infos.append({
                     'name': name,
-                    'handle': base64.b64encode(pickle.dumps(cluster['handle'])).decode('utf-8'),
-                    'status': base64.b64encode(pickle.dumps(cluster['status'])).decode('utf-8'),
+                    'handle': base64.b64encode(pickle.dumps(cluster['handle'])
+                                              ).decode('utf-8'),
+                    'status': base64.b64encode(pickle.dumps(cluster['status'])
+                                              ).decode('utf-8'),
                 })
         return infos
 

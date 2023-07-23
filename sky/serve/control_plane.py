@@ -24,13 +24,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class Controller:
+class ControlPlane:
 
     def __init__(self,
+                 port: int,
                  infra_provider: InfraProvider,
                  load_balancer: LoadBalancer,
-                 autoscaler: Optional[Autoscaler] = None,
-                 port: int = 8082):
+                 autoscaler: Optional[Autoscaler] = None):
         self.port = port
         self.infra_provider = infra_provider
         self.load_balancer = load_balancer
@@ -47,7 +47,7 @@ class Controller:
     # TODO(tian): Authentication!!!
     def run(self):
 
-        @self.app.post('/controller/increment_request_count')
+        @self.app.post('/control_plane/increment_request_count')
         async def increment_request_count(request: Request):
             # await request
             request_data = await request.json()
@@ -57,15 +57,15 @@ class Controller:
             self.load_balancer.increment_request_count(count=count)
             return {'message': 'Success'}
 
-        @self.app.get('/controller/get_server_ips')
+        @self.app.get('/control_plane/get_server_ips')
         def get_server_ips():
             return {'server_ips': list(self.load_balancer.servers_queue)}
 
-        @self.app.get('/controller/get_replica_info')
+        @self.app.get('/control_plane/get_replica_info')
         def get_replica_info():
             return {'replica_info': self.infra_provider.get_replica_info()}
 
-        @self.app.get('/controller/get_replica_nums')
+        @self.app.get('/control_plane/get_replica_nums')
         def get_replica_nums():
             return {
                 'num_healthy_replicas': len(self.load_balancer.available_servers
@@ -91,7 +91,7 @@ class Controller:
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='SkyServe Server')
+    parser = argparse.ArgumentParser(description='SkyServe Control Plane')
     parser.add_argument('--service-name',
                         type=str,
                         help='Name of the service',
@@ -103,7 +103,7 @@ if __name__ == '__main__':
     parser.add_argument('--port',
                         '-p',
                         type=int,
-                        help='Port to run the controller',
+                        help='Port to run the control plane',
                         required=True)
     args = parser.parse_args()
 
@@ -140,8 +140,7 @@ if __name__ == '__main__':
         lower_threshold=service_spec.qps_lower_threshold,
         cooldown=60)
 
-    # ======= Controller =========
-    # Create a controller object and run it.
-    controller = Controller(infra_provider, load_balancer, autoscaler,
-                            args.port)
-    controller.run()
+    # ======= ControlPlane =========
+    # Create a control plane object and run it.
+    control_plane = ControlPlane(args.port, infra_provider, load_balancer, autoscaler)
+    control_plane.run()

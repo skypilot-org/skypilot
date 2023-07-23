@@ -996,7 +996,7 @@ def serve_up(
         common_utils.dump_yaml(f.name, original)
         remote_task_yaml_path = f'{serve.SERVICE_YAML_PREFIX}/service_{name}.yaml'
         vars_to_fill = {
-            'ports': [app_port, serve.CONTROLLER_PORT],
+            'ports': [app_port, serve.CONTROL_PLANE_PORT],
             'workdir': workdir_abs_path,
             'remote_task_yaml_path': remote_task_yaml_path,
             'local_task_yaml_path': f.name,
@@ -1028,15 +1028,17 @@ def serve_up(
             status_lib.ServiceStatus.REPLICA_INIT, 0, 0, 0, policy,
             requested_resources)
 
-        print(f'{colorama.Fore.YELLOW}'
-              'Launching controller process on middleware...'
-              f'{colorama.Style.RESET_ALL}', end='')
+        print(
+            f'{colorama.Fore.YELLOW}'
+            'Launching control plane process on middleware...'
+            f'{colorama.Style.RESET_ALL}',
+            end='')
         _execute(
             entrypoint=sky.Task(
-                name='run-middleware-controller',
-                run='python -m sky.serve.controller --service-name '
+                name='run-control-plane',
+                run='python -m sky.serve.control_plane --service-name '
                 f'{name} --task-yaml {remote_task_yaml_path} '
-                f'--port {serve.CONTROLLER_PORT}'),
+                f'--port {serve.CONTROL_PLANE_PORT}'),
             stream_logs=False,
             handle=handle,
             stages=[Stage.EXEC],
@@ -1044,15 +1046,18 @@ def serve_up(
             detach_run=True,
         )
 
-        print(f'{colorama.Fore.YELLOW}'
-              'Launching redirector process on middleware...'
-              f'{colorama.Style.RESET_ALL}', end='')
+        print(
+            f'{colorama.Fore.YELLOW}'
+            'Launching redirector process on middleware...'
+            f'{colorama.Style.RESET_ALL}',
+            end='')
         _execute(
             entrypoint=sky.Task(
-                name='run-middleware-redirector',
+                name='run-redirector',
                 run='python -m sky.serve.redirector --task-yaml '
                 f'{remote_task_yaml_path} --port {app_port} '
-                f'--controller-addr http://0.0.0.0:{serve.CONTROLLER_PORT}'),
+                f'--control-plane-addr http://0.0.0.0:{serve.CONTROL_PLANE_PORT}'
+            ),
             stream_logs=False,
             handle=handle,
             stages=[Stage.EXEC],
@@ -1090,7 +1095,7 @@ def serve_down(name: str):
                                          status_lib.ServiceStatus.SHUTTING_DOWN)
 
     print(f'{colorama.Fore.YELLOW}'
-          f'Stopping controller and redirector processes on middleware...'
+          f'Stopping control plane and redirector processes on middleware...'
           f'{colorama.Style.RESET_ALL}')
     core.cancel(middleware_cluster_name, all=True)
 

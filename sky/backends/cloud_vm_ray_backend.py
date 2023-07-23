@@ -2927,7 +2927,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{backend_utils.BOLD}sky spot dashboard'
                     f'{backend_utils.RESET_BOLD}')
             elif not name.startswith(serve_lib.MIDDLEWARE_PREFIX):
-                # Skip logging for submit controller & redirector jobs
+                # Skip logging for submit control plane & redirector jobs
                 # to middleware
                 logger.info(f'{fore.CYAN}Job ID: '
                             f'{style.BRIGHT}{job_id}{style.RESET_ALL}'

@@ -3940,10 +3940,12 @@ def serve_status(all: bool, service: Optional[str]):
         assert len(service_records) == 1, service_records
         service_record = service_records[0]
         if 'replica_info' not in service_record:
-            click.secho(f'Failed to refresh status of service: {service}.', fg='red')
+            click.secho(f'Failed to refresh status of service: {service}.',
+                        fg='red')
             return
-        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Replicas of {service}'
-                   f'{colorama.Style.RESET_ALL}')
+        click.echo(
+            f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Replicas of {service}'
+            f'{colorama.Style.RESET_ALL}')
         status_utils.show_replica_table(service_record['replica_info'], all)
 
 

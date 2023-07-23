@@ -2437,11 +2437,10 @@ def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
         with requests.Session() as session:
             try:
                 resp = session.get(
-                    f'http://{middleware_ip}:{serve_lib.CONTROLLER_PORT}/controller/get_replica_nums',
+                    f'http://{middleware_ip}:{serve_lib.CONTROL_PLANE_PORT}/control_plane/get_replica_nums',
                     timeout=5)
             except requests.RequestException:
                 pass
-                # record['status'] = status_lib.ServiceStatus.FAILED
             else:
                 record.update(resp.json())
                 if record['num_healthy_replicas'] > 0:
@@ -2453,15 +2452,17 @@ def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
                 assert record['name'] == service
                 try:
                     resp = session.get(
-                        f'http://{middleware_ip}:{serve_lib.CONTROLLER_PORT}/controller/get_replica_info',
+                        f'http://{middleware_ip}:{serve_lib.CONTROL_PLANE_PORT}/control_plane/get_replica_info',
                         timeout=5)
-                except requests.RequestException as e:
+                except requests.RequestException:
                     pass
                 else:
                     record['replica_info'] = resp.json()['replica_info']
                     for rec in record['replica_info']:
-                        rec['status'] = pickle.loads(base64.b64decode(rec['status']))
-                        rec['handle'] = pickle.loads(base64.b64decode(rec['handle']))
+                        rec['status'] = pickle.loads(
+                            base64.b64decode(rec['status']))
+                        rec['handle'] = pickle.loads(
+                            base64.b64decode(rec['handle']))
     return service_records
 
 
