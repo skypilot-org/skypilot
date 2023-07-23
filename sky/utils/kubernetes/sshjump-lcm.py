@@ -11,59 +11,71 @@ config.load_incluster_config()
 
 v1 = client.CoreV1Api()
 
-# Get the current namespace from the pod service account
-with open("/var/run/secrets/kubernetes.io/serviceaccount/namespace", "r") as f:
-    current_namespace = f.read()
+current_name = os.getenv("MY_POD_NAME")
+current_namespace = os.getenv("MY_POD_NAMESPACE")
 
-# Set the time delta for checking last active pods
-time_delta = datetime.timedelta(minutes=10)
+# In seconds
+alert_threshold = int(os.getenv("ALERT_THRESHOLD", "300"))
+# In seconds
+retly_interval = int(os.getenv("RETRY_INTERVAL", "60"))
 
-# Set delay for each retry
-retry_delta = datetime.timedelta(seconds=60)
-retry_delay = 60  # In seconds
 
-w8time_delata = datetime.timedelta()
+def poll():
+    sys.stdout.write("enter poll()\n")
 
-while True:
-    time.sleep(retry_delay)
+    # Set alert threshold of which during that time no ray pods exist
+    alert_delta = datetime.timedelta(seconds=alert_threshold)
 
-    # List the pods in the current namespace
-    ret = v1.list_namespaced_pod(current_namespace, label_selector="parent=skypilot")
-    if len(ret.items) == 0:
-        sys.stdout.write(f"Active pods not found with label 'parent: skypilot' in namespace: '{current_namespace}'\n")
-        w8time_delata = w8time_delata + retry_delta
-        sys.stdout.write(f"After time increment: {w8time_delata}\n")
-    else:
-        sys.stdout.write(f"Active pods found with label 'parent: skypilot' in namespace: '{current_namespace}'\n")
-        # reset ..
-        w8time_delata = datetime.timedelta()
+    # Set delay for each retry
+    retry_interval_delta = datetime.timedelta(seconds=retly_interval)
 
-    if w8time_delata > time_delta:
-        sys.stdout.write ("it's time to kill myself\n")
-        break
+    # Accumulated wait time to be compared with alert threshold time
+    w8time_delta = datetime.timedelta()
 
-    # time.sleep(retry_delay)
-    #
-    # # Get the current time
-    # now = datetime.datetime.now(pytz.UTC)
-    #
-    # found = False
-    # # List the pods in the current namespace
-    # ret = v1.list_namespaced_pod(current_namespace, label_selector="parent=skypilot")
-    # if len(ret.items) > 0:
-    #     # Calculate the elapsed time since the pod was last active
-    #     elapsed_time = now - i.metadata.creation_timestamp
-    #     # If the pod was active in the last 10 minutes, set found to True
-    #     if elapsed_time < time_delta:
-    #         found = True
-    #         break
-    #
-    # # If no active pods were found with the specified label, exit the script
-    # if not found:
-    #     print("No active pods found with label 'parent: skypilot' in the past 10 minutes. Exiting...")
-    #     exit(1)
-    #
-    # # If pods were found, sleep for the specified delay and then retry
-    # print(f"Active pods found with label 'parent: skypilot' in namespace: '{current_namespace}'. Retrying in {retry_delay} seconds...")
+    while True:
+        time.sleep(retly_interval)
+    
+        # List the pods in the current namespace
+        try:
+            ret = v1.list_namespaced_pod(current_namespace, label_selector="parent=skypilot")
+        except Exception as e:
+            sys.stdout.write(f"[ERROR] exit poll() with error: {e}\n")
+            raise
 
-    # time.sleep(retry_delay)
+        if len(ret.items) == 0:
+            sys.stdout.write(f"NOT FOUND active pods with label 'parent: skypilot' in namespace: '{current_namespace}'\n")
+            w8time_delta = w8time_delta + retry_interval_delta
+            sys.stdout.write(f"w8time_delta after time increment: {w8time_delta}\n")
+        else:
+            sys.stdout.write(f"FOUND active pods with label 'parent: skypilot' in namespace: '{current_namespace}'\n")
+            # reset ..
+            w8time_delta = datetime.timedelta()
+            sys.stdout.write(f"w8time_delta is reset: {w8time_delta}\n")
+    
+        if w8time_delta > alert_delta:
+            sys.stdout.write(f"w8time_delta: {w8time_delta} crossed alert threshold: {alert_delta}. It's time to terminate myself\n")
+            try:
+                v1.delete_namespaced_pod(current_name, current_namespace)
+            except Exception as e:
+                sys.stdout.write(f"[ERROR] exit poll() with error: {e}\n")
+                raise
+
+            sys.stdout.write("exit poll()\n")
+            break
+
+
+def main():
+    sys.stdout.write("enter main()\n")
+    sys.stdout.write(f"*** current_name {current_name}\n")
+    sys.stdout.write(f"*** current_namespace {current_namespace}\n")
+    sys.stdout.write(f"*** alert_threshold {alert_threshold}\n")
+    sys.stdout.write(f"*** retly_interval {retly_interval}\n")
+
+    if not current_name or not current_namespace:
+        raise Exception('[ERROR] One or more environment variables is missing '
+                        'with an actual value.')
+    poll()
+
+
+if __name__ == '__main__':
+    main()

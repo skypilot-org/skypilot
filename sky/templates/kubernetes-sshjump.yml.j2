@@ -26,6 +26,21 @@ pod_spec:
                 postStart:
                     exec:
                         command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && sudo service ssh restart"]
+            env:
+              - name: MY_POD_NAME
+                valueFrom:
+                    fieldRef:
+                        fieldPath: metadata.name
+              - name: MY_POD_NAMESPACE
+                valueFrom:
+                    fieldRef:
+                        fieldPath: metadata.namespace
+              - name: ALERT_THRESHOLD
+                # seconds
+                value: "300"
+              - name: RETRY_INTERVAL
+                # seconds
+                value: "10"
 service_spec:
     apiVersion: v1
     kind: Service
