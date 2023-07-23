@@ -2650,7 +2650,8 @@ class TestStorageWithCredentials:
     @pytest.mark.xdist_group('multiple_bucket_deletion')
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm)
     ])
     def test_multiple_buckets_creation_and_deletion(
             self, tmp_multiple_scratch_storage_obj, store_type):
