@@ -45,7 +45,7 @@ def poll():
         if len(ret.items) == 0:
             sys.stdout.write(f"NOT FOUND active pods with label 'parent: skypilot' in namespace: '{current_namespace}'\n")
             w8time_delta = w8time_delta + retry_interval_delta
-            sys.stdout.write(f"w8time_delta after time increment: {w8time_delta}\n")
+            sys.stdout.write(f"w8time_delta after time increment: {w8time_delta}, alert threshold: {alert_delta}\n")
         else:
             sys.stdout.write(f"FOUND active pods with label 'parent: skypilot' in namespace: '{current_namespace}'\n")
             # reset ..
@@ -55,6 +55,9 @@ def poll():
         if w8time_delta > alert_delta:
             sys.stdout.write(f"w8time_delta: {w8time_delta} crossed alert threshold: {alert_delta}. It's time to terminate myself\n")
             try:
+                # NOTE: according to template all sshjump resources under
+                # same name
+                v1.delete_namespaced_service(current_name, current_namespace)
                 v1.delete_namespaced_pod(current_name, current_namespace)
             except Exception as e:
                 sys.stdout.write(f"[ERROR] exit poll() with error: {e}\n")
