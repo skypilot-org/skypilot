@@ -23,7 +23,8 @@ retly_interval = int(os.getenv("RETRY_INTERVAL", "60"))
 def poll():
     sys.stdout.write("enter poll()\n")
 
-    # Set alert threshold of which during that time no ray pods exist
+    # Set alert threshold. This is the amount of time where no ray pods exist
+    # and this sshjump pod and service will get terminated
     alert_delta = datetime.timedelta(seconds=alert_threshold)
 
     # Set delay for each retry

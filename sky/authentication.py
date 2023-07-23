@@ -422,36 +422,36 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
-                f'SSH Jump ServiceAcount {sshjump_name} already exists in the cluster, using it...')
+                f'SSH Jump ServiceAcount already exists in the cluster, using it...')
         else:
             raise
     else:
         logger.info(
-            f'Creating SSH Jump ServiceAcount {sshjump_name} in the cluster...')
+            f'Creating SSH Jump ServiceAcount in the cluster...')
     # Role
     try:
         kubernetes.auth_api().create_namespaced_role('default', content['role'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
-                f'SSH Jump Role {sshjump_name} already exists in the cluster, using it...')
+                f'SSH Jump Role already exists in the cluster, using it...')
         else:
             raise
     else:
         logger.info(
-            f'Creating SSH Jump Role {sshjump_name} in the cluster...')
+            f'Creating SSH Jump Role in the cluster...')
     # RoleBinding
     try:
         kubernetes.auth_api().create_namespaced_role_binding('default', content['role_binding'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
-                f'SSH Jump RoleBinding {sshjump_name} already exists in the cluster, using it...')
+                f'SSH Jump RoleBinding already exists in the cluster, using it...')
         else:
             raise
     else:
         logger.info(
-            f'Creating SSH Jump RoleBinding {sshjump_name} in the cluster...')
+            f'Creating SSH Jump RoleBinding in the cluster...')
 
     # Pod
     try:

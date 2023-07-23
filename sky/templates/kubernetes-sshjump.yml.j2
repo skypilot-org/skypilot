@@ -6,7 +6,7 @@ pod_spec:
         labels:
             component: {{ name }}
     spec:
-        serviceAccountName: {{ name }}
+        serviceAccountName: sshjump
         volumes:
           - name: secret-volume
             secret:
@@ -37,7 +37,7 @@ pod_spec:
                         fieldPath: metadata.namespace
               - name: ALERT_THRESHOLD
                 # seconds
-                value: "300"
+                value: "600"
               - name: RETRY_INTERVAL
                 # seconds
                 value: "60"
@@ -58,14 +58,12 @@ service_account:
     apiVersion: v1
     kind: ServiceAccount
     metadata:
-        labels:
-            parent: skypilot
-        name: {{ name }}
+        name: sshjump
 role:
     kind: Role
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
-        name: {{ name }}
+        name: sshjump
     rules:
       - apiGroups: [""]
         resources: ["pods", "pods/status", "pods/exec", "services"]
@@ -74,11 +72,11 @@ role_binding:
     apiVersion: rbac.authorization.k8s.io/v1
     kind: RoleBinding
     metadata:
-        name: {{ name }}
+        name: sshjump
     subjects:
     - kind: ServiceAccount
-      name: {{ name }}
+      name: sshjump
     roleRef:
         kind: Role
-        name: {{ name }}
+        name: sshjump
         apiGroup: rbac.authorization.k8s.io
