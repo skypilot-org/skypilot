@@ -416,6 +416,44 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     content = yaml.safe_load(_content)
 
+    # ServiceAccount
+    try:
+        kubernetes.core_api().create_namespaced_service_account('default', content['service_account'])
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.warning(
+                f'SSH Jump ServiceAcount {sshjump_name} already exists in the cluster, using it...')
+        else:
+            raise
+    else:
+        logger.info(
+            f'Creating SSH Jump ServiceAcount {sshjump_name} in the cluster...')
+    # Role
+    try:
+        kubernetes.auth_api().create_namespaced_role('default', content['role'])
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.warning(
+                f'SSH Jump Role {sshjump_name} already exists in the cluster, using it...')
+        else:
+            raise
+    else:
+        logger.info(
+            f'Creating SSH Jump Role {sshjump_name} in the cluster...')
+    # RoleBinding
+    try:
+        kubernetes.auth_api().create_namespaced_role_binding('default', content['role_binding'])
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.warning(
+                f'SSH Jump RoleBinding {sshjump_name} already exists in the cluster, using it...')
+        else:
+            raise
+    else:
+        logger.info(
+            f'Creating SSH Jump RoleBinding {sshjump_name} in the cluster...')
+
+    # Pod
     try:
         kubernetes.core_api().create_namespaced_pod('default', content['pod_spec'])
     except kubernetes.api_exception() as e:
@@ -427,6 +465,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     else:
         logger.info(
             f'Creating SSH Jump Host {sshjump_name} in the cluster...')
+    # Service
     try:
         kubernetes.core_api().create_namespaced_service('default', content['service_spec'])
     except kubernetes.api_exception() as e:
