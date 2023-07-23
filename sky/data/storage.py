@@ -1511,7 +1511,7 @@ class GcsStore(AbstractStore):
             sync_format = '|'.join(file_names)
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             sync_command = (f'{alias_gen}; {gsutil_alias} '
-                            f'rsync -x \'^(?!{sync_format}$).*\' '
+                            f'rsync -e -x \'^(?!{sync_format}$).*\' '
                             f'{base_dir_path} gs://{self.name}')
             return sync_command
 
@@ -1519,7 +1519,7 @@ class GcsStore(AbstractStore):
             # we exclude .git directory from the sync
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             sync_command = (f'{alias_gen}; {gsutil_alias} '
-                            f'rsync -r -x \'.git/*\' {src_dir_path} '
+                            f'rsync -e -r -x \'.git/*\' {src_dir_path} '
                             f'gs://{self.name}/{dest_dir_name}')
             return sync_command
 

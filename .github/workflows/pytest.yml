@@ -19,6 +19,7 @@ jobs:
           - tests/test_cli.py
           - tests/test_config.py
           - tests/test_global_user_state.py
+          - tests/test_jobs.py
           - tests/test_list_accelerators.py
           - tests/test_optimizer_dryruns.py
           - tests/test_optimizer_random_dag.py

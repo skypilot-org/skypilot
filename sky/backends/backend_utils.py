@@ -63,7 +63,8 @@ logger = sky_logging.init_logger(__name__)
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
-IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
+# Exclude subnet mask from IP address regex.
+IP_ADDR_REGEX = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?!/\d{1,2})\b'
 SKY_REMOTE_PATH = '~/.sky/wheels'
 SKY_USER_FILE_PATH = '~/.sky/generated'
 
@@ -937,6 +938,10 @@ def write_cluster_config(
                 # GCP only:
                 'gcp_project_id': gcp_project_id,
 
+                # Conda setup
+                'conda_installation_commands':
+                    constants.CONDA_INSTALLATION_COMMANDS,
+
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
                 'ray_port': constants.SKY_REMOTE_RAY_PORT,
@@ -1637,6 +1642,9 @@ def check_owner_identity(cluster_name: str) -> None:
         for i, (owner,
                 current) in enumerate(zip(owner_identity,
                                           current_user_identity)):
+            # Clean up the owner identiy for the backslash and newlines, caused
+            # by the cloud CLI output, e.g. gcloud.
+            owner = owner.replace('\n', '').replace('\\', '')
             if owner == current:
                 if i != 0:
                     logger.warning(
@@ -2047,7 +2055,7 @@ def _update_cluster_status(
 def _refresh_cluster_record(
         cluster_name: str,
         *,
-        force_refresh: bool = False,
+        force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
         acquire_per_cluster_status_lock: bool = True
 ) -> Optional[Dict[str, Any]]:
     """Refresh the cluster, and return the possibly updated record.
@@ -2058,8 +2066,10 @@ def _refresh_cluster_record(
 
     Args:
         cluster_name: The name of the cluster.
-        force_refresh: if True, refresh the cluster status even if it may be
-            skipped. Otherwise (the default), only refresh if the cluster:
+        force_refresh_statuses: if specified, refresh the cluster if it has one of
+            the specified statuses. Additionally, clusters satisfying the
+            following conditions will always be refreshed no matter the
+            argument is specified or not:
                 1. is a spot cluster, or
                 2. is a non-spot cluster, is not STOPPED, and autostop is set.
         acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
@@ -2089,7 +2099,9 @@ def _refresh_cluster_record(
         use_spot = handle.launched_resources.use_spot
         has_autostop = (record['status'] != status_lib.ClusterStatus.STOPPED and
                         record['autostop'] >= 0)
-        if force_refresh or has_autostop or use_spot:
+        force_refresh_for_cluster = (force_refresh_statuses is not None and
+                                     record['status'] in force_refresh_statuses)
+        if force_refresh_for_cluster or has_autostop or use_spot:
             record = _update_cluster_status(
                 cluster_name,
                 acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
@@ -2100,7 +2112,7 @@ def _refresh_cluster_record(
 def refresh_cluster_status_handle(
     cluster_name: str,
     *,
-    force_refresh: bool = False,
+    force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
     acquire_per_cluster_status_lock: bool = True,
 ) -> Tuple[Optional[status_lib.ClusterStatus],
            Optional[backends.ResourceHandle]]:
@@ -2112,7 +2124,7 @@ def refresh_cluster_status_handle(
     """
     record = _refresh_cluster_record(
         cluster_name,
-        force_refresh=force_refresh,
+        force_refresh_statuses=force_refresh_statuses,
         acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
     if record is None:
         return None, None
@@ -2128,6 +2140,7 @@ def check_cluster_available(
     *,
     operation: str,
     check_cloud_vm_ray_backend: Literal[True] = True,
+    dryrun: bool = ...,
 ) -> 'cloud_vm_ray_backend.CloudVmRayResourceHandle':
     ...
 
@@ -2138,6 +2151,7 @@ def check_cluster_available(
     *,
     operation: str,
     check_cloud_vm_ray_backend: Literal[False],
+    dryrun: bool = ...,
 ) -> backends.ResourceHandle:
     ...
 
@@ -2147,6 +2161,7 @@ def check_cluster_available(
     *,
     operation: str,
     check_cloud_vm_ray_backend: bool = True,
+    dryrun: bool = False,
 ) -> backends.ResourceHandle:
     """Check if the cluster is available.
 
@@ -2160,6 +2175,10 @@ def check_cluster_available(
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
     """
+    if dryrun:
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        assert record is not None, cluster_name
+        return record['handle']
     try:
         cluster_status, handle = refresh_cluster_status_handle(cluster_name)
     except exceptions.ClusterStatusFetchingError as e:
@@ -2331,7 +2350,7 @@ def get_clusters(
         try:
             record = _refresh_cluster_record(
                 cluster_name,
-                force_refresh=True,
+                force_refresh_statuses=set(status_lib.ClusterStatus),
                 acquire_per_cluster_status_lock=True)
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.CloudUserIdentityError,
@@ -2580,3 +2599,24 @@ def run_command_and_handle_ssh_failure(runner: command_runner.SSHCommandRunner,
                                        failure_message,
                                        stderr=stderr)
     return stdout
+
+
+def check_rsync_installed() -> None:
+    """Checks if rsync is installed.
+
+    Raises:
+        RuntimeError: if rsync is not installed in the machine.
+    """
+    try:
+        subprocess.run('rsync --version',
+                       shell=True,
+                       check=True,
+                       stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                '`rsync` is required for provisioning and'
+                ' it is not installed. For Debian/Ubuntu system, '
+                'install it with:\n'
+                '  $ sudo apt install rsync') from None

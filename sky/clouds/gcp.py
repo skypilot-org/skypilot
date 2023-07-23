@@ -2,6 +2,7 @@
 import functools
 import json
 import os
+import re
 import subprocess
 import time
 import typing
@@ -113,6 +114,33 @@ class GCP(clouds.Cloud):
     # suffix '-worker'. Here we do not distinguish these cases and take the
     # lower limit.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 35
+
+    _INDENT_PREFIX = '    '
+    _DEPENDENCY_HINT = (
+        'GCP tools are not installed. Run the following commands:\n'
+        # Install the Google Cloud SDK:
+        f'{_INDENT_PREFIX}  $ pip install google-api-python-client\n'
+        f'{_INDENT_PREFIX}  $ conda install -c conda-forge '
+        'google-cloud-sdk -y')
+
+    _CREDENTIAL_HINT = (
+        'Run the following commands:\n'
+        # This authenticates the CLI to make `gsutil` work:
+        f'{_INDENT_PREFIX}  $ gcloud init\n'
+        # This will generate
+        # ~/.config/gcloud/application_default_credentials.json.
+        f'{_INDENT_PREFIX}  $ gcloud auth application-default login\n'
+        f'{_INDENT_PREFIX}For more info: '
+        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
+    )
+    _APPLICATION_CREDENTIAL_HINT = (
+        'Run the following commands:\n'
+        f'{_INDENT_PREFIX}  $ gcloud auth application-default login\n'
+        f'{_INDENT_PREFIX}Or set the environment variable GOOGLE_APPLICATION_CREDENTIALS '
+        'to the path of your service account key file.\n'
+        f'{_INDENT_PREFIX}For more info: '
+        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
+    )
 
     @classmethod
     def _cloud_unsupported_features(
@@ -243,8 +271,13 @@ class GCP(clouds.Cloud):
     def is_same_cloud(self, other):
         return isinstance(other, GCP)
 
+    @classmethod
+    def _is_machine_image(cls, image_id: str) -> bool:
+        find_machine = re.match(r'projects/.*/.*/machineImages/.*', image_id)
+        return find_machine is not None
+
     def get_image_size(self, image_id: str, region: Optional[str]) -> float:
-        del region  # unused
+        del region  # Unused.
         if image_id.startswith('skypilot:'):
             return DEFAULT_GCP_IMAGE_GB
         try:
@@ -260,9 +293,22 @@ class GCP(clouds.Cloud):
                 raise ValueError(f'Image {image_id!r} not found in GCP.')
             project = image_attrs[1]
             image_name = image_attrs[-1]
-            image_infos = compute.images().get(project=project,
-                                               image=image_name).execute()
-            return float(image_infos['diskSizeGb'])
+            # We support both GCP's Machine Images and Custom Images, both
+            # of which are specified with the image_id field. We will
+            # distinguish them by checking if the image_id contains
+            # 'machineImages'.
+            if self._is_machine_image(image_id):
+                image_infos = compute.machineImages().get(
+                    project=project, machineImage=image_name).execute()
+                # The VM launching in a different region than the machine
+                # image is supported by GCP, so we do not need to check the
+                # storageLocations.
+                return float(
+                    image_infos['instanceProperties']['disks'][0]['diskSizeGb'])
+            else:
+                image_infos = compute.images().get(project=project,
+                                                   image=image_name).execute()
+                return float(image_infos['diskSizeGb'])
         except gcp.http_error_exception() as e:
             if e.resp.status == 403:
                 with ux_utils.print_exception_no_traceback():
@@ -331,8 +377,8 @@ class GCP(clouds.Cloud):
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
-                if acc == 'A100-80GB':
-                    # A100-80GB has a different name pattern.
+                if acc in ('A100-80GB', 'L4'):
+                    # A100-80GB and L4 have a different name pattern.
                     resources_vars['gpu'] = 'nvidia-{}'.format(acc.lower())
                 else:
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
@@ -343,6 +389,9 @@ class GCP(clouds.Cloud):
                     # versions of CUDA as noted below.
                     # CUDA driver version 470.57.02, CUDA Library 11.4
                     image_id = 'skypilot:k80-debian-10'
+                elif acc == 'L4':
+                    # CUDA driver version 525.105.17, CUDA Library 11.8
+                    image_id = 'skypilot:cuda118-debian-11'
                 else:
                     # Though the image is called cu113, it actually has later
                     # versions of CUDA as noted below.
@@ -362,12 +411,17 @@ class GCP(clouds.Cloud):
 
         assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
+        resources_vars['machine_image'] = None
+
+        if self._is_machine_image(image_id):
+            resources_vars['machine_image'] = image_id
+            resources_vars['image_id'] = None
 
         resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier)
 
         return resources_vars
 
-    def get_feasible_launchable_resources(self, resources):
+    def _get_feasible_launchable_resources(self, resources):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             return ([resources], [])
@@ -503,6 +557,17 @@ class GCP(clouds.Cloud):
             # Check google-api-python-client installation.
             import googleapiclient
 
+            # Check the installation of google-cloud-sdk.
+            _run_output('gcloud --version')
+        except (ImportError, subprocess.CalledProcessError) as e:
+            return False, (
+                f'{cls._DEPENDENCY_HINT}\n'
+                f'{cls._INDENT_PREFIX}Credentials may also need to be set. '
+                f'{cls._CREDENTIAL_HINT}\n'
+                f'{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+
+        try:
             # These files are required because they will be synced to remote
             # VMs for `gsutil` to access private storage buckets.
             # `auth.default()` does not guarantee these files exist.
@@ -512,37 +577,38 @@ class GCP(clouds.Cloud):
             ]:
                 if not os.path.isfile(os.path.expanduser(file)):
                     raise FileNotFoundError(file)
+        except FileNotFoundError as e:
+            return False, (
+                f'Credentails are not set. '
+                f'{cls._CREDENTIAL_HINT}\n'
+                f'{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
+        try:
             cls._find_application_key_path()
+        except FileNotFoundError as e:
+            return False, (
+                f'Application credentials are not set. '
+                f'{cls._APPLICATION_CREDENTIAL_HINT}\n'
+                f'{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
-            # Check the installation of google-cloud-sdk.
-            _run_output('gcloud --version')
-
+        try:
             # Check if application default credentials are set.
             project_id = cls.get_project_id()
 
             # Check if the user is activated.
             identity = cls.get_current_user_identity()
         except (auth.exceptions.DefaultCredentialsError,
-                subprocess.CalledProcessError,
-                exceptions.CloudUserIdentityError, FileNotFoundError,
-                ImportError) as e:
+                exceptions.CloudUserIdentityError) as e:
             # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
-                'GCP tools are not installed or credentials are not set. '
-                'Run the following commands:\n    '
-                # Install the Google Cloud SDK:
-                '  $ pip install google-api-python-client\n    '
-                '  $ conda install -c conda-forge google-cloud-sdk -y\n    '
-                # This authenticates the CLI to make `gsutil` work:
-                '  $ gcloud init\n    '
-                # This will generate
-                # ~/.config/gcloud/application_default_credentials.json.
-                '  $ gcloud auth application-default login\n    '
-                'For more info: '
-                'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
-                f'\nDetails: {common_utils.format_exception(e, use_bracket=True)}'
-            )
+                'Getting project ID or user identity failed. You can debug '
+                'with `gcloud auth list`. To fix this, '
+                f'{cls._CREDENTIAL_HINT[0].lower()}'
+                f'{cls._CREDENTIAL_HINT[1:]}\n'
+                f'{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
         # Check APIs.
         apis = (
@@ -654,6 +720,7 @@ class GCP(clouds.Cloud):
         try:
             account = _run_output('gcloud auth list --filter=status:ACTIVE '
                                   '--format="value(account)"')
+            account = account.strip()
         except subprocess.CalledProcessError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
@@ -680,6 +747,13 @@ class GCP(clouds.Cloud):
                     f'{common_utils.format_exception(e, use_bracket=True)}'
                 ) from e
         return [f'{account} [project_id={project_id}]']
+
+    @classmethod
+    def get_current_user_identity_str(cls) -> Optional[str]:
+        user_identity = cls.get_current_user_identity()
+        if user_identity is None:
+            return None
+        return user_identity[0].replace('\n', '')
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
@@ -719,18 +793,12 @@ class GCP(clouds.Cloud):
         return project_id
 
     @staticmethod
-    def check_host_accelerator_compatibility(
-            instance_type: str, accelerators: Optional[Dict[str, int]]) -> None:
-        service_catalog.check_host_accelerator_compatibility(
-            instance_type, accelerators, 'gcp')
-
-    @staticmethod
-    def check_accelerator_attachable_to_host(
-            instance_type: str,
-            accelerators: Optional[Dict[str, int]],
-            zone: Optional[str] = None) -> None:
+    def _check_instance_type_accelerators_combination(
+            resources: 'resources.Resources') -> None:
+        assert resources.is_launchable(), resources
         service_catalog.check_accelerator_attachable_to_host(
-            instance_type, accelerators, zone, 'gcp')
+            resources.instance_type, resources.accelerators, resources.zone,
+            'gcp')
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
@@ -750,6 +818,64 @@ class GCP(clouds.Cloud):
     @classmethod
     def _label_filter_str(cls, tag_filters: Dict[str, str]) -> str:
         return ' '.join(f'labels.{k}={v}' for k, v in tag_filters.items())
+
+    @classmethod
+    def check_quota_available(cls, resources: 'resources.Resources') -> bool:
+        """Check if GCP quota is available based on `resources`.
+
+        GCP-specific implementation of check_quota_available. The function works by
+        matching the `accelerator` to the a corresponding GCP keyword, and then using
+        the GCP CLI commands to query for the specific quota (the `accelerator` as
+        defined by `resources`).
+
+        Returns:
+            False if the quota is found to be zero, and True otherwise.
+        Raises:
+            CalledProcessError: error with the GCP CLI command.
+        """
+
+        if not resources.accelerators:
+            # TODO(hriday): We currently only support checking quotas for GPUs.
+            # For CPU-only instances, we need to try provisioning to check quotas.
+            return True
+
+        accelerator = list(resources.accelerators.keys())[0]
+        use_spot = resources.use_spot
+        region = resources.region
+
+        from sky.clouds.service_catalog import gcp_catalog  # pylint: disable=import-outside-toplevel
+
+        quota_code = gcp_catalog.get_quota_code(accelerator, use_spot)
+
+        if quota_code is None:
+            # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
+            return True
+
+        command = f'gcloud compute regions describe {region} |grep -B 1 "{quota_code}" | awk \'/limit/ {{print; exit}}\''
+        try:
+            proc = subprocess_utils.run(cmd=command,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE)
+
+        except subprocess.CalledProcessError as e:
+            logger.warning(f'Quota check command failed with error: '
+                           f'{e.stderr.decode()}')
+            return True
+
+        # Extract quota from output
+        # Example output:  "- limit: 16.0"
+        out = proc.stdout.decode()
+        try:
+            quota = int(float(out.split('limit:')[-1].strip()))
+        except (ValueError, IndexError, AttributeError) as e:
+            logger.warning('Parsing the subprocess output failed '
+                           f'with error: {e}')
+            return True
+
+        if quota == 0:
+            return False
+        # Quota found to be greater than zero, try provisioning
+        return True
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],

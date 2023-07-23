@@ -46,6 +46,9 @@ available_node_types:
   {%- endif %}
 {%- else %}
       machineType: {{instance_type}}
+    {%- if machine_image is not none %}
+      sourceMachineImage: {{machine_image}}
+    {%- endif %}
       disks:
         - boot: true
           autoDelete: true
@@ -53,14 +56,23 @@ available_node_types:
           initializeParams:
             diskSizeGb: {{disk_size}}
             # See https://cloud.google.com/deep-learning-vm/docs/images
+          {%- if machine_image is none %}
             sourceImage: {{image_id}}
+          {%- endif %}
             diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
   {%- if gpu is not none %}
       guestAccelerators:
         - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
           acceleratorCount: {{gpu_count}}
+  {%- endif %}
       metadata:
         items:
+          - key: ssh-keys
+            # After replacing the variables, this will become username:ssh_public_key_content.
+            # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
+            value: |
+              skypilot:ssh_user:skypilot:ssh_public_key_content
+  {%- if gpu is not none %}
           - key: install-nvidia-driver
             value: "True"
   {%- endif %}
@@ -89,6 +101,9 @@ available_node_types:
     {%- endif %}
   {%- else %}
       machineType: {{instance_type}}
+    {%- if machine_image is not none %}
+      sourceMachineImage: {{machine_image}}
+    {%- endif %}
       disks:
         - boot: true
           autoDelete: true
@@ -96,14 +111,21 @@ available_node_types:
           initializeParams:
             diskSizeGb: {{disk_size}}
             # See https://cloud.google.com/deep-learning-vm/docs/images
+          {%- if machine_image is none %}
             sourceImage: {{image_id}}
+          {%- endif %}
             diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
     {%- if gpu is not none %}
       guestAccelerators:
         - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
           acceleratorCount: {{gpu_count}}
+    {%- endif %}
       metadata:
         items:
+          - key: ssh-keys
+            value: |
+              skypilot:ssh_user:skypilot:ssh_public_key_content
+    {%- if gpu is not none %}
           - key: install-nvidia-driver
             value: "True"
     {%- endif %}
@@ -142,7 +164,6 @@ initialization_commands: []
 setup_commands:
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Line 'mkdir -p ..': Create ~/.ssh/config file in case the file does not exist in the custom image.
-  # Line 'pip3 --v ..': Make sure python3 & pip3 are available on this image.
   # Line 'which conda ..': some images (TPU VM) do not install conda by
   # default. 'source ~/.bashrc' is needed so conda takes effect for the next
   # commands.
@@ -161,10 +182,9 @@ setup_commands:
     sudo pkill -9 apt-get;
     sudo dpkg --configure --force-overwrite -a;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
-    pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
+    {{ conda_installation_commands }}
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
-    which conda > /dev/null 2>&1 || (wget -nc https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b && eval "$(/home/gcpuser/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true);
     source ~/.bashrc;
   {%- if tpu_vm %}
     test -f /home/gcpuser/miniconda3/etc/profile.d/conda.sh && source /home/gcpuser/miniconda3/etc/profile.d/conda.sh && conda activate base || true;

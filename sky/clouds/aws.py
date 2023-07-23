@@ -360,8 +360,8 @@ class AWS(clouds.Cloud):
             **AWS._get_disk_specs(r.disk_tier)
         }
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
+    def _get_feasible_launchable_resources(
+            self, resources: 'resources_lib.Resources'):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
@@ -622,6 +622,14 @@ class AWS(clouds.Cloud):
                 ) from None
         return user_ids
 
+    @classmethod
+    def get_current_user_identity_str(cls) -> Optional[str]:
+        user_identity = cls.get_current_user_identity()
+        if user_identity is None:
+            return None
+        identity_str = f'{user_identity[0]} [account={user_identity[1]}]'
+        return identity_str
+
     def get_credential_file_mounts(self) -> Dict[str, str]:
         # The credentials file should not be uploaded if the user identity is
         # not SHARED_CREDENTIALS_FILE, since we cannot be sure if the currently
@@ -690,14 +698,14 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def check_quota_available(cls,
-                              region: str,
-                              instance_type: str,
-                              use_spot: bool = False) -> bool:
-        """Check if AWS quota is available for `instance_type` in `region`.
+                              resources: 'resources_lib.Resources') -> bool:
+        """Check if AWS quota is available based on `resources`.
 
-        AWS-specific implementation of check_quota_available. The function works by
-        matching the instance_type to the corresponding AWS quota code, and then using
-        the boto3 Python API to query the region for the specific quota code.
+        AWS-specific implementation of check_quota_available. The function
+        works by matching the `instance_type` to the corresponding AWS quota
+        code, and then using the boto3 Python API to query the `region` for
+        the specific quota code (the `instance_type` and `region` as defined
+        by `resources`).
 
         Returns:
             False if the quota is found to be zero, and True otherwise.
@@ -705,6 +713,10 @@ class AWS(clouds.Cloud):
             ImportError: if the dependencies for AWS are not able to be installed.
             botocore.exceptions.ClientError: error in Boto3 client request.
         """
+
+        instance_type = resources.instance_type
+        region = resources.region
+        use_spot = resources.use_spot
 
         from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
 

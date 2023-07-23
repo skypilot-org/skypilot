@@ -61,6 +61,9 @@ class Azure(clouds.Cloud):
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
         return {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {cls._REPR}.',
+            # TODO(zhwu): our azure subscription offer ID does not support spot.
+            # Need to support it.
+            clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {cls._REPR}.',
         }
 
     @classmethod
@@ -248,55 +251,60 @@ class Azure(clouds.Cloud):
             'disk_tier': Azure._get_disk_type(r.disk_tier)
         }
 
-    def get_feasible_launchable_resources(self, resources):
+    def _get_feasible_launchable_resources(self, resources):
 
-        def failover_disk_tier(instance_type: str,
-                               disk_tier: Optional[str]) -> Optional[str]:
+        def failover_disk_tier(
+                instance_type: str,
+                disk_tier: Optional[str]) -> Tuple[bool, Optional[str]]:
             """Figure out the actual disk tier to be used
 
             Check the disk_tier specified by the user with the instance type to
-            be used. If not valid, return None.
+            be used. If not valid, return False.
             When the disk_tier is not specified, failover through the possible
             disk tiers.
 
             Returns:
-                The actual disk tier to be used. If None, the specified
+                A tuple of a boolean value and an optional string to represent the
+                instance_type to use. If the boolean value is False, the specified
                 configuration is not a valid combination, and should not be used
                 for launching a VM.
             """
             if disk_tier is not None:
                 ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
-                return disk_tier if ok else None
+                return (True, disk_tier) if ok else (False, None)
             disk_tier = clouds.Cloud._DEFAULT_DISK_TIER
             all_tiers = {'high', 'medium', 'low'}
             while not Azure.check_disk_tier(instance_type, disk_tier)[0]:
                 all_tiers.remove(disk_tier)
                 if not all_tiers:
                     # No available disk_tier found the specified instance_type
-                    return None
+                    return (False, None)
                 disk_tier = list(all_tiers)[0]
-            return disk_tier
+            if disk_tier != clouds.Cloud._DEFAULT_DISK_TIER:
+                return True, disk_tier
+            else:
+                return True, None
 
-        if resources.use_spot:
-            # TODO(zhwu): our azure subscription offer ID does not support spot.
-            # Need to support it.
-            return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
-            # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
+            ok, disk_tier = failover_disk_tier(resources.instance_type,
+                                               resources.disk_tier)
+            if not ok:
+                return ([], [])
+            # Treat Resources(Azure, Standard_NC4as_T4_v3, T4) as
+            # Resources(Azure, Standard_NC4as_T4_v3).
             resources = resources.copy(
                 accelerators=None,
-                disk_tier=failover_disk_tier(resources.instance_type,
-                                             resources.disk_tier),
+                disk_tier=disk_tier,
             )
             return ([resources], [])
 
         def _make(instance_list):
             resource_list = []
             for instance_type in instance_list:
-                disk_tier = failover_disk_tier(instance_type,
-                                               resources.disk_tier)
-                if not disk_tier:
+                ok, disk_tier = failover_disk_tier(instance_type,
+                                                   resources.disk_tier)
+                if not ok:
                     continue
                 r = resources.copy(
                     cloud=Azure(),
@@ -438,6 +446,13 @@ class Azure(clouds.Cloud):
                 raise exceptions.CloudUserIdentityError(
                     'Failed to get Azure project ID.') from e
         return [f'{account_email} [subscription_id={project_id}]']
+
+    @classmethod
+    def get_current_user_identity_str(cls) -> Optional[str]:
+        user_identity = cls.get_current_user_identity()
+        if user_identity is None:
+            return None
+        return user_identity[0]
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
