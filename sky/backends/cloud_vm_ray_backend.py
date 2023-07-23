@@ -640,7 +640,6 @@ class RetryingVmProvisioner(object):
         self._dag = dag
         self._optimize_target = optimize_target
         self._requested_features = requested_features
-        self.granted_features = None
         self._local_wheel_path = local_wheel_path
         self._wheel_hash = wheel_hash
 
@@ -2018,9 +2017,15 @@ class RetryingVmProvisioner(object):
                 else:
                     cloud_user = to_provision.cloud.get_current_user_identity()
                 # Skip if to_provision.cloud does not support requested features
-                self.granted_features = to_provision.cloud.grant_features(
+                granted_features = to_provision.cloud.grant_features(
                     self._requested_features,
                     ExcludableFeatureCheckConfig(cluster_name=cluster_name))
+
+                if self._requested_features != granted_features:
+                    logger.info(
+                        f'{colorama.Fore.CYAN}The following features will be skipped since they are not supported by {to_provision.cloud.__class__.__name__} and were deemed optional : '
+                        f'{", ".join(map(lambda x: x.value, self._requested_features - granted_features))}{style.RESET_ALL}'
+                    )
 
                 config_dict = self._retry_zones(
                     to_provision,
@@ -2405,8 +2410,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._dag = None
         self._optimize_target = None
         self._requested_features = set()
-        self._granted_features: Optional[Set[
-            clouds.CloudImplementationFeatures]] = None
 
         # Command for running the setup script. It is only set when the
         # setup needs to be run outside the self._setup() and as part of
@@ -2574,7 +2577,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         self._requested_features, local_wheel_path, wheel_hash)
                     config_dict = provisioner.provision_with_retries(
                         task, to_provision_config, dryrun, stream_logs)
-                    self._granted_features = provisioner.granted_features
                     break
                 except exceptions.ResourcesUnavailableError as e:
                     # Do not remove the stopped cluster from the global state
@@ -3774,14 +3776,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      idle_minutes_to_autostop: Optional[int],
                      down: bool = False,
                      stream_logs: bool = True) -> None:
-        if (self._granted_features is not None and
-                clouds.CloudImplementationFeatures.AUTOSTOP
-                not in self._granted_features) or (
-                    handle.launched_resources.cloud and
-                    clouds.CloudImplementationFeatures.AUTOSTOP not in handle.
-                    launched_resources.cloud._cloud_unsupported_features()):
+        if (handle.launched_resources.cloud and
+                clouds.CloudImplementationFeatures.AUTOSTOP in
+                handle.launched_resources.cloud._cloud_unsupported_features()):
             logger.info(
-                f'{colorama.Fore.YELLOW}Autostop is not supported for '
+                f'{colorama.Fore.YELLOW}Skipping set_autostop since it is not supported for '
                 f'{handle.get_cluster_name()}.{colorama.Style.RESET_ALL}')
             return
 
