@@ -15,6 +15,19 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 
+class ExcludableFeatureCheckConfig(
+        collections.namedtuple('ExcludableFeatureCheckConfig',
+                               ['cluster_name'])):
+    """Config for excludable feature check."""
+    cluster_name: str
+
+
+class ExcludableFeatureCheckProtocol(typing.Protocol):
+
+    def __call__(self, config: ExcludableFeatureCheckConfig) -> bool:
+        ...
+
+
 class CloudImplementationFeatures(enum.Enum):
     """Features that might not be implemented for all clouds.
 
@@ -92,6 +105,21 @@ class Cloud:
             cloud implementation.
         """
         raise NotImplementedError
+
+    @classmethod
+    def _cloud_excludable_features(
+        cls
+    ) -> Dict[CloudImplementationFeatures, ExcludableFeatureCheckProtocol]:
+        """The features that can be excluded/ignored by the cloud implementation, given their exclusion condition is met.
+
+        This method is used by check_excludable_featurs() to check if the
+        cloud implementation can exclude features if their condition is met.
+
+        Returns:
+            A dict of {feature: condition} for the features excludable by the
+            cloud implementation.
+        """
+        return {}
 
     @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:
@@ -448,6 +476,44 @@ class Cloud:
                 raise exceptions.NotSupportedError(
                     f'The following features are not supported by {cls._REPR}:'
                     '\n\t' + table.get_string().replace('\n', '\n\t'))
+
+    @classmethod
+    def get_excludable_features(
+        cls, requested_features: Set[CloudImplementationFeatures],
+        config: ExcludableFeatureCheckConfig
+    ) -> Set[CloudImplementationFeatures]:
+        """Returns the features that can be excluded/ignored by the cloud implementation, given their exclusion condition is met.
+
+        For instance, Kubernetes Cloud can exclude autostop for spot controller, so
+        Kubernetes.check_excludable_features({
+            CloudImplementationFeatures.AUTOSTOP
+        }) returns {CloudImplementationFeatures.AUTOSTOP} if the cluster is a spot controller else {}.
+        """
+        excludable_features = set()
+        excludable_features2condition = cls._cloud_excludable_features()
+        for feature, condition in excludable_features2condition.items():
+            if feature in requested_features and condition(config):
+                excludable_features.add(feature)
+        return excludable_features
+
+    @classmethod
+    def grant_features(
+        cls, requested_features: Set[CloudImplementationFeatures],
+        config: ExcludableFeatureCheckConfig
+    ) -> Set[CloudImplementationFeatures]:
+        """Returns the features that can be granted by the cloud implementation.
+
+        This function performs the following steps:
+        1. Get excludable features from the cloud implementation.
+        2. Remove excludable features from the requested features.
+        3. Check if the remaining features are supported by the cloud implementation.
+        4. Return the remaining features.
+        """
+        excludable_features = cls.get_excludable_features(
+            requested_features, config)
+        remaining_features = requested_features - excludable_features
+        cls.check_features_are_supported(remaining_features)
+        return remaining_features
 
     @classmethod
     def check_cluster_name_is_valid(cls, cluster_name: str) -> None:
