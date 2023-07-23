@@ -2626,7 +2626,8 @@ def _down_or_stop_clusters(
             if not down:
                 raise click.UsageError(
                     f'{operation} reserved cluster(s) '
-                    f'{reserved_clusters_str} is currently not supported.')
+                    f'{reserved_clusters_str} is currently not supported. '
+                    'It will be auto-stopped after all spot jobs finish.')
             else:
                 # TODO(zhwu): We can only have one reserved cluster (spot
                 # controller).
