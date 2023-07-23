@@ -1475,8 +1475,7 @@ class GcsStore(AbstractStore):
         copy_list = '\n'.join(
             os.path.abspath(os.path.expanduser(p)) for p in source_path_list)
         gsutil_alias, alias_gen = data_utils.get_gsutil_command()
-        sync_command = (f'echo "{copy_list}" | '
-                        f'{alias_gen}; {gsutil_alias} '
+        sync_command = (f'{alias_gen}; echo "{copy_list}" | {gsutil_alias} '
                         f'cp -e -n -r -I gs://{self.name}')
 
         with log_utils.safe_rich_status(

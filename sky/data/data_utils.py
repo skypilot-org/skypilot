@@ -222,10 +222,13 @@ def get_gsutil_command() -> Tuple[str, str]:
     gsutil_alias = 'skypilot_gsutil'
     disable_multiprocessing_flag = '-o "GSUtil:parallel_process_count=1"'
 
-    alias_gen = (
-        '[[ "$(uname)" == "Darwin" ]] && alias '
-        f'{gsutil_alias}="gsutil -m {disable_multiprocessing_flag!r}" || '
-        f'alias {gsutil_alias}="gsutil -m"')
+    # Define skypilot_gsutil as a shell function instead of an alias.
+    # This function will behave just like alias, but can be called immediately
+    # after its definition on the same line
+    alias_gen = (f'[[ "$(uname)" == "Darwin" ]] && {gsutil_alias}() {{ '
+                 f'gsutil -m {disable_multiprocessing_flag!r} "$@"; }} '
+                 f'|| {gsutil_alias}() {{ gsutil -m "$@"; }}')
+
     return gsutil_alias, alias_gen
 
 
