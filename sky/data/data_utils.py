@@ -18,6 +18,7 @@ from sky.adaptors import aws, gcp, cloudflare, ibm
 from sky.utils import ux_utils
 
 Client = Any
+
 logger = sky_logging.init_logger(__name__)
 
 
