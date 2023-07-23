@@ -9,9 +9,12 @@ from sky import clouds
 from sky import exceptions
 from sky import status_lib
 from sky.adaptors import kubernetes
+from sky.clouds.cloud import ExcludableFeatureCheckProtocol
 from sky.utils import common_utils
 from sky.utils import ux_utils
 from sky.skylet.providers.kubernetes import utils as kubernetes_utils
+
+from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -164,6 +167,12 @@ class Kubernetes(clouds.Cloud):
                                                              'supported in '
                                                              'Kubernetes.',
     }
+    _CLOUD_EXCLUDABLE_FEATURES: Dict[
+        clouds.CloudImplementationFeatures, ExcludableFeatureCheckProtocol] = {
+            clouds.CloudImplementationFeatures.AUTOSTOP:
+                lambda config: config.cluster_name.startswith(
+                    'sky-spot-controller-')
+        }
 
     IMAGE = 'us-central1-docker.pkg.dev/' \
             'skypilot-375900/skypilotk8s/skypilot:latest'
@@ -172,6 +181,13 @@ class Kubernetes(clouds.Cloud):
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
         return cls._CLOUD_UNSUPPORTED_FEATURES
+
+    @classmethod
+    def _cloud_excludable_features(
+        cls
+    ) -> Dict[clouds.CloudImplementationFeatures,
+              ExcludableFeatureCheckProtocol]:
+        return cls._CLOUD_EXCLUDABLE_FEATURES
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
