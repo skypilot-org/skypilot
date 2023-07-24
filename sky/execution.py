@@ -1000,6 +1000,9 @@ def serve_up(
             'workdir': workdir_abs_path,
             'remote_task_yaml_path': remote_task_yaml_path,
             'local_task_yaml_path': f.name,
+            'is_dev': env_options.Options.IS_DEVELOPER.get(),
+            'is_debug': env_options.Options.SHOW_DEBUG_INFO.get(),
+            'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
         }
         controller_yaml_path = os.path.join(serve.CONTROLLER_YAML_PREFIX,
                                             f'{name}.yaml')
