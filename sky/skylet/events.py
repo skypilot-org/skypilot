@@ -209,19 +209,18 @@ class AutostopEvent(SkyletEvent):
 
         subprocess.run('ray stop', shell=True, check=True)
 
-        subprocess.run('ray stop', shell=True, check=True)
+        operation_fn = provision_lib.stop_instances
+        if autostop_config.down:
+            operation_fn = provision_lib.terminate_instances
+
         if is_cluster_multinode:
-            provision_lib.stop_or_terminate_instances(
-                provider_name=provider_name,
-                cluster_name=cluster_name,
-                provider_config=cluster_config['provider'],
-                worker_only=True,
-                terminate=autostop_config.down)
-        provision_lib.stop_or_terminate_instances(
-            provider_name=provider_name,
-            cluster_name=cluster_name,
-            provider_config=cluster_config['provider'],
-            terminate=autostop_config.down)
+            operation_fn(provider_name=provider_name,
+                         cluster_name=cluster_name,
+                         provider_config=cluster_config['provider'],
+                         worker_only=True)
+        operation_fn(provider_name=provider_name,
+                     cluster_name=cluster_name,
+                     provider_config=cluster_config['provider'])
 
     def _replace_yaml_for_stopping(self, yaml_path: str, down: bool):
         with open(yaml_path, 'r') as f:

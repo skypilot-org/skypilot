@@ -3375,12 +3375,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'Failed to take down Ray autoscaler on the head node. '
                         'It might be because the cluster\'s head node has '
                         'already been terminated. It is fine to skip this.')
+            operation_fn = provision_lib.stop_instances
+            if terminate:
+                operation_fn = provision_lib.terminate_instances
             try:
-                provision_lib.stop_or_terminate_instances(
-                    repr(cloud),
-                    cluster_name,
-                    provider_config=config['provider'],
-                    terminate=terminate)
+                operation_fn(repr(cloud),
+                             cluster_name,
+                             provider_config=config['provider'])
             except Exception as e:  # pylint: disable=broad-except
                 if purge:
                     logger.warning(
