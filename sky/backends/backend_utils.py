@@ -2458,11 +2458,13 @@ def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
                     pass
                 else:
                     record['replica_info'] = resp.json()['replica_info']
-                    for rec in record['replica_info']:
-                        rec['status'] = pickle.loads(
-                            base64.b64decode(rec['status']))
-                        rec['handle'] = pickle.loads(
-                            base64.b64decode(rec['handle']))
+                    decoded_info = []
+                    for info in record['replica_info']:
+                        decoded_info.append({
+                            k: pickle.loads(base64.b64decode(v))
+                            for k, v in info.items()
+                        })
+                    record['replica_info'] = decoded_info
     return service_records
 
 

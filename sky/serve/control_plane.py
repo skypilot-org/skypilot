@@ -142,5 +142,6 @@ if __name__ == '__main__':
 
     # ======= ControlPlane =========
     # Create a control plane object and run it.
-    control_plane = ControlPlane(args.port, infra_provider, load_balancer, autoscaler)
+    control_plane = ControlPlane(args.port, infra_provider, load_balancer,
+                                 autoscaler)
     control_plane.run()

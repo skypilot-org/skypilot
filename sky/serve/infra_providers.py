@@ -127,15 +127,17 @@ class SkyPilotInfraProvider(InfraProvider):
         clusters = sky.global_user_state.get_clusters()
         infos = []
         for cluster in clusters:
-            name = cluster['name']
-            if self.cluster_name_prefix in name:
-                infos.append({
-                    'name': name,
-                    'handle': base64.b64encode(pickle.dumps(cluster['handle'])
-                                              ).decode('utf-8'),
-                    'status': base64.b64encode(pickle.dumps(cluster['status'])
-                                              ).decode('utf-8'),
-                })
+            if self.cluster_name_prefix in cluster['name']:
+                info = {
+                    'name': cluster['name'],
+                    'handle': cluster['handle'],
+                    'status': cluster['status'],
+                }
+                info = {
+                    k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
+                    for k, v in info.items()
+                }
+                infos.append(info)
         return infos
 
     def _get_server_ips(self):
@@ -213,10 +215,8 @@ class SkyPilotInfraProvider(InfraProvider):
             name = ip_to_name_map[endpoint_url]
             if endpoint_url in unhealthy_servers:
                 logger.info(f'Deleting SkyPilot cluster {name}')
-                # Run sky.down in a daemon thread so that it doesn't block the main thread
                 threading.Thread(target=sky.down,
                                  args=(name,),
                                  kwargs={
                                      'purge': True
-                                 },
-                                 daemon=True).start()
+                                 }).start()
