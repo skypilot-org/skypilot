@@ -500,7 +500,7 @@ class Cloud:
         cls, requested_features: Set[CloudImplementationFeatures],
         config: ExcludableFeatureCheckConfig
     ) -> Set[CloudImplementationFeatures]:
-        """Returns the features that can be granted by the cloud implementation.
+        """Returns the features that can be granted by the cloud implementation after running cloud.check_features_are_supported on mandatory features.
 
         This function performs the following steps:
         1. Get excludable features from the cloud implementation.
