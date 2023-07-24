@@ -57,12 +57,10 @@ class ModelArguments:
 
 @dataclass
 class DataArguments:
-    data_path: str = field(
-        default=None, metadata={"help": "Path to the training data."}
-    )
+    data_path: str = field(default=None,
+                           metadata={"help": "Path to the training data."})
     eval_data_path: str = field(
-        default=None, metadata={"help": "Path to the evaluation data."}
-    )
+        default=None, metadata={"help": "Path to the evaluation data."})
     lazy_preprocess: bool = False
 
 
@@ -86,7 +84,8 @@ def rank0_print(*args):
         print(*args)
 
 
-def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
+def safe_save_model_for_hf_trainer(trainer: transformers.Trainer,
+                                   output_dir: str):
     """Collects the state dict and dump to disk."""
     state_dict = trainer.model.state_dict()
     if trainer.args.should_save:
@@ -163,7 +162,7 @@ def preprocess(
             instruction_len = len(tokenizer(parts[0]).input_ids) - 2
 
             # Ignore the user instructions
-            target[cur_len : cur_len + instruction_len] = IGNORE_TOKEN_ID
+            target[cur_len:cur_len + instruction_len] = IGNORE_TOKEN_ID
             cur_len += turn_len
 
         target[cur_len:] = IGNORE_TOKEN_ID
@@ -178,8 +177,7 @@ def preprocess(
                 target[:] = IGNORE_TOKEN_ID
                 rank0_print(
                     f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}."
-                    f" (ignored)"
-                )
+                    f" (ignored)")
 
     return dict(
         input_ids=input_ids,
@@ -243,13 +241,11 @@ class LazySupervisedDataset(Dataset):
         return ret
 
 
-def make_supervised_data_module(
-    tokenizer: transformers.PreTrainedTokenizer, data_args
-) -> Dict:
+def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer,
+                                data_args) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
-    dataset_cls = (
-        LazySupervisedDataset if data_args.lazy_preprocess else SupervisedDataset
-    )
+    dataset_cls = (LazySupervisedDataset
+                   if data_args.lazy_preprocess else SupervisedDataset)
     rank0_print("Loading data...")
 
     train_json = json.load(open(data_args.data_path, "r"))
@@ -263,25 +259,33 @@ def make_supervised_data_module(
 
     return dict(train_dataset=train_dataset, eval_dataset=eval_dataset)
 
+
 class CheckpointCallback(transformers.TrainerCallback):
+
     def on_save(self, args, state, control, **kwargs):
         """Add complete indicator to avoid incomplete checkpoints."""
         if local_rank == 0:
-            with open(os.path.join(args.output_dir, f'checkpoint-{state.global_step}', 'complete'), 'w') as f:
+            with open(
+                    os.path.join(args.output_dir,
+                                 f'checkpoint-{state.global_step}', 'complete'),
+                    'w') as f:
                 f.write('')
-        
+
     def on_train_end(self, args, state, control, **kwargs):
         """Add complete indicator to avoid incomplete checkpoints."""
         if local_rank == 0:
             with open(os.path.join(args.output_dir, 'complete'), 'w') as f:
                 f.write('')
-        
+
+
 def cleanup_incomplete_checkpoints(output_dir):
     """Remove incomplete checkpoints."""
     global resume_from_checkpoint
     checkpoints = list(pathlib.Path(output_dir).glob('checkpoint-*'))
     checkpoints = [c for c in checkpoints if c.name.split('-')[-1].isdigit()]
-    checkpoints = sorted(checkpoints, key=lambda x: int(x.name.split('-')[-1]), reverse=True)
+    checkpoints = sorted(checkpoints,
+                         key=lambda x: int(x.name.split('-')[-1]),
+                         reverse=True)
     for checkpoint in checkpoints:
         if not (checkpoint / 'complete').exists():
             print(f'Renaming incomplete checkpoint {checkpoint}')
@@ -290,12 +294,12 @@ def cleanup_incomplete_checkpoints(output_dir):
             resume_from_checkpoint = True
             break
 
+
 def train():
     global local_rank
 
     parser = transformers.HfArgumentParser(
-        (ModelArguments, DataArguments, TrainingArguments)
-    )
+        (ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     local_rank = training_args.local_rank
     if local_rank == 0:
@@ -315,15 +319,18 @@ def train():
     )
     tokenizer.pad_token = tokenizer.unk_token
 
-    data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
-    trainer = Trainer(
-        model=model, tokenizer=tokenizer, args=training_args, **data_module
-    )
+    data_module = make_supervised_data_module(tokenizer=tokenizer,
+                                              data_args=data_args)
+    trainer = Trainer(model=model,
+                      tokenizer=tokenizer,
+                      args=training_args,
+                      **data_module)
     trainer.add_callback(CheckpointCallback())
 
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     trainer.save_state()
-    safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
+    safe_save_model_for_hf_trainer(trainer=trainer,
+                                   output_dir=training_args.output_dir)
 
 
 if __name__ == "__main__":

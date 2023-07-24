@@ -30,15 +30,19 @@ def identity_questions():
     def generate_conversations(questions, answers):
         for q in questions:
             for a in answers:
-                content.append(
-                    {
-                        "id": f"identity_{len(content)}",
-                        "conversations": [
-                            {"from": "human", "value": q},
-                            {"from": "gpt", "value": a},
-                        ],
-                    }
-                )
+                content.append({
+                    "id": f"identity_{len(content)}",
+                    "conversations": [
+                        {
+                            "from": "human",
+                            "value": q
+                        },
+                        {
+                            "from": "gpt",
+                            "value": a
+                        },
+                    ],
+                })
 
     questions = [
         "Who are you?",

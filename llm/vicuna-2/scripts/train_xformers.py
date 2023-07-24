@@ -17,8 +17,7 @@
 
 # Need to call this before importing transformers.
 from xformers_patch import (
-    replace_llama_attn_with_xformers_attn,
-)
+    replace_llama_attn_with_xformers_attn,)
 
 replace_llama_attn_with_xformers_attn()
 
