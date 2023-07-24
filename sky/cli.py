@@ -334,7 +334,7 @@ def _parse_env_var(env_var: str) -> Tuple[str, str]:
 
 def _merge_env_vars(env_dict: Optional[Dict[str, str]],
                     env_list: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
-    """Merges all values from env_list into env_dict, overwriting any old values."""
+    """Merges all values from env_list into env_dict."""
     if not env_dict:
         return env_list
     for (key, value) in env_list:
