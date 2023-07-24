@@ -43,7 +43,8 @@ provider:
                 parent: skypilot
             name: autoscaler
         # TODO(romilb): This is a very permissive role - gives all access in the
-        #  namespace. We should restrict this.
+        #  namespace. We should restrict this. For reference, this is required
+        #  for autodown and creating more SkyPilot clusters from within the pod.
         rules:
         - apiGroups: ["*"]
           resources: ["*"]

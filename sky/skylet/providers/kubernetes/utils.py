@@ -1,6 +1,6 @@
-from typing import List, Tuple, Optional
+from typing import Tuple, Optional
 
-from sky import status_lib
+from sky.utils import common_utils
 from sky.adaptors import kubernetes
 
 DEFAULT_NAMESPACE = 'default'
@@ -51,7 +51,7 @@ def check_credentials(timeout: int = 3) -> Tuple[bool, Optional[str]]:
                       'Check if your cluster is running and your network ' \
                       'is stable.'
     except ValueError as e:
-        return False, str(e)
+        return False, common_utils.format_exception(e)
     except Exception as e:
         return False, f'An error occurred: {str(e)}'
 
