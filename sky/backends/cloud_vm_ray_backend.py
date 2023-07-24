@@ -2023,7 +2023,7 @@ class RetryingVmProvisioner(object):
 
                 if self._requested_features != granted_features:
                     logger.info(
-                        f'{colorama.Fore.CYAN}The following features will be skipped since they are not supported by {to_provision.cloud.__class__.__name__} and were deemed optional : '
+                        f'{colorama.Fore.CYAN}The following features will be skipped since they are not supported by {to_provision.cloud} and were deemed optional : '
                         f'{", ".join(map(lambda x: x.value, self._requested_features - granted_features))}{style.RESET_ALL}'
                     )
 
