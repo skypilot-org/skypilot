@@ -3959,9 +3959,16 @@ def serve_status(all: bool, service: Optional[str]):
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--purge',
+              '-p',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Ignore errors (if any). ')
 def serve_down(
     service: str,
     yes: bool,
+    purge: bool,
 ):
     """Stops a SkyServe instance.
 
@@ -3975,7 +3982,7 @@ def serve_down(
         prompt = f'Tearing down service {service}. Proceed?'
         click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.serve_down(service)
+    sky.serve_down(service, purge)
 
 
 # ==============================

@@ -14,6 +14,8 @@ file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}
 
 envs:
+  # skip cloud identity check for serve controller to avoid the overhead.
+  SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK: 1
 {% if is_dev %}
   SKYPILOT_DEV: 1
 {% endif %}

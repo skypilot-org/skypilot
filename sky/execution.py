@@ -1074,7 +1074,10 @@ def serve_up(
               f'{colorama.Style.RESET_ALL}')
 
 
-def serve_down(name: str):
+def serve_down(
+    name: str,
+    purge: bool,
+):
     """Teardown a service.
 
     Please refer to the sky.cli.serve_down for the document.
@@ -1097,31 +1100,39 @@ def serve_down(name: str):
     global_user_state.set_service_status(name,
                                          status_lib.ServiceStatus.SHUTTING_DOWN)
 
-    print(f'{colorama.Fore.YELLOW}'
-          f'Stopping control plane and redirector processes on controller...'
-          f'{colorama.Style.RESET_ALL}')
-    core.cancel(controller_cluster_name, all=True)
+    try:
+        print(
+            f'{colorama.Fore.YELLOW}'
+            f'Stopping control plane and redirector processes on controller...'
+            f'{colorama.Style.RESET_ALL}')
+        core.cancel(controller_cluster_name, all=True)
 
-    plural = ''
-    # TODO(tian): Change to #num replica (including unhealthy one)
-    if num_replicas > 1:
-        plural = 's'
-    print(f'{colorama.Fore.YELLOW}'
-          f'Tearing down {num_replicas} replica{plural}...'
-          f'{colorama.Style.RESET_ALL}')
-    _execute(
-        entrypoint=sky.Task(name='teardown-all-replicas', run='sky down -a -y'),
-        stream_logs=False,
-        handle=handle,
-        stages=[Stage.EXEC],
-        cluster_name=controller_cluster_name,
-        detach_run=False,
-    )
+        plural = ''
+        # TODO(tian): Change to #num replica (including unhealthy one)
+        if num_replicas > 1:
+            plural = 's'
+        print(f'{colorama.Fore.YELLOW}'
+              f'Tearing down {num_replicas} replica{plural}...'
+              f'{colorama.Style.RESET_ALL}')
+        _execute(
+            entrypoint=sky.Task(name='teardown-all-replicas',
+                                run='sky down -a -y'),
+            stream_logs=False,
+            handle=handle,
+            stages=[Stage.EXEC],
+            cluster_name=controller_cluster_name,
+            detach_run=False,
+        )
 
-    print(f'{colorama.Fore.YELLOW}'
-          'Teardown controller...'
-          f'{colorama.Style.RESET_ALL}')
-    core.down(controller_cluster_name, purge=True)
+        print(f'{colorama.Fore.YELLOW}'
+              'Teardown controller...'
+              f'{colorama.Style.RESET_ALL}')
+        core.down(controller_cluster_name, purge=purge)
+    except ValueError as e:
+        if purge:
+            logger.warning(f'Ignoring error when cleaning controller: {e}')
+        else:
+            raise e
 
     global_user_state.remove_service(name)
 
