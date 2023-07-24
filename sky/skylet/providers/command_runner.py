@@ -189,10 +189,8 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             'echo \'[ "$(whoami)" == "root" ] && alias sudo=""\' >> ~/.bashrc;'
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;')
         # Install dependencies.
-        self.run(
-            'sudo apt-get update; sudo apt-get install -y rsync curl wget '
-            'patch openssh-server python3-pip;'
-        )
+        self.run('sudo apt-get update; sudo apt-get install -y rsync curl wget '
+                 'patch openssh-server python3-pip;')
 
         # Copy local authorized_keys to docker container.
         container_name = constants.DEFAULT_DOCKER_CONTAINER_NAME
