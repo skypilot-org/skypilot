@@ -1486,22 +1486,22 @@ def test_scp_autodown():
             f'sky status | grep {name} | grep "1m (down)"',
             # Ensure the cluster is not terminated early.
             'sleep 45',
-            f'sky status --refresh | grep {name} | grep UP',
+            f'sky status {name} --refresh | grep {name} | grep UP',
             # Ensure the cluster is terminated.
             'sleep 200',
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
             f'sky launch -y -d -c {name} {SCP_TYPE} --down tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
             f'sky exec {name} {SCP_TYPE} tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep "1m (down)"',
             'sleep 200',
             # Ensure the cluster is terminated.
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
             f'sky launch -y -d -c {name} {SCP_TYPE} --down tests/test_yamls/minimal.yaml',
             f'sky autostop -y {name} --cancel',
             'sleep 200',
             # Ensure the cluster is still UP.
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && echo "$s" | grep {name} | grep UP',
+            f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && printf "$s" && echo "$s" | grep {name} | grep UP',
         ],
         f'sky down -y {name}',
         timeout=25 * 60,
@@ -2365,7 +2365,7 @@ def test_user_ray_cluster():
             f'sky launch -y -c {name} "ray start --head"',
             f'sky exec {name} "echo hi"',
             f'sky logs {name} 1 --status',
-            f'sky status -r | grep {name} | grep UP',
+            f'sky status {name} -r | grep {name} | grep UP',
             f'sky exec {name} "echo bye"',
             f'sky logs {name} 2 --status',
         ],
