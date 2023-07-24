@@ -17,7 +17,8 @@ def get_port(svc_name, namespace):
     return head_service.spec.ports[0].node_port
 
 
-def check_credentials(timeout: int = 3) -> Tuple[bool, Optional[str]]:
+def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
+        Tuple[bool, Optional[str]]:
     """
     Check if the credentials in kubeconfig file are valid
 

@@ -16,6 +16,8 @@ _auth_api = None
 _networking_api = None
 _custom_objects_api = None
 
+# Timeout to use for API calls
+API_TIMEOUT = 5
 
 def import_package(func):
 

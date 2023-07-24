@@ -6,9 +6,11 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import exceptions
 from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.utils import common_utils
+from sky.utils import ux_utils
 from sky.skylet.providers.kubernetes import utils as kubernetes_utils
 
 if typing.TYPE_CHECKING:
@@ -376,8 +378,16 @@ class Kubernetes(clouds.Cloud):
         namespace = kubernetes_utils.get_current_kube_config_context_namespace()
 
         # Get all the pods with the label skypilot-cluster: <cluster_name>
-        pods = kubernetes.core_api().list_namespaced_pod(
-            namespace, label_selector=f'skypilot-cluster={name}').items
+        try:
+            pods = kubernetes.core_api().list_namespaced_pod(
+                namespace,
+                label_selector=f'skypilot-cluster={name}',
+                _request_timeout=kubernetes.API_TIMEOUT).items
+        except Exception as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ClusterStatusFetchingError(
+                    f'Failed to query Kubernetes cluster {name!r} status: '
+                    f'{common_utils.format_exception(e)}')
 
         # Check if the pods are running or pending
         cluster_status = []
