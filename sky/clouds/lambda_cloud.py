@@ -42,7 +42,7 @@ class Lambda(clouds.Cloud):
              'You can try running docker command inside the '
              '`run` section in task.yaml.'),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',
-        clouds.CloudImplementationFeatures.CUSTOM_DOSK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
     }
 
     @classmethod

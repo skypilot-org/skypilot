@@ -42,7 +42,7 @@ class IBM(clouds.Cloud):
                 (f'Native docker is not supported in {cls._REPR}. '
                  'You can try running docker command inside the '
                  '`run` section in task.yaml.'),
-            clouds.CloudImplementationFeatures.CUSTOM_DOSK_TIER:
+            clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
                 (f'Custom disk tier is not supported in {cls._REPR}.'),
         }
 

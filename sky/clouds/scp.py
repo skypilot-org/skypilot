@@ -51,7 +51,7 @@ class SCP(clouds.Cloud):
              '`run` section in task.yaml.'),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             (f'Spot instances are not supported in {_REPR}.'),
-        clouds.CloudImplementationFeatures.CUSTOM_DOSK_TIER:
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             (f'Custom disk tiers are not supported in {_REPR}.'),
     }
 

@@ -57,6 +57,9 @@ available_node_types:
   {%- endif %}
 {%- else %}
       machineType: {{instance_type}}
+    {%- if machine_image is not none %}
+      sourceMachineImage: {{machine_image}}
+    {%- endif %}
       disks:
         - boot: true
           autoDelete: true
@@ -64,7 +67,9 @@ available_node_types:
           initializeParams:
             diskSizeGb: {{disk_size}}
             # See https://cloud.google.com/deep-learning-vm/docs/images
+          {%- if machine_image is none %}
             sourceImage: {{image_id}}
+          {%- endif %}
             diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
   {%- if gpu is not none %}
       guestAccelerators:
@@ -107,6 +112,9 @@ available_node_types:
     {%- endif %}
   {%- else %}
       machineType: {{instance_type}}
+    {%- if machine_image is not none %}
+      sourceMachineImage: {{machine_image}}
+    {%- endif %}
       disks:
         - boot: true
           autoDelete: true
@@ -114,7 +122,9 @@ available_node_types:
           initializeParams:
             diskSizeGb: {{disk_size}}
             # See https://cloud.google.com/deep-learning-vm/docs/images
+          {%- if machine_image is none %}
             sourceImage: {{image_id}}
+          {%- endif %}
             diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
     {%- if gpu is not none %}
       guestAccelerators:
@@ -165,7 +175,6 @@ initialization_commands: []
 setup_commands:
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Line 'mkdir -p ..': Create ~/.ssh/config file in case the file does not exist in the custom image.
-  # Line 'pip3 --v ..': Make sure python3 & pip3 are available on this image.
   # Line 'which conda ..': some images (TPU VM) do not install conda by
   # default. 'source ~/.bashrc' is needed so conda takes effect for the next
   # commands.
@@ -187,10 +196,9 @@ setup_commands:
     sudo dpkg --configure --force-overwrite -a;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
-    source ~/.bashrc;
-    pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
+    source ~/.bashrc;
   {%- if tpu_vm %}
     test -f ~/miniconda3/etc/profile.d/conda.sh && source ~/miniconda3/etc/profile.d/conda.sh && conda activate base || true;
     pip3 install --upgrade google-api-python-client;
