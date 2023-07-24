@@ -911,7 +911,7 @@ def write_cluster_config(
                 # calling user which should've been passed in as the
                 # SKYPILOT_USER env var (see spot-controller.yaml.j2).
                 'user': get_cleaned_username(os.environ.get(
-                    'SKYPILOT_USER', "")),
+                    'SKYPILOT_USER', '')),
 
                 # AWS only:
                 # Temporary measure, as deleting per-cluster SGs is too slow.
