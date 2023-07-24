@@ -86,6 +86,7 @@ install_requires = [
     # PrettyTable with version >=2.0.0 is required for the support of
     # `add_rows` method.
     'PrettyTable>=2.0.0',
+    'python-dotenv==1.0.0',
     # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
     'ray[default]>=2.2.0,<=2.4.0',
