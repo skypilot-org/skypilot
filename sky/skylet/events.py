@@ -203,10 +203,11 @@ class AutostopEvent(SkyletEvent):
         cluster_name = cluster_config['cluster_name']
         is_cluster_multinode = cluster_config['max_workers'] > 0
 
-        os.environ['RAY_USAGE_STATS_ENABLED'] = '0'
         os.environ.pop('AWS_ACCESS_KEY_ID', None)
         os.environ.pop('AWS_SECRET_ACCESS_KEY', None)
 
+        # Stop the ray autoscaler to avoid scaling up, during
+        # stopping/terminating of the cluster.
         subprocess.run('ray stop', shell=True, check=True)
 
         operation_fn = provision_lib.stop_instances
