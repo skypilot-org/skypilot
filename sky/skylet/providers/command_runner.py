@@ -190,7 +190,8 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;')
         # Install dependencies.
         self.run(
-            'sudo apt-get update; sudo apt-get install -y rsync curl wget patch openssh-server;'
+            'sudo apt-get update; sudo apt-get install -y rsync curl wget '
+            'patch openssh-server python3-pip;'
         )
 
         # Copy local authorized_keys to docker container.
