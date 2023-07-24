@@ -88,7 +88,7 @@ install_requires = [
     'PrettyTable>=2.0.0',
     # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
-    'ray[default]>=2.2.0,<=2.4.0',
+    'ray[default]>=2.2.0,<=2.6.1',
     'rich',
     'tabulate',
     # Light weight requirement, can be replaced with "typing" once
