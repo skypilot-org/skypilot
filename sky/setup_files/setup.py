@@ -116,7 +116,8 @@ install_requires = [
     # Cython 3.0 release breaks PyYAML installed by aws-cli.
     # https://github.com/yaml/pyyaml/issues/601
     # https://github.com/aws/aws-cli/issues/8036
-    'pyyaml<=5.3.1'
+    # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
+    'pyyaml > 3.13, <= 5.3.1'
 ]
 
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
