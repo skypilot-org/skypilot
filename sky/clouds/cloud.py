@@ -112,7 +112,7 @@ class Cloud:
     ) -> Dict[CloudImplementationFeatures, ExcludableFeatureCheckProtocol]:
         """The features that can be excluded/ignored by the cloud implementation, given their exclusion condition is met.
 
-        This method is used by check_excludable_featurs() to check if the
+        This method is used by get_excludable_features() to check if the
         cloud implementation can exclude features if their condition is met.
 
         Returns:
@@ -485,8 +485,8 @@ class Cloud:
         """Returns the features that can be excluded/ignored by the cloud implementation, given their exclusion condition is met.
 
         For instance, Kubernetes Cloud can exclude autostop for spot controller, so
-        Kubernetes.check_excludable_features({
-            CloudImplementationFeatures.AUTOSTOP
+        Kubernetes.get_excludable_features({
+            CloudImplementationFeatures.AUTOSTOP, ExcludableFeatureCheckConfig(cluster_name=cluster_name)
         }) returns {CloudImplementationFeatures.AUTOSTOP} if the cluster is a spot controller else {}.
         """
         excludable_features = set()
