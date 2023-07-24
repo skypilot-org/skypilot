@@ -25,7 +25,6 @@ each other.
 """
 import copy
 import datetime
-from dotenv import dotenv_values
 import functools
 import multiprocessing
 import os
@@ -41,6 +40,7 @@ import webbrowser
 
 import click
 import colorama
+import dotenv
 from rich import progress as rich_progress
 import yaml
 
@@ -331,6 +331,7 @@ def _parse_env_var(env_var: str) -> Tuple[str, str]:
             'or KEY.')
     return ret[0], ret[1]
 
+
 def _merge_env_vars(env_dict: Optional[Dict[str, str]],
                     env_list: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
     """Merges all values from env_list into env_dict, overwriting any old values."""
@@ -392,17 +393,15 @@ _TASK_OPTIONS = [
                  default=None,
                  help=('Custom image id for launching the instances. '
                        'Passing "none" resets the config.')),
-    click.option(
-        '--env-file',
-        required=False,
-        type=dotenv_values,
-        help="""\
+    click.option('--env-file',
+                 required=False,
+                 type=dotenv.dotenv_values,
+                 help="""\
         Path to a dotenv file with environment variables to set on the remote
         node.
 
         If any values from ``--env-file`` conflict with values set by
-        ``--env``, the ``--env`` value will be preferred."""
-    ),
+        ``--env``, the ``--env`` value will be preferred."""),
     click.option(
         '--env',
         required=False,
@@ -1328,8 +1327,8 @@ def launch(
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
-    env: List[Tuple[str, str]],
     env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
     idle_minutes_to_autostop: Optional[int],
@@ -1446,8 +1445,8 @@ def exec(
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
-    env: List[Tuple[str, str]],
     env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or a command on a cluster (skip setup).
@@ -3484,8 +3483,8 @@ def spot_launch(
     use_spot: Optional[bool],
     image_id: Optional[str],
     spot_recovery: Optional[str],
-    env: List[Tuple[str, str]],
     env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
     detach_run: bool,
@@ -3934,8 +3933,8 @@ def benchmark_launch(
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
-    env: List[Tuple[str, str]],
     env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
     idle_minutes_to_autostop: Optional[int],
