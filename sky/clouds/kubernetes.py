@@ -383,7 +383,7 @@ class Kubernetes(clouds.Cloud):
                 namespace,
                 label_selector=f'skypilot-cluster={name}',
                 _request_timeout=kubernetes.API_TIMEOUT).items
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ClusterStatusFetchingError(
                     f'Failed to query Kubernetes cluster {name!r} status: '
