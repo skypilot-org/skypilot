@@ -31,11 +31,11 @@ class ExcludableFeatureCheckProtocol(typing.Protocol):
 class CloudImplementationFeatures(enum.Enum):
     """Features that might not be implemented for all clouds.
 
-    Used by Cloud.check_features_are_supported().
+    Used by Cloud.check_features_are_supported() and Cloud.grant_features().
 
     Note: If any new feature is added, please check and update
-    _cloud_unsupported_features in all clouds to make sure the
-    check_features_are_supported() works as expected.
+    _cloud_unsupported_features and _cloud_excludable_features in all clouds to make sure
+    check_features_are_supported() and grant_features() work as expected.
     """
     STOP = 'stop'
     AUTOSTOP = 'autostop'
