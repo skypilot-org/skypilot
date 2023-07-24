@@ -1324,7 +1324,7 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{get_cleaned_username()}'
 
 
-def get_cleaned_username(username: str = "") -> str:
+def get_cleaned_username(username: str = '') -> str:
     """Cleans the username to be used as part of a cluster name.
 
     Clean up includes:
