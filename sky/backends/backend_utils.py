@@ -897,6 +897,19 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
     )
 
+    # Only using new security group names for clusters with ports specified.
+    default_aws_sg_name = f'sky-sg-{common_utils.user_and_hostname_hash()}'
+    if ports is not None:
+        if skypilot_config.get_nested(('aws', 'security_group_name'),
+                                      None) is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify both ports when using a custom '
+                    'security_group_name in ~/.sky/config.yaml. '
+                    'Please remove the security_group_name field in'
+                    ' ~/.sky/config.yaml and try again.')
+        default_aws_sg_name += f'-{common_utils.hash_cluster_name(cluster_name)}'
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -922,9 +935,7 @@ def write_cluster_config(
                 # (username, last 4 chars of hash of hostname): for uniquefying
                 # users on shared-account scenarios.
                 'security_group': skypilot_config.get_nested(
-                    ('aws', 'security_group_name'),
-                    (f'sky-sg-{common_utils.user_and_hostname_hash()}'
-                     f'-{cluster_name}')),
+                    ('aws', 'security_group_name'), default_aws_sg_name),
                 'vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
                                                        None),
                 'use_internal_ips': skypilot_config.get_nested(

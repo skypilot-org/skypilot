@@ -97,7 +97,10 @@ def terminate_instances(
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.Instance
     instances = _filter_instances(ec2, filters, None, None)
     instances.terminate()
-    # Wait for all instances to be terminated, since we need to delete the
+    if 'ports' not in provider_config:
+        return
+    # If ports are specified, we need to delete the newly created Security
+    # Group. Here we wait for all instances to be terminated, since the
     # Security Group dependent on them.
     for instance in instances:
         instance.wait_until_terminated()
@@ -115,6 +118,8 @@ def cleanup_ports(
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name, provider_config)
+    if 'ports' not in provider_config:
+        return
     region = provider_config['region']
     ec2 = aws.resource(
         'ec2',
@@ -122,7 +127,8 @@ def cleanup_ports(
         config=config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}))
     # TODO(tian): Add a function to generate SG name for AWS, then replace here
     # and backend_utils::write_cluster_config
-    sg_name = f'sky-sg-{common_utils.user_and_hostname_hash()}-{cluster_name}'
+    sg_name = (f'sky-sg-{common_utils.user_and_hostname_hash()}'
+               f'-{common_utils.hash_cluster_name(cluster_name)}')
     sgs = ec2.security_groups.filter(GroupNames=[sg_name])
     assert len(list(sgs)) == 1
     list(sgs)[0].delete()
