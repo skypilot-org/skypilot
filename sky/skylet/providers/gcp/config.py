@@ -117,13 +117,12 @@ def wait_for_crm_operation(operation, crm):
     return result
 
 
-def wait_for_compute_global_operation(project_name, operation, compute, silent=False):
+def wait_for_compute_global_operation(project_name, operation, compute):
     """Poll for global compute operation until finished."""
-    if not silent:
-        logger.info(
-            "wait_for_compute_global_operation: "
-            "Waiting for operation {} to finish...".format(operation["name"])
-        )
+    logger.info(
+        "wait_for_compute_global_operation: "
+        "Waiting for operation {} to finish...".format(operation["name"])
+    )
 
     for _ in range(MAX_POLLS):
         result = (
@@ -138,8 +137,7 @@ def wait_for_compute_global_operation(project_name, operation, compute, silent=F
             raise Exception(result["error"])
 
         if result["status"] == "DONE":
-            if not silent:
-                logger.info("wait_for_compute_global_operation: Operation done.")
+            logger.info("wait_for_compute_global_operation: Operation done.")
             break
 
         time.sleep(POLL_INTERVAL)
@@ -906,14 +904,14 @@ def _create_firewall_rule_wait(config, compute, operation):
     return response
 
 
-def _delete_firewall_rule(config, compute, name, silent=False):
+def _delete_firewall_rule(config, compute, name):
     operation = (
         compute.firewalls()
         .delete(project=config["provider"]["project_id"], firewall=name)
         .execute()
     )
     response = wait_for_compute_global_operation(
-        config["provider"]["project_id"], operation, compute, silent
+        config["provider"]["project_id"], operation, compute
     )
     return response
 
