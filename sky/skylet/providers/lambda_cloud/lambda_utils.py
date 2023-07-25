@@ -9,8 +9,7 @@ from sky.utils import common_utils
 
 CREDENTIALS_PATH = '~/.lambda_cloud/lambda_keys'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
-# TODO(tian): Determine best backoff factors.
-INITIAL_BACKOFF_SECONDS = 3
+INITIAL_BACKOFF_SECONDS = 10
 MAX_BACKOFF_FACTOR = 10
 MAX_ATTEMPTS = 6
 
@@ -92,25 +91,14 @@ def raise_lambda_error(response: requests.Response) -> None:
     raise LambdaCloudError(f'{code}: {message}')
 
 
-def try_post_with_backoff(url: str, data: str, headers: Dict[str, str]):
-    backoff = common_utils.Backoff(initial_backoff=INITIAL_BACKOFF,
+def _try_request_with_backoff(method,
+                             url: str,
+                             headers: Dict[str, str],
+                             data: Optional[str] = None):
+    backoff = common_utils.Backoff(initial_backoff=INITIAL_BACKOFF_SECONDS,
                                    max_backoff_factor=MAX_BACKOFF_FACTOR)
     for i in range(MAX_ATTEMPTS):
-        response = requests.post(url, data=data, headers=headers)
-        # If rate limited, wait and try again
-        if response.status_code == 429 and i != MAX_ATTEMPTS - 1:
-            time.sleep(backoff.current_backoff())
-            continue
-        if response.status_code == 200:
-            return response
-        raise_lambda_error(response)
-
-
-def try_get_with_backoff(url: str, headers: Dict[str, str]):
-    backoff = common_utils.Backoff(initial_backoff=INITIAL_BACKOFF,
-                                   max_backoff_factor=MAX_BACKOFF_FACTOR)
-    for i in range(MAX_ATTEMPTS):
-        response = requests.get(url, headers=headers)
+        response = method(url, data=data, headers=headers)
         # If rate limited, wait and try again
         if response.status_code == 429 and i != MAX_ATTEMPTS - 1:
             time.sleep(backoff.current_backoff())
@@ -168,7 +156,8 @@ class LambdaCloudClient:
             'quantity': quantity,
             'name': name
         })
-        response = try_post_with_backoff(
+        response = _try_request_with_backoff(
+            requests.post,
             f'{API_ENDPOINT}/instance-operations/launch',
             data=data,
             headers=self.headers)
@@ -181,7 +170,8 @@ class LambdaCloudClient:
                 instance_ids[0]  # TODO(ewzeng) don't hardcode
             ]
         })
-        response = try_post_with_backoff(
+        response = _try_request_with_backoff(
+            requests.post,
             f'{API_ENDPOINT}/instance-operations/terminate',
             data=data,
             headers=self.headers)
@@ -189,14 +179,16 @@ class LambdaCloudClient:
 
     def list_instances(self) -> List[Dict[str, Any]]:
         """List existing instances."""
-        response = try_get_with_backoff(f'{API_ENDPOINT}/instances',
-                                        headers=self.headers)
+        response = _try_request_with_backoff(requests.get,
+                                            f'{API_ENDPOINT}/instances',
+                                            headers=self.headers)
         return response.json().get('data', [])
 
     def list_ssh_keys(self) -> List[Dict[str, str]]:
         """List ssh keys."""
-        response = try_get_with_backoff(f'{API_ENDPOINT}/ssh-keys',
-                                        headers=self.headers)
+        response = _try_request_with_backoff(requests.get,
+                                            f'{API_ENDPOINT}/ssh-keys',
+                                            headers=self.headers)
         return response.json().get('data', [])
 
     def get_unique_ssh_key_name(self, prefix: str,
@@ -232,12 +224,14 @@ class LambdaCloudClient:
     def register_ssh_key(self, name: str, pub_key: str) -> None:
         """Register ssh key with Lambda."""
         data = json.dumps({'name': name, 'public_key': pub_key})
-        try_post_with_backoff(f'{API_ENDPOINT}/ssh-keys',
-                              data=data,
-                              headers=self.headers)
+        _try_request_with_backoff(requests.post,
+                                 f'{API_ENDPOINT}/ssh-keys',
+                                 data=data,
+                                 headers=self.headers)
 
     def list_catalog(self) -> Dict[str, Any]:
         """List offered instances and their availability."""
-        response = try_get_with_backoff(f'{API_ENDPOINT}/instance-types',
-                                        headers=self.headers)
+        response = _try_request_with_backoff(requests.get,
+                                            f'{API_ENDPOINT}/instance-types',
+                                            headers=self.headers)
         return response.json().get('data', [])
