@@ -266,7 +266,8 @@ class KubernetesNodeProvider(NodeProvider):
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')
         try:
-            kubernetes.core_api().delete_namespaced_pod(node_id, self.namespace)
+            kubernetes.core_api().delete_namespaced_pod(node_id, self.namespace,
+                                                        _request_timeout=config.DELETION_TIMEOUT)
         except kubernetes.api_exception() as e:
             if e.status == 404:
                 logger.warning(config.log_prefix +
@@ -276,15 +277,16 @@ class KubernetesNodeProvider(NodeProvider):
                 raise
         try:
             kubernetes.core_api().delete_namespaced_service(
-                node_id, self.namespace)
+                node_id, self.namespace, _request_timeout=config.DELETION_TIMEOUT)
             kubernetes.core_api().delete_namespaced_service(
-                f'{node_id}-ssh', self.namespace)
+                f'{node_id}-ssh', self.namespace, _request_timeout=config.DELETION_TIMEOUT)
         except kubernetes.api_exception():
             pass
         try:
             kubernetes.networking_api().delete_namespaced_ingress(
                 node_id,
                 self.namespace,
+                _request_timeout=config.DELETION_TIMEOUT
             )
         except kubernetes.api_exception():
             pass
