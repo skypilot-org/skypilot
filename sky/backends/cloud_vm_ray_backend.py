@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import typing
 from typing import Dict, Iterable, List, Optional, Tuple, Union, Set
@@ -27,7 +28,7 @@ from sky import clouds
 from sky import cloud_stores
 from sky import exceptions
 from sky import global_user_state
-from sky import provision as provision_api
+from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import optimizer
@@ -102,6 +103,10 @@ _TEARDOWN_PURGE_WARNING = (
     'Make sure resources are manually deleted.\n'
     'Details: {details}'
     f'{colorama.Style.RESET_ALL}')
+
+_RSYNC_NOT_FOUND_MESSAGE = (
+    '`rsync` command is not found in the specified image. '
+    'Please use an image with rsync installed.')
 
 _TPU_NOT_FOUND_ERROR = 'ERROR: (gcloud.compute.tpus.delete) NOT_FOUND'
 
@@ -764,6 +769,9 @@ class RetryingVmProvisioner(object):
                 logger.warning(f'Got \'resource not found\' in {zone.name}.')
                 self._blocked_resources.add(
                     launchable_resources.copy(zone=zone.name))
+            elif 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             else:
                 logger.info('====== stdout ======')
                 for s in stdout.split('\n'):
@@ -806,6 +814,9 @@ class RetryingVmProvisioner(object):
             line.startswith('<1/1> Setting up head node')
             for line in stdout_splits + stderr_splits)
         if not errors or head_node_up:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             # TODO: Got transient 'Failed to create security group' that goes
             # away after a few minutes.  Should we auto retry other regions, or
             # let the user retry.
@@ -858,6 +869,9 @@ class RetryingVmProvisioner(object):
                 in s.strip() or '(ReadOnlyDisabledSubscription)' in s.strip())
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -891,6 +905,9 @@ class RetryingVmProvisioner(object):
             if 'LambdaCloudError:' in s.strip()
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -927,6 +944,9 @@ class RetryingVmProvisioner(object):
             if 'SCPError:' in s.strip()
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -964,6 +984,9 @@ class RetryingVmProvisioner(object):
             if 'ERR' in s.strip() or 'PANIC' in s.strip()
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -995,6 +1018,9 @@ class RetryingVmProvisioner(object):
             if 'ERR' in s.strip() or 'PANIC' in s.strip()
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -1030,6 +1056,9 @@ class RetryingVmProvisioner(object):
               'LimitExceeded' in s.strip() or 'NotAuthenticated' in s.strip()))
         ]
         if not errors:
+            if 'rsync: command not found' in stderr:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
             for s in stdout_splits:
                 print(s)
@@ -1365,8 +1394,7 @@ class RetryingVmProvisioner(object):
         # instead of trying to provision and failing later.
         try:
             need_provision = to_provision.cloud.check_quota_available(
-                to_provision.region, to_provision.instance_type,
-                to_provision.use_spot)
+                to_provision)
 
         except Exception as e:  # pylint: disable=broad-except
             need_provision = True
@@ -1384,7 +1412,8 @@ class RetryingVmProvisioner(object):
             raise exceptions.ResourcesUnavailableError(
                 f'{colorama.Fore.YELLOW}Found no quota for '
                 f'{to_provision.instance_type} {instance_descriptor} '
-                f'instances in region {to_provision.region}. '
+                f'instances in region {to_provision.region} '
+                f'in {to_provision.cloud}. '
                 f'{colorama.Style.RESET_ALL}'
                 f'To request quotas, check the instruction: '
                 f'https://skypilot.readthedocs.io/en/latest/cloud-setup/quota.html.'  # pylint: disable=line-too-long
@@ -1758,6 +1787,11 @@ class RetryingVmProvisioner(object):
                         'Retrying due to the possibly flaky RESOURCE_NOT_FOUND '
                         'error.')
                     return True
+
+            if 'rsync: command not found' in stderr:
+                logger.info('Skipping retry due to `rsync` not found in '
+                            'the specified image.')
+                return False
 
             if ('Processing file mounts' in stdout and
                     'Running setup commands' not in stdout and
@@ -3263,8 +3297,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
-        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
-        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+            signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
         try:
             returncode = self.run_on_head(
                 handle,
@@ -3297,8 +3332,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
-        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
-        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+            signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
         # Refer to the notes in tail_logs.
         self.run_on_head(
@@ -3376,17 +3412,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'Failed to take down Ray autoscaler on the head node. '
                         'It might be because the cluster\'s head node has '
                         'already been terminated. It is fine to skip this.')
+            operation_fn = provision_lib.stop_instances
+            if terminate:
+                operation_fn = provision_lib.terminate_instances
             try:
-                if terminate:
-                    provision_api.terminate_instances(
-                        repr(cloud),
-                        cluster_name,
-                        provider_config=config['provider'])
-                else:
-                    provision_api.stop_instances(
-                        repr(cloud),
-                        cluster_name,
-                        provider_config=config['provider'])
+                operation_fn(repr(cloud),
+                             cluster_name,
+                             provider_config=config['provider'])
             except Exception as e:  # pylint: disable=broad-except
                 if purge:
                     logger.warning(

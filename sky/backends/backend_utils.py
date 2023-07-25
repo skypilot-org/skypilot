@@ -912,7 +912,8 @@ def write_cluster_config(
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the
                 # SKYPILOT_USER env var (see spot-controller.yaml.j2).
-                'user': os.environ.get('SKYPILOT_USER', getpass.getuser()),
+                'user': get_cleaned_username(os.environ.get(
+                    'SKYPILOT_USER', '')),
 
                 # AWS only:
                 # Temporary measure, as deleting per-cluster SGs is too slow.
@@ -1326,8 +1327,8 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{get_cleaned_username()}'
 
 
-def get_cleaned_username() -> str:
-    """Cleans the current username to be used as part of a cluster name.
+def get_cleaned_username(username: str = '') -> str:
+    """Cleans the username to be used as part of a cluster name.
 
     Clean up includes:
      1. Making all characters lowercase
@@ -1341,7 +1342,7 @@ def get_cleaned_username() -> str:
       A cleaned username that will pass the regex in
       check_cluster_name_is_valid().
     """
-    username = getpass.getuser()
+    username = username or getpass.getuser()
     username = username.lower()
     username = re.sub(r'[^a-z0-9-]', '', username)
     username = re.sub(r'^[0-9-]+', '', username)

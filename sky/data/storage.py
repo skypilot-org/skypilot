@@ -1474,8 +1474,9 @@ class GcsStore(AbstractStore):
         ]
         copy_list = '\n'.join(
             os.path.abspath(os.path.expanduser(p)) for p in source_path_list)
-        sync_command = (f'echo "{copy_list}" | '
-                        f'gsutil -m cp -e -n -r -I gs://{self.name}')
+        gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+        sync_command = (f'{alias_gen}; echo "{copy_list}" | {gsutil_alias} '
+                        f'cp -e -n -r -I gs://{self.name}')
 
         with log_utils.safe_rich_status(
                 f'[bold cyan]Syncing '
@@ -1507,15 +1508,18 @@ class GcsStore(AbstractStore):
 
         def get_file_sync_command(base_dir_path, file_names):
             sync_format = '|'.join(file_names)
-            sync_command = (f'gsutil -m rsync -e -x \'^(?!{sync_format}$).*\' '
+            gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+            sync_command = (f'{alias_gen}; {gsutil_alias} '
+                            f'rsync -e -x \'^(?!{sync_format}$).*\' '
                             f'{base_dir_path} gs://{self.name}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            sync_command = (
-                f'gsutil -m rsync -e -r -x \'.git/*\' {src_dir_path} '
-                f'gs://{self.name}/{dest_dir_name}')
+            gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+            sync_command = (f'{alias_gen}; {gsutil_alias} '
+                            f'rsync -e -r -x \'.git/*\' {src_dir_path} '
+                            f'gs://{self.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
@@ -1678,10 +1682,13 @@ class GcsStore(AbstractStore):
                         bucket_name=bucket_name))
                 return False
             try:
-                remove_obj_command = ('gsutil -m rm -r'
-                                      f' gs://{bucket_name}')
-                subprocess.check_output(remove_obj_command.split(' '),
-                                        stderr=subprocess.STDOUT)
+                gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+                remove_obj_command = (f'{alias_gen};{gsutil_alias} '
+                                      f'rm -r gs://{bucket_name}')
+                subprocess.check_output(remove_obj_command,
+                                        stderr=subprocess.STDOUT,
+                                        shell=True,
+                                        executable='/bin/bash')
                 return True
             except subprocess.CalledProcessError as e:
                 logger.error(e.output)

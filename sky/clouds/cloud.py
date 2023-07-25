@@ -29,7 +29,7 @@ class CloudImplementationFeatures(enum.Enum):
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
     SPOT_INSTANCE = 'spot_instance'
-    CUSTOM_DOSK_TIER = 'custom_disk_tier'
+    CUSTOM_DISK_TIER = 'custom_disk_tier'
     OPEN_PORTS = 'open_ports'
 
 
@@ -540,21 +540,19 @@ class Cloud:
 
     @classmethod
     def check_quota_available(cls,
-                              region: str,
-                              instance_type: str,
-                              use_spot: bool = False) -> bool:
-        """Check if quota is available for `instance_type` in `region`.
-
-        (Currently, check_quota_available is only implemented for AWS.)
+                              resources: 'resources_lib.Resources') -> bool:
+        """Check if quota is available based on `resources`.
 
         The _retry_zones function in cloud_vm_ray_backend goes through different
-        candidate regions and attempts to provision the requested instance_type
-        accelerators in the region, until a successful provisioning happens
-        or all regions with the requested accelerator have been looked at.
-        Previously, SkyPilot would attempt to provision resources in all of
-        these regions. However, many regions would have a zero quota or
-        inadequate quota, meaning these attempted provisions were destined
-        to fail from the get-go.
+        candidate regions and attempts to provision the requested
+        `instance_type` or `accelerator` accelerators in the `region`
+        (the `instance_type` or `accelerator`, and `region`, as defined in
+        `resources`) until a successful provisioning happens or all regions
+        with the requested accelerator have been looked at. Previously,
+        SkyPilot would attempt to provision resources in all of these regions.
+        However, many regions would have a zero quota or inadequate quota,
+        meaning these attempted provisions were destined to fail from
+        the get-go.
 
         Checking the quota is substantially faster than attempting a failed
         provision (~1 second vs 30+ seconds) so this function attempts to
@@ -566,7 +564,7 @@ class Cloud:
         quota utilization because many cloud providers' APIs don't have a
         built-in command for checking the real-time utilization. Checking
         real-time utilization is a more difficult endeavor that involves
-        monitoring etc., so we are holding off on that for now.
+        observability etc., so we are holding off on that for now.
 
         If for at any point the function fails, whether it's because we can't
         import the necessary dependencies or a query using a cloud provider's
@@ -586,7 +584,7 @@ class Cloud:
         Returns:
             False if the quota is found to be zero, and true otherwise.
         """
-        del region, instance_type, use_spot  # unused
+        del resources  # unused
 
         return True
 

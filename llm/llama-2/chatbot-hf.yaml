@@ -1,7 +1,12 @@
 resources:
+  memory: 32+
   accelerators: A100:1
   disk_size: 1024
   disk_tier: high
+
+envs:
+  MODEL_SIZE: 7
+  HF_TOKEN: <your-huggingface-token> # TODO: Replace with huggingface token
 
 setup: |
   conda activate chatbot
@@ -12,7 +17,10 @@ setup: |
 
   # Install dependencies
   pip install git+https://github.com/lm-sys/FastChat.git
+  # Need the latest transformers to support 70B model
+  pip install git+https://github.com/huggingface/transformers.git
 
+  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
 run: |
   conda activate chatbot
@@ -22,7 +30,8 @@ run: |
   sleep 10
   echo 'Starting model worker...'
   python -u -m fastchat.serve.model_worker \
-            --model-path lmsys/vicuna-${MODEL_SIZE}b-v1.3 2>&1 \
+            --model-path meta-llama/Llama-2-${MODEL_SIZE}b-chat-hf \
+            --num-gpus $SKYPILOT_NUM_GPUS_PER_NODE 2>&1 \
             | tee model_worker.log &
 
   echo 'Waiting for model worker to start...'
@@ -30,6 +39,3 @@ run: |
 
   echo 'Starting gradio server...'
   python -u -m fastchat.serve.gradio_web_server --share | tee ~/gradio.log
-
-envs:
-  MODEL_SIZE: 7

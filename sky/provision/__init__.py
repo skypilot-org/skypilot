@@ -41,8 +41,7 @@ def stop_instances(
     provider_name: str,
     cluster_name: str,
     provider_config: Optional[Dict[str, Any]] = None,
-    included_instances: Optional[List[str]] = None,
-    excluded_instances: Optional[List[str]] = None,
+    worker_only: bool = False,
 ) -> None:
     """Stop running instances."""
     raise NotImplementedError
@@ -53,8 +52,7 @@ def terminate_instances(
     provider_name: str,
     cluster_name: str,
     provider_config: Optional[Dict[str, Any]] = None,
-    included_instances: Optional[List[str]] = None,
-    excluded_instances: Optional[List[str]] = None,
+    worker_only: bool = False,
 ) -> None:
     """Terminate running or stopped instances."""
     raise NotImplementedError
