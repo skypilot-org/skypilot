@@ -2123,6 +2123,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'{self.cluster_yaml}, '
                 f'\n\tlaunched_resources={self.launched_nodes}x '
                 f'{self.launched_resources}, '
+                f'\n\tdocker_user={self.docker_user},'
                 f'\n\ttpu_create_script={self.tpu_create_script}, '
                 f'\n\ttpu_delete_script={self.tpu_delete_script})')
 
