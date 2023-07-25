@@ -45,6 +45,13 @@ Currently, such `A100-80GB:1` spot instances are only available on AWS and GCP.
 sky launch -c falcon -s train.yaml --no-use-spot
 ```
 
+For reference, below is a loss graph you may expect to see, and the amount of time and the approximate cost of fine-tuning each of the models (assuming a spot instance GPU rate at $0.39 / hour):
+
+1. `ybelkada/falcon-7b-sharded-bf16`: 2.5 to 3 hours using 1 A100 GPU; total cost ≈ $1.
+
+2. `tiiuae/falcon-7b`: 2.5 to 3 hours using 1 A100 GPU; total cost ≈ $1.
+
+3. `tiiuae/falcon-40b`: 10 hours using 1 A100-80GB; total cost ≈ $4.
 
 
 ## Q&A
