@@ -2,6 +2,7 @@
 from typing import Dict, List, Any, Optional
 
 from botocore import config
+
 from sky.adaptors import aws
 from sky import status_lib
 
@@ -9,6 +10,20 @@ BOTO_MAX_RETRIES = 12
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'
+
+
+def _default_ec2_resource(region: str) -> Any:
+    return aws.resource(
+        'ec2',
+        region_name=region,
+        config=config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}))
+
+
+def _cluster_name_filter(cluster_name: str) -> List[Dict[str, Any]]:
+    return [{
+        'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
+        'Values': [cluster_name],
+    }]
 
 
 def _filter_instances(ec2, filters: List[Dict[str, Any]],
@@ -33,18 +48,11 @@ def query_instances(
     cluster_name: str,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+    """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name, provider_config)
     region = provider_config['region']
-    ec2 = aws.resource(
-        'ec2',
-        region_name=region,
-        config=config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}))
-    filters = [
-        {
-            'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
-            'Values': [cluster_name],
-        },
-    ]
+    ec2 = _default_ec2_resource(region)
+    filters = _cluster_name_filter(cluster_name)
     instances = ec2.instances.filter(Filters=filters)
     status_map = {
         'pending': status_lib.ClusterStatus.INIT,
@@ -71,19 +79,13 @@ def stop_instances(
     """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name, provider_config)
     region = provider_config['region']
-    ec2 = aws.resource(
-        'ec2',
-        region_name=region,
-        config=config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}))
+    ec2 = _default_ec2_resource(region)
     filters = [
         {
             'Name': 'instance-state-name',
             'Values': ['pending', 'running'],
         },
-        {
-            'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
-            'Values': [cluster_name],
-        },
+        *_cluster_name_filter(cluster_name),
     ]
     if worker_only:
         filters.append({
@@ -108,20 +110,14 @@ def terminate_instances(
     """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name, provider_config)
     region = provider_config['region']
-    ec2 = aws.resource(
-        'ec2',
-        region_name=region,
-        config=config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}))
+    ec2 = _default_ec2_resource(region)
     filters = [
         {
             'Name': 'instance-state-name',
             # exclude 'shutting-down' or 'terminated' states
             'Values': ['pending', 'running', 'stopping', 'stopped'],
         },
-        {
-            'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
-            'Values': [cluster_name],
-        },
+        *_cluster_name_filter(cluster_name),
     ]
     if worker_only:
         filters.append({

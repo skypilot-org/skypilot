@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 import functools
 import importlib
 import inspect
+
 from sky import status_lib
 
 
@@ -46,6 +47,9 @@ def query_instances(
     """Query instances.
 
     Returns a dictionary of instance IDs and status.
+
+    A None status means the instance is marked as "terminated"
+    or "terminating".
     """
     raise NotImplementedError
 
