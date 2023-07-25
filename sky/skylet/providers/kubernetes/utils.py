@@ -83,8 +83,8 @@ def get_current_kube_config_context_namespace() -> str:
     k8s = kubernetes.get_kubernetes()
     try:
         _, current_context = k8s.config.list_kube_config_contexts()
-        if 'namespace' in current_context:
-            return current_context['namespace']
+        if 'namespace' in current_context['context']:
+            return current_context['context']['namespace']
         else:
             return DEFAULT_NAMESPACE
     except k8s.config.config_exception.ConfigException:
