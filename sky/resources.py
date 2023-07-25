@@ -50,7 +50,7 @@ class Resources:
         image_id: Union[Dict[str, str], str, None] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
-        ports: Optional[List[int]] = None,
+        ports: Optional[List[Union[int, str]]] = None,
         # Internal use only.
         _is_image_managed: Optional[bool] = None,
     ):
@@ -345,7 +345,7 @@ class Resources:
         return self._disk_tier
 
     @property
-    def ports(self) -> Optional[List[int]]:
+    def ports(self) -> Optional[List[Union[int, str]]]:
         return self._ports
 
     @property
@@ -756,15 +756,38 @@ class Resources:
             self.cloud.check_features_are_supported(
                 {clouds.CloudImplementationFeatures.OPEN_PORTS})
         for port in self.ports:
-            if not isinstance(port, int):
+            if isinstance(port, int):
+                if port < 1 or port > 65535:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid port {port}. Please use a port number '
+                            'between 1 and 65535.')
+            elif isinstance(port, str):
+                port_range = port.split('-')
+                if len(port_range) != 2:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid port {port}. Please use a port range '
+                            'such as 10022-10040.')
+                try:
+                    from_port = int(port_range[0])
+                    to_port = int(port_range[1])
+                except ValueError as e:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid port {port}. Please use a integer inside'
+                            ' the range.') from e
+                if (from_port < 1 or from_port > 65535 or to_port < 1 or
+                        to_port > 65535):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid port {port}. Please use port '
+                            'numbers between 1 and 65535.')
+            else:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Invalid port {port}. Please use an integer.')
-            if port < 1 or port > 65535:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Invalid port {port}. Please use a port number '
-                        'between 1 and 65535.')
+                        f'Invalid port {port}. Please use an integer or '
+                        'a range such as 10022-10040.')
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
@@ -854,7 +877,20 @@ class Resources:
         if self.ports is not None:
             if other.ports is None:
                 return False
-            if not set(self.ports) <= set(other.ports):
+
+            def parse_ports(ports):
+                port_set = set()
+                for p in ports:
+                    if isinstance(p, int):
+                        port_set.add(p)
+                    else:
+                        from_port, to_port = p.split('-')
+                        port_set.update(
+                            range(int(from_port),
+                                  int(to_port) + 1))
+                return port_set
+
+            if not parse_ports(self.ports) <= parse_ports(other.ports):
                 return False
 
         # self <= other

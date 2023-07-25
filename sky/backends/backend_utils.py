@@ -798,7 +798,7 @@ def _replace_yaml_dicts(
 def write_cluster_config(
         to_provision: 'resources.Resources',
         num_nodes: int,
-        ports: Optional[List[int]],
+        ports: Optional[List[Union[int, str]]],
         cluster_config_template: str,
         cluster_name: str,
         local_wheel_path: pathlib.Path,

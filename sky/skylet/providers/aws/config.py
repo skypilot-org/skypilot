@@ -1027,10 +1027,16 @@ def _create_default_inbound_rules(sgids, user_specified_rules, extended_rules=No
 def _retrieve_user_specified_rules(ports):
     rules = []
     for port in ports:
+        if isinstance(port, int):
+            from_port = to_port = port
+        else:
+            from_port, to_port = port.split("-")
+            from_port = int(from_port)
+            to_port = int(to_port)
         rules.append(
             {
-                "FromPort": port,
-                "ToPort": port,
+                "FromPort": from_port,
+                "ToPort": to_port,
                 "IpProtocol": "tcp",
                 "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
             }

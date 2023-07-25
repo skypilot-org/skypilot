@@ -69,7 +69,11 @@ def get_resources_schema():
             'ports': {
                 'type': 'array',
                 'items': {
-                    'type': 'integer',
+                    'anyOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'integer',
+                    }]
                 }
             },
             'accelerator_args': {
