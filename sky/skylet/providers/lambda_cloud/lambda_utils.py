@@ -10,7 +10,7 @@ from sky.utils import common_utils
 CREDENTIALS_PATH = '~/.lambda_cloud/lambda_keys'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
 # TODO(tian): Determine best backoff factors.
-INITIAL_BACKOFF = 3
+INITIAL_BACKOFF_SECONDS = 3
 MAX_BACKOFF_FACTOR = 10
 MAX_ATTEMPTS = 6
 
