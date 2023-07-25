@@ -80,7 +80,7 @@ def stop_instances(
     assert provider_config is not None, (cluster_name, provider_config)
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
-    filters = [
+    filters: List[Dict[str, Any]] = [
         {
             'Name': 'instance-state-name',
             'Values': ['pending', 'running'],
