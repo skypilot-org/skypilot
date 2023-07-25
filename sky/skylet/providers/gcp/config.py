@@ -27,6 +27,7 @@ from sky.skylet.providers.gcp.constants import (
     VM_MINIMAL_PERMISSIONS,
     TPU_MINIMAL_PERMISSIONS,
 )
+from sky.utils import common_utils
 from ray.autoscaler._private.util import check_legacy_fields
 
 logger = logging.getLogger(__name__)
@@ -808,13 +809,14 @@ def get_usable_vpc(config):
     ports = config["provider"].get("ports", [])
     user_rules = []
     for port in ports:
-        suffix = f"-user-ports-{config['cluster_name']}-{port}"
+        cluster_name_hash = common_utils.hash_cluster_name(config["cluster_name"])
+        name = f"user-ports-{cluster_name_hash}-{port}"
         user_rules.append(
             {
-                "name": "{VPC_NAME}" + suffix,
+                "name": name,
                 "description": f"Allow user-specified port {port} for cluster {config['cluster_name']}",
                 "network": "projects/{PROJ_ID}/global/networks/{VPC_NAME}",
-                "selfLink": "projects/{PROJ_ID}/global/firewalls/{VPC_NAME}" + suffix,
+                "selfLink": "projects/{PROJ_ID}/global/firewalls/" + name,
                 "direction": "INGRESS",
                 "priority": 65534,
                 "allowed": [

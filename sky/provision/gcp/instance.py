@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
 from sky import sky_logging
 from sky.provision.gcp import instance_utils
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -162,27 +163,9 @@ def cleanup_ports(
     if 'ports' not in provider_config:
         # No new ports were opened, so there is nothing to clean up.
         return
-    zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
-
-    name_filter = {TAG_RAY_CLUSTER_NAME: cluster_name}
-    handlers: List[Type[instance_utils.GCPInstance]] = [
-        instance_utils.GCPComputeInstance
-    ]
-    handler_to_instances = _filter_instances(handlers, project_id, zone,
-                                             name_filter, lambda _: None, None,
-                                             None)
-    # When launching process is interrupted, there may be no instances.
-    assert len(handler_to_instances) <= 1, handler_to_instances
-
-    for handler, instances in handler_to_instances.items():
-        # all instances should be in the same VPC
-        vpc_name = handler.get_vpc_name(project_id, zone, instances[0])
-        if vpc_name is None:
-            logger.warning(f'VPC for cluster {cluster_name} not found. '
-                           'Skipping cleanup. Please manually delete the '
-                           'firewall rules.')
-            return
-        for port in provider_config['ports']:
-            rule_name = (f'{vpc_name}-user-ports-{cluster_name}-{port}')
-            handler.delete_firewall_rule(project_id, rule_name)
+    cluster_name_hash = common_utils.hash_cluster_name(cluster_name)
+    for port in provider_config['ports']:
+        rule_name = f'user-ports-{cluster_name_hash}-{port}'
+        instance_utils.GCPComputeInstance.delete_firewall_rule(
+            project_id, rule_name)

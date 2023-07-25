@@ -72,15 +72,6 @@ class GCPInstance:
         raise NotImplementedError
 
     @classmethod
-    def get_vpc_name(
-        cls,
-        project_id: str,
-        zone: str,
-        instance: str,
-    ) -> Optional[str]:
-        raise NotImplementedError
-
-    @classmethod
     def delete_firewall_rule(
         cls,
         project_id: str,
@@ -198,24 +189,6 @@ class GCPComputeInstance(GCPInstance):
                          f'Operation {operation["name"]} finished.')
             return True
         return False
-
-    @classmethod
-    def get_vpc_name(
-        cls,
-        project_id: str,
-        zone: str,
-        instance: str,
-    ) -> Optional[str]:
-        response = (cls.load_resource().instances().get(
-            project=project_id,
-            instance=instance,
-            zone=zone,
-        ).execute())
-        if ('networkInterfaces' not in response or
-                len(response['networkInterfaces']) != 1):
-            return None
-        assert 'network' in response['networkInterfaces'][0]
-        return response['networkInterfaces'][0]['network'].split('/')[-1]
 
     @classmethod
     def delete_firewall_rule(
