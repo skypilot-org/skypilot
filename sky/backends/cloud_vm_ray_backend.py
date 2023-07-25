@@ -3647,7 +3647,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             config = common_utils.read_yaml(handle.cluster_yaml)
             if isinstance(cloud, (clouds.AWS, clouds.GCP)):
                 # Clean up AWS SGs
-                provision_api.cleanup_ports(repr(cloud), handle.cluster_name,
+                provision_lib.cleanup_ports(repr(cloud), handle.cluster_name,
                                             config['provider'])
 
         # The cluster file must exist because the cluster_yaml will only
