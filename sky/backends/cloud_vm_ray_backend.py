@@ -1787,6 +1787,12 @@ class RetryingVmProvisioner(object):
                         'error.')
                     return True
 
+            if isinstance(to_provision_cloud, clouds.Lambda):
+                if 'Your API requests are being rate limited.' in stderr:
+                    logger.info(
+                        'Retrying due to Lambda API rate limit exceeded.')
+                    return True
+
             if 'rsync: command not found' in stderr:
                 logger.info('Skipping retry due to `rsync` not found in '
                             'the specified image.')
