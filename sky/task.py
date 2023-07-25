@@ -195,6 +195,7 @@ class Task:
         self.estimated_outputs_size_gigabytes = None
         # Default to CPUNode
         self.resources = {sky.Resources()}
+        self._service = None
         self.time_estimator_func: Optional[Callable[['sky.Resources'],
                                                     int]] = None
         self.file_mounts: Optional[Dict[str, str]] = None
@@ -903,6 +904,10 @@ class Task:
             assert len(self.resources) == 1
             resources = list(self.resources)[0]
             add_if_not_none('resources', resources.to_yaml_config())
+
+        if self.service is not None:
+            add_if_not_none('service', self.service.to_yaml_config())
+
         add_if_not_none('num_nodes', self.num_nodes)
 
         if self.inputs is not None:

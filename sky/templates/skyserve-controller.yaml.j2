@@ -6,9 +6,9 @@ resources:
     - {{port}}
 {%- endfor %}
 
-{% if workdir is not none %}
-workdir: {{workdir}}
-{% endif %}
+# {% if workdir is not none %}
+# workdir: {{workdir}}
+# {% endif %}
 
 file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}

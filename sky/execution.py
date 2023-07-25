@@ -974,30 +974,23 @@ def serve_up(
         name, controller_cluster_name, '',
         status_lib.ServiceStatus.CONTROLLER_INIT, 0, 0, 0, policy,
         requested_resources)
-    # TODO(tian): use `task` directly
-    original = common_utils.read_yaml(original_yaml_path)
-    original_workdir = original.get('workdir', None)
-    workdir_abs_path = None
-    # TODO(tian): use _maybe_translate_local_file_mounts_and_sync_up instead
-    if original_workdir is not None:
-        # Upload the workdir to controller:~/sky_workdir
-        # Then upload controller:~/sky_workdir to the endpoint replica
-        workdir_path = os.path.join(os.path.dirname(original_yaml_path),
-                                    original_workdir)
-        workdir_abs_path = os.path.abspath(workdir_path)
-        original['workdir'] = '~/sky_workdir'
-    service = original['service']
-    app_port = service['port']
-    if 'resources' not in original:
-        original['resources'] = {}
-    original['resources']['ports'] = [app_port]
+    app_port = int(task.service.app_port)
+    assert len(task.resources) == 1, task
+    task.set_resources(list(task.resources)[0].copy(ports=[app_port]))
+
+    # TODO(tian): Use skyserve constants.
+    _maybe_translate_local_file_mounts_and_sync_up(task)
+
     with tempfile.NamedTemporaryFile(prefix=f'serve-task-{name}-',
                                      mode='w') as f:
-        common_utils.dump_yaml(f.name, original)
+        task_config = task.to_yaml_config()
+        if 'resources' in task_config and 'spot_recovery' in task_config[
+                'resources']:
+            del task_config['resources']['spot_recovery']
+        common_utils.dump_yaml(f.name, task_config)
         remote_task_yaml_path = f'{serve.SERVICE_YAML_PREFIX}/service_{name}.yaml'
         vars_to_fill = {
             'ports': [app_port, serve.CONTROL_PLANE_PORT],
-            'workdir': workdir_abs_path,
             'remote_task_yaml_path': remote_task_yaml_path,
             'local_task_yaml_path': f.name,
             'is_dev': env_options.Options.IS_DEVELOPER.get(),
@@ -1106,29 +1099,42 @@ def serve_down(
             f'Stopping control plane and redirector processes on controller...'
             f'{colorama.Style.RESET_ALL}')
         core.cancel(controller_cluster_name, all=True)
+    except (ValueError, sky.exceptions.ClusterNotUpError) as e:
+        if purge:
+            logger.warning(f'Ignoring error when stopping controller: {e}')
+        else:
+            raise e
 
-        plural = ''
-        # TODO(tian): Change to #num replica (including unhealthy one)
-        if num_replicas > 1:
-            plural = 's'
-        print(f'{colorama.Fore.YELLOW}'
-              f'Tearing down {num_replicas} replica{plural}...'
-              f'{colorama.Style.RESET_ALL}')
-        _execute(
-            entrypoint=sky.Task(name='teardown-all-replicas',
-                                run='sky down -a -y'),
-            stream_logs=False,
-            handle=handle,
-            stages=[Stage.EXEC],
-            cluster_name=controller_cluster_name,
-            detach_run=False,
-        )
+    try:
+        if handle is not None:
+            plural = ''
+            # TODO(tian): Change to #num replica (including failed one)
+            if num_replicas > 1:
+                plural = 's'
+            print(f'{colorama.Fore.YELLOW}'
+                  f'Tearing down {num_replicas} replica{plural}...'
+                  f'{colorama.Style.RESET_ALL}')
+            _execute(
+                entrypoint=sky.Task(name='teardown-all-replicas',
+                                    run='sky down -a -y'),
+                stream_logs=False,
+                handle=handle,
+                stages=[Stage.EXEC],
+                cluster_name=controller_cluster_name,
+                detach_run=False,
+            )
+    except (RuntimeError, ValueError) as e:
+        if purge:
+            logger.warning(f'Ignoring error when cleaning controller: {e}')
+        else:
+            raise e
 
+    try:
         print(f'{colorama.Fore.YELLOW}'
               'Teardown controller...'
               f'{colorama.Style.RESET_ALL}')
         core.down(controller_cluster_name, purge=purge)
-    except ValueError as e:
+    except (RuntimeError, ValueError) as e:
         if purge:
             logger.warning(f'Ignoring error when cleaning controller: {e}')
         else:

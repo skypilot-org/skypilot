@@ -54,6 +54,29 @@ class SkyServiceSpec:
 
         return SkyServiceSpec(**service_config)
 
+    def to_yaml_config(self):
+        replica_policy = {}
+
+        def add_if_not_none(key, value, no_empty: bool = False):
+            if no_empty and not value:
+                return
+            if value is not None:
+                replica_policy[key] = value
+
+        add_if_not_none('min_replica', self.min_replica)
+        add_if_not_none('max_replica', self.max_replica)
+        add_if_not_none('qps_upper_threshold', self.qps_upper_threshold)
+        add_if_not_none('qps_lower_threshold', self.qps_lower_threshold)
+
+        return {
+            'port': int(self.app_port),
+            'readiness_probe': {
+                'path': self.readiness_path[len(f':{self.app_port}'):],
+                'readiness_timeout': self.readiness_timeout,
+            },
+            'replica_policy': replica_policy,
+        }
+
     def policy_str(self):
         if self.max_replica == self.min_replica or self.max_replica is None:
             plural = ''
