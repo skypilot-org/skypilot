@@ -77,7 +77,9 @@ def ssh_options_list(ssh_private_key: Optional[str],
         # Agent forwarding for git.
         'ForwardAgent': 'yes',
     }
-    if ssh_control_name is not None:
+    # SSH Control will have a severe delay when using docker_ssh_proxy_command.
+    # TODO(tian): Investigate why.
+    if ssh_control_name is not None and docker_ssh_proxy_command is None:
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
