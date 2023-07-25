@@ -900,14 +900,6 @@ def write_cluster_config(
     # Only using new security group names for clusters with ports specified.
     default_aws_sg_name = f'sky-sg-{common_utils.user_and_hostname_hash()}'
     if ports is not None:
-        if skypilot_config.get_nested(('aws', 'security_group_name'),
-                                      None) is not None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cannot specify both ports when using a custom '
-                    'security_group_name in ~/.sky/config.yaml. '
-                    'Please remove the security_group_name field in'
-                    ' ~/.sky/config.yaml and try again.')
         default_aws_sg_name += f'-{common_utils.hash_cluster_name(cluster_name)}'
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
