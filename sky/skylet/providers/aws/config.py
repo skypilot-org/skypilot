@@ -862,12 +862,13 @@ def _check_ami(config):
 
 
 def _upsert_security_groups(config, node_types):
-    st = time.time()
+    start_time = time.time()
     logger.info("Creating or updating security groups...")
     security_groups = _get_or_create_vpc_security_groups(config, node_types)
     _upsert_security_group_rules(config, security_groups)
-    ed = time.time()
-    logger.info(f"Security groups created or updated in {ed-st:.5f} seconds.")
+    end_time = time.time()
+    elapsed = end_time - start_time
+    logger.info(f"Security groups created or updated in {elapsed:.5f} seconds.")
 
     return security_groups
 

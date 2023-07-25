@@ -863,7 +863,7 @@ def get_usable_vpc(config):
             break
 
     if usable_vpc_name is None:
-        st = time.time()
+        start_time = time.time()
         logger.info(
             f"Creating or updating a default VPC network, {SKYPILOT_VPC_NAME}..."
         )
@@ -919,8 +919,9 @@ def get_usable_vpc(config):
 
         usable_vpc_name = SKYPILOT_VPC_NAME
         logger.info(f"A VPC network {SKYPILOT_VPC_NAME} created.")
-        ed = time.time()
-        logger.info(f"Time to create a VPC network: {ed-st:.5f} sec")
+        end_time = time.time()
+        elapsed = end_time - start_time
+        logger.info(f"Time to create a VPC network: {elapsed:.5f} sec")
 
     return usable_vpc_name
 
