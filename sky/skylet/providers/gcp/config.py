@@ -867,7 +867,6 @@ def _configure_subnet(config, compute):
                     "type": "ONE_TO_ONE_NAT",
                 }
             ],
-            "tags": {"items": [config["cluster_name"]]},
         }
     ]
 
