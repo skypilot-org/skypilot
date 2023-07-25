@@ -917,12 +917,6 @@ def _delete_firewall_rule(config, compute, name, silent=False):
     return response
 
 
-def delete_firewall_rule_if_exist(config, compute, name, silent=False):
-    rule_list = _list_firewall_rules(config, compute, filter=f"(name={name})")
-    if len(rule_list) > 0:
-        _delete_firewall_rule(config, compute, name, silent)
-
-
 def _list_firewall_rules(config, compute, filter=None):
     response = (
         compute.firewalls()
