@@ -885,9 +885,7 @@ class Resources:
                         port_set.add(p)
                     else:
                         from_port, to_port = p.split('-')
-                        port_set.update(
-                            range(int(from_port),
-                                  int(to_port) + 1))
+                        port_set.update(range(int(from_port), int(to_port) + 1))
                 return port_set
 
             if not parse_ports(self.ports) <= parse_ports(other.ports):
