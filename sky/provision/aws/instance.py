@@ -47,6 +47,7 @@ def _filter_instances(ec2, filters: List[Dict[str, Any]],
 def query_instances(
     cluster_name: str,
     provider_config: Optional[Dict[str, Any]] = None,
+    non_terminated_only: bool = True,
 ) -> Dict[str, Optional[status_lib.ClusterStatus]]:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name, provider_config)
@@ -66,8 +67,10 @@ def query_instances(
     }
     statuses = {}
     for inst in instances:
-        state = inst.state['Name']
-        statuses[inst.id] = status_map[state]
+        status = status_map[inst.state['Name']]
+        if non_terminated_only and status is None:
+            continue
+        statuses[inst.id] = status
     return statuses
 
 

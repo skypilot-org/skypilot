@@ -1685,7 +1685,12 @@ def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
 def _query_cluster_status_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
 ) -> List[status_lib.ClusterStatus]:
-    """Returns the status of the cluster."""
+    """Returns the status of the cluster.
+
+    Raises:
+        exceptions.ClusterStatusFetchingError: the cluster status cannot be
+          fetched from the cloud provider.
+    """
     cluster_name = handle.cluster_name
     # Use region and zone from the cluster config, instead of the
     # handle.launched_resources, because the latter may not be set
@@ -1828,6 +1833,12 @@ def check_can_clone_disk_and_override_task(
 
 def _update_cluster_status_no_lock(
         cluster_name: str) -> Optional[Dict[str, Any]]:
+    """Updates the status of the cluster.
+    
+    Raises:
+        exceptions.ClusterStatusFetchingError: the cluster status cannot be
+          fetched from the cloud provider.
+    """
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return None

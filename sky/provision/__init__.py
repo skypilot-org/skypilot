@@ -43,6 +43,7 @@ def query_instances(
     provider_name: str,
     cluster_name: str,
     provider_config: Optional[Dict[str, Any]] = None,
+    non_terminated_only: bool = True,
 ) -> Dict[str, Optional[status_lib.ClusterStatus]]:
     """Query instances.
 
