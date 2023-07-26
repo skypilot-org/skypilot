@@ -11,6 +11,11 @@ from sky.utils.cli_utils import status_utils
 
 logger = sky_logging.init_logger(__name__)
 
+_FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG = (
+    f'{colorama.Fore.YELLOW}Warning: Files/dirs '
+    'specified in .gitignore will be uploaded '
+    'to the cloud storage for {path!r}'
+    'due to the following error: {error_msg!r}')
 
 def format_storage_table(storages: List[Dict[str, Any]],
                          show_all: bool = False) -> str:
@@ -96,24 +101,31 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
                     # Check if the user has 'write' permission to
                     # SRC_DIR_PATH
                     if not os.access(expand_src_dir_path, os.W_OK):
+                        error_msg = 'Write permission denial'
                         logger.warning(
-                            f'{colorama.Fore.YELLOW}Warning: Write permission '
-                            f'denied in {src_dir_path}. Files/dirs specified'
-                            ' in .gitignore will be uploaded to the cloud '
-                            'storage.')
+                            _FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG.format(
+                                path=src_dir_path, error_msg=error_msg)
+                            )
                         return excluded_list
                     init_cmd = f'git -C {expand_src_dir_path} init'
-                    subprocess.run(init_cmd,
-                                   shell=True,
-                                   stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE,
-                                   check=True)
-                    output = subprocess.run(filter_cmd,
-                                            shell=True,
-                                            stdout=subprocess.PIPE,
-                                            stderr=subprocess.PIPE,
-                                            check=True,
-                                            text=True)
+                    try:
+                        subprocess.run(init_cmd,
+                                    shell=True,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    check=True)
+                        output = subprocess.run(filter_cmd,
+                                                shell=True,
+                                                stdout=subprocess.PIPE,
+                                                stderr=subprocess.PIPE,
+                                                check=True,
+                                                text=True)
+                    except subprocess.CalledProcessError as e:
+                        logger.warning(
+                            _FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG.format(
+                                path=src_dir_path, error_msg=e.stderr)
+                        )
+                        return excluded_list
                     if git_exclude_exists:
                         # removes all the files/dirs created with 'git init'
                         # under .git/ except .git/info/exclude

@@ -42,6 +42,7 @@ import pytest
 
 import sky
 from sky import global_user_state
+from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.adaptors import cloudflare
 from sky.skylet import events
@@ -2195,6 +2196,23 @@ def test_inline_env(generic_cloud: str):
     run_one_test(test)
 
 
+# ---------- Testing env file ----------
+def test_inline_env_file(generic_cloud: str):
+    """Test env"""
+    name = _get_cluster_name()
+    test = Test(
+        'test-inline-env-file',
+        [
+            f'sky launch -c {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} --env-file examples/sample_dotenv "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Testing custom image ----------
 @pytest.mark.aws
 def test_custom_image():
@@ -2526,7 +2544,8 @@ class TestStorageWithCredentials:
             return f'aws s3 rb {url} --force'
         if store_type == storage_lib.StoreType.GCS:
             url = f'gs://{bucket_name}'
-            return f'gsutil -m rm -r {url}'
+            gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+            return f'{alias_gen}; {gsutil_alias} rm -r {url}'
         if store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             url = f's3://{bucket_name}'
