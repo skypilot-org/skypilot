@@ -480,11 +480,12 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
         if self._launched_cloud_region is not None:
             task = self.dag.tasks[0]
             requested_resources = list(task.resources)[0]
-            if requested_resources.region is None and requested_resources.zone is None:
+            if (requested_resources.region is None and
+                    requested_resources.zone is None):
                 # Optimization: We only block the previously launched region,
                 # if the requested resources does not specify a region or zone,
-                # because, otherwise, we will spend unnecessary time for skipping
-                # the only specified region/zone.
+                # because, otherwise, we will spend unnecessary time for
+                # skipping the only specified region/zone.
                 launched_cloud, launched_region = self._launched_cloud_region
                 task.blocked_resources = {
                     requested_resources.copy(cloud=launched_cloud,
