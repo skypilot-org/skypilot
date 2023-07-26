@@ -3984,6 +3984,61 @@ def serve_down(
     sky.serve_down(service, purge)
 
 
+@serve.command('logs', cls=_DocumentedCodeCommand)
+@click.option(
+    '--follow/--no-follow',
+    is_flag=True,
+    default=True,
+    help=('Follow the logs of the job. [default: --follow] '
+          'If --no-follow is specified, print the log so far and exit.'))
+@click.option('--control-plane',
+                '-c',
+                is_flag=True,
+                default=False,
+                required=False,
+                help='Show the control plane logs of this service.')
+@click.option('--redirector',
+              '-r',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Show the redirector logs of this service.')
+@click.option('--replica-id',
+                '-i',
+                default=None,
+                required=False,
+                help='Show the logs of a specific replica.')
+@click.argument('service', required=True, type=str)
+@usage_lib.entrypoint
+def serve_logs(
+    service: str,
+    follow: bool,
+    control_plane: bool,
+    redirector: bool,
+    replica_id: Optional[str],
+):
+    """Tail the log of a service.
+
+    Usage: sky serve logs <service> [-c|-r|-i <replica_id>]
+    """
+    have_replica_id = replica_id is not None
+    if (control_plane + redirector + have_replica_id) != 1:
+        click.secho('Usage: sky serve logs <service> [-c|-r|-i <replica_id>]',
+                    fg='red')
+        return
+    service_record = global_user_state.get_service_from_name(service)
+    if service_record is None:
+        click.secho(f'Service {service!r} not found.', fg='red')
+        return
+    controller_name = service_record['controller_cluster_name']
+    if control_plane:
+        core.tail_logs(controller_name, job_id=1, follow=follow)
+    if redirector:
+        core.tail_logs(controller_name, job_id=2, follow=follow)
+    if have_replica_id:
+        raise NotImplementedError
+
+
 # ==============================
 # Sky Benchmark CLIs
 # ==============================
