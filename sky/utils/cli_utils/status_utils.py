@@ -19,6 +19,9 @@ NUM_COST_REPORT_LINES = 5
 _ClusterRecord = Dict[str, Any]
 # A record returned by core.cost_report(); see its docstr for all fields.
 _ClusterCostReportRecord = Dict[str, Any]
+# A record in global_user_state's 'services' table.
+_ServiceRecord = Dict[str, Any]
+_ReplicaRecord = Dict[str, Any]
 
 
 def truncate_long_string(s: str, max_length: int = 35) -> str:
@@ -105,6 +108,68 @@ def show_status_table(cluster_records: List[_ClusterRecord],
     else:
         click.echo('No existing clusters.')
     return num_pending_autostop
+
+
+def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
+    status_columns = [
+        StatusColumn('NAME', _get_name),
+        StatusColumn('CONTROLLER_CLUSTER_NAME',
+                     _get_controller_cluster_name,
+                     show_by_default=False),
+        StatusColumn('ENDPOINT', _get_endpoint),
+        StatusColumn('#HEALTHY_REPLICAS', _get_healthy_replicas),
+        StatusColumn('#UNHEALTHY_REPLICAS', _get_unhealthy_replicas),
+        # TODO(tian): After we have a better way to detect failed replicas
+        # StatusColumn('#FAILED_REPLICAS', _get_failed_replicas),
+        StatusColumn('STATUS', _get_service_status_colored),
+        StatusColumn('POLICY', _get_policy, show_by_default=False),
+        StatusColumn('REQUESTED_RESOURCES',
+                     _get_requested_resources,
+                     show_by_default=False),
+    ]
+
+    columns = []
+    for status_column in status_columns:
+        if status_column.show_by_default or show_all:
+            columns.append(status_column.name)
+    service_table = log_utils.create_table(columns)
+    for record in service_records:
+        row = []
+        for status_column in status_columns:
+            if status_column.show_by_default or show_all:
+                row.append(status_column.calc(record))
+        service_table.add_row(row)
+    if service_records:
+        click.echo(service_table)
+    else:
+        click.echo('No existing services.')
+
+
+def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
+    status_columns = [
+        StatusColumn('NAME', _get_name),
+        StatusColumn('RESOURCES',
+                     _get_resources,
+                     trunc_length=70 if not show_all else 0),
+        StatusColumn('REGION', _get_region),
+        StatusColumn('STATUS', _get_status_colored),
+    ]
+
+    columns = []
+    for status_column in status_columns:
+        if status_column.show_by_default or show_all:
+            columns.append(status_column.name)
+    replica_table = log_utils.create_table(columns)
+    for record in replica_records:
+        row = []
+        for status_column in status_columns:
+            if status_column.show_by_default or show_all:
+                row.append(status_column.calc(record))
+        replica_table.add_row(row)
+    if replica_records:
+        click.echo(replica_table)
+    else:
+        click.echo('No existing replicas.')
 
 
 def get_total_cost_of_displayed_records(
@@ -307,6 +372,27 @@ _get_region = (
 _get_command = (lambda cluster_record: cluster_record['last_use'])
 _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
+_get_controller_cluster_name = (
+    lambda service_record: service_record['controller_cluster_name'])
+_get_endpoint = (lambda service_record: service_record['endpoint'])
+_get_healthy_replicas = (
+    lambda service_record: service_record['num_healthy_replicas'])
+_get_unhealthy_replicas = (
+    lambda service_record: service_record['num_unhealthy_replicas'])
+_get_failed_replicas = (
+    lambda service_record: service_record['num_failed_replicas'])
+_get_policy = (lambda service_record: service_record['policy'])
+_get_requested_resources = (
+    lambda service_record: service_record['requested_resources'])
+
+
+def _get_service_status(
+        service_record: _ServiceRecord) -> status_lib.ServiceStatus:
+    return service_record['status']
+
+
+def _get_service_status_colored(service_record: _ServiceRecord) -> str:
+    return _get_service_status(service_record).colored_str()
 
 
 def _get_status(cluster_record: _ClusterRecord) -> status_lib.ClusterStatus:

@@ -137,6 +137,52 @@ def get_storage_schema():
     }
 
 
+def get_service_schema():
+    return {
+        '$schema': 'http://json-schema.org/draft-07/schema#',
+        'type': 'object',
+        'required': ['port', 'readiness_probe', 'replica_policy'],
+        'additionalProperties': False,
+        'properties': {
+            'port': {
+                'type': 'integer',
+            },
+            'readiness_probe': {
+                'type': 'object',
+                'required': ['path', 'readiness_timeout'],
+                'additionalProperties': False,
+                'properties': {
+                    'path': {
+                        'type': 'string',
+                    },
+                    'readiness_timeout': {
+                        'type': 'number',
+                    },
+                }
+            },
+            'replica_policy': {
+                'type': 'object',
+                'required': ['min_replica'],
+                'additionalProperties': False,
+                'properties': {
+                    'min_replica': {
+                        'type': 'integer',
+                    },
+                    'max_replica': {
+                        'type': 'integer',
+                    },
+                    'qps_upper_threshold': {
+                        'type': 'number',
+                    },
+                    'qps_lower_threshold': {
+                        'type': 'number',
+                    },
+                }
+            }
+        }
+    }
+
+
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -162,6 +208,10 @@ def get_task_schema():
             },
             # storage config is validated separately using STORAGE_SCHEMA
             'file_mounts': {
+                'type': 'object',
+            },
+            # service config is validated separately using SERVICE_SCHEMA
+            'service': {
                 'type': 'object',
             },
             'setup': {
@@ -197,9 +247,6 @@ def get_task_schema():
                 'additionalProperties': {
                     'type': 'number'
                 }
-            },
-            'service': {
-                'type': 'object',
             }
         }
     }

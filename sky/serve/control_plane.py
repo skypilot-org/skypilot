@@ -9,6 +9,7 @@ from sky.serve.load_balancers import RoundRobinLoadBalancer, LoadBalancer
 
 import time
 import threading
+import yaml
 
 from typing import Optional
 
@@ -23,13 +24,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class Controller:
+class ControlPlane:
 
     def __init__(self,
+                 port: int,
                  infra_provider: InfraProvider,
                  load_balancer: LoadBalancer,
-                 autoscaler: Optional[Autoscaler] = None,
-                 port: int = 8082):
+                 autoscaler: Optional[Autoscaler] = None):
         self.port = port
         self.infra_provider = infra_provider
         self.load_balancer = load_balancer
@@ -43,9 +44,10 @@ class Controller:
             self.load_balancer.probe_endpoints(server_ips)
             time.sleep(10)
 
+    # TODO(tian): Authentication!!!
     def run(self):
 
-        @self.app.post('/controller/increment_request_count')
+        @self.app.post('/control_plane/increment_request_count')
         async def increment_request_count(request: Request):
             # await request
             request_data = await request.json()
@@ -55,9 +57,25 @@ class Controller:
             self.load_balancer.increment_request_count(count=count)
             return {'message': 'Success'}
 
-        @self.app.get('/controller/get_server_ips')
+        @self.app.get('/control_plane/get_server_ips')
         def get_server_ips():
             return {'server_ips': list(self.load_balancer.servers_queue)}
+
+        @self.app.get('/control_plane/get_replica_info')
+        def get_replica_info():
+            return {'replica_info': self.infra_provider.get_replica_info()}
+
+        @self.app.get('/control_plane/get_replica_nums')
+        def get_replica_nums():
+            return {
+                'num_healthy_replicas': len(self.load_balancer.available_servers
+                                           ),
+                'num_unhealthy_replicas':
+                    self.infra_provider.total_servers() -
+                    len(self.load_balancer.available_servers),
+                # TODO(tian): Detect error replicas
+                'num_failed_replicas': 0
+            }
 
         # Run server_monitor and autoscaler.monitor (if autoscaler is defined) in separate threads in the background. This should not block the main thread.
         server_fetcher_thread = threading.Thread(target=self.server_fetcher,
@@ -73,7 +91,11 @@ class Controller:
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='SkyServe Server')
+    parser = argparse.ArgumentParser(description='SkyServe Control Plane')
+    parser.add_argument('--service-name',
+                        type=str,
+                        help='Name of the service',
+                        required=True)
     parser.add_argument('--task-yaml',
                         type=str,
                         help='Task YAML file',
@@ -81,24 +103,26 @@ if __name__ == '__main__':
     parser.add_argument('--port',
                         '-p',
                         type=int,
-                        help='Port to run the controller',
-                        default=8082)
-    parser.add_argument('--min-nodes',
-                        type=int,
-                        default=1,
-                        help='Minimum nodes to keep running')
+                        help='Port to run the control plane',
+                        required=True)
     args = parser.parse_args()
 
     # ======= Infra Provider =========
     # infra_provider = DummyInfraProvider()
-    infra_provider = SkyPilotInfraProvider(args.task_yaml)
+    infra_provider = SkyPilotInfraProvider(args.task_yaml, args.service_name)
 
     # ======= Load Balancer =========
-    service_spec = SkyServiceSpec(args.task_yaml)
+    with open(args.task_yaml, 'r') as f:
+        task = yaml.safe_load(f)
+    if 'service' not in task:
+        raise ValueError('Task YAML must have a "service" section')
+    service_config = task['service']
+    service_spec = SkyServiceSpec.from_yaml_config(service_config)
     # Select the load balancing policy: RoundRobinLoadBalancer or LeastLoadedLoadBalancer
     load_balancer = RoundRobinLoadBalancer(
         infra_provider=infra_provider,
-        endpoint_path=service_spec.readiness_path)
+        endpoint_path=service_spec.readiness_path,
+        readiness_timeout=service_spec.readiness_timeout)
     # load_balancer = LeastLoadedLoadBalancer(n=5)
     # autoscaler = LatencyThresholdAutoscaler(load_balancer,
     #                                         upper_threshold=0.5,    # 500ms
@@ -106,17 +130,18 @@ if __name__ == '__main__':
 
     # ======= Autoscaler =========
     # Create an autoscaler with the RequestRateAutoscaler policy. Thresholds are defined as requests per node in the defined interval.
-    autoscaler = RequestRateAutoscaler(infra_provider,
-                                       load_balancer,
-                                       frequency=5,
-                                       query_interval=60,
-                                       lower_threshold=0,
-                                       upper_threshold=1,
-                                       min_nodes=args.min_nodes,
-                                       cooldown=60)
+    autoscaler = RequestRateAutoscaler(
+        infra_provider,
+        load_balancer,
+        frequency=5,
+        min_nodes=service_spec.min_replica,
+        max_nodes=service_spec.max_replica,
+        upper_threshold=service_spec.qps_upper_threshold,
+        lower_threshold=service_spec.qps_lower_threshold,
+        cooldown=60)
 
-    # ======= Controller =========
-    # Create a controller object and run it.
-    controller = Controller(infra_provider, load_balancer, autoscaler,
-                            args.port)
-    controller.run()
+    # ======= ControlPlane =========
+    # Create a control plane object and run it.
+    control_plane = ControlPlane(args.port, infra_provider, load_balancer,
+                                 autoscaler)
+    control_plane.run()

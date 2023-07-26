@@ -1,6 +1,8 @@
 import time
 import logging
+import yaml
 from collections import deque
+from typing import List, Deque
 
 from sky.serve.common import SkyServiceSpec
 
@@ -24,34 +26,34 @@ logger = logging.getLogger(__name__)
 class SkyServeRedirector:
 
     def __init__(self,
-                 controller_url: str,
+                 control_plane_url: str,
                  service_spec: SkyServiceSpec,
                  port: int = 8081):
-        self.controller_url = controller_url
+        self.control_plane_url = control_plane_url
         self.port = port
         self.app_port = service_spec.app_port
-        self.server_ips = []
-        self.servers_queue = deque()
+        self.server_ips: List[str] = []
+        self.servers_queue: Deque[str] = deque()
         self.app = FastAPI()
         self.request_count = 0
-        self.controller_sync_timeout = 20
+        self.control_plane_sync_timeout = 20
 
-    def sync_with_controller(self):
+    def sync_with_control_plane(self):
         while True:
             server_ips = []
             with requests.Session() as session:
                 try:
                     # send request count
                     response = session.post(
-                        self.controller_url +
-                        '/controller/increment_request_count',
+                        self.control_plane_url +
+                        '/control_plane/increment_request_count',
                         json={'counts': self.request_count},
                         timeout=5)
                     response.raise_for_status()
                     self.request_count = 0
                     # get server ips
-                    response = session.get(self.controller_url +
-                                           '/controller/get_server_ips')
+                    response = session.get(self.control_plane_url +
+                                           '/control_plane/get_server_ips')
                     response.raise_for_status()
                     server_ips = response.json()['server_ips']
                 except requests.RequestException as e:
@@ -59,7 +61,7 @@ class SkyServeRedirector:
                 else:
                     logger.info(f'Server IPs: {server_ips}')
                     self.servers_queue = deque(server_ips)
-            time.sleep(self.controller_sync_timeout)
+            time.sleep(self.control_plane_sync_timeout)
 
     def select_server(self):
         if not self.servers_queue:
@@ -86,7 +88,7 @@ class SkyServeRedirector:
                                methods=['GET', 'POST', 'PUT', 'DELETE'])
 
         server_fetcher_thread = threading.Thread(
-            target=self.sync_with_controller, daemon=True)
+            target=self.sync_with_control_plane, daemon=True)
         server_fetcher_thread.start()
 
         logger.info(f'Sky Server started on http://0.0.0.0:{self.port}')
@@ -106,15 +108,21 @@ if __name__ == '__main__':
                         '-p',
                         type=int,
                         help='Port to run the redirector on',
-                        default=8081)
-    parser.add_argument('--controller-addr',
-                        default='http://localhost:8082',
+                        required=True)
+    parser.add_argument('--control-plane-addr',
                         type=str,
-                        help='Controller address (ip:port).')
+                        help='Control plane address (ip:port).',
+                        required=True)
     args = parser.parse_args()
 
-    service_spec = SkyServiceSpec(args.task_yaml)
-    redirector = SkyServeRedirector(controller_url=args.controller_addr,
+    with open(args.task_yaml, 'r') as f:
+        task = yaml.safe_load(f)
+    if 'service' not in task:
+        raise ValueError('Task YAML must have a "service" section')
+    service_config = task['service']
+    service_spec = SkyServiceSpec.from_yaml_config(service_config)
+
+    redirector = SkyServeRedirector(control_plane_url=args.control_plane_addr,
                                     service_spec=service_spec,
                                     port=args.port)
     redirector.serve()
