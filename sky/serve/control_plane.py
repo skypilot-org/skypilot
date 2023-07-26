@@ -1,6 +1,7 @@
 import logging
 
 import argparse
+import multiprocessing
 
 from sky.serve.autoscalers import RequestRateAutoscaler, Autoscaler
 from sky.serve.common import SkyServiceSpec
@@ -38,11 +39,21 @@ class ControlPlane:
         self.app = FastAPI()
 
     def server_fetcher(self):
-        while True:
+        while not self.server_fetcher_stop_event.is_set():
             logger.info('Running server fetcher.')
             server_ips = self.infra_provider.get_server_ips()
             self.load_balancer.probe_endpoints(server_ips)
             time.sleep(10)
+
+    def start_server_fetcher(self):
+        self.server_fetcher_stop_event = threading.Event()
+        self.server_fetcher_thread = threading.Thread(
+            target=self.server_fetcher)
+        self.server_fetcher_thread.start()
+
+    def terminate_server_fetcher(self):
+        self.server_fetcher_stop_event.set()
+        self.server_fetcher_thread.join()
 
     # TODO(tian): Authentication!!!
     def run(self):
@@ -73,18 +84,35 @@ class ControlPlane:
                 'num_unhealthy_replicas':
                     self.infra_provider.total_servers() -
                     len(self.load_balancer.available_servers),
-                # TODO(tian): Detect error replicas
-                'num_failed_replicas': 0
+                'num_failed_replicas': len(
+                    self.infra_provider.get_failed_servers())
             }
 
+        # @self.app.get('/control_plane/debug')
+        # def debug():
+        #     import base64, pickle
+        #     return {
+        #         'lb': base64.b64encode(pickle.dumps(self.load_balancer)).decode('utf-8'),
+        #         'ip': base64.b64encode(pickle.dumps(self.infra_provider)).decode('utf-8'),
+        #         'as': base64.b64encode(pickle.dumps(self.autoscaler)).decode('utf-8'),
+        #     }
+
+        @self.app.post('/control_plane/terminate')
+        def terminate(request: Request):
+            request_data = request.json()
+            # TODO(tian): Authentication!!!
+            logger.info(f'Terminating service...')
+            self.terminate_server_fetcher()
+            self.autoscaler.terminate_monitor()
+            # For correctly show serve status
+            self.load_balancer.available_servers = []
+            self.infra_provider.terminate()
+            return {'message': 'Success'}
+
         # Run server_monitor and autoscaler.monitor (if autoscaler is defined) in separate threads in the background. This should not block the main thread.
-        server_fetcher_thread = threading.Thread(target=self.server_fetcher,
-                                                 daemon=True)
-        server_fetcher_thread.start()
+        self.start_server_fetcher()
         if self.autoscaler:
-            autoscaler_monitor_thread = threading.Thread(
-                target=self.autoscaler.monitor, daemon=True)
-            autoscaler_monitor_thread.start()
+            self.autoscaler.start_monitor()
 
         logger.info(f'Sky Server started on http://0.0.0.0:{self.port}')
         uvicorn.run(self.app, host='0.0.0.0', port=self.port)

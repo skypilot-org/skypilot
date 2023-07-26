@@ -15,6 +15,7 @@ Current task launcher:
 import copy
 import enum
 import getpass
+import requests
 import tempfile
 import os
 import uuid
@@ -1019,10 +1020,6 @@ def serve_up(
             controller_cluster_name)
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         endpoint = f'{handle.head_ip}:{task.service.app_port}'
-        global_user_state.add_or_update_service(
-            name, controller_cluster_name, endpoint,
-            status_lib.ServiceStatus.REPLICA_INIT, 0, 0, 0, policy,
-            requested_resources)
 
         print(
             f'{colorama.Fore.YELLOW}'
@@ -1061,6 +1058,11 @@ def serve_up(
             detach_run=True,
         )
 
+        global_user_state.add_or_update_service(
+            name, controller_cluster_name, endpoint,
+            status_lib.ServiceStatus.REPLICA_INIT, 0, 0, 0, policy,
+            requested_resources)
+
         print(f'{colorama.Style.BRIGHT}{colorama.Fore.CYAN}Serving at '
               f'{colorama.Style.RESET_ALL}{colorama.Fore.CYAN}'
               f'{endpoint}.\n'
@@ -1087,23 +1089,13 @@ def serve_down(
     controller_cluster_name = service_record['controller_cluster_name']
     num_healthy_replicas = service_record['num_healthy_replicas']
     num_unhealthy_replicas = service_record['num_unhealthy_replicas']
-    num_replicas = num_healthy_replicas + num_unhealthy_replicas
+    num_failed_replicas = service_record['num_failed_replicas']
+    num_replicas = num_healthy_replicas + num_unhealthy_replicas + num_failed_replicas
+    controller_ip = service_record['endpoint'].split(':')[0]
     handle = global_user_state.get_handle_from_cluster_name(
         controller_cluster_name)
     global_user_state.set_service_status(name,
                                          status_lib.ServiceStatus.SHUTTING_DOWN)
-
-    try:
-        print(
-            f'{colorama.Fore.YELLOW}'
-            f'Stopping control plane and redirector processes on controller...'
-            f'{colorama.Style.RESET_ALL}')
-        core.cancel(controller_cluster_name, all=True)
-    except (ValueError, sky.exceptions.ClusterNotUpError) as e:
-        if purge:
-            logger.warning(f'Ignoring error when stopping controller: {e}')
-        else:
-            raise e
 
     try:
         if handle is not None:
@@ -1114,18 +1106,28 @@ def serve_down(
             print(f'{colorama.Fore.YELLOW}'
                   f'Tearing down {num_replicas} replica{plural}...'
                   f'{colorama.Style.RESET_ALL}')
-            _execute(
-                entrypoint=sky.Task(name='teardown-all-replicas',
-                                    run='sky down -a -y'),
-                stream_logs=False,
-                handle=handle,
-                stages=[Stage.EXEC],
-                cluster_name=controller_cluster_name,
-                detach_run=False,
-            )
+            resp = requests.post(
+                f'http://{controller_ip}:{serve.CONTROL_PLANE_PORT}/control_plane/terminate',
+                data='')
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f'Failed to terminate replica due to request failure: {resp.text}')
+            logger.debug(resp.json())
     except (RuntimeError, ValueError) as e:
         if purge:
             logger.warning(f'Ignoring error when cleaning controller: {e}')
+        else:
+            raise e
+
+    try:
+        print(
+            f'{colorama.Fore.YELLOW}'
+            f'Stopping control plane and redirector processes on controller...'
+            f'{colorama.Style.RESET_ALL}')
+        core.cancel(controller_cluster_name, all=True)
+    except (ValueError, sky.exceptions.ClusterNotUpError) as e:
+        if purge:
+            logger.warning(f'Ignoring error when stopping controller: {e}')
         else:
             raise e
 

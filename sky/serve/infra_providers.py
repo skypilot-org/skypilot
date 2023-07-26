@@ -1,8 +1,11 @@
 import logging
-from typing import List
+import os
+from typing import List, Dict
 import time
 import pickle
 import base64
+import multiprocessing
+import signal
 
 import sky
 from sky.backends import backend_utils
@@ -11,6 +14,8 @@ import urllib
 import threading
 
 logger = logging.getLogger(__name__)
+
+_PROCESS_POOL_REFRESH_INTERVAL = 5
 
 
 class InfraProvider:
@@ -31,6 +36,14 @@ class InfraProvider:
 
     def terminate_servers(self, unhealthy_servers: List[str]):
         # Terminates the servers with endpoints in the list
+        raise NotImplementedError
+
+    def get_failed_servers(self):
+        # Returns a list of failed servers
+        raise NotImplementedError
+
+    def terminate(self):
+        # Terminate service
         raise NotImplementedError
 
 
@@ -84,6 +97,13 @@ class SkyPilotInfraProvider(InfraProvider):
         self.task_yaml_path = task_yaml_path
         self.cluster_name_prefix = cluster_name_prefix + '-'
         self.id_counter = self._get_id_start()
+        self.launch_process_pool: Dict[str, multiprocessing.Process] = dict()
+        self.down_process_pool: Dict[str, multiprocessing.Process] = dict()
+        self.failed_servers: List[str] = []
+
+        self.process_pool_refresh_process = multiprocessing.Process(
+            target=self._refresh_process_pool)
+        self.process_pool_refresh_process.start()
 
     def _get_id_start(self):
         """
@@ -153,16 +173,34 @@ class SkyPilotInfraProvider(InfraProvider):
         ]
         return len(clusters)
 
+    def get_failed_servers(self):
+        return self.failed_servers
+
+    def _launch_cluster(self, cluster_name, task):
+        p = multiprocessing.Process(target=sky.launch,
+                                    args=(task,),
+                                    kwargs={
+                                        'cluster_name': cluster_name,
+                                        'detach_run': True,
+                                        'retry_until_up': True
+                                    })
+        self.launch_process_pool[cluster_name] = p
+        p.start()
+
+    def _teardown_cluster(self, cluster_name):
+        p = multiprocessing.Process(target=sky.down,
+                                    args=(cluster_name,),
+                                    kwargs={'purge': True})
+        self.down_process_pool[cluster_name] = p
+        p.start()
+
     def _scale_up(self, n):
         # Launch n new clusters
         task = sky.Task.from_yaml(self.task_yaml_path)
-        for i in range(0, n):
+        for _ in range(0, n):
             cluster_name = f'{self.cluster_name_prefix}{self.id_counter}'
             logger.info(f'Creating SkyPilot cluster {cluster_name}')
-            sky.launch(task,
-                       cluster_name=cluster_name,
-                       detach_run=True,
-                       retry_until_up=True)  # TODO - make the launch parallel
+            self._launch_cluster(cluster_name, task)
             self.id_counter += 1
 
     def _scale_down(self, n):
@@ -184,7 +222,22 @@ class SkyPilotInfraProvider(InfraProvider):
             for i in range(0, n):
                 cluster = clusters[i]
                 logger.info(f'Deleting SkyPilot cluster {cluster["name"]}')
-                sky.down(cluster['name'], purge=True)
+                self._teardown_cluster(cluster['name'])
+
+    def _refresh_process_pool(self):
+        while True:
+            logger.info('Refreshing process pool.')
+            for pool in [self.launch_process_pool, self.down_process_pool]:
+                for cluster_name, p in list(pool.items()):
+                    if not p.is_alive():
+                        logger.info(f'Process for {cluster_name} is dead.')
+                        del pool[cluster_name]
+                        if p.exitcode != 0:
+                            logger.info(
+                                f'Process for {cluster_name} exited abnormally with code {p.exitcode}.'
+                            )
+                            self.failed_servers.append(cluster_name)
+            time.sleep(_PROCESS_POOL_REFRESH_INTERVAL)
 
     def get_server_ips(self) -> List[str]:
         ips = self._get_server_ips()
@@ -215,8 +268,18 @@ class SkyPilotInfraProvider(InfraProvider):
             name = ip_to_name_map[endpoint_url]
             if endpoint_url in unhealthy_servers:
                 logger.info(f'Deleting SkyPilot cluster {name}')
-                threading.Thread(target=sky.down,
-                                 args=(name,),
-                                 kwargs={
-                                     'purge': True
-                                 }).start()
+                self._teardown_cluster(name)
+
+    def terminate(self):
+        self.process_pool_refresh_process.terminate()
+        for name, p in self.launch_process_pool.items():
+            # Use keyboard interrupt here since sky.launch has great handling for it
+            # Edge case: sky.launched finished after the process_pool_refresh_process terminates
+            if p.is_alive():
+                os.kill(p.pid, signal.SIGINT)
+                p.join()
+                self._teardown_cluster(name)
+        server_ips = self._get_server_ips()
+        self.terminate_servers(server_ips)
+        for _, p in self.down_process_pool.items():
+            p.join()

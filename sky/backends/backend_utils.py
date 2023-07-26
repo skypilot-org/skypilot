@@ -2441,10 +2441,11 @@ def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
                 pass
             else:
                 record.update(resp.json())
-                if record['num_healthy_replicas'] > 0:
-                    record['status'] = status_lib.ServiceStatus.RUNNING
-                elif record['num_unhealthy_replicas'] > 0:
-                    record['status'] = status_lib.ServiceStatus.REPLICA_INIT
+                if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
+                    if record['num_healthy_replicas'] > 0:
+                        record['status'] = status_lib.ServiceStatus.RUNNING
+                    elif record['num_unhealthy_replicas'] > 0:
+                        record['status'] = status_lib.ServiceStatus.REPLICA_INIT
             global_user_state.add_or_update_service(**record)
             if service is not None:
                 assert record['name'] == service

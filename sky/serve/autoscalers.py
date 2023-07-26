@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 
 from typing import Optional
@@ -32,9 +33,18 @@ class Autoscaler:
 
     def monitor(self):
         logger.info('Starting autoscaler monitor.')
-        while True:
+        while not self.monitor_thread_stop_event.is_set():
             self.evaluate_scaling()
             time.sleep(self.frequency)
+
+    def start_monitor(self):
+        self.monitor_thread_stop_event = threading.Event()
+        self.monitor_thread = threading.Thread(target=self.monitor)
+        self.monitor_thread.start()
+
+    def terminate_monitor(self):
+        self.monitor_thread_stop_event.set()
+        self.monitor_thread.join()
 
 
 class LatencyThresholdAutoscaler(Autoscaler):
@@ -134,7 +144,6 @@ class RequestRateAutoscaler(Autoscaler):
                     f'lower threshold: {self.lower_threshold} qps/node, '
                     f'queries per node: {requests_per_node} qps/node')
 
-        scaled = True
         # Bootstrap case
         logger.info(f'Number of nodes: {num_nodes}')
         if num_nodes < self.min_nodes:

@@ -195,7 +195,7 @@ class Task:
         self.estimated_outputs_size_gigabytes = None
         # Default to CPUNode
         self.resources = {sky.Resources()}
-        self._service = None
+        self._service: Optional[common.SkyServiceSpec] = None
         self.time_estimator_func: Optional[Callable[['sky.Resources'],
                                                     int]] = None
         self.file_mounts: Optional[Dict[str, str]] = None

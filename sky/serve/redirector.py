@@ -28,7 +28,7 @@ class SkyServeRedirector:
     def __init__(self,
                  control_plane_url: str,
                  service_spec: SkyServiceSpec,
-                 port: int = 8081):
+                 port: int):
         self.control_plane_url = control_plane_url
         self.port = port
         self.app_port = service_spec.app_port
