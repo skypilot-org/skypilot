@@ -43,6 +43,7 @@ from sky.adaptors import gcp, ibm, kubernetes
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.skylet.providers.kubernetes import utils as kubernetes_utils
 from sky.skylet.providers.lambda_cloud import lambda_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -405,6 +406,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     sshjump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
     sshjump_image =  clouds.Kubernetes.IMAGE
+    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
 
     template_path = os.path.join(sky.__root_dir__, 'templates', 'kubernetes-sshjump.yml.j2')
     if not os.path.exists(template_path):
@@ -418,7 +420,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # ServiceAccount
     try:
-        kubernetes.core_api().create_namespaced_service_account('default', content['service_account'])
+        kubernetes.core_api().create_namespaced_service_account(namespace, content['service_account'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
@@ -430,7 +432,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             f'Creating SSH Jump ServiceAcount in the cluster...')
     # Role
     try:
-        kubernetes.auth_api().create_namespaced_role('default', content['role'])
+        kubernetes.auth_api().create_namespaced_role(namespace, content['role'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
@@ -442,7 +444,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             f'Creating SSH Jump Role in the cluster...')
     # RoleBinding
     try:
-        kubernetes.auth_api().create_namespaced_role_binding('default', content['role_binding'])
+        kubernetes.auth_api().create_namespaced_role_binding(namespace, content['role_binding'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
@@ -455,7 +457,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Pod
     try:
-        kubernetes.core_api().create_namespaced_pod('default', content['pod_spec'])
+        kubernetes.core_api().create_namespaced_pod(namespace, content['pod_spec'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
@@ -467,7 +469,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             f'Creating SSH Jump Host {sshjump_name} in the cluster...')
     # Service
     try:
-        kubernetes.core_api().create_namespaced_service('default', content['service_spec'])
+        kubernetes.core_api().create_namespaced_service(namespace, content['service_spec'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
@@ -478,7 +480,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(
             f'Creating SSH Jump Service {sshjump_name} in the cluster...')
 
-    ssh_jump_port = clouds.Kubernetes.get_port(sshjump_name, 'default')
+    ssh_jump_port = clouds.Kubernetes.get_port(sshjump_name)
     ssh_jump_ip = clouds.Kubernetes.get_external_ip()
 
     config['auth']['ssh_proxy_command'] = \
