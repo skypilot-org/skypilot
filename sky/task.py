@@ -4,7 +4,7 @@ import json
 import os
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import yaml
 
@@ -118,7 +118,7 @@ class Task:
         # Advanced:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
-        blocked_resources: Optional['resources_lib.Resources'] = None,
+        blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
     ):
         """Initializes a Task.
 
@@ -173,6 +173,7 @@ class Task:
           docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
+          blocked_resources: A set of resources that this task cannot run on.
         """
         self.name = name
         self.run = run

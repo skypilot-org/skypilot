@@ -634,6 +634,7 @@ class RetryingVmProvisioner(object):
                      resources_lib.Resources]] = None):
         self._blocked_resources: Set[resources_lib.Resources] = set()
         if blocked_resources:
+            # blocked_resources is not None and not empty.
             self._blocked_resources.update(blocked_resources)
 
         self.log_dir = os.path.expanduser(log_dir)

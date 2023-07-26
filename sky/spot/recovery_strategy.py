@@ -3,7 +3,7 @@
 In the YAML file, the user can specify the strategy to use for spot jobs.
 
 resources:
-    spot_recovery: AGGRESSIVE_FAILOVER
+    spot_recovery: EAGER_FAILOVER
 """
 import time
 import traceback
@@ -362,7 +362,8 @@ class StrategyExecutor:
             time.sleep(gap_seconds)
 
 
-class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=False):
+class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
+                               default=False):
     """Failover strategy: wait in same region and failover after timout."""
 
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
@@ -402,9 +403,6 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=False)
         # Step 1
         self._try_cancel_all_jobs()
 
-        # Retry the entire block until the cluster is up, so that the ratio of
-        # the time spent in the current region and the time spent in the other
-        # region is consistent during the retry.
         while True:
             # Add region constraint to the task, to retry on the same region
             # first (if valid).
@@ -455,11 +453,11 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=False)
 class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
                                     name='EAGER_FAILOVER',
                                     default=True):
-    """Aggressive failover strategy
+    """Eager failover strategy.
 
-    This strategy is an extension of the failover strategy. Instead of waiting
+    This strategy is an extension of the FAILOVER strategy. Instead of waiting
     in the same region when the preemption happens, it immediately terminates
-    the cluster and relaunches it in a different regions. This is based on the
+    the cluster and relaunches it in a different region. This is based on the
     observation that the preemption is likely to happen again shortly in the
     same region, so trying other regions first is more likely to get a longer
     running cluster.
@@ -469,7 +467,7 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
         # 1. Terminate the current cluster
         # 2. Launch the cluster without retrying the previously launched region
         # 3. Launch the cluster with no cloud/region constraint or respect the
-        #    original user specification.
+        #    original resources requirements.
 
         # Step 1
         logger.debug('Terminating unhealthy spot cluster and '
@@ -481,31 +479,28 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
                      'cloud/region.')
         if self._launched_cloud_region is not None:
             task = self.dag.tasks[0]
-            resources = list(task.resources)[0]
-            if resources.region is None and resources.zone is None:
+            requested_resources = list(task.resources)[0]
+            if requested_resources.region is None and requested_resources.zone is None:
                 # Optimization: We only block the previously launched region,
-                # if the task does not specify a region or zone, because,
-                # otherwise, we will spend unnecessary time for skipping the
-                # only specified region/zone.
+                # if the requested resources does not specify a region or zone,
+                # because, otherwise, we will spend unnecessary time for skipping
+                # the only specified region/zone.
                 launched_cloud, launched_region = self._launched_cloud_region
                 task.blocked_resources = {
-                    resources.copy(cloud=launched_cloud, region=launched_region)
+                    requested_resources.copy(cloud=launched_cloud,
+                                             region=launched_region)
                 }
                 # Not using self.launch to avoid the retry until up logic.
                 job_submitted_at = self._launch(raise_on_failure=False)
                 task.blocked_resources = None
-                # Restore the original dag, i.e. reset the region constraint.
                 if job_submitted_at is not None:
                     return job_submitted_at
+                # Failed to launch the cluster.
                 self._launched_cloud_region = None
-                terminate_cluster(self.cluster_name)
 
-        # Retry the entire block until the cluster is up, so that the ratio of
-        # the time spent in the current region and the time spent in the other
-        # region is consistent during the retry.
         while True:
             # Step 3
-            logger.debug('Relaunch the cluster  without constraining to prior '
+            logger.debug('Relaunch the cluster without constraining to prior '
                          'cloud/region.')
             # Not using self.launch to avoid the retry until up logic.
             job_submitted_at = self._launch(max_retry=self._MAX_RETRY_CNT,
