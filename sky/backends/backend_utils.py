@@ -1834,7 +1834,7 @@ def check_can_clone_disk_and_override_task(
 def _update_cluster_status_no_lock(
         cluster_name: str) -> Optional[Dict[str, Any]]:
     """Updates the status of the cluster.
-    
+
     Raises:
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
           fetched from the cloud provider.
