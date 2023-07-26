@@ -92,8 +92,8 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
                         logger.warning(
                             f'{colorama.Fore.YELLOW}Warning: Write permission '
                             f'denied in {src_dir_path}. Files/dirs specified'
-                            ' in .gitignore will be uploaded to the Cloud '
-                            'Storage."')
+                            ' in .gitignore will be uploaded to the cloud '
+                            'storage.')
                         return excluded_list
                     init_cmd = f'git -C {expand_src_dir_path} init'
                     subprocess.run(init_cmd,
