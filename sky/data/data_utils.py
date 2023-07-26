@@ -149,6 +149,38 @@ def verify_ibm_cos_bucket(name: str) -> bool:
     return get_ibm_cos_bucket_region(name) != ''
 
 
+def _get_ibm_cos_bucket_region(region, bucket_name):
+    """helper function of get_ibm_cos_bucket_region
+
+    returns region of bucket if exists in a region,
+    else returns an empty string.
+    located outside of get_ibm_cos_bucket_region since
+    inner function aren't pickable for processes.
+
+    Args:
+        region (str): region to search the bucket in.
+        bucket_name (str): name of bucket in search.
+
+    Returns:
+        str: region or ''
+    """
+    try:
+        # reinitialize a client to search in different regions
+        tmp_client = ibm.get_cos_client(region)
+        tmp_client.head_bucket(Bucket=bucket_name)
+        return region
+    except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # pylint: disable=line-too-long
+        if e.response['Error']['Code'] == '404':
+            logger.debug(f'bucket {bucket_name} was not found '
+                         f'in {region}')
+        # Failed to connect to bucket, e.g. owned by different user
+        elif e.response['Error']['Code'] == '403':
+            raise exceptions.StorageBucketGetError()
+        else:
+            raise e
+    return ''
+
+
 def get_ibm_cos_bucket_region(bucket_name: str) -> str:
     """
     Returns the region of the bucket if exists,
@@ -164,28 +196,12 @@ def get_ibm_cos_bucket_region(bucket_name: str) -> str:
         str: region of bucket if bucket exists, else empty string.
     """
 
-    def _get_bucket_region(region):
-        try:
-            # reinitialize a client to search in different regions
-            tmp_client = ibm.get_cos_client(region)
-            tmp_client.head_bucket(Bucket=bucket_name)
-            return region
-        except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # pylint: disable=line-too-long
-            if e.response['Error']['Code'] == '404':
-                logger.debug(f'bucket {bucket_name} was not found '
-                             f'in {region}')
-            # Failed to connect to bucket, e.g. owned by different user
-            elif e.response['Error']['Code'] == '403':
-                raise exceptions.StorageBucketGetError()
-            else:
-                raise e
-        return ''
-
-    # concurrently check whether a bucket exists in each region
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+    # parallel lookup on bucket storage region
+    with concurrent.futures.ProcessPoolExecutor() as executor:
         futures = []
         for region_scanned in get_cos_regions():
-            future = executor.submit(_get_bucket_region, region_scanned)
+            future = executor.submit(_get_ibm_cos_bucket_region, region_scanned,
+                                     bucket_name)
             futures.append(future)
 
         for future in concurrent.futures.as_completed(futures):
