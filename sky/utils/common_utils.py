@@ -89,7 +89,9 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
 
 
 def hash_cluster_name(cluster_name: str) -> str:
-    return hashlib.md5(
+    if len(cluster_name) < 15:
+        return cluster_name
+    return cluster_name[:10] + hashlib.md5(
         cluster_name.encode()).hexdigest()[:CLUSTER_NAME_HASH_LENGTH]
 
 
