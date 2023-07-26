@@ -1619,7 +1619,7 @@ def get_head_ssh_port(
             head_ssh_port = handle.head_ssh_port
         else:
             svc_name = f'{handle.get_cluster_name()}-ray-head-ssh'
-            head_ssh_port = clouds.Kubernetes.get_port(svc_name, 'default')
+            head_ssh_port = clouds.Kubernetes.get_port(svc_name)
     return head_ssh_port
 
 

@@ -213,8 +213,9 @@ class Kubernetes(clouds.Cloud):
         return isinstance(other, Kubernetes)
 
     @classmethod
-    def get_port(cls, svc_name, namespace) -> int:
-        return kubernetes_utils.get_port(svc_name, namespace)
+    def get_port(cls, svc_name) -> int:
+        ns = kubernetes_utils.get_current_kube_config_context_namespace()
+        return kubernetes_utils.get_port(svc_name, ns)
 
     @classmethod
     def get_default_instance_type(
