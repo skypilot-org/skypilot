@@ -155,7 +155,7 @@ class KubernetesNodeProvider(NodeProvider):
                 return
             except kubernetes.api_exception() as e:
                 if e.status == 409:
-                    logger.info(kubernetes.log_prefix +
+                    logger.info(config.log_prefix +
                                 'Caught a 409 error while setting'
                                 ' node tags. Retrying...')
                     time.sleep(DELAY_BEFORE_TAG_RETRY)
