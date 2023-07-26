@@ -41,7 +41,7 @@ available_node_types:
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}
       metadata:
-        # TPU VM's metadata as different format than normal VMs.
+        # TPU VM's metadata has different format than normal VMs.
         # After replacing the variables, this will become username:ssh_public_key_content.
         # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
         ssh-keys: |
@@ -72,7 +72,6 @@ available_node_types:
           acceleratorCount: {{gpu_count}}
   {%- endif %}
       metadata:
-        # TPU VM's metadata as different format than normal VMs.
         items:
           - key: ssh-keys
             # After replacing the variables, this will become username:ssh_public_key_content.
@@ -103,6 +102,7 @@ available_node_types:
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}
       metadata:
+        # TPU VM's metadata has different format than normal VMs.
         # After replacing the variables, this will become username:ssh_public_key_content.
         # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
         ssh-keys: |
