@@ -7,6 +7,7 @@ from sky.adaptors import aws
 BOTO_MAX_RETRIES = 12
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
+TAG_RAY_NODE_KIND = 'ray-node-type'
 
 
 def _filter_instances(ec2, filters: List[Dict[str, Any]],
@@ -30,8 +31,7 @@ def _filter_instances(ec2, filters: List[Dict[str, Any]],
 def stop_instances(
     cluster_name: str,
     provider_config: Optional[Dict[str, Any]] = None,
-    included_instances: Optional[List[str]] = None,
-    excluded_instances: Optional[List[str]] = None,
+    worker_only: bool = False,
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name, provider_config)
@@ -50,8 +50,12 @@ def stop_instances(
             'Values': [cluster_name],
         },
     ]
-    instances = _filter_instances(ec2, filters, included_instances,
-                                  excluded_instances)
+    if worker_only:
+        filters.append({
+            'Name': f'tag:{TAG_RAY_NODE_KIND}',
+            'Values': ['worker'],
+        })
+    instances = _filter_instances(ec2, filters, None, None)
     instances.stop()
     # TODO(suquark): Currently, the implementation of GCP and Azure will
     #  wait util the cluster is fully terminated, while other clouds just
@@ -64,8 +68,7 @@ def stop_instances(
 def terminate_instances(
     cluster_name: str,
     provider_config: Optional[Dict[str, Any]] = None,
-    included_instances: Optional[List[str]] = None,
-    excluded_instances: Optional[List[str]] = None,
+    worker_only: bool = False,
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name, provider_config)
@@ -85,9 +88,13 @@ def terminate_instances(
             'Values': [cluster_name],
         },
     ]
+    if worker_only:
+        filters.append({
+            'Name': f'tag:{TAG_RAY_NODE_KIND}',
+            'Values': ['worker'],
+        })
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.Instance
-    instances = _filter_instances(ec2, filters, included_instances,
-                                  excluded_instances)
+    instances = _filter_instances(ec2, filters, None, None)
     instances.terminate()
     # TODO(suquark): Currently, the implementation of GCP and Azure will
     #  wait util the cluster is fully terminated, while other clouds just

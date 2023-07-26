@@ -139,7 +139,6 @@ Documentation
    cloud-setup/cloud-auth
    cloud-setup/quota
 
-
 .. toctree::
    :maxdepth: 1
    :caption: References
@@ -147,3 +146,4 @@ Documentation
    reference/yaml-spec
    reference/cli
    reference/api
+   reference/config

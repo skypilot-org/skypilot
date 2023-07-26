@@ -2,6 +2,7 @@
 import functools
 import json
 import os
+import re
 import subprocess
 import time
 import typing
@@ -270,8 +271,13 @@ class GCP(clouds.Cloud):
     def is_same_cloud(self, other):
         return isinstance(other, GCP)
 
+    @classmethod
+    def _is_machine_image(cls, image_id: str) -> bool:
+        find_machine = re.match(r'projects/.*/.*/machineImages/.*', image_id)
+        return find_machine is not None
+
     def get_image_size(self, image_id: str, region: Optional[str]) -> float:
-        del region  # unused
+        del region  # Unused.
         if image_id.startswith('skypilot:'):
             return DEFAULT_GCP_IMAGE_GB
         try:
@@ -287,9 +293,22 @@ class GCP(clouds.Cloud):
                 raise ValueError(f'Image {image_id!r} not found in GCP.')
             project = image_attrs[1]
             image_name = image_attrs[-1]
-            image_infos = compute.images().get(project=project,
-                                               image=image_name).execute()
-            return float(image_infos['diskSizeGb'])
+            # We support both GCP's Machine Images and Custom Images, both
+            # of which are specified with the image_id field. We will
+            # distinguish them by checking if the image_id contains
+            # 'machineImages'.
+            if self._is_machine_image(image_id):
+                image_infos = compute.machineImages().get(
+                    project=project, machineImage=image_name).execute()
+                # The VM launching in a different region than the machine
+                # image is supported by GCP, so we do not need to check the
+                # storageLocations.
+                return float(
+                    image_infos['instanceProperties']['disks'][0]['diskSizeGb'])
+            else:
+                image_infos = compute.images().get(project=project,
+                                                   image=image_name).execute()
+                return float(image_infos['diskSizeGb'])
         except gcp.http_error_exception() as e:
             if e.resp.status == 403:
                 with ux_utils.print_exception_no_traceback():
@@ -386,6 +405,11 @@ class GCP(clouds.Cloud):
 
         assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
+        resources_vars['machine_image'] = None
+
+        if self._is_machine_image(image_id):
+            resources_vars['machine_image'] = image_id
+            resources_vars['image_id'] = None
 
         resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier)
 
