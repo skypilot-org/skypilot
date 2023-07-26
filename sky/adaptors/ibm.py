@@ -9,7 +9,6 @@ import json
 import requests
 import functools
 import multiprocessing
-import threading
 
 CREDENTIAL_FILE = '~/.ibm/credentials.yaml'
 logger = sky_logging.init_logger(__name__)
@@ -19,9 +18,6 @@ ibm_cloud_sdk_core = None
 ibm_platform_services = None
 ibm_boto3 = None
 ibm_botocore = None
-# locks for synchronizing storage clients
-multiprocessing_lock = multiprocessing.Lock()
-threading_lock = threading.Lock()
 
 
 def import_package(func):
@@ -131,7 +127,7 @@ def tagging_client():
 @import_package
 def get_cos_client(region: str = 'us-east'):
     """Returns an IBM COS client object.
-      Using thread&process locks to protect not multi thread/process
+      Using process lock to protect not multi process
       safe Boto3.session, which is invoked (default session) by
       boto3.client.
 
@@ -142,20 +138,19 @@ def get_cos_client(region: str = 'us-east'):
         IBM COS client
     """
     access_key_id, secret_access_key = get_hmac_keys()
-    with multiprocessing_lock:
-        with threading_lock:
-            return ibm_boto3.client(  # type: ignore[union-attr]
-                service_name='s3',
-                aws_access_key_id=access_key_id,
-                aws_secret_access_key=secret_access_key,
-                endpoint_url=
-                f'https://s3.{region}.cloud-object-storage.appdomain.cloud')
+    with _get_global_process_lock():
+        return ibm_boto3.client(  # type: ignore[union-attr]
+            service_name='s3',
+            aws_access_key_id=access_key_id,
+            aws_secret_access_key=secret_access_key,
+            endpoint_url=
+            f'https://s3.{region}.cloud-object-storage.appdomain.cloud')
 
 
 @import_package
 def get_cos_resource(region: str = 'us-east'):
     """Returns an IBM COS Resource object.
-      Using thread&process locks to protect not multi thread/process safe
+      Using process lock to protect not multi process safe
       boto3.Resource.
 
     Args:
@@ -165,11 +160,25 @@ def get_cos_resource(region: str = 'us-east'):
         IBM COS Resource
     """
     access_key_id, secret_access_key = get_hmac_keys()
-    with multiprocessing_lock:
-        with threading_lock:
-            return ibm_boto3.resource(  # type: ignore[union-attr]
-                's3',
-                aws_access_key_id=access_key_id,
-                aws_secret_access_key=secret_access_key,
-                endpoint_url=
-                f'https://s3.{region}.cloud-object-storage.appdomain.cloud')
+    with _get_global_process_lock():
+        return ibm_boto3.resource(  # type: ignore[union-attr]
+            's3',
+            aws_access_key_id=access_key_id,
+            aws_secret_access_key=secret_access_key,
+            endpoint_url=
+            f'https://s3.{region}.cloud-object-storage.appdomain.cloud')
+
+
+def _get_global_process_lock():
+    """returns a multi-process lock.
+
+    lazily initializes a global multi-process lock if it wasn't
+      already initialized.
+    Necessary when process are spawned without a shared lock.
+    """
+    global global_process_lock  # pylint: disable=global-variable-undefined
+
+    if 'global_process_lock' not in globals():
+        global_process_lock = multiprocessing.Lock()
+
+    return global_process_lock
