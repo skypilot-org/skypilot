@@ -34,7 +34,6 @@ setup_commands:
 head_setup_commands: []
 
 
-head_start_ray_commands:
-  - (ps ux | grep -v 'bash\|grep' | grep -q sky.skylet.skylet) || (nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &) # Start skylet daemon. (Should not place it in the head_setup_commands, otherwise it will run before sky is installed.)
+head_start_ray_commands: []
 
 worker_start_ray_commands: []
