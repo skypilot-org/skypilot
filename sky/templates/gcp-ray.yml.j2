@@ -40,6 +40,12 @@ available_node_types:
 {%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}
+      metadata:
+        # TPU VM's metadata as different format than normal VMs.
+        # After replacing the variables, this will become username:ssh_public_key_content.
+        # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
+        ssh-keys: |
+              skypilot:ssh_user:skypilot:ssh_public_key_content
   {%- if use_spot %}
       schedulingConfig:
         preemptible: true
@@ -66,20 +72,13 @@ available_node_types:
           acceleratorCount: {{gpu_count}}
   {%- endif %}
       metadata:
+        # TPU VM's metadata as different format than normal VMs.
         items:
-        {%- if tpu_vm %}
-          - key: startup-script
-            value: |
-              #! /bin/bash
-              echo "# Added by SkyPilot\nskypilot:ssh_public_key_content" >> ~/.ssh/authorized_keys
-              EOF
-        {%- else %}
           - key: ssh-keys
             # After replacing the variables, this will become username:ssh_public_key_content.
             # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
             value: |
               skypilot:ssh_user:skypilot:ssh_public_key_content
-        {%- endif %}
   {%- if gpu is not none %}
           - key: install-nvidia-driver
             value: "True"
@@ -103,6 +102,11 @@ available_node_types:
   {%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}
+      metadata:
+        # After replacing the variables, this will become username:ssh_public_key_content.
+        # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
+        ssh-keys: |
+              skypilot:ssh_user:skypilot:ssh_public_key_content
     {%- if use_spot %}
       schedulingConfig:
         preemptible: true
@@ -131,11 +135,16 @@ available_node_types:
       metadata:
         items:
           {%- if tpu_vm %}
-          - key: startup-script
+          - key: user-data
             value: |
-              #! /bin/bash
-              echo "# Added by SkyPilot\nskypilot:ssh_public_key_content" >> ~/.ssh/authorized_keys
-              EOF
+              #cloud-config
+              users:
+                - name: skypilot:ssh_user
+                  shell: /bin/bash
+                  sudo: ALL=(ALL) NOPASSWD:ALL
+                  ssh_authorized_keys:
+                    - |
+                      skypilot:ssh_public_key_content
         {%- else %}
           - key: ssh-keys
             # After replacing the variables, this will become username:ssh_public_key_content.
