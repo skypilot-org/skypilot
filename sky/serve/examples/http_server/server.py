@@ -3,7 +3,9 @@ import socketserver
 
 PORT = 8081
 
+
 class MyHttpRequestHandler(http.server.SimpleHTTPRequestHandler):
+
     def do_GET(self):
         # Return 200 for all paths
         # Therefore, readiness_probe will return 200 at path '/health'
@@ -22,6 +24,7 @@ class MyHttpRequestHandler(http.server.SimpleHTTPRequestHandler):
         '''
         self.wfile.write(bytes(html, 'utf8'))
         return
+
 
 Handler = MyHttpRequestHandler
 

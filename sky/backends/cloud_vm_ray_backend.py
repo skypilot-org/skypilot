@@ -33,6 +33,7 @@ from sky import sky_logging
 from sky import optimizer
 from sky import skypilot_config
 from sky import spot as spot_lib
+from sky import serve as serve_lib
 from sky import status_lib
 from sky import task as task_lib
 from sky.data import data_utils
@@ -2892,8 +2893,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                            f'Failed to submit job {job_id}.',
                                            stderr=stdout + stderr)
 
-        logger.info('Job submitted with Job ID: '
-                    f'{style.BRIGHT}{job_id}{style.RESET_ALL}')
+        if not handle.cluster_name.startswith(serve_lib.CONTROLLER_PREFIX):
+            logger.info('Job submitted with Job ID: '
+                        f'{style.BRIGHT}{job_id}{style.RESET_ALL}')
 
         try:
             if not detach_run:
@@ -2924,7 +2926,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     '\nTo view the spot job dashboard:\t'
                     f'{backend_utils.BOLD}sky spot dashboard'
                     f'{backend_utils.RESET_BOLD}')
-            else:
+            elif not name.startswith(serve_lib.CONTROLLER_PREFIX):
+                # Skip logging for submit control plane & redirector jobs
+                # to controller
                 logger.info(f'{fore.CYAN}Job ID: '
                             f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
                             '\nTo cancel the job:\t'
@@ -3039,7 +3043,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         fore = colorama.Fore
         style = colorama.Style
         name = handle.cluster_name
-        if name == spot_lib.SPOT_CONTROLLER_NAME or down:
+        if (name == spot_lib.SPOT_CONTROLLER_NAME or down or
+                name.startswith(serve_lib.CONTROLLER_PREFIX)):
             return
         stop_str = ('\nTo stop the cluster:'
                     f'\t{backend_utils.BOLD}sky stop {name}'

@@ -110,6 +110,11 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
 
 
 @usage_lib.entrypoint
+def service_status(service: Optional[str]) -> List[Dict[str, Any]]:
+    return backend_utils.refresh_service_status(service)
+
+
+@usage_lib.entrypoint
 def cost_report() -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.

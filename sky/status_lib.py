@@ -49,3 +49,37 @@ class StorageStatus(enum.Enum):
 
     # Finished uploading, in terminal state
     READY = 'READY'
+
+
+class ServiceStatus(enum.Enum):
+    """Service status as recorded in table 'services'."""
+
+    # Middleware is initializing
+    CONTROLLER_INIT = 'CONTROLLER_INIT'
+
+    # Replica is initializing
+    REPLICA_INIT = 'REPLICA_INIT'
+
+    # At least one replica is ready
+    RUNNING = 'RUNNING'
+
+    # Service is being stopped
+    SHUTTING_DOWN = 'SHUTTING_DOWN'
+
+    # At least one replica is failed
+    FAILED = 'FAILED'
+
+    def colored_str(self):
+        color = _SERVICE_STATUS_TO_COLOR[self]
+        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
+
+_SERVICE_STATUS_TO_COLOR = {
+    ServiceStatus.CONTROLLER_INIT: colorama.Fore.BLUE,
+    ServiceStatus.REPLICA_INIT: colorama.Fore.BLUE,
+    ServiceStatus.RUNNING: colorama.Fore.GREEN,
+    ServiceStatus.SHUTTING_DOWN: colorama.Fore.YELLOW,
+    ServiceStatus.FAILED: colorama.Fore.RED,
+}
+
+# TODO(tian): Add status for replicas to distinguish 'skypilot UP' and 'health probe succeeded'

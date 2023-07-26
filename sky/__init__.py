@@ -12,7 +12,7 @@ from sky import benchmark
 from sky import clouds
 from sky.clouds.service_catalog import list_accelerators
 from sky.dag import Dag
-from sky.execution import launch, exec, spot_launch  # pylint: disable=redefined-builtin
+from sky.execution import launch, exec, spot_launch, serve_up, serve_down  # pylint: disable=redefined-builtin
 from sky.resources import Resources
 from sky.task import Task
 from sky.optimizer import Optimizer, OptimizeTarget
@@ -64,6 +64,8 @@ __all__ = [
     'launch',
     'exec',
     'spot_launch',
+    'serve_up',
+    'serve_down',
     # core APIs
     'status',
     'start',

@@ -12,12 +12,17 @@ logger = logging.getLogger(__name__)
 
 class LoadBalancer:
 
-    def __init__(self, infra_provider, endpoint_path, post_data=None):
+    def __init__(self,
+                 infra_provider,
+                 endpoint_path,
+                 readiness_timeout,
+                 post_data=None):
         self.available_servers = []
         self.request_count = 0
         self.request_timestamps = deque()
         self.infra_provider = infra_provider
         self.endpoint_path = endpoint_path
+        self.readiness_timeout = readiness_timeout
         self.post_data = post_data
 
     def increment_request_count(self, count=1):
@@ -37,7 +42,6 @@ class RoundRobinLoadBalancer(LoadBalancer):
         super().__init__(*args, **kwargs)
         self.servers_queue = deque()
         self.first_unhealthy_time = {}
-        self.timeout = 18000
         logger.info(f'Endpoint path: {self.endpoint_path}')
 
     def probe_endpoints(self, endpoint_ips):
@@ -101,7 +105,7 @@ class RoundRobinLoadBalancer(LoadBalancer):
                 if server not in self.first_unhealthy_time:
                     self.first_unhealthy_time[server] = time.time()
                 elif time.time() - self.first_unhealthy_time[
-                        server] > self.timeout:  # cooldown before terminating a dead server to avoid hysterisis
+                        server] > self.readiness_timeout:  # cooldown before terminating a dead server to avoid hysterisis
                     servers_to_terminate.append(server)
             self.infra_provider.terminate_servers(servers_to_terminate)
 

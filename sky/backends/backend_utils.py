@@ -1,4 +1,5 @@
 """Util constants/functions for the backends."""
+import base64
 from datetime import datetime
 import difflib
 import enum
@@ -6,6 +7,7 @@ import getpass
 import json
 import os
 import pathlib
+import pickle
 import re
 import subprocess
 import tempfile
@@ -37,6 +39,7 @@ from sky import global_user_state
 from sky import skypilot_config
 from sky import sky_logging
 from sky import spot as spot_lib
+from sky import serve as serve_lib
 from sky import status_lib
 from sky.backends import onprem_utils
 from sky.skylet import constants
@@ -1326,6 +1329,10 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{get_cleaned_username()}'
 
 
+def generate_service_name():
+    return f'service-{uuid.uuid4().hex[:4]}'
+
+
 def get_cleaned_username() -> str:
     """Cleans the current username to be used as part of a cluster name.
 
@@ -2406,6 +2413,57 @@ def get_clusters(
         for cluster_name, e in failed_clusters:
             logger.warning(f'  {bright}{cluster_name}{reset}: {e}')
     return kept_records
+
+
+def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
+    if service is None:
+        service_records = global_user_state.get_services()
+    else:
+        service_record = global_user_state.get_service_from_name(service)
+        if service_record is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Service {service} does not exist.')
+        service_records = [service_record]
+    # TODO(tian): Make it run in parallel.
+    for record in service_records:
+        controller_cluster_name = record['controller_cluster_name']
+        endpoint = record['endpoint']
+        if not endpoint:
+            continue
+        # TODO(tian): Refactor: store ip and app_port separately.
+        controller_ip = endpoint.split(':')[0]
+        with requests.Session() as session:
+            try:
+                resp = session.get(
+                    f'http://{controller_ip}:{serve_lib.CONTROL_PLANE_PORT}/control_plane/get_replica_nums',
+                    timeout=5)
+            except requests.RequestException:
+                pass
+            else:
+                record.update(resp.json())
+                if record['num_healthy_replicas'] > 0:
+                    record['status'] = status_lib.ServiceStatus.RUNNING
+                elif record['num_unhealthy_replicas'] > 0:
+                    record['status'] = status_lib.ServiceStatus.REPLICA_INIT
+            global_user_state.add_or_update_service(**record)
+            if service is not None:
+                assert record['name'] == service
+                try:
+                    resp = session.get(
+                        f'http://{controller_ip}:{serve_lib.CONTROL_PLANE_PORT}/control_plane/get_replica_info',
+                        timeout=5)
+                except requests.RequestException:
+                    pass
+                else:
+                    record['replica_info'] = resp.json()['replica_info']
+                    decoded_info = []
+                    for info in record['replica_info']:
+                        decoded_info.append({
+                            k: pickle.loads(base64.b64decode(v))
+                            for k, v in info.items()
+                        })
+                    record['replica_info'] = decoded_info
+    return service_records
 
 
 @typing.overload

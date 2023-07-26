@@ -1,6 +1,8 @@
 import logging
 from typing import List
 import time
+import pickle
+import base64
 
 import sky
 from sky.backends import backend_utils
@@ -77,21 +79,21 @@ class DummyInfraProvider(InfraProvider):
 
 
 class SkyPilotInfraProvider(InfraProvider):
-    CLUSTER_NAME_PREFIX = 'skyserve-'
 
-    def __init__(self, task_yaml_path: str):
+    def __init__(self, task_yaml_path: str, cluster_name_prefix: str):
         self.task_yaml_path = task_yaml_path
+        self.cluster_name_prefix = cluster_name_prefix + '-'
         self.id_counter = self._get_id_start()
 
     def _get_id_start(self):
-        '''
+        """
         Returns the id to start from when creating a new cluster
-        '''
+        """
         clusters = sky.global_user_state.get_clusters()
         # Filter out clusters that don't have the prefix
         clusters = [
             cluster for cluster in clusters
-            if self.CLUSTER_NAME_PREFIX in cluster['name']
+            if self.cluster_name_prefix in cluster['name']
         ]
         # Get the greatest id
         max_id = 0
@@ -108,7 +110,7 @@ class SkyPilotInfraProvider(InfraProvider):
         ip_clusname_map = {}
         for cluster in clusters:
             name = cluster['name']
-            if self.CLUSTER_NAME_PREFIX in name:
+            if self.cluster_name_prefix in name:
                 handle = cluster['handle']
                 try:
                     # Get the head node ip
@@ -121,6 +123,23 @@ class SkyPilotInfraProvider(InfraProvider):
                     continue
         return ip_clusname_map
 
+    def get_replica_info(self):
+        clusters = sky.global_user_state.get_clusters()
+        infos = []
+        for cluster in clusters:
+            if self.cluster_name_prefix in cluster['name']:
+                info = {
+                    'name': cluster['name'],
+                    'handle': cluster['handle'],
+                    'status': cluster['status'],
+                }
+                info = {
+                    k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
+                    for k, v in info.items()
+                }
+                infos.append(info)
+        return infos
+
     def _get_server_ips(self):
         return list(self._get_ip_clusname_map().keys())
 
@@ -130,7 +149,7 @@ class SkyPilotInfraProvider(InfraProvider):
         # FIXME - this is a hack to get around. should implement a better filtering mechanism
         clusters = [
             cluster for cluster in clusters
-            if self.CLUSTER_NAME_PREFIX in cluster['name']
+            if self.cluster_name_prefix in cluster['name']
         ]
         return len(clusters)
 
@@ -138,10 +157,12 @@ class SkyPilotInfraProvider(InfraProvider):
         # Launch n new clusters
         task = sky.Task.from_yaml(self.task_yaml_path)
         for i in range(0, n):
-            cluster_name = f'{self.CLUSTER_NAME_PREFIX}{self.id_counter}'
+            cluster_name = f'{self.cluster_name_prefix}{self.id_counter}'
             logger.info(f'Creating SkyPilot cluster {cluster_name}')
-            sky.launch(task, cluster_name=cluster_name,
-                       detach_run=True)  # TODO - make the launch parallel
+            sky.launch(task,
+                       cluster_name=cluster_name,
+                       detach_run=True,
+                       retry_until_up=True)  # TODO - make the launch parallel
             self.id_counter += 1
 
     def _scale_down(self, n):
@@ -151,7 +172,7 @@ class SkyPilotInfraProvider(InfraProvider):
         # Filter out clusters that don't have the prefix
         clusters = [
             cluster for cluster in clusters
-            if self.CLUSTER_NAME_PREFIX in cluster['name']
+            if self.cluster_name_prefix in cluster['name']
         ]
         num_clusters = len(clusters)
         if num_clusters > 0:
@@ -194,10 +215,8 @@ class SkyPilotInfraProvider(InfraProvider):
             name = ip_to_name_map[endpoint_url]
             if endpoint_url in unhealthy_servers:
                 logger.info(f'Deleting SkyPilot cluster {name}')
-                # Run sky.down in a daemon thread so that it doesn't block the main thread
                 threading.Thread(target=sky.down,
                                  args=(name,),
                                  kwargs={
                                      'purge': True
-                                 },
-                                 daemon=True).start()
+                                 }).start()

@@ -25,12 +25,15 @@ import colorama
 import sky
 from sky import backends
 from sky import clouds
+from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
 from sky import skypilot_config
 from sky import sky_logging
 from sky import spot
+from sky import serve
+from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import gcp
@@ -365,7 +368,9 @@ def _execute(
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
-        if cluster_name != spot.SPOT_CONTROLLER_NAME:
+        if (cluster_name != spot.SPOT_CONTROLLER_NAME and
+                cluster_name is not None and
+                not cluster_name.startswith(serve.CONTROLLER_PREFIX)):
             # UX: print live clusters to make users aware (to save costs).
             #
             # Don't print if this job is launched by the spot controller,
@@ -942,3 +947,201 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
                     raise exceptions.NotSupportedError(
                         f'Unsupported store type: {store_type}')
             storage_obj.force_delete = True
+
+
+@usage_lib.entrypoint
+def serve_up(
+    task: 'sky.Task',
+    name: str,
+    original_yaml_path: str,
+):
+    """Serve up a service.
+
+    Please refer to the sky.cli.serve_up for the document.
+
+    Args:
+        task: sky.Task to serve up.
+        name: Name of the RESTful API.
+
+    Raises:
+    """
+    controller_cluster_name = serve.CONTROLLER_PREFIX + name
+    assert task.service is not None, task
+    policy = task.service.policy_str()
+    assert len(task.resources) == 1
+    requested_resources = list(task.resources)[0]
+    global_user_state.add_or_update_service(
+        name, controller_cluster_name, '',
+        status_lib.ServiceStatus.CONTROLLER_INIT, 0, 0, 0, policy,
+        requested_resources)
+    app_port = int(task.service.app_port)
+    assert len(task.resources) == 1, task
+    task.set_resources(list(task.resources)[0].copy(ports=[app_port]))
+
+    # TODO(tian): Use skyserve constants.
+    _maybe_translate_local_file_mounts_and_sync_up(task)
+
+    with tempfile.NamedTemporaryFile(prefix=f'serve-task-{name}-',
+                                     mode='w') as f:
+        task_config = task.to_yaml_config()
+        if 'resources' in task_config and 'spot_recovery' in task_config[
+                'resources']:
+            del task_config['resources']['spot_recovery']
+        common_utils.dump_yaml(f.name, task_config)
+        remote_task_yaml_path = f'{serve.SERVICE_YAML_PREFIX}/service_{name}.yaml'
+        vars_to_fill = {
+            'ports': [app_port, serve.CONTROL_PLANE_PORT],
+            'remote_task_yaml_path': remote_task_yaml_path,
+            'local_task_yaml_path': f.name,
+            'is_dev': env_options.Options.IS_DEVELOPER.get(),
+            'is_debug': env_options.Options.SHOW_DEBUG_INFO.get(),
+            'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
+        }
+        controller_yaml_path = os.path.join(serve.CONTROLLER_YAML_PREFIX,
+                                            f'{name}.yaml')
+        backend_utils.fill_template(serve.CONTROLLER_TEMPLATE,
+                                    vars_to_fill,
+                                    output_path=controller_yaml_path)
+        controller_task = task_lib.Task.from_yaml(controller_yaml_path)
+        assert len(controller_task.resources) == 1, controller_task
+        print(f'{colorama.Fore.YELLOW}'
+              f'Launching controller for {name}...'
+              f'{colorama.Style.RESET_ALL}')
+
+        _execute(
+            entrypoint=controller_task,
+            stream_logs=True,
+            cluster_name=controller_cluster_name,
+            retry_until_up=True,
+        )
+
+        handle = global_user_state.get_handle_from_cluster_name(
+            controller_cluster_name)
+        assert isinstance(handle, backends.CloudVmRayResourceHandle)
+        endpoint = f'{handle.head_ip}:{task.service.app_port}'
+        global_user_state.add_or_update_service(
+            name, controller_cluster_name, endpoint,
+            status_lib.ServiceStatus.REPLICA_INIT, 0, 0, 0, policy,
+            requested_resources)
+
+        print(
+            f'{colorama.Fore.YELLOW}'
+            'Launching control plane process on controller...'
+            f'{colorama.Style.RESET_ALL}',
+            end='')
+        _execute(
+            entrypoint=sky.Task(
+                name='run-control-plane',
+                run='python -m sky.serve.control_plane --service-name '
+                f'{name} --task-yaml {remote_task_yaml_path} '
+                f'--port {serve.CONTROL_PLANE_PORT}'),
+            stream_logs=False,
+            handle=handle,
+            stages=[Stage.EXEC],
+            cluster_name=controller_cluster_name,
+            detach_run=True,
+        )
+
+        print(
+            f'{colorama.Fore.YELLOW}'
+            'Launching redirector process on controller...'
+            f'{colorama.Style.RESET_ALL}',
+            end='')
+        _execute(
+            entrypoint=sky.Task(
+                name='run-redirector',
+                run='python -m sky.serve.redirector --task-yaml '
+                f'{remote_task_yaml_path} --port {app_port} '
+                f'--control-plane-addr http://0.0.0.0:{serve.CONTROL_PLANE_PORT}'
+            ),
+            stream_logs=False,
+            handle=handle,
+            stages=[Stage.EXEC],
+            cluster_name=controller_cluster_name,
+            detach_run=True,
+        )
+
+        print(f'{colorama.Style.BRIGHT}{colorama.Fore.CYAN}Serving at '
+              f'{colorama.Style.RESET_ALL}{colorama.Fore.CYAN}'
+              f'{endpoint}.\n'
+              f'{colorama.Style.RESET_ALL}')
+
+
+def serve_down(
+    name: str,
+    purge: bool,
+):
+    """Teardown a service.
+
+    Please refer to the sky.cli.serve_down for the document.
+
+    Args:
+        name: Name of the service.
+
+    Raises:
+    """
+    service_record = global_user_state.get_service_from_name(name)
+    if service_record is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {name} does not exist.')
+    controller_cluster_name = service_record['controller_cluster_name']
+    num_healthy_replicas = service_record['num_healthy_replicas']
+    num_unhealthy_replicas = service_record['num_unhealthy_replicas']
+    num_replicas = num_healthy_replicas + num_unhealthy_replicas
+    handle = global_user_state.get_handle_from_cluster_name(
+        controller_cluster_name)
+    global_user_state.set_service_status(name,
+                                         status_lib.ServiceStatus.SHUTTING_DOWN)
+
+    try:
+        print(
+            f'{colorama.Fore.YELLOW}'
+            f'Stopping control plane and redirector processes on controller...'
+            f'{colorama.Style.RESET_ALL}')
+        core.cancel(controller_cluster_name, all=True)
+    except (ValueError, sky.exceptions.ClusterNotUpError) as e:
+        if purge:
+            logger.warning(f'Ignoring error when stopping controller: {e}')
+        else:
+            raise e
+
+    try:
+        if handle is not None:
+            plural = ''
+            # TODO(tian): Change to #num replica (including failed one)
+            if num_replicas > 1:
+                plural = 's'
+            print(f'{colorama.Fore.YELLOW}'
+                  f'Tearing down {num_replicas} replica{plural}...'
+                  f'{colorama.Style.RESET_ALL}')
+            _execute(
+                entrypoint=sky.Task(name='teardown-all-replicas',
+                                    run='sky down -a -y'),
+                stream_logs=False,
+                handle=handle,
+                stages=[Stage.EXEC],
+                cluster_name=controller_cluster_name,
+                detach_run=False,
+            )
+    except (RuntimeError, ValueError) as e:
+        if purge:
+            logger.warning(f'Ignoring error when cleaning controller: {e}')
+        else:
+            raise e
+
+    try:
+        print(f'{colorama.Fore.YELLOW}'
+              'Teardown controller...'
+              f'{colorama.Style.RESET_ALL}')
+        core.down(controller_cluster_name, purge=purge)
+    except (RuntimeError, ValueError) as e:
+        if purge:
+            logger.warning(f'Ignoring error when cleaning controller: {e}')
+        else:
+            raise e
+
+    global_user_state.remove_service(name)
+
+    print(f'{colorama.Fore.GREEN}'
+          f'Tear down service {name} done.'
+          f'{colorama.Style.RESET_ALL}')

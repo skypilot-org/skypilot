@@ -15,6 +15,7 @@ from sky import global_user_state
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 from sky.data import data_utils
+from sky.serve import common
 from sky.skylet import constants
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -194,6 +195,7 @@ class Task:
         self.estimated_outputs_size_gigabytes = None
         # Default to CPUNode
         self.resources = {sky.Resources()}
+        self._service = None
         self.time_estimator_func: Optional[Callable[['sky.Resources'],
                                                     int]] = None
         self.file_mounts: Optional[Dict[str, str]] = None
@@ -365,10 +367,12 @@ class Task:
         resources = config.pop('resources', None)
         resources = sky.Resources.from_yaml_config(resources)
 
-        # FIXME: find a better way to exclude unused fields.
-        config.pop('service', None)
-
         task.set_resources({resources})
+
+        service = config.pop('service', None)
+        service = common.SkyServiceSpec.from_yaml_config(service)
+        task.set_service(service)
+
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
@@ -527,6 +531,22 @@ class Task:
 
     def get_resources(self):
         return self.resources
+
+    @property
+    def service(self) -> Optional[common.SkyServiceSpec]:
+        return self._service
+
+    def set_service(self, service: Optional[common.SkyServiceSpec]) -> 'Task':
+        """Sets the service spec for this task.
+
+        Args:
+          service: a SkyServiceSpec object.
+
+        Returns:
+          self: The current task, with service set.
+        """
+        self._service = service
+        return self
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
                                                 int]) -> 'Task':
@@ -884,6 +904,10 @@ class Task:
             assert len(self.resources) == 1
             resources = list(self.resources)[0]
             add_if_not_none('resources', resources.to_yaml_config())
+
+        if self.service is not None:
+            add_if_not_none('service', self.service.to_yaml_config())
+
         add_if_not_none('num_nodes', self.num_nodes)
 
         if self.inputs is not None:
