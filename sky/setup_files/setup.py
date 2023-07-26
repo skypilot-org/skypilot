@@ -112,7 +112,12 @@ install_requires = [
     'pulp',
     # Ray job has an issue with pydantic>2.0.0, due to API changes of pydantic. See
     # https://github.com/ray-project/ray/issues/36990
-    'pydantic<2.0'
+    'pydantic<2.0',
+    # Cython 3.0 release breaks PyYAML installed by aws-cli.
+    # https://github.com/yaml/pyyaml/issues/601
+    # https://github.com/aws/aws-cli/issues/8036
+    # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
+    'pyyaml > 3.13, <= 5.3.1'
 ]
 
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the

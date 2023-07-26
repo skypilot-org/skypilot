@@ -64,8 +64,25 @@ _apply_az_mapping_lock = threading.Lock()
 _image_df = common.read_catalog('aws/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
-_quotas_df = common.read_catalog('aws/instance_quota_mapping.csv',
-                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+_quotas_df = common.read_catalog('aws/instance_quota_mapping.csv')
+
+
+def _get_az_mappings(aws_user_hash: str) -> Optional[pd.DataFrame]:
+    az_mapping_path = common.get_catalog_path(
+        f'aws/az_mappings-{aws_user_hash}.csv')
+    if not os.path.exists(az_mapping_path):
+        az_mappings = None
+        if aws_user_hash != 'default':
+            # Fetch az mapping from AWS.
+            logger.info(f'{colorama.Style.DIM}Fetching availability zones '
+                        f'mapping for AWS...{colorama.Style.RESET_ALL}')
+            az_mappings = fetch_aws.fetch_availability_zone_mappings()
+        else:
+            return None
+        az_mappings.to_csv(az_mapping_path, index=False)
+    else:
+        az_mappings = pd.read_csv(az_mapping_path)
+    return az_mappings
 
 
 def _fetch_and_apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
@@ -114,23 +131,12 @@ def _fetch_and_apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
             'Failed to get AWS user identity. Using the latest mapping '
             f'file for user {aws_user_hash!r}.')
 
-    az_mapping_path = common.get_catalog_path(
-        f'aws/az_mappings-{aws_user_hash}.csv')
-    if not os.path.exists(az_mapping_path):
-        az_mappings = None
-        if aws_user_hash != 'default':
-            # Fetch az mapping from AWS.
-            logger.info(f'{colorama.Style.DIM}Fetching availability zones '
-                        f'mapping for AWS...{colorama.Style.RESET_ALL}')
-            az_mappings = fetch_aws.fetch_availability_zone_mappings()
-        else:
-            # Returning the original dataframe directly, as no cloud
-            # identity can be fetched which suggests there are no
-            # credentials.
-            return df
-        az_mappings.to_csv(az_mapping_path, index=False)
-    else:
-        az_mappings = pd.read_csv(az_mapping_path)
+    az_mappings = _get_az_mappings(aws_user_hash)
+    if az_mappings is None:
+        # Returning the original dataframe directly, as no cloud
+        # identity can be fetched which suggests there are no
+        # credentials.
+        return df
     # Use inner join to drop rows with unknown AZ IDs, which are likely
     # because the user does not have access to that Region. Otherwise,
     # there will be rows with NaN in the AvailabilityZone column.
@@ -152,9 +158,12 @@ def _get_df() -> pd.DataFrame:
 
 
 def get_quota_code(instance_type: str, use_spot: bool) -> Optional[str]:
-    # Get the quota code from the accelerator instance type
-    # This will be used in the botocore command to check for
-    # a non-zero quota
+    """Get the quota code based on `instance_type` and `use_spot`.
+
+    The quota code is fetched from `_quotas_df` based on the instance type
+    specified, and will then be utilized in a botocore API command in order
+    to check its quota.
+    """
 
     if use_spot:
         spot_header = 'SpotInstanceCode'

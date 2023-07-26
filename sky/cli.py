@@ -2626,7 +2626,8 @@ def _down_or_stop_clusters(
             if not down:
                 raise click.UsageError(
                     f'{operation} reserved cluster(s) '
-                    f'{reserved_clusters_str} is currently not supported.')
+                    f'{reserved_clusters_str} is currently not supported. '
+                    'It will be auto-stopped after all spot jobs finish.')
             else:
                 # TODO(zhwu): We can only have one reserved cluster (spot
                 # controller).
@@ -3240,11 +3241,18 @@ def storage():
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
 @usage_lib.entrypoint
-def storage_ls():
-    """List storage objects created."""
+# pylint: disable=redefined-builtin
+def storage_ls(all: bool):
+    """List storage objects managed by SkyPilot."""
     storages = sky.storage_ls()
-    storage_table = storage_utils.format_storage_table(storages)
+    storage_table = storage_utils.format_storage_table(storages, show_all=all)
     click.echo(storage_table)
 
 

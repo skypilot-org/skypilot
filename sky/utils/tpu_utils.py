@@ -71,34 +71,3 @@ def check_gcp_cli_include_tpu_vm() -> None:
                 raise RuntimeError(
                     'Google Cloud SDK version must be >= 382.0.0 to use'
                     ' TPU VM APIs, check "gcloud version" for details.')
-
-
-def terminate_tpu_vm_cluster_cmd(cluster_name: str,
-                                 zone: str,
-                                 log_path: str = os.devnull) -> str:
-    check_gcp_cli_include_tpu_vm()
-    query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
-                 f'"(labels.ray-cluster-name={cluster_name})" '
-                 f'--zone={zone} --format="value(name)"')
-    returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
-                                                      log_path,
-                                                      shell=True,
-                                                      stream_logs=False,
-                                                      require_outputs=True)
-
-    # Skip the termination command, if the TPU ID
-    # query command fails.
-    if returncode != 0:
-        terminate_cmd = (f'echo "cmd: {query_cmd}" && '
-                         f'echo "{stdout}" && '
-                         f'echo "{stderr}" >&2 && '
-                         f'exit {returncode}')
-    else:
-        # Needs to create a list as GCP does not allow deleting
-        # multiple TPU VMs at once.
-        tpu_terminate_cmds = []
-        for tpu_id in stdout.splitlines():
-            tpu_terminate_cmds.append('gcloud compute tpus tpu-vm delete '
-                                      f'--zone={zone} --quiet {tpu_id}')
-        terminate_cmd = ' && '.join(tpu_terminate_cmds)
-    return terminate_cmd
