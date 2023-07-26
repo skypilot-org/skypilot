@@ -954,7 +954,6 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
 def serve_up(
     task: 'sky.Task',
     name: str,
-    original_yaml_path: str,
 ):
     """Serve up a service.
 
@@ -989,7 +988,8 @@ def serve_up(
                 'resources']:
             del task_config['resources']['spot_recovery']
         common_utils.dump_yaml(f.name, task_config)
-        remote_task_yaml_path = f'{serve.SERVICE_YAML_PREFIX}/service_{name}.yaml'
+        remote_task_yaml_path = (serve.SERVICE_YAML_PREFIX +
+                                 f'/service_{name}.yaml')
         vars_to_fill = {
             'ports': [app_port, serve.CONTROL_PLANE_PORT],
             'remote_task_yaml_path': remote_task_yaml_path,
@@ -1025,7 +1025,8 @@ def serve_up(
             'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,
             'SKYPILOT_DEV': env_options.Options.IS_DEVELOPER.get(),
             'SKYPILOT_DEBUG': env_options.Options.SHOW_DEBUG_INFO.get(),
-            'SKYPILOT_DISABLE_USAGE_COLLECTION': env_options.Options.DISABLE_LOGGING.get(),
+            'SKYPILOT_DISABLE_USAGE_COLLECTION':
+                env_options.Options.DISABLE_LOGGING.get(),
         }
 
         print(
@@ -1052,14 +1053,14 @@ def serve_up(
             'Launching redirector process on controller...'
             f'{colorama.Style.RESET_ALL}',
             end='')
+        control_plane_addr = f'http://0.0.0.0:{serve.CONTROL_PLANE_PORT}'
         _execute(
             entrypoint=sky.Task(
                 name='run-redirector',
                 envs=controller_envs,
                 run='python -m sky.serve.redirector --task-yaml '
                 f'{remote_task_yaml_path} --port {app_port} '
-                f'--control-plane-addr http://0.0.0.0:{serve.CONTROL_PLANE_PORT}'
-            ),
+                f'--control-plane-addr {control_plane_addr}'),
             stream_logs=False,
             handle=handle,
             stages=[Stage.EXEC],
@@ -1099,8 +1100,10 @@ def serve_down(
     num_healthy_replicas = service_record['num_healthy_replicas']
     num_unhealthy_replicas = service_record['num_unhealthy_replicas']
     num_failed_replicas = service_record['num_failed_replicas']
-    num_replicas = num_healthy_replicas + num_unhealthy_replicas + num_failed_replicas
+    num_replicas = (num_healthy_replicas + num_unhealthy_replicas +
+                    num_failed_replicas)
     controller_ip = service_record['endpoint'].split(':')[0]
+    controller_url = f'http://{controller_ip}:{serve.CONTROL_PLANE_PORT}'
     handle = global_user_state.get_handle_from_cluster_name(
         controller_cluster_name)
     global_user_state.set_service_status(name,
@@ -1115,14 +1118,13 @@ def serve_down(
             print(f'{colorama.Fore.YELLOW}'
                   f'Tearing down {num_replicas} replica{plural}...'
                   f'{colorama.Style.RESET_ALL}')
-            resp = requests.post(
-                f'http://{controller_ip}:{serve.CONTROL_PLANE_PORT}/control_plane/terminate',
-                data='')
+            resp = requests.post(controller_url + '/control_plane/terminate',
+                                 data='')
             if resp.status_code != 200:
-                raise RuntimeError(
-                    f'Failed to terminate replica due to request failure: {resp.text}')
+                raise RuntimeError('Failed to terminate replica due to '
+                                   f'request failure: {resp.text}')
             logger.debug(resp.json())
-    except (RuntimeError, ValueError) as e:
+    except (RuntimeError, ValueError, requests.exceptions.ConnectionError) as e:
         if purge:
             logger.warning(f'Ignoring error when cleaning controller: {e}')
         else:

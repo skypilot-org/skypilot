@@ -12,10 +12,10 @@ import sky
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import serve as serve_lib
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 from sky.data import data_utils
-from sky.serve import common
 from sky.skylet import constants
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -195,7 +195,7 @@ class Task:
         self.estimated_outputs_size_gigabytes = None
         # Default to CPUNode
         self.resources = {sky.Resources()}
-        self._service: Optional[common.SkyServiceSpec] = None
+        self._service: Optional[serve_lib.SkyServiceSpec] = None
         self.time_estimator_func: Optional[Callable[['sky.Resources'],
                                                     int]] = None
         self.file_mounts: Optional[Dict[str, str]] = None
@@ -370,7 +370,7 @@ class Task:
         task.set_resources({resources})
 
         service = config.pop('service', None)
-        service = common.SkyServiceSpec.from_yaml_config(service)
+        service = serve_lib.SkyServiceSpec.from_yaml_config(service)
         task.set_service(service)
 
         assert not config, f'Invalid task args: {config.keys()}'
@@ -533,10 +533,11 @@ class Task:
         return self.resources
 
     @property
-    def service(self) -> Optional[common.SkyServiceSpec]:
+    def service(self) -> Optional[serve_lib.SkyServiceSpec]:
         return self._service
 
-    def set_service(self, service: Optional[common.SkyServiceSpec]) -> 'Task':
+    def set_service(self,
+                    service: Optional[serve_lib.SkyServiceSpec]) -> 'Task':
         """Sets the service spec for this task.
 
         Args:

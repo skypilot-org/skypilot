@@ -3913,7 +3913,7 @@ def serve_up(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.serve_up(task, service, entrypoint)
+    sky.serve_up(task, service)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
@@ -3943,9 +3943,8 @@ def serve_status(all: bool, service: Optional[str]):
             click.secho(f'Failed to refresh status of service: {service}.',
                         fg='red')
             return
-        click.echo(
-            f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Replicas of {service}'
-            f'{colorama.Style.RESET_ALL}')
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Replicas of {service}{colorama.Style.RESET_ALL}')
         status_utils.show_replica_table(service_record['replica_info'], all)
 
 

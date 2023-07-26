@@ -1,3 +1,7 @@
+"""Service specification for SkyServe."""
+import os
+import yaml
+
 from typing import Optional, Dict, Any
 
 from sky.backends import backend_utils
@@ -6,6 +10,7 @@ from sky.utils import ux_utils
 
 
 class SkyServiceSpec:
+    """SkyServe service specification."""
 
     def __init__(
         self,
@@ -31,8 +36,8 @@ class SkyServiceSpec:
         self._qps_upper_threshold = qps_upper_threshold
         self._qps_lower_threshold = qps_lower_threshold
 
-    @classmethod
-    def from_yaml_config(cls, config: Optional[Dict[str, Any]]):
+    @staticmethod
+    def from_yaml_config(config: Optional[Dict[str, Any]]):
         if config is None:
             return None
 
@@ -53,6 +58,26 @@ class SkyServiceSpec:
             'qps_lower_threshold', None)
 
         return SkyServiceSpec(**service_config)
+
+    @staticmethod
+    def from_yaml(yaml_path: str):
+        with open(os.path.expanduser(yaml_path), 'r') as f:
+            config = yaml.safe_load(f)
+
+        if isinstance(config, str):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('YAML loaded as str, not as dict. '
+                                 f'Is it correct? Path: {yaml_path}')
+
+        if config is None:
+            config = {}
+
+        if 'service' not in config:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Service YAML must have a "service" section. '
+                                 f'Is it correct? Path: {yaml_path}')
+
+        return SkyServiceSpec.from_yaml_config(config['service'])
 
     def to_yaml_config(self):
         replica_policy = {}

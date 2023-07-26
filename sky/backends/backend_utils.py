@@ -2426,44 +2426,43 @@ def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
         service_records = [service_record]
     # TODO(tian): Make it run in parallel.
     for record in service_records:
-        controller_cluster_name = record['controller_cluster_name']
         endpoint = record['endpoint']
         if not endpoint:
             continue
         # TODO(tian): Refactor: store ip and app_port separately.
         controller_ip = endpoint.split(':')[0]
-        with requests.Session() as session:
+        controller_url = f'http://{controller_ip}:{serve_lib.CONTROL_PLANE_PORT}'
+        try:
+            resp = requests.get(controller_url +
+                                '/control_plane/get_replica_nums',
+                                timeout=5)
+        except requests.RequestException:
+            pass
+        else:
+            record.update(resp.json())
+            if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
+                if record['num_healthy_replicas'] > 0:
+                    record['status'] = status_lib.ServiceStatus.RUNNING
+                elif record['num_unhealthy_replicas'] > 0:
+                    record['status'] = status_lib.ServiceStatus.REPLICA_INIT
+        global_user_state.add_or_update_service(**record)
+        if service is not None:
+            assert record['name'] == service
             try:
-                resp = session.get(
-                    f'http://{controller_ip}:{serve_lib.CONTROL_PLANE_PORT}/control_plane/get_replica_nums',
-                    timeout=5)
+                resp = requests.get(controller_url +
+                                    '/control_plane/get_replica_info',
+                                    timeout=5)
             except requests.RequestException:
                 pass
             else:
-                record.update(resp.json())
-                if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
-                    if record['num_healthy_replicas'] > 0:
-                        record['status'] = status_lib.ServiceStatus.RUNNING
-                    elif record['num_unhealthy_replicas'] > 0:
-                        record['status'] = status_lib.ServiceStatus.REPLICA_INIT
-            global_user_state.add_or_update_service(**record)
-            if service is not None:
-                assert record['name'] == service
-                try:
-                    resp = session.get(
-                        f'http://{controller_ip}:{serve_lib.CONTROL_PLANE_PORT}/control_plane/get_replica_info',
-                        timeout=5)
-                except requests.RequestException:
-                    pass
-                else:
-                    record['replica_info'] = resp.json()['replica_info']
-                    decoded_info = []
-                    for info in record['replica_info']:
-                        decoded_info.append({
-                            k: pickle.loads(base64.b64decode(v))
-                            for k, v in info.items()
-                        })
-                    record['replica_info'] = decoded_info
+                record['replica_info'] = resp.json()['replica_info']
+                decoded_info = []
+                for info in record['replica_info']:
+                    decoded_info.append({
+                        k: pickle.loads(base64.b64decode(v))
+                        for k, v in info.items()
+                    })
+                record['replica_info'] = decoded_info
     return service_records
 
 

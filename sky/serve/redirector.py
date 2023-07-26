@@ -1,10 +1,8 @@
+"""Redirector: redirect any incoming request to an endpoint replica."""
 import time
 import logging
-import yaml
 from collections import deque
 from typing import List, Deque
-
-from sky.serve.common import SkyServiceSpec
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import RedirectResponse
@@ -24,14 +22,15 @@ logger = logging.getLogger(__name__)
 
 
 class SkyServeRedirector:
+    """Redirector: redirect incoming traffic.
 
-    def __init__(self,
-                 control_plane_url: str,
-                 service_spec: SkyServiceSpec,
-                 port: int):
+    This class accept any traffic to the controller and redirect it
+    to the appropriate endpoint replica.
+    """
+
+    def __init__(self, control_plane_url: str, port: int):
         self.control_plane_url = control_plane_url
         self.port = port
-        self.app_port = service_spec.app_port
         self.server_ips: List[str] = []
         self.servers_queue: Deque[str] = deque()
         self.app = FastAPI()
@@ -76,9 +75,8 @@ class SkyServeRedirector:
 
         if server_ip is None:
             raise HTTPException(status_code=503, detail='No available servers')
-        logger.info(f'Redirecting request to {server_ip}{request.url.path}')
 
-        path = f'http://{server_ip}:{self.app_port}{request.url.path}'
+        path = f'http://{server_ip}:{self.port}{request.url.path}'
         logger.info(f'Redirecting request to {path}')
         return RedirectResponse(url=path)
 
@@ -107,7 +105,7 @@ if __name__ == '__main__':
     parser.add_argument('--port',
                         '-p',
                         type=int,
-                        help='Port to run the redirector on',
+                        help='Port to run the redirector on.',
                         required=True)
     parser.add_argument('--control-plane-addr',
                         type=str,
@@ -115,14 +113,6 @@ if __name__ == '__main__':
                         required=True)
     args = parser.parse_args()
 
-    with open(args.task_yaml, 'r') as f:
-        task = yaml.safe_load(f)
-    if 'service' not in task:
-        raise ValueError('Task YAML must have a "service" section')
-    service_config = task['service']
-    service_spec = SkyServiceSpec.from_yaml_config(service_config)
-
     redirector = SkyServeRedirector(control_plane_url=args.control_plane_addr,
-                                    service_spec=service_spec,
                                     port=args.port)
     redirector.serve()

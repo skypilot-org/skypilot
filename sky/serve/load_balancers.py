@@ -1,52 +1,58 @@
+"""LoadBalancer: probe endpoints and select by load balancing algorithm."""
 import time
 from collections import deque
 
-import aiohttp
+# import aiohttp
 import logging
+import requests
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import requests
+from typing import Optional, Any, List, Deque, Dict
+
+from sky.serve.infra_providers import InfraProvider
 
 logger = logging.getLogger(__name__)
 
 
 class LoadBalancer:
+    """Abstract class for load balancers."""
 
     def __init__(self,
-                 infra_provider,
-                 endpoint_path,
-                 readiness_timeout,
-                 post_data=None):
-        self.available_servers = []
-        self.request_count = 0
-        self.request_timestamps = deque()
-        self.infra_provider = infra_provider
-        self.endpoint_path = endpoint_path
-        self.readiness_timeout = readiness_timeout
-        self.post_data = post_data
+                 infra_provider: InfraProvider,
+                 endpoint_path: str,
+                 readiness_timeout: int,
+                 post_data: Optional[Any] = None):
+        self.available_servers: List[str] = []
+        self.request_count: int = 0
+        self.request_timestamps: Deque[float] = deque()
+        self.infra_provider: InfraProvider = infra_provider
+        self.endpoint_path: str = endpoint_path
+        self.readiness_timeout: int = readiness_timeout
+        self.post_data: Any = post_data
 
-    def increment_request_count(self, count=1):
+    def increment_request_count(self, count: int = 1) -> None:
         self.request_count += count
         self.request_timestamps.append(time.time())
 
-    def probe_endpoints(self, endpoint_ips):
+    def probe_endpoints(self, endpoint_ips: List[str]) -> None:
         raise NotImplementedError
 
-    def select_server(self, request):
+    def select_server(self, request) -> Optional[str]:
         raise NotImplementedError
 
 
 class RoundRobinLoadBalancer(LoadBalancer):
+    """Round-robin load balancer."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.servers_queue = deque()
-        self.first_unhealthy_time = {}
+        self.servers_queue: Deque[str] = deque()
+        self.first_unhealthy_time: Dict[str, float] = {}
         logger.info(f'Endpoint path: {self.endpoint_path}')
 
-    def probe_endpoints(self, endpoint_ips):
+    def probe_endpoints(self, endpoint_ips: List[str]) -> None:
 
-        def probe_endpoint(endpoint_ip):
+        def probe_endpoint(endpoint_ip: str) -> Optional[str]:
             try:
                 if self.post_data:
                     response = requests.post(
@@ -78,23 +84,23 @@ class RoundRobinLoadBalancer(LoadBalancer):
         logger.info(f'Healthy servers: {healthy_servers}')
         # Add newly available servers
         for server in healthy_servers:
+            assert server is not None
             if server not in self.available_servers:
-                logger.info(
-                    f'Server {server} is newly available. Adding to available servers.'
-                )
+                logger.info(f'Server {server} is newly available. '
+                            'Adding to available servers.')
                 self.available_servers.append(server)
                 self.servers_queue.append(server)
         # Remove servers that are no longer available
         unhealthy_servers = set()
         for server in self.available_servers:
             if server not in healthy_servers:
-                logger.info(
-                    f'Server {server} is no longer available. Removing from available servers.'
-                )
+                logger.info(f'Server {server} is no longer available. '
+                            'Removing from available servers.')
                 self.available_servers.remove(server)
                 self.servers_queue.remove(server)
                 unhealthy_servers.add(server)
-        # Tell the infra provider to remove endpoints that are no longer available
+        # Tell the infra provider to remove endpoints that are
+        # no longer available
         for server in endpoint_ips:
             if server not in healthy_servers:
                 unhealthy_servers.add(server)
@@ -104,12 +110,13 @@ class RoundRobinLoadBalancer(LoadBalancer):
             for server in unhealthy_servers:
                 if server not in self.first_unhealthy_time:
                     self.first_unhealthy_time[server] = time.time()
-                elif time.time() - self.first_unhealthy_time[
-                        server] > self.readiness_timeout:  # cooldown before terminating a dead server to avoid hysterisis
+                # coldstart time limitation is `self.readiness_timeout`.
+                elif time.time(
+                ) - self.first_unhealthy_time[server] > self.readiness_timeout:
                     servers_to_terminate.append(server)
             self.infra_provider.terminate_servers(servers_to_terminate)
 
-    def select_server(self, request):
+    def select_server(self, request) -> Optional[str]:
         if not self.servers_queue:
             return None
 
@@ -119,46 +126,47 @@ class RoundRobinLoadBalancer(LoadBalancer):
         return server_ip
 
 
-class LeastLoadedLoadBalancer(LoadBalancer):
+# class LeastLoadedLoadBalancer(LoadBalancer):
 
-    def __init__(self, *args, n=10, **kwargs):
+#     def __init__(self, *args, n=10, **kwargs):
 
-        super().__init__(*args, **kwargs)
-        self.server_loads = {}
-        self.n = n
+#         super().__init__(*args, **kwargs)
+#         self.server_loads = {}
+#         self.n = n
 
-    def probe_endpoints(self, endpoint_ips):
-        timeout = aiohttp.ClientTimeout(total=2)
-        with aiohttp.ClientSession(timeout=timeout) as session:
-            for server_ip in endpoint_ips:
-                try:
-                    start_time = time()
-                    with session.get(f'{server_ip}') as response:
-                        if response.status == 200:
-                            load = time() - start_time
+#     def probe_endpoints(self, endpoint_ips):
+#         timeout = aiohttp.ClientTimeout(total=2)
+#         with aiohttp.ClientSession(timeout=timeout) as session:
+#             for server_ip in endpoint_ips:
+#                 try:
+#                     start_time = time.time()
+#                     with session.get(f'{server_ip}') as response:
+#                         if response.status == 200:
+#                             load = time.time() - start_time
 
-                            if server_ip not in self.server_loads:
-                                self.server_loads[server_ip] = [load] * self.n
-                            else:
-                                self.server_loads[server_ip].append(load)
-                                if len(self.server_loads[server_ip]) > self.n:
-                                    self.server_loads[server_ip].pop(0)
+#                             if server_ip not in self.server_loads:
+#                                 self.server_loads[server_ip] = [load] * self.n
+#                             else:
+#                                 self.server_loads[server_ip].append(load)
+#                                 if len(self.server_loads[server_ip]) > self.n:
+#                                     self.server_loads[server_ip].pop(0)
 
-                            if server_ip not in self.available_servers:
-                                self.available_servers.append(server_ip)
-                        elif server_ip in self.available_servers:
-                            self.available_servers.remove(server_ip)
-                            del self.server_loads[server_ip]
-                except:
-                    if server_ip in self.available_servers:
-                        self.available_servers.remove(server_ip)
-                        del self.server_loads[server_ip]
+#                             if server_ip not in self.available_servers:
+#                                 self.available_servers.append(server_ip)
+#                         elif server_ip in self.available_servers:
+#                             self.available_servers.remove(server_ip)
+#                             del self.server_loads[server_ip]
+#                 except:
+#                     if server_ip in self.available_servers:
+#                         self.available_servers.remove(server_ip)
+#                         del self.server_loads[server_ip]
 
-    def select_server(self, request):
-        if not self.server_loads:
-            return None
+#     def select_server(self, request):
+#         if not self.server_loads:
+#             return None
 
-        server_ip = min(
-            self.server_loads,
-            key=lambda x: sum(self.server_loads[x]) / len(self.server_loads[x]))
-        return server_ip
+#         def calc_avg_load(x):
+#             return sum(self.server_loads[x]) / len(self.server_loads[x])
+
+#         server_ip = min(self.server_loads, key=calc_avg_load)
+#         return server_ip
