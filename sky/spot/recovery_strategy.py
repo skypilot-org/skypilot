@@ -461,7 +461,7 @@ class OnDemandFailOverStrategyExecutor(FailoverStrategyExecutor,
 
         # 1. Cancel the jobs and launch the cluster with the STOPPED status
         # 2. Launch the cluster with on-demand instances
-        logger.info('OnDemandFailOverStrategyExecutor started')
+        logger.info('OnDemandFailOver started')
 
         task = self.dag.tasks[task_id]
         resources = list(task.resources)[0]
@@ -470,18 +470,24 @@ class OnDemandFailOverStrategyExecutor(FailoverStrategyExecutor,
         launched_cloud, launched_region = self._launched_cloud_region
 
         # Step 1
-        logger.info('OnDemandFailOverStrategyExecutor _try_cancel_all_jobs')
         self._try_cancel_all_jobs()
 
         # Step 2. Launch on_demand
         new_resources = resources.copy(cloud=launched_cloud,
                                        region=launched_region,
-                                       use_spot=False)
+                                       use_spot=False,
+                                       spot_recovery=None)
         task.set_resources({new_resources})
-        # Not using self.launch to avoid the retry until up logic.
-        logger.info('OnDemandFailOverStrategyExecutor try launch on_demand')
-        job_submitted_at = self._launch(max_retry=self._MAX_RETRY_CNT,
-                                        raise_on_failure=False)
 
+        assert not new_resources.use_spot
+        assert not task.use_spot
+
+        sky.launch(task,
+                    cluster_name=self.cluster_name,
+                    detach_setup=True,
+                    detach_run=True,
+                    _is_launched_by_spot_controller=False)
+
+        job_submitted_at = self._wait_until_job_starts_on_cluster() 
         assert job_submitted_at is not None
         return job_submitted_at
