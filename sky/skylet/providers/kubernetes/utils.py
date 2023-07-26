@@ -6,14 +6,12 @@ from sky.adaptors import kubernetes
 DEFAULT_NAMESPACE = 'default'
 
 
-def get_head_ssh_port(cluster_name: str,
-                      namespace: str) -> int:
+def get_head_ssh_port(cluster_name: str, namespace: str) -> int:
     svc_name = f'{cluster_name}-ray-head-ssh'
     return get_port(svc_name, namespace)
 
 
-def get_port(svc_name: str,
-             namespace: str) -> int:
+def get_port(svc_name: str, namespace: str) -> int:
     """
     Gets the nodeport of the specified service.
 
