@@ -64,7 +64,8 @@ def _generate_rsa_key_pair() -> Tuple[str, str]:
     private_key = key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.TraditionalOpenSSL,
-        encryption_algorithm=serialization.NoEncryption()).decode('utf-8').strip()
+        encryption_algorithm=serialization.NoEncryption()).decode(
+            'utf-8').strip()
 
     public_key = key.public_key().public_bytes(
         serialization.Encoding.OpenSSH,
