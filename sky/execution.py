@@ -1144,7 +1144,7 @@ def serve_down(
 
     try:
         print(f'{colorama.Fore.YELLOW}'
-              'Teardown controller...'
+              'Tearing down controller...'
               f'{colorama.Style.RESET_ALL}')
         core.down(controller_cluster_name, purge=purge)
     except (RuntimeError, ValueError) as e:
@@ -1156,5 +1156,5 @@ def serve_down(
     global_user_state.remove_service(name)
 
     print(f'{colorama.Fore.GREEN}'
-          f'Tear down service {name} done.'
+          f'The tearing down of service {name} is done.'
           f'{colorama.Style.RESET_ALL}')
