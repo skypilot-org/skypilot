@@ -4473,7 +4473,7 @@ def local_up():
 @local.command('down', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
 def local_down():
-    """Creates a local cluster."""
+    """Deletes a local cluster."""
     cluster_removed = False
     with log_utils.safe_rich_status('Removing local cluster...'):
         path_to_package = os.path.dirname(os.path.dirname(__file__))
