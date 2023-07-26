@@ -315,10 +315,6 @@ class KubernetesNodeProvider(NodeProvider):
             port = 22
         else:
             port = self.external_port(node_id)
-        cli_logger.print(port)
-        cli_logger.print(command_runner.__dict__)
-        with open('/tmp/log.txt', 'a') as f:
-            f.write(f'{node_id} port: {port}\n')
         command_runner.set_port(port)
         return command_runner
 
