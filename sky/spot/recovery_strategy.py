@@ -453,7 +453,7 @@ class OnDemandFailOverStrategyExecutor(FailoverStrategyExecutor,
                                        default=False):
     """On Demand failover strategy
     This strategy is an extension of the failover strategy.
-    It relaunches the terminated spot with on-demand.
+    It relaunches with on-demand.
     This strategy is useful when the user wants to ensure availability.
     """
 
