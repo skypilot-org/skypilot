@@ -1021,6 +1021,13 @@ def serve_up(
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         endpoint = f'{handle.head_ip}:{task.service.app_port}'
 
+        controller_envs = {
+            'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,
+            'SKYPILOT_DEV': env_options.Options.IS_DEVELOPER.get(),
+            'SKYPILOT_DEBUG': env_options.Options.SHOW_DEBUG_INFO.get(),
+            'SKYPILOT_DISABLE_USAGE_COLLECTION': env_options.Options.DISABLE_LOGGING.get(),
+        }
+
         print(
             f'{colorama.Fore.YELLOW}'
             'Launching control plane process on controller...'
@@ -1029,6 +1036,7 @@ def serve_up(
         _execute(
             entrypoint=sky.Task(
                 name='run-control-plane',
+                envs=controller_envs,
                 run='python -m sky.serve.control_plane --service-name '
                 f'{name} --task-yaml {remote_task_yaml_path} '
                 f'--port {serve.CONTROL_PLANE_PORT}'),
@@ -1047,6 +1055,7 @@ def serve_up(
         _execute(
             entrypoint=sky.Task(
                 name='run-redirector',
+                envs=controller_envs,
                 run='python -m sky.serve.redirector --task-yaml '
                 f'{remote_task_yaml_path} --port {app_port} '
                 f'--control-plane-addr http://0.0.0.0:{serve.CONTROL_PLANE_PORT}'
