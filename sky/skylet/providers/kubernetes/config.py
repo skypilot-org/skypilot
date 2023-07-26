@@ -18,6 +18,9 @@ MEMORY_SIZE_UNITS = {
 
 log_prefix = 'KubernetesNodeProvider: '
 
+# Timeout for deleting a Kubernetes resource (in seconds).
+DELETION_TIMEOUT = 90
+
 
 class InvalidNamespaceError(ValueError):
 

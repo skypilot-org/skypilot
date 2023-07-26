@@ -6,9 +6,11 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import exceptions
 from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.utils import common_utils
+from sky.utils import ux_utils
 from sky.skylet.providers.kubernetes import utils as kubernetes_utils
 
 if typing.TYPE_CHECKING:
@@ -212,8 +214,9 @@ class Kubernetes(clouds.Cloud):
         return isinstance(other, Kubernetes)
 
     @classmethod
-    def get_port(cls, svc_name, namespace) -> int:
-        return kubernetes_utils.get_port(svc_name, namespace)
+    def get_port(cls, svc_name) -> int:
+        ns = kubernetes_utils.get_current_kube_config_context_namespace()
+        return kubernetes_utils.get_port(svc_name, ns)
 
     @classmethod
     def get_external_ip(cls) -> str:
@@ -381,8 +384,23 @@ class Kubernetes(clouds.Cloud):
         namespace = kubernetes_utils.get_current_kube_config_context_namespace()
 
         # Get all the pods with the label skypilot-cluster: <cluster_name>
-        pods = kubernetes.core_api().list_namespaced_pod(
-            namespace, label_selector=f'skypilot-cluster={name}').items
+        try:
+            pods = kubernetes.core_api().list_namespaced_pod(
+                namespace,
+                label_selector=f'skypilot-cluster={name}',
+                _request_timeout=kubernetes.API_TIMEOUT).items
+        except kubernetes.max_retry_error():
+            with ux_utils.print_exception_no_traceback():
+                ctx_name = kubernetes_utils.get_current_kube_config_context_name()
+                raise exceptions.ClusterStatusFetchingError(
+                    f'Failed to query cluster {name!r} status. '
+                    'Network error - check if the Kubernetes cluster in '
+                    f'context {ctx_name} is up and accessible.')
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ClusterStatusFetchingError(
+                    f'Failed to query Kubernetes cluster {name!r} status: '
+                    f'{common_utils.format_exception(e)}')
 
         # Check if the pods are running or pending
         cluster_status = []

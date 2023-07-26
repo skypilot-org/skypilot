@@ -1592,6 +1592,7 @@ def test_kubernetes_autodown():
     )
     run_one_test(test)
 
+
 def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
     test = Test(
         f'{cloud}-cancel-task',

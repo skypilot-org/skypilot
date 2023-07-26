@@ -1,8 +1,7 @@
-from typing import List, Tuple, Optional
+from typing import Tuple, Optional
 
 from urllib.parse import urlparse
-
-from sky import status_lib
+from sky.utils import common_utils
 from sky.adaptors import kubernetes
 
 DEFAULT_NAMESPACE = 'default'
@@ -33,7 +32,8 @@ def get_external_ip():
     return parsed_url.hostname
 
 
-def check_credentials(timeout: int = 3) -> Tuple[bool, Optional[str]]:
+def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
+        Tuple[bool, Optional[str]]:
     """
     Check if the credentials in kubeconfig file are valid
 
@@ -67,7 +67,7 @@ def check_credentials(timeout: int = 3) -> Tuple[bool, Optional[str]]:
                       'Check if your cluster is running and your network ' \
                       'is stable.'
     except ValueError as e:
-        return False, str(e)
+        return False, common_utils.format_exception(e)
     except Exception as e:
         return False, f'An error occurred: {str(e)}'
 
@@ -98,8 +98,8 @@ def get_current_kube_config_context_namespace() -> str:
     k8s = kubernetes.get_kubernetes()
     try:
         _, current_context = k8s.config.list_kube_config_contexts()
-        if 'namespace' in current_context:
-            return current_context['namespace']
+        if 'namespace' in current_context['context']:
+            return current_context['context']['namespace']
         else:
             return DEFAULT_NAMESPACE
     except k8s.config.config_exception.ConfigException:
