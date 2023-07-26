@@ -45,9 +45,9 @@ Currently, such `A100-80GB:1` spot instances are only available on AWS and GCP.
 sky launch -c falcon -s train.yaml --no-use-spot
 ```
 
-For reference, below is a loss graph you may expect to see, and the amount of time and the approximate cost of fine-tuning each of the models (assuming a spot instance GPU rate at $0.39 / hour):
+For reference, below is a loss graph you may expect to see, and the amount of time and the approximate cost of fine-tuning each of the models for 500 epochs (assuming a spot instance GPU rate at $0.39 / hour):
 
-<img width="524" alt="image" src="https://github.com/xzrderek/skypilot/assets/32891260/cdd81781-f5b8-462b-8190-0c1da55f0526">
+<img width="524" alt="image" src="https://imgur.com/BDlHink.png">
 
 1. `ybelkada/falcon-7b-sharded-bf16`: 2.5 to 3 hours using 1 A100 GPU; total cost ≈ $1.
 
