@@ -483,11 +483,11 @@ class OnDemandFailOverStrategyExecutor(FailoverStrategyExecutor,
         assert not task.use_spot
 
         sky.launch(task,
-                    cluster_name=self.cluster_name,
-                    detach_setup=True,
-                    detach_run=True,
-                    _is_launched_by_spot_controller=False)
+                   cluster_name=self.cluster_name,
+                   detach_setup=True,
+                   detach_run=True,
+                   _is_launched_by_spot_controller=False)
 
-        job_submitted_at = self._wait_until_job_starts_on_cluster() 
+        job_submitted_at = self._wait_until_job_starts_on_cluster()
         assert job_submitted_at is not None
         return job_submitted_at
