@@ -53,7 +53,7 @@ def poll():
             w8time_delta = datetime.timedelta()
             sys.stdout.write(f"w8time_delta is reset: {w8time_delta}\n")
     
-        if w8time_delta > alert_delta:
+        if w8time_delta >= alert_delta:
             sys.stdout.write(f"w8time_delta: {w8time_delta} crossed alert threshold: {alert_delta}. It's time to terminate myself\n")
             try:
                 # NOTE: according to template all sshjump resources under
