@@ -17,6 +17,7 @@ _FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG = (
     'to the cloud storage for {path!r}'
     'due to the following error: {error_msg!r}')
 
+
 def format_storage_table(storages: List[Dict[str, Any]],
                          show_all: bool = False) -> str:
     """Format the storage table for display.
@@ -104,16 +105,15 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
                         error_msg = 'Write permission denial'
                         logger.warning(
                             _FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG.format(
-                                path=src_dir_path, error_msg=error_msg)
-                            )
+                                path=src_dir_path, error_msg=error_msg))
                         return excluded_list
                     init_cmd = f'git -C {expand_src_dir_path} init'
                     try:
                         subprocess.run(init_cmd,
-                                    shell=True,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    check=True)
+                                       shell=True,
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE,
+                                       check=True)
                         output = subprocess.run(filter_cmd,
                                                 shell=True,
                                                 stdout=subprocess.PIPE,
@@ -123,8 +123,7 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
                     except subprocess.CalledProcessError as e:
                         logger.warning(
                             _FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG.format(
-                                path=src_dir_path, error_msg=e.stderr)
-                        )
+                                path=src_dir_path, error_msg=e.stderr))
                         return excluded_list
                     if git_exclude_exists:
                         # removes all the files/dirs created with 'git init'
