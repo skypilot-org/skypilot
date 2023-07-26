@@ -44,6 +44,10 @@ def _filter_instances(ec2, filters: List[Dict[str, Any]],
     return instances
 
 
+# TODO(suquark): Does it make sense to not expose this and always assume
+# non_terminated_only=True?
+# Will there be callers who would want this to be False?
+# stop() and terminate() for example already implicitly assume non-terminated.
 def query_instances(
     cluster_name: str,
     provider_config: Optional[Dict[str, Any]] = None,
