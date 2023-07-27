@@ -1124,7 +1124,9 @@ class S3Store(AbstractStore):
         elif self.source.startswith('r2://'):
             data_transfer.r2_to_s3(self.name, self.name)
 
-    def _get_bucket(self, max_retries: int = 3) -> Tuple[Optional[StorageHandle], bool]:
+    def _get_bucket(self,
+                    max_retries: int = 3
+                   ) -> Tuple[Optional[StorageHandle], bool]:
         """Obtains the S3 bucket.
 
         If the bucket exists, this method will return the bucket.
@@ -1165,6 +1167,8 @@ class S3Store(AbstractStore):
             if max_retries > 0:
                 logger.info('Encountered AWS "Unable to locate credentials" '
                             'error. Retrying.')
+                # Retrieving fresh credentials from AWS's metadata service
+                self.client = data_utils.create_s3_client(self.region)
                 time.sleep(random.uniform(0, 1) * 2)
                 return self._get_bucket(max_retries - 1)
 

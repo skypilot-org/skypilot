@@ -52,7 +52,7 @@ def split_r2_path(r2_path: str) -> Tuple[str, str]:
     return bucket, key
 
 
-def create_s3_client(region: str = 'us-east-2') -> Client:
+def create_s3_client(region: Optional[str] = 'us-east-2') -> Client:
     """Helper method that connects to Boto3 client for S3 Bucket
 
     Args:
