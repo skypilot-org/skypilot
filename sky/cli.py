@@ -3951,6 +3951,7 @@ def serve_status(all: bool, service: Optional[str]):
 @serve.command('down', cls=_DocumentedCodeCommand)
 @click.argument('service',
                 required=True,
+                type=str,
                 **_get_shell_complete_args(_complete_service_name))
 @click.option('--yes',
               '-y',
@@ -3992,11 +3993,11 @@ def serve_down(
     help=('Follow the logs of the job. [default: --follow] '
           'If --no-follow is specified, print the log so far and exit.'))
 @click.option('--control-plane',
-                '-c',
-                is_flag=True,
-                default=False,
-                required=False,
-                help='Show the control plane logs of this service.')
+              '-c',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Show the control plane logs of this service.')
 @click.option('--redirector',
               '-r',
               is_flag=True,
@@ -4004,11 +4005,14 @@ def serve_down(
               required=False,
               help='Show the redirector logs of this service.')
 @click.option('--replica-id',
-                '-i',
-                default=None,
-                required=False,
-                help='Show the logs of a specific replica.')
-@click.argument('service', required=True, type=str)
+              '-i',
+              default=None,
+              required=False,
+              help='Show the logs of a specific replica.')
+@click.argument('service',
+                required=True,
+                type=str,
+                **_get_shell_complete_args(_complete_service_name))
 @usage_lib.entrypoint
 def serve_logs(
     service: str,

@@ -49,8 +49,13 @@ class ControlPlane:
     def server_fetcher(self) -> None:
         while not self.server_fetcher_stop_event.is_set():
             logger.info('Running server fetcher.')
-            server_ips = self.infra_provider.get_server_ips()
-            self.load_balancer.probe_endpoints(server_ips)
+            try:
+                server_ips = self.infra_provider.get_server_ips()
+                self.load_balancer.probe_endpoints(server_ips)
+            except Exception as e:  # pylint: disable=broad-except
+                # No matter what error happens, we should keep the
+                # server fetcher running.
+                logger.error(f'Error in server fetcher: {e}')
             time.sleep(10)
 
     def start_server_fetcher(self) -> None:
@@ -140,22 +145,16 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # ======= Infra Provider =========
-    # infra_provider = DummyInfraProvider()
     _infra_provider = SkyPilotInfraProvider(args.task_yaml, args.service_name)
 
     # ======= Load Balancer =========
     service_spec = SkyServiceSpec.from_yaml(args.task_yaml)
-    # Select the load balancing policy: RoundRobinLoadBalancer
-    # or LeastLoadedLoadBalancer
     _load_balancer = RoundRobinLoadBalancer(
         infra_provider=_infra_provider,
         endpoint_path=service_spec.readiness_path,
         readiness_timeout=service_spec.readiness_timeout)
-    # load_balancer = LeastLoadedLoadBalancer(n=5)
 
     # ======= Autoscaler =========
-    # Create an autoscaler with the RequestRateAutoscaler policy.
-    # Thresholds are defined as requests per node in the defined interval.
     _autoscaler = RequestRateAutoscaler(
         _infra_provider,
         _load_balancer,
@@ -165,12 +164,8 @@ if __name__ == '__main__':
         upper_threshold=service_spec.qps_upper_threshold,
         lower_threshold=service_spec.qps_lower_threshold,
         cooldown=60)
-    # autoscaler = LatencyThresholdAutoscaler(load_balancer,
-    #                                         upper_threshold=0.5,    # 500ms
-    #                                         lower_threshold=0.1)    # 100ms
 
     # ======= ControlPlane =========
-    # Create a control plane object and run it.
     control_plane = ControlPlane(args.port, _infra_provider, _load_balancer,
                                  _autoscaler)
     control_plane.run()

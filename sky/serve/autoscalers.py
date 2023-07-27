@@ -36,7 +36,12 @@ class Autoscaler:
     def monitor(self):
         logger.info('Starting autoscaler monitor.')
         while not self.monitor_thread_stop_event.is_set():
-            self.evaluate_scaling()
+            try:
+                self.evaluate_scaling()
+            except Exception as e:  # pylint: disable=broad-except
+                # No matter what error happens, we should keep the
+                # monitor running.
+                logger.error(f'Error in autoscaler monitor: {e}')
             time.sleep(self.frequency)
 
     def start_monitor(self):
@@ -47,41 +52,6 @@ class Autoscaler:
     def terminate_monitor(self):
         self.monitor_thread_stop_event.set()
         self.monitor_thread.join()
-
-
-# class LatencyThresholdAutoscaler(Autoscaler):
-#     """
-#     Autoscaler that scales up when the average latency of all servers is
-#     above the upper threshold and scales down.
-#     when the average latency of all servers is below the lower threshold.
-#     """
-
-#     def __init__(self,
-#                  *args,
-#                  upper_threshold: int = 50,
-#                  lower_threshold: int = 1,
-#                  min_nodes: int = 1,
-#                  **kwargs):
-#         super().__init__(*args, **kwargs)
-#         self.upper_threshold = upper_threshold
-#         self.lower_threshold = lower_threshold
-#         self.min_nodes = min_nodes
-
-#     def evaluate_scaling(self):
-#         server_loads = self.load_balancer.server_loads
-#         if not server_loads:
-#             return
-
-#         avg_latencies = [
-#             sum(latencies) / len(latencies)
-#             for latencies in server_loads.values()
-#         ]
-
-#         if all(latency > self.upper_threshold for latency in avg_latencies):
-#             self.scale_up(1)
-#         elif all(latency < self.lower_threshold for latency in avg_latencies):
-#             if self.infra_provider.total_servers() > self.min_nodes:
-#                 self.scale_down(1)
 
 
 class RequestRateAutoscaler(Autoscaler):

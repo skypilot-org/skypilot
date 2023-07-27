@@ -1,7 +1,7 @@
 """InfraProvider: handles the creation and deletion of servers."""
 import logging
 import os
-from typing import List, Dict
+from typing import List, Dict, Set
 import time
 import pickle
 import base64
@@ -13,7 +13,7 @@ from sky.backends import backend_utils
 
 logger = logging.getLogger(__name__)
 
-_PROCESS_POOL_REFRESH_INTERVAL = 5
+_PROCESS_POOL_REFRESH_INTERVAL = 20
 
 
 class InfraProvider:
@@ -48,49 +48,6 @@ class InfraProvider:
         raise NotImplementedError
 
 
-# class DummyInfraProvider(InfraProvider):
-#     """A dummy infra provider that not actually provision any servers."""
-
-#     def __init__(self):
-#         self.default_entrypoints = [
-#             'https://httpbin.org/get?id=basecase', 'https://www.google.com',
-#             'http://thiswebsitedoesntexistitsonlyfortesting.com'
-#         ]
-#         self.current_endpoints = self.default_entrypoints.copy()
-
-#     def get_server_ips(self) -> List[str]:
-#         logger.info(f'Returning current endpoints: {self.current_endpoints}')
-#         return self.current_endpoints
-
-#     def total_servers(self) -> int:
-#         return len(self.current_endpoints)
-
-#     def scale_up(self, n: int) -> None:
-#         logger.info(f'DummyInfraProvider.scale_up called with n={n}. '
-#                     'Sleeping for 30s.')
-#         for i in range(30):
-#             logger.info(f'DummyInfraProvider.scale_up: {i}/30')
-#             time.sleep(1)
-#         # Add n new endpoints
-#         for i in range(n):
-#             self.current_endpoints.append('https://httpbin.org/get?id=' +
-#                                           str(len(self.current_endpoints)))
-#         logger.info('DummyInfraProvider.scale_up: done sleeping.')
-
-#     def scale_down(self, n: int) -> None:
-#         logger.info(f'DummyInfraProvider.scale_down called with n={n}. '
-#                     'Doing nothing.')
-
-#     def terminate_servers(self, unhealthy_servers: List[str]):
-#         # Remove unhealthy servers from current_endpoints
-#         logger.info('DummyInfraProvider.terminate_servers called with '
-#                     f'unhealthy_servers={unhealthy_servers}')
-#         self.current_endpoints = [
-#             endpoint for endpoint in self.current_endpoints
-#             if endpoint not in unhealthy_servers
-#         ]
-
-
 class SkyPilotInfraProvider(InfraProvider):
     """Infra provider for SkyPilot clusters."""
 
@@ -101,6 +58,7 @@ class SkyPilotInfraProvider(InfraProvider):
         self.launch_process_pool: Dict[str, multiprocessing.Process] = dict()
         self.down_process_pool: Dict[str, multiprocessing.Process] = dict()
         self.failed_servers: List[str] = []
+        self.all_servers: Set[str] = set()
 
         self.process_pool_refresh_process = multiprocessing.Process(
             target=self._refresh_process_pool)
@@ -234,6 +192,9 @@ class SkyPilotInfraProvider(InfraProvider):
             for pool in [self.launch_process_pool, self.down_process_pool]:
                 for cluster_name, p in list(pool.items()):
                     if not p.is_alive():
+                        # TODO(tian): Try-catch in process, and have an enum
+                        # return value to indicate which type of failure
+                        # happened.
                         logger.info(f'Process for {cluster_name} is dead.')
                         del pool[cluster_name]
                         if p.exitcode != 0:
@@ -288,3 +249,4 @@ class SkyPilotInfraProvider(InfraProvider):
         self.terminate_servers(server_ips)
         for _, p in self.down_process_pool.items():
             p.join()
+            # TODO(tian): Check return code. If failed, notify user.
