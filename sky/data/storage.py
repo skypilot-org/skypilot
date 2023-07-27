@@ -17,6 +17,7 @@ from sky.adaptors import aws
 from sky.adaptors import gcp
 from sky.adaptors import cloudflare
 from sky.backends import backend_utils
+from sky.utils import common_utils
 from sky.utils import schemas
 from sky.data import data_transfer
 from sky.data import data_utils
@@ -1172,9 +1173,15 @@ class S3Store(AbstractStore):
             # retry head_bucket.
             if max_retries > 0:
                 logger.info('Encountered AWS "Unable to locate credentials" '
-                            f'error. Retrying. Details: {e}')
+                            f'error while retrieving the bucket. Retrying. '
+                            f'Details: {common_utils.format_exception(e)}')
                 time.sleep(random.uniform(0, 1) * 2)
                 return self._get_bucket(max_retries - 1)
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketCreateError(
+                        f'Attempted to retrieve the bucket '
+                        f'{self.name} but failed.') from e
 
         if isinstance(self.source, str) and self.source.startswith('s3://'):
             with ux_utils.print_exception_no_traceback():
@@ -1256,9 +1263,11 @@ class S3Store(AbstractStore):
             # retry to create_bucket.
             if max_retries > 0:
                 logger.info('Encountered AWS "Unable to locate credentials" '
-                            'error. Retrying.')
+                            f'error while creating bucket. Retrying. '
+                            f'Details: {common_utils.format_exception(e)}')
                 time.sleep(random.uniform(0, 1) * 2)
-                return self._create_s3_bucket(bucket_name, region, max_retries - 1)
+                return self._create_s3_bucket(bucket_name, region,
+                                              max_retries - 1)
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketCreateError(
