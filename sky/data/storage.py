@@ -1169,12 +1169,10 @@ class S3Store(AbstractStore):
             #
             # We do not know the root cause. For now, the hypothesis is
             # instance metadata service is temporarily unavailable. So, we
-            # retry with new session and client for refreshed credential.
+            # retry head_bucket.
             if max_retries > 0:
                 logger.info('Encountered AWS "Unable to locate credentials" '
                             'error. Retrying.')
-                # Retrieving fresh credentials from AWS's metadata service
-                self.client = data_utils.create_s3_client(self.region)
                 time.sleep(random.uniform(0, 1) * 2)
                 return self._get_bucket(max_retries - 1)
 
@@ -1225,7 +1223,8 @@ class S3Store(AbstractStore):
 
     def _create_s3_bucket(self,
                           bucket_name: str,
-                          region='us-east-2') -> StorageHandle:
+                          region='us-east-2',
+                          max_retries: int = 3) -> StorageHandle:
         """Creates S3 bucket with specific name in specific region
 
         Args:
@@ -1248,6 +1247,23 @@ class S3Store(AbstractStore):
                 raise exceptions.StorageBucketCreateError(
                     f'Attempted to create a bucket '
                     f'{self.name} but failed.') from e
+        except aws.botocore_exceptions().NoCredentialsError as e:
+            # AWS: has run into this rare error with spot controller (which
+            # has an assumed IAM role and is working fine most of the time).
+            #
+            # We do not know the root cause. For now, the hypothesis is
+            # instance metadata service is temporarily unavailable. So, we
+            # retry to create_bucket.
+            if max_retries > 0:
+                logger.info('Encountered AWS "Unable to locate credentials" '
+                            'error. Retrying.')
+                time.sleep(random.uniform(0, 1) * 2)
+                return self._create_s3_bucket(bucket_name, region, max_retries - 1)
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketCreateError(
+                        f'Attempted to create a bucket '
+                        f'{self.name} but failed.') from e
         return aws.resource('s3').Bucket(bucket_name)
 
     def _delete_s3_bucket(self, bucket_name: str) -> bool:
