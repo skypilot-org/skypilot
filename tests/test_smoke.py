@@ -42,7 +42,7 @@ import pytest
 import sky
 from sky import global_user_state
 from sky.data import storage as storage_lib
-from sky.adaptors import cloudflare
+from sky.adaptors import cloudflare, minio
 from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -897,6 +897,35 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
 
         test = Test(
             'cloudflare_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
+@pytest.mark.minio
+def test_minio_storage_mounts(generic_cloud: str):
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_minio_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    endpoint_url = minio.create_endpoint()
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=minio'
+        ]
+
+        test = Test(
+            'minio_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete {storage_name}',
             timeout=20 * 60,  # 20 mins
@@ -2533,6 +2562,10 @@ class TestStorageWithCredentials:
             endpoint_url = cloudflare.create_endpoint()
             url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
+        if store_type == storage_lib.StoreType.MINIO:
+            endpoint_url = minio.create_endpoint()
+            url = f's3://{bucket_name}'
+            return f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=minio'
 
     @staticmethod
     def cli_ls_cmd(store_type, bucket_name, suffix=''):
@@ -2555,6 +2588,13 @@ class TestStorageWithCredentials:
             else:
                 url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
+        if store_type == storage_lib.StoreType.MINIO:
+            endpoint_url = minio.create_endpoint()
+            if suffix:
+                url = f's3://{bucket_name}/{suffix}'
+            else:
+                url = f's3://{bucket_name}'
+            return f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=minio'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -2696,6 +2736,18 @@ class TestStorageWithCredentials:
             shell=True)
 
     @pytest.fixture
+    def tmp_awscli_bucket_minio(self, tmp_bucket_name):
+        # Creates a temporary bucket using awscli
+        endpoint_url = minio.create_endpoint()
+        subprocess.check_call(
+            f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3 mb s3://{tmp_bucket_name} --endpoint {endpoint_url} --profile=minio',
+            shell=True)
+        yield tmp_bucket_name
+        subprocess.check_call(
+            f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3 rb s3://{tmp_bucket_name} --force --endpoint {endpoint_url} --profile=minio',
+            shell=True)
+
+    @pytest.fixture
     def tmp_public_storage_obj(self, request):
         # Initializes a storage object with a public bucket
         storage_obj = storage_lib.Storage(source=request.param)
@@ -2705,7 +2757,8 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.MINIO, marks=pytest.mark.minio)
     ])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
                                               store_type):
@@ -2728,7 +2781,8 @@ class TestStorageWithCredentials:
     @pytest.mark.xdist_group('multiple_bucket_deletion')
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.MINIO, marks=pytest.mark.minio)
     ])
     def test_multiple_buckets_creation_and_deletion(
             self, tmp_multiple_scratch_storage_obj, store_type):
@@ -2766,7 +2820,8 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.MINIO, marks=pytest.mark.minio)
     ])
     def test_bucket_external_deletion(self, tmp_scratch_storage_obj,
                                       store_type):
