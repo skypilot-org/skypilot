@@ -1172,7 +1172,7 @@ class S3Store(AbstractStore):
             # retry head_bucket.
             if max_retries > 0:
                 logger.info('Encountered AWS "Unable to locate credentials" '
-                            'error. Retrying.')
+                            f'error. Retrying. Details: {e}')
                 time.sleep(random.uniform(0, 1) * 2)
                 return self._get_bucket(max_retries - 1)
 
