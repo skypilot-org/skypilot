@@ -13,7 +13,9 @@ import threading
 import signal
 
 import sky
+from sky import backends
 from sky.backends import backend_utils
+from sky import status_lib
 
 logger = logging.getLogger(__name__)
 
@@ -151,14 +153,28 @@ class SkyPilotInfraProvider(InfraProvider):
         return ip_clusname_map
 
     def get_replica_info(self) -> List[Dict[str, str]]:
+
+        def _get_replica_status(cluster_status: status_lib.ClusterStatus,
+                                ip: str) -> status_lib.ReplicaStatus:
+            if ip in self.available_servers:
+                return status_lib.ReplicaStatus.RUNNING
+            if ip in self.failed_servers:
+                return status_lib.ReplicaStatus.FAILED
+            if cluster_status == status_lib.ClusterStatus.UP:
+                return status_lib.ReplicaStatus.UNHEALTHY
+            return status_lib.ReplicaStatus.INIT
+
         clusters = sky.global_user_state.get_clusters()
         infos = []
         for cluster in clusters:
             if self.cluster_name_prefix in cluster['name']:
+                handle = cluster['handle']
+                assert isinstance(handle, backends.CloudVmRayResourceHandle)
+                ip = handle.head_ip
                 info = {
                     'name': cluster['name'],
-                    'handle': cluster['handle'],
-                    'status': cluster['status'],
+                    'handle': handle,
+                    'status': _get_replica_status(cluster['status'], ip),
                 }
                 info = {
                     k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
