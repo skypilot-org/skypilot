@@ -33,6 +33,7 @@ Lambda = clouds.Lambda
 SCP = clouds.SCP
 Local = clouds.Local
 OCI = clouds.OCI
+Fluidstack = clouds.Fluidstack
 optimize = Optimizer.optimize
 
 __all__ = [
@@ -45,6 +46,7 @@ __all__ = [
     'SCP',
     'Local',
     'OCI',
+    'Fluidstack',
     'Optimizer',
     'OptimizeTarget',
     'backends',

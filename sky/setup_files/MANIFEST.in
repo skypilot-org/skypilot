@@ -11,6 +11,7 @@ include sky/skylet/providers/lambda_cloud/*
 include sky/skylet/providers/ibm/*
 include sky/skylet/providers/scp/*
 include sky/skylet/providers/oci/*
+include sky/skylet/providers/fluidstack/*
 include sky/skylet/ray_patches/*.patch
 include sky/spot/dashboard/*
 include sky/spot/dashboard/templates/*

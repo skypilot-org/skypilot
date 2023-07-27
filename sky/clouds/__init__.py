@@ -12,7 +12,7 @@ from sky.clouds.local import Local
 from sky.clouds.ibm import IBM
 from sky.clouds.scp import SCP
 from sky.clouds.oci import OCI
-
+from sky.clouds.fluidstack import Fluidstack
 __all__ = [
     'IBM',
     'AWS',
@@ -23,6 +23,7 @@ __all__ = [
     'Local',
     'SCP',
     'OCI',
+    'Fluidstack',
     'CloudImplementationFeatures',
     'Region',
     'Zone',

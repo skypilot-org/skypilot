@@ -42,6 +42,7 @@ from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.skylet.providers.lambda_cloud import lambda_utils
+from sky.skylet.providers.fluidstack import fluidstack_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -373,3 +374,24 @@ def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     with open(public_key_path, 'r') as f:
         public_key = f.read().strip()
     return _replace_ssh_info_in_config(config, public_key)
+
+
+def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    get_or_generate_keys()
+
+    client = fluidstack_utils.FluidstackClient()
+    public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
+    public_key = None
+    with open(public_key_path, "r") as f:
+        public_key = f.read()
+    client.add_ssh_key(public_key)
+
+    # Need to use ~ relative path because Ray uses the same
+    # path for finding the public key path on both local and head node.
+    config["auth"]["ssh_public_key"] = PUBLIC_SSH_KEY_PATH
+
+    file_mounts = config["file_mounts"]
+    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
+    config["file_mounts"] = file_mounts
+
+    return config
