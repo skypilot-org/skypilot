@@ -43,25 +43,24 @@ class ControlPlane:
         self.autoscaler = autoscaler
         self.app = FastAPI()
 
-    def server_fetcher(self) -> None:
+    def _server_fetcher(self) -> None:
         while not self.server_fetcher_stop_event.is_set():
             logger.info('Running server fetcher.')
             try:
-                server_ips = self.infra_provider.get_server_ips()
-                self.infra_provider.probe_endpoints(server_ips)
+                self.infra_provider.probe_all_endpoints()
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # server fetcher running.
                 logger.error(f'Error in server fetcher: {e}')
             time.sleep(10)
 
-    def start_server_fetcher(self) -> None:
+    def _start_server_fetcher(self) -> None:
         self.server_fetcher_stop_event = threading.Event()
         self.server_fetcher_thread = threading.Thread(
-            target=self.server_fetcher)
+            target=self._server_fetcher)
         self.server_fetcher_thread.start()
 
-    def terminate_server_fetcher(self) -> None:
+    def _terminate_server_fetcher(self) -> None:
         self.server_fetcher_stop_event.set()
         self.server_fetcher_thread.join()
 
@@ -98,13 +97,11 @@ class ControlPlane:
         @self.app.get('/control_plane/get_replica_nums')
         def get_replica_nums():
             return {
-                'num_healthy_replicas': len(
-                    self.infra_provider.available_servers),
+                'num_healthy_replicas':
+                    self.infra_provider.available_server_num(),
                 'num_unhealthy_replicas':
-                    self.infra_provider.total_servers() -
-                    len(self.infra_provider.available_servers),
-                'num_failed_replicas': len(
-                    self.infra_provider.get_failed_servers())
+                    self.infra_provider.unhealthy_server_num(),
+                'num_failed_replicas': self.infra_provider.failed_server_num()
             }
 
         @self.app.post('/control_plane/terminate')
@@ -113,18 +110,16 @@ class ControlPlane:
             # request_data = request.json()
             # TODO(tian): Authentication!!!
             logger.info('Terminating service...')
-            self.terminate_server_fetcher()
+            self._terminate_server_fetcher()
             if self.autoscaler is not None:
                 self.autoscaler.terminate_monitor()
-            # For correctly show serve status
-            self.infra_provider.available_servers.clear()
-            self.infra_provider.terminate()
-            return {'message': 'Success'}
+            msg = self.infra_provider.terminate()
+            return {'message': msg}
 
         # Run server_monitor and autoscaler.monitor (if autoscaler is defined)
         # in separate threads in the background.
         # This should not block the main thread.
-        self.start_server_fetcher()
+        self._start_server_fetcher()
         if self.autoscaler is not None:
             self.autoscaler.start_monitor()
 

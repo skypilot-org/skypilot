@@ -8,6 +8,7 @@ import requests
 import pickle
 import base64
 import multiprocessing
+import collections
 import threading
 import signal
 
@@ -17,6 +18,8 @@ from sky.backends import backend_utils
 logger = logging.getLogger(__name__)
 
 _PROCESS_POOL_REFRESH_INTERVAL = 20
+# TODO(tian): Maybe let user determine this threshold
+_SERVER_UNHEALTHY_THRESHOLD_SECOND = 180
 
 
 class InfraProvider:
@@ -26,9 +29,11 @@ class InfraProvider:
                  readiness_path: str,
                  readiness_timeout: int,
                  post_data: Optional[Any] = None) -> None:
-        self.failed_servers: List[str] = []
         self.available_servers: Set[str] = set()
-        self.first_unhealthy_time: Dict[str, float] = {}
+        self.unhealthy_servers: Set[str] = set()
+        self.failed_servers: Set[str] = set()
+        self.unhealthy_time: Dict[str,
+                                  List[float]] = collections.defaultdict(list)
         self.readiness_path: str = readiness_path
         self.readiness_timeout: int = readiness_timeout
         self.post_data: Any = post_data
@@ -42,9 +47,21 @@ class InfraProvider:
         # Get all server ips
         raise NotImplementedError
 
-    def total_servers(self) -> int:
+    def total_server_num(self) -> int:
         # Returns the total number of servers, including those under
         # provisioning and deletion
+        raise NotImplementedError
+
+    def available_server_num(self) -> int:
+        # Returns the total number of available servers
+        raise NotImplementedError
+
+    def unhealthy_server_num(self) -> int:
+        # Returns the total number of unhealthy servers
+        raise NotImplementedError
+
+    def failed_server_num(self) -> int:
+        # Returns the number of failed servers
         raise NotImplementedError
 
     def scale_up(self, n: int) -> None:
@@ -55,20 +72,16 @@ class InfraProvider:
         # delete or the number of servers to delete
         raise NotImplementedError
 
-    def get_failed_servers(self) -> List[str]:
-        # Returns a list of failed servers
-        raise NotImplementedError
-
     def terminate_servers(self, unhealthy_servers: List[str]) -> None:
         # Terminates the servers with endpoints in the list
         raise NotImplementedError
 
-    def terminate(self) -> None:
+    def terminate(self) -> Optional[str]:
         # Terminate service
         raise NotImplementedError
 
-    def probe_endpoints(self, endpoint_ips: List[str]) -> None:
-        # Probe readiness of endpoints
+    def probe_all_endpoints(self) -> None:
+        # Probe readiness of all endpoints
         raise NotImplementedError
 
 
@@ -80,7 +93,7 @@ class SkyPilotInfraProvider(InfraProvider):
         super().__init__(*args, **kwargs)
         self.task_yaml_path: str = task_yaml_path
         self.cluster_name_prefix: str = cluster_name_prefix + '-'
-        self.id_counter: int = self._get_id_start()
+        self.id_counter: int = 1
         self.launch_process_pool: Dict[str, multiprocessing.Process] = dict()
         self.down_process_pool: Dict[str, multiprocessing.Process] = dict()
 
@@ -89,18 +102,21 @@ class SkyPilotInfraProvider(InfraProvider):
     def _refresh_process_pool(self) -> None:
         while not self.refresh_process_pool_stop_event.is_set():
             logger.info('Refreshing process pool.')
-            for pool in [self.launch_process_pool, self.down_process_pool]:
+            for op, pool in zip(
+                ['Launch', 'Down'],
+                [self.launch_process_pool, self.down_process_pool]):
                 for cluster_name, p in list(pool.items()):
                     if not p.is_alive():
                         # TODO(tian): Try-catch in process, and have an enum
                         # return value to indicate which type of failure
                         # happened.
-                        logger.info(f'Process for {cluster_name} is dead.')
+                        logger.info(
+                            f'{op} process for {cluster_name} finished.')
                         del pool[cluster_name]
                         if p.exitcode != 0:
                             logger.info(f'Process for {cluster_name} exited '
                                         f'abnormally with code {p.exitcode}.')
-                            self.failed_servers.append(cluster_name)
+                            self.failed_servers.add(cluster_name)
             time.sleep(_PROCESS_POOL_REFRESH_INTERVAL)
 
     def _start_refresh_process_pool(self) -> None:
@@ -112,25 +128,6 @@ class SkyPilotInfraProvider(InfraProvider):
     def _terminate_refresh_process_pool(self) -> None:
         self.refresh_process_pool_stop_event.set()
         self.refresh_process_pool_thread.join()
-
-    def _get_id_start(self) -> int:
-        """
-        Returns the id to start from when creating a new cluster.
-        """
-        clusters = sky.global_user_state.get_clusters()
-        # Filter out clusters that don't have the prefix
-        clusters = [
-            cluster for cluster in clusters
-            if self.cluster_name_prefix in cluster['name']
-        ]
-        # Get the greatest id
-        max_id = 0
-        for cluster in clusters:
-            name = cluster['name']
-            server_id = int(name.split('-')[-1])
-            if server_id > max_id:
-                max_id = server_id
-        return max_id + 1
 
     def _get_ip_clusname_map(self) -> Dict[str, str]:
         """
@@ -186,8 +183,17 @@ class SkyPilotInfraProvider(InfraProvider):
         ]
         return len(clusters)
 
-    def total_servers(self) -> int:
+    def total_server_num(self) -> int:
         return self._return_total_servers()
+
+    def available_server_num(self) -> int:
+        return len(self.available_servers)
+
+    def unhealthy_server_num(self) -> int:
+        return len(self.unhealthy_servers)
+
+    def failed_server_num(self) -> int:
+        return len(self.failed_servers)
 
     def _launch_cluster(self, cluster_name: str, task: sky.Task) -> None:
         p = multiprocessing.Process(target=sky.launch,
@@ -243,9 +249,6 @@ class SkyPilotInfraProvider(InfraProvider):
     def scale_down(self, n: int) -> None:
         self._scale_down(n)
 
-    def get_failed_servers(self) -> List[str]:
-        return self.failed_servers
-
     def terminate_servers(self, unhealthy_servers: List[str]) -> None:
         # Remove unhealthy servers from current_endpoints
         logger.info('SkyPilotInfraProvider.terminate_servers called with '
@@ -262,7 +265,10 @@ class SkyPilotInfraProvider(InfraProvider):
                 logger.info(f'Deleting SkyPilot cluster {name}')
                 self._teardown_cluster(name)
 
-    def terminate(self) -> None:
+    def terminate(self) -> Optional[str]:
+        # For correctly show serve status
+        self.available_servers.clear()
+        self.unhealthy_servers = set(self.get_server_ips())
         self._terminate_refresh_process_pool()
         for name, p in self.launch_process_pool.items():
             # Use keyboard interrupt here since sky.launch has great
@@ -274,72 +280,74 @@ class SkyPilotInfraProvider(InfraProvider):
                 os.kill(p.pid, signal.SIGINT)
                 p.join()
                 self._teardown_cluster(name)
+                logger.info(f'Interrupted launch process for cluster {name}'
+                            'and deleted the cluster.')
         server_ips = self.get_server_ips()
         self.terminate_servers(server_ips)
-        for _, p in self.down_process_pool.items():
+        msg = []
+        for name, p in self.down_process_pool.items():
             p.join()
-            # TODO(tian): Check return code. If failed, notify user.
+            logger.info(f'Down process for cluster {name} finished.')
+            if p.exitcode != 0:
+                msg.append(f'Down process for cluster {name} exited abnormally'
+                           f' with code {p.exitcode}. Please login to the '
+                           'controller and make sure the cluster is released.')
+        if not msg:
+            return None
+        return '\n'.join(msg)
 
-    def probe_endpoints(self, endpoint_ips: List[str]) -> None:
+    def probe_all_endpoints(self) -> None:
+        replica_ips = set(self.get_server_ips()) - self.failed_servers
 
-        def probe_endpoint(endpoint_ip: str) -> Optional[str]:
+        def probe_endpoint(replica_ip: str) -> Optional[str]:
             try:
                 if self.post_data:
                     response = requests.post(
-                        f'http://{endpoint_ip}{self.readiness_path}',
+                        f'http://{replica_ip}{self.readiness_path}',
                         json=self.post_data,
                         timeout=3)
                 else:
                     response = requests.get(
-                        f'http://{endpoint_ip}{self.readiness_path}', timeout=3)
+                        f'http://{replica_ip}{self.readiness_path}', timeout=3)
                 if response.status_code == 200:
-                    logger.info(f'Server {endpoint_ip} is available.')
-                    return endpoint_ip
+                    logger.info(f'Replica {replica_ip} is available.')
+                    return replica_ip
             except requests.exceptions.RequestException as e:
                 logger.info(e)
-                logger.info(f'Server {endpoint_ip} is not available.')
+                logger.info(f'Replica {replica_ip} is not available.')
                 pass
             return None
 
         with ThreadPoolExecutor() as executor:
             futures = [
-                executor.submit(probe_endpoint, endpoint_url)
-                for endpoint_url in endpoint_ips
+                executor.submit(probe_endpoint, replica_ip)
+                for replica_ip in replica_ips
             ]
-            healthy_servers = [
-                future.result()
-                for future in as_completed(futures)
-                if future.result() is not None
-            ]
+            healthy_servers = set()
+            for future in as_completed(futures):
+                ip = future.result()
+                if ip is not None:
+                    healthy_servers.add(ip)
         logger.info(f'Healthy servers: {healthy_servers}')
-        # Add newly available servers
-        for server in healthy_servers:
-            assert server is not None
-            if server not in self.available_servers:
-                logger.info(f'Server {server} is newly available. '
-                            'Adding to available servers.')
-                self.available_servers.add(server)
-        # Remove servers that are no longer available
-        unhealthy_servers = set()
-        for server in self.available_servers:
-            if server not in healthy_servers:
-                logger.info(f'Server {server} is no longer available. '
-                            'Removing from available servers.')
-                self.available_servers.remove(server)
-                unhealthy_servers.add(server)
-        # Tell the infra provider to remove endpoints that are
-        # no longer available
-        for server in endpoint_ips:
-            if server not in healthy_servers:
-                unhealthy_servers.add(server)
+        self.available_servers = healthy_servers
+        unhealthy_servers = replica_ips - healthy_servers
         logger.info(f'Unhealthy servers: {unhealthy_servers}')
-        if unhealthy_servers:
-            servers_to_terminate = []
-            for server in unhealthy_servers:
-                if server not in self.first_unhealthy_time:
-                    self.first_unhealthy_time[server] = time.time()
-                # coldstart time limitation is `self.readiness_timeout`.
-                elif time.time(
-                ) - self.first_unhealthy_time[server] > self.readiness_timeout:
+        self.unhealthy_servers = unhealthy_servers
+        servers_to_terminate = []
+        for server in unhealthy_servers:
+            self.unhealthy_time[server].append(time.time())
+            # coldstart time limitation is `self.readiness_timeout`.
+            first_unhealthy_time = self.unhealthy_time[server][0]
+            if time.time() - first_unhealthy_time > self.readiness_timeout:
+                last_unhealthy_time = self.unhealthy_time[server][-1]
+                if (time.time() - last_unhealthy_time >
+                        _SERVER_UNHEALTHY_THRESHOLD_SECOND):
+                    logger.info(f'Terminating server {server}.')
                     servers_to_terminate.append(server)
-            self.terminate_servers(servers_to_terminate)
+                else:
+                    logger.info(f'Server {server} is unhealthy but '
+                                'within unhealthy threshold. Skipping.')
+            else:
+                logger.info(f'Server {server} is unhealthy but within '
+                            'readiness timeout. Skipping.')
+        self.terminate_servers(servers_to_terminate)

@@ -57,7 +57,8 @@ class RoundRobinLoadBalancer(LoadBalancer):
         self.servers_queue: Deque[str] = deque()
 
     def set_available_servers(self, server_ips: List[str]) -> None:
-        self.servers_queue = deque(server_ips)
+        if set(server_ips) != set(self.available_servers):
+            self.servers_queue = deque(server_ips)
 
     def select_server(self, request) -> Optional[str]:
         if not self.servers_queue:

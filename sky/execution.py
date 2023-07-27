@@ -976,7 +976,13 @@ def serve_up(
         requested_resources)
     app_port = int(task.service.app_port)
     assert len(task.resources) == 1, task
-    task.set_resources(list(task.resources)[0].copy(ports=[app_port]))
+    original_resources = list(task.resources)[0]
+    if original_resources.ports is not None and (len(original_resources.ports)
+                                                 != 1):
+        if original_resources.ports[0] != app_port:
+            logger.warning('Ignoring port specification '
+                           f'{original_resources.ports} in resources.')
+    task.set_resources(original_resources.copy(ports=[app_port]))
 
     # TODO(tian): Use skyserve constants.
     _maybe_translate_local_file_mounts_and_sync_up(task)
