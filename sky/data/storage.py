@@ -1172,7 +1172,7 @@ class S3Store(AbstractStore):
             # retry with new session and client for refreshed credential.
             if max_retries > 0:
                 logger.info('Encountered AWS "Unable to locate credentials" '
-                            'error. Retrying.')
+                            f'error. Retrying. Details: {e}')
                 # Retrieving fresh credentials from AWS's metadata service
                 self.client = data_utils.create_s3_client(self.region)
                 time.sleep(random.uniform(0, 1) * 2)
