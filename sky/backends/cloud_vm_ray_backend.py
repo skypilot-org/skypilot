@@ -28,7 +28,7 @@ from sky import clouds
 from sky import cloud_stores
 from sky import exceptions
 from sky import global_user_state
-from sky import provision as provision_api
+from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import optimizer
@@ -1787,6 +1787,12 @@ class RetryingVmProvisioner(object):
                         'error.')
                     return True
 
+            if isinstance(to_provision_cloud, clouds.Lambda):
+                if 'Your API requests are being rate limited.' in stderr:
+                    logger.info(
+                        'Retrying due to Lambda API rate limit exceeded.')
+                    return True
+
             if 'rsync: command not found' in stderr:
                 logger.info('Skipping retry due to `rsync` not found in '
                             'the specified image.')
@@ -3411,17 +3417,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'Failed to take down Ray autoscaler on the head node. '
                         'It might be because the cluster\'s head node has '
                         'already been terminated. It is fine to skip this.')
+            operation_fn = provision_lib.stop_instances
+            if terminate:
+                operation_fn = provision_lib.terminate_instances
             try:
-                if terminate:
-                    provision_api.terminate_instances(
-                        repr(cloud),
-                        cluster_name,
-                        provider_config=config['provider'])
-                else:
-                    provision_api.stop_instances(
-                        repr(cloud),
-                        cluster_name,
-                        provider_config=config['provider'])
+                operation_fn(repr(cloud),
+                             cluster_name,
+                             provider_config=config['provider'])
             except Exception as e:  # pylint: disable=broad-except
                 if purge:
                     logger.warning(
