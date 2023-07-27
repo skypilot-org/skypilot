@@ -21,6 +21,7 @@ class SkyServiceSpec:
         max_replica: Optional[int] = None,
         qps_upper_threshold: Optional[float] = None,
         qps_lower_threshold: Optional[float] = None,
+        post_data: Optional[Dict[str, Any]] = None,
     ):
         if max_replica is not None and max_replica < min_replica:
             with ux_utils.print_exception_no_traceback():
@@ -35,6 +36,7 @@ class SkyServiceSpec:
         self._max_replica = max_replica
         self._qps_upper_threshold = qps_upper_threshold
         self._qps_lower_threshold = qps_lower_threshold
+        self._post_data = post_data
 
     @staticmethod
     def from_yaml_config(config: Optional[Dict[str, Any]]):
@@ -56,6 +58,8 @@ class SkyServiceSpec:
             'qps_upper_threshold', None)
         service_config['qps_lower_threshold'] = config['replica_policy'].get(
             'qps_lower_threshold', None)
+        service_config['post_data'] = config['readiness_probe'].get(
+            'post_data', None)
 
         return SkyServiceSpec(**service_config)
 
@@ -112,29 +116,33 @@ class SkyServiceSpec:
         return f'AUTOSCALE [{self.min_replica}, {self.max_replica}]'
 
     @property
-    def readiness_path(self):
+    def readiness_path(self) -> str:
         return self._readiness_path
 
     @property
-    def readiness_timeout(self):
+    def readiness_timeout(self) -> int:
         return self._readiness_timeout
 
     @property
-    def app_port(self):
+    def app_port(self) -> int:
         return self._app_port
 
     @property
-    def min_replica(self):
+    def min_replica(self) -> int:
         return self._min_replica
 
     @property
-    def max_replica(self):
+    def max_replica(self) -> Optional[int]:
         return self._max_replica
 
     @property
-    def qps_upper_threshold(self):
+    def qps_upper_threshold(self) -> Optional[float]:
         return self._qps_upper_threshold
 
     @property
-    def qps_lower_threshold(self):
+    def qps_lower_threshold(self) -> Optional[float]:
         return self._qps_lower_threshold
+
+    @property
+    def post_data(self) -> Optional[Dict[str, Any]]:
+        return self._post_data

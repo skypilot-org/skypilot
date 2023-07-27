@@ -81,7 +81,7 @@ class ControlPlane:
         @self.app.get('/control_plane/get_autoscaler_query_interval')
         def get_autoscaler_query_interval():
             if isinstance(self.autoscaler, RequestRateAutoscaler):
-                return {'query_interval': self.autoscaler.query_interval}
+                return {'query_interval': self.autoscaler.get_query_interval()}
             return {'query_interval': None}
 
         @self.app.get('/control_plane/get_available_servers')
@@ -150,7 +150,8 @@ if __name__ == '__main__':
         args.task_yaml,
         args.service_name,
         readiness_path=service_spec.readiness_path,
-        readiness_timeout=service_spec.readiness_timeout)
+        readiness_timeout=service_spec.readiness_timeout,
+        post_data=service_spec.post_data)
 
     # ======= Autoscaler =========
     _autoscaler = RequestRateAutoscaler(
@@ -160,7 +161,8 @@ if __name__ == '__main__':
         max_nodes=service_spec.max_replica,
         upper_threshold=service_spec.qps_upper_threshold,
         lower_threshold=service_spec.qps_lower_threshold,
-        cooldown=60)
+        cooldown=60,
+        query_interval=60)
 
     # ======= ControlPlane =========
     control_plane = ControlPlane(args.port, _infra_provider, _autoscaler)
