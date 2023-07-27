@@ -9,7 +9,6 @@ import argparse
 from sky.serve.autoscalers import RequestRateAutoscaler, Autoscaler
 from sky.serve import SkyServiceSpec
 from sky.serve.infra_providers import InfraProvider, SkyPilotInfraProvider
-from sky.serve.load_balancers import RoundRobinLoadBalancer, LoadBalancer
 
 import time
 import threading
@@ -38,11 +37,9 @@ class ControlPlane:
     def __init__(self,
                  port: int,
                  infra_provider: InfraProvider,
-                 load_balancer: LoadBalancer,
                  autoscaler: Optional[Autoscaler] = None) -> None:
         self.port = port
         self.infra_provider = infra_provider
-        self.load_balancer = load_balancer
         self.autoscaler = autoscaler
         self.app = FastAPI()
 
@@ -71,20 +68,28 @@ class ControlPlane:
     # TODO(tian): Authentication!!!
     def run(self) -> None:
 
-        @self.app.post('/control_plane/increment_request_count')
-        async def increment_request_count(request: Request):
+        @self.app.post('/control_plane/get_num_requests')
+        async def get_num_requests(request: Request):
             # await request
             request_data = await request.json()
             # get request data
-            count = (0 if 'counts' not in request_data else
-                     request_data['counts'])
+            num_requests = request_data['num_requests']
             logger.info(f'Received request: {request_data}')
-            self.load_balancer.increment_request_count(count=count)
+            if isinstance(self.autoscaler, RequestRateAutoscaler):
+                self.autoscaler.set_num_requests(num_requests)
             return {'message': 'Success'}
 
-        @self.app.get('/control_plane/get_server_ips')
-        def get_server_ips():
-            return {'server_ips': list(self.infra_provider.available_servers)}
+        @self.app.get('/control_plane/get_autoscaler_query_interval')
+        def get_autoscaler_query_interval():
+            if isinstance(self.autoscaler, RequestRateAutoscaler):
+                return {'query_interval': self.autoscaler.query_interval}
+            return {'query_interval': None}
+
+        @self.app.get('/control_plane/get_available_servers')
+        def get_available_servers():
+            return {
+                'available_servers': list(self.infra_provider.available_servers)
+            }
 
         @self.app.get('/control_plane/get_replica_info')
         def get_replica_info():
@@ -152,14 +157,10 @@ if __name__ == '__main__':
         readiness_path=service_spec.readiness_path,
         readiness_timeout=service_spec.readiness_timeout)
 
-    # ======= Load Balancer =========
-    _load_balancer = RoundRobinLoadBalancer()
-
     # ======= Autoscaler =========
     _autoscaler = RequestRateAutoscaler(
         _infra_provider,
-        _load_balancer,
-        frequency=5,
+        frequency=20,
         min_nodes=service_spec.min_replica,
         max_nodes=service_spec.max_replica,
         upper_threshold=service_spec.qps_upper_threshold,
@@ -167,6 +168,5 @@ if __name__ == '__main__':
         cooldown=60)
 
     # ======= ControlPlane =========
-    control_plane = ControlPlane(args.port, _infra_provider, _load_balancer,
-                                 _autoscaler)
+    control_plane = ControlPlane(args.port, _infra_provider, _autoscaler)
     control_plane.run()

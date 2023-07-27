@@ -1,8 +1,6 @@
 """Redirector: redirect any incoming request to an endpoint replica."""
 import time
 import logging
-from collections import deque
-from typing import List, Deque
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import RedirectResponse
@@ -11,6 +9,10 @@ import uvicorn
 
 import requests
 import argparse
+
+from sky.serve.load_balancers import RoundRobinLoadBalancer, LoadBalancer
+
+CONTROL_PLANE_SYNC_INTERVAL = 20
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,50 +30,56 @@ class SkyServeRedirector:
     to the appropriate endpoint replica.
     """
 
-    def __init__(self, control_plane_url: str, port: int):
+    def __init__(self, control_plane_url: str, port: int,
+                 load_balancer: LoadBalancer):
+        self.app = FastAPI()
         self.control_plane_url = control_plane_url
         self.port = port
-        self.server_ips: List[str] = []
-        self.servers_queue: Deque[str] = deque()
-        self.app = FastAPI()
-        self.request_count = 0
-        self.control_plane_sync_timeout = 20
+        self.load_balancer = load_balancer
+
+        for i in range(3):
+            resp = requests.get(self.control_plane_url +
+                                '/control_plane/get_autoscaler_query_interval')
+            if resp.status_code == 200:
+                self.load_balancer.set_query_interval(
+                    resp.json()['query_interval'])
+                break
+            if i == 2:
+                logger.error('Failed to get autoscaler query interval. '
+                             'Use default interval instead.')
+                self.load_balancer.set_query_interval(None)
+            time.sleep(10)
 
     def sync_with_control_plane(self):
         while True:
-            server_ips = []
             with requests.Session() as session:
                 try:
-                    # send request count
+                    # send request num in last query interval
                     response = session.post(
                         self.control_plane_url +
-                        '/control_plane/increment_request_count',
-                        json={'counts': self.request_count},
+                        '/control_plane/get_num_requests',
+                        json={
+                            'num_requests':
+                                self.load_balancer.deprecate_old_requests()
+                        },
                         timeout=5)
                     response.raise_for_status()
-                    self.request_count = 0
                     # get server ips
-                    response = session.get(self.control_plane_url +
-                                           '/control_plane/get_server_ips')
+                    response = session.get(
+                        self.control_plane_url +
+                        '/control_plane/get_available_servers')
                     response.raise_for_status()
-                    server_ips = response.json()['server_ips']
+                    available_servers = response.json()['available_servers']
                 except requests.RequestException as e:
                     print(f'An error occurred: {e}')
                 else:
-                    logger.info(f'Server IPs: {server_ips}')
-                    self.servers_queue = deque(server_ips)
-            time.sleep(self.control_plane_sync_timeout)
-
-    def select_server(self):
-        if not self.servers_queue:
-            return None
-        server_ip = self.servers_queue.popleft()
-        self.servers_queue.append(server_ip)
-        return server_ip
+                    logger.info(f'Available Server IPs: {available_servers}')
+                    self.load_balancer.set_available_servers(available_servers)
+            time.sleep(CONTROL_PLANE_SYNC_INTERVAL)
 
     async def redirector_handler(self, request: Request):
-        self.request_count += 1
-        server_ip = self.select_server()
+        self.load_balancer.increment_request_count(1)
+        server_ip = self.load_balancer.select_server(request)
 
         if server_ip is None:
             raise HTTPException(status_code=503, detail='No available servers')
@@ -113,6 +121,11 @@ if __name__ == '__main__':
                         required=True)
     args = parser.parse_args()
 
+    # ======= Load Balancer =========
+    _load_balancer = RoundRobinLoadBalancer()
+
+    # ======= Redirector =========
     redirector = SkyServeRedirector(control_plane_url=args.control_plane_addr,
-                                    port=args.port)
+                                    port=args.port,
+                                    load_balancer=_load_balancer)
     redirector.serve()

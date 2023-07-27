@@ -7,6 +7,7 @@ from typing import Optional
 
 from sky.serve.infra_providers import InfraProvider
 from sky.serve.load_balancers import LoadBalancer
+from sky.serve.redirector import CONTROL_PLANE_SYNC_INTERVAL
 
 logger = logging.getLogger(__name__)
 
@@ -16,11 +17,13 @@ class Autoscaler:
 
     def __init__(self,
                  infra_provider: InfraProvider,
-                 load_balancer: LoadBalancer,
                  frequency: int = 60) -> None:
         self.infra_provider = infra_provider
-        self.load_balancer = load_balancer
         self.frequency = frequency  # Time to sleep in seconds.
+        if frequency < CONTROL_PLANE_SYNC_INTERVAL:
+            logger.warning('Autoscaler frequency is less than '
+                           'control plane sync interval. It might '
+                           'not always got the latest information.')
 
     def evaluate_scaling(self) -> None:
         raise NotImplementedError
@@ -77,6 +80,10 @@ class RequestRateAutoscaler(Autoscaler):
         self.lower_threshold: Optional[float] = lower_threshold
         self.cooldown: int = cooldown
         self.last_scale_operation: float = 0.  # Time of last scale operation.
+        self.num_requests: int = 0
+
+    def set_num_requests(self, num_requests: int) -> None:
+        self.num_requests = num_requests
 
     def evaluate_scaling(self) -> None:
         current_time = time.time()
@@ -91,18 +98,12 @@ class RequestRateAutoscaler(Autoscaler):
                 ' Skipping scaling.')
             return
 
-        while (self.load_balancer.request_timestamps and
-               current_time - self.load_balancer.request_timestamps[0] >
-               self.query_interval):
-            self.load_balancer.request_timestamps.popleft()
-
-        num_requests = len(self.load_balancer.request_timestamps)
         # Convert to requests per second.
-        num_requests = float(num_requests) / self.query_interval
+        num_requests_per_second = float(self.num_requests) / self.query_interval
         num_nodes = self.infra_provider.total_servers()
         # Edge case: num_nodes is zero.
-        requests_per_node = (num_requests /
-                             num_nodes if num_nodes else num_requests)
+        requests_per_node = (num_requests_per_second / num_nodes
+                             if num_nodes else num_requests_per_second)
 
         logger.info(f'Requests per node: {requests_per_node}')
         logger.info(f'Upper threshold: {self.upper_threshold} qps/node, '
