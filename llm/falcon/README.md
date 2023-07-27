@@ -1,11 +1,6 @@
-# Finetuning Falcon: The Top LLM Chatbot on OpenLLM Leaderboard
+# Fine-tuning Falcon with SkyPilot
 
-This README contains instructions on how to use SkyPilot to finetune Falcon-7B and Falcon-40B, an open-source LLM that rivals many current closed-source models, including ChatGPT. Notably, it currently tops the charts of the [Open LLM Leaderboard](https://huggingface.co/spaces/HuggingFaceH4/open_llm_leaderboard).
-
-* [Blog post](https://huggingface.co/blog/falcon)
-* [Repo](https://huggingface.co/tiiuae/falcon-40b)
-* [Training code](https://gist.github.com/pacman100/1731b41f7a90a87b457e8c5415ff1c14)
-
+This README contains instructions on how to use SkyPilot to finetune [Falcon-7B](https://huggingface.co/tiiuae/falcon-7b) and [Falcon-40B](https://huggingface.co/tiiuae/falcon-40b), an open-source LLM that rivals many current closed-source models, including ChatGPT. 
 
 ## Prerequisites
 Install the latest SkyPilot and check your setup of the cloud credentials:
@@ -13,7 +8,8 @@ Install the latest SkyPilot and check your setup of the cloud credentials:
 pip install git+https://github.com/skypilot-org/skypilot.git
 sky check
 ```
-See the Falcon SkyPilot YAML for [training](train.yaml). Serving is currently a work in progress and a YAML will be provided for that soon! We are also working on adding an evaluation step to evaluate the model you finetuned compared to the base model.
+
+Tasks in SkyPilot are defined as YAML files - check out the YAML for fine-tuning Falcon at [falcon.yaml](falcon.yaml). Serving is currently a work in progress and a YAML will be provided for that soon! We are also working on adding an evaluation step to evaluate the model you finetuned compared to the base model.
 
 ## Finetuning Falcon with SkyPilot
 Finetuning Falcon-7B and Falcon-40B require GPUs with 80GB memory, but Falcon-7b-sharded requires only 40GB memory. In other words, if your GPU does not have over 40 GB memory, i.e. `accelerators: A100:1`, we suggest using `ybelkada/falcon-7b-sharded-bf16`. `tiiuae/falcon-7b` and `tiiuae/falcon-40b` will need 80 GB memory. In our examples, we use A100-80GB and A100. 
