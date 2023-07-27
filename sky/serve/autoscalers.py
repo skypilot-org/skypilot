@@ -17,23 +17,23 @@ class Autoscaler:
     def __init__(self,
                  infra_provider: InfraProvider,
                  load_balancer: LoadBalancer,
-                 frequency: int = 60):
+                 frequency: int = 60) -> None:
         self.infra_provider = infra_provider
         self.load_balancer = load_balancer
         self.frequency = frequency  # Time to sleep in seconds.
 
-    def evaluate_scaling(self):
+    def evaluate_scaling(self) -> None:
         raise NotImplementedError
 
-    def scale_up(self, num_nodes_to_add: int):
+    def scale_up(self, num_nodes_to_add: int) -> None:
         logger.debug(f'Scaling up by {num_nodes_to_add} nodes')
         self.infra_provider.scale_up(num_nodes_to_add)
 
-    def scale_down(self, num_nodes_to_remove: int):
+    def scale_down(self, num_nodes_to_remove: int) -> None:
         logger.debug(f'Scaling down by {num_nodes_to_remove} nodes')
         self.infra_provider.scale_down(num_nodes_to_remove)
 
-    def monitor(self):
+    def monitor(self) -> None:
         logger.info('Starting autoscaler monitor.')
         while not self.monitor_thread_stop_event.is_set():
             try:
@@ -44,12 +44,12 @@ class Autoscaler:
                 logger.error(f'Error in autoscaler monitor: {e}')
             time.sleep(self.frequency)
 
-    def start_monitor(self):
+    def start_monitor(self) -> None:
         self.monitor_thread_stop_event = threading.Event()
         self.monitor_thread = threading.Thread(target=self.monitor)
         self.monitor_thread.start()
 
-    def terminate_monitor(self):
+    def terminate_monitor(self) -> None:
         self.monitor_thread_stop_event.set()
         self.monitor_thread.join()
 
@@ -67,7 +67,7 @@ class RequestRateAutoscaler(Autoscaler):
                  upper_threshold: Optional[float] = None,
                  lower_threshold: Optional[float] = None,
                  cooldown: int = 60,
-                 **kwargs):
+                 **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.min_nodes: int = min_nodes
         # Default to fixed node, i.e. min_nodes == max_nodes.

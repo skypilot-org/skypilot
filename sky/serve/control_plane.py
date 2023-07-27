@@ -39,7 +39,7 @@ class ControlPlane:
                  port: int,
                  infra_provider: InfraProvider,
                  load_balancer: LoadBalancer,
-                 autoscaler: Optional[Autoscaler] = None):
+                 autoscaler: Optional[Autoscaler] = None) -> None:
         self.port = port
         self.infra_provider = infra_provider
         self.load_balancer = load_balancer
@@ -51,7 +51,7 @@ class ControlPlane:
             logger.info('Running server fetcher.')
             try:
                 server_ips = self.infra_provider.get_server_ips()
-                self.load_balancer.probe_endpoints(server_ips)
+                self.infra_provider.probe_endpoints(server_ips)
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # server fetcher running.
@@ -69,7 +69,7 @@ class ControlPlane:
         self.server_fetcher_thread.join()
 
     # TODO(tian): Authentication!!!
-    def run(self):
+    def run(self) -> None:
 
         @self.app.post('/control_plane/increment_request_count')
         async def increment_request_count(request: Request):
@@ -84,7 +84,7 @@ class ControlPlane:
 
         @self.app.get('/control_plane/get_server_ips')
         def get_server_ips():
-            return {'server_ips': list(self.load_balancer.servers_queue)}
+            return {'server_ips': list(self.infra_provider.available_servers)}
 
         @self.app.get('/control_plane/get_replica_info')
         def get_replica_info():
@@ -93,11 +93,11 @@ class ControlPlane:
         @self.app.get('/control_plane/get_replica_nums')
         def get_replica_nums():
             return {
-                'num_healthy_replicas': len(self.load_balancer.available_servers
-                                           ),
+                'num_healthy_replicas': len(
+                    self.infra_provider.available_servers),
                 'num_unhealthy_replicas':
                     self.infra_provider.total_servers() -
-                    len(self.load_balancer.available_servers),
+                    len(self.infra_provider.available_servers),
                 'num_failed_replicas': len(
                     self.infra_provider.get_failed_servers())
             }
@@ -112,7 +112,7 @@ class ControlPlane:
             if self.autoscaler is not None:
                 self.autoscaler.terminate_monitor()
             # For correctly show serve status
-            self.load_balancer.available_servers = []
+            self.infra_provider.available_servers.clear()
             self.infra_provider.terminate()
             return {'message': 'Success'}
 
@@ -145,14 +145,15 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # ======= Infra Provider =========
-    _infra_provider = SkyPilotInfraProvider(args.task_yaml, args.service_name)
+    service_spec = SkyServiceSpec.from_yaml(args.task_yaml)
+    _infra_provider = SkyPilotInfraProvider(
+        args.task_yaml,
+        args.service_name,
+        readiness_path=service_spec.readiness_path,
+        readiness_timeout=service_spec.readiness_timeout)
 
     # ======= Load Balancer =========
-    service_spec = SkyServiceSpec.from_yaml(args.task_yaml)
-    _load_balancer = RoundRobinLoadBalancer(
-        infra_provider=_infra_provider,
-        endpoint_path=service_spec.readiness_path,
-        readiness_timeout=service_spec.readiness_timeout)
+    _load_balancer = RoundRobinLoadBalancer()
 
     # ======= Autoscaler =========
     _autoscaler = RequestRateAutoscaler(

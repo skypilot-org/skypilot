@@ -1,11 +1,14 @@
 """InfraProvider: handles the creation and deletion of servers."""
 import logging
 import os
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Optional, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+import requests
 import pickle
 import base64
 import multiprocessing
+import threading
 import signal
 
 import sky
@@ -19,7 +22,24 @@ _PROCESS_POOL_REFRESH_INTERVAL = 20
 class InfraProvider:
     """Each infra provider manages one services."""
 
+    def __init__(self,
+                 readiness_path: str,
+                 readiness_timeout: int,
+                 post_data: Optional[Any] = None) -> None:
+        self.failed_servers: List[str] = []
+        self.available_servers: Set[str] = set()
+        self.first_unhealthy_time: Dict[str, float] = {}
+        self.readiness_path: str = readiness_path
+        self.readiness_timeout: int = readiness_timeout
+        self.post_data: Any = post_data
+        logger.info(f'Readiness probe path: {self.readiness_path}')
+
+    def get_replica_info(self) -> List[Dict[str, str]]:
+        # Get replica info for all servers
+        raise NotImplementedError
+
     def get_server_ips(self) -> List[str]:
+        # Get all server ips
         raise NotImplementedError
 
     def total_servers(self) -> int:
@@ -35,34 +55,63 @@ class InfraProvider:
         # delete or the number of servers to delete
         raise NotImplementedError
 
+    def get_failed_servers(self) -> List[str]:
+        # Returns a list of failed servers
+        raise NotImplementedError
+
     def terminate_servers(self, unhealthy_servers: List[str]) -> None:
         # Terminates the servers with endpoints in the list
         raise NotImplementedError
 
-    def get_failed_servers(self):
-        # Returns a list of failed servers
+    def terminate(self) -> None:
+        # Terminate service
         raise NotImplementedError
 
-    def terminate(self):
-        # Terminate service
+    def probe_endpoints(self, endpoint_ips: List[str]) -> None:
+        # Probe readiness of endpoints
         raise NotImplementedError
 
 
 class SkyPilotInfraProvider(InfraProvider):
     """Infra provider for SkyPilot clusters."""
 
-    def __init__(self, task_yaml_path: str, cluster_name_prefix: str):
+    def __init__(self, task_yaml_path: str, cluster_name_prefix: str, *args,
+                 **kwargs) -> None:
+        super().__init__(*args, **kwargs)
         self.task_yaml_path: str = task_yaml_path
         self.cluster_name_prefix: str = cluster_name_prefix + '-'
         self.id_counter: int = self._get_id_start()
         self.launch_process_pool: Dict[str, multiprocessing.Process] = dict()
         self.down_process_pool: Dict[str, multiprocessing.Process] = dict()
-        self.failed_servers: List[str] = []
-        self.all_servers: Set[str] = set()
 
-        self.process_pool_refresh_process = multiprocessing.Process(
+        self._start_refresh_process_pool()
+
+    def _refresh_process_pool(self) -> None:
+        while not self.refresh_process_pool_stop_event.is_set():
+            logger.info('Refreshing process pool.')
+            for pool in [self.launch_process_pool, self.down_process_pool]:
+                for cluster_name, p in list(pool.items()):
+                    if not p.is_alive():
+                        # TODO(tian): Try-catch in process, and have an enum
+                        # return value to indicate which type of failure
+                        # happened.
+                        logger.info(f'Process for {cluster_name} is dead.')
+                        del pool[cluster_name]
+                        if p.exitcode != 0:
+                            logger.info(f'Process for {cluster_name} exited '
+                                        f'abnormally with code {p.exitcode}.')
+                            self.failed_servers.append(cluster_name)
+            time.sleep(_PROCESS_POOL_REFRESH_INTERVAL)
+
+    def _start_refresh_process_pool(self) -> None:
+        self.refresh_process_pool_stop_event = threading.Event()
+        self.refresh_process_pool_thread = threading.Thread(
             target=self._refresh_process_pool)
-        self.process_pool_refresh_process.start()
+        self.refresh_process_pool_thread.start()
+
+    def _terminate_refresh_process_pool(self) -> None:
+        self.refresh_process_pool_stop_event.set()
+        self.refresh_process_pool_thread.join()
 
     def _get_id_start(self) -> int:
         """
@@ -121,8 +170,10 @@ class SkyPilotInfraProvider(InfraProvider):
                 infos.append(info)
         return infos
 
-    def _get_server_ips(self) -> List[str]:
-        return list(self._get_ip_clusname_map().keys())
+    def get_server_ips(self) -> List[str]:
+        ips = list(self._get_ip_clusname_map().keys())
+        logger.info(f'Returning SkyPilot endpoints: {ips}')
+        return ips
 
     def _return_total_servers(self) -> int:
         clusters = sky.global_user_state.get_clusters()
@@ -135,8 +186,8 @@ class SkyPilotInfraProvider(InfraProvider):
         ]
         return len(clusters)
 
-    def get_failed_servers(self) -> List[str]:
-        return self.failed_servers
+    def total_servers(self) -> int:
+        return self._return_total_servers()
 
     def _launch_cluster(self, cluster_name: str, task: sky.Task) -> None:
         p = multiprocessing.Process(target=sky.launch,
@@ -149,13 +200,6 @@ class SkyPilotInfraProvider(InfraProvider):
         self.launch_process_pool[cluster_name] = p
         p.start()
 
-    def _teardown_cluster(self, cluster_name: str) -> None:
-        p = multiprocessing.Process(target=sky.down,
-                                    args=(cluster_name,),
-                                    kwargs={'purge': True})
-        self.down_process_pool[cluster_name] = p
-        p.start()
-
     def _scale_up(self, n: int) -> None:
         # Launch n new clusters
         task = sky.Task.from_yaml(self.task_yaml_path)
@@ -164,6 +208,16 @@ class SkyPilotInfraProvider(InfraProvider):
             logger.info(f'Creating SkyPilot cluster {cluster_name}')
             self._launch_cluster(cluster_name, task)
             self.id_counter += 1
+
+    def scale_up(self, n: int) -> None:
+        self._scale_up(n)
+
+    def _teardown_cluster(self, cluster_name: str) -> None:
+        p = multiprocessing.Process(target=sky.down,
+                                    args=(cluster_name,),
+                                    kwargs={'purge': True})
+        self.down_process_pool[cluster_name] = p
+        p.start()
 
     def _scale_down(self, n: int) -> None:
         # Delete n clusters
@@ -186,36 +240,11 @@ class SkyPilotInfraProvider(InfraProvider):
                 logger.info(f'Deleting SkyPilot cluster {cluster["name"]}')
                 self._teardown_cluster(cluster['name'])
 
-    def _refresh_process_pool(self) -> None:
-        while True:
-            logger.info('Refreshing process pool.')
-            for pool in [self.launch_process_pool, self.down_process_pool]:
-                for cluster_name, p in list(pool.items()):
-                    if not p.is_alive():
-                        # TODO(tian): Try-catch in process, and have an enum
-                        # return value to indicate which type of failure
-                        # happened.
-                        logger.info(f'Process for {cluster_name} is dead.')
-                        del pool[cluster_name]
-                        if p.exitcode != 0:
-                            logger.info(f'Process for {cluster_name} exited '
-                                        f'abnormally with code {p.exitcode}.')
-                            self.failed_servers.append(cluster_name)
-            time.sleep(_PROCESS_POOL_REFRESH_INTERVAL)
-
-    def get_server_ips(self) -> List[str]:
-        ips = self._get_server_ips()
-        logger.info(f'Returning SkyPilot endpoints: {ips}')
-        return ips
-
-    def total_servers(self) -> int:
-        return self._return_total_servers()
-
-    def scale_up(self, n: int) -> None:
-        self._scale_up(n)
-
     def scale_down(self, n: int) -> None:
         self._scale_down(n)
+
+    def get_failed_servers(self) -> List[str]:
+        return self.failed_servers
 
     def terminate_servers(self, unhealthy_servers: List[str]) -> None:
         # Remove unhealthy servers from current_endpoints
@@ -234,7 +263,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 self._teardown_cluster(name)
 
     def terminate(self) -> None:
-        self.process_pool_refresh_process.terminate()
+        self._terminate_refresh_process_pool()
         for name, p in self.launch_process_pool.items():
             # Use keyboard interrupt here since sky.launch has great
             # handling for it
@@ -245,8 +274,72 @@ class SkyPilotInfraProvider(InfraProvider):
                 os.kill(p.pid, signal.SIGINT)
                 p.join()
                 self._teardown_cluster(name)
-        server_ips = self._get_server_ips()
+        server_ips = self.get_server_ips()
         self.terminate_servers(server_ips)
         for _, p in self.down_process_pool.items():
             p.join()
             # TODO(tian): Check return code. If failed, notify user.
+
+    def probe_endpoints(self, endpoint_ips: List[str]) -> None:
+
+        def probe_endpoint(endpoint_ip: str) -> Optional[str]:
+            try:
+                if self.post_data:
+                    response = requests.post(
+                        f'http://{endpoint_ip}{self.readiness_path}',
+                        json=self.post_data,
+                        timeout=3)
+                else:
+                    response = requests.get(
+                        f'http://{endpoint_ip}{self.readiness_path}', timeout=3)
+                if response.status_code == 200:
+                    logger.info(f'Server {endpoint_ip} is available.')
+                    return endpoint_ip
+            except requests.exceptions.RequestException as e:
+                logger.info(e)
+                logger.info(f'Server {endpoint_ip} is not available.')
+                pass
+            return None
+
+        with ThreadPoolExecutor() as executor:
+            futures = [
+                executor.submit(probe_endpoint, endpoint_url)
+                for endpoint_url in endpoint_ips
+            ]
+            healthy_servers = [
+                future.result()
+                for future in as_completed(futures)
+                if future.result() is not None
+            ]
+        logger.info(f'Healthy servers: {healthy_servers}')
+        # Add newly available servers
+        for server in healthy_servers:
+            assert server is not None
+            if server not in self.available_servers:
+                logger.info(f'Server {server} is newly available. '
+                            'Adding to available servers.')
+                self.available_servers.add(server)
+        # Remove servers that are no longer available
+        unhealthy_servers = set()
+        for server in self.available_servers:
+            if server not in healthy_servers:
+                logger.info(f'Server {server} is no longer available. '
+                            'Removing from available servers.')
+                self.available_servers.remove(server)
+                unhealthy_servers.add(server)
+        # Tell the infra provider to remove endpoints that are
+        # no longer available
+        for server in endpoint_ips:
+            if server not in healthy_servers:
+                unhealthy_servers.add(server)
+        logger.info(f'Unhealthy servers: {unhealthy_servers}')
+        if unhealthy_servers:
+            servers_to_terminate = []
+            for server in unhealthy_servers:
+                if server not in self.first_unhealthy_time:
+                    self.first_unhealthy_time[server] = time.time()
+                # coldstart time limitation is `self.readiness_timeout`.
+                elif time.time(
+                ) - self.first_unhealthy_time[server] > self.readiness_timeout:
+                    servers_to_terminate.append(server)
+            self.terminate_servers(servers_to_terminate)
