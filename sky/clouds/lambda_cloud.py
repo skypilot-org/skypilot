@@ -38,7 +38,7 @@ class Lambda(clouds.Cloud):
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',
-        clouds.CloudImplementationFeatures.CUSTOM_DOSK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
     }
 
     @classmethod

@@ -59,8 +59,7 @@ TPU_V4_HOST_DF = pd.read_csv(
 
 # TODO(woosuk): Make this more robust.
 # Refer to: https://github.com/skypilot-org/skypilot/issues/1006
-# G2 series has L4 GPU, which is not supported by SkyPilot yet
-# Unsupported Series: 'f1', 'm2', 'g2'
+# Unsupported Series: 'f1', 'm2'
 SERIES_TO_DISCRIPTION = {
     'a2': 'A2 Instance',
     'c2': 'Compute optimized',
@@ -69,6 +68,7 @@ SERIES_TO_DISCRIPTION = {
     'e2': 'E2 Instance',
     'f1': 'Micro Instance with burstable CPU',
     'g1': 'Small Instance with 1 VCPU',
+    'g2': 'G2 Instance',
     'm1': 'Memory-optimized Instance',
     # FIXME(woosuk): Support M2 series.
     'm3': 'M3 Memory-optimized Instance',

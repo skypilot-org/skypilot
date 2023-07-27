@@ -80,6 +80,7 @@ def show_status_table(cluster_records: List[_ClusterRecord],
         StatusColumn('ZONE', _get_zone, show_by_default=False),
         StatusColumn('STATUS', _get_status_colored),
         StatusColumn('AUTOSTOP', _get_autostop),
+        StatusColumn('HEAD_IP', _get_head_ip, show_by_default=False),
         StatusColumn('COMMAND',
                      _get_command,
                      trunc_length=COMMAND_TRUNC_LENGTH if not show_all else 0),
@@ -361,6 +362,15 @@ def _get_autostop(cluster_record: _ClusterRecord) -> str:
     if autostop_str == '':
         autostop_str = '-'
     return autostop_str
+
+
+def _get_head_ip(cluster_record: _ClusterRecord) -> str:
+    handle = cluster_record['handle']
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        return '-'
+    if handle.head_ip is None:
+        return '-'
+    return handle.head_ip
 
 
 def _is_pending_autostop(cluster_record: _ClusterRecord) -> bool:
