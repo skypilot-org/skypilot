@@ -820,6 +820,16 @@ class Task:
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
+                elif store_type is storage_lib.StoreType.MINIO:
+                    if storage.source is not None and not isinstance(
+                            storage.source,
+                            list) and storage.source.startswith('minio://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 'minio://' + storage.name
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
                 elif store_type is storage_lib.StoreType.AZURE:
                     # TODO when Azure Blob is done: sync ~/.azure
                     raise NotImplementedError('Azure Blob not mountable yet')
