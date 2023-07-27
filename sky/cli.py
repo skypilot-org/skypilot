@@ -3176,11 +3176,14 @@ def show_gpus(
             else:
                 name, quantity = accelerator_str, None
 
+        # Case-sensitive
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=name,
                                                    quantity_filter=quantity,
                                                    region_filter=region,
-                                                   clouds=cloud)
+                                                   clouds=cloud,
+                                                   case_sensitive=False)
+
         if len(result) == 0:
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
