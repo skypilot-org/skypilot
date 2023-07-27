@@ -1138,7 +1138,7 @@ class S3Store(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Args:
-            max_retries: Maximum number of retries before giving up. For AWS only.
+            max_retries: int; Maximum number of retries before giving up. For AWS only.
 
         Raises:
             StorageBucketCreateError: If creating the bucket fails
@@ -1237,6 +1237,8 @@ class S3Store(AbstractStore):
         Args:
           bucket_name: str; Name of bucket
           region: str; Region name, e.g. us-west-1, us-east-2
+          max_retries: int; Maximum number of retries before giving up. For AWS only.
+
         Raises:
           StorageBucketCreateError: If bucket creation fails.
         """
