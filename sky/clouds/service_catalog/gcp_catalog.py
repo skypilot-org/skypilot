@@ -27,7 +27,8 @@ _df = common.read_catalog('gcp/vms.csv',
 _image_df = common.read_catalog('gcp/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
-_quotas_df = common.read_catalog('gcp/accelerator_quota_mapping.csv')
+_quotas_df = common.read_catalog('gcp/accelerator_quota_mapping.csv',
+                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 _TPU_REGIONS = [
     'us-central1',

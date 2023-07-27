@@ -64,7 +64,8 @@ _apply_az_mapping_lock = threading.Lock()
 _image_df = common.read_catalog('aws/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
-_quotas_df = common.read_catalog('aws/instance_quota_mapping.csv')
+_quotas_df = common.read_catalog('aws/instance_quota_mapping.csv',
+                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 
 def _get_az_mappings(aws_user_hash: str) -> Optional[pd.DataFrame]:
