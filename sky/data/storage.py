@@ -1179,7 +1179,7 @@ class S3Store(AbstractStore):
                 return self._get_bucket(max_retries - 1)
             else:
                 with ux_utils.print_exception_no_traceback():
-                    raise exceptions.StorageBucketGetErrorr(
+                    raise exceptions.StorageBucketGetError(
                         f'Attempted to get the bucket '
                         f'{self.name} but failed.') from e
 
