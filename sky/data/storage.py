@@ -1,6 +1,7 @@
 """Storage and Store Classes for Sky Data."""
 import enum
 import os
+import random
 import re
 import subprocess
 import time
@@ -1123,7 +1124,7 @@ class S3Store(AbstractStore):
         elif self.source.startswith('r2://'):
             data_transfer.r2_to_s3(self.name, self.name)
 
-    def _get_bucket(self) -> Tuple[Optional[StorageHandle], bool]:
+    def _get_bucket(self, max_retries: int = 3) -> Tuple[Optional[StorageHandle], bool]:
         """Obtains the S3 bucket.
 
         If the bucket exists, this method will return the bucket.
@@ -1132,6 +1133,9 @@ class S3Store(AbstractStore):
           2) Return None if bucket has been externally deleted and
              sync_on_reconstruction is False
           3) Create and return a new bucket otherwise
+
+        Args:
+            max_retries: Maximum number of retries before giving up. For AWS only.
 
         Raises:
             StorageBucketCreateError: If creating the bucket fails
@@ -1157,6 +1161,12 @@ class S3Store(AbstractStore):
                     raise exceptions.StorageBucketGetError(
                         _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
                         f' To debug, consider running `{command}`.') from e
+        except aws.botocore_exceptions().NoCredentialsError as e:
+            if max_retries > 0:
+                logger.info('Encountered AWS "Unable to locate credentials" '
+                            'error. Retrying.')
+                time.sleep(random.uniform(0, 1) * 2)
+                return self._get_bucket(max_retries - 1)
 
         if isinstance(self.source, str) and self.source.startswith('s3://'):
             with ux_utils.print_exception_no_traceback():
