@@ -137,17 +137,15 @@ extras_require: Dict[str, List[str]] = {
     # azure-identity is needed in node_provider.
     # We need azure-identity>=1.13.0 to enable the customization of the
     # timeout of AzureCliCredential.
-    'azure': [
-        'azure-cli>=2.31.0', 'azure-core', 'azure-identity>=1.13.0',
-        'azure-mgmt-network'
-    ],
+    'azure': ['azure-cli>=2.31.0', 'azure-core', 'azure-identity>=1.13.0', 'azure-mgmt-network'],
+    'cloudflare': aws_dependencies,
+    'docker': ['docker'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'ibm': ['ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services'],
-    'docker': ['docker'],
     'lambda': [],
-    'cloudflare': aws_dependencies,
-    'scp': [],
     'oci': ['oci'],
+    'runpod': ['runpod'],
+    'scp': [],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

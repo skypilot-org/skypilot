@@ -3,11 +3,11 @@
 Node provider is called by the Ray Autoscaler to provision new compute
 resources (head / worker nodes).
 
-To show debug messages, export SKYPILOT_DEBUG=1 
+To show debug messages, export SKYPILOT_DEBUG=1
 
 History:
  - Hysun He (hysun.he@oracle.com) @ Apr, 2023: Initial implementation
- 
+
 """
 
 import logging
@@ -159,7 +159,7 @@ class OCINodeProvider(NodeProvider):
         """Creates a number of nodes within the namespace."""
         start_time = round(time.time() * 1000)
         starting_insts = []
-        # Check first if it neccessary to create new nodes / start stopped nodes
+        # Check first if it necessary to create new nodes / start stopped nodes
         VALIDITY_TAGS = [
             TAG_RAY_CLUSTER_NAME,
             TAG_RAY_NODE_KIND,
@@ -279,7 +279,7 @@ class OCINodeProvider(NodeProvider):
                 preemption_action=oci_adaptor.get_oci().core.models.
                 TerminatePreemptionAction(type="TERMINATE",
                                           preserve_boot_volume=False))
-                                   if node_config["Preemptible"] else None)
+                if node_config["Preemptible"] else None)
 
             logger.debug(f"Shape: {instance_type_str}, ocpu: {ocpu_count}")
             logger.debug(f"Shape config is {machine_shape_config}")
@@ -310,8 +310,7 @@ class OCINodeProvider(NodeProvider):
                     availability_domain=node_config["AvailabilityDomain"],
                     compartment_id=compartment,
                     shape=instance_type_str,
-                    display_name=
-                    f"{self.cluster_name}_{node_type}_{batch_id}_{seq}",
+                    display_name=f"{self.cluster_name}_{node_type}_{batch_id}_{seq}",
                     freeform_tags=vm_tags,
                     metadata={
                         "ssh_authorized_keys": node_config["AuthorizedKey"]
@@ -373,7 +372,7 @@ class OCINodeProvider(NodeProvider):
                 availability_domain=inst_info["ad"],
                 compartment_id=inst_info["compartment"],
                 instance_id=inst_info["inst_id"],
-            )
+        )
 
         vnic = list_vnic_attachments_response.data[0]
         get_vnic_response = (oci_adaptor.get_net_client(
@@ -409,7 +408,7 @@ class OCINodeProvider(NodeProvider):
                         update_instance_details=oci_adaptor.get_oci().core.
                         models.UpdateInstanceDetails(
                             freeform_tags=combined_tags),
-                    )
+                )
                 logger.info(f"Tags are well set for node {node_id}")
                 break
             except Exception as e:
