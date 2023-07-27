@@ -2849,7 +2849,8 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.MINIO, marks=pytest.mark.minio)
     ])
     def test_bucket_bulk_deletion(self, store_type, tmp_bulk_del_storage_obj):
         # Creates a temp folder with over 256 files and folders, upload
@@ -2879,7 +2880,8 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('nonexist_bucket_url', [
         's3://{random_name}', 'gs://{random_name}',
-        pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare)
+        pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare),
+        pytest.param('minio://{random_name}', marks=pytest.mark.minio)
     ])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
         # Attempts to create fetch a stroage with a non-existent source.
@@ -2896,6 +2898,10 @@ class TestStorageWithCredentials:
             elif nonexist_bucket_url.startswith('r2'):
                 endpoint_url = cloudflare.create_endpoint()
                 command = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=r2'
+                expected_output = '404'
+            elif nonexist_bucket_url.startswith('minio'):
+                endpoint_url = minio.create_endpoint()
+                command = f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=minio'
                 expected_output = '404'
             else:
                 raise ValueError('Unsupported bucket type '
@@ -2942,7 +2948,11 @@ class TestStorageWithCredentials:
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
                               pytest.param('tmp_awscli_bucket_r2',
                                            storage_lib.StoreType.R2,
-                                           marks=pytest.mark.cloudflare)])
+                                           marks=pytest.mark.cloudflare),
+                              pytest.param('tmp_awscli_bucket_minio',
+                                           storage_lib.StoreType.MINIO,
+                                           marks=pytest.mark.minio),
+                              ])
     def test_upload_to_existing_bucket(self, ext_bucket_fixture, request,
                                        tmp_source, store_type):
         # Tries uploading existing files to newly created bucket (outside of
@@ -2984,7 +2994,8 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.MINIO, marks=pytest.mark.minio),        
     ])
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
         # Uses a list in the source field to specify a file and a directory to
@@ -3012,7 +3023,12 @@ class TestStorageWithCredentials:
                               (GCS_INVALID_NAMES, storage_lib.StoreType.GCS),
                               pytest.param(AWS_INVALID_NAMES,
                                            storage_lib.StoreType.R2,
-                                           marks=pytest.mark.cloudflare)])
+                                           marks=pytest.mark.cloudflare),
+                              pytest.param(AWS_INVALID_NAMES,
+                                           storage_lib.StoreType.MINIO,
+                                           marks=pytest.mark.minio),
+                              ],
+                             )
     def test_invalid_names(self, invalid_name_list, store_type):
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
