@@ -9,6 +9,8 @@ import functools
 import importlib
 import inspect
 
+from sky import status_lib
+
 
 def _route_to_cloud_impl(func):
 
@@ -34,6 +36,23 @@ def _route_to_cloud_impl(func):
 # pylint: disable=unused-argument
 
 # TODO(suquark): Bring all other functions here from the
+
+
+@_route_to_cloud_impl
+def query_instances(
+    provider_name: str,
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    non_terminated_only: bool = True,
+) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+    """Query instances.
+
+    Returns a dictionary of instance IDs and status.
+
+    A None status means the instance is marked as "terminated"
+    or "terminating".
+    """
+    raise NotImplementedError
 
 
 @_route_to_cloud_impl

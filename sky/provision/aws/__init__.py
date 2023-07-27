@@ -1,3 +1,4 @@
 """AWS provisioner for SkyPilot."""
 
-from sky.provision.aws.instance import stop_instances, terminate_instances, cleanup_ports
+from sky.provision.aws.instance import (cleanup_ports, query_instances, terminate_instances,
+                                        stop_instances)

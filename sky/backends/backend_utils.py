@@ -34,6 +34,7 @@ from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import provision as provision_lib
 from sky import skypilot_config
 from sky import sky_logging
 from sky import spot as spot_lib
@@ -1690,7 +1691,12 @@ def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
 def _query_cluster_status_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
 ) -> List[status_lib.ClusterStatus]:
-    """Returns the status of the cluster."""
+    """Returns the status of the cluster.
+
+    Raises:
+        exceptions.ClusterStatusFetchingError: the cluster status cannot be
+          fetched from the cloud provider.
+    """
     cluster_name = handle.cluster_name
     # Use region and zone from the cluster config, instead of the
     # handle.launched_resources, because the latter may not be set
@@ -1704,9 +1710,22 @@ def _query_cluster_status_via_cloud_api(
         kwargs['use_tpu_vm'] = ray_config['provider'].get('_has_tpus', False)
 
     # Query the cloud provider.
-    node_statuses = handle.launched_resources.cloud.query_status(
-        cluster_name, tag_filter_for_cluster(cluster_name), region, zone,
-        **kwargs)
+    # TODO(suquark): move implementations of more clouds here
+    if isinstance(handle.launched_resources.cloud, clouds.AWS):
+        cloud_name = repr(handle.launched_resources.cloud)
+        try:
+            node_status_dict = provision_lib.query_instances(
+                cloud_name, cluster_name, provider_config)
+            node_statuses = list(node_status_dict.values())
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ClusterStatusFetchingError(
+                    f'Failed to query {cloud_name} cluster {cluster_name!r} '
+                    f'status: {e}')
+    else:
+        node_statuses = handle.launched_resources.cloud.query_status(
+            cluster_name, tag_filter_for_cluster(cluster_name), region, zone,
+            **kwargs)
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
     # TODO(wei-lin): handle multi-node cases.
     # TODO(zhwu): this should be moved into the GCP class, after we refactor
@@ -1820,6 +1839,12 @@ def check_can_clone_disk_and_override_task(
 
 def _update_cluster_status_no_lock(
         cluster_name: str) -> Optional[Dict[str, Any]]:
+    """Updates the status of the cluster.
+
+    Raises:
+        exceptions.ClusterStatusFetchingError: the cluster status cannot be
+          fetched from the cloud provider.
+    """
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return None

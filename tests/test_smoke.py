@@ -25,6 +25,7 @@
 import hashlib
 import inspect
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -2180,7 +2181,7 @@ def test_spot_tpu():
             f'sky spot launch -n {name} examples/tpu/tpuvm_mnist.yaml -y -d',
             'sleep 5',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep STARTING',
-            'sleep 720',  # TPU takes a while to launch
+            'sleep 840',  # TPU takes a while to launch
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         _SPOT_CANCEL_WAIT.format(job_name=name),
@@ -2479,6 +2480,97 @@ class TestStorageWithCredentials:
         'abc_',  # ends with an underscore
     ]
 
+    GITIGNORE_SYNC_TEST_DIR_STRUCTURE = {
+        'double_asterisk': {
+            'double_asterisk_excluded': None,
+            'double_asterisk_excluded_dir': {
+                'dir_excluded': None,
+            },
+        },
+        'double_asterisk_parent': {
+            'parent': {
+                'also_excluded.txt': None,
+                'child': {
+                    'double_asterisk_parent_child_excluded.txt': None,
+                },
+                'double_asterisk_parent_excluded.txt': None,
+            },
+        },
+        'excluded.log': None,
+        'excluded_dir': {
+            'excluded.txt': None,
+            'nested_excluded': {
+                'excluded': None,
+            },
+        },
+        'exp-1': {
+            'be_excluded': None,
+        },
+        'exp-2': {
+            'be_excluded': None,
+        },
+        'front_slash_excluded': None,
+        'included.log': None,
+        'included.txt': None,
+        'include_dir': {
+            'excluded.log': None,
+            'included.log': None,
+        },
+        'nested_double_asterisk': {
+            'one': {
+                'also_exclude.txt': None,
+            },
+            'two': {
+                'also_exclude.txt': None,
+            },
+        },
+        'nested_wildcard_dir': {
+            'monday': {
+                'also_exclude.txt': None,
+            },
+            'tuesday': {
+                'also_exclude.txt': None,
+            },
+        },
+        'no_slash_excluded': None,
+        'no_slash_tests': {
+            'no_slash_excluded': {
+                'also_excluded.txt': None,
+            },
+        },
+        'question_mark': {
+            'excluded1.txt': None,
+            'excluded@.txt': None,
+        },
+        'square_bracket': {
+            'excluded1.txt': None,
+        },
+        'square_bracket_alpha': {
+            'excludedz.txt': None,
+        },
+        'square_bracket_excla': {
+            'excluded2.txt': None,
+            'excluded@.txt': None,
+        },
+        'square_bracket_single': {
+            'excluded0.txt': None,
+        },
+    }
+
+    @staticmethod
+    def create_dir_structure(base_path, structure):
+        # creates a given file STRUCTURE in BASE_PATH
+        for name, substructure in structure.items():
+            path = os.path.join(base_path, name)
+            if substructure is None:
+                # Create a file
+                open(path, 'a').close()
+            else:
+                # Create a subdirectory
+                os.mkdir(path)
+                TestStorageWithCredentials.create_dir_structure(
+                    path, substructure)
+
     @staticmethod
     def cli_delete_cmd(store_type, bucket_name):
         if store_type == storage_lib.StoreType.S3:
@@ -2514,6 +2606,35 @@ class TestStorageWithCredentials:
             else:
                 url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
+
+    @staticmethod
+    def cli_count_name_in_bucket(store_type, bucket_name, file_name, suffix=''):
+        if store_type == storage_lib.StoreType.S3:
+            if suffix:
+                return f'aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)"'
+            else:
+                return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)"'
+        elif store_type == storage_lib.StoreType.GCS:
+            if suffix:
+                return f'gsutil ls -r gs://{bucket_name}/{suffix} | grep "{file_name}" | wc -l'
+            else:
+                return f'gsutil ls -r gs://{bucket_name} | grep "{file_name}" | wc -l'
+        elif store_type == storage_lib.StoreType.R2:
+            endpoint_url = cloudflare.create_endpoint()
+            if suffix:
+                return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=r2'
+            else:
+                return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=r2'
+
+    @staticmethod
+    def cli_count_file_in_bucket(store_type, bucket_name):
+        if store_type == storage_lib.StoreType.S3:
+            return f'aws s3 ls s3://{bucket_name} --recursive | wc -l'
+        elif store_type == storage_lib.StoreType.GCS:
+            return f'gsutil ls -r gs://{bucket_name}/** | wc -l'
+        elif store_type == storage_lib.StoreType.R2:
+            endpoint_url = cloudflare.create_endpoint()
+            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile=r2 | wc -l'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -2626,6 +2747,37 @@ class TestStorageWithCredentials:
         # above, but now in COPY mode. This should succeed.
         yield from self.yield_storage_object(name=storage_name,
                                              mode=storage_lib.StorageMode.COPY)
+
+    @pytest.fixture
+    def tmp_gitignore_storage_obj(self, tmp_bucket_name, gitignore_structure):
+        # Creates a temporary storage object for testing .gitignore filter.
+        # GITIGINORE_STRUCTURE is representing a file structure in a dictionary
+        # foramt. Created storage object will contain the file structure along
+        # with .gitignore and .git/info/exclude files to test exclude filter.
+        # Stores must be added in the test.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Creates file structure to be uploaded in the Storage
+            self.create_dir_structure(tmpdir, gitignore_structure)
+
+            # Create .gitignore and list files/dirs to be excluded in it
+            skypilot_path = os.path.dirname(os.path.dirname(sky.__file__))
+            temp_path = f'{tmpdir}/.gitignore'
+            file_path = os.path.join(skypilot_path, 'tests/gitignore_test')
+            shutil.copyfile(file_path, temp_path)
+
+            # Create .git/info/exclude and list files/dirs to be excluded in it
+            temp_path = f'{tmpdir}/.git/info/'
+            os.makedirs(temp_path)
+            temp_exclude_path = os.path.join(temp_path, 'exclude')
+            file_path = os.path.join(skypilot_path,
+                                     'tests/git_info_exclude_test')
+            shutil.copyfile(file_path, temp_exclude_path)
+
+            # Create sky Storage with the files created
+            yield from self.yield_storage_object(
+                name=tmp_bucket_name,
+                source=tmpdir,
+                mode=storage_lib.StorageMode.COPY)
 
     @pytest.fixture
     def tmp_awscli_bucket(self, tmp_bucket_name):
@@ -2924,6 +3076,44 @@ class TestStorageWithCredentials:
             with pytest.raises(sky.exceptions.StorageNameError):
                 storage_obj = storage_lib.Storage(name=name)
                 storage_obj.add_store(store_type)
+
+    @pytest.mark.parametrize(
+        'gitignore_structure, store_type',
+        [(GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.S3),
+         (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.GCS),
+         pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
+                      storage_lib.StoreType.R2,
+                      marks=pytest.mark.cloudflare)])
+    def test_excluded_file_cloud_storage_upload_copy(self, gitignore_structure,
+                                                     store_type,
+                                                     tmp_gitignore_storage_obj):
+        # tests if files included in .gitignore and .git/info/exclude are
+        # excluded from being transferred to Storage
+
+        tmp_gitignore_storage_obj.add_store(store_type)
+
+        upload_file_name = 'included'
+        # Count the number of files with the given file name
+        up_cmd = self.cli_count_name_in_bucket(store_type, \
+            tmp_gitignore_storage_obj.name, file_name=upload_file_name)
+        git_exclude_cmd = self.cli_count_name_in_bucket(store_type, \
+            tmp_gitignore_storage_obj.name, file_name='.git')
+        cnt_num_file_cmd = self.cli_count_file_in_bucket(
+            store_type, tmp_gitignore_storage_obj.name)
+
+        up_output = subprocess.check_output(up_cmd, shell=True)
+        git_exclude_output = subprocess.check_output(git_exclude_cmd,
+                                                     shell=True)
+        cnt_output = subprocess.check_output(cnt_num_file_cmd, shell=True)
+
+        assert '3' in up_output.decode('utf-8'), \
+                'Files to be included are not completely uploaded.'
+        # 1 is read as .gitignore is uploaded
+        assert '1' in git_exclude_output.decode('utf-8'), \
+               '.git directory should not be uploaded.'
+        # 4 files include .gitignore, included.log, included.txt, include_dir/included.log
+        assert '4' in cnt_output.decode('utf-8'), \
+               'Some items listed in .gitignore and .git/info/exclude are not excluded.'
 
 
 # ---------- Testing YAML Specs ----------

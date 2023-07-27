@@ -20,6 +20,7 @@ from sky.utils import schemas
 from sky.data import data_transfer
 from sky.data import data_utils
 from sky.data import mounting_utils
+from sky.data import storage_utils
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -1092,10 +1093,14 @@ class S3Store(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            sync_command = (
-                'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
-                f'{src_dir_path} '
-                f's3://{self.name}/{dest_dir_name}')
+            excluded_list = storage_utils.get_excluded_files_from_gitignore(
+                src_dir_path)
+            excluded_list.append('.git/*')
+            excludes = ' '.join(
+                [f'--exclude "{file_name}"' for file_name in excluded_list])
+            sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
+                            f'{src_dir_path} '
+                            f's3://{self.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
@@ -1515,10 +1520,14 @@ class GcsStore(AbstractStore):
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
+            excluded_list = storage_utils.get_excluded_files_from_gitignore(
+                src_dir_path)
             # we exclude .git directory from the sync
+            excluded_list.append(r'^\.git/.*$')
+            excludes = '|'.join(excluded_list)
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             sync_command = (f'{alias_gen}; {gsutil_alias} '
-                            f'rsync -e -r -x \'.git/*\' {src_dir_path} '
+                            f'rsync -e -r -x \'({excludes})\' {src_dir_path} '
                             f'gs://{self.name}/{dest_dir_name}')
             return sync_command
 
@@ -1843,15 +1852,20 @@ class R2Store(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
+            excluded_list = storage_utils.get_excluded_files_from_gitignore(
+                src_dir_path)
+            excluded_list.append('.git/*')
+            excludes = ' '.join(
+                [f'--exclude "{file_name}"' for file_name in excluded_list])
             endpoint_url = cloudflare.create_endpoint()
-            sync_command = (
-                'AWS_SHARED_CREDENTIALS_FILE='
-                f'{cloudflare.R2_CREDENTIALS_PATH} '
-                'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
-                f'{src_dir_path} '
-                f's3://{self.name}/{dest_dir_name} '
-                f'--endpoint {endpoint_url} '
-                f'--profile={cloudflare.R2_PROFILE_NAME}')
+
+            sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
+                            f'{cloudflare.R2_CREDENTIALS_PATH} '
+                            f'aws s3 sync --no-follow-symlinks {excludes} '
+                            f'{src_dir_path} '
+                            f's3://{self.name}/{dest_dir_name} '
+                            f'--endpoint {endpoint_url} '
+                            f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
 
         # Generate message for upload

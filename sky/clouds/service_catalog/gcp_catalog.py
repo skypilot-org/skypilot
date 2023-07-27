@@ -10,11 +10,14 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from sky import exceptions
+from sky import sky_logging
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
+
+logger = sky_logging.init_logger(__name__)
 
 # Pull the latest catalog every week.
 # GCP guarantees that the catalog is updated at most once per 30 days, but
@@ -27,7 +30,8 @@ _df = common.read_catalog('gcp/vms.csv',
 _image_df = common.read_catalog('gcp/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
-_quotas_df = common.read_catalog('gcp/accelerator_quota_mapping.csv')
+_quotas_df = common.read_catalog('gcp/accelerator_quota_mapping.csv',
+                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 _TPU_REGIONS = [
     'us-central1',
@@ -551,11 +555,21 @@ def check_accelerator_attachable_to_host(instance_type: str,
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     """Returns the image id from the tag."""
-    return common.get_image_id_from_tag_impl(_image_df, tag, region)
+    global _image_df
+
+    image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
+    if image_id is None:
+        # Refresh the image catalog and try again, if the image tag is not
+        # found.
+        logger.debug('Refreshing the image catalog and trying again.')
+        _image_df = common.read_catalog('gcp/images.csv',
+                                        pull_frequency_hours=0)
+        image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
+    return image_id
 
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
     """Returns whether the image tag is valid."""
     # GCP images are not region-specific.
-    del region  # Unused.
-    return common.is_image_tag_valid_impl(_image_df, tag, None)
+    del region  # unused
+    return get_image_id_from_tag(tag, None) is not None

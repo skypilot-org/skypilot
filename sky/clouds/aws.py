@@ -11,8 +11,8 @@ from typing import Dict, Iterator, List, Optional, Tuple, Any
 
 from sky import clouds
 from sky import exceptions
+from sky import provision as provision_lib
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import aws
 from sky.clouds import service_catalog
 from sky.utils import common_utils
@@ -23,6 +23,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
+    from sky import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -742,79 +743,29 @@ class AWS(clouds.Cloud):
         return True
 
     @classmethod
-    def _query_instance_property_with_retries(
-        cls,
-        tag_filters: Dict[str, str],
-        region: str,
-        query: str,
-    ) -> Tuple[int, str, str]:
-        filter_str = ' '.join(f'Name=tag:{key},Values={value}'
-                              for key, value in tag_filters.items())
-        query_cmd = (f'aws ec2 describe-instances --filters {filter_str} '
-                     f'--region {region} --query "{query}" --output json')
-        returncode, stdout, stderr = subprocess_utils.run_with_retries(
-            query_cmd,
-            retry_returncode=[255],
-            retry_stderrs=[
-                'Unable to locate credentials. You can configure credentials by '
-                'running "aws configure"'
-            ])
-        return returncode, stdout, stderr
-
-    @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
-        del zone  # unused
-        status_map = {
-            'pending': status_lib.ClusterStatus.INIT,
-            'running': status_lib.ClusterStatus.UP,
-            # TODO(zhwu): stopping and shutting-down could occasionally fail
-            # due to internal errors of AWS. We should cover that case.
-            'stopping': status_lib.ClusterStatus.STOPPED,
-            'stopped': status_lib.ClusterStatus.STOPPED,
-            'shutting-down': None,
-            'terminated': None,
-        }
-
-        assert region is not None, (tag_filters, region)
-        returncode, stdout, stderr = cls._query_instance_property_with_retries(
-            tag_filters, region, query='Reservations[].Instances[].State.Name')
-
-        if returncode != 0:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query AWS cluster {name!r} status: '
-                    f'{stdout + stderr}')
-
-        original_statuses = json.loads(stdout.strip())
-
-        statuses = []
-        for s in original_statuses:
-            node_status = status_map[s]
-            if node_status is not None:
-                statuses.append(node_status)
-        return statuses
+        # TODO(suquark): deprecate this method
+        assert False, 'This could path should not be used.'
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,
                                   tag_filters: Dict[str,
                                                     str], region: Optional[str],
                                   zone: Optional[str]) -> str:
-        del zone  # unused
         assert region is not None, (tag_filters, region)
+        del tag_filters, zone  # unused
+
         image_name = f'skypilot-{cluster_name}-{int(time.time())}'
-        returncode, stdout, stderr = cls._query_instance_property_with_retries(
-            tag_filters, region, query='Reservations[].Instances[].InstanceId')
 
-        subprocess_utils.handle_returncode(
-            returncode,
-            '',
-            error_msg='Failed to find the source cluster on AWS.',
-            stderr=stderr,
-            stream_logs=False)
+        status = provision_lib.query_instances('AWS', cluster_name,
+                                               {'region': region})
+        instance_ids = list(status.keys())
+        if not instance_ids:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Failed to find the source cluster on AWS.')
 
-        instance_ids = json.loads(stdout.strip())
         if len(instance_ids) != 1:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
@@ -845,7 +796,7 @@ class AWS(clouds.Cloud):
         wait_image_cmd = (
             f'aws ec2 wait image-available --region {region} --image-ids {image_id}'
         )
-        returncode, stdout, stderr = subprocess_utils.run_with_retries(
+        returncode, _, stderr = subprocess_utils.run_with_retries(
             wait_image_cmd,
             retry_returncode=[255],
         )
