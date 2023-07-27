@@ -38,6 +38,8 @@ class IBM(clouds.Cloud):
         return {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is not supported in {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
+                (f'Custom disk tier is not supported in {cls._REPR}.'),
         }
 
     @classmethod

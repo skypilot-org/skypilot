@@ -301,6 +301,44 @@ def parallel_upload(source_path_list: List[str],
                 [bucket_name] * len(commands)))
 
 
+def get_gsutil_command() -> Tuple[str, str]:
+    """Gets the alias'd command for gsutil and a command to define the alias.
+
+    This is required for applying platform-specific flags to gsutil.
+
+    In particular, we disable multiprocessing on Mac using
+    `-o "GSUtil:parallel_process_count=1"`. Multithreading is still enabled.
+    gsutil on Mac has a bug with multiprocessing that causes it to crash
+    when uploading files. Related issues:
+    https://bugs.python.org/issue33725
+    https://github.com/GoogleCloudPlatform/gsutil/issues/464
+
+    The flags are added by checking the platform using bash in a one-liner.
+    The platform check is done inline to have the flags match where the command
+    is executed, rather than where the code is run. This is important when
+    the command is run in a remote VM.
+
+    Returns:
+        Tuple[str, str] : (gsutil_alias, command to generate the alias)
+        The command to generate alias must be run before using the alias. E.g.,
+        ```
+        gsutil_alias, alias_gen = get_gsutil_command()
+        cmd_to_run = f'{alias_gen}; {gsutil_alias} cp ...'
+        ```
+    """
+    gsutil_alias = 'skypilot_gsutil'
+    disable_multiprocessing_flag = '-o "GSUtil:parallel_process_count=1"'
+
+    # Define skypilot_gsutil as a shell function instead of an alias.
+    # This function will behave just like alias, but can be called immediately
+    # after its definition on the same line
+    alias_gen = (f'[[ "$(uname)" == "Darwin" ]] && {gsutil_alias}() {{ '
+                 f'gsutil -m {disable_multiprocessing_flag} "$@"; }} '
+                 f'|| {gsutil_alias}() {{ gsutil -m "$@"; }}')
+
+    return gsutil_alias, alias_gen
+
+
 def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
     # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
     # to a log file.

@@ -45,6 +45,10 @@ class SCP(clouds.Cloud):
         clouds.CloudImplementationFeatures.MULTI_NODE: _MULTI_NODE,
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             (f'Migrating disk is not supported in {_REPR}.'),
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
+            (f'Spot instances are not supported in {_REPR}.'),
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
+            (f'Custom disk tiers are not supported in {_REPR}.'),
     }
 
     _INDENT_PREFIX = '    '
@@ -230,8 +234,6 @@ class SCP(clouds.Cloud):
 
     def _get_feasible_launchable_resources(
             self, resources: 'resources_lib.Resources'):
-        if resources.use_spot or resources.disk_tier is not None:
-            return ([], [])
         # Check if the host VM satisfies the min/max disk size limits.
         is_allowed = self._is_disk_size_allowed(resources)
         if not is_allowed:

@@ -1,5 +1,5 @@
 """Resources: compute requirements of Tasks."""
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Set
 from typing_extensions import Literal
 
 import colorama
@@ -890,6 +890,16 @@ class Resources:
             if None not in self.image_id and region not in self.image_id:
                 return False
         return True
+
+    def get_required_cloud_features(
+            self) -> Set[clouds.CloudImplementationFeatures]:
+        """Returns the set of cloud features required by this Resources."""
+        features = set()
+        if self.use_spot:
+            features.add(clouds.CloudImplementationFeatures.SPOT_INSTANCE)
+        if self.disk_tier is not None:
+            features.add(clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
+        return features
 
     @classmethod
     def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
