@@ -1164,6 +1164,12 @@ class S3Store(AbstractStore):
                         _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
                         f' To debug, consider running `{command}`.') from e
         except aws.botocore_exceptions().NoCredentialsError as e:
+            # AWS: has run into this rare error with spot controller (which
+            # has an assumed IAM role and is working fine most of the time).
+            #
+            # We do not know the root cause. For now, the hypothesis is
+            # instance metadata service is temporarily unavailable. So, we
+            # retry with new session and client for refreshed credential.
             if max_retries > 0:
                 logger.info('Encountered AWS "Unable to locate credentials" '
                             'error. Retrying.')
