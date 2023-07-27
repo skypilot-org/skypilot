@@ -111,7 +111,10 @@ class SkyPilotInfraProvider(InfraProvider):
                     if not p.is_alive():
                         # TODO(tian): Try-catch in process, and have an enum
                         # return value to indicate which type of failure
-                        # happened.
+                        # happened. Currently we only have user code failure
+                        # since the retry_until_up flag is set to True, but it
+                        # will be helpful when we enable user choose whether to
+                        # retry or not.
                         logger.info(
                             f'{op} process for {cluster_name} finished.')
                         del pool[cluster_name]

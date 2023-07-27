@@ -1118,7 +1118,6 @@ def serve_down(
     try:
         if handle is not None:
             plural = ''
-            # TODO(tian): Change to #num replica (including failed one)
             if num_replicas > 1:
                 plural = 's'
             print(f'{colorama.Fore.YELLOW}'

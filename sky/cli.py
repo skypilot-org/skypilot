@@ -3844,8 +3844,11 @@ def serve_up(
         sky serve up service.yaml
     """
     if service is None:
-        # TODO(tian): Check service name is unique.
         service = backend_utils.generate_service_name()
+
+    if global_user_state.get_service_from_name(service) is not None:
+        click.secho(f'Service {service!r} already exists.', fg='red')
+        return
 
     shell_splits = shlex.split(entrypoint)
     yaml_file_provided = (len(shell_splits) == 1 and
