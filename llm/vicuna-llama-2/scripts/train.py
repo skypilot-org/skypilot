@@ -264,19 +264,22 @@ class CheckpointCallback(transformers.TrainerCallback):
 
     def on_save(self, args, state, control, **kwargs):
         """Add complete indicator to avoid incomplete checkpoints."""
-        if local_rank == 0:
+        torch.distributed.barrier()
+        if state.is_world_process_zero:
             with open(
                     os.path.join(args.output_dir,
                                  f'checkpoint-{state.global_step}', 'complete'),
                     'w') as f:
                 f.write('')
+            print(f'Checkpoint {state.global_step} saved.')
 
     def on_train_end(self, args, state, control, **kwargs):
         """Add complete indicator to avoid incomplete checkpoints."""
-        if local_rank == 0:
+        torch.distributed.barrier()
+        if state.is_world_process_zero:
             with open(os.path.join(args.output_dir, 'complete'), 'w') as f:
                 f.write('')
-
+            print(f'Checkpoint {state.global_step} saved.')
 
 def cleanup_incomplete_checkpoints(output_dir):
     """Remove incomplete checkpoints."""
@@ -324,8 +327,8 @@ def train():
     trainer = Trainer(model=model,
                       tokenizer=tokenizer,
                       args=training_args,
+                      callbacks=[CheckpointCallback()],
                       **data_module)
-    trainer.add_callback(CheckpointCallback())
 
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     trainer.save_state()
