@@ -17,7 +17,7 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Dict, Iterable, List, Optional, Tuple, Union, Set
+from typing import Dict, Iterable, List, Optional, Tuple, Union, Set, Any
 
 import colorama
 import filelock
@@ -4115,6 +4115,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise exceptions.CommandError(
                         e.returncode, command='to mount',
                         error_msg=e.error_msg) from None
+            # Set storage information in cluster's metadata
+            cluster_name = handle.cluster_name
+            cluster_metadata: Dict[str, Any] = global_user_state.get_cluster_metadata(cluster_name)
+            storage_name = storage_obj.name
+            storage_metadata_name = global_user_state.CLUSTER_STORAGE_METADATA_NAME
+            if not cluster_metadata[storage_metadata_name]:
+                cluster_metadata[storage_metadata_name] = {}
+            cluster_metadata[storage_metadata_name][storage_name] = storage_obj
+            global_user_state.set_cluster_metadata(cluster_name, cluster_metadata)
+        
+        
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
