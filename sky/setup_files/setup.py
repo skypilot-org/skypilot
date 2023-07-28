@@ -129,7 +129,7 @@ aws_dependencies = [
     # https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html.
     'awscli>=1.27.1',
     'botocore>=1.29.1',
-    'boto3>=1.28.1',
+    'boto3>=1.26.1',
     # 'Crypto' module used in authentication.py for AWS.
     'pycryptodome==3.12.0',
 ]
