@@ -4,6 +4,7 @@
 
 import functools
 import threading
+import time
 
 boto3 = None
 botocore = None
@@ -41,8 +42,23 @@ def session():
     # Reference: https://github.com/boto/boto3/issues/1592
     # However, the session object itself is thread-safe, so we are
     # able to use lru_cache() to cache the session object.
-    with _session_creation_lock:
-        return boto3.session.Session()
+
+    # Retry 5 times by default for potential credential errors,
+    # mentioned in
+    # https://github.com/skypilot-org/skypilot/pull/1988
+    max_attempts = 5
+    attempt = 0
+    err = None
+    while attempt < max_attempts:
+        try:
+            with _session_creation_lock:
+                return boto3.session.Session()
+        except (botocore_exceptions().CredentialRetrievalError,
+                botocore_exceptions().NoCredentialsError) as e:
+            time.sleep(5)
+            err = e
+            attempt += 1
+    raise err
 
 
 @functools.lru_cache()
@@ -54,11 +70,10 @@ def resource(resource_name: str, **kwargs):
         resource_name: AWS resource name (e.g., 's3').
         kwargs: Other options.
     """
-    # Need to use the resource retrieved from the per-thread session
-    # to avoid thread-safety issues (Directly creating the client
-    # with boto3.resource() is not thread-safe).
-    # Reference: https://stackoverflow.com/a/59635814
-    return session().resource(resource_name, **kwargs)
+    # The resource is not thread-safe for boto3, so we add a reentrant lock.
+    # Reference: https://boto3.amazonaws.com/v1/documentation/api/latest/guide/resources.html#multithreading-or-multiprocessing-with-resources
+    with _session_creation_lock:
+        return session().resource(resource_name, **kwargs)
 
 
 @functools.lru_cache()
