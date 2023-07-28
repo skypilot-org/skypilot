@@ -752,6 +752,12 @@ class Resources:
                 raise ValueError(
                     'Cannot specify ports when AWS security group name is '
                     'specified.')
+        if self.accelerators is not None:
+            for acc in self.accelerators.keys():
+                if acc.lower().startswith('tpu'):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'Ports is not supported for TPU VM.')
         if self.cloud is not None:
             self.cloud.check_features_are_supported(
                 {clouds.CloudImplementationFeatures.OPEN_PORTS})
