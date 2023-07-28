@@ -881,11 +881,13 @@ def _configure_subnet(config, compute):
             node_config["networkConfig"] = copy.deepcopy(default_interfaces)[0]
             node_config["networkConfig"].pop("accessConfigs")
 
-        if "tags" not in node_config:
-            node_config["tags"] = {"items": []}
-        # Add cluster name to the tags so that firewall rules will apply to
-        # the created VM.
-        node_config["tags"]["items"].append(config["cluster_name"])
+        # Only add tags to compute instances
+        if get_node_type(node_config) == GCPNodeType.COMPUTE:
+            if "tags" not in node_config:
+                node_config["tags"] = {"items": []}
+            # Add cluster name to the tags so that firewall rules will apply to
+            # the created VM.
+            node_config["tags"]["items"].append(config["cluster_name"])
 
     return config
 
