@@ -750,7 +750,7 @@ def _create_rules(config, compute, rules, VPC_NAME, PROJ_ID):
         op = _create_firewall_rule_submit(config, compute, body)
         opertaions.append(op)
     for op in opertaions:
-        _create_firewall_rule_wait(config, compute, op)
+        wait_for_compute_global_operation(config["provider"]["project_id"], op, compute)
 
 
 def get_usable_vpc(config):
@@ -895,13 +895,6 @@ def _create_firewall_rule_submit(config, compute, body):
         .execute()
     )
     return operation
-
-
-def _create_firewall_rule_wait(config, compute, operation):
-    response = wait_for_compute_global_operation(
-        config["provider"]["project_id"], operation, compute
-    )
-    return response
 
 
 def _delete_firewall_rule(config, compute, name):
