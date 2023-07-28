@@ -28,7 +28,8 @@ sky local up
 
 ## Running a GKE cluster
 1. Make sure ports 30000-32767 are open in your node pool VPC's firewall.
-2. Create a GKE cluster with at least 1 node.
+2. Create a GKE cluster with at least 1 node. We recommend creating nodes with at least 4 vCPUs.
+   * Note - only GKE standard clusters are supported. GKE autopilot clusters are not supported.
 3. Get the kubeconfig for your cluster and place it in `~/.kube/config`:
 ```bash
 gcloud container clusters get-credentials <cluster-name> --region <region>

@@ -9,7 +9,6 @@ from sky.skylet.providers.kubernetes import config
 from sky.skylet.providers.kubernetes import get_head_ssh_port
 from sky.skylet.providers.kubernetes import utils
 from ray.autoscaler._private.command_runner import SSHCommandRunner
-from ray.autoscaler._private.cli_logger import cli_logger
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import NODE_KIND_HEAD, TAG_RAY_CLUSTER_NAME, TAG_RAY_NODE_KIND
 
@@ -144,7 +143,7 @@ class KubernetesNodeProvider(NodeProvider):
                 return
             except kubernetes.api_exception() as e:
                 if e.status == 409:
-                    logger.info(kubernetes.log_prefix +
+                    logger.info(config.log_prefix +
                                 'Caught a 409 error while setting'
                                 ' node tags. Retrying...')
                     time.sleep(DELAY_BEFORE_TAG_RETRY)
@@ -163,7 +162,6 @@ class KubernetesNodeProvider(NodeProvider):
         conf = copy.deepcopy(node_config)
         pod_spec = conf.get('pod', conf)
         service_spec = conf.get('service')
-        ingress_spec = conf.get('ingress')
         node_uuid = str(uuid4())
         tags[TAG_RAY_CLUSTER_NAME] = self.cluster_name
         tags['ray-node-uuid'] = node_uuid
@@ -200,18 +198,6 @@ class KubernetesNodeProvider(NodeProvider):
                 svc = kubernetes.core_api().create_namespaced_service(
                     self.namespace, service_spec)
                 new_svcs.append(svc)
-
-        if ingress_spec is not None:
-            logger.info(config.log_prefix + 'calling create_namespaced_ingress '
-                        '(count={}).'.format(count))
-            for new_svc in new_svcs:
-                metadata = ingress_spec.get('metadata', {})
-                metadata['name'] = new_svc.metadata.name
-                ingress_spec['metadata'] = metadata
-                ingress_spec = _add_service_name_to_service_port(
-                    ingress_spec, new_svc.metadata.name)
-                kubernetes.networking_api().create_namespaced_ingress(
-                    self.namespace, ingress_spec)
 
         # Wait for all pods to be ready, and if it exceeds the timeout, raise an
         # exception. If pod's container is ContainerCreating, then we can assume
@@ -255,8 +241,10 @@ class KubernetesNodeProvider(NodeProvider):
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')
         try:
-            kubernetes.core_api().delete_namespaced_pod(node_id, self.namespace,
-                                                        _request_timeout=config.DELETION_TIMEOUT)
+            kubernetes.core_api().delete_namespaced_pod(
+                node_id,
+                self.namespace,
+                _request_timeout=config.DELETION_TIMEOUT)
         except kubernetes.api_exception() as e:
             if e.status == 404:
                 logger.warning(config.log_prefix +
@@ -266,17 +254,13 @@ class KubernetesNodeProvider(NodeProvider):
                 raise
         try:
             kubernetes.core_api().delete_namespaced_service(
-                node_id, self.namespace, _request_timeout=config.DELETION_TIMEOUT)
-            kubernetes.core_api().delete_namespaced_service(
-                f'{node_id}-ssh', self.namespace, _request_timeout=config.DELETION_TIMEOUT)
-        except kubernetes.api_exception():
-            pass
-        try:
-            kubernetes.networking_api().delete_namespaced_ingress(
                 node_id,
                 self.namespace,
-                _request_timeout=config.DELETION_TIMEOUT
-            )
+                _request_timeout=config.DELETION_TIMEOUT)
+            kubernetes.core_api().delete_namespaced_service(
+                f'{node_id}-ssh',
+                self.namespace,
+                _request_timeout=config.DELETION_TIMEOUT)
         except kubernetes.api_exception():
             pass
 
@@ -325,10 +309,6 @@ class KubernetesNodeProvider(NodeProvider):
             port = 22
         else:
             port = self.external_port(node_id)
-        cli_logger.print(port)
-        cli_logger.print(command_runner.__dict__)
-        with open('/tmp/log.txt', 'a') as f:
-            f.write(f'{node_id} port: {port}\n')
         command_runner.set_port(port)
         return command_runner
 
@@ -340,31 +320,3 @@ class KubernetesNodeProvider(NodeProvider):
     def fillout_available_node_types_resources(cluster_config):
         """Fills out missing "resources" field for available_node_types."""
         return config.fillout_resources_kubernetes(cluster_config)
-
-
-def _add_service_name_to_service_port(spec, svc_name):
-    """Goes recursively through the ingress manifest and adds the
-    right serviceName next to every servicePort definition.
-    """
-    if isinstance(spec, dict):
-        dict_keys = list(spec.keys())
-        for k in dict_keys:
-            spec[k] = _add_service_name_to_service_port(spec[k], svc_name)
-
-            if k == 'serviceName' and spec[k] != svc_name:
-                raise ValueError(
-                    'The value of serviceName must be set to '
-                    '${RAY_POD_NAME}. It is automatically replaced '
-                    'when using the autoscaler.')
-
-    elif isinstance(spec, list):
-        spec = [
-            _add_service_name_to_service_port(item, svc_name) for item in spec
-        ]
-
-    elif isinstance(spec, str):
-        # The magic string ${RAY_POD_NAME} is replaced with
-        # the true service name, which is equal to the worker pod name.
-        if '${RAY_POD_NAME}' in spec:
-            spec = spec.replace('${RAY_POD_NAME}', svc_name)
-    return spec
