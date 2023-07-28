@@ -88,7 +88,7 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
     return user_hash
 
 
-def hash_cluster_name(cluster_name: str) -> str:
+def truncate_and_hash_cluster_name(cluster_name: str) -> str:
     if len(cluster_name) < 15:
         return cluster_name
     return cluster_name[:10] + hashlib.md5(

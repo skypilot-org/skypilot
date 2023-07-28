@@ -164,7 +164,8 @@ def cleanup_ports(
         # No new ports were opened, so there is nothing to clean up.
         return
     project_id = provider_config['project_id']
-    cluster_name_hash = common_utils.hash_cluster_name(cluster_name)
+    cluster_name_hash = common_utils.truncate_and_hash_cluster_name(
+        cluster_name)
     for port in provider_config['ports']:
         rule_name = f'user-ports-{cluster_name_hash}-{port}'
         instance_utils.GCPComputeInstance.delete_firewall_rule(

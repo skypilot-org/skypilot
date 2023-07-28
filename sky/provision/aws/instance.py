@@ -166,7 +166,7 @@ def cleanup_ports(
     # TODO(tian): Add a function to generate SG name for AWS, then replace here
     # and backend_utils::write_cluster_config
     sg_name = (f'sky-sg-{common_utils.user_and_hostname_hash()}'
-               f'-{common_utils.hash_cluster_name(cluster_name)}')
+               f'-{common_utils.truncate_and_hash_cluster_name(cluster_name)}')
     sgs = ec2.security_groups.filter(GroupNames=[sg_name])
     assert len(list(sgs)) == 1
     list(sgs)[0].delete()
