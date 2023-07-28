@@ -23,7 +23,7 @@ setup: |
   # Download the ShareGPT dataset
   # Change to your OWN dataset if you want to train your own model
   mkdir -p $HOME/data
-  wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json  -O $HOME/data/sharegpt.json
+  wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json -O $HOME/data/sharegpt.json
 
   # Setup the environment
   conda activate chatbot
