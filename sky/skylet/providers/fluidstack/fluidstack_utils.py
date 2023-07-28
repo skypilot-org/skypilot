@@ -12,7 +12,7 @@ def get_key_suffix():
     return str(uuid.uuid4()).replace("-", "")[:8]
 
 
-ENDPOINT = "https://console.fluidstack.io/"
+ENDPOINT = "https://fs-dev.herokuapp.com/" # TODO(mjibril) change to live endpoint when ready
 FLUIDSTACK_API_KEY_PATH = "~/.fluidstack/api_key"
 FLUIDSTACK_API_TOKEN_PATH = "~/.fluidstack/api_token"
 
