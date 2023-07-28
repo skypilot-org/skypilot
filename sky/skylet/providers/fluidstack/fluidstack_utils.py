@@ -1,16 +1,18 @@
 import requests
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 import json
 import os
 from functools import lru_cache
 import uuid
 
 
+
+
 def get_key_suffix():
     return str(uuid.uuid4()).replace("-", "")[:8]
 
 
-ENDPOINT = "http://localhost:5001/"
+ENDPOINT = "https://console.fluidstack.io/"
 FLUIDSTACK_API_KEY_PATH = "~/.fluidstack/api_key"
 FLUIDSTACK_API_TOKEN_PATH = "~/.fluidstack/api_token"
 
