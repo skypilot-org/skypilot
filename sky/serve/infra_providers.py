@@ -1,27 +1,27 @@
-"""InfraProvider: handles the creation and deletion of servers."""
-import logging
-import os
-from typing import List, Dict, Set, Optional, Any
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
-import requests
-import pickle
+"""InfraProvider: handles the creation and deletion of endpoint replicas."""
 import base64
-import multiprocessing
 import collections
-import threading
+from concurrent import futures
+import logging
+import multiprocessing
+import os
+import pickle
+import requests
 import signal
+import threading
+import time
+from typing import List, Dict, Set, Optional, Any
 
 import sky
 from sky import backends
-from sky.backends import backend_utils
 from sky import status_lib
+from sky.backends import backend_utils
 
 logger = logging.getLogger(__name__)
 
 _PROCESS_POOL_REFRESH_INTERVAL = 20
 # TODO(tian): Maybe let user determine this threshold
-_SERVER_UNHEALTHY_THRESHOLD_SECOND = 180
+_REPLICA_UNHEALTHY_THRESHOLD_SECOND = 180
 
 
 class InfraProvider:
@@ -31,9 +31,9 @@ class InfraProvider:
                  readiness_path: str,
                  readiness_timeout: int,
                  post_data: Optional[Any] = None) -> None:
-        self.available_servers: Set[str] = set()
-        self.unhealthy_servers: Set[str] = set()
-        self.failed_servers: Set[str] = set()
+        self.healthy_replicas: Set[str] = set()
+        self.unhealthy_replicas: Set[str] = set()
+        self.failed_replicas: Set[str] = set()
         self.unhealthy_time: Dict[str,
                                   List[float]] = collections.defaultdict(list)
         self.readiness_path: str = readiness_path
@@ -42,40 +42,44 @@ class InfraProvider:
         logger.info(f'Readiness probe path: {self.readiness_path}')
 
     def get_replica_info(self) -> List[Dict[str, str]]:
-        # Get replica info for all servers
+        # Get replica info for all replicas
         raise NotImplementedError
 
-    def get_server_ips(self) -> List[str]:
-        # Get all server ips
+    def _get_replica_ips(self) -> Set[str]:
+        # Get all replica ips
         raise NotImplementedError
 
-    def total_server_num(self) -> int:
-        # Returns the total number of servers, including those under
+    def total_replica_num(self) -> int:
+        # Returns the total number of replicas, including those under
         # provisioning and deletion
         raise NotImplementedError
 
-    def available_server_num(self) -> int:
-        # Returns the total number of available servers
+    def healthy_replica_num(self) -> int:
+        # Returns the total number of available replicas
         raise NotImplementedError
 
-    def unhealthy_server_num(self) -> int:
-        # Returns the total number of unhealthy servers
+    def get_healthy_replicas(self) -> Set[str]:
+        # Returns the endpoints of all healthy replicas
         raise NotImplementedError
 
-    def failed_server_num(self) -> int:
-        # Returns the number of failed servers
+    def unhealthy_replica_num(self) -> int:
+        # Returns the total number of unhealthy replicas
+        raise NotImplementedError
+
+    def failed_replica_num(self) -> int:
+        # Returns the number of failed replicas
         raise NotImplementedError
 
     def scale_up(self, n: int) -> None:
         raise NotImplementedError
 
     def scale_down(self, n: int) -> None:
-        # TODO - Scale down must also pass in a list of servers to
-        # delete or the number of servers to delete
+        # TODO - Scale down must also pass in a list of replicas to
+        # delete or the number of replicas to delete
         raise NotImplementedError
 
-    def terminate_servers(self, unhealthy_servers: List[str]) -> None:
-        # Terminates the servers with endpoints in the list
+    def _terminate_replicas(self, unhealthy_replicas: Set[str]) -> None:
+        # Terminates the replicas with endpoints in the list
         raise NotImplementedError
 
     def terminate(self) -> Optional[str]:
@@ -119,9 +123,10 @@ class SkyPilotInfraProvider(InfraProvider):
                             f'{op} process for {cluster_name} finished.')
                         del pool[cluster_name]
                         if p.exitcode != 0:
-                            logger.info(f'Process for {cluster_name} exited '
-                                        f'abnormally with code {p.exitcode}.')
-                            self.failed_servers.add(cluster_name)
+                            logger.info(
+                                f'{op} process for {cluster_name} exited '
+                                f'abnormally with code {p.exitcode}.')
+                            self.failed_replicas.add(cluster_name)
             time.sleep(_PROCESS_POOL_REFRESH_INTERVAL)
 
     def _start_refresh_process_pool(self) -> None:
@@ -136,32 +141,31 @@ class SkyPilotInfraProvider(InfraProvider):
 
     def _get_ip_clusname_map(self) -> Dict[str, str]:
         """
-        Returns a map of ip to cluster name for all clusters with the prefix.
+        Returns a map of ip to cluster name for all clusters.
         """
         clusters = sky.global_user_state.get_clusters()
         ip_clusname_map = {}
         for cluster in clusters:
             name = cluster['name']
-            if self.cluster_name_prefix in name:
-                handle = cluster['handle']
-                try:
-                    # Get the head node ip
-                    ip = backend_utils.get_node_ips(handle.cluster_yaml,
-                                                    handle.launched_nodes,
-                                                    handle)[0]
-                    ip_clusname_map[ip] = name
-                except sky.exceptions.FetchIPError:
-                    logger.warning(f'Unable to get IP for cluster {name}.')
-                    continue
+            handle = cluster['handle']
+            try:
+                # Get the head node ip
+                ip = backend_utils.get_node_ips(handle.cluster_yaml,
+                                                handle.launched_nodes,
+                                                handle)[0]
+                ip_clusname_map[ip] = name
+            except sky.exceptions.FetchIPError:
+                logger.warning(f'Unable to get IP for cluster {name}.')
+                continue
         return ip_clusname_map
 
     def get_replica_info(self) -> List[Dict[str, str]]:
 
         def _get_replica_status(cluster_status: status_lib.ClusterStatus,
                                 ip: str) -> status_lib.ReplicaStatus:
-            if ip in self.available_servers:
+            if ip in self.healthy_replicas:
                 return status_lib.ReplicaStatus.RUNNING
-            if ip in self.failed_servers:
+            if ip in self.failed_replicas:
                 return status_lib.ReplicaStatus.FAILED
             if cluster_status == status_lib.ClusterStatus.UP:
                 return status_lib.ReplicaStatus.UNHEALTHY
@@ -170,49 +174,42 @@ class SkyPilotInfraProvider(InfraProvider):
         clusters = sky.global_user_state.get_clusters()
         infos = []
         for cluster in clusters:
-            if self.cluster_name_prefix in cluster['name']:
-                handle = cluster['handle']
-                assert isinstance(handle, backends.CloudVmRayResourceHandle)
-                ip = handle.head_ip
-                info = {
-                    'name': cluster['name'],
-                    'handle': handle,
-                    'status': _get_replica_status(cluster['status'], ip),
-                }
-                info = {
-                    k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
-                    for k, v in info.items()
-                }
-                infos.append(info)
+            handle = cluster['handle']
+            assert isinstance(handle, backends.CloudVmRayResourceHandle)
+            ip = handle.head_ip
+            info = {
+                'name': cluster['name'],
+                'handle': handle,
+                'status': _get_replica_status(cluster['status'], ip),
+            }
+            info = {
+                k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
+                for k, v in info.items()
+            }
+            infos.append(info)
         return infos
 
-    def get_server_ips(self) -> List[str]:
-        ips = list(self._get_ip_clusname_map().keys())
+    def _get_replica_ips(self) -> Set[str]:
+        ips = set(self._get_ip_clusname_map().keys())
         logger.info(f'Returning SkyPilot endpoints: {ips}')
         return ips
 
-    def _return_total_servers(self) -> int:
+    def total_replica_num(self) -> int:
         clusters = sky.global_user_state.get_clusters()
-        # Filter out clusters that don't have the prefix
-        # FIXME - this is a hack to get around.
-        # should implement a better filtering mechanism
-        clusters = [
-            cluster for cluster in clusters
-            if self.cluster_name_prefix in cluster['name']
-        ]
+        # All replica launched in controller is a replica.
         return len(clusters)
 
-    def total_server_num(self) -> int:
-        return self._return_total_servers()
+    def get_healthy_replicas(self) -> Set[str]:
+        return self.healthy_replicas
 
-    def available_server_num(self) -> int:
-        return len(self.available_servers)
+    def healthy_replica_num(self) -> int:
+        return len(self.healthy_replicas)
 
-    def unhealthy_server_num(self) -> int:
-        return len(self.unhealthy_servers)
+    def unhealthy_replica_num(self) -> int:
+        return len(self.unhealthy_replicas)
 
-    def failed_server_num(self) -> int:
-        return len(self.failed_servers)
+    def failed_replica_num(self) -> int:
+        return len(self.failed_replicas)
 
     def _launch_cluster(self, cluster_name: str, task: sky.Task) -> None:
         p = multiprocessing.Process(target=sky.launch,
@@ -248,11 +245,6 @@ class SkyPilotInfraProvider(InfraProvider):
         # Delete n clusters
         # Currently deletes the first n clusters
         clusters = sky.global_user_state.get_clusters()
-        # Filter out clusters that don't have the prefix
-        clusters = [
-            cluster for cluster in clusters
-            if self.cluster_name_prefix in cluster['name']
-        ]
         num_clusters = len(clusters)
         if num_clusters > 0:
             if n > num_clusters:
@@ -268,11 +260,11 @@ class SkyPilotInfraProvider(InfraProvider):
     def scale_down(self, n: int) -> None:
         self._scale_down(n)
 
-    def terminate_servers(self, unhealthy_servers: List[str]) -> None:
-        # Remove unhealthy servers from current_endpoints
-        logger.info('SkyPilotInfraProvider.terminate_servers called with '
-                    f'unhealthy_servers={unhealthy_servers}')
-        for endpoint_url in unhealthy_servers:
+    def _terminate_replicas(self, unhealthy_replicas: Set[str]) -> None:
+        # Remove unhealthy replicas from current_endpoints
+        logger.info('SkyPilotInfraProvider._terminate_replicas called with '
+                    f'unhealthy_replicas={unhealthy_replicas}')
+        for endpoint_url in unhealthy_replicas:
             ip_to_name_map = self._get_ip_clusname_map()
             if endpoint_url not in ip_to_name_map:
                 logger.warning(
@@ -280,14 +272,14 @@ class SkyPilotInfraProvider(InfraProvider):
                     'Skipping.')
                 continue
             name = ip_to_name_map[endpoint_url]
-            if endpoint_url in unhealthy_servers:
+            if endpoint_url in unhealthy_replicas:
                 logger.info(f'Deleting SkyPilot cluster {name}')
                 self._teardown_cluster(name)
 
     def terminate(self) -> Optional[str]:
         # For correctly show serve status
-        self.available_servers.clear()
-        self.unhealthy_servers = set(self.get_server_ips())
+        self.healthy_replicas.clear()
+        self.unhealthy_replicas = self._get_replica_ips()
         self._terminate_refresh_process_pool()
         for name, p in self.launch_process_pool.items():
             # Use keyboard interrupt here since sky.launch has great
@@ -301,8 +293,8 @@ class SkyPilotInfraProvider(InfraProvider):
                 self._teardown_cluster(name)
                 logger.info(f'Interrupted launch process for cluster {name}'
                             'and deleted the cluster.')
-        server_ips = self.get_server_ips()
-        self.terminate_servers(server_ips)
+        replica_ips = self._get_replica_ips()
+        self._terminate_replicas(replica_ips)
         msg = []
         for name, p in self.down_process_pool.items():
             p.join()
@@ -316,7 +308,7 @@ class SkyPilotInfraProvider(InfraProvider):
         return '\n'.join(msg)
 
     def probe_all_endpoints(self) -> None:
-        replica_ips = set(self.get_server_ips()) - self.failed_servers
+        replica_ips = self._get_replica_ips() - self.failed_replicas
 
         def probe_endpoint(replica_ip: str) -> Optional[str]:
             try:
@@ -337,36 +329,39 @@ class SkyPilotInfraProvider(InfraProvider):
                 pass
             return None
 
-        with ThreadPoolExecutor() as executor:
-            futures = [
+        with futures.ThreadPoolExecutor() as executor:
+            probe_futures = [
                 executor.submit(probe_endpoint, replica_ip)
                 for replica_ip in replica_ips
             ]
-            healthy_servers = set()
-            for future in as_completed(futures):
+            healthy_replicas = set()
+            for future in futures.as_completed(probe_futures):
                 ip = future.result()
                 if ip is not None:
-                    healthy_servers.add(ip)
-        logger.info(f'Healthy servers: {healthy_servers}')
-        self.available_servers = healthy_servers
-        unhealthy_servers = replica_ips - healthy_servers
-        logger.info(f'Unhealthy servers: {unhealthy_servers}')
-        self.unhealthy_servers = unhealthy_servers
-        servers_to_terminate = []
-        for server in unhealthy_servers:
-            self.unhealthy_time[server].append(time.time())
+                    healthy_replicas.add(ip)
+
+        logger.info(f'Healthy replicas: {healthy_replicas}')
+        self.healthy_replicas = healthy_replicas
+        unhealthy_replicas = replica_ips - healthy_replicas
+        logger.info(f'Unhealthy replicas: {unhealthy_replicas}')
+        self.unhealthy_replicas = unhealthy_replicas
+
+        replicas_to_terminate = set()
+        for replica in unhealthy_replicas:
+            self.unhealthy_time[replica].append(time.time())
             # coldstart time limitation is `self.readiness_timeout`.
-            first_unhealthy_time = self.unhealthy_time[server][0]
+            first_unhealthy_time = self.unhealthy_time[replica][0]
             if time.time() - first_unhealthy_time > self.readiness_timeout:
-                last_unhealthy_time = self.unhealthy_time[server][-1]
+                last_unhealthy_time = self.unhealthy_time[replica][-1]
                 if (time.time() - last_unhealthy_time >
-                        _SERVER_UNHEALTHY_THRESHOLD_SECOND):
-                    logger.info(f'Terminating server {server}.')
-                    servers_to_terminate.append(server)
+                        _REPLICA_UNHEALTHY_THRESHOLD_SECOND):
+                    logger.info(f'Terminating replica {replica}.')
+                    replicas_to_terminate.add(replica)
                 else:
-                    logger.info(f'Server {server} is unhealthy but '
+                    logger.info(f'Replica {replica} is unhealthy but '
                                 'within unhealthy threshold. Skipping.')
             else:
-                logger.info(f'Server {server} is unhealthy but within '
+                logger.info(f'Replica {replica} is unhealthy but within '
                             'readiness timeout. Skipping.')
-        self.terminate_servers(servers_to_terminate)
+
+        self._terminate_replicas(replicas_to_terminate)

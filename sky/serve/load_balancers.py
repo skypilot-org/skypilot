@@ -1,11 +1,9 @@
-"""LoadBalancer: probe endpoints and select by load balancing algorithm."""
-import time
+"""LoadBalancer: select endpoint by load balancing algorithm."""
 from collections import deque
-
-# import aiohttp
+import fastapi
+import time
 import logging
-
-from typing import Optional, Deque, List
+from typing import Optional, Deque, Set
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +14,7 @@ class LoadBalancer:
     """Abstract class for load balancers."""
 
     def __init__(self) -> None:
-        self.available_servers: List[str] = []
+        self.healthy_replicas: Set[str] = set()
         self.request_count: int = 0
         self.request_timestamps: Deque[float] = deque()
         self.query_interval: Optional[float] = None
@@ -42,10 +40,10 @@ class LoadBalancer:
             self.request_timestamps.popleft()
         return len(self.request_timestamps)
 
-    def set_available_servers(self, server_ips: List[str]) -> None:
+    def set_healthy_replicas(self, healthy_replicas: Set[str]) -> None:
         raise NotImplementedError
 
-    def select_server(self, request) -> Optional[str]:
+    def select_replica(self, request: fastapi.Request) -> Optional[str]:
         raise NotImplementedError
 
 
@@ -54,16 +52,17 @@ class RoundRobinLoadBalancer(LoadBalancer):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.servers_queue: Deque[str] = deque()
+        self.replicas_queue: Deque[str] = deque()
 
-    def set_available_servers(self, server_ips: List[str]) -> None:
-        if set(server_ips) != set(self.available_servers):
-            self.servers_queue = deque(server_ips)
+    def set_healthy_replicas(self, healthy_replicas: Set[str]) -> None:
+        if set(healthy_replicas) != set(self.healthy_replicas):
+            self.healthy_replicas = healthy_replicas
+            self.replicas_queue = deque(healthy_replicas)
 
-    def select_server(self, request) -> Optional[str]:
-        if not self.servers_queue:
+    def select_replica(self, request: fastapi.Request) -> Optional[str]:
+        if not self.replicas_queue:
             return None
-        server_ip = self.servers_queue.popleft()
-        self.servers_queue.append(server_ip)
-        logger.info(f'Selected server {server_ip} for request {request}')
-        return server_ip
+        replica_ip = self.replicas_queue.popleft()
+        self.replicas_queue.append(replica_ip)
+        logger.info(f'Selected replica {replica_ip} for request {request}')
+        return replica_ip

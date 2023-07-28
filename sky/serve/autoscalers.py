@@ -2,11 +2,10 @@
 import logging
 import threading
 import time
-
 from typing import Optional
 
-from sky.serve.infra_providers import InfraProvider
-from sky.serve.redirector import CONTROL_PLANE_SYNC_INTERVAL
+from sky.serve import infra_providers
+from sky.serve import constants
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +14,7 @@ class Autoscaler:
     """Abstract class for autoscalers."""
 
     def __init__(self,
-                 infra_provider: InfraProvider,
+                 infra_provider: infra_providers.InfraProvider,
                  frequency: int,
                  min_nodes: int = 1,
                  max_nodes: Optional[int] = None) -> None:
@@ -24,7 +23,7 @@ class Autoscaler:
         # Default to fixed node, i.e. min_nodes == max_nodes.
         self.max_nodes: int = max_nodes or min_nodes
         self.frequency = frequency  # Time to sleep in seconds.
-        if frequency < CONTROL_PLANE_SYNC_INTERVAL:
+        if frequency < constants.CONTROL_PLANE_SYNC_INTERVAL:
             logger.warning('Autoscaler frequency is less than '
                            'control plane sync interval. It might '
                            'not always got the latest information.')
@@ -67,13 +66,9 @@ class RequestRateAutoscaler(Autoscaler):
     interval is above or below the upper threshold.
     """
 
-    def __init__(self,
-                 *args,
-                 upper_threshold: Optional[float],
-                 lower_threshold: Optional[float],
-                 cooldown: int,
-                 query_interval: int,
-                 **kwargs) -> None:
+    def __init__(self, *args, upper_threshold: Optional[float],
+                 lower_threshold: Optional[float], cooldown: int,
+                 query_interval: int, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.upper_threshold: Optional[float] = upper_threshold
         self.lower_threshold: Optional[float] = lower_threshold
@@ -90,7 +85,7 @@ class RequestRateAutoscaler(Autoscaler):
 
     def evaluate_scaling(self) -> None:
         current_time = time.time()
-        num_nodes = self.infra_provider.total_server_num()
+        num_nodes = self.infra_provider.total_replica_num()
 
         # Check if cooldown period has passed since the last scaling operation.
         # Only cooldown if bootstrapping is done.

@@ -1,7 +1,6 @@
 """Service specification for SkyServe."""
 import os
 import yaml
-
 from typing import Optional, Dict, Any
 
 from sky.backends import backend_utils
@@ -124,7 +123,7 @@ class SkyServiceSpec:
         return self._readiness_timeout
 
     @property
-    def app_port(self) -> int:
+    def app_port(self) -> str:
         return self._app_port
 
     @property

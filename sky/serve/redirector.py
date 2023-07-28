@@ -1,18 +1,14 @@
 """Redirector: redirect any incoming request to an endpoint replica."""
-import time
-import logging
-
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import RedirectResponse
-import threading
-import uvicorn
-
-import requests
 import argparse
+import fastapi
+import logging
+import threading
+import time
+import uvicorn
+import requests
 
-from sky.serve.load_balancers import RoundRobinLoadBalancer, LoadBalancer
-
-CONTROL_PLANE_SYNC_INTERVAL = 20
+from sky.serve import constants
+from sky.serve import load_balancers
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,8 +27,8 @@ class SkyServeRedirector:
     """
 
     def __init__(self, control_plane_url: str, port: int,
-                 load_balancer: LoadBalancer):
-        self.app = FastAPI()
+                 load_balancer: load_balancers.LoadBalancer):
+        self.app = fastapi.FastAPI()
         self.control_plane_url = control_plane_url
         self.port = port
         self.load_balancer = load_balancer
@@ -50,7 +46,7 @@ class SkyServeRedirector:
                 self.load_balancer.set_query_interval(None)
             time.sleep(10)
 
-    def sync_with_control_plane(self):
+    def _sync_with_control_plane(self):
         while True:
             with requests.Session() as session:
                 try:
@@ -64,41 +60,42 @@ class SkyServeRedirector:
                         },
                         timeout=5)
                     response.raise_for_status()
-                    # get server ips
+                    # get replica ips
                     response = session.get(
                         self.control_plane_url +
-                        '/control_plane/get_available_servers')
+                        '/control_plane/get_healthy_replicas')
                     response.raise_for_status()
-                    available_servers = response.json()['available_servers']
+                    healthy_replicas = response.json()['healthy_replicas']
                 except requests.RequestException as e:
                     print(f'An error occurred: {e}')
                 else:
-                    logger.info(f'Available Server IPs: {available_servers}')
-                    self.load_balancer.set_available_servers(available_servers)
-            time.sleep(CONTROL_PLANE_SYNC_INTERVAL)
+                    logger.info(f'Available Server IPs: {healthy_replicas}')
+                    self.load_balancer.set_healthy_replicas(healthy_replicas)
+            time.sleep(constants.CONTROL_PLANE_SYNC_INTERVAL)
 
-    async def redirector_handler(self, request: Request):
+    async def _redirector_handler(self, request: fastapi.Request):
         self.load_balancer.increment_request_count(1)
-        server_ip = self.load_balancer.select_server(request)
+        replica_ip = self.load_balancer.select_replica(request)
 
-        if server_ip is None:
-            raise HTTPException(status_code=503, detail='No available servers')
+        if replica_ip is None:
+            raise fastapi.HTTPException(status_code=503,
+                                        detail='No available replicas')
 
-        path = f'http://{server_ip}:{self.port}{request.url.path}'
+        path = f'http://{replica_ip}:{self.port}{request.url.path}'
         logger.info(f'Redirecting request to {path}')
-        return RedirectResponse(url=path)
+        return fastapi.responses.RedirectResponse(url=path)
 
-    def serve(self):
+    def run(self):
         self.app.add_api_route('/{path:path}',
-                               self.redirector_handler,
+                               self._redirector_handler,
                                methods=['GET', 'POST', 'PUT', 'DELETE'])
 
-        server_fetcher_thread = threading.Thread(
-            target=self.sync_with_control_plane, daemon=True)
-        server_fetcher_thread.start()
+        sync_control_plane_thread = threading.Thread(
+            target=self._sync_with_control_plane, daemon=True)
+        sync_control_plane_thread.start()
 
-        logger.info(f'Sky Server started on http://0.0.0.0:{self.port}')
-        logger.info('Sky Serve Redirector is ready to serve.')
+        logger.info(
+            f'SkyServe Redirector started on http://0.0.0.0:{self.port}')
 
         uvicorn.run(self.app, host='0.0.0.0', port=self.port)
 
@@ -122,10 +119,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # ======= Load Balancer =========
-    _load_balancer = RoundRobinLoadBalancer()
+    _load_balancer = load_balancers.RoundRobinLoadBalancer()
 
     # ======= Redirector =========
     redirector = SkyServeRedirector(control_plane_url=args.control_plane_addr,
                                     port=args.port,
                                     load_balancer=_load_balancer)
-    redirector.serve()
+    redirector.run()
