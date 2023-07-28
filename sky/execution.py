@@ -1130,9 +1130,10 @@ def serve_down(
                                    f'request failure: {resp.text}')
             msg = resp.json()['message']
             if msg:
-                logger.warning('Unexpected message when tearing down '
-                               f'replica: {msg}. Please login to the controller '
-                               'and make sure the service is properly cleaned.')
+                raise RuntimeError(
+                    'Unexpected message when tearing down '
+                    f'replica: {msg}. Please login to the controller '
+                    'and make sure the service is properly cleaned.')
     except (RuntimeError, ValueError, requests.exceptions.ConnectionError) as e:
         if purge:
             logger.warning(f'Ignoring error when cleaning controller: {e}')

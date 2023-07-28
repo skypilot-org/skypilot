@@ -101,6 +101,7 @@ class SkyServiceSpec:
             'readiness_probe': {
                 'path': self.readiness_path[len(f':{self.app_port}'):],
                 'readiness_timeout': self.readiness_timeout,
+                'post_data': self.post_data,
             },
             'replica_policy': replica_policy,
         }

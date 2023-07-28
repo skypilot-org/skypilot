@@ -40,6 +40,7 @@ class InfraProvider:
         self.readiness_timeout: int = readiness_timeout
         self.post_data: Any = post_data
         logger.info(f'Readiness probe path: {self.readiness_path}')
+        logger.info(f'Post data: {self.post_data} ({type(self.post_data)})')
 
     def get_replica_info(self) -> List[Dict[str, str]]:
         # Get replica info for all replicas
@@ -145,6 +146,7 @@ class SkyPilotInfraProvider(InfraProvider):
         """
         clusters = sky.global_user_state.get_clusters()
         ip_clusname_map = {}
+        dummy_counter = 0
         for cluster in clusters:
             name = cluster['name']
             handle = cluster['handle']
@@ -155,7 +157,10 @@ class SkyPilotInfraProvider(InfraProvider):
                                                 handle)[0]
                 ip_clusname_map[ip] = name
             except sky.exceptions.FetchIPError:
-                logger.warning(f'Unable to get IP for cluster {name}.')
+                logger.warning(f'Unable to get IP for cluster {name}.'
+                               'Use dummp IP instead.')
+                ip_clusname_map[f'10.0.0.{dummy_counter}'] = name
+                dummy_counter += 1
                 continue
         return ip_clusname_map
 
@@ -312,14 +317,19 @@ class SkyPilotInfraProvider(InfraProvider):
 
         def probe_endpoint(replica_ip: str) -> Optional[str]:
             try:
-                if self.post_data:
-                    response = requests.post(
-                        f'http://{replica_ip}{self.readiness_path}',
-                        json=self.post_data,
-                        timeout=3)
+                msg = ''
+                readiness_url = f'http://{replica_ip}{self.readiness_path}'
+                if self.post_data is not None:
+                    msg += 'Post'
+                    response = requests.post(readiness_url,
+                                             json=self.post_data,
+                                             timeout=3)
                 else:
-                    response = requests.get(
-                        f'http://{replica_ip}{self.readiness_path}', timeout=3)
+                    msg += 'Get'
+                    response = requests.get(readiness_url, timeout=3)
+                msg += (f' request to {replica_ip} returned status code '
+                        f'{response.status_code} and response {response.text}.')
+                logger.info(msg)
                 if response.status_code == 200:
                     logger.info(f'Replica {replica_ip} is available.')
                     return replica_ip
