@@ -3212,8 +3212,7 @@ def storage():
               default=False,
               is_flag=True,
               required=False,
-              help=('Syncs the internal state, state.db, and external '
-                    'state, console, of storages.'))
+              help=('Query the latest storage state from the cloud provider(s).'))
 @usage_lib.entrypoint
 def storage_ls(refresh: bool):
     """List storage objects created."""
