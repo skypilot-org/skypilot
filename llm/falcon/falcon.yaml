@@ -1,18 +1,18 @@
 resources:
   accelerators: A100-80GB:1
   disk_size: 1000
-  use_spot: true
   disk_tier: high
 
 workdir: .
 
 envs:
   MODEL_NAME: tiiuae/falcon-7b # [ybelkada/falcon-7b-sharded-bf16, tiiuae/falcon-7b, tiiuae/falcon-40b]
-  WANDB_API_KEY: YOUR_WANDB_KEY # Change to your own wandb key
+  WANDB_API_KEY: $WANDB_KEY # Change to your own wandb key
+  OUTPUT_BUCKET_NAME: # Set a unique name for the bucket which will store model weights
 
 file_mounts:
   /results: # Change if the output_dir parameter is changed below
-    name: YOUR_OWN_BUCKET_NAME # Change to your own bucket name
+    name: $OUTPUT_BUCKET_NAME # Change to your own bucket name
     mode: MOUNT
 
 setup: |

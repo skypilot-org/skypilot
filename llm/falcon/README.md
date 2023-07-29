@@ -3,47 +3,58 @@
 This README contains instructions on how to use SkyPilot to finetune [Falcon-7B](https://huggingface.co/tiiuae/falcon-7b) and [Falcon-40B](https://huggingface.co/tiiuae/falcon-40b), an open-source LLM that rivals many current closed-source models, including ChatGPT. 
 
 ## Prerequisites
-Install the latest SkyPilot and check your setup of the cloud credentials:
+Install SkyPilot from source and follow the [installation guide](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html) to setup your cloud accounts:
 ```bash
 pip install git+https://github.com/skypilot-org/skypilot.git
 sky check
 ```
 
-Tasks in SkyPilot are defined as YAML files - check out the YAML for fine-tuning Falcon at [falcon.yaml](falcon.yaml). Serving is currently a work in progress and a YAML will be provided for that soon! We are also working on adding an evaluation step to evaluate the model you finetuned compared to the base model.
+## Background
+Tasks in SkyPilot are defined as YAML files. It contains a `resources` field for specifying the GPUs to use, a `setup` field to install dependencies and `run` field to define the commands to be run as the task. Check out [falcon.yaml](falcon.yaml), which we will be using for fine-tuning Falcon.
 
-## Finetuning Falcon with SkyPilot
-Finetuning Falcon-7B and Falcon-40B require GPUs with 80GB memory, but Falcon-7b-sharded requires only 40GB memory. In other words, if your GPU does not have over 40 GB memory, i.e. `accelerators: A100:1`, we suggest using `ybelkada/falcon-7b-sharded-bf16`. `tiiuae/falcon-7b` and `tiiuae/falcon-40b` will need 80 GB memory. In our examples, we use A100-80GB and A100. 
+GPU memory requirements for fine-tuning Falcon depend on the size of model:
+* `tiiuae/falcon-7b` and `tiiuae/falcon-40b` require GPUs with 80GB memory (e.g., `A100-80GB`).
+* `ybelkada/falcon-7b-sharded-bf16` requires only 40GB memory (e.g., `A100`).
 
-Try `sky show-gpus --all` for supported GPUs.
+You can run `sky show-gpus` to list supported GPUs.
 
-We can start the finetuning of Falcon model on Open Assistant's [Guanaco](https://huggingface.co/datasets/timdettmers/openassistant-guanaco) data **with a single command**. It will automatically find the available cheapest VM on any cloud.
+## Launching fine-tuning
 
-**To finetune using different data**, simply replace the path in `timdettmers/openassistant-guanaco` with any other huggingface dataset.
-
-Steps for training on your cloud(s):
-
-1. In [train.yaml](train.yaml):
-
-    - Replace the bucket name with some unique name, so the SkyPilot can create a bucket for you to store the model weights. See `# Change to your own bucket` in the YAML file. 
-    - Replace the `WANDB_API_KEY` to your own key. 
-    - Replace the `MODEL_NAME` with your desired base model. 
-
-2.  **Training the Falcon model using spot instances**:
+With the task YAML ready, we can start the fine-tuning of Falcon model on Open Assistant's [Guanaco](https://huggingface.co/datasets/timdettmers/openassistant-guanaco) data **with a single command**.
 
 ```bash
-sky spot launch -n falcon train.yaml
+sky launch -c falcon -s falcon.yaml --down --env MODEL_NAME=tiiuae/falcon-40b --env WANDB_API_KEY=<wandb key> --env OUTPUT_BUCKET_NAME=<bucket name>
 ```
 
-Currently, such `A100-80GB:1` spot instances are only available on AWS and GCP.
+In the above command, 
+* Set the `OUTPUT_BUCKET_NAME` to some unique name, so the SkyPilot can create a bucket for you to store the model weights. 
+* Set `WANDB_API_KEY` to your own key. 
+* Set `MODEL_NAME` to the desired base model. Options include `ybelkada/falcon-7b-sharded-bf16`, `tiiuae/falcon-7b`,`tiiuae/falcon-40b`.
 
-[Optional] **To use on-demand `A100-80GB:1` instances**, which are currently available on Lambda Cloud, Azure, and GCP:
-```bash
-sky launch -c falcon -s train.yaml --no-use-spot
-```
+When you run this command, SkyPilot will:
+1. Find the cheapest available VM across all clouds you have access to.
+2. Create and mount your output bucket to the VM to store the model weights.
+3. Install all required dependencies and start the fine-tuning.
+4. Automatically terminate the instance after the fine-tuning has completed.
 
 For reference, below is a loss graph you may expect to see, and the amount of time and the approximate cost of fine-tuning each of the models (assuming a spot instance GPU rate at $0.39 / hour):
 
 <img width="524" alt="image" src="https://github.com/xzrderek/skypilot/assets/32891260/cdd81781-f5b8-462b-8190-0c1da55f0526">
+
+
+### Cutting costs with spot instances
+
+To further reduce costs by upto 70%, you can use spot instances. Use `sky spot launch` to launch the same YAML:
+
+```bash
+sky spot launch -n falcon train.yaml --env MODEL_NAME=tiiuae/falcon-40b --env WANDB_API_KEY=<wandb key> --env OUTPUT_BUCKET_NAME=<bucket name>
+```
+
+SkyPilot [Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html) transparently handles any instance failures during fine-tuning. If the spot instance gets preempted, SkyPilot will restart the job on another cloud/region where instances are available. Upon restart, training will resume from the last checkpoint.
+
+### Fine-tuning cost estimates
+
+TODO- add table here (column 'with SkyPilot managed spot')
 
 1. `ybelkada/falcon-7b-sharded-bf16`: 2.5 to 3 hours using 1 A100 GPU; total cost ≈ $1.
 
@@ -52,7 +63,7 @@ For reference, below is a loss graph you may expect to see, and the amount of ti
 3. `tiiuae/falcon-40b`: 10 hours using 1 A100-80GB; total cost ≈ $4.
 
 
-## Q&A
+## FAQs
 
 Q: I see some bucket permission errors `sky.exceptions.StorageBucketGetError` when running the above:
 ```
@@ -64,3 +75,7 @@ Please check if:
 ```
 
 A: You need to replace the bucket name with your own globally unique name, and rerun the commands. New private buckets will be automatically created under your cloud account.
+
+Q: Can I fine-tune on other datasets?
+
+A: To finetune using different data, simply add the flag `--env DATASET_NAME=timdettmers/openassistant-guanaco` and replace the path with any huggingface dataset.
