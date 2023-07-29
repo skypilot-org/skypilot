@@ -2332,9 +2332,15 @@ def start(
     to_start = []
 
     if not clusters and not all:
-        raise click.UsageError(
-            'sky start requires either a cluster name (see `sky status`) '
-            'or --all.')
+        # UX: frequently users may have only 1 cluster. In this case, be smart
+        # and default to that unique choice.
+        all_cluster_names = global_user_state.get_cluster_names_start_with('')
+        if len(all_cluster_names) <= 1:
+            clusters = all_cluster_names
+        else:
+            raise click.UsageError(
+                '`sky start` requires either a cluster name or glob, '
+                'or the -a/--all flag.')
 
     if all:
         if len(clusters) > 0:
