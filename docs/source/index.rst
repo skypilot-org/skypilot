@@ -124,6 +124,7 @@ Documentation
    :maxdepth: 1
    :caption: User Guides
 
+   reference/kubernetes/index
    examples/docker-containers
    examples/iterative-dev-project
    reference/interactive-nodes
