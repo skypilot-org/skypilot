@@ -985,6 +985,7 @@ def serve_up(
     task.set_resources(original_resources.copy(ports=[app_port]))
 
     # TODO(tian): Use skyserve constants.
+    # TODO(tian): Clean up storage when the service is torn down.
     _maybe_translate_local_file_mounts_and_sync_up(task)
 
     with tempfile.NamedTemporaryFile(prefix=f'serve-task-{name}-',
