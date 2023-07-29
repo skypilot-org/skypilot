@@ -2075,11 +2075,6 @@ class R2Store(AbstractStore):
                                         CreateBucketConfiguration=location)
                 logger.info(f'Created R2 bucket {bucket_name} in {region}')
             r2_client.put_object(Bucket=bucket_name, Key='.sky_DO_NOT_DELETE')
-            logger.info(f'{colorama.Fore.YELLOW}Warning:'
-                        f'{colorama.Style.RESET_ALL} '
-                        '\'.sky_DO_NOT_DELETE\' in R2 bucket: '
-                        f'{bucket_name} is crucial for sky storage. '
-                        'Do not delete.')
         except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
