@@ -991,9 +991,8 @@ def storage_refresh() -> None:
         elif storage_enabled_cloud == cloudflare.NAME:
             storetype = storage_lib.StoreType.R2
 
-        store_class = storage_lib.get_abstract_store_from_storetype(storetype)
         external_buckets_status[
-            storetype] = store_class.get_sky_managed_bucket_names()
+            storetype] = storage_lib.get_sky_managed_bucket_names(storetype)
         # check if anything in state.db doesn't exist in the external state
         only_in_internal_state = internal_buckets_status[storetype].difference(
             external_buckets_status[storetype])
@@ -1006,9 +1005,9 @@ def storage_refresh() -> None:
         # check if anything in external state doesn't exist in state.db
         only_in_external_state = external_buckets_status[storetype].difference(
             internal_buckets_status[storetype])
-        # add storage that exist in external state but not in state.db
+        # add storage that exists in external state but not in state.db 
         for s_name in only_in_external_state:
-            # Storage with S_NAME is already in internal_state from different
+            # when storage with S_NAME is already in internal_state from different
             # cloud storage provider. Obtain StorageMetadata to update handle
             for s_type in internal_buckets_status.keys():
                 if s_type != storetype and s_name in internal_buckets_status[
@@ -1018,9 +1017,7 @@ def storage_refresh() -> None:
                     if handle is not None:
                         region = storage_lib.get_bucket_region(
                             s_name, storetype)
-                        store_class = \
-                            storage_lib.get_abstract_store_from_storetype(
-                            storetype)
+                        store_class = storage_lib.StoreType.to_store(storetype)
                         handle.sky_stores[
                             storetype] = store_class.StoreMetadata(
                                 name=s_name,
@@ -1028,10 +1025,9 @@ def storage_refresh() -> None:
                                 region=region,
                                 is_sky_managed=True)
                         break
-            # Storage with s_name created for the first time
+            # when storage with S_NAME created for the first time
             else:
-                store_class = storage_lib.get_abstract_store_from_storetype(
-                    storetype)
+                store_class = storage_lib.StoreType.to_store(storetype)
                 region = storage_lib.get_bucket_region(s_name, storetype)
                 store_metadata = store_class.StoreMetadata(name=s_name,
                                                            source=None,
@@ -1041,8 +1037,8 @@ def storage_refresh() -> None:
                     storage_name=s_name,
                     source=None,
                     sky_stores={storetype: store_metadata})
+            # update the externally created storage
             if handle is not None:
-                # update the externally created storage
                 global_user_state.add_or_update_storage(
                     s_name, handle, global_user_state.StorageStatus.READY)
                 sky_logging.print(f'{green}Added{reset} {bold}'

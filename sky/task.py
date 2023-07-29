@@ -693,7 +693,6 @@ class Task:
         else:
             resources = list(self.resources)[0]
             storage_cloud = resources.cloud
-
         if storage_cloud is not None:
             if str(storage_cloud) not in enabled_storage_clouds:
                 storage_cloud = None

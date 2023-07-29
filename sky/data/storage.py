@@ -104,6 +104,71 @@ class StoreType(enum.Enum):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unknown store type: {store}')
 
+    @classmethod
+    def to_store(cls, storetype: 'StoreType') -> 'AbstractStore':
+        if storetype == StoreType.S3:
+            return S3Store
+        elif storetype == StoreType.GCS:
+            return GcsStore
+        elif storetype == StoreType.R2:
+            return R2Store
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Unknown store type: {storetype}')
+
+
+def get_sky_managed_bucket_names(storetype: 'StoreType') -> Set[str]:
+    """Gets a set of sky managed buckets from AWS S3
+    
+    Args:
+        storetype: The type of storage (S3, GCS, or R2) from which
+        to retrieve the names of Sky-managed buckets.
+        
+    Returns:
+        Set[str]: Set of bucket names that are sky managed
+    """
+    sky_managed_buckets = set()
+    if storetype == StoreType.S3:
+        s3_client = data_utils.create_s3_client()
+        buckets = s3_client.list_buckets()
+        # Get a list of all bucket names from the response
+        bucket_names = [bucket['Name'] for bucket in buckets['Buckets']]
+        for bucket_name in bucket_names:
+            try:
+                response = s3_client.get_bucket_tagging(Bucket=bucket_name)
+                tagset = response['TagSet']  # list of dictionaries
+                for tag in tagset:
+                    if tag['Key'] == 'skymanaged':
+                        sky_managed_buckets.add(bucket_name)
+            except botocore.exceptions.ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchTagSet':
+                    continue
+    elif storetype == StoreType.GCS:
+        gcs_client = gcp.storage_client()
+        buckets = gcs_client.list_buckets()
+        for bucket in buckets:
+            labels: Dict[str, str] = bucket.labels
+            if 'skymanaged' in labels:
+                sky_managed_buckets.add(bucket.name)
+    elif storetype == StoreType.R2:
+        r2_resource = cloudflare.resource('s3')
+        buckets = r2_resource.buckets.all()
+        for bucket in buckets:
+            try:
+                r2_resource.Object(bucket.name, '.sky_DO_NOT_DELETE').load()
+            except aws.botocore_exceptions().ClientError:
+                # The file does not exist in this bucket, and therefore,
+                # the bucket is not sky managed
+                continue
+            else:
+                # The file exists in this bucket
+                sky_managed_buckets.add(bucket.name)
+    else:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Unknown store type: {storetype}')
+        
+    return sky_managed_buckets
+    
 
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
@@ -318,15 +383,6 @@ class AbstractStore:
 
         Args:
           mount_path: str; Mount path on remote server
-        """
-        raise NotImplementedError
-
-    @staticmethod
-    def get_sky_managed_bucket_names() -> Set[str]:
-        """Returns a set of sky managed buckets
-
-        Returns:
-         List[str]: List of bucket names that are sky managed
         """
         raise NotImplementedError
 
@@ -920,19 +976,6 @@ class Storage(object):
         return config
 
 
-def get_abstract_store_from_storetype(
-        storetype: 'StoreType') -> Type[AbstractStore]:
-    if storetype == StoreType.S3:
-        return S3Store
-    elif storetype == StoreType.GCS:
-        return GcsStore
-    elif storetype == StoreType.R2:
-        return R2Store
-    else:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Unknown store type: {storetype}')
-
-
 class S3Store(AbstractStore):
     """S3Store inherits from Storage Object and represents the backend
     for S3 buckets.
@@ -1316,30 +1359,6 @@ class S3Store(AbstractStore):
         while data_utils.verify_s3_bucket(bucket_name):
             time.sleep(0.1)
         return True
-
-    @staticmethod
-    def get_sky_managed_bucket_names() -> Set[str]:
-        """Gets a set of sky managed buckets from AWS S3
-
-        Returns:
-         List[str]: List of bucket names that are sky managed
-        """
-        s3_client = data_utils.create_s3_client()
-        buckets = s3_client.list_buckets()
-        sky_managed_s3_buckets = set()
-        # Get a list of all bucket names from the response
-        bucket_names = [bucket['Name'] for bucket in buckets['Buckets']]
-        for bucket_name in bucket_names:
-            try:
-                response = s3_client.get_bucket_tagging(Bucket=bucket_name)
-                tagset = response['TagSet']  # list of dictionaries
-                for tag in tagset:
-                    if tag['Key'] == 'skymanaged':
-                        sky_managed_s3_buckets.add(bucket_name)
-            except botocore.exceptions.ClientError as e:
-                if e.response['Error']['Code'] == 'NoSuchTagSet':
-                    continue
-        return sky_managed_s3_buckets
 
 
 class GcsStore(AbstractStore):
@@ -1762,22 +1781,6 @@ class GcsStore(AbstractStore):
                     raise exceptions.StorageBucketDeleteError(
                         f'Failed to delete GCS bucket {bucket_name}.')
 
-    @staticmethod
-    def get_sky_managed_bucket_names() -> Set[str]:
-        """Gets a set of sky managed buckets from GCP GCS
-
-        Returns:
-         List[str]: List of bucket names that are sky managed
-        """
-        storage_client = gcp.storage_client()
-        buckets = storage_client.list_buckets()
-        sky_managed_gcs_buckets = set()
-        for bucket in buckets:
-            labels: Dict[str, str] = bucket.labels
-            if 'skymanaged' in labels:
-                sky_managed_gcs_buckets.add(bucket.name)
-        return sky_managed_gcs_buckets
-
 
 class R2Store(AbstractStore):
     """R2Store inherits from S3Store Object and represents the backend
@@ -2131,26 +2134,3 @@ class R2Store(AbstractStore):
         while data_utils.verify_r2_bucket(bucket_name):
             time.sleep(0.1)
         return True
-
-    @staticmethod
-    def get_sky_managed_bucket_names() -> Set[str]:
-        """Gets a set of sky managed buckets from Cloudflare R2
-
-        Returns:
-         List[str]: List of bucket names that are sky managed
-        """
-        r2_resource = cloudflare.resource('s3')
-        sky_managed_r2_buckets = set()
-        buckets = r2_resource.buckets.all()
-        for bucket in buckets:
-            try:
-                r2_resource.Object(bucket.name, '.sky_DO_NOT_DELETE').load()
-            except aws.botocore_exceptions().ClientError:
-                # The file does not exist in this bucket, and therefore,
-                # the bucket is not sky managed
-                continue
-            else:
-                # The file exists in this bucket
-                sky_managed_r2_buckets.add(bucket.name)
-
-        return sky_managed_r2_buckets
