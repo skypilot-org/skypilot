@@ -20,8 +20,9 @@ from sky.backends import backend_utils
 logger = logging.getLogger(__name__)
 
 _PROCESS_POOL_REFRESH_INTERVAL = 20
+_ENDPOINT_PROBE_INTERVAL = 10
 # TODO(tian): Maybe let user determine this threshold
-_REPLICA_UNHEALTHY_THRESHOLD_SECOND = 180
+_REPLICA_UNHEALTHY_THRESHOLD_COUNTER = 180 // _ENDPOINT_PROBE_INTERVAL
 
 
 class InfraProvider:
@@ -34,8 +35,9 @@ class InfraProvider:
         self.healthy_replicas: Set[str] = set()
         self.unhealthy_replicas: Set[str] = set()
         self.failed_replicas: Set[str] = set()
-        self.unhealthy_time: Dict[str,
-                                  List[float]] = collections.defaultdict(list)
+        self.first_unhealthy_time: Dict[str, float] = dict()
+        self.continuous_unhealthy_counter: Dict[
+            str, int] = collections.defaultdict(int)
         self.readiness_path: str = readiness_path
         self.readiness_timeout: int = readiness_timeout
         self.post_data: Any = post_data
@@ -85,6 +87,14 @@ class InfraProvider:
 
     def terminate(self) -> Optional[str]:
         # Terminate service
+        raise NotImplementedError
+
+    def start_replica_fetcher(self) -> None:
+        # Start the replica fetcher thread
+        raise NotImplementedError
+
+    def terminate_replica_fetcher(self) -> None:
+        # Terminate the replica fetcher thread
         raise NotImplementedError
 
     def probe_all_endpoints(self) -> None:
@@ -312,6 +322,27 @@ class SkyPilotInfraProvider(InfraProvider):
             return None
         return '\n'.join(msg)
 
+    def _replica_fetcher(self) -> None:
+        while not self.replica_fetcher_stop_event.is_set():
+            logger.info('Running replica fetcher.')
+            try:
+                self.probe_all_endpoints()
+            except Exception as e:  # pylint: disable=broad-except
+                # No matter what error happens, we should keep the
+                # replica fetcher running.
+                logger.error(f'Error in replica fetcher: {e}')
+            time.sleep(_ENDPOINT_PROBE_INTERVAL)
+
+    def start_replica_fetcher(self) -> None:
+        self.replica_fetcher_stop_event = threading.Event()
+        self.replica_fetcher_thread = threading.Thread(
+            target=self._replica_fetcher)
+        self.replica_fetcher_thread.start()
+
+    def terminate_replica_fetcher(self) -> None:
+        self.replica_fetcher_stop_event.set()
+        self.replica_fetcher_thread.join()
+
     def probe_all_endpoints(self) -> None:
         replica_ips = self._get_replica_ips() - self.failed_replicas
 
@@ -356,15 +387,21 @@ class SkyPilotInfraProvider(InfraProvider):
         logger.info(f'Unhealthy replicas: {unhealthy_replicas}')
         self.unhealthy_replicas = unhealthy_replicas
 
+        for replica in healthy_replicas:
+            self.continuous_unhealthy_counter[replica] = 0
+
         replicas_to_terminate = set()
         for replica in unhealthy_replicas:
-            self.unhealthy_time[replica].append(time.time())
+            if replica not in self.first_unhealthy_time:
+                self.first_unhealthy_time[replica] = time.time()
+            self.continuous_unhealthy_counter[replica] += 1
             # coldstart time limitation is `self.readiness_timeout`.
-            first_unhealthy_time = self.unhealthy_time[replica][0]
+            first_unhealthy_time = self.first_unhealthy_time[replica]
             if time.time() - first_unhealthy_time > self.readiness_timeout:
-                last_unhealthy_time = self.unhealthy_time[replica][-1]
-                if (time.time() - last_unhealthy_time >
-                        _REPLICA_UNHEALTHY_THRESHOLD_SECOND):
+                continuous_unhealthy_times = self.continuous_unhealthy_counter[
+                    replica]
+                if (continuous_unhealthy_times >
+                        _REPLICA_UNHEALTHY_THRESHOLD_COUNTER):
                     logger.info(f'Terminating replica {replica}.')
                     replicas_to_terminate.add(replica)
                 else:

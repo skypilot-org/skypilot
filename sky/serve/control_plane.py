@@ -5,8 +5,6 @@ Responsible for autoscaling and replica management.
 import argparse
 import fastapi
 import logging
-import threading
-import time
 from typing import Optional
 import uvicorn
 
@@ -38,27 +36,6 @@ class ControlPlane:
         self.infra_provider = infra_provider
         self.autoscaler = autoscaler
         self.app = fastapi.FastAPI()
-
-    def _replica_fetcher(self) -> None:
-        while not self.replica_fetcher_stop_event.is_set():
-            logger.info('Running replica fetcher.')
-            try:
-                self.infra_provider.probe_all_endpoints()
-            except Exception as e:  # pylint: disable=broad-except
-                # No matter what error happens, we should keep the
-                # replica fetcher running.
-                logger.error(f'Error in replica fetcher: {e}')
-            time.sleep(10)
-
-    def _start_replica_fetcher(self) -> None:
-        self.replica_fetcher_stop_event = threading.Event()
-        self.replica_fetcher_thread = threading.Thread(
-            target=self._replica_fetcher)
-        self.replica_fetcher_thread.start()
-
-    def _terminate_replica_fetcher(self) -> None:
-        self.replica_fetcher_stop_event.set()
-        self.replica_fetcher_thread.join()
 
     # TODO(tian): Authentication!!!
     def run(self) -> None:
@@ -106,7 +83,7 @@ class ControlPlane:
             # request_data = request.json()
             # TODO(tian): Authentication!!!
             logger.info('Terminating service...')
-            self._terminate_replica_fetcher()
+            self.infra_provider.terminate_replica_fetcher()
             if self.autoscaler is not None:
                 self.autoscaler.terminate_monitor()
             msg = self.infra_provider.terminate()
@@ -115,7 +92,7 @@ class ControlPlane:
         # Run replica_monitor and autoscaler.monitor (if autoscaler is defined)
         # in separate threads in the background.
         # This should not block the main thread.
-        self._start_replica_fetcher()
+        self.infra_provider.start_replica_fetcher()
         if self.autoscaler is not None:
             self.autoscaler.start_monitor()
 
