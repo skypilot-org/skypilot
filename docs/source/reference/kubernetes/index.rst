@@ -12,7 +12,7 @@ tasks can be submitted to your Kubernetes cluster just like any other cloud prov
 
 **Benefits of bringing your Kubernetes cluster to SkyPilot:**
 
-* Get all features of SkyPilot (setup management, job execution, queuing, logging, SSH access) on your Kubernetes resources
+* Get SkyPilot features (setup management, job execution, queuing, logging, SSH access) on your Kubernetes resources
 * Replace complex Kubernetes manifests with simple SkyPilot tasks
 * Maximize resource utilization by running cloud jobs on your Kubernetes cluster.
 * Seamlessly "burst" jobs to the cloud if the Kubernetes cluster is congested.
