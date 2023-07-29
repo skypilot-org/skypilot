@@ -30,16 +30,23 @@ Kubernetes Cluster Requirements
 To connect and use a Kubernetes cluster, SkyPilot needs:
 
 * A `Kubeconfig <kubeconfig>`_ file containing access credentials and namespace to be used.
-* Ports 30000-32767 should be accessible on all Kubernetes nodes. TODO(romilb): Add footnote that this is going to change in the future.
+* Ports 30000-32767 should be accessible on all Kubernetes nodes.
 
 Detailed guides for setting up different deployment environments (Amazon EKS, Google GKE, On-Prem and local debugging) are included in the :ref:`Kubernetes cluster setup guide <kubernetes-setup>`.
 
 Using Kubernetes Clusters with SkyPilot
 ---------------------------------------
+.. _kubernetes-instructions:
 
 Once your Kubernetes cluster is up and running:
 
-1. Place your kubeconfig file at ``~/.kube/config``. TODO(romilb): Add command to verify
+1. Place your kubeconfig file at ``~/.kube/config``.
+
+   .. code-block:: console
+
+     $ mkdir -p ~/.kube
+     $ cp /path/to/kubeconfig ~/.kube/config
+
 2. Run :code:`sky check` and verify that Kubernetes is enabled in SkyPilot.
 
    .. code-block:: console
@@ -105,10 +112,11 @@ SkyPilot on Kubernetes is under active development. Some features are in progres
 * Multi-node tasks - 🚧 In progress
 * Multiple Kubernetes Clusters - 🚧 In progress
 
-TODO(romilb): Make this a nicer table
 
 
 Table of Contents
 -------------------
 .. toctree::
+   :hidden:
+
    kubernetes-setup

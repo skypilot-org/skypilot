@@ -12,14 +12,14 @@ To connect to the Kubernetes cluster, SkyPilot needs:
 
 Below we show minimal examples to setup your Kubernetes cluster in different environments, including hosted services on the cloud.
 
-Deploying locally with KinD
+Deploying locally with kind
 ---------------------------
 
-`KinD <TODO(romilb):AddLink>`_ is a 1-click tool for creating a Kubernetes cluster on your local machine. It runs a Kubernetes cluster inside a container, so no setup is required.
+`kind <https://kind.sigs.k8s.io/>`_ is a 1-click tool for creating a Kubernetes cluster on your local machine. It runs a Kubernetes cluster inside a container, so no setup is required.
 
 We recommend using this method if you want to try out SkyPilot on Kubernetes on your laptop or run SkyPilot tasks locally without requiring any cloud access.
 
-1. Install `Docker <TODO(romilb):AddLink>`_ and `KinD <TODO(romilb):AddLink>`_.
+1. Install `Docker <https://docs.docker.com/engine/install/>`_ and `kind <https://kind.sigs.k8s.io/docs/user/quick-start/#installation>`_.
 2. Run :code:`sky local up` to launch a Kubernetes cluster and configure your kubeconfig file:
 
     .. code-block:: console
@@ -34,7 +34,7 @@ We recommend using this method if you want to try out SkyPilot on Kubernetes on 
         $ sky local down
 
 .. note::
-    We recommend allocating at least 4 or more CPUs to your docker runtime to ensure KinD has enough resources. See instructions `here <TODO(romilb):add path>`_.
+    We recommend allocating at least 4 or more CPUs to your docker runtime to ensure kind has enough resources. See instructions `here <https://docs.docker.com/desktop/settings/linux/>`_.
 
 .. note::
     KinD does not support multiple nodes and GPUs. It is not recommended for use in a production environment. See section on `On-Prem deployment <Deploying on On-Prem Clusters>`_ for more.
@@ -72,11 +72,11 @@ TODO(romilb): Test and add this.
 Deploying on On-Prem Clusters
 -----------------------------
 
-You can also deploy Kubernetes on your On-Prem clusters using off-the-shelf tools, such as `kubeadm <TODO(romilb):AddLink>`_, `k3s <TODO(romilb):AddLink>`_ or `Rancher <TODO(romilb):AddLink>`_. Please follow their respective guides to deploy your Kubernetes cluster.
+You can also deploy Kubernetes on your On-Prem clusters using off-the-shelf tools, such as `kubeadm <https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/>`_, `k3s <https://docs.k3s.io/quick-start>`_ or `Rancher <https://ranchermanager.docs.rancher.com/v2.5/pages-for-subheaders/kubernetes-clusters-in-rancher-setup>`_. Please follow their respective guides to deploy your Kubernetes cluster.
 
 Once the cluster is deployed, make sure:
 
 1. You have a kubeconfig file for accessing the cluster.
 2. Ports 30000-32767 on all nodes are accessible from the client.
 
-If all looks good, follow instructions :ref:`here <kubernetes-overview>` to setup Kubernetes access for each SkyPilot client. TODO(romilb): Make this link to exact section.
+If all looks good, follow instructions :ref:`here <kubernetes-instructions>` to setup Kubernetes access for each SkyPilot client.
