@@ -6,6 +6,8 @@ import functools
 import threading
 import time
 
+from sky.utils import common_utils
+
 boto3 = None
 botocore = None
 _session_creation_lock = threading.RLock()
@@ -48,6 +50,7 @@ def session():
     # https://github.com/skypilot-org/skypilot/pull/1988
     max_attempts = 5
     attempt = 0
+    backoff = common_utils.Backoff()
     err = None
     while attempt < max_attempts:
         try:
@@ -55,16 +58,18 @@ def session():
                 return boto3.session.Session()
         except (botocore_exceptions().CredentialRetrievalError,
                 botocore_exceptions().NoCredentialsError) as e:
-            time.sleep(5)
+            time.sleep(backoff.current_backoff())
             err = e
             attempt += 1
     raise err
 
 
-@functools.lru_cache()
 @import_package
 def resource(resource_name: str, **kwargs):
     """Create an AWS resource.
+
+    It is relatively fast to create a resource from the session (<1s), so we
+    don't need to cache the resource object.
 
     Args:
         resource_name: AWS resource name (e.g., 's3').
