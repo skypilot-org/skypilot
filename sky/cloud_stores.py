@@ -260,7 +260,7 @@ class MinioCloudStorage(CloudStorage):
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
-        endpoint_url = cloudflare.create_endpoint()
+        endpoint_url = minio.create_endpoint()
         download_via_awscli = ('AWS_SHARED_CREDENTIALS_FILE='
                                f'{minio.MINIO_CREDENTIALS_PATH} '
                                f'aws s3 cp s3://{source} {destination} '
