@@ -1009,7 +1009,7 @@ def storage_refresh() -> None:
         # add storage that exist in external state but not in state.db
         for s_name in only_in_external_state:
             # Storage with S_NAME is already in internal_state from different
-            # cloud storage provider. Obtain StorageMetedata to update handle
+            # cloud storage provider. Obtain StorageMetadata to update handle
             for s_type in internal_buckets_status.keys():
                 if s_type != storetype and s_name in internal_buckets_status[
                         s_type]:
