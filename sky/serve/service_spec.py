@@ -4,6 +4,7 @@ import yaml
 from typing import Optional, Dict, Any
 
 from sky.backends import backend_utils
+from sky.serve import constants
 from sky.utils import schemas
 from sky.utils import ux_utils
 
@@ -26,6 +27,12 @@ class SkyServiceSpec:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'max_replica must be greater than or equal to min_replica')
+        if app_port == constants.CONTROL_PLANE_PORT:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'App port cannot be {constants.CONTROL_PLANE_PORT} '
+                    'since it is reserved for the control plane. '
+                    ' Please use a different port.')
         # TODO: check if the path is valid
         self._readiness_path = f':{app_port}{readiness_path}'
         self._readiness_timeout = readiness_timeout
