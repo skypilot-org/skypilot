@@ -10,9 +10,18 @@ SkyPilot can run on your private on-prem or cloud Kubernetes clusters.
 Your Kubernetes cluster gets added to the list of "clouds" in SkyPilot and SkyPilot
 tasks can be submitted to your Kubernetes cluster just like any other cloud provider.
 
-* Get all features of SkyPilot (setup management, job execution, queuing, logging, SSH access) on your Kubernetes cluster.
+**Benefits of bringing your Kubernetes cluster to SkyPilot:**
+
+* Get all features of SkyPilot (setup management, job execution, queuing, logging, SSH access) on your Kubernetes resources
+* Replace complex Kubernetes manifests with simple SkyPilot tasks
 * Maximize resource utilization by running cloud jobs on your Kubernetes cluster.
 * Seamlessly "burst" jobs to the cloud if the Kubernetes cluster is congested.
+
+**Supported deployment models:**
+
+* On-prem clusters (Kubeadm, K3s, Rancher)
+* Hosted Kubernetes services (AWS EKS, GKE)
+* Local development clusters (KinD, minikube)
 
 
 Kubernetes Cluster Requirements
