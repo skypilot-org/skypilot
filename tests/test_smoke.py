@@ -42,15 +42,15 @@ import pytest
 
 import sky
 from sky import global_user_state
+from sky.adaptors import ibm
+from sky.adaptors import cloudflare
+from sky.clouds import AWS, GCP, Azure
 from sky.data import data_utils
 from sky.data import storage as storage_lib
-from sky.adaptors import cloudflare
+from sky.data.data_utils import Rclone
 from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
-from sky.clouds import AWS, GCP, Azure
-from sky.adaptors import ibm
-from sky.data.data_utils import Rclone
 
 # For uniquefying users on shared-account cloud providers. Used as part of the
 # cluster names.
