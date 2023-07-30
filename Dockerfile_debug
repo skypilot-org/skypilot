@@ -1,0 +1,54 @@
+# A swiss-knife style dockerfile with some useful tools for debugging SkyPilot
+# Automatically clones the SkyPilot repo to /sky_repo when the container is run.
+# Does not contain skypilot dependencies to simulate a clean install.
+#
+# Built specifically for amd64 (and not arm64) to allow for debugging on a Mac.
+#
+# Build with:
+# docker buildx build --load --platform linux/amd64 -t berkeleyskypilot/skypilot-debug -f Dockerfile_debug .
+#
+# Push with:
+# docker buildx build --push --platform linux/amd64 -t berkeleyskypilot/skypilot-debug -f Dockerfile_debug .
+#
+# Run with:
+# docker run -it --rm --name skypilot-debug berkeleyskypilot/skypilot-debug /bin/bash
+
+FROM continuumio/miniconda3:23.5.2-0
+
+# Install system packages
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    libffi-dev \
+    libssl-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    libzmq3-dev \
+    pkg-config \
+    python3-dev \
+    python3-pip \
+    python3-setuptools \
+    python3-wheel \
+    nano \
+    wget \
+    gcc \
+    vim \
+    screen \
+    less \
+    unzip \
+    rsync
+
+COPY requirements-dev.txt /tmp/requirements-dev.txt
+
+# Install dev dependencies
+RUN pip3 install --upgrade pip && \
+    pip3 install -r /tmp/requirements-dev.txt
+
+ENV SKYPILOT_DEBUG=1
+ENV SKYPILOT_DEV=1
+ENV SKYPILOT_DISABLE_USAGE_COLLECTION=1
+
+# Git clone repo when the container is run (not when it's built) for convinience
+ENTRYPOINT ["/bin/bash", "-c", "mkdir -p /sky_repo && cd /sky_repo && git clone https://github.com/skypilot-org/skypilot.git && /bin/bash"]
+
+CMD ["/bin/bash"]
