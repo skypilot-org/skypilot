@@ -197,6 +197,10 @@ def get_ibm_cos_bucket_region(bucket_name: str) -> str:
     """
 
     # parallel lookup on bucket storage region
+    # Using threads would be more efficient, but raises a leaked semaphore
+    # warning on Mac machines when guarding cos client with a thread lock
+    # nested within the process lock. Source:
+    # https://github.com/skypilot-org/skypilot/pull/1966#issuecomment-1646992938
     with concurrent.futures.ProcessPoolExecutor() as executor:
         futures = []
         for region_scanned in get_cos_regions():
