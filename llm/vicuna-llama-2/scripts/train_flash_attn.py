@@ -2,8 +2,7 @@
 
 # Need to call this before importing transformers.
 from flash_attn_patch import (
-    replace_llama_attn_with_flash_attn,
-)
+    replace_llama_attn_with_flash_attn,)
 
 replace_llama_attn_with_flash_attn()
 

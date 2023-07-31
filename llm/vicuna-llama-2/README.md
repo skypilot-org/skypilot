@@ -20,8 +20,7 @@ Generate a read-only access token on HuggingFace [here](https://huggingface.co/s
 Fill the access token in the [train.yaml](train.yaml).
 ```yaml
 envs:
-  MODEL_SIZE: 7
-  HF_TOKEN: <your-huggingface-token>
+  HF_TOKEN: <your-huggingface-token> # Change to your own huggingface token
 ```
 
 ## Train your own Vicuna on LLaMA 2
@@ -81,7 +80,6 @@ resources:
   accelerators: A100-80GB:8
   disk_size: 1000
   use_spot: true
-  disk_tier: high
 ```
 However, spot A100-80GB:8 is currently only supported on GCP. On-demand versions are supported on AWS, Azure, GCP, and Lambda (hint: check out the handy outputs of `sky show-gpus A100-80GB:8`!).
 
