@@ -2441,9 +2441,13 @@ def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
         else:
             record.update(resp.json())
             if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
-                # TODO(tian): manage failed status here.
-                if record['num_healthy_replicas'] > 0:
-                    record['status'] = status_lib.ServiceStatus.RUNNING
+                # TODO(tian): Current behaviour for user bugs in setup section
+                # is to teardown and relaunching forever. We should have a way
+                # to detect such bugs and stop relaunching.
+                if record['num_failed_replicas'] > 0:
+                    record['status'] = status_lib.ServiceStatus.FAILED
+                elif record['num_healthy_replicas'] > 0:
+                    record['status'] = status_lib.ServiceStatus.READY
                 elif record['num_unhealthy_replicas'] > 0:
                     record['status'] = status_lib.ServiceStatus.REPLICA_INIT
         global_user_state.add_or_update_service(**record)
