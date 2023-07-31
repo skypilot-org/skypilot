@@ -3,7 +3,7 @@ envs:
   ARTIFACT_BUCKET_NAME: YOUR_OWN_BUCKET_NAME # Change to your own bucket name
   WANDB_API_KEY: "" # Change to your own wandb api key
   MODEL_SIZE: 7
-  USE_FLASH_ATTN: 1
+  USE_XFORMERS: 1
 
 resources:
   accelerators: A100-80GB:8
@@ -33,8 +33,8 @@ setup: |
   fi
   cd ./scripts
   pip install git+https://github.com/lm-sys/FastChat.git@4e2c942b8d785eb5e2aef1d0df2150e756f381ab
-  if [ $USE_FLASH_ATTN -eq 1 ]; then
-    pip install -U flash-attn
+  if [ $USE_XFORMERS -eq 1 ]; then
+    pip install -U xformers
   fi
   python hardcoded_questions.py
   python -m fastchat.data.merge --in $HOME/data/sharegpt.json hardcoded.json --out $HOME/data/mydata.json
@@ -44,8 +44,8 @@ setup: |
 run: |
   cd scripts
   conda activate chatbot
-  if [ $USE_FLASH_ATTN -eq 1 ]; then
-    TRAIN_SCRIPT=train_flash_attn.py
+  if [ $USE_XFORMERS -eq 1 ]; then
+    TRAIN_SCRIPT=train_xformers.py
   else
     TRAIN_SCRIPT=train.py
   fi

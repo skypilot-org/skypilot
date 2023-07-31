@@ -1,6 +1,6 @@
 envs:
-  MODEL_SIZE: 7
   MODEL_CKPT: <bucket-path-to-your-model-ckpt>
+
 resources:
   accelerators: A100:1
   disk_size: 1024
