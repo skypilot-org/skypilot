@@ -3933,6 +3933,24 @@ def serve_up(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def serve_status(all: bool, service: Optional[str]):
+    """Show statuses of SkyServe services.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # Show status for all services
+      sky serve status
+      \b
+      # Show detailed status for all services
+      sky serve status -a
+      \b
+      # Show service status and replica status for a specific service
+      sky serve status my-service
+      \b
+      # Show detailed service status and replica status for a specific service
+      sky serve status my-service -a
+    """
     service_records = core.service_status(service)
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Services'
                f'{colorama.Style.RESET_ALL}')
