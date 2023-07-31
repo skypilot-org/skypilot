@@ -1083,9 +1083,22 @@ def serve_up(
         print(f'{colorama.Style.BRIGHT}{colorama.Fore.CYAN}'
               'Gateway endpoint serving at '
               f'{colorama.Style.RESET_ALL}{colorama.Fore.CYAN}'
-              f'{endpoint}.\n'
+              f'{endpoint}.'
               f'{colorama.Style.RESET_ALL}')
-        # TODO(tian): Add `sky serve status <service-name>` doc and logs doc.
+        print(f'\n{colorama.Fore.CYAN}Service name: '
+              f'{colorama.Style.BRIGHT}{name}{colorama.Style.RESET_ALL}'
+              '\nTo see detailed info about replicas:'
+              f'\t{backend_utils.BOLD}sky serve status {name} (-a)'
+              f'{backend_utils.RESET_BOLD}'
+              '\nTo see logs of controller:'
+              f'\t\t{backend_utils.BOLD}sky serve logs -c {name}'
+              f'{backend_utils.RESET_BOLD}'
+              '\nTo see logs of redirector:'
+              f'\t\t{backend_utils.BOLD}sky serve logs -r {name}'
+              f'{backend_utils.RESET_BOLD}'
+              '\nTo teardown the service:'
+              f'\t\t{backend_utils.BOLD}sky serve down {name}'
+              f'{backend_utils.RESET_BOLD}')
 
 
 def serve_down(
