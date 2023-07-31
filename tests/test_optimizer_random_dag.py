@@ -68,7 +68,9 @@ def generate_random_dag(
                     assert candidate.cloud == 'GCP', candidate
                     (instance_list,
                      _) = service_catalog.get_instance_type_for_accelerator(
-                         candidate.accelerator_name, candidate.accelerator_count, clouds='gcp')
+                         candidate.accelerator_name,
+                         candidate.accelerator_count,
+                         clouds='gcp')
                     assert instance_list, (candidate, instance_list)
                     instance_type = random.choice(instance_list)
                 resources = sky.Resources(
