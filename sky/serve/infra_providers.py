@@ -359,7 +359,11 @@ class SkyPilotInfraProvider(InfraProvider):
                     msg += 'Get'
                     response = requests.get(readiness_url, timeout=3)
                 msg += (f' request to {replica_ip} returned status code '
-                        f'{response.status_code} and response {response.text}.')
+                        f'{response.status_code}')
+                if response.status_code == 200:
+                    msg += '.'
+                else:
+                    msg += f' and response {response.text}.'
                 logger.info(msg)
                 if response.status_code == 200:
                     logger.info(f'Replica {replica_ip} is available.')
