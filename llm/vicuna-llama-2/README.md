@@ -1,4 +1,4 @@
-# Finetune Your Own Vicuna on Llama-2
+# Train Your Own Vicuna on Llama-2
 
 [Vicuna](https://lmsys.org/blog/2023-03-30-vicuna/) is the first open-source chatbot that performs closely to the ChatGPT, and still is leading the [LLM leaderboard](https://huggingface.co/spaces/lmsys/chatbot-arena-leaderboard) today comparing to all other open-source models.
 
