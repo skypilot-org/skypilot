@@ -6,13 +6,9 @@ import pandas as pd
 
 import sky
 from sky import clouds
-from sky import global_user_state
 from sky.clouds import service_catalog
 
-ALL_INSTANCE_TYPE_INFOS = sum(
-    sky.list_accelerators(
-        gpus_only=True, clouds=global_user_state.get_enabled_clouds()).values(),
-    [])
+ALL_INSTANCE_TYPE_INFOS = sum(sky.list_accelerators(gpus_only=True).values(), [])
 
 DUMMY_NODES = [
     sky.optimizer._DUMMY_SOURCE_NAME,
