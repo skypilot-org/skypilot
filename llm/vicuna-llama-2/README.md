@@ -2,9 +2,7 @@
 
 [Vicuna](https://lmsys.org/blog/2023-03-30-vicuna/) is the first open-source chatbot that performs closely to the ChatGPT, and still is leading the [LLM leaderboard](https://huggingface.co/spaces/lmsys/chatbot-arena-leaderboard) today comparing to all other open-source models.
 
-However, since the LLaMA model it was trained on cannot be used in commercial products, the usage of Vicuna is limited.
-
-[LLaMA 2](https://github.com/facebookresearch/llama/tree/main) comes as a rescue with with a license that authorizes commercial use. We are now closing to see the full potential of the open-source Vicuna.
+With the latest [LLaMA 2](https://github.com/facebookresearch/llama/tree/main), we are now able to get a Vicuna model that can be used commercially.
 
 In this tutorial, we will show you how to train your own Vicuna on LLaMA 2, with your own data, on any cloud, with the help of SkyPilot.
 
@@ -33,7 +31,7 @@ envs:
 
   By default, we use the ShareGPT data and the identity questions in [hardcoded_questions.py](./scripts/hardcoded_questions.py).
 
-  * **Optional**: To use custom data, you can change the data by change the following line in [train.yaml](train.yaml).
+  * **Optional**: To use custom data, you can change the data by changing the following line in [train.yaml](train.yaml).
 
   ```yaml
   setup: |
@@ -63,7 +61,7 @@ envs:
 
 ### Kick start the training on any cloud
 
-1. Start training with a single command
+* Start training with a single command
 
   ```bash
   sky launch --down -c vicuna-2 train.yaml \
@@ -92,7 +90,7 @@ To use these clouds, add the `--no-use-spot` flag to request on-demand instances
 sky launch --no-use-spot ...
 ```
 
-2. **Optional**: Try out the training for the 13B model:
+* **Optional**: Try out the training for the 13B model:
 
   ```bash
   sky launch -c vicuna-2 train.yaml \
