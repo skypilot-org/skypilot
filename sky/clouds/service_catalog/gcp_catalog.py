@@ -376,7 +376,7 @@ def get_accelerator_hourly_cost(accelerator: str,
     for region in set(_df['Region']):
         try:
             current_minimal = min(current_minimal,
-                                    get_reagion_cheapest_price(region))
+                                  get_reagion_cheapest_price(region))
         except AssertionError:
             continue
 
