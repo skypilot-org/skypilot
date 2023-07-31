@@ -52,6 +52,18 @@ def split_r2_path(r2_path: str) -> Tuple[str, str]:
     return bucket, key
 
 
+def split_oci_path(oci_path: str) -> Tuple[str, str]:
+    """Splits OCI Path into Bucket name and Relative Path to Bucket
+
+    Args:
+      oci_path: str; OCI Path, e.g. oci://imagenet/train/
+    """
+    path_parts = oci_path.replace('oci://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
 def create_s3_client(region: str = 'us-east-2') -> Client:
     """Helper method that connects to Boto3 client for S3 Bucket
 
@@ -103,6 +115,26 @@ def verify_r2_bucket(name: str) -> bool:
     r2 = cloudflare.resource('s3')
     bucket = r2.Bucket(name)
     return bucket in r2.buckets.all()
+
+
+def verify_oci_bucket(name: str) -> bool:
+    """Helper method that checks if the OCI bucket exists
+
+    This method is mainly used by other cloud stores to check the
+    existence of an OCI bucket when it is specified as source. However,
+    We don't verify the existence of OCI bucket because moving data
+    directly between other cloud buckets and OCI buckets is currently
+    not supported.
+
+    Currently, this method always return True and in data_transfer, it
+    will throw NotImplementedError.
+
+    Args:
+      name: str; Name of OCI Bucket (without oci:// prefix)
+    """
+    # TODO(HysunHe): Implement sync with other clouds (s3, gs)
+    logger.debug(f'verify_oci_bucket: {name}')
+    return True
 
 
 def is_cloud_store_url(url):

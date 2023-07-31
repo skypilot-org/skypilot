@@ -72,6 +72,12 @@ def get_identity_client(region=None, profile='DEFAULT'):
 
 
 @import_package
+def get_object_storage_client(region=None, profile='DEFAULT'):
+    return oci.object_storage.ObjectStorageClient(
+        get_oci_config(region, profile))
+
+
+@import_package
 def service_exception():
     """OCI service exception."""
     # pylint: disable=import-outside-toplevel
