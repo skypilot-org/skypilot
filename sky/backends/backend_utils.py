@@ -1864,6 +1864,13 @@ def _update_cluster_status_no_lock(
             # below.
             external_ips = handle.external_ips(use_cached_ips=True)
             # This happens to a stopped TPU VM as we use gcloud to query the IP.
+            # Or user interrupt the `sky launch` process before the first time
+            # resources handle is written back to local database.
+            # This is helpful when user interrupt after the provision is done
+            # and before the skylet is restarted. After #2304 is merged, this
+            # helps keep the cluster status to INIT after `sky status -r`, so
+            # user will be notified that any auto stop/down might not be
+            # triggered.
             if external_ips is None or len(external_ips) == 0:
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
