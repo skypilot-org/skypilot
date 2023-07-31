@@ -121,6 +121,8 @@ Available fields:
       # GCP
       # To find GCP images: https://cloud.google.com/compute/docs/images
       # image_id: projects/deeplearning-platform-release/global/images/family/tf2-ent-2-1-cpu-ubuntu-2004
+      # Or machine image: https://cloud.google.com/compute/docs/machine-images
+      # image_id: projects/my-project/global/machineImages/my-machine-image
       #
       # IBM
       # Create a private VPC image and paste its ID in the following format:

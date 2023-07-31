@@ -25,6 +25,7 @@ import colorama
 from sky import clouds
 from sky import sky_logging
 from sky.adaptors import aws, gcp
+from sky.data import data_utils
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
@@ -139,9 +140,9 @@ def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
       s3_bucket_name: str; Name of the Amazon S3 Bucket
     """
-    sync_command = (f'gsutil -m rsync -rd gs://{gs_bucket_name} '
-                    f's3://{s3_bucket_name}')
-
+    gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+    sync_command = (f'{alias_gen}; {gsutil_alias} '
+                    f'rsync -rd gs://{gs_bucket_name} s3://{s3_bucket_name}')
     subprocess.call(sync_command, shell=True)
 
 
