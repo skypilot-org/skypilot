@@ -130,6 +130,8 @@ aws_dependencies = [
     'awscli>=1.27.10',
     'botocore>=1.29.10',
     'boto3>=1.26.1',
+    # https://github.com/orgs/python-poetry/discussions/7937
+    'urllib3<2',
     # 'Crypto' module used in authentication.py for AWS.
     'pycryptodome==3.12.0',
 ]
@@ -157,7 +159,7 @@ extras_require['all'] = sum(extras_require.values(), [])
 
 # Install aws requirements by default, as it is the most common cloud provider,
 # and the installation is quick.
-# install_requires += extras_require['aws']
+install_requires += extras_require['aws']
 
 long_description = ''
 readme_filepath = 'README.md'
