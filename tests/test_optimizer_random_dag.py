@@ -6,10 +6,13 @@ import pandas as pd
 
 import sky
 from sky import clouds
+from sky import global_user_state
 from sky.clouds import service_catalog
 
 ALL_INSTANCE_TYPE_INFOS = sum(
-    sky.list_accelerators(gpus_only=True).values(), [])
+    sky.list_accelerators(
+        gpus_only=True, clouds=global_user_state.get_enabled_clouds()).values(),
+    [])
 
 DUMMY_NODES = [
     sky.optimizer._DUMMY_SOURCE_NAME,
@@ -138,5 +141,6 @@ def test_optimizer(enable_all_clouds):
         dag = generate_random_dag(num_tasks=5, seed=seed)
         sky.Optimizer._add_dummy_source_sink_nodes(dag)
 
+        # TODO(tian): Add test for minimize_cost=False. We need a time estimator
+        # that dependent on the resources, rather than returns a constant.
         compare_optimization_results(dag, minimize_cost=True)
-        compare_optimization_results(dag, minimize_cost=False)
