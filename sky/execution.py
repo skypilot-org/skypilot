@@ -1080,10 +1080,12 @@ def serve_up(
             status_lib.ServiceStatus.REPLICA_INIT, 0, 0, 0, policy,
             requested_resources)
 
-        print(f'{colorama.Style.BRIGHT}{colorama.Fore.CYAN}Serving at '
+        print(f'{colorama.Style.BRIGHT}{colorama.Fore.CYAN}'
+              'Gateway endpoint serving at '
               f'{colorama.Style.RESET_ALL}{colorama.Fore.CYAN}'
               f'{endpoint}.\n'
               f'{colorama.Style.RESET_ALL}')
+        # TODO(tian): Add `sky serve status <service-name>` doc and logs doc.
 
 
 def serve_down(

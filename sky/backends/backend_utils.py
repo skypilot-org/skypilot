@@ -2441,6 +2441,7 @@ def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
         else:
             record.update(resp.json())
             if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
+                # TODO(tian): manage failed status here.
                 if record['num_healthy_replicas'] > 0:
                     record['status'] = status_lib.ServiceStatus.RUNNING
                 elif record['num_unhealthy_replicas'] > 0:

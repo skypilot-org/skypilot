@@ -61,7 +61,7 @@ class ServiceStatus(enum.Enum):
     REPLICA_INIT = 'REPLICA_INIT'
 
     # At least one replica is ready
-    RUNNING = 'RUNNING'
+    READY = 'READY'
 
     # Service is being stopped
     SHUTTING_DOWN = 'SHUTTING_DOWN'
@@ -77,7 +77,7 @@ class ServiceStatus(enum.Enum):
 _SERVICE_STATUS_TO_COLOR = {
     ServiceStatus.CONTROLLER_INIT: colorama.Fore.BLUE,
     ServiceStatus.REPLICA_INIT: colorama.Fore.BLUE,
-    ServiceStatus.RUNNING: colorama.Fore.GREEN,
+    ServiceStatus.READY: colorama.Fore.GREEN,
     ServiceStatus.SHUTTING_DOWN: colorama.Fore.YELLOW,
     ServiceStatus.FAILED: colorama.Fore.RED,
 }
