@@ -855,6 +855,8 @@ class Optimizer:
 class DummyResources(resources_lib.Resources):
     """A dummy Resources that has zero egress cost from/to."""
 
+    _REPR = 'DummyResources'
+
     def __repr__(self) -> str:
         return DummyResources._REPR
 
