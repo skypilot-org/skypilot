@@ -1024,15 +1024,14 @@ def storage_refresh() -> None:
                                 source=None,
                                 region=region,
                                 is_sky_managed=True)
-                        break
+                        global_user_state.add_or_update_storage(
+                            s_name, handle, global_user_state.StorageStatus.READY)
             # when storage with S_NAME created for the first time
             else:
                 store_class = storage_lib.StoreType.to_store(storetype)
                 region = storage_lib.get_bucket_region(s_name, storetype)
-                storage_obj = storage_lib.Storage(name=s_name, source=None, region=region, sync_on_reconstruction=False)
-                storage_obj.add_store(storetype)
-            
-            
+                storage_obj = storage_lib.Storage(name=s_name, source=None, sync_on_reconstruction=False)
+                storage_obj.add_store(storetype, region=region)
             """
             else:
                 store_class = storage_lib.StoreType.to_store(storetype)
@@ -1050,8 +1049,8 @@ def storage_refresh() -> None:
                 global_user_state.add_or_update_storage(
                     s_name, handle, global_user_state.StorageStatus.READY)
             """
-                sky_logging.print(f'{green}Added{reset} {bold}'
-                                  f'{storetype.value}{reset} bucket: {s_name}')
+            sky_logging.print(f'{green}Added{reset} {bold}'
+                                f'{storetype.value}{reset} bucket: {s_name}')
 
 
 @usage_lib.entrypoint

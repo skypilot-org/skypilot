@@ -2712,7 +2712,7 @@ class TestStorageWithCredentials:
                                            marks=pytest.mark.cloudflare)])
     def test_storage_refresh(self, ext_bucket_fixture, request, store_type,
                              tmp_local_storage_obj, tmp_state_db_file):
-        # create 1 storage object
+        # internally create 1 storage object
         tmp_local_storage_obj.add_store(store_type)
         # check if created storage appears in state.db
         out = global_user_state.get_storage_names_start_with(
@@ -2734,6 +2734,8 @@ class TestStorageWithCredentials:
 
         # externally create 1 storage object
         bucket_name = request.getfixturevalue(ext_bucket_fixture)
+        # wait unitl created storage gets updated to console
+        time.sleep(5)
         # check if externally created storage does not appear in state.db
         out = global_user_state.get_storage_names_start_with(bucket_name)
         assert bucket_name not in out

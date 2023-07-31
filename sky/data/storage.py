@@ -769,7 +769,7 @@ class Storage(object):
             f'Validation failed for storage source {self.source}, name '
             f'{self.name} and mode {self.mode}. Please check the arguments.')
 
-    def add_store(self, store_type: Union[str, StoreType]) -> AbstractStore:
+    def add_store(self, store_type: Union[str, StoreType], region: str = None) -> AbstractStore:
         """Initializes and adds a new store to the storage.
 
         Invoked by the optimizer after it has selected a store to
@@ -777,6 +777,9 @@ class Storage(object):
 
         Args:
           store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2]
+          region: str; Region to place the bucket in. It is used when
+            external storage state is synced to internal state with
+            sky storage ls --refresh 
         """
         if isinstance(store_type, str):
             store_type = StoreType(store_type)
@@ -802,6 +805,7 @@ class Storage(object):
             store = store_cls(
                 name=self.name,
                 source=self.source,
+                region=region,
                 sync_on_reconstruction=self.sync_on_reconstruction)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
@@ -1226,14 +1230,17 @@ class S3Store(AbstractStore):
         bucket = s3.Bucket(self.name)
 
         try:
-            # Try Public bucket case.
+            # Try Public/Private bucket cases.
             # This line does not error out if the bucket is an external public
             # bucket or if it is a user's bucket that is publicly
             # accessible.
             self.client.head_bucket(Bucket=self.name)
-            if not self.sync_on_reconstruction:
-                return bucket, True
-            return bucket, False
+            # If there are externally created sky managed storage, then sky
+            # storage ls --refresh syncs it to internal state. And this is 
+            # considered as new_bucket as it was not part of state.db before
+            if self.sync_on_reconstruction:
+                return bucket, False
+            return bucket, True
         except aws.botocore_exceptions().ClientError as e:
             error_code = e.response['Error']['Code']
             # AccessDenied error for buckets that are private and not owned by
@@ -1651,7 +1658,12 @@ class GcsStore(AbstractStore):
         """
         try:
             bucket = self.client.get_bucket(self.name)
-            return bucket, False
+            # If there are externally created sky managed storage, then sky
+            # storage ls --refresh syncs it to internal state. And this is 
+            # considered as new_bucket as it was not part of state.db before
+            if self.sync_on_reconstruction:
+                return bucket, False
+            return bucket, True
         except gcp.not_found_exception() as e:
             if isinstance(self.source, str) and self.source.startswith('gs://'):
                 with ux_utils.print_exception_no_traceback():
@@ -1989,7 +2001,12 @@ class R2Store(AbstractStore):
             # bucket or if it is a user's bucket that is publicly
             # accessible.
             self.client.head_bucket(Bucket=self.name)
-            return bucket, False
+            # If there are externally created sky managed storage, then sky
+            # storage ls --refresh syncs it to internal state. And this is 
+            # considered as new_bucket as it was not part of state.db before
+            if self.sync_on_reconstruction:
+                return bucket, False
+            return bucket, True
         except aws.botocore_exceptions().ClientError as e:
             error_code = e.response['Error']['Code']
             # AccessDenied error for buckets that are private and not owned by
