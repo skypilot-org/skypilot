@@ -1,21 +1,21 @@
-# Train Your Own Vicuna on Llama-2
+# Finetune Your Own Vicuna on Llama-2
 
 [Vicuna](https://lmsys.org/blog/2023-03-30-vicuna/) is the first open-source chatbot that performs closely to the ChatGPT, and still is leading the [LLM leaderboard](https://huggingface.co/spaces/lmsys/chatbot-arena-leaderboard) today comparing to all other open-source models.
 
-With the latest [LLaMA 2](https://github.com/facebookresearch/llama/tree/main), we are now able to get a Vicuna model that can be used commercially.
+With the latest [Llama-2](https://github.com/facebookresearch/llama/tree/main), we are now able to get a Vicuna model that can be used commercially.
 
-In this tutorial, we will show you how to train your own Vicuna on LLaMA 2, with your own data, on any cloud, with the help of SkyPilot.
+In this tutorial, we will show you how to train your own Vicuna on Llama-2, with your own data, on any cloud, with the help of SkyPilot.
 
 ## Pre-requisites
 
-1. Apply for the access to the LLaMA 2 model
+1. Apply for the access to the Llama-2 model
 
 Go to the [application page](https://ai.meta.com/resources/models-and-libraries/llama-downloads/) and apply for the access to the model weights. Ensure your huggingface email is the same as the email on the Meta request (the huggingface access may take 1-2 days for approval).
 
 
 2. Get the access token from HuggingFace
 
-Generate a read-only access token on HuggingFace [here](https://huggingface.co/settings/token), and make sure your HuggingFace account can access the LLaMA 2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main).
+Generate a read-only access token on HuggingFace [here](https://huggingface.co/settings/token), and make sure your HuggingFace account can access the Llama-2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main).
 
 Fill the access token in the [train.yaml](train.yaml).
 ```yaml
@@ -23,7 +23,7 @@ envs:
   HF_TOKEN: <your-huggingface-token> # Change to your own huggingface token
 ```
 
-## Train your own Vicuna on LLaMA 2
+## Train your own Vicuna on Llama-2
 
 
 ### Check training data

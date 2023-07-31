@@ -1,9 +1,9 @@
-# Self-Hosted LLaMA 2 Chatbot on Any Cloud
+# Self-Hosted Llama-2 Chatbot on Any Cloud
 
-[LLaMA 2](https://github.com/facebookresearch/llama/tree/main) is the top open-source models on the [Open LLM leaderboard](https://huggingface.co/spaces/HuggingFaceH4/open_llm_leaderboard) today. It has been released with a license that authorizes commercial use. You can deploy a private LLaMA 2 chatbot with SkyPilot in your own cloud with just one simple command.
+[Llama-2](https://github.com/facebookresearch/llama/tree/main) is the top open-source models on the [Open LLM leaderboard](https://huggingface.co/spaces/HuggingFaceH4/open_llm_leaderboard) today. It has been released with a license that authorizes commercial use. You can deploy a private Llama-2 chatbot with SkyPilot in your own cloud with just one simple command.
 
-* [LLaMA 2 release](https://github.com/facebookresearch/llama/tree/main)
-* [LLaMA 2 paper](https://ai.meta.com/research/publications/llama-2-open-foundation-and-fine-tuned-chat-models/)
+* [Llama-2 release](https://github.com/facebookresearch/llama/tree/main)
+* [Llama-2 paper](https://ai.meta.com/research/publications/llama-2-open-foundation-and-fine-tuned-chat-models/)
 
 ## Why use SkyPilot to deploy over commercial hosted solutions?
 
@@ -17,14 +17,14 @@
 
 ## Pre-requisites
 
-1. Apply for the access to the LLaMA 2 model
+1. Apply for the access to the Llama-2 model
 
 Go to the [application page](https://ai.meta.com/resources/models-and-libraries/llama-downloads/) and apply for the access to the model weights.
 
 
 2. Get the access token from huggingface
 
-Generate a read-only access token on huggingface [here](https://huggingface.co/settings/token), and make sure your huggingface account can access the LLaMA 2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main).
+Generate a read-only access token on huggingface [here](https://huggingface.co/settings/token), and make sure your huggingface account can access the Llama-2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main).
 
 Fill the access token in the [chatbot-hf.yaml](chatbot-hf.yaml) and [chatbot-meta.yaml](chatbot-meta.yaml) file.
 ```yaml
@@ -34,15 +34,15 @@ envs:
 ```
 
 
-## Running your own LLaMA 2 chatbot with SkyPilot
+## Running your own Llama-2 chatbot with SkyPilot
 
-You can now host your own LLaMA 2 chatbot with SkyPilot using 1-click.
+You can now host your own Llama-2 chatbot with SkyPilot using 1-click.
 
 1. Start serving the LLaMA-7B-Chat 2 model on a single A100 GPU:
 ```bash
 sky launch -c llama-serve -s chatbot-hf.yaml
 ```
-2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to chat with LLaMA 2.
+2. Check the output of the command. There will be a sharable gradio link (like the last line of the following). Open it in your browser to chat with Llama-2.
 ```
 (task, pid=20933) 2023-04-12 22:08:49 | INFO | gradio_web_server | Namespace(host='0.0.0.0', port=None, controller_url='http://localhost:21001', concurrency_count=10, model_list_mode='once', share=True, moderate=False)
 (task, pid=20933) 2023-04-12 22:08:49 | INFO | stdout | Running on local URL:  http://0.0.0.0:7860
@@ -50,7 +50,7 @@ sky launch -c llama-serve -s chatbot-hf.yaml
 ```
 
 <p align="center">
-  <img src="https://i.imgur.com/cLqulb0.gif" alt="LLaMA 2 Demo"/>
+  <img src="https://i.imgur.com/cLqulb0.gif" alt="Llama-2 Demo"/>
 </p>
 
 3. **Optional**: Try other GPUs:
@@ -63,7 +63,7 @@ sky launch -c llama-serve-v100 -s chatbot-hf.yaml --gpus V100:8
 sky launch -c llama-serve -s chatbot-hf.yaml --env MODEL_SIZE=13
 ```
 
-5. **Optional**: Serve the **70B** LLaMA 2 model:
+5. **Optional**: Serve the **70B** Llama-2 model:
 ```bash
 sky launch -c llama-serve-70b -s chatbot-hf.yaml --env MODEL_SIZE=70 --gpus A100-80GB:2
 ```
@@ -71,12 +71,12 @@ sky launch -c llama-serve-70b -s chatbot-hf.yaml --env MODEL_SIZE=70 --gpus A100
 ![70B model](https://i.imgur.com/jEM8w3r.png)
 
 
-## How to run LLaMA 2 chatbot with the FAIR model?
+## How to run Llama-2 chatbot with the FAIR model?
 
 You can also host the official FAIR model without using huggingface and gradio.
 
 
-1. Launch the LLaMA 2 chatbot on the cloud:
+1. Launch the Llama-2 chatbot on the cloud:
 
     ```bash
     sky launch -c llama chatbot-meta.yaml
