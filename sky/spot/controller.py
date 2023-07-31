@@ -1,6 +1,7 @@
 """Controller: handles the life cycle of a managed spot cluster (job)."""
 import argparse
 import multiprocessing
+import os
 import pathlib
 import time
 import traceback
@@ -73,6 +74,36 @@ class SpotController:
             task_envs[constants.TASK_ID_LIST_ENV_VAR] = '\n'.join(
                 job_id_env_vars)
             task.update_envs(task_envs)
+
+    def _download_log_and_stream(self, handle):
+        """ Download the logs from spot cluster, and stream them
+        
+        We do not stream the logs from the spot cluster directly, as the donwload
+        and stream should be faster, as more reliable to preemptions or ssh
+        disconnection during the streaming.
+        """
+        spot_job_logs_dir = os.path.join(
+            constants.SKY_LOGS_DIRECTORY, 'spot_jobs')
+        os.makedirs(spot_job_logs_dir, exist_ok=True)
+        try:
+            log_dirs = self._backend.sync_down_logs(
+                handle,
+                # Download the log for the latest job.
+                job_ids=None,
+                local_dir=spot_job_logs_dir)
+        except exceptions.CommandError as e:
+            logger.info(f'Failed to download the logs: '
+                        f'{common_utils.format_exception(e)}')
+        else:
+            log_dir = list(log_dirs.values())[0]
+
+            # Print the logs to the console.
+            for log_file in os.listdir(log_dir):
+                if log_file.endswith('.log'):
+                    with open(os.path.join(log_dir, log_file)) as f:
+                        logger.info(f.read())
+            logger.info(f'\n== End of logs (ID: {self._job_id} ==')
+
 
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring spot cluster status and handling recovery.
@@ -237,13 +268,8 @@ class SpotController:
                     logger.info(
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
-                    # TODO(zhwu): Download the logs, and stream them from the
-                    # local disk, instead of streaming them from the spot
-                    # cluster, to make it faster and more reliable.
-                    returncode = self._backend.tail_logs(
-                        handle, None, spot_job_id=self._job_id)
-                    logger.info(f'\n== End of logs (ID: {self._job_id}, '
-                                f'tail_logs returncode: {returncode}) ==')
+                    
+                    self._download_log_and_stream(handle)
                     spot_status_to_set = spot_state.SpotStatus.FAILED
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
                         spot_status_to_set = spot_state.SpotStatus.FAILED_SETUP
