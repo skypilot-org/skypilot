@@ -89,16 +89,18 @@ def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
     topo_order = dag.tasks
 
     final_plan = {}
+    min_objective = np.inf
+    resources_stack = []
 
     def _optimize_by_brute_force(tasks, plan):
         """Optimizes a Sky DAG in a brute-force manner."""
         # NOTE: Here we assume that the Sky DAG is topologically sorted.
-        nonlocal final_plan
+        nonlocal final_plan, min_objective
         task = tasks[0]
-        min_objective = np.inf
         for resources in task.get_resources():
             assert task.name in DUMMY_NODES or resources.is_launchable()
             plan[task] = resources
+            resources_stack.append(resources)
             if len(tasks) == 1:
                 if minimize_cost:
                     objective = sky.Optimizer._compute_total_cost(
@@ -106,14 +108,17 @@ def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
                 else:
                     objective = sky.Optimizer._compute_total_time(
                         graph, topo_order, plan)
+                if objective < min_objective:
+                    final_plan = {
+                        topo_order[i]: resources_stack[i]
+                        for i in range(len(topo_order))
+                    }
+                    min_objective = objective
             else:
-                objective = _optimize_by_brute_force(tasks[1:], plan)
-            if objective < min_objective:
-                final_plan[task] = resources
-                min_objective = objective
-        return min_objective
+                _optimize_by_brute_force(tasks[1:], plan)
+            resources_stack.pop()
 
-    min_objective = _optimize_by_brute_force(topo_order, {})
+    _optimize_by_brute_force(topo_order, {})
     print(final_plan)
     return min_objective
 
