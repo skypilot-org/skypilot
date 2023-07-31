@@ -7,6 +7,7 @@ from collections import defaultdict
 import typing
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 
 from sky import exceptions
@@ -353,26 +354,33 @@ def get_accelerator_hourly_cost(accelerator: str,
                                 use_spot: bool = False,
                                 region: Optional[str] = None,
                                 zone: Optional[str] = None) -> float:
-    # NOTE: As of 2022/4/13, Prices of TPU v3-64 to v3-2048 are not available on
-    # https://cloud.google.com/tpu/pricing. We put estimates in gcp catalog.
-    if region is None:
-        for tpu_region in _TPU_REGIONS:
-            df = _get_accelerator(_df, accelerator, count, tpu_region)
-            if len(set(df['Price'])) == 1:
-                region = tpu_region
-                break
 
-    df = _get_accelerator(_df, accelerator, count, region, zone)
-    assert len(set(df['Price'])) == 1, df
-    if not use_spot:
-        return df['Price'].iloc[0]
+    # TODO(tian): Maybe use pandas native API to speed up the search.
+    def get_reagion_cheapest_price(region: str) -> float:
+        df = _get_accelerator(_df, accelerator, count, region, zone)
+        assert len(set(df['Price'])) == 1, df
+        if not use_spot:
+            return df['Price'].iloc[0]
 
-    cheapest_idx = df['SpotPrice'].idxmin()
-    if pd.isnull(cheapest_idx):
-        return df['Price'].iloc[0]
+        cheapest_idx = df['SpotPrice'].idxmin()
+        if pd.isnull(cheapest_idx):
+            return df['Price'].iloc[0]
 
-    cheapest = df.loc[cheapest_idx]
-    return cheapest['SpotPrice']
+        cheapest = df.loc[cheapest_idx]
+        return cheapest['SpotPrice']
+
+    if region is not None:
+        return get_reagion_cheapest_price(region)
+
+    current_minimal = np.inf
+    for region in set(_df['Region']):
+        try:
+            current_minimal = min(current_minimal,
+                                    get_reagion_cheapest_price(region))
+        except AssertionError:
+            continue
+
+    return current_minimal
 
 
 def list_accelerators(
