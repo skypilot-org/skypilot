@@ -186,6 +186,8 @@ class SkyPilotInfraProvider(InfraProvider):
                 return status_lib.ReplicaStatus.UNHEALTHY
             return status_lib.ReplicaStatus.INIT
 
+        # TODO(tian): Return failed replica info here if it is already
+        # be torn down.
         clusters = sky.global_user_state.get_clusters()
         infos = []
         for cluster in clusters:
