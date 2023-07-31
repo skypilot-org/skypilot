@@ -1231,6 +1231,8 @@ class S3Store(AbstractStore):
             # bucket or if it is a user's bucket that is publicly
             # accessible.
             self.client.head_bucket(Bucket=self.name)
+            if not self.sync_on_reconstruction:
+                return bucket, True
             return bucket, False
         except aws.botocore_exceptions().ClientError as e:
             error_code = e.response['Error']['Code']
@@ -1252,7 +1254,7 @@ class S3Store(AbstractStore):
 
         # If bucket cannot be found in both private and public settings,
         # the bucket is to be created by Sky. However, creation is skipped if
-        # Store object is being reconstructed for deletion.
+        # Store object is being reconstructed for deletion or ls refresh.
         if self.sync_on_reconstruction:
             bucket = self._create_s3_bucket(self.name)
             return bucket, True

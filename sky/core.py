@@ -1026,6 +1026,13 @@ def storage_refresh() -> None:
                                 is_sky_managed=True)
                         break
             # when storage with S_NAME created for the first time
+            else:
+                store_class = storage_lib.StoreType.to_store(storetype)
+                region = storage_lib.get_bucket_region(s_name, storetype)
+                storage_obj = storage_lib.Storage(name=s_name, source=None, region=region, sync_on_reconstruction=False)
+                storage_obj.add_store(storetype)
+            
+            
             """
             else:
                 store_class = storage_lib.StoreType.to_store(storetype)
