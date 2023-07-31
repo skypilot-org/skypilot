@@ -109,3 +109,12 @@ sky spot launch -n vicuna-2 train.yaml \
   --env WANDB_API_KEY=<your-wandb-api-key>
 ```
 
+### Serve your model
+
+After the training is done, you can serve your model with the following command:
+
+```bash
+sky launch -c serve serve.yaml --env MODEL_CKPT=<your-bucket-name>/chatbot/7b
+```
+
+> **Tip**: You can also switch to a cheaper accelerator, such as L4, to save cost, by adding `--gpus L4` to the above command.
