@@ -388,7 +388,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         output = e.output.decode('utf-8')
         suffix = f'\nError message: {output}'
         if 'already exists' in output:
-            logger.warning(
+            logger.debug(
                 f'Key {key_label} already exists in the cluster, using it...')
         elif any(err in output for err in ['connection refused', 'timeout']):
             with ux_utils.print_exception_no_traceback():

@@ -1,7 +1,7 @@
 """GCP cloud adaptors"""
 
 # pylint: disable=import-outside-toplevel
-from functools import wraps
+import functools
 
 googleapiclient = None
 google = None
@@ -9,7 +9,7 @@ google = None
 
 def import_package(func):
 
-    @wraps(func)
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         global googleapiclient, google
         if googleapiclient is None or google is None:

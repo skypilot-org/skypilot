@@ -1,5 +1,6 @@
 #!/bin/bash
 # Builds the Dockerfile_k8s image as the SkyPilot image.
+# Optionally, if -p is specified, pushes the image to the registry.
 # Uses buildx to build the image for both amd64 and arm64.
 # If -p flag is specified, pushes the image to the registry.
 # If -g flag is specified, builds the GPU image in Dockerfile_k8s_gpu. GPU image is built only for amd64.
@@ -52,10 +53,10 @@ fi
 # Load the right image depending on the architecture of the host machine (Apple Silicon or Intel)
 if [[ $(uname -m) == "arm64" ]]; then
   echo "Loading image for arm64 (Apple Silicon etc.)"
-  docker buildx build --load --platform linux/arm64 -t us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest -f Dockerfile_k8s ./sky
+  docker buildx build --load --platform linux/arm64 -t $TAG -f Dockerfile_k8s ./sky
 elif [[ $(uname -m) == "x86_64" ]]; then
   echo "Building for amd64 (Intel CPUs)"
-  docker buildx build --load --platform linux/amd64 -t us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest -f Dockerfile_k8s ./sky
+  docker buildx build --load --platform linux/amd64 -t $TAG -f Dockerfile_k8s ./sky
 else
   echo "Unsupported architecture: $(uname -m)"
   exit 1
@@ -67,5 +68,3 @@ if [[ $gpu ]]; then
 else
   docker tag $TAG skypilot:latest
 fi
-
-docker buildx build --push --platform linux/amd64 -t us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest-gpu -f Dockerfile_k8s_gpu ./sky

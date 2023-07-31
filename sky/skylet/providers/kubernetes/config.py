@@ -4,6 +4,7 @@ import math
 import re
 
 from sky.adaptors import kubernetes
+from sky.skylet.providers.kubernetes import utils
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,9 @@ MEMORY_SIZE_UNITS = {
 }
 
 log_prefix = 'KubernetesNodeProvider: '
+
+# Timeout for deleting a Kubernetes resource (in seconds).
+DELETION_TIMEOUT = 90
 
 
 class InvalidNamespaceError(ValueError):
@@ -55,10 +59,7 @@ def not_provided_msg(resource_type):
 
 
 def bootstrap_kubernetes(config):
-    if config['provider'].get('_operator'):
-        namespace = config['provider']['namespace']
-    else:
-        namespace = _configure_namespace(config['provider'])
+    namespace = utils.get_current_kube_config_context_namespace()
 
     _configure_services(namespace, config['provider'])
 
@@ -84,8 +85,7 @@ def fillout_resources_kubernetes(config):
     for node_type in node_types:
 
         node_config = node_types[node_type]['node_config']
-        # The next line is for compatibility with configs like
-        # kubernetes/example-ingress.yaml,
+        # The next line is for compatibility with configs which define pod specs
         # cf. KubernetesNodeProvider.create_node().
         pod = node_config.get('pod', node_config)
         container_data = pod['spec']['containers'][0]
@@ -184,34 +184,6 @@ def _parse_memory_resource(resource):
     number, unit_index = [item.strip() for item in memory_size.split()]
     unit_index = unit_index[0]
     return float(number) * MEMORY_SIZE_UNITS[unit_index]
-
-
-def _configure_namespace(provider_config):
-    namespace_field = 'namespace'
-    if namespace_field not in provider_config:
-        raise ValueError('Must specify namespace in Kubernetes config.')
-
-    namespace = provider_config[namespace_field]
-    field_selector = f'metadata.name={namespace}'
-    try:
-        namespaces = kubernetes.core_api().list_namespace(
-            field_selector=field_selector).items
-    except kubernetes.api_exception():
-        logger.warning(log_prefix +
-                       not_checking_msg(namespace_field, namespace))
-        return namespace
-
-    if len(namespaces) > 0:
-        assert len(namespaces) == 1
-        logger.info(log_prefix + using_existing_msg(namespace_field, namespace))
-        return namespace
-
-    logger.info(log_prefix + not_found_msg(namespace_field, namespace))
-    namespace_config = kubernetes.client.V1Namespace(
-        metadata=kubernetes.client.V1ObjectMeta(name=namespace))
-    kubernetes.core_api().create_namespace(namespace_config)
-    logger.info(log_prefix + created_msg(namespace_field, namespace))
-    return namespace
 
 
 def _configure_autoscaler_service_account(namespace, provider_config):

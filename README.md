@@ -27,6 +27,7 @@
 
 ----
 :fire: *News* :fire:
+- [July, 2023] Self-Hosted **LLaMA 2 Chatbot** on Any Cloud: [**example**](./llm/llama-2/)
 - [June, 2023] Serving LLM **24x Faster On the Cloud** with vLLM and SkyPilot: [**example**](./llm/vllm/), [**blog post**](https://blog.skypilot.co/serving-llm-24x-faster-on-the-cloud-with-vllm-and-skypilot/)
 - [June, 2023] [**Two new clouds supported**](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html): Samsung SCP and Oracle OCI!
 - [April, 2023] **[**SkyPilot YAMLs released**](./llm/vicuna/) for finetuning & serving the Vicuna model with a single command**!
@@ -71,7 +72,7 @@ You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/
 - [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html)
 - [CLI reference](https://skypilot.readthedocs.io/en/latest/reference/cli.html)
 
-## SkyPilot in 1 minute
+## SkyPilot in 1 Minute
 
 A SkyPilot task specifies: resource requirements, data to be synced, setup commands, and the task commands. 
 
@@ -125,20 +126,32 @@ SkyPilot then performs the heavy-lifting for you, including:
 
 Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) to get started with SkyPilot.
 
-## Learn more
+## More Information
+To learn more, see our [Documentation](https://skypilot.readthedocs.io/en/latest/) and [Tutorials](https://github.com/skypilot-org/skypilot-tutorial).
 
-- [Documentation](https://skypilot.readthedocs.io/en/latest/)
-- [Example: HuggingFace](https://skypilot.readthedocs.io/en/latest/getting-started/tutorial.html) 
-- [Tutorials](https://github.com/skypilot-org/skypilot-tutorial) 
-- [YAML reference](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html)
-- Framework examples: [PyTorch DDP](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml),  [Distributed](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py) [TensorFlow](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml), [JAX/Flax on TPU](https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml), [Stable Diffusion](https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion), [Detectron2](https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml), [programmatic grid search](https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py), [Docker](https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml), and [many more](./examples).
+Runnable examples:
+- LLMs on SkyPilot
+  - [Self-Hosted LLaMA 2 Chatbot](./llm/llama-2/)
+  - [Vicuna chatbots: Training & Serving](./llm/vicuna/) (from official Vicuna team)
+  - [vLLM: Serving LLM 24x Faster On the Cloud](./llm/vllm/) (from official vLLM team)
+  - [QLoRA](https://github.com/artidoro/qlora/pull/132)
+  - [LLaMA-LoRA-Tuner](https://github.com/zetavg/LLaMA-LoRA-Tuner#run-on-a-cloud-service-via-skypilot)
+  - [Tabby: Self-hosted AI coding assistant](https://github.com/TabbyML/tabby/blob/bed723fcedb44a6b867ce22a7b1f03d2f3531c1e/experimental/eval/skypilot.yaml)
+  - [LocalGPT](./llm/localgpt)
+  - Add yours here & see more in [`llm/`](./llm)!
+- Framework examples: [PyTorch DDP](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml), [DeepSpeed](./examples/deepspeed-multinode/sky.yaml), [JAX/Flax on TPU](https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml), [Stable Diffusion](https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion), [Detectron2](https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml), [Distributed](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py) [TensorFlow](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml), [programmatic grid search](https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py), [Docker](https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml), and [many more (`examples/`)](./examples).
 
-More information:
-- [SkyPilot Blog](https://blog.skypilot.co/)
-  - [Introductory blog post](https://blog.skypilot.co/introducing-skypilot/)
-- [NSDI 2023 paper & talk](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng)
+Follow updates:
+- [Twitter](https://twitter.com/skypilot_org)
+- [Slack](http://slack.skypilot.co)
+- [SkyPilot Blog](https://blog.skypilot.co/) ([Introductory blog post](https://blog.skypilot.co/introducing-skypilot/))
 
-## Issues, feature requests, and questions
+Read the research:
+- [SkyPilot paper](https://www.usenix.org/system/files/nsdi23-yang-zongheng.pdf) and [talk](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng) (NSDI 2023)
+- [Sky Computing whitepaper](https://arxiv.org/abs/2205.07147)
+- [Sky Computing vision paper](https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf) (HotOS 2021)
+
+## Support and Questions
 We are excited to hear your feedback! 
 * For issues and feature requests, please [open a GitHub issue](https://github.com/skypilot-org/skypilot/issues/new).
 * For questions, please use [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
