@@ -2332,9 +2332,15 @@ def start(
     to_start = []
 
     if not clusters and not all:
-        raise click.UsageError(
-            'sky start requires either a cluster name (see `sky status`) '
-            'or --all.')
+        # UX: frequently users may have only 1 cluster. In this case, be smart
+        # and default to that unique choice.
+        all_cluster_names = global_user_state.get_cluster_names_start_with('')
+        if len(all_cluster_names) <= 1:
+            clusters = all_cluster_names
+        else:
+            raise click.UsageError(
+                '`sky start` requires either a cluster name or glob '
+                '(see `sky status`), or the -a/--all flag.')
 
     if all:
         if len(clusters) > 0:
@@ -2348,7 +2354,11 @@ def start(
             if cluster['name'] not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
         ]
 
-    if clusters:
+    if not clusters:
+        click.echo('Cluster(s) not found (tip: see `sky status`). Do you '
+                   'mean to use `sky launch` to provision a new cluster?')
+        return
+    else:
         # Get GLOB cluster names
         clusters = _get_glob_clusters(clusters)
         local_clusters = onprem_utils.check_and_get_local_clusters()
@@ -2603,9 +2613,16 @@ def _down_or_stop_clusters(
     else:
         command = 'stop'
     if not names and apply_to_all is None:
-        raise click.UsageError(
-            f'`sky {command}` requires either a cluster name (see `sky status`)'
-            ' or --all.')
+        # UX: frequently users may have only 1 cluster. In this case, 'sky
+        # stop/down' without args should be smart and default to that unique
+        # choice.
+        all_cluster_names = global_user_state.get_cluster_names_start_with('')
+        if len(all_cluster_names) <= 1:
+            names = all_cluster_names
+        else:
+            raise click.UsageError(
+                f'`sky {command}` requires either a cluster name or glob '
+                '(see `sky status`), or the -a/--all flag.')
 
     operation = 'Terminating' if down else 'Stopping'
     if idle_minutes_to_autostop is not None:
@@ -2695,7 +2712,7 @@ def _down_or_stop_clusters(
     usage_lib.record_cluster_name_for_current_operation(clusters)
 
     if not clusters:
-        click.echo('\nCluster(s) not found (tip: see `sky status`).')
+        click.echo('Cluster(s) not found (tip: see `sky status`).')
         return
 
     if not no_confirm and len(clusters) > 0:
