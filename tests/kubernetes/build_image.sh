@@ -8,7 +8,7 @@
 # -p: Push the image to the registry
 # -g: Build the GPU image
 
-TAG=us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest
+TAG=us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot
 
 # Parse command line arguments
 while getopts ":pg" opt; do
@@ -30,7 +30,9 @@ done
 
 # Add -gpu to the tag if the GPU image is being built
 if [[ $gpu ]]; then
-  TAG=$TAG-gpu
+  TAG=$TAG-gpu:latest
+else
+  TAG=$TAG:latest
 fi
 
 # Navigate to the root of the project (inferred from git)

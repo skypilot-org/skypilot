@@ -165,9 +165,10 @@ class Kubernetes(clouds.Cloud):
                                                              'Kubernetes.',
     }
 
-    # TODO(romilb): Add GPU Support - have GPU-enabled image.sky
+    # TODO(romilb): Add GPU Support - toggle between image depending on chosen
+    #  accelerator type.
     IMAGE = 'us-central1-docker.pkg.dev/' \
-            'skypilot-375900/skypilotk8s/skypilot:latest'
+            'skypilot-375900/skypilotk8s/skypilot-gpu:latest'
 
     @classmethod
     def _cloud_unsupported_features(
@@ -295,19 +296,12 @@ class Kubernetes(clouds.Cloud):
 
         # resources.memory and cpus are None if they are not explicitly set.
         # We fetch the default values for the instance type in that case.
-        cpus, mem = self.get_vcpus_mem_from_instance_type(
-            resources.instance_type)
-        acc_count = 0
-        acc_type = None
-
-        # Add accelerator variables if they are set.
-        accelerators = resources.accelerators
-        if accelerators is not None:
-            assert len(accelerators) == 1, resources
-            acc_type, acc_count = list(accelerators.items())[0]
-            # TODO(romilb): Add accelerator type support.
-            # For now, hacking back to None
-            acc_type = None
+        k = KubernetesInstanceType.from_instance_type(resources.instance_type)
+        cpus = k.cpus
+        mem = k.memory
+        # Optionally populate accelerator information.
+        acc_count = k.accelerator_count if k.accelerator_count else 0
+        acc_type = k.accelerator_type if k.accelerator_type else ''
 
         vars = {
             'instance_type': resources.instance_type,

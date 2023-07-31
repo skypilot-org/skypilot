@@ -15,10 +15,12 @@ RUN sudo mkdir -p /var/run/sshd && \
     cd /etc/ssh/ && \
     ssh-keygen -A
 
-# Setup new user named sky and add to sudoers. Also add /opt/conda/bin to sudo path.
+# Setup new user named sky and add to sudoers. \
+# Also add /opt/conda/bin to sudo path and give sky user access to /home/ray
 RUN sudo useradd -m -s /bin/bash sky && \
     sudo /bin/bash -c 'echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers' && \
-    sudo /bin/bash -c "echo 'Defaults        secure_path=\"/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"' > /etc/sudoers.d/sky"
+    sudo /bin/bash -c "echo 'Defaults        secure_path=\"/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"' > /etc/sudoers.d/sky" && \
+    sudo chmod -R a+rwx /home/ray
 
 
 # Switch to sky user

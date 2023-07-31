@@ -181,6 +181,7 @@ available_node_types:
             requests:
               cpu: {{cpus}}
               memory: {{memory}}G
+              nvidia.com/gpu: {{accelerator_count}}
             limits:
               # The maximum memory that this pod is allowed to use. The
               # limit will be detected by ray and split to use 10% for
@@ -191,6 +192,7 @@ available_node_types:
               # cause problems for other pods.
               cpu: {{cpus}}
               memory: {{memory}}G
+              nvidia.com/gpu: {{accelerator_count}}
   ray_worker_default:
     # Minimum number of Ray workers of this Pod type.
     min_workers: {{num_nodes - 1}}
