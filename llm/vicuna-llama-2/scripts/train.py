@@ -47,7 +47,6 @@ from fastchat.conversation import SeparatorStyle
 from fastchat.model.model_adapter import get_conversation_template
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
-resume_from_checkpoint = False
 
 
 @dataclass
@@ -275,7 +274,6 @@ class CheckpointCallback(transformers.TrainerCallback):
 
 def cleanup_incomplete_checkpoints(output_dir):
     """Remove incomplete checkpoints."""
-    global resume_from_checkpoint
     checkpoints = list(pathlib.Path(output_dir).glob('checkpoint-*'))
     checkpoints = [c for c in checkpoints if c.name.split('-')[-1].isdigit()]
     checkpoints = sorted(checkpoints,
@@ -283,10 +281,9 @@ def cleanup_incomplete_checkpoints(output_dir):
                          reverse=True)
     for checkpoint in checkpoints:
         if not (checkpoint / 'complete').exists():
-            print(f'Renaming incomplete checkpoint {checkpoint}')
+            print(f'Removing incomplete checkpoint {checkpoint}')
             shutil.rmtree(checkpoint)
         else:
-            resume_from_checkpoint = True
             break
 
 
@@ -299,6 +296,12 @@ def train():
     local_rank = training_args.local_rank
     if local_rank == 0:
         cleanup_incomplete_checkpoints(training_args.output_dir)
+    
+    # Check the existence of checkpoints in all processes
+    resume_from_checkpoint = False
+    checkpoints = list(pathlib.Path(training_args.output_dir).glob('checkpoint-*'))
+    if checkpoints:
+        resume_from_checkpoint = True
     torch.distributed.barrier()
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path,
