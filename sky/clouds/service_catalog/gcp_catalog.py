@@ -34,12 +34,6 @@ _image_df = common.read_catalog('gcp/images.csv',
 _quotas_df = common.read_catalog('gcp/accelerator_quota_mapping.csv',
                                  pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
-_TPU_REGIONS = [
-    'us-central1',
-    'europe-west4',
-    'asia-east1',
-]
-
 # We will select from the following three CPU instance families:
 _DEFAULT_INSTANCE_FAMILY = [
     # This is the latest general-purpose instance family as of Mar 2023.
@@ -373,10 +367,10 @@ def get_accelerator_hourly_cost(accelerator: str,
         return get_reagion_cheapest_price(region)
 
     current_minimal = np.inf
-    for region in set(_df['Region']):
+    for current_region in set(_df['Region']):
         try:
             current_minimal = min(current_minimal,
-                                  get_reagion_cheapest_price(region))
+                                  get_reagion_cheapest_price(current_region))
         except AssertionError:
             continue
 
