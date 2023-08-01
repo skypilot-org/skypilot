@@ -1005,50 +1005,11 @@ def storage_refresh() -> None:
         # check if anything in external state doesn't exist in state.db
         only_in_external_state = external_buckets_status[storetype].difference(
             internal_buckets_status[storetype])
-        # add storage that exists in external state but not in state.db 
+        # add storage that exists in external state but not in state.db
         for s_name in only_in_external_state:
-            # when storage with S_NAME is already in internal_state from different
-            # cloud storage provider. Obtain StorageMetadata to update handle
-            for s_type in internal_buckets_status.keys():
-                if s_type != storetype and s_name in internal_buckets_status[
-                        s_type]:
-                    handle = \
-                        global_user_state.get_handle_from_storage_name(s_name)
-                    if handle is not None:
-                        region = storage_lib.get_bucket_region(
-                            s_name, storetype)
-                        store_class = storage_lib.StoreType.to_store(storetype)
-                        handle.sky_stores[
-                            storetype] = store_class.StoreMetadata(
-                                name=s_name,
-                                source=None,
-                                region=region,
-                                is_sky_managed=True)
-                        global_user_state.add_or_update_storage(
-                            s_name, handle, global_user_state.StorageStatus.READY)
-            # when storage with S_NAME created for the first time
-            else:
-                store_class = storage_lib.StoreType.to_store(storetype)
-                region = storage_lib.get_bucket_region(s_name, storetype)
-                storage_obj = storage_lib.Storage(name=s_name, source=None, sync_on_reconstruction=False)
-                storage_obj.add_store(storetype, region=region)
-            """
-            else:
-                store_class = storage_lib.StoreType.to_store(storetype)
-                region = storage_lib.get_bucket_region(s_name, storetype)
-                store_metadata = store_class.StoreMetadata(name=s_name,
-                                                           source=None,
-                                                           region=region,
-                                                           is_sky_managed=True)
-                handle = storage_lib.Storage.StorageMetadata(
-                    storage_name=s_name,
-                    source=None,
-                    sky_stores={storetype: store_metadata})
-            # update the externally created storage
-            if handle is not None:
-                global_user_state.add_or_update_storage(
-                    s_name, handle, global_user_state.StorageStatus.READY)
-            """
+            region = storage_lib.get_bucket_region(s_name, storetype)
+            storage_obj = storage_lib.Storage(name=s_name, source=None, sync_on_reconstruction=False)
+            storage_obj.add_store(storetype, region=region)
             sky_logging.print(f'{green}Added{reset} {bold}'
                                 f'{storetype.value}{reset} bucket: {s_name}')
 
