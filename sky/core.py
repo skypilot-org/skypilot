@@ -1008,10 +1008,12 @@ def storage_refresh() -> None:
         # add storage that exists in external state but not in state.db
         for s_name in only_in_external_state:
             region = storage_lib.get_bucket_region(s_name, storetype)
-            storage_obj = storage_lib.Storage(name=s_name, source=None, sync_on_reconstruction=False)
+            storage_obj = storage_lib.Storage(name=s_name,
+                                              source=None,
+                                              sync_on_reconstruction=False)
             storage_obj.add_store(storetype, region=region)
             sky_logging.print(f'{green}Added{reset} {bold}'
-                                f'{storetype.value}{reset} bucket: {s_name}')
+                              f'{storetype.value}{reset} bucket: {s_name}')
 
 
 @usage_lib.entrypoint

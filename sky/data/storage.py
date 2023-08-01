@@ -106,18 +106,6 @@ class StoreType(enum.Enum):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unknown store type: {store}')
 
-    @classmethod
-    def to_store(cls, storetype: 'StoreType') -> 'AbstractStore':
-        if storetype == StoreType.S3:
-            return S3Store
-        elif storetype == StoreType.GCS:
-            return GcsStore
-        elif storetype == StoreType.R2:
-            return R2Store
-        else:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Unknown store type: {storetype}')
-
 
 def get_sky_managed_bucket_names(storetype: 'StoreType') -> Set[str]:
     """Gets a set of sky managed buckets from AWS S3
@@ -168,9 +156,9 @@ def get_sky_managed_bucket_names(storetype: 'StoreType') -> Set[str]:
     else:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Unknown store type: {storetype}')
-        
+
     return sky_managed_buckets
-    
+
 
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
@@ -771,7 +759,9 @@ class Storage(object):
             f'Validation failed for storage source {self.source}, name '
             f'{self.name} and mode {self.mode}. Please check the arguments.')
 
-    def add_store(self, store_type: Union[str, StoreType], region: str = None) -> AbstractStore:
+    def add_store(self,
+                  store_type: Union[str, StoreType],
+                  region: Optional[str] = None) -> AbstractStore:
         """Initializes and adds a new store to the storage.
 
         Invoked by the optimizer after it has selected a store to
@@ -1242,7 +1232,7 @@ class S3Store(AbstractStore):
             # accessible.
             self.client.head_bucket(Bucket=self.name)
             # If there are externally created sky managed storage, then sky
-            # storage ls --refresh syncs it to internal state. And this is 
+            # storage ls --refresh syncs it to internal state. And this is
             # considered as new_bucket as it was not part of state.db before
             if self.sync_on_reconstruction:
                 return bucket, False
@@ -1673,7 +1663,7 @@ class GcsStore(AbstractStore):
         try:
             bucket = self.client.get_bucket(self.name)
             # If there are externally created sky managed storage, then sky
-            # storage ls --refresh syncs it to internal state. And this is 
+            # storage ls --refresh syncs it to internal state. And this is
             # considered as new_bucket as it was not part of state.db before
             if self.sync_on_reconstruction:
                 return bucket, False
@@ -2024,7 +2014,7 @@ class R2Store(AbstractStore):
             # accessible.
             self.client.head_bucket(Bucket=self.name)
             # If there are externally created sky managed storage, then sky
-            # storage ls --refresh syncs it to internal state. And this is 
+            # storage ls --refresh syncs it to internal state. And this is
             # considered as new_bucket as it was not part of state.db before
             if self.sync_on_reconstruction:
                 return bucket, False

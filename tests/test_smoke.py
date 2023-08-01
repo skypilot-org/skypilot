@@ -2749,8 +2749,10 @@ class TestStorageWithCredentials:
                 mode=storage_lib.StorageMode.COPY)
 
     @pytest.fixture
-    def tmp_awscli_bucket(self, tmp_bucket_name):
+    def tmp_awscli_bucket(self, tmp_bucket_name, request):
         # Creates a temporary bucket using awscli
+        # request.node.originalname is the name of the calling test
+        need_tagging = (request.node.originalname == 'test_storage_refresh')
         try:
             subprocess.check_output(
                 ['aws', 's3', 'mb', f's3://{tmp_bucket_name}'],
@@ -2763,19 +2765,23 @@ class TestStorageWithCredentials:
                 tmp_bucket_name = f'{tmp_bucket_name}-2'
                 subprocess.check_call(
                     ['aws', 's3', 'mb', f's3://{tmp_bucket_name}'])
-        cmd = f'aws s3api put-bucket-tagging --bucket {tmp_bucket_name} --tagging \'TagSet=[{{Key=skymanaged,Value=sky}}]\''
-        subprocess.check_call(cmd, shell=True)
+        if need_tagging:
+            cmd = f'aws s3api put-bucket-tagging --bucket {tmp_bucket_name} --tagging \'TagSet=[{{Key=skymanaged,Value=sky}}]\''
+            subprocess.check_call(cmd, shell=True)
         yield tmp_bucket_name
         subprocess.check_call(
             ['aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force'])
 
     @pytest.fixture
-    def tmp_gsutil_bucket(self, tmp_bucket_name):
+    def tmp_gsutil_bucket(self, tmp_bucket_name, request):
         # Creates a temporary bucket using gsutil
+        # request.node.originalname is the name of the calling test
+        need_label = (request.node.originalname == 'test_storage_refresh')
         try:
             subprocess.check_output(['gsutil', 'mb', f'gs://{tmp_bucket_name}'])
-            cmd = f'gsutil label ch -l "skymanaged:sky" gs://{tmp_bucket_name}'
-            subprocess.check_output(cmd, shell=True, stderr=subprocess.PIPE)
+            if need_label:
+                cmd = f'gsutil label ch -l "skymanaged:sky" gs://{tmp_bucket_name}'
+                subprocess.check_output(cmd, shell=True, stderr=subprocess.PIPE)
         except subprocess.CalledProcessError as e:
             # To avoid errors in test_storage_refresh due to immediate
             # gcs bucket recreation after deletion, unique name is created.
@@ -2785,8 +2791,11 @@ class TestStorageWithCredentials:
                 tmp_bucket_name = f'{tmp_bucket_name}-2'
                 subprocess.check_output(
                     ['gsutil', 'mb', f'gs://{tmp_bucket_name}'])
-                cmd = f'gsutil label ch -l "skymanaged:sky" gs://{tmp_bucket_name}'
-                subprocess.check_output(cmd, shell=True, stderr=subprocess.PIPE)
+                if need_label:
+                    cmd = f'gsutil label ch -l "skymanaged:sky" gs://{tmp_bucket_name}'
+                    subprocess.check_output(cmd,
+                                            shell=True,
+                                            stderr=subprocess.PIPE)
         yield tmp_bucket_name
         try:
             subprocess.check_output(
@@ -2799,15 +2808,18 @@ class TestStorageWithCredentials:
                 pass
 
     @pytest.fixture
-    def tmp_awscli_bucket_r2(self, tmp_bucket_name):
+    def tmp_awscli_bucket_r2(self, tmp_bucket_name, request):
         # Creates a temporary bucket using awscli
+        # request.node.originalname is the name of the calling test
+        need_tagging = (request.node.originalname == 'test_storage_refresh')
         endpoint_url = cloudflare.create_endpoint()
         subprocess.check_call(
             f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 mb s3://{tmp_bucket_name} --endpoint {endpoint_url} --profile=r2',
             shell=True,
             stderr=subprocess.PIPE)
-        cmd = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api put-object --bucket {tmp_bucket_name} --key .sky_DO_NOT_DELETE --endpoint {endpoint_url} --profile=r2'
-        subprocess.check_call(cmd, shell=True)
+        if need_tagging:
+            cmd = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api put-object --bucket {tmp_bucket_name} --key .sky_DO_NOT_DELETE --endpoint {endpoint_url} --profile=r2'
+            subprocess.check_call(cmd, shell=True)
         yield tmp_bucket_name
         subprocess.check_call(
             f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb s3://{tmp_bucket_name} --force --endpoint {endpoint_url} --profile=r2',
@@ -3134,10 +3146,15 @@ class TestStorageWithCredentials:
         # 1 is read as .gitignore is uploaded
         assert '1' in git_exclude_output.decode('utf-8'), \
                '.git directory should not be uploaded.'
-        # 4 files include .gitignore, included.log, included.txt, include_dir/included.log
-        assert '4' in cnt_output.decode('utf-8'), \
-               'Some items listed in .gitignore and .git/info/exclude are not excluded.'
-
+        if store_type == storage_lib.StoreType.R2:
+            # 5 files include .gitignore, included.log, included.txt, include_dir/included.log,
+            # and .sky_DO_NOT_DELETE
+            assert '5' in cnt_output.decode('utf-8'), \
+                'Some items listed in .gitignore and .git/info/exclude are not excluded.'
+        else:
+            # 4 files include .gitignore, included.log, included.txt, include_dir/included.log
+            assert '4' in cnt_output.decode('utf-8'), \
+                'Some items listed in .gitignore and .git/info/exclude are not excluded.'
 
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
