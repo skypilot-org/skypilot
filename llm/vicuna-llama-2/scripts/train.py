@@ -296,13 +296,14 @@ def train():
     local_rank = training_args.local_rank
     if local_rank == 0:
         cleanup_incomplete_checkpoints(training_args.output_dir)
-    
+    torch.distributed.barrier()
+
     # Check the existence of checkpoints in all processes
     resume_from_checkpoint = False
     checkpoints = list(pathlib.Path(training_args.output_dir).glob('checkpoint-*'))
+    checkpoints = [c for c in checkpoints if c.name.split('-')[-1].isdigit()]
     if checkpoints:
         resume_from_checkpoint = True
-    torch.distributed.barrier()
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
@@ -322,9 +323,8 @@ def train():
     trainer = Trainer(model=model,
                       tokenizer=tokenizer,
                       args=training_args,
-                      callbacks=[CheckpointCallback()],
                       **data_module)
-
+    trainer.add_callback(CheckpointCallback)
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     trainer.save_state()
     safe_save_model_for_hf_trainer(trainer=trainer,

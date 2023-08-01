@@ -63,7 +63,7 @@ envs:
 * Start training with a single command
 
   ```bash
-  sky launch --down -c vicuna-2 train.yaml \
+  sky launch --down -c vicuna train.yaml \
     --env ARTIFACT_BUCKET_NAME=<your-bucket-name> \
     --env WANDB_API_KEY=<your-wandb-api-key>
   ```
@@ -91,7 +91,7 @@ sky launch --no-use-spot ...
 * **Optional**: Try out the training for the 13B model:
 
   ```bash
-  sky launch -c vicuna-2 train.yaml \
+  sky launch -c vicuna train.yaml \
     --env ARTIFACT_BUCKET_NAME=<your-bucket-name> \
     --env WANDB_API_KEY=<your-wandb-api-key> \
     --env MODEL_SIZE=13
@@ -104,7 +104,7 @@ sky launch --no-use-spot ...
 To use SkyPilot Managed Spot, you can simply replace `sky launch` with `sky spot launch` in the above command:
 
 ```bash
-sky spot launch -n vicuna-2 train.yaml \
+sky spot launch -n vicuna train.yaml \
   --env ARTIFACT_BUCKET_NAME=<your-bucket-name> \
   --env WANDB_API_KEY=<your-wandb-api-key>
 ```
