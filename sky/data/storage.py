@@ -20,9 +20,11 @@ from sky.utils import schemas
 from sky.data import data_transfer
 from sky.data import data_utils
 from sky.data import mounting_utils
+from sky.data import storage_utils
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import status_lib
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
@@ -33,7 +35,7 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 StorageHandle = Any
-StorageStatus = global_user_state.StorageStatus
+StorageStatus = status_lib.StorageStatus
 Path = str
 SourceType = Union[Path, List[Path]]
 
@@ -1181,10 +1183,14 @@ class S3Store(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            sync_command = (
-                'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
-                f'{src_dir_path} '
-                f's3://{self.name}/{dest_dir_name}')
+            excluded_list = storage_utils.get_excluded_files_from_gitignore(
+                src_dir_path)
+            excluded_list.append('.git/*')
+            excludes = ' '.join(
+                [f'--exclude "{file_name}"' for file_name in excluded_list])
+            sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
+                            f'{src_dir_path} '
+                            f's3://{self.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
@@ -1421,11 +1427,10 @@ class GcsStore(AbstractStore):
         if not _is_storage_cloud_enabled(str(clouds.GCP())):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
-                    'Storage \'store: gcs\' specified, but ' \
-                    'GCP access is disabled. To fix, enable '\
-                    'GCP by running `sky check`. '\
-                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
-                    )
+                    'Storage \'store: gcs\' specified, but '
+                    'GCP access is disabled. To fix, enable '
+                    'GCP by running `sky check`. '
+                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.')  # pylint: disable=line-too-long
 
     @classmethod
     def validate_name(cls, name) -> str:
@@ -1575,8 +1580,9 @@ class GcsStore(AbstractStore):
         ]
         copy_list = '\n'.join(
             os.path.abspath(os.path.expanduser(p)) for p in source_path_list)
-        sync_command = (f'echo "{copy_list}" | '
-                        f'gsutil -m cp -e -n -r -I gs://{self.name}')
+        gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+        sync_command = (f'{alias_gen}; echo "{copy_list}" | {gsutil_alias} '
+                        f'cp -e -n -r -I gs://{self.name}')
 
         with log_utils.safe_rich_status(
                 f'[bold cyan]Syncing '
@@ -1608,13 +1614,21 @@ class GcsStore(AbstractStore):
 
         def get_file_sync_command(base_dir_path, file_names):
             sync_format = '|'.join(file_names)
-            sync_command = (f'gsutil -m rsync -x \'^(?!{sync_format}$).*\' '
+            gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+            sync_command = (f'{alias_gen}; {gsutil_alias} '
+                            f'rsync -e -x \'^(?!{sync_format}$).*\' '
                             f'{base_dir_path} gs://{self.name}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
+            excluded_list = storage_utils.get_excluded_files_from_gitignore(
+                src_dir_path)
             # we exclude .git directory from the sync
-            sync_command = (f'gsutil -m rsync -r -x \'.git/*\' {src_dir_path} '
+            excluded_list.append(r'^\.git/.*$')
+            excludes = '|'.join(excluded_list)
+            gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+            sync_command = (f'{alias_gen}; {gsutil_alias} '
+                            f'rsync -e -r -x \'({excludes})\' {src_dir_path} '
                             f'gs://{self.name}/{dest_dir_name}')
             return sync_command
 
@@ -1784,10 +1798,13 @@ class GcsStore(AbstractStore):
                         bucket_name=bucket_name))
                 return False
             try:
-                remove_obj_command = ('gsutil -m rm -r'
-                                      f' gs://{bucket_name}')
-                subprocess.check_output(remove_obj_command.split(' '),
-                                        stderr=subprocess.STDOUT)
+                gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+                remove_obj_command = (f'{alias_gen};{gsutil_alias} '
+                                      f'rm -r gs://{bucket_name}')
+                subprocess.check_output(remove_obj_command,
+                                        stderr=subprocess.STDOUT,
+                                        shell=True,
+                                        executable='/bin/bash')
                 return True
             except subprocess.CalledProcessError as e:
                 logger.error(e.output)
@@ -1942,15 +1959,20 @@ class R2Store(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
+            excluded_list = storage_utils.get_excluded_files_from_gitignore(
+                src_dir_path)
+            excluded_list.append('.git/*')
+            excludes = ' '.join(
+                [f'--exclude "{file_name}"' for file_name in excluded_list])
             endpoint_url = cloudflare.create_endpoint()
-            sync_command = (
-                'AWS_SHARED_CREDENTIALS_FILE='
-                f'{cloudflare.R2_CREDENTIALS_PATH} '
-                'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
-                f'{src_dir_path} '
-                f's3://{self.name}/{dest_dir_name} '
-                f'--endpoint {endpoint_url} '
-                f'--profile={cloudflare.R2_PROFILE_NAME}')
+
+            sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
+                            f'{cloudflare.R2_CREDENTIALS_PATH} '
+                            f'aws s3 sync --no-follow-symlinks {excludes} '
+                            f'{src_dir_path} '
+                            f's3://{self.name}/{dest_dir_name} '
+                            f'--endpoint {endpoint_url} '
+                            f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
 
         # Generate message for upload

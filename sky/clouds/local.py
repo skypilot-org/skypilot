@@ -1,5 +1,4 @@
 """Local/On-premise."""
-import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -9,15 +8,6 @@ from sky import exceptions
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
-
-
-def _run_output(cmd):
-    proc = subprocess.run(cmd,
-                          shell=True,
-                          check=True,
-                          stderr=subprocess.PIPE,
-                          stdout=subprocess.PIPE)
-    return proc.stdout.decode('ascii')
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -41,7 +31,9 @@ class Local(clouds.Cloud):
         clouds.CloudImplementationFeatures.STOP:
             ('Local cloud does not support stopping instances.'),
         clouds.CloudImplementationFeatures.AUTOSTOP:
-            ('Local cloud does not support stopping instances.')
+            ('Local cloud does not support stopping instances.'),
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+            ('Migrating disk is not supported for Local.'),
     }
 
     @classmethod
@@ -142,8 +134,8 @@ class Local(clouds.Cloud):
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         return {}
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
+    def _get_feasible_launchable_resources(
+            self, resources: 'resources_lib.Resources'):
         if resources.disk_tier is not None:
             return ([], [])
         # The entire local cluster's resources is considered launchable, as the

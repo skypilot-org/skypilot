@@ -86,6 +86,7 @@ install_requires = [
     # PrettyTable with version >=2.0.0 is required for the support of
     # `add_rows` method.
     'PrettyTable>=2.0.0',
+    'python-dotenv',
     # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
     'ray[default]>=2.2.0,<=2.4.0',
@@ -110,16 +111,29 @@ install_requires = [
     'protobuf >= 3.15.3, != 3.19.5',
     'psutil',
     'pulp',
+    # Ray job has an issue with pydantic>2.0.0, due to API changes of pydantic. See
+    # https://github.com/ray-project/ray/issues/36990
+    'pydantic<2.0',
+    # Cython 3.0 release breaks PyYAML installed by aws-cli.
+    # https://github.com/yaml/pyyaml/issues/601
+    # https://github.com/aws/aws-cli/issues/8036
+    # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
+    'pyyaml > 3.13, <= 5.3.1'
 ]
 
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
 # following packages dependencies are changed.
 aws_dependencies = [
+    # botocore does not work with urllib3>=2.0.0, accuroding to https://github.com/boto/botocore/issues/2926
+    # We have to explicitly pin the version to optimize the time for
+    # poetry install. See https://github.com/orgs/python-poetry/discussions/7937
+    'urllib3<2',
     # NOTE: this installs CLI V1. To use AWS SSO (e.g., `aws sso login`), users
     # should instead use CLI V2 which is not pip-installable. See
     # https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html.
-    'awscli',
-    'boto3',
+    'awscli>=1.27.10',
+    'botocore>=1.29.10',
+    'boto3>=1.26.1',
     # 'Crypto' module used in authentication.py for AWS.
     'pycryptodome==3.12.0',
 ]

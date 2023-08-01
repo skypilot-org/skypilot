@@ -2,11 +2,13 @@
 import collections
 import enum
 import json
+import os
 import pathlib
 import shlex
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
+from typing_extensions import Literal
 
 import colorama
 import filelock
@@ -15,8 +17,11 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import status_lib
 from sky.backends import backend_utils
+from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.skylet.log_lib import run_bash_command_with_log
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.spot import spot_state
@@ -24,6 +29,7 @@ from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag as dag_lib
+    import sky
 
 logger = sky_logging.init_logger(__name__)
 
@@ -153,6 +159,44 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
     return float(stdout)
 
 
+def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
+    """Run event callback for the task."""
+
+    def callback_func(state: str):
+        event_callback = task.event_callback if task else None
+        if event_callback is None or task is None:
+            return
+        event_callback = event_callback.strip()
+        cluster_name = generate_spot_cluster_name(task.name,
+                                                  job_id) if task.name else None
+        logger.info(f'=== START: event callback for {state!r} ===')
+        log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, 'spot_event',
+                                f'spot-callback-{job_id}-{task_id}.log')
+        result = run_bash_command_with_log(
+            bash_command=event_callback,
+            log_path=log_path,
+            env_vars=dict(
+                SKYPILOT_JOB_ID=str(
+                    task.envs.get(constants.TASK_ID_ENV_VAR_DEPRECATED,
+                                  'N.A.')),
+                SKYPILOT_TASK_ID=str(
+                    task.envs.get(constants.TASK_ID_ENV_VAR, 'N.A.')),
+                SKYPILOT_TASK_IDS=str(
+                    task.envs.get(constants.TASK_ID_LIST_ENV_VAR, 'N.A.')),
+                TASK_ID=str(task_id),
+                JOB_ID=str(job_id),
+                JOB_STATUS=state,
+                CLUSTER_NAME=cluster_name or '',
+                TASK_NAME=task.name or '',
+                # TODO(MaoZiming): Future event type Job or Spot.
+                EVENT_TYPE='Spot'))
+        logger.info(
+            f'Bash:{event_callback},log_path:{log_path},result:{result}')
+        logger.info(f'=== END: event callback for {state!r} ===')
+
+    return callback_func
+
+
 # ======== user functions ========
 
 
@@ -226,7 +270,7 @@ def cancel_job_by_name(job_name: str) -> str:
 def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     """Stream logs by job id."""
     controller_status = job_lib.get_status(job_id)
-    status_msg = ('[bold cyan]Waiting for controller process to be RUNNING '
+    status_msg = ('[bold cyan]Waiting for controller process to be RUNNING'
                   '{status_str}[/].')
     status_display = log_utils.safe_rich_status(
         status_msg.format(status_str=''))
@@ -425,6 +469,7 @@ def dump_spot_job_queue() -> str:
                 f'{handle.launched_nodes}x {handle.launched_resources}')
             job['region'] = handle.launched_resources.region
         else:
+            # FIXME(zongheng): display the last cached values for these.
             job['cluster_resources'] = '-'
             job['region'] = '-'
 
@@ -439,15 +484,38 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
+@typing.overload
 def format_job_table(tasks: List[Dict[str, Any]],
                      show_all: bool,
+                     return_rows: Literal[False] = False,
                      max_jobs: Optional[int] = None) -> str:
+    ...
+
+
+@typing.overload
+def format_job_table(tasks: List[Dict[str, Any]],
+                     show_all: bool,
+                     return_rows: Literal[True],
+                     max_jobs: Optional[int] = None) -> List[List[str]]:
+    ...
+
+
+def format_job_table(
+        tasks: List[Dict[str, Any]],
+        show_all: bool,
+        return_rows: bool = False,
+        max_jobs: Optional[int] = None) -> Union[str, List[List[str]]]:
     """Returns spot jobs as a formatted string.
 
     Args:
         jobs: A list of spot jobs.
         show_all: Whether to show all columns.
         max_jobs: The maximum number of jobs to show in the table.
+        return_rows: If True, return the rows as a list of strings instead of
+          all rows concatenated into a single string.
+
+    Returns: A formatted string of spot jobs, if not `return_rows`; otherwise a
+      list of "rows" (each of which is a list of str).
     """
     columns = [
         'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
@@ -585,6 +653,8 @@ def format_job_table(tasks: List[Dict[str, Any]],
     output = status_str
     if str(job_table):
         output += f'\n{job_table}'
+    if return_rows:
+        return job_table.rows
     return output
 
 
@@ -694,13 +764,18 @@ def load_job_table_cache() -> Optional[Tuple[float, str]]:
 
 def is_spot_controller_up(
     stopped_message: str,
-) -> Tuple[Optional[global_user_state.ClusterStatus],
+    non_existent_message: str = 'No managed spot jobs are found.',
+) -> Tuple[Optional[status_lib.ClusterStatus],
            Optional['backends.CloudVmRayResourceHandle']]:
     """Check if the spot controller is up.
 
     It can be used to check the actual controller status (since the autostop is
     set for the controller) before the spot commands interact with the
     controller.
+
+    Args:
+        stopped_message: Message to print if the controller is STOPPED.
+        non_existent_message: Message to show if the controller does not exist.
 
     Returns:
         controller_status: The status of the spot controller. If it fails during
@@ -716,13 +791,14 @@ def is_spot_controller_up(
           identity.
     """
     try:
-        # Set force_refresh=False to make sure the refresh only happens when the
-        # controller is INIT/UP. This optimization avoids unnecessary costly
-        # refresh when the controller is already stopped. This optimization is
-        # based on the assumption that the user will not start the controller
-        # manually from the cloud console.
+        # Set force_refresh_statuses=None to make sure the refresh only happens
+        # when the controller is INIT/UP (triggered in these statuses as the
+        # autostop is always set for spot controller). This optimization avoids
+        # unnecessary costly refresh when the controller is already stopped.
+        # This optimization is based on the assumption that the user will not
+        # start the controller manually from the cloud console.
         controller_status, handle = backend_utils.refresh_cluster_status_handle(
-            SPOT_CONTROLLER_NAME, force_refresh=False)
+            SPOT_CONTROLLER_NAME, force_refresh_statuses=None)
     except exceptions.ClusterStatusFetchingError as e:
         # We do not catch the exceptions related to the cluster owner identity
         # mismatch, please refer to the comment in
@@ -738,13 +814,13 @@ def is_spot_controller_up(
             controller_status, handle = record['status'], record['handle']
 
     if controller_status is None:
-        sky_logging.print('No managed spot jobs are found.')
-    elif controller_status != global_user_state.ClusterStatus.UP:
+        sky_logging.print(non_existent_message)
+    elif controller_status != status_lib.ClusterStatus.UP:
         msg = (f'Spot controller {SPOT_CONTROLLER_NAME} '
                f'is {controller_status.value}.')
-        if controller_status == global_user_state.ClusterStatus.STOPPED:
+        if controller_status == status_lib.ClusterStatus.STOPPED:
             msg += f'\n{stopped_message}'
-        if controller_status == global_user_state.ClusterStatus.INIT:
+        if controller_status == status_lib.ClusterStatus.INIT:
             msg += '\nPlease wait for the controller to be ready.'
         sky_logging.print(msg)
         handle = None

@@ -4,7 +4,7 @@
 # Run all tests except for AWS and Lambda Cloud
 # > pytest tests/test_smoke.py
 #
-# Terminate failed clusetrs after test finishes
+# Terminate failed clusters after test finishes
 # > pytest tests/test_smoke.py --terminate-on-failure
 #
 # Re-run last failed tests
@@ -25,6 +25,7 @@
 import hashlib
 import inspect
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -33,6 +34,7 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 import urllib.parse
 import uuid
 import os
+import warnings
 
 import colorama
 import jinja2
@@ -41,6 +43,7 @@ import pytest
 import sky
 from sky import exceptions
 from sky import global_user_state
+from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.adaptors import cloudflare, aws, gcp
 from sky.skylet import events
@@ -182,6 +185,43 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
 
     if proc.returncode:
         raise Exception(f'test failed: less {log_file.name}')
+
+
+def get_aws_region_for_quota_failover() -> Optional[str]:
+    candidate_regions = AWS.regions_with_offering(instance_type='p3.16xlarge',
+                                                  accelerators=None,
+                                                  use_spot=True,
+                                                  region=None,
+                                                  zone=None)
+
+    for region in candidate_regions:
+        resources = sky.Resources(cloud=sky.AWS(),
+                                  instance_type='p3.16xlarge',
+                                  region=region.name,
+                                  use_spot=True)
+        if not AWS.check_quota_available(resources):
+            return region.name
+
+    return None
+
+
+def get_gcp_region_for_quota_failover() -> Optional[str]:
+
+    candidate_regions = GCP.regions_with_offering(instance_type=None,
+                                                  accelerators={'A100-80GB': 1},
+                                                  use_spot=True,
+                                                  region=None,
+                                                  zone=None)
+
+    for region in candidate_regions:
+        if not GCP.check_quota_available(
+                sky.Resources(cloud=sky.GCP(),
+                              region=region.name,
+                              accelerators={'A100-80GB': 1},
+                              use_spot=True)):
+            return region.name
+
+    return None
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
@@ -539,6 +579,46 @@ def test_gcp_image_id_dict_zone():
 
 
 @pytest.mark.aws
+def test_clone_disk_aws():
+    name = _get_cluster_name()
+    test = Test(
+        'clone_disk_aws',
+        [
+            f'sky launch -y -c {name} --cloud aws --region us-east-2 --retry-until-up "echo hello > ~/user_file.txt"',
+            f'sky launch --clone-disk-from {name} -y -c {name}-clone && exit 1 || true',
+            f'sky stop {name} -y',
+            'sleep 60',
+            f'sky launch --clone-disk-from {name} -y -c {name}-clone --cloud aws -d --region us-west-2 "cat ~/user_file.txt | grep hello"',
+            f'sky launch --clone-disk-from {name} -y -c {name}-clone-2 --cloud aws -d --region us-east-2 "cat ~/user_file.txt | grep hello"',
+            f'sky logs {name}-clone 1 --status',
+            f'sky logs {name}-clone-2 1 --status',
+        ],
+        f'sky down -y {name} {name}-clone {name}-clone-2',
+        timeout=30 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_clone_disk_gcp():
+    name = _get_cluster_name()
+    test = Test(
+        'clone_disk_gcp',
+        [
+            f'sky launch -y -c {name} --cloud gcp --zone us-east1-b --retry-until-up "echo hello > ~/user_file.txt"',
+            f'sky launch --clone-disk-from {name} -y -c {name}-clone && exit 1 || true',
+            f'sky stop {name} -y',
+            f'sky launch --clone-disk-from {name} -y -c {name}-clone --cloud gcp --zone us-central1-a "cat ~/user_file.txt | grep hello"',
+            f'sky launch --clone-disk-from {name} -y -c {name}-clone-2 --cloud gcp --zone us-east1-b "cat ~/user_file.txt | grep hello"',
+            f'sky logs {name}-clone 1 --status',
+            f'sky logs {name}-clone-2 1 --status',
+        ],
+        f'sky down -y {name} {name}-clone {name}-clone-2',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.aws
 def test_image_no_conda():
     name = _get_cluster_name()
     test = Test(
@@ -680,6 +760,28 @@ def test_scp_file_mounts():
         'SCP_using_file_mounts',
         test_commands,
         f'sky down -y {name}',
+        timeout=20 * 60,  # 20 mins
+    )
+    run_one_test(test)
+
+
+def test_using_file_mounts_with_env_vars(generic_cloud: str):
+    name = _get_cluster_name()
+    test_commands = [
+        *storage_setup_commands,
+        (f'sky launch -y -c {name} --cpus 2+ --cloud {generic_cloud} '
+         'examples/using_file_mounts_with_env_vars.yaml'),
+        f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        # Override with --env:
+        (f'sky launch -y -c {name}-2 --cpus 2+ --cloud {generic_cloud} '
+         'examples/using_file_mounts_with_env_vars.yaml '
+         '--env MY_LOCAL_PATH=tmpfile'),
+        f'sky logs {name}-2 1 --status',  # Ensure the job succeeded.
+    ]
+    test = Test(
+        'using_file_mounts_with_env_vars',
+        test_commands,
+        f'sky down -y {name} {name}-2',
         timeout=20 * 60,  # 20 mins
     )
     run_one_test(test)
@@ -1051,6 +1153,7 @@ def test_ibm_job_queue_multinode():
             f'sky logs {name} 7 --status',
         ],
         f'sky down -y {name}',
+        timeout=20 * 60,  # 20 mins
     )
     run_one_test(test)
 
@@ -1213,6 +1316,9 @@ def test_multi_hostname(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.skip(
+    reason=
+    'The resnet_distributed_tf_app is flaky, due to it failing to detect GPUs.')
 def test_distributed_tf(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1243,9 +1349,11 @@ def test_gcp_start_stop():
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
             f'sleep 20',
-            f'sky start -y {name}',
+            f'sky start -y {name} -i 1',
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
+            'sleep 180',
+            f'sky status -r {name} | grep "INIT\|STOPPED"',
         ],
         f'sky down -y {name}',
     )
@@ -1265,9 +1373,11 @@ def test_azure_start_stop():
             f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',  # Ensure the raylet process has the correct file descriptor limit.
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
-            f'sky start -y {name}',
+            f'sky start -y {name} -i 1',
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
+            'sleep 200',
+            f's=$(sky status -r {name}) && echo $s && echo $s | grep "INIT\|STOPPED"'
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # 30 mins
@@ -1427,6 +1537,8 @@ def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
 
 # ---------- Testing `sky cancel` ----------
 @pytest.mark.aws
+@pytest.mark.skip(
+    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_aws():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'aws')
@@ -1434,6 +1546,8 @@ def test_cancel_aws():
 
 
 @pytest.mark.gcp
+@pytest.mark.skip(
+    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_gcp():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'gcp')
@@ -1441,6 +1555,8 @@ def test_cancel_gcp():
 
 
 @pytest.mark.azure
+@pytest.mark.skip(
+    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_azure():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'azure', timeout=30 * 60)
@@ -2034,7 +2150,7 @@ def test_spot_tpu():
             f'sky spot launch -n {name} examples/tpu/tpuvm_mnist.yaml -y -d',
             'sleep 5',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep STARTING',
-            'sleep 600',  # TPU takes a while to launch
+            'sleep 840',  # TPU takes a while to launch
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         _SPOT_CANCEL_WAIT.format(job_name=name),
@@ -2076,6 +2192,23 @@ def test_inline_env(generic_cloud: str):
             f'sky launch -c {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
             f'sky logs {name} 1 --status',
             f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Testing env file ----------
+def test_inline_env_file(generic_cloud: str):
+    """Test env"""
+    name = _get_cluster_name()
+    test = Test(
+        'test-inline-env-file',
+        [
+            f'sky launch -c {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} --env-file examples/sample_dotenv "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
@@ -2198,6 +2331,53 @@ def test_azure_disk_tier():
         run_one_test(test)
 
 
+# ------ Testing Zero Quota Failover ------
+@pytest.mark.aws
+def test_aws_zero_quota_failover():
+
+    name = _get_cluster_name()
+    region = get_aws_region_for_quota_failover()
+
+    if not region:
+        pytest.xfail(
+            'Unable to test zero quota failover optimization — quotas '
+            'for EC2 P3 instances were found on all AWS regions. Is this '
+            'expected for your account?')
+        return
+
+    test = Test(
+        'aws-zero-quota-failover',
+        [
+            f'sky launch -y -c {name} --cloud aws --region {region} --gpus V100:8 --use-spot | grep "Found no quota"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_gcp_zero_quota_failover():
+
+    name = _get_cluster_name()
+    region = get_gcp_region_for_quota_failover()
+
+    if not region:
+        pytest.xfail(
+            'Unable to test zero quota failover optimization — quotas '
+            'for A100-80GB GPUs were found on all GCP regions. Is this '
+            'expected for your account?')
+        return
+
+    test = Test(
+        'gcp-zero-quota-failover',
+        [
+            f'sky launch -y -c {name} --cloud gcp --region {region} --gpus A100-80GB:1 --use-spot | grep "Found no quota"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ------- Testing user ray cluster --------
 def test_user_ray_cluster():
     name = _get_cluster_name()
@@ -2269,6 +2449,97 @@ class TestStorageWithCredentials:
         'abc_',  # ends with an underscore
     ]
 
+    GITIGNORE_SYNC_TEST_DIR_STRUCTURE = {
+        'double_asterisk': {
+            'double_asterisk_excluded': None,
+            'double_asterisk_excluded_dir': {
+                'dir_excluded': None,
+            },
+        },
+        'double_asterisk_parent': {
+            'parent': {
+                'also_excluded.txt': None,
+                'child': {
+                    'double_asterisk_parent_child_excluded.txt': None,
+                },
+                'double_asterisk_parent_excluded.txt': None,
+            },
+        },
+        'excluded.log': None,
+        'excluded_dir': {
+            'excluded.txt': None,
+            'nested_excluded': {
+                'excluded': None,
+            },
+        },
+        'exp-1': {
+            'be_excluded': None,
+        },
+        'exp-2': {
+            'be_excluded': None,
+        },
+        'front_slash_excluded': None,
+        'included.log': None,
+        'included.txt': None,
+        'include_dir': {
+            'excluded.log': None,
+            'included.log': None,
+        },
+        'nested_double_asterisk': {
+            'one': {
+                'also_exclude.txt': None,
+            },
+            'two': {
+                'also_exclude.txt': None,
+            },
+        },
+        'nested_wildcard_dir': {
+            'monday': {
+                'also_exclude.txt': None,
+            },
+            'tuesday': {
+                'also_exclude.txt': None,
+            },
+        },
+        'no_slash_excluded': None,
+        'no_slash_tests': {
+            'no_slash_excluded': {
+                'also_excluded.txt': None,
+            },
+        },
+        'question_mark': {
+            'excluded1.txt': None,
+            'excluded@.txt': None,
+        },
+        'square_bracket': {
+            'excluded1.txt': None,
+        },
+        'square_bracket_alpha': {
+            'excludedz.txt': None,
+        },
+        'square_bracket_excla': {
+            'excluded2.txt': None,
+            'excluded@.txt': None,
+        },
+        'square_bracket_single': {
+            'excluded0.txt': None,
+        },
+    }
+
+    @staticmethod
+    def create_dir_structure(base_path, structure):
+        # creates a given file STRUCTURE in BASE_PATH
+        for name, substructure in structure.items():
+            path = os.path.join(base_path, name)
+            if substructure is None:
+                # Create a file
+                open(path, 'a').close()
+            else:
+                # Create a subdirectory
+                os.mkdir(path)
+                TestStorageWithCredentials.create_dir_structure(
+                    path, substructure)
+
     @staticmethod
     def cli_delete_cmd(store_type, bucket_name):
         if store_type == storage_lib.StoreType.S3:
@@ -2276,7 +2547,8 @@ class TestStorageWithCredentials:
             return f'aws s3 rb {url} --force'
         if store_type == storage_lib.StoreType.GCS:
             url = f'gs://{bucket_name}'
-            return f'gsutil -m rm -r {url}'
+            gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+            return f'{alias_gen}; {gsutil_alias} rm -r {url}'
         if store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             url = f's3://{bucket_name}'
@@ -2303,6 +2575,35 @@ class TestStorageWithCredentials:
             else:
                 url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
+
+    @staticmethod
+    def cli_count_name_in_bucket(store_type, bucket_name, file_name, suffix=''):
+        if store_type == storage_lib.StoreType.S3:
+            if suffix:
+                return f'aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)"'
+            else:
+                return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)"'
+        elif store_type == storage_lib.StoreType.GCS:
+            if suffix:
+                return f'gsutil ls -r gs://{bucket_name}/{suffix} | grep "{file_name}" | wc -l'
+            else:
+                return f'gsutil ls -r gs://{bucket_name} | grep "{file_name}" | wc -l'
+        elif store_type == storage_lib.StoreType.R2:
+            endpoint_url = cloudflare.create_endpoint()
+            if suffix:
+                return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=r2'
+            else:
+                return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=r2'
+
+    @staticmethod
+    def cli_count_file_in_bucket(store_type, bucket_name):
+        if store_type == storage_lib.StoreType.S3:
+            return f'aws s3 ls s3://{bucket_name} --recursive | wc -l'
+        elif store_type == storage_lib.StoreType.GCS:
+            return f'gsutil ls -r gs://{bucket_name}/** | wc -l'
+        elif store_type == storage_lib.StoreType.R2:
+            endpoint_url = cloudflare.create_endpoint()
+            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile=r2 | wc -l'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -2355,6 +2656,28 @@ class TestStorageWithCredentials:
         yield from self.yield_storage_object(name=tmp_bucket_name)
 
     @pytest.fixture
+    def tmp_multiple_scratch_storage_obj(self):
+        # Creates a list of 5 storage objects with no source to create
+        # multiple scratch storages.
+        # Stores for each object in the list must be added in the test.
+        storage_mult_obj = []
+        for _ in range(5):
+            timestamp = str(time.time()).replace('.', '')
+            store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}')
+            storage_mult_obj.append(store_obj)
+        yield storage_mult_obj
+        for storage_obj in storage_mult_obj:
+            handle = global_user_state.get_handle_from_storage_name(
+                storage_obj.name)
+            if handle:
+                # If handle exists, delete manually
+                # TODO(romilb): This is potentially risky - if the delete method has
+                # bugs, this can cause resource leaks. Ideally we should manually
+                # eject storage from global_user_state and delete the bucket using
+                # boto3 directly.
+                storage_obj.delete()
+
+    @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):
         # Creates a temporary storage object. Stores must be added in the test.
         yield from self.yield_storage_object(name=tmp_bucket_name,
@@ -2370,6 +2693,20 @@ class TestStorageWithCredentials:
                                              source=list_source)
 
     @pytest.fixture
+    def tmp_bulk_del_storage_obj(self, tmp_bucket_name):
+        # Creates a temporary storage object for testing bulk deletion.
+        # Stores must be added in the test.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subprocess.check_output(f'mkdir -p {tmpdir}/folder{{000..255}}',
+                                    shell=True)
+            subprocess.check_output(f'touch {tmpdir}/test{{000..255}}.txt',
+                                    shell=True)
+            subprocess.check_output(
+                f'touch {tmpdir}/folder{{000..255}}/test.txt', shell=True)
+            yield from self.yield_storage_object(name=tmp_bucket_name,
+                                                 source=tmpdir)
+
+    @pytest.fixture
     def tmp_copy_mnt_existing_storage_obj(self, tmp_scratch_storage_obj):
         # Creates a copy mount storage which reuses an existing storage object.
         tmp_scratch_storage_obj.add_store(storage_lib.StoreType.S3)
@@ -2379,6 +2716,37 @@ class TestStorageWithCredentials:
         # above, but now in COPY mode. This should succeed.
         yield from self.yield_storage_object(name=storage_name,
                                              mode=storage_lib.StorageMode.COPY)
+
+    @pytest.fixture
+    def tmp_gitignore_storage_obj(self, tmp_bucket_name, gitignore_structure):
+        # Creates a temporary storage object for testing .gitignore filter.
+        # GITIGINORE_STRUCTURE is representing a file structure in a dictionary
+        # foramt. Created storage object will contain the file structure along
+        # with .gitignore and .git/info/exclude files to test exclude filter.
+        # Stores must be added in the test.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Creates file structure to be uploaded in the Storage
+            self.create_dir_structure(tmpdir, gitignore_structure)
+
+            # Create .gitignore and list files/dirs to be excluded in it
+            skypilot_path = os.path.dirname(os.path.dirname(sky.__file__))
+            temp_path = f'{tmpdir}/.gitignore'
+            file_path = os.path.join(skypilot_path, 'tests/gitignore_test')
+            shutil.copyfile(file_path, temp_path)
+
+            # Create .git/info/exclude and list files/dirs to be excluded in it
+            temp_path = f'{tmpdir}/.git/info/'
+            os.makedirs(temp_path)
+            temp_exclude_path = os.path.join(temp_path, 'exclude')
+            file_path = os.path.join(skypilot_path,
+                                     'tests/git_info_exclude_test')
+            shutil.copyfile(file_path, temp_exclude_path)
+
+            # Create sky Storage with the files created
+            yield from self.yield_storage_object(
+                name=tmp_bucket_name,
+                source=tmpdir,
+                mode=storage_lib.StorageMode.COPY)
 
     @pytest.fixture
     def tmp_awscli_bucket(self, tmp_bucket_name):
@@ -2491,6 +2859,45 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.xdist_group('multiple_bucket_deletion')
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
+    def test_multiple_buckets_creation_and_deletion(
+            self, tmp_multiple_scratch_storage_obj, store_type):
+        # Creates multiple new buckets(5 buckets) with a local source
+        # and deletes them.
+        storage_obj_name = []
+        for store_obj in tmp_multiple_scratch_storage_obj:
+            store_obj.add_store(store_type)
+            storage_obj_name.append(store_obj.name)
+
+        # Run sky storage ls to check if all storage objects exists in the
+        # output filtered by store type
+        out_all = subprocess.check_output(['sky', 'storage', 'ls'])
+        out = [
+            item.split()[0]
+            for item in out_all.decode('utf-8').splitlines()
+            if store_type.value in item
+        ]
+        assert all([item in out for item in storage_obj_name])
+
+        # Run sky storage delete all to delete all storage objects
+        delete_cmd = ['sky', 'storage', 'delete']
+        delete_cmd += storage_obj_name
+        subprocess.check_output(delete_cmd)
+
+        # Run sky storage ls to check if all storage objects filtered by store
+        # type are deleted
+        out_all = subprocess.check_output(['sky', 'storage', 'ls'])
+        out = [
+            item.split()[0]
+            for item in out_all.decode('utf-8').splitlines()
+            if store_type.value in item
+        ]
+        assert all([item not in out for item in storage_obj_name])
+
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
@@ -2523,26 +2930,16 @@ class TestStorageWithCredentials:
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
-    def test_bucket_bulk_deletion(self, store_type):
-        # Create a temp folder with over 256 files and folders, upload
+    def test_bucket_bulk_deletion(self, store_type, tmp_bulk_del_storage_obj):
+        # Creates a temp folder with over 256 files and folders, upload
         # files and folders to a new bucket, then delete bucket.
-        with tempfile.TemporaryDirectory() as tmpdir:
-            subprocess.check_output(f'mkdir -p {tmpdir}/folder{{000..255}}',
-                                    shell=True)
-            subprocess.check_output(f'touch {tmpdir}/test{{000..255}}.txt',
-                                    shell=True)
-            subprocess.check_output(
-                f'touch {tmpdir}/folder{{000..255}}/test.txt', shell=True)
+        tmp_bulk_del_storage_obj.add_store(store_type)
 
-            timestamp = str(time.time()).replace('.', '')
-            store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
-                                            source=tmpdir)
-            store_obj.add_store(store_type)
-
-        subprocess.check_output(['sky', 'storage', 'delete', store_obj.name])
+        subprocess.check_output(
+            ['sky', 'storage', 'delete', tmp_bulk_del_storage_obj.name])
 
         output = subprocess.check_output(['sky', 'storage', 'ls'])
-        assert store_obj.name not in output.decode('utf-8')
+        assert tmp_bulk_del_storage_obj.name not in output.decode('utf-8')
 
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
@@ -2702,6 +3099,44 @@ class TestStorageWithCredentials:
             with pytest.raises(sky.exceptions.StorageNameError):
                 storage_obj = storage_lib.Storage(name=name)
                 storage_obj.add_store(store_type)
+
+    @pytest.mark.parametrize(
+        'gitignore_structure, store_type',
+        [(GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.S3),
+         (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.GCS),
+         pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
+                      storage_lib.StoreType.R2,
+                      marks=pytest.mark.cloudflare)])
+    def test_excluded_file_cloud_storage_upload_copy(self, gitignore_structure,
+                                                     store_type,
+                                                     tmp_gitignore_storage_obj):
+        # tests if files included in .gitignore and .git/info/exclude are
+        # excluded from being transferred to Storage
+
+        tmp_gitignore_storage_obj.add_store(store_type)
+
+        upload_file_name = 'included'
+        # Count the number of files with the given file name
+        up_cmd = self.cli_count_name_in_bucket(store_type, \
+            tmp_gitignore_storage_obj.name, file_name=upload_file_name)
+        git_exclude_cmd = self.cli_count_name_in_bucket(store_type, \
+            tmp_gitignore_storage_obj.name, file_name='.git')
+        cnt_num_file_cmd = self.cli_count_file_in_bucket(
+            store_type, tmp_gitignore_storage_obj.name)
+
+        up_output = subprocess.check_output(up_cmd, shell=True)
+        git_exclude_output = subprocess.check_output(git_exclude_cmd,
+                                                     shell=True)
+        cnt_output = subprocess.check_output(cnt_num_file_cmd, shell=True)
+
+        assert '3' in up_output.decode('utf-8'), \
+                'Files to be included are not completely uploaded.'
+        # 1 is read as .gitignore is uploaded
+        assert '1' in git_exclude_output.decode('utf-8'), \
+               '.git directory should not be uploaded.'
+        # 4 files include .gitignore, included.log, included.txt, include_dir/included.log
+        assert '4' in cnt_output.decode('utf-8'), \
+               'Some items listed in .gitignore and .git/info/exclude are not excluded.'
 
 
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',

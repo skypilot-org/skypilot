@@ -2,16 +2,17 @@
 import os
 import yaml
 import json
-from sky import clouds
-from sky.clouds import service_catalog
-from sky.adaptors import ibm
-from sky import sky_logging
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
-from sky.adaptors.ibm import CREDENTIAL_FILE
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from sky.clouds.cloud import Zone
+from sky import clouds
+from sky import sky_logging
+from sky import status_lib
+from sky.adaptors import ibm
+from sky.adaptors.ibm import CREDENTIAL_FILE
+from sky.clouds import service_catalog
 from sky.utils import ux_utils
+
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
@@ -34,7 +35,12 @@ class IBM(clouds.Cloud):
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return dict()
+        return {
+            clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+                (f'Migrating disk is not supported in {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
+                (f'Custom disk tier is not supported in {cls._REPR}.'),
+        }
 
     @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:
@@ -69,7 +75,7 @@ class IBM(clouds.Cloud):
         instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[Optional[List[Zone]]]:
+    ) -> Iterator[Optional[List[clouds.Zone]]]:
         """Loops over (region, zones) to retry for provisioning.
 
         returning a single zone list with its region,
@@ -242,8 +248,8 @@ class IBM(clouds.Cloud):
                                                          disk_tier=disk_tier,
                                                          clouds='ibm')
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
+    def _get_feasible_launchable_resources(
+            self, resources: 'resources_lib.Resources'):
         """Returns a list of feasible and launchable resources.
 
         Feasible resources refer to an offering respecting the resource
@@ -422,6 +428,44 @@ class IBM(clouds.Cloud):
         """Returns whether the accelerator is valid in the region or zone."""
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'ibm')
+
+    @classmethod
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List['status_lib.ClusterStatus']:
+        del tag_filters, zone, kwargs  # unused
+
+        status_map: Dict[str, Any] = {
+            'pending': status_lib.ClusterStatus.INIT,
+            'starting': status_lib.ClusterStatus.INIT,
+            'restarting': status_lib.ClusterStatus.INIT,
+            'running': status_lib.ClusterStatus.UP,
+            'stopping': status_lib.ClusterStatus.STOPPED,
+            'stopped': status_lib.ClusterStatus.STOPPED,
+            'deleting': None,
+            'failed': status_lib.ClusterStatus.INIT,
+            'cluster_deleted': []
+        }
+
+        client = ibm.client(region=region)
+        search_client = ibm.search_client()
+        # pylint: disable=E1136
+        vpcs_filtered_by_tags_and_region = search_client.search(
+            query=f'type:vpc AND tags:{name} AND region:{region}',
+            fields=['tags', 'region', 'type'],
+            limit=1000).get_result()['items']
+        if not vpcs_filtered_by_tags_and_region:
+            # a vpc could have been removed unkownlingly to skypilot, such as
+            # via `sky autostop --down`, or simply manually (e.g. via console).
+            logger.warning('No vpc exists in '
+                           f'{region} '
+                           f'with tag: {name}')
+            return status_map['cluster_deleted']
+        vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(':', 1)[-1]
+        instances = client.list_instances(
+            vpc_id=vpc_id).get_result()['instances']
+
+        return [status_map[instance['status']] for instance in instances]
 
 
 def _read_credential_file():

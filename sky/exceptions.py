@@ -4,7 +4,7 @@ import typing
 from typing import List, Optional
 
 if typing.TYPE_CHECKING:
-    from sky import global_user_state
+    from sky import status_lib
     from sky.backends import backend
 
 # Return code for keyboard interruption and SIGTSTP
@@ -13,6 +13,8 @@ SIGTSTP_CODE = 146
 RSYNC_FILE_NOT_FOUND_CODE = 23
 # Arbitrarily chosen value. Used in SkyPilot's storage mounting scripts
 MOUNT_PATH_NON_EMPTY_CODE = 42
+# Return code when git command is ran in a dir that is not git repo
+GIT_FATAL_EXIT_CODE = 128
 
 
 class ResourcesUnavailableError(Exception):
@@ -97,7 +99,7 @@ class ClusterNotUpError(Exception):
 
     def __init__(self,
                  message: str,
-                 cluster_status: Optional['global_user_state.ClusterStatus'],
+                 cluster_status: Optional['status_lib.ClusterStatus'],
                  handle: Optional['backend.ResourceHandle'] = None) -> None:
         super().__init__(message)
         self.cluster_status = cluster_status

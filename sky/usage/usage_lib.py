@@ -21,7 +21,7 @@ from sky.utils import common_utils
 from sky.utils import env_options
 
 if typing.TYPE_CHECKING:
-    from sky import global_user_state
+    from sky import status_lib
     from sky import resources as resources_lib
     from sky import task as task_lib
 
@@ -236,7 +236,7 @@ class UsageMessageToReport(MessageToReport):
         self.local_resources = [r.to_yaml_config() for r in local_resources]
 
     def update_cluster_status(
-            self, original_status: Optional['global_user_state.ClusterStatus']):
+            self, original_status: Optional['status_lib.ClusterStatus']):
         status = original_status.value if original_status else None
         if not self._original_cluster_status_specified:
             self.original_cluster_status = status
@@ -244,7 +244,7 @@ class UsageMessageToReport(MessageToReport):
         self.final_cluster_status = status
 
     def update_final_cluster_status(
-            self, status: Optional['global_user_state.ClusterStatus']):
+            self, status: Optional['status_lib.ClusterStatus']):
         self.final_cluster_status = status.value if status is not None else None
 
     def set_new_cluster(self):

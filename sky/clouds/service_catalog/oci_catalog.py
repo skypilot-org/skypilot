@@ -35,6 +35,13 @@ def _get_df() -> 'pd.DataFrame':
         if _df is not None:
             return _df
 
+        df = common.read_catalog('oci/vms.csv')
+        try:
+            oci_adaptor.get_oci()
+        except ImportError:
+            _df = df
+            return _df
+
         try:
             config_profile = oci_conf.get_profile()
             client = oci_adaptor.get_identity_client(profile=config_profile)
@@ -60,8 +67,6 @@ def _get_df() -> 'pd.DataFrame':
             logger.warning(
                 f'Unexpected exception when handle catalog: {str(e)}')
             subscribed_regions = []
-
-        df = common.read_catalog('oci/vms.csv')
 
         if subscribed_regions:
             _df = df[df['Region'].isin(subscribed_regions)]
@@ -179,10 +184,16 @@ def get_vcpus_mem_from_instance_type(
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     """Returns the image id from the tag."""
+    # Always try get region-specific imageid first (for backward compatible)
     image_str = common.get_image_id_from_tag_impl(_image_df, tag, region)
+    if image_str is None:
+        # Support cross-region (general) imageid
+        image_str = common.get_image_id_from_tag_impl(_image_df, tag, None)
+
     df = _image_df[_image_df['Tag'].str.fullmatch(tag)]
     app_catalog_listing_id = df['AppCatalogListingId'].iloc[0]
     resource_version = df['ResourceVersion'].iloc[0]
+
     return (f'{image_str}{oci_conf.IMAGE_TAG_SPERATOR}{app_catalog_listing_id}'
             f'{oci_conf.IMAGE_TAG_SPERATOR}{resource_version}')
 

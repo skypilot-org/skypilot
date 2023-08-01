@@ -94,18 +94,21 @@ class GcsCloudStorage(CloudStorage):
     # parellel workers on our end.
     # The gsutil command is part of the Google Cloud SDK, and we reuse
     # the installation logic here.
-    _GET_GSUTIL = gcp.GOOGLE_SDK_INSTALLATION_COMMAND
+    _INSTALL_GSUTIL = gcp.GOOGLE_SDK_INSTALLATION_COMMAND
 
-    _GSUTIL = ('GOOGLE_APPLICATION_CREDENTIALS='
-               f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH} gsutil')
+    @property
+    def _gsutil_command(self):
+        gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+        return (f'{alias_gen}; GOOGLE_APPLICATION_CREDENTIALS='
+                f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH} {gsutil_alias}')
 
     def is_directory(self, url: str) -> bool:
         """Returns whether 'url' is a directory.
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
         """
-        commands = [self._GET_GSUTIL]
-        commands.append(f'{self._GSUTIL} ls -d {url}')
+        commands = [self._INSTALL_GSUTIL]
+        commands.append(f'{self._gsutil_command} ls -d {url}')
         command = ' && '.join(commands)
         p = subprocess.run(command,
                            stdout=subprocess.PIPE,
@@ -132,16 +135,17 @@ class GcsCloudStorage(CloudStorage):
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads a directory using gsutil."""
-        download_via_gsutil = (
-            f'{self._GSUTIL} -m rsync -r {source} {destination}')
-        all_commands = [self._GET_GSUTIL]
+        download_via_gsutil = (f'{self._gsutil_command} '
+                               f'rsync -e -r {source} {destination}')
+        all_commands = [self._INSTALL_GSUTIL]
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using gsutil."""
-        download_via_gsutil = f'{self._GSUTIL} -m cp {source} {destination}'
-        all_commands = [self._GET_GSUTIL]
+        download_via_gsutil = f'{self._gsutil_command} ' \
+                              f'cp {source} {destination}'
+        all_commands = [self._INSTALL_GSUTIL]
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)
 

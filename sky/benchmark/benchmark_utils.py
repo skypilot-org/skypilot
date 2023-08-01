@@ -24,6 +24,7 @@ from sky import backends
 from sky import data
 from sky import global_user_state
 from sky import sky_logging
+from sky import status_lib
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.skylet import constants
@@ -313,7 +314,7 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
 
-        if cluster_status == global_user_state.ClusterStatus.UP:
+        if cluster_status == status_lib.ClusterStatus.UP:
             # NOTE: The id of the benchmarking job must be 1.
             # TODO(woosuk): Handle exceptions.
             job_status = backend.get_job_status(handle,
@@ -321,13 +322,13 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
                                                 stream_logs=False)['1']
 
     # Update the benchmark status.
-    if (cluster_status == global_user_state.ClusterStatus.INIT or
+    if (cluster_status == status_lib.ClusterStatus.INIT or
             job_status < job_lib.JobStatus.RUNNING):
         benchmark_status = benchmark_state.BenchmarkStatus.INIT
     elif job_status == job_lib.JobStatus.RUNNING:
         benchmark_status = benchmark_state.BenchmarkStatus.RUNNING
     elif (cluster_status is None or
-          cluster_status == global_user_state.ClusterStatus.STOPPED or
+          cluster_status == status_lib.ClusterStatus.STOPPED or
           (job_status is not None and job_status.is_terminal())):
         # The cluster has terminated or stopped, or
         # the cluster is UP and the job has terminated.

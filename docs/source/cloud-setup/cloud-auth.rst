@@ -45,3 +45,25 @@ Example of mixing a default profile and an SSO profile:
 
     $ # A cluster launched under a different profile.
     $ AWS_PROFILE=AdministratorAccess-12345 sky launch --cloud aws -c my-sso-cluster
+
+
+GCP
+-------------------------------
+
+.. _gcp-service-account:
+
+GCP Service Account
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+`GCP Service Account <https://cloud.google.com/iam/docs/service-account-overview>`__ is supported.
+
+To use it to access GCP with SkyPilot, you need to setup the credentials:
+
+1. Download the key for the service account from the `GCP console <https://console.cloud.google.com/iam-admin/serviceaccounts>`__.
+2. Set the environment variable `GOOGLE_APPLICATION_CREDENTIALS` to the path of the key file, and configure the gcloud CLI tool:
+
+.. code-block:: console
+
+    $ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
+    $ gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+    $ gcloud config set project your-project-id

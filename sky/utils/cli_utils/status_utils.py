@@ -6,13 +6,13 @@ import click
 import colorama
 
 from sky import backends
-from sky import global_user_state
 from sky import spot
+from sky import status_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import log_utils
 
-_COMMAND_TRUNC_LENGTH = 25
+COMMAND_TRUNC_LENGTH = 25
 NUM_COST_REPORT_LINES = 5
 
 # A record in global_user_state's 'clusters' table.
@@ -21,7 +21,7 @@ _ClusterRecord = Dict[str, Any]
 _ClusterCostReportRecord = Dict[str, Any]
 
 
-def _truncate_long_string(s: str, max_length: int = 35) -> str:
+def truncate_long_string(s: str, max_length: int = 35) -> str:
     if len(s) <= max_length:
         return s
     splits = s.split(' ')
@@ -56,7 +56,7 @@ class StatusColumn:
     def calc(self, record):
         val = self.calc_func(record)
         if self.trunc_length != 0:
-            val = _truncate_long_string(str(val), self.trunc_length)
+            val = truncate_long_string(str(val), self.trunc_length)
         return val
 
 
@@ -80,9 +80,10 @@ def show_status_table(cluster_records: List[_ClusterRecord],
         StatusColumn('ZONE', _get_zone, show_by_default=False),
         StatusColumn('STATUS', _get_status_colored),
         StatusColumn('AUTOSTOP', _get_autostop),
+        StatusColumn('HEAD_IP', _get_head_ip, show_by_default=False),
         StatusColumn('COMMAND',
                      _get_command,
-                     trunc_length=_COMMAND_TRUNC_LENGTH if not show_all else 0),
+                     trunc_length=COMMAND_TRUNC_LENGTH if not show_all else 0),
     ]
 
     columns = []
@@ -268,7 +269,7 @@ def show_local_status_table(local_clusters: List[str]):
             # RESOURCES
             resources_str,
             # COMMAND
-            _truncate_long_string(command_str, _COMMAND_TRUNC_LENGTH),
+            truncate_long_string(command_str, COMMAND_TRUNC_LENGTH),
         ]
         names.append(cluster_name)
         cluster_table.add_row(row)
@@ -309,8 +310,7 @@ _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
 
 
-def _get_status(
-        cluster_record: _ClusterRecord) -> global_user_state.ClusterStatus:
+def _get_status(cluster_record: _ClusterRecord) -> status_lib.ClusterStatus:
     return cluster_record['status']
 
 
@@ -364,10 +364,19 @@ def _get_autostop(cluster_record: _ClusterRecord) -> str:
     return autostop_str
 
 
+def _get_head_ip(cluster_record: _ClusterRecord) -> str:
+    handle = cluster_record['handle']
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        return '-'
+    if handle.head_ip is None:
+        return '-'
+    return handle.head_ip
+
+
 def _is_pending_autostop(cluster_record: _ClusterRecord) -> bool:
     # autostop < 0 means nothing scheduled.
     return cluster_record['autostop'] >= 0 and _get_status(
-        cluster_record) != global_user_state.ClusterStatus.STOPPED
+        cluster_record) != status_lib.ClusterStatus.STOPPED
 
 
 # ---- 'sky cost-report' helper functions below ----
