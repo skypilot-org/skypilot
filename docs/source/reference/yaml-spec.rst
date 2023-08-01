@@ -80,6 +80,13 @@ Available fields:
       #   high: 6000 IOPS; 340 MB/s; write 250 MB/s
       disk_tier: 'medium'
 
+      # Ports to expose (optional).
+      # Currently only TCP protocol is supported.
+      # Could be an integer or a range.
+      ports:
+        - 8080
+        - 10022-10040
+
       # Additional accelerator metadata (optional); only used for TPU node
       # and TPU VM.
       # Example usage:

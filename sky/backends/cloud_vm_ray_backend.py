@@ -1455,6 +1455,7 @@ class RetryingVmProvisioner(object):
                 config_dict = backend_utils.write_cluster_config(
                     to_provision,
                     num_nodes,
+                    to_provision.ports,
                     _get_cluster_config_template(to_provision.cloud),
                     cluster_name,
                     self._local_wheel_path,
@@ -3647,6 +3648,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'Failed to delete cloned image {image_id}. Please '
                     'remove it manually to avoid image leakage. Details: '
                     f'{common_utils.format_exception(e, use_bracket=True)}')
+        if terminate:
+            cloud = handle.launched_resources.cloud
+            config = common_utils.read_yaml(handle.cluster_yaml)
+            if isinstance(cloud, (clouds.AWS, clouds.GCP)):
+                # Clean up AWS SGs
+                provision_lib.cleanup_ports(repr(cloud), handle.cluster_name,
+                                            config['provider'])
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.

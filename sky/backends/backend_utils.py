@@ -799,6 +799,7 @@ def _replace_yaml_dicts(
 def write_cluster_config(
         to_provision: 'resources.Resources',
         num_nodes: int,
+        ports: Optional[List[Union[int, str]]],
         cluster_config_template: str,
         cluster_name: str,
         local_wheel_path: pathlib.Path,
@@ -897,6 +898,11 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
     )
 
+    # Only using new security group names for clusters with ports specified.
+    default_aws_sg_name = f'sky-sg-{common_utils.user_and_hostname_hash()}'
+    if ports is not None:
+        default_aws_sg_name += f'-{common_utils.truncate_and_hash_cluster_name(cluster_name)}'
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -907,6 +913,7 @@ def write_cluster_config(
             **{
                 'cluster_name': cluster_name,
                 'num_nodes': num_nodes,
+                'ports': ports,
                 'disk_size': to_provision.disk_size,
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the
@@ -921,8 +928,7 @@ def write_cluster_config(
                 # (username, last 4 chars of hash of hostname): for uniquefying
                 # users on shared-account scenarios.
                 'security_group': skypilot_config.get_nested(
-                    ('aws', 'security_group_name'),
-                    f'sky-sg-{common_utils.user_and_hostname_hash()}'),
+                    ('aws', 'security_group_name'), default_aws_sg_name),
                 'vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
                                                        None),
                 'use_internal_ips': skypilot_config.get_nested(
