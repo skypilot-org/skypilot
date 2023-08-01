@@ -755,8 +755,11 @@ class Resources:
         if self.accelerators is not None:
             for acc in self.accelerators.keys():
                 if acc.lower().startswith('tpu'):
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError('Ports is not supported for TPU VM.')
+                    use_tpu_vm = self.accelerator_args.get('tpu_vm', False)
+                    if use_tpu_vm:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                'Ports is not supported for TPU VM.')
         if self.cloud is not None:
             self.cloud.check_features_are_supported(
                 {clouds.CloudImplementationFeatures.OPEN_PORTS})
