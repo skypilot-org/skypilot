@@ -384,13 +384,13 @@ class Kubernetes(clouds.Cloud):
                 namespace,
                 label_selector=f'skypilot-cluster={name}',
                 _request_timeout=kubernetes.API_TIMEOUT).items
-        except kubernetes.max_retry_error() as e:
+        except kubernetes.max_retry_error():
             with ux_utils.print_exception_no_traceback():
                 ctx = kubernetes_utils.get_current_kube_config_context_name()
                 raise exceptions.ClusterStatusFetchingError(
                     f'Failed to query cluster {name!r} status. '
                     'Network error - check if the Kubernetes cluster in '
-                    f'context {ctx} is up and accessible.')
+                    f'context {ctx} is up and accessible.') from None
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ClusterStatusFetchingError(
