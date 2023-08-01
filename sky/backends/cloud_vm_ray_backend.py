@@ -2828,6 +2828,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         style = colorama.Style
         fore = colorama.Fore
 
+        cloud_env_vars = handle.launched_resources.cloud.query_env_vars(
+            handle.cluster_name)
+        task.update_envs(cloud_env_vars)
+
         if task.setup is None:
             return
 
