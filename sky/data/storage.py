@@ -1,13 +1,13 @@
 """Storage and Store Classes for Sky Data."""
+import botocore
 import enum
 import os
 import re
 import subprocess
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Tuple, Type, Union, Set
 import urllib.parse
-
 import colorama
 
 from sky import check
@@ -65,7 +65,7 @@ _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
 
 def _is_storage_cloud_enabled(cloud_name: str,
                               try_fix_with_sky_check: bool = True) -> bool:
-    enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+    enabled_storage_clouds = global_user_state.get_storage_enabled_clouds()
     if cloud_name in enabled_storage_clouds:
         return True
     if try_fix_with_sky_check:
@@ -107,6 +107,59 @@ class StoreType(enum.Enum):
                 raise ValueError(f'Unknown store type: {store}')
 
 
+def get_sky_managed_bucket_names(storetype: 'StoreType') -> Set[str]:
+    """Gets a set of sky managed buckets from AWS S3
+
+    Args:
+        storetype: The type of storage (S3, GCS, or R2) from which
+        to retrieve the names of Sky-managed buckets.
+
+    Returns:
+        Set[str]: Set of bucket names that are sky managed
+    """
+    sky_managed_buckets = set()
+    if storetype == StoreType.S3:
+        s3_client = data_utils.create_s3_client()
+        buckets = s3_client.list_buckets()
+        # Get a list of all bucket names from the response
+        bucket_names = [bucket['Name'] for bucket in buckets['Buckets']]
+        for bucket_name in bucket_names:
+            try:
+                response = s3_client.get_bucket_tagging(Bucket=bucket_name)
+                tagset = response['TagSet']  # list of dictionaries
+                for tag in tagset:
+                    if tag['Key'] == 'skymanaged':
+                        sky_managed_buckets.add(bucket_name)
+            except botocore.exceptions.ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchTagSet':
+                    continue
+    elif storetype == StoreType.GCS:
+        gcs_client = gcp.storage_client()
+        buckets = gcs_client.list_buckets()
+        for bucket in buckets:
+            labels: Dict[str, str] = bucket.labels
+            if 'skymanaged' in labels:
+                sky_managed_buckets.add(bucket.name)
+    elif storetype == StoreType.R2:
+        r2_resource = cloudflare.resource('s3')
+        buckets = r2_resource.buckets.all()
+        for bucket in buckets:
+            try:
+                r2_resource.Object(bucket.name, '.sky_DO_NOT_DELETE').load()
+            except aws.botocore_exceptions().ClientError:
+                # The file does not exist in this bucket, and therefore,
+                # the bucket is not sky managed
+                continue
+            else:
+                # The file exists in this bucket
+                sky_managed_buckets.add(bucket.name)
+    else:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Unknown store type: {storetype}')
+
+    return sky_managed_buckets
+
+
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
@@ -145,6 +198,27 @@ def get_store_prefix(storetype: StoreType) -> str:
     else:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Unknown store type: {storetype}')
+
+
+def get_bucket_region(bucket_name: str, storetype: StoreType) -> str:
+    if storetype == StoreType.S3:
+        s3 = aws.client('s3')
+        bucket_location = s3.get_bucket_location(Bucket=bucket_name)
+        region = bucket_location['LocationConstraint']
+    elif storetype == StoreType.GCS:
+        storage_client = gcp.storage_client()
+        try:
+            bucket = storage_client.get_bucket(bucket_name)
+        except gcp.not_found_exception() as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketGetError(
+                    'Attempted to get region of a non-existent bucket: '
+                    f'{bucket_name}') from e
+        region = bucket.location
+    elif storetype == StoreType.R2:
+        # Cloudflare only supports 'auto' region for R2
+        region = 'auto'
+    return region
 
 
 class AbstractStore:
@@ -685,7 +759,9 @@ class Storage(object):
             f'Validation failed for storage source {self.source}, name '
             f'{self.name} and mode {self.mode}. Please check the arguments.')
 
-    def add_store(self, store_type: Union[str, StoreType]) -> AbstractStore:
+    def add_store(self,
+                  store_type: Union[str, StoreType],
+                  region: Optional[str] = None) -> AbstractStore:
         """Initializes and adds a new store to the storage.
 
         Invoked by the optimizer after it has selected a store to
@@ -693,6 +769,9 @@ class Storage(object):
 
         Args:
           store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2]
+          region: str; Region to place the bucket in. It is used when
+            external storage state is synced to internal state with
+            sky storage ls --refresh
         """
         if isinstance(store_type, str):
             store_type = StoreType(store_type)
@@ -718,6 +797,7 @@ class Storage(object):
             store = store_cls(
                 name=self.name,
                 source=self.source,
+                region=region,
                 sync_on_reconstruction=self.sync_on_reconstruction)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
@@ -1146,12 +1226,17 @@ class S3Store(AbstractStore):
         bucket = s3.Bucket(self.name)
 
         try:
-            # Try Public bucket case.
+            # Try Public/Private bucket cases.
             # This line does not error out if the bucket is an external public
             # bucket or if it is a user's bucket that is publicly
             # accessible.
             self.client.head_bucket(Bucket=self.name)
-            return bucket, False
+            # If there are externally created sky managed storage, then sky
+            # storage ls --refresh syncs it to internal state. And this is
+            # considered as new_bucket as it was not part of state.db before
+            if self.sync_on_reconstruction:
+                return bucket, False
+            return bucket, True
         except aws.botocore_exceptions().ClientError as e:
             error_code = e.response['Error']['Code']
             # AccessDenied error for buckets that are private and not owned by
@@ -1172,7 +1257,7 @@ class S3Store(AbstractStore):
 
         # If bucket cannot be found in both private and public settings,
         # the bucket is to be created by Sky. However, creation is skipped if
-        # Store object is being reconstructed for deletion.
+        # Store object is being reconstructed for deletion or ls refresh.
         if self.sync_on_reconstruction:
             bucket = self._create_s3_bucket(self.name)
             return bucket, True
@@ -1228,6 +1313,12 @@ class S3Store(AbstractStore):
                 s3_client.create_bucket(Bucket=bucket_name,
                                         CreateBucketConfiguration=location)
                 logger.info(f'Created S3 bucket {bucket_name} in {region}')
+            s3_client.put_bucket_tagging(
+                Bucket=bucket_name,
+                Tagging={'TagSet': [{
+                    'Key': 'skymanaged',
+                    'Value': 'sky'
+                },]})
         except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
@@ -1571,7 +1662,12 @@ class GcsStore(AbstractStore):
         """
         try:
             bucket = self.client.get_bucket(self.name)
-            return bucket, False
+            # If there are externally created sky managed storage, then sky
+            # storage ls --refresh syncs it to internal state. And this is
+            # considered as new_bucket as it was not part of state.db before
+            if self.sync_on_reconstruction:
+                return bucket, False
+            return bucket, True
         except gcp.not_found_exception() as e:
             if isinstance(self.source, str) and self.source.startswith('gs://'):
                 with ux_utils.print_exception_no_traceback():
@@ -1652,6 +1748,7 @@ class GcsStore(AbstractStore):
         try:
             bucket = self.client.bucket(bucket_name)
             bucket.storage_class = 'STANDARD'
+            bucket.labels = {'skymanaged': 'sky'}
             new_bucket = self.client.create_bucket(bucket, location=region)
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
@@ -1916,7 +2013,12 @@ class R2Store(AbstractStore):
             # bucket or if it is a user's bucket that is publicly
             # accessible.
             self.client.head_bucket(Bucket=self.name)
-            return bucket, False
+            # If there are externally created sky managed storage, then sky
+            # storage ls --refresh syncs it to internal state. And this is
+            # considered as new_bucket as it was not part of state.db before
+            if self.sync_on_reconstruction:
+                return bucket, False
+            return bucket, True
         except aws.botocore_exceptions().ClientError as e:
             error_code = e.response['Error']['Code']
             # AccessDenied error for buckets that are private and not owned by
@@ -2006,6 +2108,7 @@ class R2Store(AbstractStore):
                 r2_client.create_bucket(Bucket=bucket_name,
                                         CreateBucketConfiguration=location)
                 logger.info(f'Created R2 bucket {bucket_name} in {region}')
+            r2_client.put_object(Bucket=bucket_name, Key='.sky_DO_NOT_DELETE')
         except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(

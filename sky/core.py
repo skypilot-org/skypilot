@@ -1,4 +1,5 @@
 """SDK functions for cluster/job management."""
+import collections
 import getpass
 import sys
 from typing import Any, Dict, List, Optional, Union
@@ -10,11 +11,13 @@ from sky import dag
 from sky import task
 from sky import backends
 from sky import data
+from sky.data import storage as storage_lib
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot
 from sky import status_lib
+from sky.adaptors import cloudflare
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -951,6 +954,65 @@ def storage_ls() -> List[Dict[str, Any]]:
     for storage in storages:
         storage['store'] = list(storage.pop('handle').sky_stores.keys())
     return storages
+
+
+def storage_refresh() -> None:
+    """Syncs the internal status and the external status of storages
+
+    Removes storages from the table in ~/.sky/state.db that are managed
+    by Sky but no longer exist in the cloud console. It also adds storages
+    to the same table if they are managed by Sky, exist in the cloud console,
+    but are not currently listed in ~/.sky/state.db.
+    """
+    green = colorama.Fore.GREEN
+    red = colorama.Fore.RED
+    bold = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
+
+    internal_storage_list = storage_ls()
+    internal_buckets_status = collections.defaultdict(set)
+    for storage in internal_storage_list:
+        for store in storage['store']:
+            internal_buckets_status[store].add(storage['name'])
+
+    storage_enabled_clouds = global_user_state.get_storage_enabled_clouds()
+    external_buckets_status = collections.defaultdict(set)
+
+    # sync state.db and external status of storages
+    for storage_enabled_cloud in storage_enabled_clouds:
+        storetype: storage_lib.StoreType
+        # TODO: use get_storetype_from_cloud when
+        # storage_enabled_clouds are officially maintained
+        if storage_enabled_cloud == 'AWS':
+            storetype = storage_lib.StoreType.S3
+        elif storage_enabled_cloud == 'GCP':
+            storetype = storage_lib.StoreType.GCS
+        elif storage_enabled_cloud == cloudflare.NAME:
+            storetype = storage_lib.StoreType.R2
+
+        external_buckets_status[
+            storetype] = storage_lib.get_sky_managed_bucket_names(storetype)
+        # check if anything in state.db doesn't exist in the external state
+        only_in_internal_state = internal_buckets_status[storetype].difference(
+            external_buckets_status[storetype])
+        # remove storages that exist in state.db but not in external state
+        for s_name in only_in_internal_state:
+            global_user_state.remove_storage(s_name, storetype)
+            sky_logging.print(f'{red}Removed{reset} '
+                              f'{bold}{storetype.value}{reset} '
+                              f'bucket: {s_name}')
+        # check if anything in external state doesn't exist in state.db
+        only_in_external_state = external_buckets_status[storetype].difference(
+            internal_buckets_status[storetype])
+        # add storage that exists in external state but not in state.db
+        for s_name in only_in_external_state:
+            region = storage_lib.get_bucket_region(s_name, storetype)
+            storage_obj = storage_lib.Storage(name=s_name,
+                                              source=None,
+                                              sync_on_reconstruction=False)
+            storage_obj.add_store(storetype, region=region)
+            sky_logging.print(f'{green}Added{reset} {bold}'
+                              f'{storetype.value}{reset} bucket: {s_name}')
 
 
 @usage_lib.entrypoint

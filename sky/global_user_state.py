@@ -26,10 +26,13 @@ from sky.utils import db_utils
 if typing.TYPE_CHECKING:
     from sky import backends
     from sky.data import Storage
+    from sky.data import StoreType
 
 _ENABLED_CLOUDS_KEY = 'enabled_clouds'
 
-_DB_PATH = os.path.expanduser('~/.sky/state.db')
+_DEFAULT_DB_PATH = os.path.expanduser('~/.sky/state.db')
+# set _DB_PATH to temporary testing db when running smoke test
+_DB_PATH = os.environ.get('SMOKE_TEST_DB_PATH', _DEFAULT_DB_PATH)
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 
@@ -626,7 +629,7 @@ def get_enabled_clouds() -> List[clouds.Cloud]:
     return enabled_clouds
 
 
-def get_enabled_storage_clouds() -> List[str]:
+def get_storage_enabled_clouds() -> List[str]:
     # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # pylint: disable=line-too-long
     # is resolved by implementing separate 'enabled_storage_clouds'
     enabled_clouds = get_enabled_clouds()
@@ -667,8 +670,17 @@ def add_or_update_storage(storage_name: str,
     _DB.conn.commit()
 
 
-def remove_storage(storage_name: str):
+def remove_storage(storage_name: str, storetype: Optional['StoreType'] = None):
     """Removes Storage from Database"""
+    if storetype is not None:
+        handle = get_handle_from_storage_name(storage_name)
+        if handle is not None:
+            del handle.sky_stores[storetype]
+            # if the storage is not empty
+            if len(handle.sky_stores) != 0:
+                add_or_update_storage(storage_name, handle,
+                                      status_lib.StorageStatus.READY)
+                return
     _DB.cursor.execute('DELETE FROM storage WHERE name=(?)', (storage_name,))
     _DB.conn.commit()
 

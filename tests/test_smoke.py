@@ -41,14 +41,17 @@ import jinja2
 import pytest
 
 import sky
+from sky import exceptions
 from sky import global_user_state
 from sky.data import data_utils
 from sky.data import storage as storage_lib
-from sky.adaptors import cloudflare
+from sky.adaptors import cloudflare, aws, gcp
 from sky.skylet import events
 from sky.utils import common_utils
+from sky.utils import db_utils
 from sky.utils import subprocess_utils
 from sky.clouds import AWS, GCP, Azure
+from sky import core
 
 # For uniquefying users on shared-account cloud providers. Used as part of the
 # cluster names.
@@ -2746,27 +2749,77 @@ class TestStorageWithCredentials:
                 mode=storage_lib.StorageMode.COPY)
 
     @pytest.fixture
-    def tmp_awscli_bucket(self, tmp_bucket_name):
+    def tmp_awscli_bucket(self, tmp_bucket_name, request):
         # Creates a temporary bucket using awscli
-        subprocess.check_call(['aws', 's3', 'mb', f's3://{tmp_bucket_name}'])
+        # request.node.originalname is the name of the calling test
+        need_tagging = (request.node.originalname == 'test_storage_refresh')
+        try:
+            subprocess.check_output(
+                ['aws', 's3', 'mb', f's3://{tmp_bucket_name}'],
+                stderr=subprocess.PIPE)
+        except subprocess.CalledProcessError as e:
+            # To avoid errors in test_storage_refresh due to immediate
+            # s3 bucket recreation after deletion, unique name is created.
+            stderr = e.stderr.decode()
+            if 'OperationAborted' in stderr:
+                tmp_bucket_name = f'{tmp_bucket_name}-2'
+                subprocess.check_call(
+                    ['aws', 's3', 'mb', f's3://{tmp_bucket_name}'])
+        if need_tagging:
+            cmd = f'aws s3api put-bucket-tagging --bucket {tmp_bucket_name} --tagging \'TagSet=[{{Key=skymanaged,Value=sky}}]\''
+            subprocess.check_call(cmd, shell=True)
         yield tmp_bucket_name
         subprocess.check_call(
             ['aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force'])
 
     @pytest.fixture
-    def tmp_gsutil_bucket(self, tmp_bucket_name):
+    def tmp_gsutil_bucket(self, tmp_bucket_name, request):
         # Creates a temporary bucket using gsutil
-        subprocess.check_call(['gsutil', 'mb', f'gs://{tmp_bucket_name}'])
+        # request.node.originalname is the name of the calling test
+        need_label = (request.node.originalname == 'test_storage_refresh')
+        try:
+            subprocess.check_output(['gsutil', 'mb', f'gs://{tmp_bucket_name}'])
+            if need_label:
+                cmd = f'gsutil label ch -l "skymanaged:sky" gs://{tmp_bucket_name}'
+                subprocess.check_output(cmd, shell=True, stderr=subprocess.PIPE)
+        except subprocess.CalledProcessError as e:
+            # To avoid errors in test_storage_refresh due to immediate
+            # gcs bucket recreation after deletion, unique name is created.
+            # Error is caught when label cmd is ran.
+            stderr = e.stderr.decode()
+            if 'BucketNotFoundException: 404' in stderr:
+                tmp_bucket_name = f'{tmp_bucket_name}-2'
+                subprocess.check_output(
+                    ['gsutil', 'mb', f'gs://{tmp_bucket_name}'])
+                if need_label:
+                    cmd = f'gsutil label ch -l "skymanaged:sky" gs://{tmp_bucket_name}'
+                    subprocess.check_output(cmd,
+                                            shell=True,
+                                            stderr=subprocess.PIPE)
         yield tmp_bucket_name
-        subprocess.check_call(['gsutil', 'rm', '-r', f'gs://{tmp_bucket_name}'])
+        try:
+            subprocess.check_output(
+                ['gsutil', 'rm', '-r', f'gs://{tmp_bucket_name}'],
+                stderr=subprocess.PIPE)
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode()
+            # when storage is already removed from the test
+            if 'BucketNotFoundException: 404' in stderr:
+                pass
 
     @pytest.fixture
-    def tmp_awscli_bucket_r2(self, tmp_bucket_name):
+    def tmp_awscli_bucket_r2(self, tmp_bucket_name, request):
         # Creates a temporary bucket using awscli
+        # request.node.originalname is the name of the calling test
+        need_tagging = (request.node.originalname == 'test_storage_refresh')
         endpoint_url = cloudflare.create_endpoint()
         subprocess.check_call(
             f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 mb s3://{tmp_bucket_name} --endpoint {endpoint_url} --profile=r2',
-            shell=True)
+            shell=True,
+            stderr=subprocess.PIPE)
+        if need_tagging:
+            cmd = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api put-object --bucket {tmp_bucket_name} --key .sky_DO_NOT_DELETE --endpoint {endpoint_url} --profile=r2'
+            subprocess.check_call(cmd, shell=True)
         yield tmp_bucket_name
         subprocess.check_call(
             f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb s3://{tmp_bucket_name} --force --endpoint {endpoint_url} --profile=r2',
@@ -2779,6 +2832,22 @@ class TestStorageWithCredentials:
         yield storage_obj
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
+
+    @staticmethod
+    @pytest.fixture
+    def tmp_state_db_file():
+        with tempfile.NamedTemporaryFile(suffix=".db") as temp_db_file:
+            original_db_path = os.environ.get('SMOKE_TEST_DB_PATH')
+            os.environ['SMOKE_TEST_DB_PATH'] = temp_db_file.name
+            global_user_state._DB_PATH = temp_db_file.name
+            global_user_state._DB = db_utils.SQLiteConn(
+                temp_db_file.name, global_user_state.create_table)
+            subprocess.run(['sky check'], shell=True)
+            yield
+            if original_db_path is not None:
+                os.environ['SMOKE_TEST_DB_PATH'] = original_db_path
+            else:
+                del os.environ['SMOKE_TEST_DB_PATH']
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -3077,9 +3146,56 @@ class TestStorageWithCredentials:
         # 1 is read as .gitignore is uploaded
         assert '1' in git_exclude_output.decode('utf-8'), \
                '.git directory should not be uploaded.'
-        # 4 files include .gitignore, included.log, included.txt, include_dir/included.log
-        assert '4' in cnt_output.decode('utf-8'), \
-               'Some items listed in .gitignore and .git/info/exclude are not excluded.'
+        if store_type == storage_lib.StoreType.R2:
+            # 5 files include .gitignore, included.log, included.txt, include_dir/included.log,
+            # and .sky_DO_NOT_DELETE
+            assert '5' in cnt_output.decode('utf-8'), \
+                'Some items listed in .gitignore and .git/info/exclude are not excluded.'
+        else:
+            # 4 files include .gitignore, included.log, included.txt, include_dir/included.log
+            assert '4' in cnt_output.decode('utf-8'), \
+                'Some items listed in .gitignore and .git/info/exclude are not excluded.'
+
+    @pytest.mark.parametrize('ext_bucket_fixture, store_type',
+                             [('tmp_awscli_bucket', storage_lib.StoreType.S3),
+                              ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
+                              pytest.param('tmp_awscli_bucket_r2',
+                                           storage_lib.StoreType.R2,
+                                           marks=pytest.mark.cloudflare)])
+    def test_storage_refresh(self, ext_bucket_fixture, request, store_type,
+                             tmp_local_storage_obj, tmp_state_db_file):
+        # internally create 1 storage object
+        tmp_local_storage_obj.add_store(store_type)
+        # check if created storage appears in state.db
+        out = global_user_state.get_storage_names_start_with(
+            tmp_local_storage_obj.name)
+        assert tmp_local_storage_obj.name in out
+        # externally remove 1 storage object
+        cmd = self.cli_delete_cmd(store_type, tmp_local_storage_obj.name)
+        subprocess.check_call(cmd, shell=True)
+        # check if created storage appears in state.db
+        out = global_user_state.get_storage_names_start_with(
+            tmp_local_storage_obj.name)
+        assert tmp_local_storage_obj.name in out
+        # run storage refresh
+        sky.storage_refresh()
+        # check if externally removed storage removed from state.db
+        out = global_user_state.get_storage_names_start_with(
+            tmp_local_storage_obj.name)
+        assert tmp_local_storage_obj.name not in out
+
+        # externally create 1 storage object
+        bucket_name = request.getfixturevalue(ext_bucket_fixture)
+        # wait unitl created storage gets updated to console
+        time.sleep(5)
+        # check if externally created storage does not appear in state.db
+        out = global_user_state.get_storage_names_start_with(bucket_name)
+        assert bucket_name not in out
+        # run storage refresh
+        sky.storage_refresh()
+        # check externally created storage updated in state.db
+        out = global_user_state.get_storage_names_start_with(bucket_name)
+        assert bucket_name in out
 
 
 # ---------- Testing YAML Specs ----------

@@ -3291,10 +3291,20 @@ def storage():
               is_flag=True,
               required=False,
               help='Show all information in full.')
+@click.option(
+    '--refresh',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help=('Query the latest storage state from the cloud provider(s).'))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def storage_ls(all: bool):
+def storage_ls(all: bool, refresh: bool):
     """List storage objects managed by SkyPilot."""
+    if refresh:
+        with log_utils.safe_rich_status('[bold cyan]Syncing storage[/]'):
+            sky.storage_refresh()
     storages = sky.storage_ls()
     storage_table = storage_utils.format_storage_table(storages, show_all=all)
     click.echo(storage_table)
