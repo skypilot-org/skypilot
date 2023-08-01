@@ -28,6 +28,8 @@ _COLOR_PATTERN = re.compile(r'\x1b[^m]*m')
 _PAYLOAD_PATTERN = re.compile(r'<sky-payload>(.*)</sky-payload>')
 _PAYLOAD_STR = '<sky-payload>{}</sky-payload>'
 
+_VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
+
 logger = sky_logging.init_logger(__name__)
 
 _usage_run_id = None
@@ -400,3 +402,8 @@ def find_free_port(start_port: int) -> int:
             except OSError:
                 pass
     raise OSError('No free ports available.')
+
+
+def is_valid_env_var(name: str) -> bool:
+    """Checks if the task environment variable name is valid."""
+    return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
