@@ -888,6 +888,7 @@ def _configure_subnet(config, compute):
             # the created VM.
             node_config["tags"]["items"].append(config["cluster_name"])
         else:
+            assert get_node_type(node_config) == GCPNodeType.GCPTPU, node_config
             # TPU VM has a different api for tags. See
             # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes  # pylint: disable=line-too-long
             if "tags" not in node_config:
