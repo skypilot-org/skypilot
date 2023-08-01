@@ -22,6 +22,8 @@ RUN sudo useradd -m -s /bin/bash sky && \
     sudo /bin/bash -c "echo 'Defaults        secure_path=\"/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"' > /etc/sudoers.d/sky" && \
     sudo chmod -R a+rwx /home/ray
 
+# Set HOME environment variable for sky user, otherwise Ray base image HOME overrides
+ENV HOME /home/sky
 
 # Switch to sky user
 USER sky
