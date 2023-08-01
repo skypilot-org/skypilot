@@ -8,6 +8,11 @@ import subprocess
 import time
 from typing import Dict, Tuple
 
+from sky import sky_logging
+from sky.utils import common_utils
+
+logger = sky_logging.init_logger(__name__)
+
 C_SYNC_FILE_PATH = '~/.skystorage'
 
 
@@ -66,8 +71,14 @@ def set_gcs_sync_cmd(src_path: str, bucketname: str, num_threads: int,
     return sync_cmd
 
 
-def run_sync(src: str, storetype: str, bucketname: str, num_threads: int,
-             delete: bool, no_follow_symlinks: bool):
+def run_sync(src: str,
+             storetype: str,
+             bucketname: str,
+             num_threads: int,
+             interval: int,
+             delete: bool,
+             no_follow_symlinks: bool,
+             max_retries: int = 10):
     """
     Runs the sync command to from SRC to STORETYPE bucket
     """
@@ -82,8 +93,30 @@ def run_sync(src: str, storetype: str, bucketname: str, num_threads: int,
     else:
         raise ValueError(f'Unknown store type: {storetype}')
 
-    #TODO: add try-except block
-    subprocess.run(sync_cmd, shell=True, check=True)
+    try:
+        subprocess.run(sync_cmd,
+                       shell=True,
+                       check=True,
+                       stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as e:
+        out = e.stderr.decode('utf-8')
+        if max_retries > 0:
+            #TODO: display the error with remaining # of retries
+            wait_time = interval / 2
+            src_to_bucket = (f'\'{src}\' to \'{bucketname}\' '
+                             f'at \'{storetype}\'')
+            logger.info('Encountered an error while syncing '
+                        f'{src_to_bucket}. Retrying'
+                        f' in {wait_time}s. {max_retries} more reattempts '
+                        f' remaining. Details: {out}')
+            time.sleep(wait_time)
+            return run_sync(src, storetype, bucketname, num_threads, interval,
+                            delete, no_follow_symlinks, max_retries - 1)
+        else:
+            raise RuntimeError(f'Failed to sync {src_to_bucket} after '
+                               'number of retries. Details: '
+                               f'{common_utils.format_exception(e)}') from None
 
     #run necessary post-processes
     if storetype == 's3':
@@ -138,7 +171,7 @@ def csync(src: str, storetype: str, bucketname: str, num_threads: int,
                 stack.enter_context(filelock.FileLock(lock_path))
             start_time = time.time()
             # TODO: add try-except block
-            run_sync(src, storetype, bucketname, num_threads, delete,
+            run_sync(src, storetype, bucketname, num_threads, interval, delete,
                      no_follow_symlinks)
             end_time = time.time()
         # the time took to sync gets reflected to the INTERVAL
