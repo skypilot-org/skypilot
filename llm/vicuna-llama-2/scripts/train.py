@@ -301,7 +301,8 @@ def train():
 
     # Check the existence of checkpoints in all processes
     resume_from_checkpoint = False
-    checkpoints = list(pathlib.Path(training_args.output_dir).glob('checkpoint-*'))
+    checkpoints = list(
+        pathlib.Path(training_args.output_dir).glob('checkpoint-*'))
     checkpoints = [c for c in checkpoints if c.name.split('-')[-1].isdigit()]
     if checkpoints:
         resume_from_checkpoint = True
