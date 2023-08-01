@@ -270,6 +270,7 @@ class CheckpointCallback(transformers.TrainerCallback):
             with open(os.path.join(ckpt_path, 'complete'), 'w') as f:
                 f.write('')
             print(f'Checkpoint {state.global_step} saved.')
+        torch.distributed.barrier()
 
 
 def cleanup_incomplete_checkpoints(output_dir):
