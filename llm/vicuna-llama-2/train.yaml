@@ -32,7 +32,9 @@ setup: |
     conda activate chatbot
   fi
   cd ./scripts
-  pip install git+https://github.com/lm-sys/FastChat.git@4e2c942b8d785eb5e2aef1d0df2150e756f381ab transformers==4.28.1
+  # Use an older version of fastchat to install transformers==4.28.1, as the transformers>=4.31
+  # has issues with checkpoint saving -- saving additional large files in the checkpoint folder
+  pip install git+https://github.com/lm-sys/FastChat.git@cfc73bf3e13c22ded81e89675e0d7b228cf4b342
   if [ $USE_XFORMERS -eq 1 ]; then
     pip install -U xformers
   fi
