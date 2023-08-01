@@ -90,7 +90,12 @@ class SpotController:
         try:
             log_dirs = self._backend.sync_down_logs(
                 handle,
-                # Download the log for the latest job.
+                # Download the log of the latest job.
+                # The job_id for the spot job running on the spot cluster is not
+                # necessarily 1, as it is possible that the worker node in a
+                # multi-node cluster is preempted, and we recover the spot job
+                # on the existing cluster, which leads to a larger job_id. Those
+                # job_ids all represent the same logical spot job.
                 job_ids=None,
                 local_dir=spot_job_logs_dir)
         except exceptions.CommandError as e:
