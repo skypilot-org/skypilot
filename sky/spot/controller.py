@@ -78,7 +78,7 @@ class SpotController:
     def _download_log_and_stream(
             self,
             handle: cloud_vm_ray_backend.CloudVmRayResourceHandle) -> None:
-        """Downloads the logs of the latest job of a spot cluster, and streams them.
+        """Downloads and streams the logs of the latest job of a spot cluster.
 
         We do not stream the logs from the spot cluster directly, as the
         donwload and stream should be faster, and more robust against
