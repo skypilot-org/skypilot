@@ -284,6 +284,7 @@ def cleanup_incomplete_checkpoints(output_dir):
             print(f'Removing incomplete checkpoint {checkpoint}')
             shutil.rmtree(checkpoint)
         else:
+            print(f'Using checkpoint {checkpoint}')
             break
 
 
