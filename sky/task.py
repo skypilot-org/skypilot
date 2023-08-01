@@ -366,6 +366,7 @@ class Task:
         resources = sky.Resources.from_yaml_config(resources)
 
         task.set_resources({resources})
+        task.set_ports_env_var()
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
@@ -456,6 +457,16 @@ class Task:
                     f'{envs}')
         self._envs.update(envs)
         return self
+
+    def set_ports_env_var(self):
+        """Set SKYPILOT_PORTS env var."""
+        assert self.resources is not None and len(self.resources) == 1
+        ports = list(self.resources)[0].ports
+        if ports is None:
+            ports_str = ''
+        else:
+            ports_str = '\n'.join([str(p) for p in ports])
+        self.update_envs({constants.PORTS_ENV_VAR: ports_str})
 
     @property
     def need_spot_recovery(self) -> bool:

@@ -112,6 +112,10 @@ SkyPilot exports these environment variables for a task's execution (while ``run
        If a task is run as a :ref:`managed spot job <spot-jobs>`, then all
        recoveries of that job will have the same ID value. Read more :ref:`here <spot-jobs-end-to-end>`.
      - sky-2023-07-06-21-18-31-563597_myclus_id-1
+   * - ``SKYPILOT_PORTS``
+     - A string of ports specified in the task YAML's ``ports`` field, where each line contains one entry in the task YAML.
+       Specifically, when no ports are specified, this variable is set to the empty string.
+     - 18000-18100
 
 The values of these variables are filled in by SkyPilot at task execution time.
 
