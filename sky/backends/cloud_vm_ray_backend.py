@@ -2741,6 +2741,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Mounts all user files to the remote nodes."""
         self._execute_file_mounts(handle, all_file_mounts)
         self._execute_storage_mounts(handle, storage_mounts)
+        self._set_cluster_metadata_storage(handle, storage_mounts)
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
@@ -4115,20 +4116,25 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise exceptions.CommandError(
                         e.returncode, command='to mount',
                         error_msg=e.error_msg) from None
-            # Set storage information in cluster's metadata
-            cluster_name = handle.cluster_name
-            cluster_metadata: Dict[str, Any] = global_user_state.get_cluster_metadata(cluster_name)
-            storage_name = storage_obj.name
-            storage_metadata_name = global_user_state.CLUSTER_STORAGE_METADATA_NAME
-            if not cluster_metadata[storage_metadata_name]:
-                cluster_metadata[storage_metadata_name] = {}
-            cluster_metadata[storage_metadata_name][storage_name] = storage_obj
-            global_user_state.set_cluster_metadata(cluster_name, cluster_metadata)
-        
-        
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
+
+
+    def _set_cluster_metadata_storage(self, handle: CloudVmRayResourceHandle,
+                                storage_mounts: Dict[Path,
+                                                     storage_lib.Storage]) -> None:
+        """Sets 'storage_mounts' object in cluster's storage metadata"""
+        if not storage_mounts:
+            return
+
+        cluster_name = handle.cluster_name
+        cluster_metadata: Dict[str, Any] = global_user_state.get_cluster_metadata(cluster_name)
+        if not 'storage' in cluster_metadata.keys():
+            cluster_metadata['storage'] = {}
+        cluster_metadata['storage']['storage_mounts'] = storage_mounts
+        global_user_state.set_cluster_metadata(cluster_name, cluster_metadata)
+
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
