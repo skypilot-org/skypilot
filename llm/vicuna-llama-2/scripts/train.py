@@ -264,7 +264,6 @@ class CheckpointCallback(transformers.TrainerCallback):
 
     def on_save(self, args, state, control, **kwargs):
         """Add complete indicator to avoid incomplete checkpoints."""
-        torch.distributed.barrier()
         if state.is_world_process_zero:
             ckpt_path = os.path.join(args.output_dir,
                                      f'checkpoint-{state.global_step}')
