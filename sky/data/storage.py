@@ -109,11 +109,11 @@ class StoreType(enum.Enum):
 
 def get_sky_managed_bucket_names(storetype: 'StoreType') -> Set[str]:
     """Gets a set of sky managed buckets from AWS S3
-    
+
     Args:
         storetype: The type of storage (S3, GCS, or R2) from which
         to retrieve the names of Sky-managed buckets.
-        
+
     Returns:
         Set[str]: Set of bucket names that are sky managed
     """
@@ -771,7 +771,7 @@ class Storage(object):
           store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2]
           region: str; Region to place the bucket in. It is used when
             external storage state is synced to internal state with
-            sky storage ls --refresh 
+            sky storage ls --refresh
         """
         if isinstance(store_type, str):
             store_type = StoreType(store_type)

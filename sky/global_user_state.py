@@ -678,7 +678,8 @@ def remove_storage(storage_name: str, storetype: Optional['StoreType'] = None):
             del handle.sky_stores[storetype]
             # if the storage is not empty
             if len(handle.sky_stores) != 0:
-                add_or_update_storage(storage_name, handle, StorageStatus.READY)
+                add_or_update_storage(storage_name, handle,
+                                      status_lib.StorageStatus.READY)
                 return
     _DB.cursor.execute('DELETE FROM storage WHERE name=(?)', (storage_name,))
     _DB.conn.commit()

@@ -2,7 +2,7 @@
 import collections
 import getpass
 import sys
-from typing import Any, Dict, List, Optional, Union, Type
+from typing import Any, Dict, List, Optional, Union
 
 import colorama
 
@@ -981,7 +981,6 @@ def storage_refresh() -> None:
     # sync state.db and external status of storages
     for storage_enabled_cloud in storage_enabled_clouds:
         storetype: storage_lib.StoreType
-        store_class: Type[storage_lib.AbstractStore]
         # TODO: use get_storetype_from_cloud when
         # storage_enabled_clouds are officially maintained
         if storage_enabled_cloud == 'AWS':
