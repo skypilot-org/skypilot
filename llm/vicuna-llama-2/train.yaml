@@ -32,7 +32,7 @@ setup: |
     conda activate chatbot
   fi
   cd ./scripts
-  pip install git+https://github.com/lm-sys/FastChat.git@4e2c942b8d785eb5e2aef1d0df2150e756f381ab
+  pip install git+https://github.com/lm-sys/FastChat.git@4e2c942b8d785eb5e2aef1d0df2150e756f381ab transformers==4.28.1
   if [ $USE_XFORMERS -eq 1 ]; then
     pip install -U xformers
   fi
