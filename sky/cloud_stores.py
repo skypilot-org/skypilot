@@ -12,7 +12,8 @@ import urllib.parse
 
 from sky.clouds import gcp
 from sky.data import data_utils
-from sky.adaptors import aws, cloudflare
+from sky.adaptors import aws, cloudflare, ibm
+from sky.data.data_utils import Rclone
 
 
 class CloudStorage:
@@ -223,8 +224,76 @@ def get_storage_from_path(url: str) -> CloudStorage:
     return _REGISTRY[result.scheme]
 
 
+class IBMCosCloudStorage(CloudStorage):
+    """IBM Cloud Storage."""
+    # install rclone if package isn't already installed
+    _GET_RCLONE = [
+        'rclone version >/dev/null 2>&1 || '
+        'curl https://rclone.org/install.sh | sudo bash',
+    ]
+
+    def is_directory(self, url: str) -> bool:
+        """Returns whether IBM COS bucket's 'url' is a directory.
+
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
+        """
+
+        bucket_name, path, region = data_utils.split_cos_path(url)
+        s3 = ibm.get_cos_resource(region)
+        bucket = s3.Bucket(bucket_name)
+
+        num_objects = 0
+        for obj in bucket.objects.filter(Prefix=path):
+            num_objects += 1
+            if obj.key == path:
+                return False
+            # If there are more than 1 object in filter, then it is a directory
+            if num_objects == 3:
+                return True
+
+        # A directory with few or no items
+        return True
+
+    def _get_rclone_sync_command(self, source: str, destination: str):
+        bucket_name, data_path, bucket_region = data_utils.split_cos_path(
+            source)
+        bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
+            bucket_name, Rclone.RcloneClouds.IBM)
+        data_path_in_bucket = bucket_name + data_path
+        rclone_config_data = Rclone.get_rclone_config(bucket_name,
+                                                      Rclone.RcloneClouds.IBM,
+                                                      bucket_region)
+        # configure_rclone stores bucket profile in remote cluster's rclone.conf
+        configure_rclone = (
+            f' mkdir -p ~/.config/rclone/ &&'
+            f' echo "{rclone_config_data}">> {Rclone.RCLONE_CONFIG_PATH}')
+        download_via_rclone = (
+            'rclone copy '
+            f'{bucket_rclone_profile}:{data_path_in_bucket} {destination}')
+
+        all_commands = list(self._GET_RCLONE)
+        all_commands.append(configure_rclone)
+        all_commands.append(download_via_rclone)
+        return ' && '.join(all_commands)
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        """Downloads a directory from 'source' bucket to remote vm
+          at 'destination' using rclone."""
+        return self._get_rclone_sync_command(source, destination)
+
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        """Downloads a file from 'source' bucket to remote vm
+          at 'destination' using rclone."""
+
+        # underlying rclone command is the same for dirs and files.
+        return self.make_sync_dir_command(source, destination)
+
+
+# Maps bucket's URIs prefix(scheme) to its corresponding storage class
 _REGISTRY = {
     'gs': GcsCloudStorage(),
     's3': S3CloudStorage(),
-    'r2': R2CloudStorage()
+    'r2': R2CloudStorage(),
+    'cos': IBMCosCloudStorage(),
 }

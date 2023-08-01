@@ -1,6 +1,6 @@
 """IBM Web Services."""
+import colorama
 import os
-import yaml
 import json
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -374,22 +374,32 @@ class IBM(clouds.Cloud):
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
-        # IBM-TODO - create a configuration script.
+
         required_fields = ['iam_api_key', 'resource_group_id']
+        ibm_cos_fields = ['access_key_id', 'secret_access_key']
         help_str = ('    Store your API key and Resource Group id '
                     f'in {CREDENTIAL_FILE} in the following format:\n'
                     '      iam_api_key: <IAM_API_KEY>\n'
                     '      resource_group_id: <RESOURCE_GROUP_ID>')
+        base_config = ibm.read_credential_file()
 
-        base_config = _read_credential_file()
         if not base_config:
             return (False, 'Missing credential file at '
                     f'{os.path.expanduser(CREDENTIAL_FILE)}.\n' + help_str)
+        # TODO(IBM) update when issue #1943 is resolved.
+        if set(ibm_cos_fields) - set(base_config):
+            logger.debug(f'{colorama.Fore.RED}IBM Storage is missing the '
+                         'following fields in '
+                         f'{os.path.expanduser(CREDENTIAL_FILE)} to function: '
+                         f"""{", ".join(list(
+                            set(ibm_cos_fields) - set(base_config)))}"""
+                         f'{colorama.Style.RESET_ALL}')
 
-        for field in required_fields:
-            if field not in base_config:
-                return (False, f'Missing field "{field}" in '
-                        f'{os.path.expanduser(CREDENTIAL_FILE)}.\n' + help_str)
+        if set(required_fields) - set(base_config):
+            return (
+                False, f'Missing field(s): '
+                f'{", ".join(list(set(required_fields) - set(base_config)))} '
+                f'in {os.path.expanduser(CREDENTIAL_FILE)}.\n{help_str}')
 
         # verifies ability of user to create a client,
         # e.g. bad API KEY.
@@ -468,19 +478,10 @@ class IBM(clouds.Cloud):
         return [status_map[instance['status']] for instance in instances]
 
 
-def _read_credential_file():
-    try:
-        with open(os.path.expanduser(CREDENTIAL_FILE), 'r',
-                  encoding='utf-8') as f:
-            return yaml.safe_load(f)
-    except FileNotFoundError:
-        return False
-
-
 def get_cred_file_field(field, default_val=None) -> str:
     """returns a the value of a field from the user's
      credentials file if exists, else default_val"""
-    base_config = _read_credential_file()
+    base_config = ibm.read_credential_file()
     if not base_config:
         raise FileNotFoundError('Missing '
                                 f'credential file at {CREDENTIAL_FILE}')

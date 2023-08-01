@@ -42,13 +42,15 @@ import pytest
 
 import sky
 from sky import global_user_state
+from sky.adaptors import ibm
+from sky.adaptors import cloudflare
+from sky.clouds import AWS, GCP, Azure
 from sky.data import data_utils
 from sky.data import storage as storage_lib
-from sky.adaptors import cloudflare
+from sky.data.data_utils import Rclone
 from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
-from sky.clouds import AWS, GCP, Azure
 
 # For uniquefying users on shared-account cloud providers. Used as part of the
 # cluster names.
@@ -861,6 +863,35 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
 
         test = Test(
             'cloudflare_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
+@pytest.mark.ibm
+def test_ibm_storage_mounts():
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
+        storage_name, Rclone.RcloneClouds.IBM)
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_ibm_cos_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud ibm {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'rclone ls {bucket_rclone_profile}:{storage_name}/hello.txt',
+        ]
+        test = Test(
+            'ibm_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete {storage_name}',
             timeout=20 * 60,  # 20 mins
@@ -2446,6 +2477,24 @@ class TestStorageWithCredentials:
         'abc_',  # ends with an underscore
     ]
 
+    IBM_INVALID_NAMES = [
+        'ab',  # less than 3 characters
+        'abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz1',
+        # more than 63 characters
+        'Abcdef',  # contains an uppercase letter
+        'abc def',  # contains a space
+        'abc..def',  # two adjacent periods
+        '192.168.5.4',  # formatted as an IP address
+        'xn--bucket',  # starts with 'xn--' prefix
+        '.abc',  # starts with a dot
+        'abc.',  # ends with a dot
+        '-abc',  # starts with a hyphen
+        'abc-',  # ends with a hyphen
+        'a.-bc',  # contains the sequence '.-'
+        'a-.bc',  # contains the sequence '-.'
+        'a&bc'  # contains special characters
+        'ab^c'  # contains special characters
+    ]
     GITIGNORE_SYNC_TEST_DIR_STRUCTURE = {
         'double_asterisk': {
             'double_asterisk_excluded': None,
@@ -2550,6 +2599,10 @@ class TestStorageWithCredentials:
             endpoint_url = cloudflare.create_endpoint()
             url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
+        if store_type == storage_lib.StoreType.IBM:
+            bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
+                bucket_name, Rclone.RcloneClouds.IBM)
+            return f'rclone purge {bucket_rclone_profile}:{bucket_name} && rclone config delete {bucket_rclone_profile}'
 
     @staticmethod
     def cli_ls_cmd(store_type, bucket_name, suffix=''):
@@ -2572,6 +2625,10 @@ class TestStorageWithCredentials:
             else:
                 url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
+        if store_type == storage_lib.StoreType.IBM:
+            bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
+                bucket_name, Rclone.RcloneClouds.IBM)
+            return f'rclone ls {bucket_rclone_profile}:{bucket_name}/{suffix}'
 
     @staticmethod
     def cli_count_name_in_bucket(store_type, bucket_name, file_name, suffix=''):
@@ -2773,6 +2830,13 @@ class TestStorageWithCredentials:
             shell=True)
 
     @pytest.fixture
+    def tmp_ibm_cos_bucket(self, tmp_bucket_name):
+        # Creates a temporary bucket using IBM COS API
+        storage_obj = storage_lib.IBMCosStore(source="", name=tmp_bucket_name)
+        yield tmp_bucket_name
+        storage_obj.delete()
+
+    @pytest.fixture
     def tmp_public_storage_obj(self, request):
         # Initializes a storage object with a public bucket
         storage_obj = storage_lib.Storage(source=request.param)
@@ -2782,6 +2846,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
@@ -2805,7 +2870,8 @@ class TestStorageWithCredentials:
     @pytest.mark.xdist_group('multiple_bucket_deletion')
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm)
     ])
     def test_multiple_buckets_creation_and_deletion(
             self, tmp_multiple_scratch_storage_obj, store_type):
@@ -2843,6 +2909,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
     def test_bucket_external_deletion(self, tmp_scratch_storage_obj,
@@ -2871,6 +2938,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
     def test_bucket_bulk_deletion(self, store_type, tmp_bulk_del_storage_obj):
@@ -2901,6 +2969,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('nonexist_bucket_url', [
         's3://{random_name}', 'gs://{random_name}',
+        pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
         pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare)
     ])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
@@ -2919,6 +2988,19 @@ class TestStorageWithCredentials:
                 endpoint_url = cloudflare.create_endpoint()
                 command = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=r2'
                 expected_output = '404'
+            elif nonexist_bucket_url.startswith('cos'):
+                # Using API calls, since using rclone requires a profile's name
+                try:
+                    expected_output = command = "echo"  # avoid unrelated exception in case of failure.
+                    bucket_name = urllib.parse.urlsplit(
+                        nonexist_bucket_url.format(
+                            random_name=nonexist_bucket_name)).path.strip('/')
+                    client = ibm.get_cos_client('us-east')
+                    client.head_bucket(Bucket=bucket_name)
+                except ibm.ibm_botocore.exceptions.ClientError as e:
+                    if e.response['Error']['Code'] == '404':
+                        # success
+                        return
             else:
                 raise ValueError('Unsupported bucket type '
                                  f'{nonexist_bucket_url}')
@@ -2946,13 +3028,17 @@ class TestStorageWithCredentials:
             storage_obj = storage_lib.Storage(source=nonexist_bucket_url.format(
                 random_name=nonexist_bucket_name))
 
-    @pytest.mark.parametrize('private_bucket',
-                             [f's3://imagenet', f'gs://imagenet'])
+    @pytest.mark.parametrize('private_bucket', [
+        f's3://imagenet', f'gs://imagenet',
+        pytest.param('cos://us-east/bucket1', marks=pytest.mark.ibm)
+    ])
     def test_private_bucket(self, private_bucket):
         # Attempts to access private buckets not belonging to the user.
         # These buckets are known to be private, but may need to be updated if
         # they are removed by their owners.
-        private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc
+        private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc if \
+              urllib.parse.urlsplit(private_bucket).scheme != 'cos' else \
+                  urllib.parse.urlsplit(private_bucket).path.strip('/')
         with pytest.raises(
                 sky.exceptions.StorageBucketGetError,
                 match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
@@ -2962,6 +3048,9 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
+                              pytest.param('tmp_ibm_cos_bucket',
+                                           storage_lib.StoreType.IBM,
+                                           marks=pytest.mark.ibm),
                               pytest.param('tmp_awscli_bucket_r2',
                                            storage_lib.StoreType.R2,
                                            marks=pytest.mark.cloudflare)])
@@ -3006,6 +3095,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
@@ -3032,6 +3122,9 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('invalid_name_list, store_type',
                              [(AWS_INVALID_NAMES, storage_lib.StoreType.S3),
                               (GCS_INVALID_NAMES, storage_lib.StoreType.GCS),
+                              pytest.param(IBM_INVALID_NAMES,
+                                           storage_lib.StoreType.IBM,
+                                           marks=pytest.mark.ibm),
                               pytest.param(AWS_INVALID_NAMES,
                                            storage_lib.StoreType.R2,
                                            marks=pytest.mark.cloudflare)])

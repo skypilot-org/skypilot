@@ -3480,7 +3480,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 returncode = -1
 
             if vpc_found:
-                # # pylint: disable=line-too-long E1136
+                # pylint: disable=line-too-long E1136
                 # Delete VPC and it's associated resources
                 vpc_provider = IBMVPCProvider(
                     config_provider['resource_group_id'], region, cluster_name)
