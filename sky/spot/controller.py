@@ -112,7 +112,7 @@ class SpotController:
                     logger.error('Failed to find the logs for the user '
                                  f'program at {log_file}.')
                 else:
-                    logger.info(f'\n== End of logs (ID: {self._job_id} ==')
+                    logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
 
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring spot cluster status and handling recovery.
