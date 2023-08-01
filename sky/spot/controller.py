@@ -107,7 +107,7 @@ class SpotController:
                 # Print the logs to the console.
                 try:
                     with open(log_file) as f:
-                        logger.info(f.read())
+                        print(f.read())
                 except FileNotFoundError:
                     logger.error('Failed to find the logs for the user '
                                  f'program at {log_file}.')
