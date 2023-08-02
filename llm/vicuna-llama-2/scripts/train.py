@@ -300,6 +300,9 @@ def train():
     torch.distributed.barrier()
 
     # Check the existence of checkpoints in all processes
+    # All ranks must simultaneously resume from a checkpoint if it exists.
+    # Otherwise, upon recovery the model weights may not reload correctly,
+    # causing loss spikes.
     resume_from_checkpoint = False
     checkpoints = list(
         pathlib.Path(training_args.output_dir).glob('checkpoint-*'))
