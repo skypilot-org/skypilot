@@ -1,23 +1,25 @@
 # Train Your Own Vicuna on Llama-2
 
+![Vicuna-Llama-2](https://imgur.com/McZWg6z.gif)
+
 [Vicuna](https://lmsys.org/blog/2023-03-30-vicuna/) is the first open-source chatbot that performs closely to the ChatGPT, and still is leading the [LLM leaderboard](https://huggingface.co/spaces/lmsys/chatbot-arena-leaderboard) today comparing to all other open-source models.
 
-With the latest [Llama-2](https://github.com/facebookresearch/llama/tree/main), we are now able to get a Vicuna model that can be used commercially.
+With the latest Meta [Llama-2](https://github.com/facebookresearch/llama/tree/main), we are now able to **train a Vicuna model that can be used commercially**.
 
 In this tutorial, we will show you how to train your own Vicuna on Llama-2, with your own data, on any cloud, with the help of SkyPilot.
 
 ## Pre-requisites
 
-1. Apply for access to the Llama-2 model
+1. Apply for access to the LLaMA 2 model
 
-Go to the [application page](https://ai.meta.com/resources/models-and-libraries/llama-downloads/) and apply for access to the model weights.
+Go to the [application page](https://ai.meta.com/resources/models-and-libraries/llama-downloads/) and apply for access to the model weights. Ensure your huggingface email is the same as the email on the Meta request (the huggingface access may take 1-2 days for approval).
 
 
-2. Get an access token from HuggingFace
+2. Get the access token from HuggingFace
 
-Generate a read-only access token on HuggingFace [here](https://huggingface.co/settings/token). Go to the HuggingFace page for Llama-2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main) and apply for access. Ensure your HuggingFace email is the same as the email on the Meta request. It may take 1-2 days for approval.
+Generate a read-only access token on HuggingFace [here](https://huggingface.co/settings/token), and make sure your HuggingFace account can access the LLaMA 2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main).
 
-Put the access token into [train.yaml](train.yaml):
+Fill the access token in the [train.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna-llama-2/train.yaml).
 ```yaml
 envs:
   HF_TOKEN: <your-huggingface-token>  # Change to your own huggingface token
@@ -28,9 +30,10 @@ envs:
 
 ### Check training data
 
-  By default, we use the ShareGPT data and the identity questions in [hardcoded_questions.py](./scripts/hardcoded_questions.py).
 
-  * **Optional**: To use custom data, you can change the following line in [train.yaml](train.yaml):
+  By default, we use the [ShareGPT data](https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json) and the identity questions in [hardcoded_questions.py](./scripts/hardcoded_questions.py).
+
+  * **Optional**: To use custom data, you can change the data by change the following line in [train.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna-llama-2/train.yaml).
 
   ```yaml
   setup: |
@@ -39,7 +42,7 @@ envs:
     ...
   ```
 
-  The above json file is an array, each element of which having the following format:
+  The above json file is an array, each element of which has the following format (the conversation can have multiple turns, between `human` and `gpt`):
   ```json
   {
     "id": "i6IyJda_0",
@@ -58,6 +61,9 @@ envs:
 
   * **Optional**: To make the model know about its identity, you can change the hardcoded questions [hardcoded_questions.py](./scripts/hardcoded_questions.py)
 
+  > **Note**: The model trained with the ShareGPT data may not be commercially viable. Please use your own data for commercial use.
+
+
 ### Kick start training on any cloud
 
 * Start training with a single command
@@ -68,7 +74,7 @@ envs:
     --env WANDB_API_KEY=<your-wandb-api-key>
   ```
 
-This will launch the training job on the cheapest cloud that has available 8x A100-80GB spot GPUs.
+This will launch the training job on the cloud wherever there is available 8x A100-80GB spot GPUs.
 
 > **Tip**: You can get `WANDB_API_KEY` at https://wandb.ai/settings. To disable Weights & Biases, simply leave out that --env flag.
 
@@ -81,9 +87,9 @@ resources:
   disk_size: 1000
   use_spot: true
 ```
-However, spot A100-80GB:8 is currently only supported on GCP. On-demand versions are supported on AWS, Azure, GCP, and Lambda. (Hint: check out the handy outputs of `sky show-gpus A100-80GB:8`!)
+However, spot A100-80GB:8 is currently only supported on GCP. On-demand versions are supported on AWS, Azure, GCP, and Lambda (hint: check out the handy outputs of `sky show-gpus A100-80GB:8`!).
 
-To use those clouds, add the `--no-use-spot` flag to request on-demand instances:
+To use these clouds, add the `--no-use-spot` flag to request on-demand instances:
 ```console
 sky launch --no-use-spot ...
 ```
@@ -97,6 +103,7 @@ sky launch --no-use-spot ...
     --env MODEL_SIZE=13
   ```
 
+
 ### Automatically recover from spot interruptions
 
 [SkyPilot Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html) is a library built on top of SkyPilot that helps users run jobs on spot instances without worrying about interruptions. That is the tool used by the LMSYS organization to train the first version of Vicuna (more details can be found in their [launch blog post](https://lmsys.org/blog/2023-03-30-vicuna/) and [example](../vicuna)). With this, the training cost can be reduced from $1000 to **\$300**.
@@ -109,12 +116,13 @@ sky spot launch -n vicuna train.yaml \
   --env WANDB_API_KEY=<your-wandb-api-key>
 ```
 
-### Serve your model
 
-After the training is done, you can serve your model with the following command:
+## Serve your model
+
+After the training is done, you can serve your model with a single command with the [serve.yaml](./serve.yaml):
 
 ```bash
-sky launch -c serve serve.yaml --env MODEL_CKPT=<your-bucket-name>/chatbot/7b
+sky launch -c serve serve.yaml --env MODEL_CKPT=<your-model-checkpoint>/chatbot/7b
 ```
 
-> **Tip**: You can also switch to a cheaper accelerator, such as L4, to save cost, by adding `--gpus L4` to the above command.
+This will launch a gradio server that serves the model checkpoint at `<your-model-checkpoint>/chatbot/7b`.
