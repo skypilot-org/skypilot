@@ -4,11 +4,10 @@
 #     $ sky launch -c jupyter jupyter_lab.yaml
 #     # Then look for the logs for some output like:
 #     # Jupyter Server 2.7.0 is running at:
-#     # http://ip-x-x-x-x:29324/lab?token=<token>
 #     #     http://127.0.0.1:29324/lab?token=<token>
 #     # Run
 #     $ sky status -a jupyter
-#     # to get the HEAD_IP of the cluster, replace the ip-x-x-x-x with
+#     # to get the HEAD_IP of the cluster, replace the 127.0.0.1 with
 #     # the HEAD_IP and open browser for the URL.
 #     
 #     # This is an alternative to port forwarding.
