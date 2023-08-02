@@ -16,28 +16,33 @@ import json
 from typing import Optional, List
 from sky.clouds.service_catalog import constants
 
-ENDPOINT = "https://console.fluidstack.io/api/plans"
+ENDPOINT = "http://localhost:5001/api/plans"
 DEFAULT_FLUIDSTACK_API_KEY_PATH = os.path.expanduser("~/.fluidstack/fluidstack_api_key")
 DEFAULT_FLUIDSTACK_API_TOKEN_PATH = os.path.expanduser(
     "~/.fluidstack/fluidstack_api_token"
 )
 
 
-GPU_TO_MEMORY = {
-    "A100": 40960,
-    "A100-80GB": 81920,
-    "A6000": 49152,
-    "A10": 24576,
-    "RTX6000": 24576,
-    "V100": 16384,
-    "H100": 81920,
-}
+
 GPU_MAP = {
     "A100_PCIE_40GB": "A100",
     "T4": "T4",
     "Tesla_V100_PCIE": "V100",
     "A10": "A10",
     "A100_PCIE_80GB": "A100-80GB",
+    "Quadro_RTX_6000_16GB" : "RTX6000",
+    "RTX_A4500_16GB": "A4500", 
+    "RTX_3060_Ti" : "RTX3060Ti",
+    "Quadro_RTX_4000_12GB" : "RTX4000",
+    "Quadro_P5000_12GB" : "P5000",
+    "RTX_A4000" : "A4000",
+    "Quadro_RTX_5000_16GB" :"RTX5000",
+    "A30" : "A30",
+    "A40" : "A40",
+    "RTX_3090" : "RTX3090",
+    "RTX_A6000" : "A6000",
+    "RTX_3080" : "RTX3080",
+    "RTX_A5000" : "A5000",
 }
 
 
@@ -46,7 +51,7 @@ def get_regions(plans: List) -> dict:
     regions = {}
     for plan in plans:
         for region in plan.get("regions", []):
-            regions[region["description"]] = region["id"]
+            regions[region["slug"]] = region["id"]
     return regions
 
 
@@ -81,8 +86,13 @@ def create_catalog(output_dir: str) -> None:
         )
 
         for plan in plans:
-            gpu = plan["gpu_type"].replace("_", "-")
-            gpu_cnt = float(plan["configuration"]["gpu_count"])
+            try:
+                gpu = GPU_MAP[plan["gpu_type"]]
+            except KeyError:
+                print(f"Could not map {plan['gpu_type']}")
+                continue
+            gpu_memory = int(str(plan["configuration"]["gpu_memory"]).replace("GB","")) * 1024
+            gpu_cnt = int(plan["configuration"]["gpu_count"])
             vcpus = float(plan["configuration"]["core_count"])
             mem = float(plan["configuration"]["ram"])
             price = float(plan["price"]["hourly"]) * gpu_cnt
@@ -92,10 +102,10 @@ def create_catalog(output_dir: str) -> None:
                         "Name": gpu,
                         "Manufacturer": "NVIDIA",
                         "Count": gpu_cnt,
-                        "MemoryInfo": {"SizeInMiB": 0},
+                        "MemoryInfo": {"SizeInMiB": int(gpu_memory) },
                     }
                 ],
-                "TotalGpuMemoryInMiB": 0,
+                "TotalGpuMemoryInMiB": int(gpu_memory * gpu_cnt),
             }
             gpuinfo = json.dumps(gpuinfo).replace(
                 '"', "'"
@@ -109,7 +119,7 @@ def create_catalog(output_dir: str) -> None:
                         vcpus,
                         mem,
                         price,
-                        r["description"],
+                        r["slug"],
                         gpuinfo,
                         "",
                     ]
@@ -138,4 +148,4 @@ if __name__ == "__main__":
     catalog_dir = os.path.join(_CATALOG_DIR, "fluidstack")
     os.makedirs(catalog_dir, exist_ok=True)
     create_catalog(catalog_dir)
-    print("Fluidstack Cloud catalog saved to fluidstack/vms.csv")
+    print("Fluidstack Cloud catalog saved to {}/vms.csv".format(catalog_dir))

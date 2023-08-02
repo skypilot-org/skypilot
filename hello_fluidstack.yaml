@@ -1,8 +1,7 @@
 resources:
   # Optional; if left out, automatically pick the cheapest cloud.
   cloud: fluidstack
-  # 1x NVIDIA V100 GPU
-  accelerators: V100:1
+  accelerators: A6000:1
 
 # Working directory (optional) containing the project codebase.
 # Its contents are synced to ~/sky_workdir/ on the cluster.

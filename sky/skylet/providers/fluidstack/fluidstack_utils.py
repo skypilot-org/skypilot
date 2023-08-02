@@ -12,7 +12,7 @@ def get_key_suffix():
     return str(uuid.uuid4()).replace("-", "")[:8]
 
 
-ENDPOINT = "https://fs-dev.herokuapp.com/" # TODO(mjibril) change to live endpoint when ready
+ENDPOINT = "http//:localhost:5001/" # TODO(mjibril) change to live endpoint when ready
 FLUIDSTACK_API_KEY_PATH = "~/.fluidstack/api_key"
 FLUIDSTACK_API_TOKEN_PATH = "~/.fluidstack/api_token"
 
@@ -78,7 +78,7 @@ class FluidstackClient:
         raise_fluidstack_error(response)
         return response.json().get("server", {}).get("id")
 
-    @lru_cache()
+    @lru_cache
     def list_ssh_keys(self):
         response = requests.get(
             ENDPOINT + "api/ssh_key", auth=(self.api_key, self.api_token)
@@ -121,7 +121,7 @@ class FluidstackClient:
             regions = {}
             for plan in plans:
                 for region in plan.get("regions", []):
-                    regions[region["description"]] = region["id"]
+                    regions[region["slug"]] = region["id"]
             return regions
 
         regions = get_regions(plans)
