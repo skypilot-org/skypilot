@@ -62,7 +62,6 @@ run: |
     WANDB_MODE="offline"
   fi
   
-  # Avoid NCCL timeout 
   torchrun \
     --nnodes=$NUM_NODES \
     --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
