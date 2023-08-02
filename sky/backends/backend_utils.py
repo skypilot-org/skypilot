@@ -2446,7 +2446,7 @@ def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
                 # to detect such bugs and stop relaunching.
                 if record['num_failed_replicas'] > 0:
                     record['status'] = status_lib.ServiceStatus.FAILED
-                elif record['num_healthy_replicas'] > 0:
+                elif record['num_ready_replicas'] > 0:
                     record['status'] = status_lib.ServiceStatus.READY
                 elif record['num_unhealthy_replicas'] > 0:
                     record['status'] = status_lib.ServiceStatus.REPLICA_INIT

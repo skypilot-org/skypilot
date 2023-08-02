@@ -61,16 +61,15 @@ class SkyServeRedirector:
                         timeout=5)
                     response.raise_for_status()
                     # get replica ips
-                    response = session.get(
-                        self.control_plane_url +
-                        '/control_plane/get_healthy_replicas')
+                    response = session.get(self.control_plane_url +
+                                           '/control_plane/get_ready_replicas')
                     response.raise_for_status()
-                    healthy_replicas = response.json()['healthy_replicas']
+                    ready_replicas = response.json()['ready_replicas']
                 except requests.RequestException as e:
                     print(f'An error occurred: {e}')
                 else:
-                    logger.info(f'Available Server IPs: {healthy_replicas}')
-                    self.load_balancer.set_healthy_replicas(healthy_replicas)
+                    logger.info(f'Available Replica IPs: {ready_replicas}')
+                    self.load_balancer.set_ready_replicas(ready_replicas)
             time.sleep(constants.CONTROL_PLANE_SYNC_INTERVAL)
 
     async def _redirector_handler(self, request: fastapi.Request):

@@ -57,11 +57,9 @@ class ControlPlane:
                 return {'query_interval': self.autoscaler.get_query_interval()}
             return {'query_interval': None}
 
-        @self.app.get('/control_plane/get_healthy_replicas')
-        def get_healthy_replicas():
-            return {
-                'healthy_replicas': self.infra_provider.get_healthy_replicas()
-            }
+        @self.app.get('/control_plane/get_ready_replicas')
+        def get_ready_replicas():
+            return {'ready_replicas': self.infra_provider.get_ready_replicas()}
 
         @self.app.get('/control_plane/get_replica_info')
         def get_replica_info():
@@ -70,8 +68,7 @@ class ControlPlane:
         @self.app.get('/control_plane/get_replica_nums')
         def get_replica_nums():
             return {
-                'num_healthy_replicas':
-                    self.infra_provider.healthy_replica_num(),
+                'num_ready_replicas': self.infra_provider.ready_replica_num(),
                 'num_unhealthy_replicas':
                     self.infra_provider.unhealthy_replica_num(),
                 'num_failed_replicas': self.infra_provider.failed_replica_num()

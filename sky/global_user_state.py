@@ -100,7 +100,7 @@ def create_table(cursor, conn):
         controller_cluster_name TEXT,
         endpoint TEXT,
         status TEXT,
-        num_healthy_replicas INTEGER DEFAULT 0,
+        num_ready_replicas INTEGER DEFAULT 0,
         num_unhealthy_replicas INTEGER DEFAULT 0,
         num_failed_replicas INTEGER DEFAULT 0,
         policy TEXT,
@@ -287,13 +287,13 @@ def add_or_update_cluster(cluster_name: str,
 
 def add_or_update_service(
         name: str, controller_cluster_name: str, endpoint: str,
-        status: status_lib.ServiceStatus, num_healthy_replicas: int,
+        status: status_lib.ServiceStatus, num_ready_replicas: int,
         num_unhealthy_replicas: int, num_failed_replicas, policy: str,
         requested_resources: Optional['resources_lib.Resources']):
     _DB.cursor.execute(
         'INSERT or REPLACE INTO services'
         '(name, controller_cluster_name, endpoint, status, '
-        'num_healthy_replicas, num_unhealthy_replicas, '
+        'num_ready_replicas, num_unhealthy_replicas, '
         'num_failed_replicas, policy, requested_resources) '
         'VALUES ('
         # name
@@ -304,7 +304,7 @@ def add_or_update_service(
         '?, '
         # status
         '?, '
-        # num_healthy_replicas
+        # num_ready_replicas
         '?, '
         # num_unhealthy_replicas
         '?, '
@@ -324,8 +324,8 @@ def add_or_update_service(
             endpoint,
             # status
             status.value,
-            # num_healthy_replicas
-            num_healthy_replicas,
+            # num_ready_replicas
+            num_ready_replicas,
             # num_unhealthy_replicas
             num_unhealthy_replicas,
             # num_failed_replicas
@@ -624,7 +624,7 @@ def get_service_from_name(
         # Explicitly specify the number of fields to unpack, so that
         # we can add new fields to the database in the future without
         # breaking the previous code.
-        (name, controller_cluster_name, endpoint, status, num_healthy_replicas,
+        (name, controller_cluster_name, endpoint, status, num_ready_replicas,
          num_unhealthy_replicas, num_failed_replicas, policy,
          requested_resources) = row[:9]
         # TODO: use namedtuple instead of dict
@@ -633,7 +633,7 @@ def get_service_from_name(
             'controller_cluster_name': controller_cluster_name,
             'endpoint': endpoint,
             'status': status_lib.ServiceStatus[status],
-            'num_healthy_replicas': num_healthy_replicas,
+            'num_ready_replicas': num_ready_replicas,
             'num_unhealthy_replicas': num_unhealthy_replicas,
             'num_failed_replicas': num_failed_replicas,
             'policy': policy,
@@ -673,7 +673,7 @@ def get_services() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('select * from services').fetchall()
     records = []
     for row in rows:
-        (name, controller_cluster_name, endpoint, status, num_healthy_replicas,
+        (name, controller_cluster_name, endpoint, status, num_ready_replicas,
          num_unhealthy_replicas, num_failed_replicas, policy,
          requested_resources) = row[:9]
         # TODO: use namedtuple instead of dict
@@ -683,7 +683,7 @@ def get_services() -> List[Dict[str, Any]]:
             'controller_cluster_name': controller_cluster_name,
             'endpoint': endpoint,
             'status': status_lib.ServiceStatus[status],
-            'num_healthy_replicas': num_healthy_replicas,
+            'num_ready_replicas': num_ready_replicas,
             'num_unhealthy_replicas': num_unhealthy_replicas,
             'num_failed_replicas': num_failed_replicas,
             'policy': policy,

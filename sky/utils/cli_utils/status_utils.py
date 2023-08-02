@@ -117,7 +117,7 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
                      _get_controller_cluster_name,
                      show_by_default=False),
         StatusColumn('ENDPOINT', _get_endpoint),
-        StatusColumn('#HEALTHY_REPLICAS', _get_healthy_replicas),
+        StatusColumn('#READY_REPLICAS', _get_ready_replicas),
         StatusColumn('#UNHEALTHY_REPLICAS', _get_unhealthy_replicas),
         StatusColumn('#FAILED_REPLICAS', _get_failed_replicas),
         StatusColumn('STATUS', _get_service_status_colored),
@@ -374,8 +374,8 @@ _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
 _get_controller_cluster_name = (
     lambda service_record: service_record['controller_cluster_name'])
 _get_endpoint = (lambda service_record: service_record['endpoint'])
-_get_healthy_replicas = (
-    lambda service_record: service_record['num_healthy_replicas'])
+_get_ready_replicas = (
+    lambda service_record: service_record['num_ready_replicas'])
 _get_unhealthy_replicas = (
     lambda service_record: service_record['num_unhealthy_replicas'])
 _get_failed_replicas = (

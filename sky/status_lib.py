@@ -90,7 +90,7 @@ class ReplicaStatus(enum.Enum):
     INIT = 'INIT'
 
     # Replica is running
-    RUNNING = 'RUNNING'
+    READY = 'READY'
 
     # Replica is unhealthy (e.g., health probe failed)
     UNHEALTHY = 'UNHEALTHY'
@@ -105,7 +105,7 @@ class ReplicaStatus(enum.Enum):
 
 _REPLICA_STATUS_TO_COLOR = {
     ReplicaStatus.INIT: colorama.Fore.BLUE,
-    ReplicaStatus.RUNNING: colorama.Fore.GREEN,
+    ReplicaStatus.READY: colorama.Fore.GREEN,
     ReplicaStatus.UNHEALTHY: colorama.Fore.YELLOW,
     ReplicaStatus.FAILED: colorama.Fore.RED,
 }

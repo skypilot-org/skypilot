@@ -14,7 +14,7 @@ class LoadBalancer:
     """Abstract class for load balancers."""
 
     def __init__(self) -> None:
-        self.healthy_replicas: Set[str] = set()
+        self.ready_replicas: Set[str] = set()
         self.request_count: int = 0
         self.request_timestamps: Deque[float] = deque()
         self.query_interval: Optional[float] = None
@@ -40,7 +40,7 @@ class LoadBalancer:
             self.request_timestamps.popleft()
         return len(self.request_timestamps)
 
-    def set_healthy_replicas(self, healthy_replicas: Set[str]) -> None:
+    def set_ready_replicas(self, ready_replicas: Set[str]) -> None:
         raise NotImplementedError
 
     def select_replica(self, request: fastapi.Request) -> Optional[str]:
@@ -54,10 +54,10 @@ class RoundRobinLoadBalancer(LoadBalancer):
         super().__init__(*args, **kwargs)
         self.replicas_queue: Deque[str] = deque()
 
-    def set_healthy_replicas(self, healthy_replicas: Set[str]) -> None:
-        if set(healthy_replicas) != set(self.healthy_replicas):
-            self.healthy_replicas = healthy_replicas
-            self.replicas_queue = deque(healthy_replicas)
+    def set_ready_replicas(self, ready_replicas: Set[str]) -> None:
+        if set(ready_replicas) != set(self.ready_replicas):
+            self.ready_replicas = ready_replicas
+            self.replicas_queue = deque(ready_replicas)
 
     def select_replica(self, request: fastapi.Request) -> Optional[str]:
         if not self.replicas_queue:

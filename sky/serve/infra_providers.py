@@ -32,7 +32,7 @@ class InfraProvider:
                  readiness_path: str,
                  readiness_timeout: int,
                  post_data: Optional[Any] = None) -> None:
-        self.healthy_replicas: Set[str] = set()
+        self.ready_replicas: Set[str] = set()
         self.unhealthy_replicas: Set[str] = set()
         self.failed_replicas: Set[str] = set()
         self.first_unhealthy_time: Dict[str, float] = dict()
@@ -57,12 +57,12 @@ class InfraProvider:
         # provisioning and deletion
         raise NotImplementedError
 
-    def healthy_replica_num(self) -> int:
+    def ready_replica_num(self) -> int:
         # Returns the total number of available replicas
         raise NotImplementedError
 
-    def get_healthy_replicas(self) -> Set[str]:
-        # Returns the endpoints of all healthy replicas
+    def get_ready_replicas(self) -> Set[str]:
+        # Returns the endpoints of all ready replicas
         raise NotImplementedError
 
     def unhealthy_replica_num(self) -> int:
@@ -178,8 +178,8 @@ class SkyPilotInfraProvider(InfraProvider):
 
         def _get_replica_status(cluster_status: status_lib.ClusterStatus,
                                 ip: str) -> status_lib.ReplicaStatus:
-            if ip in self.healthy_replicas:
-                return status_lib.ReplicaStatus.RUNNING
+            if ip in self.ready_replicas:
+                return status_lib.ReplicaStatus.READY
             if ip in self.failed_replicas:
                 return status_lib.ReplicaStatus.FAILED
             if cluster_status == status_lib.ClusterStatus.UP:
@@ -216,11 +216,11 @@ class SkyPilotInfraProvider(InfraProvider):
         # All replica launched in controller is a replica.
         return len(clusters)
 
-    def get_healthy_replicas(self) -> Set[str]:
-        return self.healthy_replicas
+    def get_ready_replicas(self) -> Set[str]:
+        return self.ready_replicas
 
-    def healthy_replica_num(self) -> int:
-        return len(self.healthy_replicas)
+    def ready_replica_num(self) -> int:
+        return len(self.ready_replicas)
 
     def unhealthy_replica_num(self) -> int:
         return len(self.unhealthy_replicas)
@@ -295,7 +295,7 @@ class SkyPilotInfraProvider(InfraProvider):
 
     def terminate(self) -> Optional[str]:
         # For correctly show serve status
-        self.healthy_replicas.clear()
+        self.ready_replicas.clear()
         self.unhealthy_replicas = self._get_replica_ips()
         self._terminate_refresh_process_pool()
         for name, p in self.launch_process_pool.items():
@@ -381,19 +381,19 @@ class SkyPilotInfraProvider(InfraProvider):
                 executor.submit(probe_endpoint, replica_ip)
                 for replica_ip in replica_ips
             ]
-            healthy_replicas = set()
+            ready_replicas = set()
             for future in futures.as_completed(probe_futures):
                 ip = future.result()
                 if ip is not None:
-                    healthy_replicas.add(ip)
+                    ready_replicas.add(ip)
 
-        logger.info(f'Healthy replicas: {healthy_replicas}')
-        self.healthy_replicas = healthy_replicas
-        unhealthy_replicas = replica_ips - healthy_replicas
+        logger.info(f'Ready replicas: {ready_replicas}')
+        self.ready_replicas = ready_replicas
+        unhealthy_replicas = replica_ips - ready_replicas
         logger.info(f'Unhealthy replicas: {unhealthy_replicas}')
         self.unhealthy_replicas = unhealthy_replicas
 
-        for replica in healthy_replicas:
+        for replica in ready_replicas:
             self.continuous_unhealthy_counter[replica] = 0
 
         replicas_to_terminate = set()

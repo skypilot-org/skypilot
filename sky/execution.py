@@ -1119,10 +1119,10 @@ def serve_down(
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {name} does not exist.')
     controller_cluster_name = service_record['controller_cluster_name']
-    num_healthy_replicas = service_record['num_healthy_replicas']
+    num_ready_replicas = service_record['num_ready_replicas']
     num_unhealthy_replicas = service_record['num_unhealthy_replicas']
     num_failed_replicas = service_record['num_failed_replicas']
-    num_replicas = (num_healthy_replicas + num_unhealthy_replicas +
+    num_replicas = (num_ready_replicas + num_unhealthy_replicas +
                     num_failed_replicas)
     controller_ip = service_record['endpoint'].split(':')[0]
     controller_url = f'http://{controller_ip}:{serve.CONTROL_PLANE_PORT}'
