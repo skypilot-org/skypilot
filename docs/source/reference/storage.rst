@@ -8,7 +8,7 @@ files required by the task. Think of it as a bucket of files that can be attache
 to your task. Compared to file_mounts, storage is faster and
 can persist across runs, requiring fewer uploads from your local machine.
 Behind the scenes, storage automatically uploads all data in the source
-to a backing object store in a particular cloud (S3/GCS/R2).
+to a backing object store in a particular cloud (S3/GCS/R2/IBM).
 
 A storage object is used by "mounting" it to a task. On mounting, the data
 specified in the source becomes available at the destination mount path.
@@ -32,7 +32,7 @@ SkyPilot Storage can be used by specifying additional fields in the
 :code:`file_mounts`. By default, :code:`file_mounts` uses rsync to
 directly copy files from local to remote VM.
 However, you can have them backed by SkyPilot Storage, which uploads
-the files to a cloud store (e.g. S3, GCS, R2) and have them persist there by
+the files to a cloud store (e.g. S3, GCS, R2, or IBM) and have them persist there by
 specifying the :code:`name`, :code:`source` and :code:`persistent` fields. By
 enabling persistence, file_mount sync can be made significantly faster.
 
@@ -99,6 +99,12 @@ and storage mounting:
       # storage to local disk.
       /train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
 
+      # *** Copying files from IBM COS ***
+      #
+      # This re-uses a predefined bucket and copies its contents directly to /datasets-cos. 
+      # Users must provide the region their bucket resides in, e.g. cos://us-east/bucket-name.
+      /datasets-cos: cos://<region-of-bucket>/<bucket-name>
+
       # *** Persistent Data Storage by copying from S3 ***
       #
       # This uses SkyPilot Storage to first create a S3 bucket named sky-dataset,
@@ -110,7 +116,7 @@ and storage mounting:
       /datasets-storage:
         name: sky-dataset-romil # Make sure this name is unique or you own this bucket
         source: ~/datasets
-        store: s3 # Could be either of [s3, gcs, r2]; default: None
+        store: s3 # Could be either of [s3, gcs, r2, ibm]; default: None
         persistent: True  # Defaults to True, can be set to false.
         mode: COPY  # Defaults to MOUNT if not specified
 
@@ -272,12 +278,12 @@ Storage YAML reference
       sky.Storage.source: str
         The source attribute specifies the local path that must be made available
         in the storage object. It can either be a local path or a list of local
-        paths or it can be a remote path (s3://, gs://, r2://).
+        paths or it can be a remote path (s3://, gs://, r2://, cos://<region_name>).
         If the source is local, data is uploaded to the cloud to an appropriate
-        object store (s3, gcs or r2). If the path is remote, the data is copied
+        object store (s3, gcs, r2, or ibm). If the path is remote, the data is copied
         or mounted directly (see mode flag below).
 
-      sky.Storage.store: str; either of 's3', 'gcs' or 'r2'
+      sky.Storage.store: str; either of 's3', 'gcs', 'r2', 'ibm'
         If you wish to force sky.Storage to be backed by a specific cloud object
         store, you can specify it here. If not specified, SkyPilot chooses the
         appropriate object store based on the source path and task's cloud provider.

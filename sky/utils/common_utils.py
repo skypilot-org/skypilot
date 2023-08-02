@@ -23,6 +23,8 @@ from sky import sky_logging
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
 
+CLUSTER_NAME_HASH_LENGTH = 4
+
 _COLOR_PATTERN = re.compile(r'\x1b[^m]*m')
 
 _PAYLOAD_PATTERN = re.compile(r'<sky-payload>(.*)</sky-payload>')
@@ -84,6 +86,13 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
     with open(_USER_HASH_FILE, 'w') as f:
         f.write(user_hash)
     return user_hash
+
+
+def truncate_and_hash_cluster_name(cluster_name: str) -> str:
+    if len(cluster_name) < 15:
+        return cluster_name
+    return cluster_name[:10] + hashlib.md5(
+        cluster_name.encode()).hexdigest()[:CLUSTER_NAME_HASH_LENGTH]
 
 
 def get_global_job_id(job_timestamp: str,

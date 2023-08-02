@@ -48,6 +48,8 @@ class OCI(clouds.Cloud):
         return {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is not supported in {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.OPEN_PORTS:
+                (f'Opening ports is not supported in {cls._REPR}.'),
         }
 
     @classmethod

@@ -28,7 +28,7 @@ from sky import clouds
 from sky import cloud_stores
 from sky import exceptions
 from sky import global_user_state
-from sky import provision as provision_api
+from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import optimizer
@@ -141,6 +141,7 @@ def _get_cluster_config_template(cloud):
         clouds.Local: 'local-ray.yml.j2',
         clouds.SCP: 'scp-ray.yml.j2',
         clouds.OCI: 'oci-ray.yml.j2',
+        clouds.Kubernetes: 'kubernetes-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
 
@@ -931,6 +932,34 @@ class RetryingVmProvisioner(object):
                         self._blocked_resources.add(
                             launchable_resources.copy(region=r.name, zone=None))
 
+    def _update_blocklist_on_kubernetes_error(
+            self, launchable_resources: 'resources_lib.Resources', region,
+            zones, stdout, stderr):
+        del zones  # Unused.
+        style = colorama.Style
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits + stderr_splits
+            if 'KubernetesError:' in s.strip()
+        ]
+        if not errors:
+            logger.info('====== stdout ======')
+            for s in stdout_splits:
+                print(s)
+            logger.info('====== stderr ======')
+            for s in stderr_splits:
+                print(s)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Errors occurred during provisioning; '
+                                   'check logs above.')
+
+        logger.warning(f'Got error(s) in {region.name}:')
+        messages = '\n\t'.join(errors)
+        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
+        self._blocked_resources.add(launchable_resources.copy(zone=None))
+
     def _update_blocklist_on_scp_error(
             self, launchable_resources: 'resources_lib.Resources', region,
             zones, stdout, stderr):
@@ -1115,6 +1144,7 @@ class RetryingVmProvisioner(object):
             clouds.IBM: self._update_blocklist_on_ibm_error,
             clouds.SCP: self._update_blocklist_on_scp_error,
             clouds.Local: self._update_blocklist_on_local_error,
+            clouds.Kubernetes: self._update_blocklist_on_kubernetes_error,
             clouds.OCI: self._update_blocklist_on_oci_error,
         }
         cloud = launchable_resources.cloud
@@ -1455,6 +1485,7 @@ class RetryingVmProvisioner(object):
                 config_dict = backend_utils.write_cluster_config(
                     to_provision,
                     num_nodes,
+                    to_provision.ports,
                     _get_cluster_config_template(to_provision.cloud),
                     cluster_name,
                     self._local_wheel_path,
@@ -1728,6 +1759,9 @@ class RetryingVmProvisioner(object):
             cluster_name = logging_info['cluster_name']
             logger.info(f'{style.BRIGHT}Launching on local cluster '
                         f'{cluster_name!r}.')
+        elif isinstance(to_provision_cloud, clouds.Kubernetes):
+            logger.info(f'{style.BRIGHT}Launching on {to_provision_cloud} '
+                        f'{style.RESET_ALL}')
         else:
             logger.info(f'{style.BRIGHT}Launching on {to_provision_cloud} '
                         f'{region_name}{style.RESET_ALL}{zone_str}')
@@ -1785,6 +1819,12 @@ class RetryingVmProvisioner(object):
                     logger.info(
                         'Retrying due to the possibly flaky RESOURCE_NOT_FOUND '
                         'error.')
+                    return True
+
+            if isinstance(to_provision_cloud, clouds.Lambda):
+                if 'Your API requests are being rate limited.' in stderr:
+                    logger.info(
+                        'Retrying due to Lambda API rate limit exceeded.')
                     return True
 
             if 'rsync: command not found' in stderr:
@@ -2085,7 +2125,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     - (optional) Launched resources
     - (optional) If TPU(s) are managed, a path to a deletion script.
     """
-    _VERSION = 3
+    _VERSION = 4
 
     def __init__(self,
                  *,
@@ -2095,6 +2135,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                  launched_resources: resources_lib.Resources,
                  stable_internal_external_ips: Optional[List[Tuple[
                      str, str]]] = None,
+                 stable_ssh_ports: Optional[List[int]] = None,
                  tpu_create_script: Optional[str] = None,
                  tpu_delete_script: Optional[str] = None) -> None:
         self._version = self._VERSION
@@ -2104,6 +2145,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # List of (internal_ip, external_ip) tuples for all the nodes
         # in the cluster, sorted by the external ips.
         self.stable_internal_external_ips = stable_internal_external_ips
+        self.stable_ssh_ports = stable_ssh_ports
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
         self.tpu_create_script = tpu_create_script
@@ -2116,6 +2158,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'\n\thead_ip={self.head_ip},'
                 '\n\tstable_internal_external_ips='
                 f'{self.stable_internal_external_ips},'
+                '\n\tstable_ssh_ports='
+                f'{self.stable_ssh_ports},'
                 '\n\tcluster_yaml='
                 f'{self.cluster_yaml}, '
                 f'\n\tlaunched_resources={self.launched_nodes}x '
@@ -2186,6 +2230,19 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         self.launched_resources = self.launched_resources.copy(region=region)
 
+    def _update_stable_ssh_ports(self, max_attempts: int = 1) -> None:
+        # TODO(romilb): Replace this with a call to the cloud class to get ports
+        if isinstance(self.launched_resources.cloud, clouds.Kubernetes):
+            head_port = backend_utils.get_head_ssh_port(
+                self, use_cache=False, max_attempts=max_attempts)
+            # TODO(romilb): Multinode doesn't work with Kubernetes yet.
+            worker_ports = [22] * (self.launched_nodes - 1)
+            ports = [head_port] + worker_ports
+        else:
+            # Use port 22 for other clouds
+            ports = [22] * self.launched_nodes
+        self.stable_ssh_ports = ports
+
     def _update_stable_cluster_ips(self, max_attempts: int = 1) -> None:
         cluster_external_ips = backend_utils.get_node_ips(
             self.cluster_yaml,
@@ -2252,6 +2309,16 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             return [ips[1] for ips in self.stable_internal_external_ips]
         return None
 
+    def external_ssh_ports(
+            self,
+            max_attempts: int = _FETCH_IP_MAX_ATTEMPTS,
+            use_cached_ports: bool = True) -> Optional[List[int]]:
+        if not use_cached_ports:
+            self._update_stable_ssh_ports(max_attempts=max_attempts)
+        if self.stable_ssh_ports is not None:
+            return self.stable_ssh_ports
+        return None
+
     def get_hourly_price(self) -> float:
         hourly_cost = (self.launched_resources.get_cost(3600) *
                        self.launched_nodes)
@@ -2268,6 +2335,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             return external_ips[0]
         return None
 
+    @property
+    def head_ssh_port(self):
+        external_ssh_ports = self.external_ssh_ports()
+        if external_ssh_ports:
+            return external_ssh_ports[0]
+        return None
+
     def __setstate__(self, state):
         self._version = self._VERSION
 
@@ -2280,11 +2354,15 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if version < 3:
             head_ip = state.pop('head_ip', None)
             state['stable_internal_external_ips'] = None
+        if version < 4:
+            # Version 4 adds self.stable_ssh_ports for Kubernetes support
+            state['stable_ssh_ports'] = None
 
         self.__dict__.update(state)
 
-        # Because the _update_stable_cluster_ips function uses the handle,
-        # we call it on the current instance after the state is updated
+        # Because the _update_stable_cluster_ips and _update_stable_ssh_ports
+        # functions use the handle, we call it on the current instance
+        # after the state is updated.
         if version < 3 and head_ip is not None:
             try:
                 self._update_stable_cluster_ips()
@@ -2292,6 +2370,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # This occurs when an old cluster from was autostopped,
                 # so the head IP in the database is not updated.
                 pass
+        if version < 4:
+            self._update_stable_ssh_ports()
 
         self._update_cluster_region()
 
@@ -2543,7 +2623,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             ip_list = handle.external_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
                                           use_cached_ips=False)
+            ssh_port_list = handle.external_ssh_ports(
+                max_attempts=_FETCH_IP_MAX_ATTEMPTS, use_cached_ports=False)
             assert ip_list is not None, handle
+            assert ssh_port_list is not None, handle
 
             if 'tpu_name' in config_dict:
                 self._set_tpu_name(handle, config_dict['tpu_name'])
@@ -2564,7 +2647,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     ssh_credentials = backend_utils.ssh_credential_from_yaml(
                         handle.cluster_yaml)
                     runners = command_runner.SSHCommandRunner.make_runner_list(
-                        ip_list, **ssh_credentials)
+                        ip_list, port_list=ssh_port_list, **ssh_credentials)
 
                     def _get_zone(runner):
                         retry_count = 0
@@ -2601,13 +2684,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # to None.
             self._update_after_cluster_provisioned(handle, task,
                                                    prev_cluster_status, ip_list,
-                                                   lock_path)
+                                                   ssh_port_list, lock_path)
             return handle
 
     def _update_after_cluster_provisioned(
             self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
-            ip_list: List[str], lock_path: str) -> None:
+            ip_list: List[str], ssh_port_list: List[int],
+            lock_path: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
         usage_lib.messages.usage.update_final_cluster_status(
@@ -2659,7 +2743,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 status_lib.ClusterStatus.UP)
             auth_config = common_utils.read_yaml(handle.cluster_yaml)['auth']
             backend_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
-                                                      ip_list, auth_config)
+                                                      ip_list, auth_config,
+                                                      ssh_port_list)
 
             common_utils.remove_file_if_exists(lock_path)
 
@@ -2671,6 +2756,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         fore = colorama.Fore
         style = colorama.Style
         ip_list = handle.external_ips()
+        port_list = handle.external_ssh_ports()
         assert ip_list is not None, 'external_ips is not cached in handle'
         full_workdir = os.path.abspath(os.path.expanduser(workdir))
 
@@ -2700,7 +2786,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, **ssh_credentials)
+            ip_list, port_list=port_list, **ssh_credentials)
 
         def _sync_workdir_node(runner: command_runner.SSHCommandRunner) -> None:
             runner.rsync(
@@ -2754,6 +2840,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_file = os.path.basename(setup_sh_path)
             # Sync the setup script up and run it.
             ip_list = handle.external_ips()
+            port_list = handle.external_ssh_ports()
             assert ip_list is not None, 'external_ips is not cached in handle'
             ssh_credentials = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml)
@@ -2762,7 +2849,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # forwarding.
             ssh_credentials.pop('ssh_control_name')
             runners = command_runner.SSHCommandRunner.make_runner_list(
-                ip_list, **ssh_credentials)
+                ip_list, port_list=port_list, **ssh_credentials)
 
             # Need this `-i` option to make sure `source ~/.bashrc` work
             setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
@@ -2844,7 +2931,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         fore = colorama.Fore
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
+        head_ssh_port = backend_utils.get_head_ssh_port(handle)
         runner = command_runner.SSHCommandRunner(handle.head_ip,
+                                                 port=head_ssh_port,
                                                  **ssh_credentials)
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(codegen)
@@ -2886,7 +2975,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                           f'touch {remote_log_path}')
             code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
-
             job_submit_cmd = mkdir_code + ' && ' + code
 
             if spot_dag is not None:
@@ -3246,10 +3334,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         ip_list = handle.external_ips()
         assert ip_list is not None, 'external_ips is not cached in handle'
+        ssh_port_list = handle.external_ssh_ports()
+        assert ssh_port_list is not None, 'external_ssh_ports is not cached ' \
+                                          'in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, **ssh_credentials)
+            ip_list, port_list=ssh_port_list, **ssh_credentials)
 
         def _rsync_down(args) -> None:
             """Rsync down logs from remote nodes.
@@ -3411,17 +3502,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'Failed to take down Ray autoscaler on the head node. '
                         'It might be because the cluster\'s head node has '
                         'already been terminated. It is fine to skip this.')
+            operation_fn = provision_lib.stop_instances
+            if terminate:
+                operation_fn = provision_lib.terminate_instances
             try:
-                if terminate:
-                    provision_api.terminate_instances(
-                        repr(cloud),
-                        cluster_name,
-                        provider_config=config['provider'])
-                else:
-                    provision_api.stop_instances(
-                        repr(cloud),
-                        cluster_name,
-                        provider_config=config['provider'])
+                operation_fn(repr(cloud),
+                             cluster_name,
+                             provider_config=config['provider'])
             except Exception as e:  # pylint: disable=broad-except
                 if purge:
                     logger.warning(
@@ -3478,7 +3565,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 returncode = -1
 
             if vpc_found:
-                # # pylint: disable=line-too-long E1136
+                # pylint: disable=line-too-long E1136
                 # Delete VPC and it's associated resources
                 vpc_provider = IBMVPCProvider(
                     config_provider['resource_group_id'], region, cluster_name)
@@ -3645,6 +3732,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'Failed to delete cloned image {image_id}. Please '
                     'remove it manually to avoid image leakage. Details: '
                     f'{common_utils.format_exception(e, use_bracket=True)}')
+        if terminate:
+            cloud = handle.launched_resources.cloud
+            config = common_utils.read_yaml(handle.cluster_yaml)
+            if isinstance(cloud, (clouds.AWS, clouds.GCP)):
+                # Clean up AWS SGs
+                provision_lib.cleanup_ports(repr(cloud), handle.cluster_name,
+                                            config['provider'])
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.
@@ -3756,9 +3850,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 enabled, lines are printed only when '\r' or '\n' is found.
         """
         head_ip = backend_utils.get_head_ip(handle, _FETCH_IP_MAX_ATTEMPTS)
+        head_ssh_port = backend_utils.get_head_ssh_port(handle,
+                                                        _FETCH_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
-        runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
+        runner = command_runner.SSHCommandRunner(head_ip,
+                                                 port=head_ssh_port,
+                                                 **ssh_credentials)
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 
@@ -3892,7 +3990,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle.cluster_yaml)
 
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, **ssh_credentials)
+            ip_list, port_list=None, **ssh_credentials)
 
         def _setup_tpu_name_on_node(
                 runner: command_runner.SSHCommandRunner) -> None:
@@ -3923,11 +4021,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
         start = time.time()
         ip_list = handle.external_ips()
+        port_list = handle.external_ssh_ports()
         assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, **ssh_credentials)
+            ip_list, port_list=port_list, **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
 
         # Check the files and warn
@@ -4070,11 +4169,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'storage mount{plural}.{style.RESET_ALL}')
         start = time.time()
         ip_list = handle.external_ips()
+        port_list = handle.external_ssh_ports()
         assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, **ssh_credentials)
+            ip_list, port_list=port_list, **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
 
         for dst, storage_obj in storage_mounts.items():
