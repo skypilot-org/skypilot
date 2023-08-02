@@ -19,7 +19,7 @@ Go to the [application page](https://ai.meta.com/resources/models-and-libraries/
 
 Generate a read-only access token on HuggingFace [here](https://huggingface.co/settings/token), and make sure your HuggingFace account can access the LLaMA 2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main).
 
-Fill the access token in the [train.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna-llama-2/train.yaml).
+Put the access token into [train.yaml](train.yaml):
 ```yaml
 envs:
   HF_TOKEN: <your-huggingface-token>  # Change to your own huggingface token
@@ -74,7 +74,7 @@ envs:
     --env WANDB_API_KEY=<your-wandb-api-key>
   ```
 
-This will launch the training job on the cloud wherever there is available 8x A100-80GB spot GPUs.
+This will launch the training job on the cheapest cloud that has available 8x A100-80GB spot GPUs.
 
 > **Tip**: You can get `WANDB_API_KEY` at https://wandb.ai/settings. To disable Weights & Biases, simply leave out that --env flag.
 
@@ -87,9 +87,9 @@ resources:
   disk_size: 1000
   use_spot: true
 ```
-However, spot A100-80GB:8 is currently only supported on GCP. On-demand versions are supported on AWS, Azure, GCP, and Lambda (hint: check out the handy outputs of `sky show-gpus A100-80GB:8`!).
+However, spot A100-80GB:8 is currently only supported on GCP. On-demand versions are supported on AWS, Azure, GCP, and Lambda. (Hint: check out the handy outputs of `sky show-gpus A100-80GB:8`!)
 
-To use these clouds, add the `--no-use-spot` flag to request on-demand instances:
+To use those clouds, add the `--no-use-spot` flag to request on-demand instances:
 ```console
 sky launch --no-use-spot ...
 ```
@@ -126,3 +126,5 @@ sky launch -c serve serve.yaml --env MODEL_CKPT=<your-model-checkpoint>/chatbot/
 ```
 
 This will launch a gradio server that serves the model checkpoint at `<your-model-checkpoint>/chatbot/7b`.
+
+> **Tip**: You can also switch to a cheaper accelerator, such as L4, to save cost, by adding `--gpus L4` to the above command.
