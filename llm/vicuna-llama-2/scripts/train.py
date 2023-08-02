@@ -289,7 +289,8 @@ def cleanup_incomplete_checkpoints(output_dir):
                   'optimization of loading.')
             tmp_dir = os.path.expanduser('~/tmp')
             os.makedirs(tmp_dir, exist_ok=True)
-            subprocess.run(['gsutil', '-m', 'rsync', '-r', checkpoint, tmp_dir], check=True)
+            subprocess.run(['gsutil', '-m', 'rsync', '-r', checkpoint, tmp_dir],
+                           check=True)
             break
 
 
