@@ -401,7 +401,7 @@ class SSHConfigHelper(object):
     @classmethod
     def _get_generated_config(cls, autogen_comment: str, host_name: str,
                               ip: str, username: str, ssh_key_path: str,
-                              proxy_command: Optional[str]):
+                              proxy_command: Optional[str], port: int):
         if proxy_command is not None:
             proxy = f'ProxyCommand {proxy_command}'
         else:
@@ -423,7 +423,7 @@ class SSHConfigHelper(object):
               StrictHostKeyChecking no
               UserKnownHostsFile=/dev/null
               GlobalKnownHostsFile=/dev/null
-              Port 22
+              Port {port}
               {proxy}
             """.rstrip())
         codegen = codegen + '\n'
@@ -431,12 +431,8 @@ class SSHConfigHelper(object):
 
     @classmethod
     @timeline.FileLockEvent(ssh_conf_lock_path)
-    def add_cluster(
-        cls,
-        cluster_name: str,
-        ips: List[str],
-        auth_config: Dict[str, str],
-    ):
+    def add_cluster(cls, cluster_name: str, ips: List[str],
+                    auth_config: Dict[str, str], ports: List[int]):
         """Add authentication information for cluster to local SSH config file.
 
         If a host with `cluster_name` already exists and the configuration was
@@ -452,6 +448,7 @@ class SSHConfigHelper(object):
             ips: List of public IP addresses in the cluster. First IP is head
               node.
             auth_config: read_yaml(handle.cluster_yaml)['auth']
+            ports: List of port numbers for SSH corresponding to ips
         """
         username = auth_config['ssh_user']
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
@@ -492,8 +489,10 @@ class SSHConfigHelper(object):
             os.chmod(config_path, 0o644)
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
+        head_port = ports[0]
         codegen = cls._get_generated_config(sky_autogen_comment, host_name, ip,
-                                            username, key_path, proxy_command)
+                                            username, key_path, proxy_command,
+                                            head_port)
 
         # Add (or overwrite) the new config.
         if overwrite:
@@ -592,9 +591,15 @@ class SSHConfigHelper(object):
                                f'host named {worker_names[idx]}.')
                 host_name = external_worker_ips[idx]
                 logger.warning(f'Using {host_name} to identify host instead.')
+                # TODO(romilb): Update port number when k8s supports multinode
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, host_name, external_worker_ips[idx],
-                    username, key_path, proxy_command)
+                    sky_autogen_comment,
+                    host_name,
+                    external_worker_ips[idx],
+                    username,
+                    key_path,
+                    proxy_command,
+                    port=22)
 
         # All workers go to SKY_USER_FILE_PATH/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
@@ -605,16 +610,26 @@ class SSHConfigHelper(object):
                     host_name = worker_names[idx]
                     overwrites[idx] = True
                     overwrite_begin_idxs[idx] = i - 1
+                # TODO(romilb): Update port number when k8s supports multinode
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, host_name, external_worker_ips[idx],
-                    username, key_path, proxy_command)
+                    sky_autogen_comment,
+                    host_name,
+                    external_worker_ips[idx],
+                    username,
+                    key_path,
+                    proxy_command,
+                    port=22)
 
         # This checks if all codegens have been created.
         for idx, ip in enumerate(external_worker_ips):
             if not codegens[idx]:
-                codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, worker_names[idx], ip, username,
-                    key_path, proxy_command)
+                codegens[idx] = cls._get_generated_config(sky_autogen_comment,
+                                                          worker_names[idx],
+                                                          ip,
+                                                          username,
+                                                          key_path,
+                                                          proxy_command,
+                                                          port=22)
 
         for idx in range(len(external_worker_ips)):
             # Add (or overwrite) the new config.
@@ -1068,6 +1083,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_azure_authentication(config)
     elif isinstance(cloud, clouds.Lambda):
         config = auth.setup_lambda_authentication(config)
+    elif isinstance(cloud, clouds.Kubernetes):
+        config = auth.setup_kubernetes_authentication(config)
     elif isinstance(cloud, clouds.IBM):
         config = auth.setup_ibm_authentication(config)
     elif isinstance(cloud, clouds.SCP):
@@ -1592,6 +1609,28 @@ def get_head_ip(
     return head_ip
 
 
+@timeline.event
+def get_head_ssh_port(
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
+    use_cache: bool = True,
+    max_attempts: int = 1,
+) -> int:
+    """Returns the ip of the head node."""
+    del max_attempts  # Unused.
+    # Use port 22 for everything except Kubernetes
+    # TODO(romilb): Add a get port method to the cloud classes.
+    head_ssh_port = 22
+    if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+        return head_ssh_port
+    else:
+        if use_cache and handle.head_ssh_port is not None:
+            head_ssh_port = handle.head_ssh_port
+        else:
+            svc_name = f'{handle.get_cluster_name()}-ray-head-ssh'
+            head_ssh_port = clouds.Kubernetes.get_port(svc_name)
+    return head_ssh_port
+
+
 def check_network_connection():
     # Tolerate 3 retries as it is observed that connections can fail.
     adapter = adapters.HTTPAdapter(max_retries=retry_lib.Retry(total=3))
@@ -1883,7 +1922,8 @@ def _update_cluster_status_no_lock(
             # Check if ray cluster status is healthy.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
             runner = command_runner.SSHCommandRunner(external_ips[0],
-                                                     **ssh_credentials)
+                                                     **ssh_credentials,
+                                                     port=handle.head_ssh_port)
             rc, output, _ = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                                        stream_logs=False,
                                        require_outputs=True,

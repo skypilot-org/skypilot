@@ -638,6 +638,7 @@ def test_image_no_conda():
 
 # ------------ Test stale job ------------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
+@pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 def test_stale_job(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -716,6 +717,7 @@ def test_gcp_stale_job_manual_restart():
 
 # ---------- Check Sky's environment variables; workdir. ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_kubernetes  # K8s does not support num_nodes > 1 yet
 def test_env_check(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -733,9 +735,15 @@ def test_env_check(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_file_mounts instead.
 def test_file_mounts(generic_cloud: str):
     name = _get_cluster_name()
+    extra_flags = ''
+    if generic_cloud in 'kubernetes':
+        # Kubernetes does not support multi-node
+        # NOTE: This test will fail if you have a Kubernetes cluster running on
+        #  arm64 (e.g., Apple Silicon) since goofys does not work on arm64.
+        extra_flags = '--num-nodes 1'
     test_commands = [
         *storage_setup_commands,
-        f'sky launch -y -c {name} --cloud {generic_cloud} examples/using_file_mounts.yaml',
+        f'sky launch -y -c {name} --cloud {generic_cloud} {extra_flags} examples/using_file_mounts.yaml',
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
     ]
     test = Test(
@@ -792,7 +800,7 @@ def test_aws_storage_mounts():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml').read_text()
+        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -819,7 +827,7 @@ def test_gcp_storage_mounts():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml').read_text()
+        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -834,6 +842,36 @@ def test_gcp_storage_mounts():
         ]
         test = Test(
             'gcp_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_storage_mounts():
+    # Tests bucket mounting on k8s, assuming S3 is configured.
+    # This test will fail if run on non x86_64 architecture, since goofys is
+    # built for x86_64 only.
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud kubernetes {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'aws s3 ls {storage_name}/hello.txt',
+        ]
+        test = Test(
+            'kubernetes_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete {storage_name}',
             timeout=20 * 60,  # 20 mins
@@ -903,11 +941,15 @@ def test_ibm_storage_mounts():
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_logs instead.
 def test_cli_logs(generic_cloud: str):
     name = _get_cluster_name()
+    num_nodes = 2
+    if generic_cloud == 'kubernetes':
+        # Kubernetes does not support multi-node
+        num_nodes = 1
     timestamp = time.time()
     test = Test(
         'cli_logs',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} --num-nodes 2 "echo {timestamp} 1"',
+            f'sky launch -y -c {name} --cloud {generic_cloud} --num-nodes {num_nodes} "echo {timestamp} 1"',
             f'sky exec {name} "echo {timestamp} 2"',
             f'sky exec {name} "echo {timestamp} 3"',
             f'sky exec {name} "echo {timestamp} 4"',
@@ -949,6 +991,7 @@ def test_scp_logs():
 @pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus. run test_ibm_job_queue instead
 @pytest.mark.no_scp  # SCP does not have K80 gpus. Run test_scp_job_queue instead
 @pytest.mark.no_oci  # OCI does not have K80 gpus
+@pytest.mark.no_kubernetes  # Kubernetes not have gpus
 def test_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1050,6 +1093,7 @@ def test_scp_job_queue():
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue_multinode instead
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
+@pytest.mark.no_kubernetes  # Kubernetes not have gpus
 def test_job_queue_multinode(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1092,7 +1136,7 @@ def test_large_job_queue(generic_cloud: str):
     test = Test(
         'large_job_queue',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud}',
+            f'sky launch -y -c {name} --cpus 8 --cloud {generic_cloud}',
             f'for i in `seq 1 75`; do sky exec {name} -n {name}-$i -d "echo $i; sleep 100000000"; done',
             f'sky cancel -y {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
             'sleep 75',
@@ -1136,7 +1180,7 @@ def test_fast_large_job_queue(generic_cloud: str):
     test = Test(
         'fast_large_job_queue',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud}',
+            f'sky launch -y -c {name} --cpus 8 --cloud {generic_cloud}',
             f'for i in `seq 1 32`; do sky exec {name} -n {name}-$i -d "echo $i"; done',
             'sleep 60',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep -v grep | grep SUCCEEDED | wc -l | grep 32',
@@ -1191,6 +1235,7 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have K80 gpus
+@pytest.mark.no_kubernetes  # Kubernetes not have gpus
 def test_multi_echo(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1214,6 +1259,7 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not have V100 (16GB) GPUs. Run test_scp_huggingface instead.
+@pytest.mark.no_kubernetes  # Kubernetes not have gpus
 def test_huggingface(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1324,6 +1370,7 @@ def test_tpu_vm_pod():
 
 # ---------- Simple apps. ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1 node yet
 def test_multi_hostname(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1378,6 +1425,7 @@ def test_aws_http_server_with_custom_ports():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1 node yet
 @pytest.mark.skip(
     reason=
     'The resnet_distributed_tf_app is flaky, due to it failing to detect GPUs.')
@@ -1451,6 +1499,7 @@ def test_azure_start_stop():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 def test_autostop(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1507,6 +1556,7 @@ def test_autostop(generic_cloud: str):
 
 # ---------- Testing Autodowning ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
+@pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1 yet. Run test_scp_kubernetes instead.
 def test_autodown(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1576,6 +1626,41 @@ def test_scp_autodown():
     run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_autodown():
+    name = _get_cluster_name()
+    test = Test(
+        'kubernetes_autodown',
+        [
+            f'sky launch -y -d -c {name} --cloud kubernetes tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} --down -i 1',
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "1m (down)"',
+            # Ensure the cluster is not terminated early.
+            'sleep 45',
+            f'sky status --refresh | grep {name} | grep UP',
+            # Ensure the cluster is terminated.
+            'sleep 200',
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} --cloud kubernetes --down tests/test_yamls/minimal.yaml',
+            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
+            f'sky exec {name} --cloud kubernetes tests/test_yamls/minimal.yaml',
+            f'sky status | grep {name} | grep "1m (down)"',
+            'sleep 200',
+            # Ensure the cluster is terminated.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} --cloud kubernetes --down tests/test_yamls/minimal.yaml',
+            f'sky autostop -y {name} --cancel',
+            'sleep 200',
+            # Ensure the cluster is still UP.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && echo "$s" | grep {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=25 * 60,
+    )
+    run_one_test(test)
+
+
 def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
     test = Test(
         f'{cloud}-cancel-task',
@@ -1628,6 +1713,7 @@ def test_cancel_azure():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_kubernetes  # Kubernetes does not support GPU yet
 def test_cancel_pytorch(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1676,6 +1762,7 @@ def test_cancel_ibm():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 def test_use_spot(generic_cloud: str):
     """Test use-spot and sky exec."""
     name = _get_cluster_name()
@@ -1696,6 +1783,7 @@ def test_use_spot(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot(generic_cloud: str):
     """Test the spot yaml."""
@@ -1728,6 +1816,7 @@ def test_spot(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_pipeline(generic_cloud: str):
     """Test a spot pipeline."""
@@ -1766,6 +1855,7 @@ def test_spot_pipeline(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_failed_setup(generic_cloud: str):
     """Test managed spot job with failed setup."""
@@ -1788,6 +1878,7 @@ def test_spot_failed_setup(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_pipeline_failed_setup(generic_cloud: str):
     """Test managed spot job with failed setup for a pipeline."""
@@ -1966,6 +2057,7 @@ def test_spot_pipeline_recovery_gcp():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_recovery_default_resources(generic_cloud: str):
     """Test managed spot recovery for default resources."""
@@ -2172,6 +2264,7 @@ def test_spot_cancellation_gcp():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_storage(generic_cloud: str):
     """Test storage with managed spot"""
@@ -2226,6 +2319,7 @@ def test_spot_tpu():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_inline_env(generic_cloud: str):
     """Test spot env"""
@@ -2441,12 +2535,13 @@ def test_gcp_zero_quota_failover():
 
 
 # ------- Testing user ray cluster --------
-def test_user_ray_cluster():
+@pytest.mark.no_kubernetes  # Kubernetes does not support sky status -r yet.
+def test_user_ray_cluster(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
         'user-ray-cluster',
         [
-            f'sky launch -y -c {name} "ray start --head"',
+            f'sky launch -y -c {name} --cloud {generic_cloud} "ray start --head"',
             f'sky exec {name} "echo hi"',
             f'sky logs {name} 1 --status',
             f'sky status -r | grep {name} | grep UP',
