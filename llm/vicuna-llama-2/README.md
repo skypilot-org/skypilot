@@ -8,19 +8,19 @@ In this tutorial, we will show you how to train your own Vicuna on Llama-2, with
 
 ## Pre-requisites
 
-1. Apply for the access to the Llama-2 model
+1. Apply for access to the Llama-2 model
 
-Go to the [application page](https://ai.meta.com/resources/models-and-libraries/llama-downloads/) and apply for the access to the model weights. Ensure your huggingface email is the same as the email on the Meta request (the huggingface access may take 1-2 days for approval).
+Go to the [application page](https://ai.meta.com/resources/models-and-libraries/llama-downloads/) and apply for access to the model weights.
 
 
-2. Get the access token from HuggingFace
+2. Get an access token from HuggingFace
 
-Generate a read-only access token on HuggingFace [here](https://huggingface.co/settings/token), and make sure your HuggingFace account can access the Llama-2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main).
+Generate a read-only access token on HuggingFace [here](https://huggingface.co/settings/token). Go to the HuggingFace page for Llama-2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main) and apply for access. Ensure your HuggingFace email is the same as the email on the Meta request. It may take 1-2 days for approval.
 
-Fill the access token in the [train.yaml](train.yaml).
+Put the access token into [train.yaml](train.yaml):
 ```yaml
 envs:
-  HF_TOKEN: <your-huggingface-token> # Change to your own huggingface token
+  HF_TOKEN: <your-huggingface-token>  # Change to your own huggingface token
 ```
 
 ## Train your own Vicuna on Llama-2
@@ -30,7 +30,7 @@ envs:
 
   By default, we use the ShareGPT data and the identity questions in [hardcoded_questions.py](./scripts/hardcoded_questions.py).
 
-  * **Optional**: To use custom data, you can change the data by changing the following line in [train.yaml](train.yaml).
+  * **Optional**: To use custom data, you can change the following line in [train.yaml](train.yaml):
 
   ```yaml
   setup: |
@@ -39,7 +39,7 @@ envs:
     ...
   ```
 
-  The above json file is an array, each element of which has the following format:
+  The above json file is an array, each element of which having the following format:
   ```json
   {
     "id": "i6IyJda_0",
@@ -58,7 +58,7 @@ envs:
 
   * **Optional**: To make the model know about its identity, you can change the hardcoded questions [hardcoded_questions.py](./scripts/hardcoded_questions.py)
 
-### Kick start the training on any cloud
+### Kick start training on any cloud
 
 * Start training with a single command
 
@@ -68,7 +68,7 @@ envs:
     --env WANDB_API_KEY=<your-wandb-api-key>
   ```
 
-This will launch the training job on the cloud wherever there is available 8x A100-80GB spot GPUs.
+This will launch the training job on the cheapest cloud that has available 8x A100-80GB spot GPUs.
 
 > **Tip**: You can get `WANDB_API_KEY` at https://wandb.ai/settings. To disable Weights & Biases, simply leave out that --env flag.
 
@@ -81,9 +81,9 @@ resources:
   disk_size: 1000
   use_spot: true
 ```
-However, spot A100-80GB:8 is currently only supported on GCP. On-demand versions are supported on AWS, Azure, GCP, and Lambda (hint: check out the handy outputs of `sky show-gpus A100-80GB:8`!).
+However, spot A100-80GB:8 is currently only supported on GCP. On-demand versions are supported on AWS, Azure, GCP, and Lambda. (Hint: check out the handy outputs of `sky show-gpus A100-80GB:8`!)
 
-To use these clouds, add the `--no-use-spot` flag to request on-demand instances:
+To use those clouds, add the `--no-use-spot` flag to request on-demand instances:
 ```console
 sky launch --no-use-spot ...
 ```
@@ -97,9 +97,9 @@ sky launch --no-use-spot ...
     --env MODEL_SIZE=13
   ```
 
-### Automatically Recover from Spot Interruptions
+### Automatically recover from spot interruptions
 
-[SkyPilot Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html) is a library built on top of SkyPilot that helps users to run jobs on spot instances without worrying about the  interruptions. That is the tool used by the LMSYS organization to train the first version of Vicuna (more details can be found in their launching [blog post](https://lmsys.org/blog/2023-03-30-vicuna/) and [example](../vicuna)). With this, the training cost can be reduced from $1000 to **\$300**.
+[SkyPilot Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html) is a library built on top of SkyPilot that helps users run jobs on spot instances without worrying about interruptions. That is the tool used by the LMSYS organization to train the first version of Vicuna (more details can be found in their [launch blog post](https://lmsys.org/blog/2023-03-30-vicuna/) and [example](../vicuna)). With this, the training cost can be reduced from $1000 to **\$300**.
 
 To use SkyPilot Managed Spot, you can simply replace `sky launch` with `sky spot launch` in the above command:
 
