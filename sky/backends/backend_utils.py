@@ -1,5 +1,4 @@
 """Util constants/functions for the backends."""
-import base64
 from datetime import datetime
 import difflib
 import enum
@@ -7,7 +6,6 @@ import getpass
 import json
 import os
 import pathlib
-import pickle
 import re
 import subprocess
 import tempfile
@@ -2429,45 +2427,64 @@ def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
         endpoint = record['endpoint']
         if not endpoint:
             continue
-        # TODO(tian): Refactor: store ip and app_port separately.
-        controller_ip = endpoint.split(':')[0]
-        controller_url = f'http://{controller_ip}:{serve_lib.CONTROL_PLANE_PORT}'
+
+        controller_cluster_name = record['controller_cluster_name']
+        handle = global_user_state.get_handle_from_cluster_name(
+            controller_cluster_name)
+        assert handle is not None
+        backend = get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
+
+        code = serve_lib.ServeCodeGen.get_replica_nums()
+        returncode, replica_nums_payload, stderr = backend.run_on_head(
+            handle,
+            code,
+            require_outputs=True,
+            stream_logs=False,
+            separate_stderr=True)
         try:
-            resp = requests.get(controller_url +
-                                '/control_plane/get_replica_nums',
-                                timeout=5)
-        except requests.RequestException:
-            pass
-        else:
-            record.update(resp.json())
-            if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
-                # TODO(tian): Current behaviour for user bugs in setup section
-                # is to teardown and relaunching forever. We should have a way
-                # to detect such bugs and stop relaunching.
-                if record['num_failed_replicas'] > 0:
-                    record['status'] = status_lib.ServiceStatus.FAILED
-                elif record['num_ready_replicas'] > 0:
-                    record['status'] = status_lib.ServiceStatus.READY
-                elif record['num_unhealthy_replicas'] > 0:
-                    record['status'] = status_lib.ServiceStatus.REPLICA_INIT
+            subprocess_utils.handle_returncode(returncode,
+                                               code,
+                                               'Failed to fetch replica nums',
+                                               stderr,
+                                               stream_logs=False)
+        except exceptions.CommandError as e:
+            raise RuntimeError(e.error_msg) from e
+        replica_nums = serve_lib.load_replica_nums(replica_nums_payload)
+        record.update(replica_nums)
+
+        if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
+            # TODO(tian): Current behaviour for user bugs in setup section
+            # is to teardown and relaunching forever. We should have a way
+            # to detect such bugs and stop relaunching.
+            if record['num_failed_replicas'] > 0:
+                record['status'] = status_lib.ServiceStatus.FAILED
+            elif record['num_ready_replicas'] > 0:
+                record['status'] = status_lib.ServiceStatus.READY
+            elif record['num_unhealthy_replicas'] > 0:
+                record['status'] = status_lib.ServiceStatus.REPLICA_INIT
         global_user_state.add_or_update_service(**record)
+
         if service is not None:
             assert record['name'] == service
+            code = serve_lib.ServeCodeGen.get_replica_info()
+            returncode, replica_info_payload, stderr = backend.run_on_head(
+                handle,
+                code,
+                require_outputs=True,
+                stream_logs=False,
+                separate_stderr=True)
             try:
-                resp = requests.get(controller_url +
-                                    '/control_plane/get_replica_info',
-                                    timeout=5)
-            except requests.RequestException:
-                pass
-            else:
-                record['replica_info'] = resp.json()['replica_info']
-                decoded_info = []
-                for info in record['replica_info']:
-                    decoded_info.append({
-                        k: pickle.loads(base64.b64decode(v))
-                        for k, v in info.items()
-                    })
-                record['replica_info'] = decoded_info
+                subprocess_utils.handle_returncode(
+                    returncode,
+                    code,
+                    'Failed to fetch replica info',
+                    stderr,
+                    stream_logs=False)
+            except exceptions.CommandError as e:
+                raise RuntimeError(e.error_msg) from e
+            record['replica_info'] = serve_lib.load_replica_info(
+                replica_info_payload)
     return service_records
 
 
