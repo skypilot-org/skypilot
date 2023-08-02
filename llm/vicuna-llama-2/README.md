@@ -101,7 +101,10 @@ To use those clouds, add the `--no-use-spot` flag to request on-demand instances
 sky launch --no-use-spot ...
 ```
 
-![Optimizer](https://imgur.com/yVIXfQo.gif)
+
+<p align="center">
+    <img src="https://imgur.com/yVIXfQo.gif" alt="Optimizer"/>
+</p>
 
 **Optional**: Try out the training for the 13B model:
 
