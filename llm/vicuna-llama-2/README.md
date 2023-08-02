@@ -103,7 +103,7 @@ sky launch --no-use-spot ...
 
 
 <p align="center">
-    <img src="https://imgur.com/yVIXfQo.gif" alt="Optimizer"/>
+    <img src="https://imgur.com/yVIXfQo.gif" width="100%" alt="Optimizer"/>
 </p>
 
 **Optional**: Try out the training for the 13B model:
