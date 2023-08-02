@@ -10,6 +10,8 @@
 #     $ sky status -a
 #     # to get the HEAD_IP of the cluster, replace the ip-x-x-x-x with
 #     # the HEAD_IP and open browser for the URL.
+#     
+#     # This is an alternative to port forwarding.
 
 resources:
   ports:
