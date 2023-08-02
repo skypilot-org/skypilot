@@ -7,7 +7,7 @@
 #     # http://ip-x-x-x-x:29324/lab?token=<token>
 #     #     http://127.0.0.1:29324/lab?token=<token>
 #     # Run
-#     $ sky status -a
+#     $ sky status -a jupyter
 #     # to get the HEAD_IP of the cluster, replace the ip-x-x-x-x with
 #     # the HEAD_IP and open browser for the URL.
 #     
