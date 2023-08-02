@@ -33,7 +33,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 10
+    _VERSION = 11
 
     def __init__(
         self,
@@ -50,6 +50,7 @@ class Resources:
         image_id: Union[Dict[str, str], str, None] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
+        ports: Optional[List[Union[int, str]]] = None,
         # Internal use only.
         _is_image_managed: Optional[bool] = None,
     ):
@@ -114,6 +115,7 @@ class Resources:
           disk_size: the size of the OS disk in GiB.
           disk_tier: the disk performance tier to use. If None, defaults to
             ``'medium'``.
+          ports: the ports to open on the instance.
         """
         self._version = self._VERSION
         self._cloud = cloud
@@ -154,6 +156,7 @@ class Resources:
         self._is_image_managed = _is_image_managed
 
         self._disk_tier = disk_tier
+        self._ports = ports
 
         self._set_cpus(cpus)
         self._set_memory(memory)
@@ -165,6 +168,7 @@ class Resources:
         self._try_validate_spot()
         self._try_validate_image_id()
         self._try_validate_disk_tier()
+        self._try_validate_ports()
 
     def __repr__(self) -> str:
         """Returns a string representation for display.
@@ -227,6 +231,10 @@ class Resources:
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
 
+        ports = ''
+        if self.ports is not None:
+            ports = f', ports={self.ports}'
+
         if self._instance_type is not None:
             instance_type = f'{self._instance_type}'
         else:
@@ -238,7 +246,7 @@ class Resources:
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
-            f'{disk_tier}{disk_size}')
+            f'{disk_tier}{disk_size}{ports}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):
@@ -335,6 +343,10 @@ class Resources:
     @property
     def disk_tier(self) -> str:
         return self._disk_tier
+
+    @property
+    def ports(self) -> Optional[List[Union[int, str]]]:
+        return self._ports
 
     @property
     def is_image_managed(self) -> Optional[bool]:
@@ -731,6 +743,52 @@ class Resources:
             self.cloud.check_disk_tier_enabled(self.instance_type,
                                                self.disk_tier)
 
+    def _try_validate_ports(self) -> None:
+        if self.ports is None:
+            return
+        if skypilot_config.get_nested(('aws', 'security_group_name'),
+                                      None) is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify ports when AWS security group name is '
+                    'specified.')
+        if self.cloud is not None:
+            self.cloud.check_features_are_supported(
+                {clouds.CloudImplementationFeatures.OPEN_PORTS})
+        for port in self.ports:
+            if isinstance(port, int):
+                if port < 1 or port > 65535:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid port {port}. Please use a port number '
+                            'between 1 and 65535.')
+            elif isinstance(port, str):
+                port_range = port.split('-')
+                if len(port_range) != 2:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid port {port}. Please use a port range '
+                            'such as 10022-10040.')
+                try:
+                    from_port = int(port_range[0])
+                    to_port = int(port_range[1])
+                except ValueError as e:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid port {port}. Please use a integer inside'
+                            ' the range.') from e
+                if (from_port < 1 or from_port > 65535 or to_port < 1 or
+                        to_port > 65535):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid port {port}. Please use port '
+                            'numbers between 1 and 65535.')
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Invalid port {port}. Please use an integer or '
+                        'a range such as 10022-10040.')
+
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
@@ -816,6 +874,23 @@ class Resources:
                 return types.index(self.disk_tier) < types.index(
                     other.disk_tier)
 
+        if self.ports is not None:
+            if other.ports is None:
+                return False
+
+            def parse_ports(ports):
+                port_set = set()
+                for p in ports:
+                    if isinstance(p, int):
+                        port_set.add(p)
+                    else:
+                        from_port, to_port = p.split('-')
+                        port_set.update(range(int(from_port), int(to_port) + 1))
+                return port_set
+
+            if not parse_ports(self.ports) <= parse_ports(other.ports):
+                return False
+
         # self <= other
         return True
 
@@ -854,6 +929,7 @@ class Resources:
             self.disk_size == _DEFAULT_DISK_SIZE_GB,
             self.disk_tier is None,
             self._image_id is None,
+            self.ports is None,
         ])
 
     def copy(self, **override) -> 'Resources':
@@ -874,6 +950,7 @@ class Resources:
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
+            ports=override.pop('ports', self.ports),
             _is_image_managed=override.pop('_is_image_managed',
                                            self._is_image_managed),
         )
@@ -899,6 +976,8 @@ class Resources:
             features.add(clouds.CloudImplementationFeatures.SPOT_INSTANCE)
         if self.disk_tier is not None:
             features.add(clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
+        if self.ports is not None:
+            features.add(clouds.CloudImplementationFeatures.OPEN_PORTS)
         return features
 
     @classmethod
@@ -938,6 +1017,8 @@ class Resources:
             resources_fields['image_id'] = config.pop('image_id')
         if config.get('disk_tier') is not None:
             resources_fields['disk_tier'] = config.pop('disk_tier')
+        if config.get('ports') is not None:
+            resources_fields['ports'] = config.pop('ports')
         if config.get('_is_image_managed') is not None:
             resources_fields['_is_image_managed'] = config.pop(
                 '_is_image_managed')
@@ -968,6 +1049,7 @@ class Resources:
         add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
         add_if_not_none('disk_tier', self.disk_tier)
+        add_if_not_none('ports', self.ports)
         if self._is_image_managed is not None:
             config['_is_image_managed'] = self._is_image_managed
         return config
@@ -1034,5 +1116,8 @@ class Resources:
 
         if version < 10:
             self._is_image_managed = None
+
+        if version < 11:
+            self._ports = None
 
         self.__dict__.update(state)

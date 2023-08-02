@@ -289,7 +289,6 @@ def get_vcpus_mem_from_instance_type_impl(
 def _filter_with_cpus(df: pd.DataFrame, cpus: Optional[str]) -> pd.DataFrame:
     if cpus is None:
         return df
-
     # The following code is redundant with the code in resources.py::_set_cpus()
     # but we add it here for safety.
     if cpus.endswith('+'):

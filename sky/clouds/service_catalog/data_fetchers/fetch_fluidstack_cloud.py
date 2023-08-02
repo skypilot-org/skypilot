@@ -16,7 +16,7 @@ import json
 from typing import Optional, List
 from sky.clouds.service_catalog import constants
 
-ENDPOINT = "http://localhost:5001/api/plans"
+ENDPOINT = "http://fs-dev.herokuapp.com/api/plans" #TODO(mjibril) change to production
 DEFAULT_FLUIDSTACK_API_KEY_PATH = os.path.expanduser("~/.fluidstack/fluidstack_api_key")
 DEFAULT_FLUIDSTACK_API_TOKEN_PATH = os.path.expanduser(
     "~/.fluidstack/fluidstack_api_token"

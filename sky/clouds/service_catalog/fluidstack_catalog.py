@@ -114,10 +114,10 @@ def list_accelerators(
 
 
 
-"""Lambda Cloud Catalog.
+"""Fluidstack Cloud Catalog.
 
 This module loads the service catalog file and can be used to query
-instance types and pricing information for Lambda.
+instance types and pricing information for Fluidstac.
 """
 import typing
 from typing import Dict, List, Optional, Tuple
@@ -130,8 +130,8 @@ if typing.TYPE_CHECKING:
 
 _df = common.read_catalog('fluidstack/vms.csv')
 
-_DEFAULT_NUM_VCPUS = 30
-_DEFAULT_MEMORY_CPU_RATIO = 4
+_DEFAULT_NUM_VCPUS = 6
+_DEFAULT_MEMORY_CPU_RATIO = 9
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -143,7 +143,7 @@ def validate_region_zone(
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Lambda Cloud does not support zones.')
+            raise ValueError('Fluidstack Cloud does not support zones.')
     return common.validate_region_zone_impl('fluidstack', _df, region, zone)
 
 
@@ -210,6 +210,7 @@ def get_instance_type_for_accelerator(
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Fluidstack does not support zones.')
+   
     return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
@@ -246,7 +247,7 @@ def list_accelerators(
         quantity_filter: Optional[int],
         case_sensitive: bool = True
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
-    """Returns all instance types in Lambda offering GPUs."""
+    """Returns all instance types in Fluidstack offering GPUs."""
     return common.list_accelerators_impl('fluidstack', _df, gpus_only, name_filter,
                                          region_filter, quantity_filter,
                                          case_sensitive)

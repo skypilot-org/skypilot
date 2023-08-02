@@ -27,6 +27,7 @@ from sky.skylet.providers.gcp.constants import (
     VM_MINIMAL_PERMISSIONS,
     TPU_MINIMAL_PERMISSIONS,
 )
+from sky.utils import common_utils
 from ray.autoscaler._private.util import check_legacy_fields
 
 logger = logging.getLogger(__name__)
@@ -672,6 +673,16 @@ def _check_firewall_rules(vpc_name, config, compute):
         source2rules: Dict[Tuple[str, str], Dict[str, Set[int]]] = {}
         source2allowed_list: Dict[Tuple[str, str], List[Dict[str, str]]] = {}
         for rule in rules:
+            # Rules applied to specific VM (targetTags) may not work for the
+            # current VM, so should be skipped.
+            # Filter by targetTags == ['cluster_name']
+            # See https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.networks.html#getEffectiveFirewalls # pylint: disable=line-too-long
+            tags = rule.get("targetTags", None)
+            if tags is not None:
+                if len(tags) != 1:
+                    continue
+                if tags[0] != config["cluster_name"]:
+                    continue
             direction = rule.get("direction", "")
             sources = rule.get("sourceRanges", [])
             allowed = rule.get("allowed", [])
@@ -722,6 +733,26 @@ def _check_firewall_rules(vpc_name, config, compute):
     return True
 
 
+def _create_rules(config, compute, rules, VPC_NAME, PROJ_ID):
+    opertaions = []
+    for rule in rules:
+        # Query firewall rule by its name (unique in a project).
+        # If the rule already exists, delete it first.
+        rule_name = rule["name"].format(VPC_NAME=VPC_NAME)
+        rule_list = _list_firewall_rules(config, compute, filter=f"(name={rule_name})")
+        if len(rule_list) > 0:
+            _delete_firewall_rule(config, compute, rule_name)
+
+        body = rule.copy()
+        body["name"] = body["name"].format(VPC_NAME=VPC_NAME)
+        body["network"] = body["network"].format(PROJ_ID=PROJ_ID, VPC_NAME=VPC_NAME)
+        body["selfLink"] = body["selfLink"].format(PROJ_ID=PROJ_ID, VPC_NAME=VPC_NAME)
+        op = _create_firewall_rule_submit(config, compute, body)
+        opertaions.append(op)
+    for op in opertaions:
+        wait_for_compute_global_operation(config["provider"]["project_id"], op, compute)
+
+
 def get_usable_vpc(config):
     """Return a usable VPC.
 
@@ -751,10 +782,10 @@ def get_usable_vpc(config):
             usable_vpc_name = vpc["name"]
             break
 
+    proj_id = config["provider"]["project_id"]
     if usable_vpc_name is None:
         logger.info(f"Creating a default VPC network, {SKYPILOT_VPC_NAME}...")
 
-        proj_id = config["provider"]["project_id"]
         # Create a SkyPilot VPC network if it doesn't exist
         vpc_list = _list_vpcnets(config, compute, filter=f"name={SKYPILOT_VPC_NAME}")
         if len(vpc_list) == 0:
@@ -765,29 +796,41 @@ def get_usable_vpc(config):
             )
             _create_vpcnet(config, compute, body)
 
-        # Create firewall rules
-        for rule in FIREWALL_RULES_TEMPLATE:
-            # Query firewall rule by its name (unique in a project).
-            # If the rule already exists, delete it first.
-            rule_name = rule["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
-            rule_list = _list_firewall_rules(
-                config, compute, filter=f"(name={rule_name})"
-            )
-            if len(rule_list) > 0:
-                _delete_firewall_rule(config, compute, rule_name)
-
-            body = rule.copy()
-            body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
-            body["network"] = body["network"].format(
-                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME
-            )
-            body["selfLink"] = body["selfLink"].format(
-                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME
-            )
-            _create_firewall_rule(config, compute, body)
+        _create_rules(
+            config, compute, FIREWALL_RULES_TEMPLATE, SKYPILOT_VPC_NAME, proj_id
+        )
 
         usable_vpc_name = SKYPILOT_VPC_NAME
         logger.info(f"A VPC network {SKYPILOT_VPC_NAME} created.")
+
+    # Configure user specified rules
+    ports = config["provider"].get("ports", [])
+    user_rules = []
+    for port in ports:
+        cluster_name_hash = common_utils.truncate_and_hash_cluster_name(
+            config["cluster_name"]
+        )
+        name = f"user-ports-{cluster_name_hash}-{port}"
+        user_rules.append(
+            {
+                "name": name,
+                "description": f"Allow user-specified port {port} for cluster {config['cluster_name']}",
+                "network": "projects/{PROJ_ID}/global/networks/{VPC_NAME}",
+                "selfLink": "projects/{PROJ_ID}/global/firewalls/" + name,
+                "direction": "INGRESS",
+                "priority": 65534,
+                "allowed": [
+                    {
+                        "IPProtocol": "tcp",
+                        "ports": [str(port)],
+                    },
+                ],
+                "sourceRanges": ["0.0.0.0/0"],
+                "targetTags": [config["cluster_name"]],
+            }
+        )
+
+    _create_rules(config, compute, user_rules, usable_vpc_name, proj_id)
 
     return usable_vpc_name
 
@@ -838,19 +881,30 @@ def _configure_subnet(config, compute):
             node_config["networkConfig"] = copy.deepcopy(default_interfaces)[0]
             node_config["networkConfig"].pop("accessConfigs")
 
+        if get_node_type(node_config) == GCPNodeType.COMPUTE:
+            if "tags" not in node_config:
+                node_config["tags"] = {"items": []}
+            # Add cluster name to the tags so that firewall rules will apply to
+            # the created VM.
+            node_config["tags"]["items"].append(config["cluster_name"])
+        else:
+            assert get_node_type(node_config) == GCPNodeType.GCPTPU, node_config
+            # TPU VM has a different api for tags. See
+            # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes  # pylint: disable=line-too-long
+            if "tags" not in node_config:
+                node_config["tags"] = []
+            node_config["tags"].append(config["cluster_name"])
+
     return config
 
 
-def _create_firewall_rule(config, compute, body):
+def _create_firewall_rule_submit(config, compute, body):
     operation = (
         compute.firewalls()
         .insert(project=config["provider"]["project_id"], body=body)
         .execute()
     )
-    response = wait_for_compute_global_operation(
-        config["provider"]["project_id"], operation, compute
-    )
-    return response
+    return operation
 
 
 def _delete_firewall_rule(config, compute, name):

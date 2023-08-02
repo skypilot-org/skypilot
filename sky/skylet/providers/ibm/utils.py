@@ -1,7 +1,7 @@
 """holds common utility function/constants to be used by the providers."""
 
 import logging
-import os
+from pathlib import Path
 import time
 
 RAY_RECYCLABLE = "ray-recyclable"
@@ -17,8 +17,7 @@ def get_logger(caller_name):
     LOGS_FOLDER = "/tmp/connector_logs/"  # this node_provider's logs location.
     logger.setLevel(logging.DEBUG)
 
-    if not os.path.exists(LOGS_FOLDER):
-        os.mkdir(LOGS_FOLDER)
+    Path(LOGS_FOLDER).mkdir(parents=True, exist_ok=True)
     logs_path = LOGS_FOLDER + caller_name + time.strftime("%Y-%m-%d--%H-%M-%S")
     # pylint: disable=line-too-long
     file_formatter = logging.Formatter(
