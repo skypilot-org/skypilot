@@ -27,7 +27,7 @@
 
 ----
 :fire: *News* :fire:
-- [Aug, 2023] **Train Your Own Vicuna** on Llama-2: [**example**](./llm/vicuna-llama-2/)
+- [Aug, 2023] New operational guide: Finetuning Llama 2 in your own cloud environment, privately: [**example**](./llm/vicuna-llama-2/)
 - [July, 2023] Self-Hosted **Llama-2 Chatbot** on Any Cloud: [**example**](./llm/llama-2/)
 - [June, 2023] Serving LLM **24x Faster On the Cloud** with vLLM and SkyPilot: [**example**](./llm/vllm/), [**blog post**](https://blog.skypilot.co/serving-llm-24x-faster-on-the-cloud-with-vllm-and-skypilot/)
 - [June, 2023] [**Two new clouds supported**](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html): Samsung SCP and Oracle OCI!
