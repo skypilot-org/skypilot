@@ -2,6 +2,8 @@
 
 ![Vicuna-Llama-2](https://imgur.com/McZWg6z.gif "Result model in action, trained using this guide. From the SkyPilot and Vicuna teams.")
 
+Meta released [Llama 2](https://ai.meta.com/llama/) two weeks ago and has made a big wave in the AI community. In our opinion, its biggest impact is that the model is now released under a [permissive license](https://github.com/facebookresearch/llama/blob/main/LICENSE) that **allows the model weights to be used commercially**[^1]. This differs from Llama 1 which cannot be used commercially.
+
 [Vicuna](https://lmsys.org/blog/2023-03-30-vicuna/) is one of the first high-quality LLMs finetuned on Llama 1.
 We, Vicuna's co-creators, updated the exact recipe that we used to train Vicuna to be based on Llama 2 instead, producing this finetuning guide.
 
