@@ -124,11 +124,16 @@ install_requires = [
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
 # following packages dependencies are changed.
 aws_dependencies = [
+    # botocore does not work with urllib3>=2.0.0, accuroding to https://github.com/boto/botocore/issues/2926
+    # We have to explicitly pin the version to optimize the time for
+    # poetry install. See https://github.com/orgs/python-poetry/discussions/7937
+    'urllib3<2',
     # NOTE: this installs CLI V1. To use AWS SSO (e.g., `aws sso login`), users
     # should instead use CLI V2 which is not pip-installable. See
     # https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html.
-    'awscli',
-    'boto3',
+    'awscli>=1.27.10',
+    'botocore>=1.29.10',
+    'boto3>=1.26.1',
     # 'Crypto' module used in authentication.py for AWS.
     'pycryptodome==3.12.0',
 ]
@@ -144,7 +149,9 @@ extras_require: Dict[str, List[str]] = {
         'azure-mgmt-network'
     ],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
-    'ibm': ['ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services'],
+    'ibm': [
+        'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
+    ],
     'docker': ['docker'],
     'lambda': [],
     'cloudflare': aws_dependencies,

@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
 from sky import sky_logging
 from sky.provision.gcp import instance_utils
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -151,3 +152,21 @@ def terminate_instances(
     _wait_for_operations(operations, project_id, zone)
     # We don't wait for the instances to be terminated, as it can take a long
     # time (same as what we did in ray's node_provider).
+
+
+def cleanup_ports(
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, cluster_name
+    if 'ports' not in provider_config:
+        # No new ports were opened, so there is nothing to clean up.
+        return
+    project_id = provider_config['project_id']
+    cluster_name_hash = common_utils.truncate_and_hash_cluster_name(
+        cluster_name)
+    for port in provider_config['ports']:
+        rule_name = f'user-ports-{cluster_name_hash}-{port}'
+        instance_utils.GCPComputeInstance.delete_firewall_rule(
+            project_id, rule_name)

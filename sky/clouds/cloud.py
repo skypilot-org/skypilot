@@ -30,6 +30,7 @@ class CloudImplementationFeatures(enum.Enum):
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
     SPOT_INSTANCE = 'spot_instance'
     CUSTOM_DISK_TIER = 'custom_disk_tier'
+    OPEN_PORTS = 'open_ports'
 
 
 class Region(collections.namedtuple('Region', ['name'])):

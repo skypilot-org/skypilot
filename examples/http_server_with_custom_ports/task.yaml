@@ -1,0 +1,7 @@
+resources:
+  ports:
+    - 33828
+
+workdir: ./examples/http_server_with_custom_ports
+
+run: python3 server.py

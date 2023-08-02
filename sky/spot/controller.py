@@ -78,7 +78,7 @@ class SpotController:
     def _download_log_and_stream(
             self,
             handle: cloud_vm_ray_backend.CloudVmRayResourceHandle) -> None:
-        """ Downloads the latest log from spot cluster, and stream them
+        """Downloads and streams the logs of the latest job of a spot cluster.
 
         We do not stream the logs from the spot cluster directly, as the
         donwload and stream should be faster, and more robust against
@@ -90,7 +90,12 @@ class SpotController:
         try:
             log_dirs = self._backend.sync_down_logs(
                 handle,
-                # Download the log for the latest job.
+                # Download the log of the latest job.
+                # The job_id for the spot job running on the spot cluster is not
+                # necessarily 1, as it is possible that the worker node in a
+                # multi-node cluster is preempted, and we recover the spot job
+                # on the existing cluster, which leads to a larger job_id. Those
+                # job_ids all represent the same logical spot job.
                 job_ids=None,
                 local_dir=spot_job_logs_dir)
         except exceptions.CommandError as e:
@@ -107,12 +112,12 @@ class SpotController:
                 # Print the logs to the console.
                 try:
                     with open(log_file) as f:
-                        logger.info(f.read())
+                        print(f.read())
                 except FileNotFoundError:
                     logger.error('Failed to find the logs for the user '
                                  f'program at {log_file}.')
                 else:
-                    logger.info(f'\n== End of logs (ID: {self._job_id} ==')
+                    logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
 
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring spot cluster status and handling recovery.
