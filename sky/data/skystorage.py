@@ -9,7 +9,6 @@ import time
 from typing import Dict, Tuple
 
 from sky import sky_logging
-from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -93,30 +92,35 @@ def run_sync(src: str,
     else:
         raise ValueError(f'Unknown store type: {storetype}')
 
-    try:
-        subprocess.run(sync_cmd,
-                       shell=True,
-                       check=True,
-                       stdout=subprocess.PIPE,
-                       stderr=subprocess.PIPE)
-    except subprocess.CalledProcessError as e:
-        out = e.stderr.decode('utf-8')
-        if max_retries > 0:
-            #TODO: display the error with remaining # of retries
-            wait_time = interval / 2
-            src_to_bucket = (f'\'{src}\' to \'{bucketname}\' '
-                             f'at \'{storetype}\'')
-            logger.info('Encountered an error while syncing '
-                        f'{src_to_bucket}. Retrying'
-                        f' in {wait_time}s. {max_retries} more reattempts '
-                        f' remaining. Details: {out}')
-            time.sleep(wait_time)
-            return run_sync(src, storetype, bucketname, num_threads, interval,
-                            delete, no_follow_symlinks, max_retries - 1)
-        else:
-            raise RuntimeError(f'Failed to sync {src_to_bucket} after '
-                               'number of retries. Details: '
-                               f'{common_utils.format_exception(e)}') from None
+    log_file_name = f'csync_{storetype}_{bucketname}.log'
+    base_dir = os.path.expanduser(C_SYNC_FILE_PATH)
+    log_path = os.path.expanduser(os.path.join(base_dir, log_file_name))
+
+    with open(log_path, 'a') as fout:
+        try:
+            subprocess.run(sync_cmd,
+                           shell=True,
+                           check=True,
+                           stdout=fout,
+                           stderr=fout)
+        except subprocess.CalledProcessError:
+            if max_retries > 0:
+                #TODO: display the error with remaining # of retries
+                wait_time = interval / 2
+                src_to_bucket = (f'\'{src}\' to \'{bucketname}\' '
+                                 f'at \'{storetype}\'')
+                fout.write('Encountered an error while syncing '
+                           f'{src_to_bucket}. Retrying'
+                           f' in {wait_time}s. {max_retries} more reattempts '
+                           f'remaining. Check {log_path} for details.')
+                time.sleep(wait_time)
+                return run_sync(src, storetype, bucketname, num_threads,
+                                interval, delete, no_follow_symlinks,
+                                max_retries - 1)
+            else:
+                raise RuntimeError(f'Failed to sync {src_to_bucket} after '
+                                   f'number of retries. Check {log_path} for'
+                                   'details') from None
 
     #run necessary post-processes
     if storetype == 's3':
