@@ -1,0 +1,7 @@
+resources:
+  ports:
+    - 29324
+
+setup: pip install jupyter
+
+run: jupyter lab --port 29324 --no-browser --ip=0.0.0.0
