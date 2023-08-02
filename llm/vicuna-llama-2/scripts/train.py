@@ -294,8 +294,9 @@ def cleanup_incomplete_checkpoints(output_dir):
                 # mounting tool to download the checkpoints in parallel first.
                 # It will improve the loading speed of the checkpoints
                 # significantly.
-                subprocess.run(['gsutil', '-m', 'rsync', '-r', checkpoint, tmp_dir],
-                            check=True)
+                subprocess.run(
+                    ['gsutil', '-m', 'rsync', '-r', checkpoint, tmp_dir],
+                    check=True)
             except:
                 print('Failed to optimize checkpoint loading. Skip.')
             break
