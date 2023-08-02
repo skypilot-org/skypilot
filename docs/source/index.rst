@@ -130,6 +130,7 @@ Documentation
    reference/faq
    reference/logging
    reference/local/index
+   reference/add-gpu
 
 .. toctree::
    :maxdepth: 1
