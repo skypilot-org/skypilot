@@ -35,6 +35,7 @@ import json
 import pathlib
 import os
 import shutil
+import subprocess
 from typing import Dict, Optional
 
 import torch
@@ -284,7 +285,11 @@ def cleanup_incomplete_checkpoints(output_dir):
             print(f'Removing incomplete checkpoint {checkpoint}')
             shutil.rmtree(checkpoint)
         else:
-            print(f'Using checkpoint {checkpoint}')
+            print(f'Using checkpoint {checkpoint}, copying to ~/tmp/ for '
+                  'optimization of loading.')
+            tmp_dir = os.path.expanduser('~/tmp')
+            os.makedirs(tmp_dir, exist_ok=True)
+            subprocess.run(['gsutil', '-m', 'rsync', '-r', checkpoint, tmp_dir], check=True)
             break
 
 

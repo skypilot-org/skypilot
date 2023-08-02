@@ -8,7 +8,7 @@ resources:
   memory: 32+
 
 file_mounts:
-  /model_ckpt:
+  /skypilot-vicuna:
     source: $MODEL_CKPT
     mode: COPY
 
@@ -31,7 +31,7 @@ run: |
   sleep 10
   echo 'Starting model worker...'
   python -u -m fastchat.serve.model_worker \
-            --model-path /model_ckpt 2>&1 \
+            --model-path /skypilot-vicuna 2>&1 \
             | tee model_worker.log &
 
   echo 'Waiting for model worker to start...'
