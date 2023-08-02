@@ -9,6 +9,7 @@ We, Vicuna's co-creators, updated the exact recipe that we used to train Vicuna 
 
 In this recipe, we will show how to train your own Vicuna on Llama 2, using SkyPilot to easily find available GPUs  on the cloud, while reducing costs to only ~\$300.
 
+[^1]: Technically, as long as you don't have 700M monthly active users. See [license](https://github.com/facebookresearch/llama/blob/main/LICENSE).
 
 ### Prerequisites
 
