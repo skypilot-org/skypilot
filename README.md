@@ -27,12 +27,12 @@
 
 ----
 :fire: *News* :fire:
-- [July, 2023] Self-Hosted **LLaMA 2 Chatbot** on Any Cloud: [**example**](./llm/llama-2/)
+- [Aug, 2023] New operational guide: Finetuning Llama 2 in your own cloud environment, privately: [**example**](./llm/vicuna-llama-2/)
+- [July, 2023] Self-Hosted **Llama-2 Chatbot** on Any Cloud: [**example**](./llm/llama-2/)
 - [June, 2023] Serving LLM **24x Faster On the Cloud** with vLLM and SkyPilot: [**example**](./llm/vllm/), [**blog post**](https://blog.skypilot.co/serving-llm-24x-faster-on-the-cloud-with-vllm-and-skypilot/)
 - [June, 2023] [**Two new clouds supported**](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html): Samsung SCP and Oracle OCI!
 - [April, 2023] **[**SkyPilot YAMLs released**](./llm/vicuna/) for finetuning & serving the Vicuna model with a single command**!
 - [March, 2023] **[Vicuna LLM chatbot](https://lmsys.org/blog/2023-03-30-vicuna/) trained** [**using SkyPilot**](./llm/vicuna/) **for $300 on spot instances!** 
-- [March, 2023] Serve your own LLaMA LLM chatbot (not finetuned) on any cloud: [**example**](./llm/llama-chatbots/), [**repo**](https://github.com/skypilot-org/sky-llama)
 ----
 
 SkyPilot is a framework for running LLMs, AI, and batch jobs on any cloud, offering maximum cost savings, highest GPU availability, and managed execution.
@@ -131,7 +131,8 @@ To learn more, see our [Documentation](https://skypilot.readthedocs.io/en/latest
 
 Runnable examples:
 - LLMs on SkyPilot
-  - [Self-Hosted LLaMA 2 Chatbot](./llm/llama-2/)
+  - [Train Your Own Vicuna on Llama-2](./llm/vicuna-llama-2/)
+  - [Self-Hosted Llama-2 Chatbot](./llm/llama-2/)
   - [Vicuna chatbots: Training & Serving](./llm/vicuna/) (from official Vicuna team)
   - [vLLM: Serving LLM 24x Faster On the Cloud](./llm/vllm/) (from official vLLM team)
   - [QLoRA](https://github.com/artidoro/qlora/pull/132)
