@@ -33,7 +33,7 @@ envs:
 
   By default, we use the [ShareGPT data](https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json) and the identity questions in [hardcoded_questions.py](./scripts/hardcoded_questions.py).
 
-  * **Optional**: To use custom data, you can change the data by change the following line in [train.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna-llama-2/train.yaml).
+  * **Optional**: To use custom data, you can change the following line in [train.yaml](train.yaml):
 
   ```yaml
   setup: |
@@ -42,7 +42,7 @@ envs:
     ...
   ```
 
-  The above json file is an array, each element of which has the following format (the conversation can have multiple turns, between `human` and `gpt`):
+  The above json file is an array, each element of which having the following format (the conversation can have multiple turns, between `human` and `gpt`):
   ```json
   {
     "id": "i6IyJda_0",
