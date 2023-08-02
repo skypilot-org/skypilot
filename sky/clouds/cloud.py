@@ -609,20 +609,6 @@ class Cloud:
         """
         raise NotImplementedError
 
-    @classmethod
-    def query_env_vars(cls, name: str) -> Dict[str, str]:
-        """Queries cloud specific environment variables of the cluster.
-        
-        Since all commands in the cluster are executed using ssh, we need
-        to query the cloud specific environment variables which may be missed when using ssh.
-        For instance, on K8s, environment variables when using kubectl exec are different from
-        those when using ssh.
-
-        Returns:
-            A dictionary of environment variables.
-        """
-        return {}
-
     # === Image related methods ===
     # These three methods are used to create, move and delete images. They
     # are currently only used in `sky launch --clone-disk-from` to clone a
