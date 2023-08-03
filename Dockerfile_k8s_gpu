@@ -1,3 +1,6 @@
+# TODO(romilb) - The base image used here (ray) is very large (11.4GB).
+#  as a result, this built image is about 13.5GB. We need to pick a lighter base
+#  image.
 FROM rayproject/ray:2.4.0-gpu
 
 # Initialize conda for root user, install ssh and other local dependencies
@@ -7,14 +10,6 @@ RUN sudo apt update -y && \
     sudo apt remove -y python3 && \
     conda init
 
-# Setup SSH and generate hostkeys
-RUN sudo mkdir -p /var/run/sshd && \
-    sudo chmod 0755 /var/run/sshd && \
-    sudo sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
-    sudo sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd && \
-    cd /etc/ssh/ && \
-    ssh-keygen -A
-
 # Setup new user named sky and add to sudoers. \
 # Also add /opt/conda/bin to sudo path and give sky user access to /home/ray
 RUN sudo useradd -m -s /bin/bash sky && \
@@ -22,11 +17,19 @@ RUN sudo useradd -m -s /bin/bash sky && \
     sudo /bin/bash -c "echo 'Defaults        secure_path=\"/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"' > /etc/sudoers.d/sky" && \
     sudo chmod -R a+rwx /home/ray
 
+# Switch to sky user
+USER sky
+
 # Set HOME environment variable for sky user, otherwise Ray base image HOME overrides
 ENV HOME /home/sky
 
-# Switch to sky user
-USER sky
+# Setup SSH and generate hostkeys
+RUN sudo mkdir -p /var/run/sshd && \
+    sudo chmod 0755 /var/run/sshd && \
+    sudo sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sudo sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd && \
+    cd /etc/ssh/ && \
+    ssh-keygen -A
 
 # Install SkyPilot pip dependencies
 RUN pip install wheel Click colorama cryptography jinja2 jsonschema && \
