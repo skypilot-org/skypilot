@@ -953,7 +953,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
 @usage_lib.entrypoint
 def serve_up(
     task: 'sky.Task',
-    name: str,
+    service_name: str,
 ):
     """Serve up a service.
 
@@ -965,13 +965,13 @@ def serve_up(
 
     Raises:
     """
-    controller_cluster_name = serve.CONTROLLER_PREFIX + name
+    controller_cluster_name = serve.CONTROLLER_PREFIX + service_name
     assert task.service is not None, task
     policy = task.service.policy_str()
     assert len(task.resources) == 1
     requested_resources = list(task.resources)[0]
     global_user_state.add_or_update_service(
-        name, controller_cluster_name, '',
+        service_name, controller_cluster_name, '',
         status_lib.ServiceStatus.CONTROLLER_INIT, 0, 0, 0, policy,
         requested_resources)
     app_port = int(task.service.app_port)
@@ -988,7 +988,7 @@ def serve_up(
     # TODO(tian): Clean up storage when the service is torn down.
     _maybe_translate_local_file_mounts_and_sync_up(task)
 
-    with tempfile.NamedTemporaryFile(prefix=f'serve-task-{name}-',
+    with tempfile.NamedTemporaryFile(prefix=f'serve-task-{service_name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
         if 'resources' in task_config and 'spot_recovery' in task_config[
@@ -996,7 +996,7 @@ def serve_up(
             del task_config['resources']['spot_recovery']
         common_utils.dump_yaml(f.name, task_config)
         remote_task_yaml_path = (serve.SERVICE_YAML_PREFIX +
-                                 f'/service_{name}.yaml')
+                                 f'/service_{service_name}.yaml')
         vars_to_fill = {
             'ports': [app_port],
             'remote_task_yaml_path': remote_task_yaml_path,
@@ -1006,14 +1006,14 @@ def serve_up(
             'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
         }
         controller_yaml_path = os.path.join(serve.CONTROLLER_YAML_PREFIX,
-                                            f'{name}.yaml')
+                                            f'{service_name}.yaml')
         backend_utils.fill_template(serve.CONTROLLER_TEMPLATE,
                                     vars_to_fill,
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
         assert len(controller_task.resources) == 1, controller_task
         print(f'{colorama.Fore.YELLOW}'
-              f'Launching controller for {name}...'
+              f'Launching controller for {service_name}...'
               f'{colorama.Style.RESET_ALL}')
 
         _execute(
@@ -1046,7 +1046,7 @@ def serve_up(
                 name='run-control-plane',
                 envs=controller_envs,
                 run='python -m sky.serve.control_plane --service-name '
-                f'{name} --task-yaml {remote_task_yaml_path} '
+                f'{service_name} --task-yaml {remote_task_yaml_path} '
                 f'--port {serve.CONTROL_PLANE_PORT}'),
             stream_logs=False,
             handle=handle,
@@ -1076,7 +1076,7 @@ def serve_up(
         )
 
         global_user_state.add_or_update_service(
-            name, controller_cluster_name, endpoint,
+            service_name, controller_cluster_name, endpoint,
             status_lib.ServiceStatus.REPLICA_INIT, 0, 0, 0, policy,
             requested_resources)
 
@@ -1086,23 +1086,23 @@ def serve_up(
               f'{endpoint}.'
               f'{colorama.Style.RESET_ALL}')
         print(f'\n{colorama.Fore.CYAN}Service name: '
-              f'{colorama.Style.BRIGHT}{name}{colorama.Style.RESET_ALL}'
+              f'{colorama.Style.BRIGHT}{service_name}{colorama.Style.RESET_ALL}'
               '\nTo see detailed info about replicas:'
-              f'\t{backend_utils.BOLD}sky serve status {name} (-a)'
+              f'\t{backend_utils.BOLD}sky serve status {service_name} (-a)'
               f'{backend_utils.RESET_BOLD}'
               '\nTo see logs of controller:'
-              f'\t\t{backend_utils.BOLD}sky serve logs -c {name}'
+              f'\t\t{backend_utils.BOLD}sky serve logs -c {service_name}'
               f'{backend_utils.RESET_BOLD}'
               '\nTo see logs of redirector:'
-              f'\t\t{backend_utils.BOLD}sky serve logs -r {name}'
+              f'\t\t{backend_utils.BOLD}sky serve logs -r {service_name}'
               f'{backend_utils.RESET_BOLD}'
               '\nTo teardown the service:'
-              f'\t\t{backend_utils.BOLD}sky serve down {name}'
+              f'\t\t{backend_utils.BOLD}sky serve down {service_name}'
               f'{backend_utils.RESET_BOLD}')
 
 
 def serve_down(
-    name: str,
+    service_name: str,
     purge: bool,
 ):
     """Teardown a service.
@@ -1114,17 +1114,17 @@ def serve_down(
 
     Raises:
     """
-    service_record = global_user_state.get_service_from_name(name)
+    service_record = global_user_state.get_service_from_name(service_name)
     if service_record is None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {name} does not exist.')
+            raise ValueError(f'Service {service_name} does not exist.')
     controller_cluster_name = service_record['controller_cluster_name']
     num_ready_replicas = service_record['num_ready_replicas']
     num_unhealthy_replicas = service_record['num_unhealthy_replicas']
     num_failed_replicas = service_record['num_failed_replicas']
     num_replicas = (num_ready_replicas + num_unhealthy_replicas +
                     num_failed_replicas)
-    global_user_state.set_service_status(name,
+    global_user_state.set_service_status(service_name,
                                          status_lib.ServiceStatus.SHUTTING_DOWN)
     handle = global_user_state.get_handle_from_cluster_name(
         controller_cluster_name)
@@ -1196,8 +1196,13 @@ def serve_down(
         else:
             raise e
 
-    global_user_state.remove_service(name)
+    # TODO(tian): Maybe add a post_cleanup function?
+    controller_yaml_path = os.path.join(serve.CONTROLLER_YAML_PREFIX,
+                                        f'{service_name}.yaml')
+    if os.path.exists(controller_yaml_path):
+        os.remove(controller_yaml_path)
+    global_user_state.remove_service(service_name)
 
     print(f'{colorama.Fore.GREEN}'
-          f'The tearing down of service {name} is done.'
+          f'The tearing down of service {service_name} is done.'
           f'{colorama.Style.RESET_ALL}')

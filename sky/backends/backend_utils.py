@@ -2413,14 +2413,14 @@ def get_clusters(
     return kept_records
 
 
-def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
-    if service is None:
+def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
+    if service_name is None:
         service_records = global_user_state.get_services()
     else:
-        service_record = global_user_state.get_service_from_name(service)
+        service_record = global_user_state.get_service_from_name(service_name)
         if service_record is None:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Service {service} does not exist.')
+                raise ValueError(f'Service {service_name} does not exist.')
         service_records = [service_record]
     # TODO(tian): Make it run in parallel.
     for record in service_records:
@@ -2465,8 +2465,8 @@ def refresh_service_status(service: Optional[str]) -> List[Dict[str, Any]]:
                 record['status'] = status_lib.ServiceStatus.REPLICA_INIT
         global_user_state.add_or_update_service(**record)
 
-        if service is not None:
-            assert record['name'] == service
+        if service_name is not None:
+            assert record['name'] == service_name
             code = serve_lib.ServeCodeGen.get_replica_info()
             returncode, replica_info_payload, stderr = backend.run_on_head(
                 handle,

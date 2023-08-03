@@ -123,7 +123,7 @@ class SkyServiceSpec:
             plural = ''
             if self.min_replica > 1:
                 plural = 'S'
-            return f'FIXED NODE{plural}: {self.min_replica}'
+            return f'#REPLICA{plural}: {self.min_replica}'
         # TODO(tian): Refactor to contain more information
         return f'AUTOSCALE [{self.min_replica}, {self.max_replica}]'
 

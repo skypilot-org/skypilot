@@ -110,8 +110,8 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
 
 
 @usage_lib.entrypoint
-def service_status(service: Optional[str]) -> List[Dict[str, Any]]:
-    return backend_utils.refresh_service_status(service)
+def service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
+    return backend_utils.refresh_service_status(service_name)
 
 
 @usage_lib.entrypoint
