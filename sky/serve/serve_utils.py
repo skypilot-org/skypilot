@@ -3,12 +3,13 @@ import base64
 import pickle
 import requests
 import shlex
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from sky.serve import constants
 from sky.utils import common_utils
 
 _CONTROL_PLANE_URL = f'http://0.0.0.0:{constants.CONTROL_PLANE_PORT}'
+
 
 def get_replica_info() -> str:
     resp = requests.get(_CONTROL_PLANE_URL + '/control_plane/get_replica_info')
@@ -17,16 +18,16 @@ def get_replica_info() -> str:
     resp = base64.b64encode(pickle.dumps(resp)).decode('utf-8')
     return common_utils.encode_payload(resp)
 
-def load_replica_info(payload: str) -> List[Dict[str, str]]:
+
+def load_replica_info(payload: str) -> List[Dict[str, Any]]:
     replica_info = common_utils.decode_payload(payload)
     replica_info = pickle.loads(base64.b64decode(replica_info))
     decoded_info = []
     for info in replica_info.json()['replica_info']:
-        decoded_info.append({
-            k: pickle.loads(base64.b64decode(v))
-            for k, v in info.items()
-        })
+        decoded_info.append(
+            {k: pickle.loads(base64.b64decode(v)) for k, v in info.items()})
     return decoded_info
+
 
 def get_replica_nums() -> str:
     resp = requests.get(_CONTROL_PLANE_URL + '/control_plane/get_replica_nums')
@@ -35,10 +36,24 @@ def get_replica_nums() -> str:
     resp = base64.b64encode(pickle.dumps(resp)).decode('utf-8')
     return common_utils.encode_payload(resp)
 
+
 def load_replica_nums(payload: str) -> Dict[str, str]:
     replica_nums_resp = common_utils.decode_payload(payload)
     replica_nums_resp = pickle.loads(base64.b64decode(replica_nums_resp))
     return replica_nums_resp.json()
+
+
+def terminate_service() -> str:
+    resp = requests.post(_CONTROL_PLANE_URL + '/control_plane/terminate')
+    resp = base64.b64encode(pickle.dumps(resp)).decode('utf-8')
+    return common_utils.encode_payload(resp)
+
+
+def load_terminate_service_result(payload: str) -> Any:
+    terminate_resp = common_utils.decode_payload(payload)
+    terminate_resp = pickle.loads(base64.b64decode(terminate_resp))
+    return terminate_resp
+
 
 class ServeCodeGen:
     """Code generator for SkyServe.
@@ -62,6 +77,14 @@ class ServeCodeGen:
     def get_replica_nums(cls) -> str:
         code = [
             'msg = serve_utils.get_replica_nums()',
+            'print(msg, end="", flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def terminate_service(cls) -> str:
+        code = [
+            'msg = serve_utils.terminate_service()',
             'print(msg, end="", flush=True)'
         ]
         return cls._build(code)

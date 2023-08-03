@@ -998,7 +998,7 @@ def serve_up(
         remote_task_yaml_path = (serve.SERVICE_YAML_PREFIX +
                                  f'/service_{name}.yaml')
         vars_to_fill = {
-            'ports': [app_port, serve.CONTROL_PLANE_PORT],
+            'ports': [app_port],
             'remote_task_yaml_path': remote_task_yaml_path,
             'local_task_yaml_path': f.name,
             'is_dev': env_options.Options.IS_DEVELOPER.get(),
@@ -1124,23 +1124,39 @@ def serve_down(
     num_failed_replicas = service_record['num_failed_replicas']
     num_replicas = (num_ready_replicas + num_unhealthy_replicas +
                     num_failed_replicas)
-    controller_ip = service_record['endpoint'].split(':')[0]
-    controller_url = f'http://{controller_ip}:{serve.CONTROL_PLANE_PORT}'
-    handle = global_user_state.get_handle_from_cluster_name(
-        controller_cluster_name)
     global_user_state.set_service_status(name,
                                          status_lib.ServiceStatus.SHUTTING_DOWN)
+    handle = global_user_state.get_handle_from_cluster_name(
+        controller_cluster_name)
 
-    try:
-        if handle is not None:
+    if handle is not None:
+        backend = backend_utils.get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
+        try:
             plural = ''
             if num_replicas > 1:
                 plural = 's'
             print(f'{colorama.Fore.YELLOW}'
                   f'Tearing down {num_replicas} replica{plural}...'
                   f'{colorama.Style.RESET_ALL}')
-            resp = requests.post(controller_url + '/control_plane/terminate',
-                                 data='')
+            code = serve.ServeCodeGen.terminate_service()
+            returncode, terminate_service_payload, stderr = backend.run_on_head(
+                handle,
+                code,
+                require_outputs=True,
+                stream_logs=False,
+                separate_stderr=True)
+            try:
+                subprocess_utils.handle_returncode(
+                    returncode,
+                    code,
+                    'Failed to terminate service',
+                    stderr,
+                    stream_logs=False)
+            except exceptions.CommandError as e:
+                raise RuntimeError(e.error_msg) from e
+            resp = serve.load_terminate_service_result(
+                terminate_service_payload)
             if resp.status_code != 200:
                 raise RuntimeError('Failed to terminate replica due to '
                                    f'request failure: {resp.text}')
@@ -1150,11 +1166,12 @@ def serve_down(
                     'Unexpected message when tearing down '
                     f'replica: {msg}. Please login to the controller '
                     'and make sure the service is properly cleaned.')
-    except (RuntimeError, ValueError, requests.exceptions.ConnectionError) as e:
-        if purge:
-            logger.warning(f'Ignoring error when cleaning controller: {e}')
-        else:
-            raise e
+        except (RuntimeError, ValueError,
+                requests.exceptions.ConnectionError) as e:
+            if purge:
+                logger.warning(f'Ignoring error when cleaning controller: {e}')
+            else:
+                raise e
 
     try:
         print(

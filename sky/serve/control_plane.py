@@ -37,7 +37,6 @@ class ControlPlane:
         self.autoscaler = autoscaler
         self.app = fastapi.FastAPI()
 
-    # TODO(tian): Authentication!!!
     def run(self) -> None:
 
         @self.app.post('/control_plane/get_num_requests')
@@ -77,8 +76,6 @@ class ControlPlane:
         @self.app.post('/control_plane/terminate')
         def terminate(request: fastapi.Request):
             del request
-            # request_data = request.json()
-            # TODO(tian): Authentication!!!
             logger.info('Terminating service...')
             self.infra_provider.terminate_replica_fetcher()
             if self.autoscaler is not None:
