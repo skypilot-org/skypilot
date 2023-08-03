@@ -3,7 +3,7 @@
 In the YAML file, the user can specify the strategy to use for spot jobs.
 
 resources:
-    spot_recovery: EAGER_FAILOVER
+    spot_recovery: EAGER_NEXT_REGION
 """
 import time
 import traceback
@@ -391,6 +391,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
             launched_resources = handle.launched_resources
             self._launched_cloud_region = (launched_resources.cloud,
                                            launched_resources.region)
+        else:
+            self._launched_cloud_region = None
         return job_submitted_at
 
     def recover(self) -> float:
@@ -425,7 +427,6 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
             # Step 2
             logger.debug('Terminating unhealthy spot cluster and '
                          'reset cloud region.')
-            self._launched_cloud_region = None
             terminate_cluster(self.cluster_name)
 
             # Step 3
@@ -451,7 +452,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
 
 
 class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
-                                    name='EAGER_FAILOVER',
+                                    name='EAGER_NEXT_REGION',
                                     default=True):
     """Eager failover strategy.
 
@@ -465,9 +466,14 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
 
     def recover(self) -> float:
         # 1. Terminate the current cluster
-        # 2. Launch the cluster without retrying the previously launched region
-        # 3. Launch the cluster with no cloud/region constraint or respect the
-        #    original resources requirements.
+        # 2. Launch again by explicitly blocking the previously launched region
+        # (this will failover through the entire search space except the
+        # previously launched region)
+        # 3. (If step 2 failed) Retry forever: Launch again with no blocked
+        # locations (this will failover through the entire search space)
+        #
+        # The entire search space is defined by the original task request,
+        # task.resources.
 
         # Step 1
         logger.debug('Terminating unhealthy spot cluster and '
@@ -496,8 +502,6 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
                 task.blocked_resources = None
                 if job_submitted_at is not None:
                     return job_submitted_at
-                # Failed to launch the cluster.
-                self._launched_cloud_region = None
 
         while True:
             # Step 3
