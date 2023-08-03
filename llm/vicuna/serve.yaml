@@ -11,11 +11,8 @@ setup: |
   fi
 
   # Install dependencies
-  pip install torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
   pip install git+https://github.com/lm-sys/FastChat.git
 
-  echo "Downloading model..."
-  python -u -c "from transformers import AutoModelForCausalLM; AutoModelForCausalLM.from_pretrained('lmsys/vicuna-${MODEL_SIZE}b-v1.3')"
 
 run: |
   conda activate chatbot

@@ -80,6 +80,13 @@ Available fields:
       #   high: 6000 IOPS; 340 MB/s; write 250 MB/s
       disk_tier: 'medium'
 
+      # Ports to expose (optional).
+      # Currently only TCP protocol is supported.
+      # Could be an integer or a range.
+      ports:
+        - 8080
+        - 10022-10040
+
       # Additional accelerator metadata (optional); only used for TPU node
       # and TPU VM.
       # Example usage:
@@ -121,6 +128,8 @@ Available fields:
       # GCP
       # To find GCP images: https://cloud.google.com/compute/docs/images
       # image_id: projects/deeplearning-platform-release/global/images/family/tf2-ent-2-1-cpu-ubuntu-2004
+      # Or machine image: https://cloud.google.com/compute/docs/machine-images
+      # image_id: projects/my-project/global/machineImages/my-machine-image
       #
       # IBM
       # Create a private VPC image and paste its ID in the following format:

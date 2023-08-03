@@ -3,11 +3,13 @@
 This module provides a standard low-level interface that all
 providers supported by SkyPilot need to follow.
 """
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import functools
 import importlib
 import inspect
+
+from sky import status_lib
 
 
 def _route_to_cloud_impl(func):
@@ -37,20 +39,49 @@ def _route_to_cloud_impl(func):
 
 
 @_route_to_cloud_impl
-def stop_instances(provider_name: str,
-                   region: str,
-                   cluster_name: str,
-                   included_instances: Optional[List[str]] = None,
-                   excluded_instances: Optional[List[str]] = None) -> None:
+def query_instances(
+    provider_name: str,
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    non_terminated_only: bool = True,
+) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+    """Query instances.
+
+    Returns a dictionary of instance IDs and status.
+
+    A None status means the instance is marked as "terminated"
+    or "terminating".
+    """
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def stop_instances(
+    provider_name: str,
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    worker_only: bool = False,
+) -> None:
     """Stop running instances."""
     raise NotImplementedError
 
 
 @_route_to_cloud_impl
-def terminate_instances(provider_name: str,
-                        region: str,
-                        cluster_name: str,
-                        included_instances: Optional[List[str]] = None,
-                        excluded_instances: Optional[List[str]] = None) -> None:
+def terminate_instances(
+    provider_name: str,
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    worker_only: bool = False,
+) -> None:
     """Terminate running or stopped instances."""
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def cleanup_ports(
+    provider_name: str,
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Delete any opened ports."""
     raise NotImplementedError

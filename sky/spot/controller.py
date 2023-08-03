@@ -1,6 +1,7 @@
 """Controller: handles the life cycle of a managed spot cluster (job)."""
 import argparse
 import multiprocessing
+import os
 import pathlib
 import time
 import traceback
@@ -74,8 +75,53 @@ class SpotController:
                 job_id_env_vars)
             task.update_envs(task_envs)
 
+    def _download_log_and_stream(
+            self,
+            handle: cloud_vm_ray_backend.CloudVmRayResourceHandle) -> None:
+        """Downloads and streams the logs of the latest job of a spot cluster.
+
+        We do not stream the logs from the spot cluster directly, as the
+        donwload and stream should be faster, and more robust against
+        preemptions or ssh disconnection during the streaming.
+        """
+        spot_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                         'spot_jobs')
+        os.makedirs(spot_job_logs_dir, exist_ok=True)
+        try:
+            log_dirs = self._backend.sync_down_logs(
+                handle,
+                # Download the log of the latest job.
+                # The job_id for the spot job running on the spot cluster is not
+                # necessarily 1, as it is possible that the worker node in a
+                # multi-node cluster is preempted, and we recover the spot job
+                # on the existing cluster, which leads to a larger job_id. Those
+                # job_ids all represent the same logical spot job.
+                job_ids=None,
+                local_dir=spot_job_logs_dir)
+        except exceptions.CommandError as e:
+            logger.info(f'Failed to download the logs: '
+                        f'{common_utils.format_exception(e)}')
+        else:
+            if not log_dirs:
+                logger.error('Failed to find the logs for the user program in '
+                             'the spot cluster.')
+            else:
+                log_dir = list(log_dirs.values())[0]
+                log_file = os.path.join(log_dir, 'run.log')
+
+                # Print the logs to the console.
+                try:
+                    with open(log_file) as f:
+                        print(f.read())
+                except FileNotFoundError:
+                    logger.error('Failed to find the logs for the user '
+                                 f'program at {log_file}.')
+                else:
+                    logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
+
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring spot cluster status and handling recovery.
+
         When the task is successfully completed, this function returns True,
         and will terminate the spot cluster before returning.
 
@@ -237,13 +283,8 @@ class SpotController:
                     logger.info(
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
-                    # TODO(zhwu): Download the logs, and stream them from the
-                    # local disk, instead of streaming them from the spot
-                    # cluster, to make it faster and more reliable.
-                    returncode = self._backend.tail_logs(
-                        handle, None, spot_job_id=self._job_id)
-                    logger.info(f'\n== End of logs (ID: {self._job_id}, '
-                                f'tail_logs returncode: {returncode}) ==')
+
+                    self._download_log_and_stream(handle)
                     spot_status_to_set = spot_state.SpotStatus.FAILED
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
                         spot_status_to_set = spot_state.SpotStatus.FAILED_SETUP

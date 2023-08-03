@@ -37,6 +37,9 @@ class Lambda(clouds.Cloud):
         clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.OPEN_PORTS: f'Opening ports is not supported in {_REPR}.',
     }
 
     @classmethod
@@ -163,10 +166,8 @@ class Lambda(clouds.Cloud):
             'region': region.name,
         }
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
-        if resources.use_spot or resources.disk_tier is not None:
-            return ([], [])
+    def _get_feasible_launchable_resources(
+            self, resources: 'resources_lib.Resources'):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Accelerators are part of the instance type in Lambda Cloud

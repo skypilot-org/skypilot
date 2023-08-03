@@ -48,6 +48,8 @@ class OCI(clouds.Cloud):
         return {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is not supported in {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.OPEN_PORTS:
+                (f'Opening ports is not supported in {cls._REPR}.'),
         }
 
     @classmethod
@@ -275,8 +277,8 @@ class OCI(clouds.Cloud):
             'use_spot': resources.use_spot
         }
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
+    def _get_feasible_launchable_resources(
+            self, resources: 'resources_lib.Resources'):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
