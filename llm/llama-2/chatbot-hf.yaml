@@ -3,6 +3,7 @@ resources:
   accelerators: A100:1
   disk_size: 1024
   disk_tier: high
+  memory: 32+
 
 envs:
   MODEL_SIZE: 7
