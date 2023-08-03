@@ -1179,6 +1179,11 @@ def serve_down(
         else:
             raise e
 
+    # TODO(tian): Maybe add a post_cleanup function?
+    controller_yaml_path = os.path.join(serve.CONTROLLER_YAML_PREFIX,
+                                        f'{name}.yaml')
+    if os.path.exists(controller_yaml_path):
+        os.remove(controller_yaml_path)
     global_user_state.remove_service(name)
 
     print(f'{colorama.Fore.GREEN}'

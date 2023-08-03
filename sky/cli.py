@@ -4044,12 +4044,23 @@ def serve_logs(
 ):
     """Tail the log of a service.
 
-    Usage: sky serve logs <service> [-c|-r|-i <replica_id>]
+    Example:
+
+    .. code-block:: bash
+
+        # Tail the control plane logs of a service
+        sky serve logs -c [SERVICE_ID]
+        \b
+        # Print the redirector logs so far and exit
+        sky serve logs -r --no-follow [SERVICE_ID]
     """
     have_replica_id = replica_id is not None
     if (control_plane + redirector + have_replica_id) != 1:
-        click.secho('Usage: sky serve logs <service> [-c|-r|-i <replica_id>]',
-                    fg='red')
+        click.secho(
+            'Only one of --control-plane, --redirector, --replica-id '
+            'can be specified. See `sky serve logs --help` for more '
+            'information.',
+            fg='red')
         return
     service_record = global_user_state.get_service_from_name(service)
     if service_record is None:

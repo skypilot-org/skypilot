@@ -10,7 +10,7 @@ import requests
 import signal
 import threading
 import time
-from typing import List, Dict, Set, Optional, Any
+from typing import List, Dict, Set, Optional, Any, Union
 
 import sky
 from sky import backends
@@ -22,25 +22,25 @@ logger = logging.getLogger(__name__)
 _PROCESS_POOL_REFRESH_INTERVAL = 20
 _ENDPOINT_PROBE_INTERVAL = 10
 # TODO(tian): Maybe let user determine this threshold
-_REPLICA_UNHEALTHY_THRESHOLD_COUNTER = 180 // _ENDPOINT_PROBE_INTERVAL
+_CONTINUOUS_FAILURE_THRESHOLD = 180 // _ENDPOINT_PROBE_INTERVAL
 
 
 class InfraProvider:
     """Each infra provider manages one services."""
 
-    def __init__(self,
-                 readiness_path: str,
-                 readiness_timeout: int,
-                 post_data: Optional[Any] = None) -> None:
+    def __init__(
+            self,
+            readiness_path: str,
+            readiness_timeout: int,
+            post_data: Optional[Union[str, Dict[str, Any]]] = None) -> None:
         self.ready_replicas: Set[str] = set()
         self.unhealthy_replicas: Set[str] = set()
         self.failed_replicas: Set[str] = set()
         self.first_unhealthy_time: Dict[str, float] = dict()
-        self.continuous_unhealthy_counter: Dict[
-            str, int] = collections.defaultdict(int)
+        self.continuous_failure: Dict[str, int] = collections.defaultdict(int)
         self.readiness_path: str = readiness_path
         self.readiness_timeout: int = readiness_timeout
-        self.post_data: Any = post_data
+        self.post_data: Optional[Union[str, Dict[str, Any]]] = post_data
         logger.info(f'Readiness probe path: {self.readiness_path}')
         logger.info(f'Post data: {self.post_data} ({type(self.post_data)})')
 
@@ -394,20 +394,18 @@ class SkyPilotInfraProvider(InfraProvider):
         self.unhealthy_replicas = unhealthy_replicas
 
         for replica in ready_replicas:
-            self.continuous_unhealthy_counter[replica] = 0
+            self.continuous_failure[replica] = 0
 
         replicas_to_terminate = set()
         for replica in unhealthy_replicas:
             if replica not in self.first_unhealthy_time:
                 self.first_unhealthy_time[replica] = time.time()
-            self.continuous_unhealthy_counter[replica] += 1
+            self.continuous_failure[replica] += 1
             # coldstart time limitation is `self.readiness_timeout`.
             first_unhealthy_time = self.first_unhealthy_time[replica]
             if time.time() - first_unhealthy_time > self.readiness_timeout:
-                continuous_unhealthy_times = self.continuous_unhealthy_counter[
-                    replica]
-                if (continuous_unhealthy_times >
-                        _REPLICA_UNHEALTHY_THRESHOLD_COUNTER):
+                continuous_failure = self.continuous_failure[replica]
+                if continuous_failure > _CONTINUOUS_FAILURE_THRESHOLD:
                     logger.info(f'Terminating replica {replica}.')
                     replicas_to_terminate.add(replica)
                 else:

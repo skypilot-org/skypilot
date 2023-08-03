@@ -63,7 +63,7 @@ class ServiceStatus(enum.Enum):
     # At least one replica is ready
     READY = 'READY'
 
-    # Service is being stopped
+    # Service is being shutting down
     SHUTTING_DOWN = 'SHUTTING_DOWN'
 
     # At least one replica is failed
