@@ -309,6 +309,13 @@ class Cloud:
     def _get_feasible_launchable_resources(self, resources):
         raise NotImplementedError
 
+    def get_available_reservation_resources(self, instance_type: str, region: str, zone: str) -> int:
+        """"
+        Returns the number of available reservation resources for the given instance type in the given region/zone.
+        Default implementation returns 0 for non-implemented clouds.
+        """
+        return 0
+
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud.

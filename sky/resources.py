@@ -801,9 +801,9 @@ class Resources:
                 self.accelerators, self.use_spot, self._region, self._zone)
         return hourly_cost * hours
 
-    def get_unused_reservation_nodes(self) -> int:
-        """Returns the number of unused reservation nodes."""
-        return self.cloud.get_unused_reservation_nodes(self._instance_type, self._region, self._zone)
+    def get_available_reservation_resources(self) -> int:
+        """Returns the number of available reservation resources."""
+        return self.cloud.get_available_reservation_resources(self._instance_type, self._region, self._zone)
 
     def less_demanding_than(self,
                             other: Union[List['Resources'], 'Resources'],
