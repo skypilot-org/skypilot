@@ -856,8 +856,10 @@ def write_cluster_config(
         azure_subscription_id = cloud.get_project_id(dryrun=dryrun)
 
     gcp_project_id = None
+    specific_reservations = None
     if isinstance(cloud, clouds.GCP):
         gcp_project_id = cloud.get_project_id(dryrun=dryrun)
+        specific_reservations = ["projects/shopify-ml-adhoc/reservations/sidekick-a100s"]
 
     assert cluster_name is not None
     credentials = sky_check.get_cloud_credential_file_mounts()
@@ -960,6 +962,7 @@ def write_cluster_config(
 
                 # GCP only:
                 'gcp_project_id': gcp_project_id,
+                'specific_reservations': specific_reservations,
 
                 # Conda setup
                 'conda_installation_commands':

@@ -303,7 +303,8 @@ class Optimizer:
 
                     if minimize_cost:
                         cost_per_node = resources.get_cost(estimated_runtime)
-                        estimated_cost_or_time = cost_per_node * node.num_nodes
+                        number_of_unused_reservation_nodes = resources.get_unused_reservation_nodes()
+                        estimated_cost_or_time = cost_per_node * (node.num_nodes - number_of_unused_reservation_nodes)
                     else:
                         # Minimize run time.
                         estimated_cost_or_time = estimated_runtime
@@ -1001,5 +1002,4 @@ def _fill_in_launchable_resources(
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)
-
     return launchable, cloud_candidates

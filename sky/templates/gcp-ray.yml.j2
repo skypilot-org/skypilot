@@ -43,6 +43,12 @@ available_node_types:
     node_config:
       labels:
         skypilot-user: {{ user }}
+      {%- if specific_reservations %}
+      reservationAffinity:
+        consumeReservationType: SPECIFIC_RESERVATION
+        key: compute.googleapis.com/reservation-name
+        values: {{ specific_reservations }}
+      {%- endif %}
 {%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}
@@ -104,6 +110,12 @@ available_node_types:
     node_config:
       labels:
         skypilot-user: {{ user }}
+      {%- if specific_reservations %}
+      reservationAffinity:
+        consumeReservationType: SPECIFIC_RESERVATION
+        key: compute.googleapis.com/reservation-name
+        values: {{ specific_reservations }}
+      {%- endif %}
   {%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}
