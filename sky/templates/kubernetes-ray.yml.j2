@@ -133,6 +133,12 @@ available_node_types:
 
         restartPolicy: Never
 
+        # Add node selector if GPUs are requested:
+        {% if k8s_acc_label_key is not none and k8s_acc_label_value is not none %}
+        nodeSelector:
+            {{k8s_acc_label_key}}: {{k8s_acc_label_value}}
+        {% endif %}
+
         # This volume allocates shared memory for Ray to use for its plasma
         # object store. If you do not provide this, Ray will fall back to
         # /tmp which cause slowdowns if is not a shared memory volume.

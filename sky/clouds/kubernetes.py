@@ -303,6 +303,69 @@ class Kubernetes(clouds.Cloud):
         acc_count = k.accelerator_count if k.accelerator_count else 0
         acc_type = k.accelerator_type if k.accelerator_type else ''
 
+        GKE_GPU_LABEL_PREFIX = 'cloud.google.com/gke-accelerator'
+        EKS_GPU_LABEL_PREFIX = 'k8s.amazonaws.com/accelerator'
+        NVIDIA_GFD_GPU_LABEL_PREFIX = 'nvidia.com/gpu.product'
+
+        def detect_cluster_gpu_labels():
+            # Detects and returns the node labels for identifying GPU type
+            # available on the node. This varies for GKE, EKS and on-prem
+            # (Nvidia GPU Operator).
+            # For GKE, the node labels are:
+            # cloud.google.com/gke-accelerator: nvidia-tesla-t4
+            # cloud.google.com/gke-accelerator-count: 1
+            # cloud.google.com/gke-accelerator-type: NVIDIA_TESLA_T4
+            # For EKS, the node labels are:
+            # k8s.amazonaws.com/accelerator: nvidia-tesla-t4
+            # For on-prem, the node labels are:
+            # nvidia.com/gpu.product: Tesla T4
+
+            # Get the set of labels across all nodes
+            # TODO(romilb): This is not efficient. We should cache the node labels
+            node_labels = set()
+            for node in kubernetes.core_api().list_node().items:
+                node_labels.update(node.metadata.labels.keys())
+
+            # Check if the node labels contain any of the GPU label prefixes
+            if any(label.startswith(GKE_GPU_LABEL_PREFIX) for label in node_labels):
+                return GKE_GPU_LABEL_PREFIX
+            elif any(label.startswith(EKS_GPU_LABEL_PREFIX) for label in node_labels):
+                return EKS_GPU_LABEL_PREFIX
+            elif any(label.startswith(NVIDIA_GFD_GPU_LABEL_PREFIX) for label in node_labels):
+                return NVIDIA_GFD_GPU_LABEL_PREFIX
+            else:
+                return None
+
+        def get_gpu_label_value(accelerator: str,
+                                gpu_label: str):
+            # Returns the GPU string from SkyPilot accelerator string
+            # to use as the value with the GPU label when specifying the nodeSelector.
+            # For GKE, the GPU string is the GPU type (e.g. nvidia-tesla-t4)
+            # For EKS, the GPU string is the GPU type (e.g. nvidia-tesla-t4)
+            # For on-prem, the GPU string is the GPU product name (e.g. Tesla-T4 or A100-SXM4-40GB)
+
+            def get_k8s_accelerator_name(accelerator: str):
+                # Used by GKE and EKS
+                if accelerator in ('A100-80GB', 'L4'):
+                    # A100-80GB and L4 have a different name pattern.
+                    return 'nvidia-{}'.format(accelerator.lower())
+                else:
+                    return 'nvidia-tesla-{}'.format(
+                        accelerator.lower())
+
+            if gpu_label.startswith(GKE_GPU_LABEL_PREFIX):
+                return get_k8s_accelerator_name(accelerator)
+            elif gpu_label.startswith(EKS_GPU_LABEL_PREFIX):
+                return get_k8s_accelerator_name(accelerator)
+            elif gpu_label.startswith(NVIDIA_GFD_GPU_LABEL_PREFIX):
+                raise NotImplementedError('On-prem GPU label not supported yet')
+            else:
+                raise NotImplementedError('GPU label not supported')
+
+
+        k8s_acc_label_key = detect_cluster_gpu_labels()
+        k8s_acc_label_value = get_gpu_label_value(acc_type, k8s_acc_label_key)
+
         vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -312,6 +375,8 @@ class Kubernetes(clouds.Cloud):
             'accelerator_count': str(acc_count),
             'timeout': str(self.TIMEOUT),
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
+            'k8s_acc_label_key': k8s_acc_label_key,
+            'k8s_acc_label_value': k8s_acc_label_value,
             # TODO(romilb): Allow user to specify custom images
             'image_id': self.IMAGE,
         }
