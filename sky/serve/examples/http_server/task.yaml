@@ -3,7 +3,7 @@ resources:
   ports:
     - 8081
 
-workdir: .
+workdir: sky/serve/examples/http_server
 
 run: python3 server.py
 

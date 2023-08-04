@@ -1,152 +1,143 @@
+"""Autoscalers: perform autoscaling by monitoring metrics."""
 import logging
+import threading
 import time
-
 from typing import Optional
 
-from sky.serve.infra_providers import InfraProvider
-from sky.serve.load_balancers import LoadBalancer
+from sky.serve import infra_providers
+from sky.serve import constants
 
 logger = logging.getLogger(__name__)
 
 
 class Autoscaler:
+    """Abstract class for autoscalers."""
 
     def __init__(self,
-                 infra_provider: InfraProvider,
-                 load_balancer: LoadBalancer,
-                 frequency: int = 60):
+                 infra_provider: infra_providers.InfraProvider,
+                 frequency: int,
+                 min_nodes: int = 1,
+                 max_nodes: Optional[int] = None) -> None:
         self.infra_provider = infra_provider
-        self.load_balancer = load_balancer
+        self.min_nodes: int = min_nodes
+        # Default to fixed node, i.e. min_nodes == max_nodes.
+        self.max_nodes: int = max_nodes or min_nodes
         self.frequency = frequency  # Time to sleep in seconds.
+        if frequency < constants.CONTROL_PLANE_SYNC_INTERVAL:
+            logger.warning('Autoscaler frequency is less than '
+                           'control plane sync interval. It might '
+                           'not always got the latest information.')
 
-    def evaluate_scaling(self):
+    def evaluate_scaling(self) -> None:
         raise NotImplementedError
 
-    def scale_up(self, num_nodes_to_add: int):
+    def scale_up(self, num_nodes_to_add: int) -> None:
         logger.debug(f'Scaling up by {num_nodes_to_add} nodes')
         self.infra_provider.scale_up(num_nodes_to_add)
 
-    def scale_down(self, num_nodes_to_remove):
+    def scale_down(self, num_nodes_to_remove: int) -> None:
         logger.debug(f'Scaling down by {num_nodes_to_remove} nodes')
         self.infra_provider.scale_down(num_nodes_to_remove)
 
-    def monitor(self):
+    def monitor(self) -> None:
         logger.info('Starting autoscaler monitor.')
-        while True:
-            self.evaluate_scaling()
+        while not self.monitor_thread_stop_event.is_set():
+            try:
+                self.evaluate_scaling()
+            except Exception as e:  # pylint: disable=broad-except
+                # No matter what error happens, we should keep the
+                # monitor running.
+                logger.error(f'Error in autoscaler monitor: {e}')
             time.sleep(self.frequency)
 
+    def start_monitor(self) -> None:
+        self.monitor_thread_stop_event = threading.Event()
+        self.monitor_thread = threading.Thread(target=self.monitor)
+        self.monitor_thread.start()
 
-class LatencyThresholdAutoscaler(Autoscaler):
-
-    def __init__(self,
-                 *args,
-                 upper_threshold: int = 50,
-                 lower_threshold: int = 1,
-                 min_nodes: int = 1,
-                 **kwargs):
-        """
-        Autoscaler that scales up when the average latency of all servers is above the upper threshold and scales down
-        when the average latency of all servers is below the lower threshold.
-        :param args:
-        :param upper_threshold: upper threshold for latency in seconds
-        :param lower_threshold: lower threshold for latency in seconds
-        :param min_nodes: minimum number of nodes to keep running
-        :param kwargs:
-        """
-        super().__init__(*args, **kwargs)
-        self.upper_threshold = upper_threshold
-        self.lower_threshold = lower_threshold
-        self.min_nodes = min_nodes
-
-    def evaluate_scaling(self):
-        server_loads = self.load_balancer.server_loads
-        if not server_loads:
-            return
-
-        avg_latencies = [
-            sum(latencies) / len(latencies)
-            for latencies in server_loads.values()
-        ]
-
-        if all(latency > self.upper_threshold for latency in avg_latencies):
-            self.scale_up(1)
-        elif all(latency < self.lower_threshold for latency in avg_latencies):
-            if self.infra_provider.total_servers() > self.min_nodes:
-                self.scale_down(1)
+    def terminate_monitor(self) -> None:
+        self.monitor_thread_stop_event.set()
+        self.monitor_thread.join()
 
 
 class RequestRateAutoscaler(Autoscaler):
+    """
+    Autoscaler that scales  when the number of requests in the given
+    interval is above or below the upper threshold.
+    """
 
-    def __init__(self,
-                 *args,
-                 min_nodes: int = 1,
-                 max_nodes: Optional[int] = None,
-                 upper_threshold: Optional[float] = None,
-                 lower_threshold: Optional[float] = None,
-                 cooldown: int = 60,
-                 **kwargs):
-        """
-        Autoscaler that scales  when the number of requests in the given interval is above or below the upper threshold
-        :param args:
-        :param query_interval:
-        :param upper_threshold:
-        :param lower_threshold:
-        :param min_nodes:
-        :param cooldown: Seconds to wait before scaling again.
-        :param kwargs:
-        """
+    def __init__(self, *args, upper_threshold: Optional[float],
+                 lower_threshold: Optional[float], cooldown: int,
+                 query_interval: int, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.min_nodes = min_nodes
-        self.max_nodes = max_nodes or min_nodes
-        self.query_interval = 60  # Therefore thresholds represent queries per minute.
-        self.upper_threshold = upper_threshold
-        self.lower_threshold = lower_threshold
-        self.cooldown = cooldown
-        self.last_scale_operation = 0  # Time of last scale operation.
+        # Cooldown between two scaling operations in seconds.
+        self.cooldown: int = cooldown
+        # Quesy interval for requests num. Every `query_interval` seconds,
+        # Autoscaler will received an update for number of requests from
+        # redirector.
+        self.query_interval: int = query_interval
+        # Time of last scale operation
+        self.last_scale_operation: float = 0.
+        # Number of requests in the last `query_interval` seconds.
+        self.num_requests: int = 0
+        # Upper threshold for scale up. If None, no scale up.
+        self.upper_threshold: Optional[float] = upper_threshold
+        # Lower threshold for scale down. If None, no scale down.
+        self.lower_threshold: Optional[float] = lower_threshold
 
-    def evaluate_scaling(self):
+    def set_num_requests(self, num_requests: int) -> None:
+        self.num_requests = num_requests
+
+    def get_query_interval(self) -> int:
+        return self.query_interval
+
+    def evaluate_scaling(self) -> None:
         current_time = time.time()
+        num_nodes = self.infra_provider.total_replica_num()
 
-        # Check if cooldown period has passed since the last scaling operation
-        if current_time - self.last_scale_operation < self.cooldown:
-            logger.info(f'Current time: {current_time}, '
-                        f'last scale operation: {self.last_scale_operation}, '
-                        f'cooldown: {self.cooldown}')
-            logger.info(
-                'Cooldown period has not passed since last scaling operation. Skipping scaling.'
-            )
-            return
+        # Check if cooldown period has passed since the last scaling operation.
+        # Only cooldown if bootstrapping is done.
+        if num_nodes >= self.min_nodes:
+            if current_time - self.last_scale_operation < self.cooldown:
+                logger.info(
+                    f'Current time: {current_time}, '
+                    f'last scale operation: {self.last_scale_operation}, '
+                    f'cooldown: {self.cooldown}')
+                logger.info('Cooldown period has not passed since last scaling '
+                            'operation. Skipping scaling.')
+                return
 
-        while (self.load_balancer.request_timestamps and
-               current_time - self.load_balancer.request_timestamps[0] >
-               self.query_interval):
-            self.load_balancer.request_timestamps.popleft()
-
-        num_requests = len(self.load_balancer.request_timestamps)
-        num_requests = float(
-            num_requests) / 60  # Convert to requests per second.
-        num_nodes = self.infra_provider.total_servers()
-        requests_per_node = num_requests / num_nodes if num_nodes else num_requests  # To account for zero case.
+        # Convert to requests per second.
+        num_requests_per_second = float(self.num_requests) / self.query_interval
+        # Edge case: num_nodes is zero.
+        requests_per_node = (num_requests_per_second / num_nodes
+                             if num_nodes else num_requests_per_second)
 
         logger.info(f'Requests per node: {requests_per_node}')
-        logger.info(f'Upper threshold: {self.upper_threshold} qps/node, '
-                    f'lower threshold: {self.lower_threshold} qps/node, '
-                    f'queries per node: {requests_per_node} qps/node')
+        # logger.info(f'Upper threshold: {self.upper_threshold} qps/node, '
+        #             f'lower threshold: {self.lower_threshold} qps/node, '
+        #             f'queries per node: {requests_per_node} qps/node')
 
-        scaled = True
         # Bootstrap case
         logger.info(f'Number of nodes: {num_nodes}')
         if num_nodes < self.min_nodes:
-            logger.info('Bootstrapping autoscaler.')
+            logger.info('Bootstrapping service.')
             self.scale_up(1)
             self.last_scale_operation = current_time
-        elif self.upper_threshold is not None and requests_per_node > self.upper_threshold:
-            if self.infra_provider.total_servers() < self.max_nodes:
+        elif (self.upper_threshold is not None and
+              requests_per_node > self.upper_threshold):
+            if num_nodes < self.max_nodes:
+                logger.info('Requests per node is above upper threshold '
+                            f'{self.upper_threshold}qps/node. '
+                            'Scaling up by 1 node.')
                 self.scale_up(1)
                 self.last_scale_operation = current_time
-        elif self.lower_threshold is not None and requests_per_node < self.lower_threshold:
-            if self.infra_provider.total_servers() > self.min_nodes:
+        elif (self.lower_threshold is not None and
+              requests_per_node < self.lower_threshold):
+            if num_nodes > self.min_nodes:
+                logger.info('Requests per node is below lower threshold '
+                            f'{self.lower_threshold}qps/node. '
+                            'Scaling down by 1 node.')
                 self.scale_down(1)
                 self.last_scale_operation = current_time
         else:
