@@ -3817,7 +3817,7 @@ def serve():
                 type=str,
                 **_get_shell_complete_args(_complete_file_name))
 @click.option('--service-name',
-              '-s',
+              '-n',
               default=None,
               type=str,
               help='A service name. Unique for each service. If not provided, '
@@ -3965,7 +3965,7 @@ def serve_status(all: bool, service_name: Optional[str]):
                         fg='red')
             return
         click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Replicas of {service_name}{colorama.Style.RESET_ALL}')
+                   f'Replicas{colorama.Style.RESET_ALL}')
         status_utils.show_replica_table(service_record['replica_info'], all)
 
 

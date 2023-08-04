@@ -65,5 +65,11 @@ class RoundRobinLoadBalancer(LoadBalancer):
             return None
         replica_ip = self.replicas_queue.popleft()
         self.replicas_queue.append(replica_ip)
-        logger.info(f'Selected replica {replica_ip} for request {request}')
+        request_repr = ('<Request '
+                        f'method="{request.method}" '
+                        f'url="{request.url}" '
+                        f'headers={dict(request.headers)} '
+                        f'query_params={dict(request.query_params)}'
+                        '>')
+        logger.info(f'Selected replica {replica_ip} for request {request_repr}')
         return replica_ip

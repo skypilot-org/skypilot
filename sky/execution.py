@@ -1001,9 +1001,6 @@ def serve_up(
             'ports': [app_port],
             'remote_task_yaml_path': remote_task_yaml_path,
             'local_task_yaml_path': f.name,
-            'is_dev': env_options.Options.IS_DEVELOPER.get(),
-            'is_debug': env_options.Options.SHOW_DEBUG_INFO.get(),
-            'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
         }
         controller_yaml_path = os.path.join(serve.CONTROLLER_YAML_PREFIX,
                                             f'{service_name}.yaml')
@@ -1011,6 +1008,16 @@ def serve_up(
                                     vars_to_fill,
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
+
+        controller_envs = {
+            'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,
+            'SKYPILOT_DEV': env_options.Options.IS_DEVELOPER.get(),
+            'SKYPILOT_DEBUG': env_options.Options.SHOW_DEBUG_INFO.get(),
+            'SKYPILOT_DISABLE_USAGE_COLLECTION':
+                env_options.Options.DISABLE_LOGGING.get(),
+        }
+        controller_task.update_envs(controller_envs)
+
         assert len(controller_task.resources) == 1, controller_task
         print(f'{colorama.Fore.YELLOW}'
               f'Launching controller for {service_name}...'
@@ -1027,14 +1034,6 @@ def serve_up(
             controller_cluster_name)
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         endpoint = f'{handle.head_ip}:{task.service.app_port}'
-
-        controller_envs = {
-            'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,
-            'SKYPILOT_DEV': env_options.Options.IS_DEVELOPER.get(),
-            'SKYPILOT_DEBUG': env_options.Options.SHOW_DEBUG_INFO.get(),
-            'SKYPILOT_DISABLE_USAGE_COLLECTION':
-                env_options.Options.DISABLE_LOGGING.get(),
-        }
 
         # NOTICE: The job submission order cannot be changed since the
         # `sky serve logs` CLI will identify the control plane job with
@@ -1084,12 +1083,7 @@ def serve_up(
             status_lib.ServiceStatus.REPLICA_INIT, policy, requested_resources,
             [])
 
-        print(f'{colorama.Style.BRIGHT}{colorama.Fore.CYAN}'
-              'Gateway endpoint serving at '
-              f'{colorama.Style.RESET_ALL}{colorama.Fore.CYAN}'
-              f'{endpoint}.'
-              f'{colorama.Style.RESET_ALL}')
-        print(f'\n{colorama.Fore.CYAN}Service name: '
+        print(f'{colorama.Fore.CYAN}Service name: '
               f'{colorama.Style.BRIGHT}{service_name}{colorama.Style.RESET_ALL}'
               '\nTo see detailed info about replicas:'
               f'\t{backend_utils.BOLD}sky serve status {service_name} (-a)'
@@ -1102,7 +1096,12 @@ def serve_up(
               f'{backend_utils.RESET_BOLD}'
               '\nTo teardown the service:'
               f'\t\t{backend_utils.BOLD}sky serve down {service_name}'
-              f'{backend_utils.RESET_BOLD}')
+              f'{backend_utils.RESET_BOLD}\n')
+        print(f'{colorama.Style.BRIGHT}{colorama.Fore.CYAN}'
+              'Endpoint serving at: '
+              f'{colorama.Style.RESET_ALL}{colorama.Fore.CYAN}'
+              f'{endpoint}'
+              f'{colorama.Style.RESET_ALL}')
 
 
 def serve_down(

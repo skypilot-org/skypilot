@@ -78,7 +78,9 @@ class SkyServeRedirector:
 
         if replica_ip is None:
             raise fastapi.HTTPException(status_code=503,
-                                        detail='No available replicas')
+                                        detail='No available replicas. '
+                                        'Use `sky serve status [SERVICE_ID] '
+                                        'to check the status of all replicas.')
 
         path = f'http://{replica_ip}:{self.port}{request.url.path}'
         logger.info(f'Redirecting request to {path}')
