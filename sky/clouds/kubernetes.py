@@ -406,3 +406,26 @@ class Kubernetes(clouds.Cloud):
                 cluster_status.append(status_lib.ClusterStatus.INIT)
         # If pods are not found, we don't add them to the return list
         return cluster_status
+
+    @classmethod
+    def query_env_vars(cls, name: str) -> Dict[str, str]:
+        namespace = kubernetes_utils.get_current_kube_config_context_namespace()
+        pod = kubernetes.core_api().list_namespaced_pod(
+            namespace,
+            label_selector=f'skypilot-cluster={name},ray-node-type=head'
+        ).items[0]
+        response = kubernetes.stream()(
+            kubernetes.core_api().connect_get_namespaced_pod_exec,
+            pod.metadata.name,
+            namespace,
+            command=['env'],
+            stderr=True,
+            stdin=False,
+            stdout=True,
+            tty=False,
+            _request_timeout=kubernetes.API_TIMEOUT)
+        lines: List[List[str]] = [
+            line.split('=', 1) for line in response.split('\n') if '=' in line
+        ]
+        return dict(
+            [line for line in lines if common_utils.is_valid_env_var(line[0])])
