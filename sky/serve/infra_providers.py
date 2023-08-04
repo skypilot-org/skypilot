@@ -24,7 +24,7 @@ _JOB_STATUS_FETCH_INTERVAL = 30
 _PROCESS_POOL_REFRESH_INTERVAL = 20
 _ENDPOINT_PROBE_INTERVAL = 10
 # TODO(tian): Maybe let user determine this threshold
-_CONTINUOUS_FAILURE_THRESHOLD = 180 // _ENDPOINT_PROBE_INTERVAL
+_CONSECUTIVE_FAILURE_THRESHOLD = 180 // _ENDPOINT_PROBE_INTERVAL
 
 
 class ReplicaInfo:
@@ -34,8 +34,8 @@ class ReplicaInfo:
                  status: status_lib.ReplicaStatus) -> None:
         self.cluster_name: str = cluster_name
         self.status: status_lib.ReplicaStatus = status
-        self.first_unhealthy_time: Optional[float] = None
-        self.continuous_failure: int = 0
+        self.first_not_ready_time: Optional[float] = None
+        self.consecutive_failure_cnt: int = 0
 
     def trancision_with_expected(self, expected_status: Union[
         status_lib.ReplicaStatus, List[status_lib.ReplicaStatus]],
@@ -77,7 +77,7 @@ class ReplicaInfo:
 
 
 class InfraProvider:
-    """Each infra provider manages one services."""
+    """Each infra provider manages one service."""
 
     def __init__(
             self,
@@ -117,11 +117,11 @@ class InfraProvider:
         # Terminate service
         raise NotImplementedError
 
-    def start_replica_fetcher(self) -> None:
+    def start_replica_prober(self) -> None:
         # Start the replica fetcher thread
         raise NotImplementedError
 
-    def terminate_replica_fetcher(self) -> None:
+    def terminate_replica_prober(self) -> None:
         # Terminate the replica fetcher thread
         raise NotImplementedError
 
@@ -328,8 +328,8 @@ class SkyPilotInfraProvider(InfraProvider):
             return None
         return '\n'.join(msg)
 
-    def _replica_fetcher(self) -> None:
-        while not self.replica_fetcher_stop_event.is_set():
+    def _replica_prober(self) -> None:
+        while not self.replica_prober_stop_event.is_set():
             logger.info('Running replica fetcher.')
             try:
                 self._probe_all_replicas()
@@ -339,15 +339,15 @@ class SkyPilotInfraProvider(InfraProvider):
                 logger.error(f'Error in replica fetcher: {e}')
             time.sleep(_ENDPOINT_PROBE_INTERVAL)
 
-    def start_replica_fetcher(self) -> None:
-        self.replica_fetcher_stop_event = threading.Event()
-        self.replica_fetcher_thread = threading.Thread(
-            target=self._replica_fetcher)
-        self.replica_fetcher_thread.start()
+    def start_replica_prober(self) -> None:
+        self.replica_prober_stop_event = threading.Event()
+        self.replica_prober_thread = threading.Thread(
+            target=self._replica_prober)
+        self.replica_prober_thread.start()
 
-    def terminate_replica_fetcher(self) -> None:
-        self.replica_fetcher_stop_event.set()
-        self.replica_fetcher_thread.join()
+    def terminate_replica_prober(self) -> None:
+        self.replica_prober_stop_event.set()
+        self.replica_prober_thread.join()
 
     def _probe_all_replicas(self) -> None:
         logger.info(f'All replica info: {self.get_replica_info()}')
@@ -373,11 +373,11 @@ class SkyPilotInfraProvider(InfraProvider):
                     msg += f' and response {response.text}.'
                 logger.info(msg)
                 if response.status_code == 200:
-                    logger.info(f'Replica {replica_ip} is available.')
+                    logger.info(f'Replica {replica_ip} is ready.')
                     return info.cluster_name, True
             except requests.exceptions.RequestException as e:
                 logger.info(e)
-                logger.info(f'Replica {replica_ip} is not available.')
+                logger.info(f'Replica {replica_ip} is not ready.')
                 pass
             return info.cluster_name, False
 
@@ -403,28 +403,30 @@ class SkyPilotInfraProvider(InfraProvider):
                         status_lib.ReplicaStatus.READY)
                 continue
             info = self.replica_info[cluster_name]
-            if info.first_unhealthy_time is None:
-                info.first_unhealthy_time = time.time()
-            if time.time() - info.first_unhealthy_time > self.readiness_timeout:
+            if info.first_not_ready_time is None:
+                info.first_not_ready_time = time.time()
+            if time.time() - info.first_not_ready_time > self.readiness_timeout:
                 is_starting = info.trancision_with_expected(
                     status_lib.ReplicaStatus.STARTING,
                     status_lib.ReplicaStatus.FAILED)
                 if is_starting:
-                    logger.info(f'Replica {cluster_name} is unhealthy and '
+                    logger.info(f'Replica {cluster_name} is not ready and '
                                 'exceeded readiness timeout. Terminating.')
                     self._teardown_cluster(cluster_name)
                 else:
-                    info.continuous_failure += 1
-                    if info.continuous_failure > _CONTINUOUS_FAILURE_THRESHOLD:
+                    info.consecutive_failure_cnt += 1
+                    if (info.consecutive_failure_cnt >
+                            _CONSECUTIVE_FAILURE_THRESHOLD):
                         info.trancision_with_expected(
                             status_lib.ReplicaStatus.READY,
                             status_lib.ReplicaStatus.FAILED)
                         logger.info(f'Terminating replica {cluster_name}.')
                         self._teardown_cluster(cluster_name)
                     else:
-                        # TODO(tian): Change to UNHEALTHY?
-                        logger.info(f'Replica {cluster_name} is unhealthy but '
-                                    'within unhealthy threshold. Skipping.')
+                        # TODO(tian): Change to NOT_READY?
+                        logger.info(f'Replica {cluster_name} is not ready but '
+                                    'within consecutive failure threshold. '
+                                    'Skipping.')
             else:
-                logger.info(f'Replica {cluster_name} is unhealthy but within '
+                logger.info(f'Replica {cluster_name} is not ready but within '
                             'readiness timeout. Skipping.')

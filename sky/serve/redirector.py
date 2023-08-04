@@ -53,7 +53,7 @@ class SkyServeRedirector:
                     # send request num in last query interval
                     response = session.post(
                         self.control_plane_url +
-                        '/control_plane/get_num_requests',
+                        '/control_plane/update_num_requests',
                         json={
                             'num_requests':
                                 self.load_balancer.deprecate_old_requests()

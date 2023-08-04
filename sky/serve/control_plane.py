@@ -41,8 +41,8 @@ class ControlPlane:
 
     def run(self) -> None:
 
-        @self.app.post('/control_plane/get_num_requests')
-        async def get_num_requests(request: fastapi.Request):
+        @self.app.post('/control_plane/update_num_requests')
+        async def update_num_requests(request: fastapi.Request):
             # await request
             request_data = await request.json()
             # get request data
@@ -74,7 +74,7 @@ class ControlPlane:
         def terminate(request: fastapi.Request):
             del request
             logger.info('Terminating service...')
-            self.infra_provider.terminate_replica_fetcher()
+            self.infra_provider.terminate_replica_prober()
             if self.autoscaler is not None:
                 self.autoscaler.terminate_monitor()
             msg = self.infra_provider.terminate()
@@ -83,7 +83,7 @@ class ControlPlane:
         # Run replica_monitor and autoscaler.monitor (if autoscaler is defined)
         # in separate threads in the background.
         # This should not block the main thread.
-        self.infra_provider.start_replica_fetcher()
+        self.infra_provider.start_replica_prober()
         if self.autoscaler is not None:
             self.autoscaler.start_monitor()
 
