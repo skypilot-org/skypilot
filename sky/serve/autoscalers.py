@@ -70,12 +70,20 @@ class RequestRateAutoscaler(Autoscaler):
                  lower_threshold: Optional[float], cooldown: int,
                  query_interval: int, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.upper_threshold: Optional[float] = upper_threshold
-        self.lower_threshold: Optional[float] = lower_threshold
+        # Cooldown between two scaling operations in seconds.
         self.cooldown: int = cooldown
+        # Quesy interval for requests num. Every `query_interval` seconds,
+        # Autoscaler will received an update for number of requests from
+        # redirector.
         self.query_interval: int = query_interval
-        self.last_scale_operation: float = 0.  # Time of last scale operation.
+        # Time of last scale operation
+        self.last_scale_operation: float = 0.
+        # Number of requests in the last `query_interval` seconds.
         self.num_requests: int = 0
+        # Upper threshold for scale up. If None, no scale up.
+        self.upper_threshold: Optional[float] = upper_threshold
+        # Lower threshold for scale down. If None, no scale down.
+        self.lower_threshold: Optional[float] = lower_threshold
 
     def set_num_requests(self, num_requests: int) -> None:
         self.num_requests = num_requests

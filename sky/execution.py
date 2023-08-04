@@ -1036,6 +1036,10 @@ def serve_up(
                 env_options.Options.DISABLE_LOGGING.get(),
         }
 
+        # NOTICE: The job submission order cannot be changed since the
+        # `sky serve logs` CLI will identify the control plane job with
+        # the first job submitted and the redirector job with the second
+        # job submitted.
         print(
             f'{colorama.Fore.YELLOW}'
             'Launching control plane process on controller...'
