@@ -167,8 +167,10 @@ class Kubernetes(clouds.Cloud):
 
     # TODO(romilb): Add GPU Support - toggle between image depending on chosen
     #  accelerator type.
-    IMAGE = 'us-central1-docker.pkg.dev/' \
-            'skypilot-375900/skypilotk8s/skypilot-gpu:latest'
+    IMAGE_CPU = ('us-central1-docker.pkg.dev/'
+                 'skypilot-375900/skypilotk8s/skypilot:latest')
+    IMAGE_GPU = ('us-central1-docker.pkg.dev/skypilot-375900/'
+                 'skypilotk8s/skypilot-gpu:latest')
 
     @classmethod
     def _cloud_unsupported_features(
@@ -303,6 +305,9 @@ class Kubernetes(clouds.Cloud):
         acc_count = k.accelerator_count if k.accelerator_count else 0
         acc_type = k.accelerator_type if k.accelerator_type else ''
 
+        # Select image based on whether we are using GPUs or not.
+        image = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
+
         GKE_GPU_LABEL_PREFIX = 'cloud.google.com/gke-accelerator'
         EKS_GPU_LABEL_PREFIX = 'k8s.amazonaws.com/accelerator'
         NVIDIA_GFD_GPU_LABEL_PREFIX = 'nvidia.com/gpu.product'
@@ -380,7 +385,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_value': k8s_acc_label_value,
             # TODO(romilb): Allow user to specify custom images
-            'image_id': self.IMAGE,
+            'image_id': image,
         }
         return vars
 
