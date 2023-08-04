@@ -2248,7 +2248,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             ports = [head_port] + worker_ports
         else:
             # Use port 22 for other clouds
-            ports = [22] * self.launched_nodes
+            ports = [22] * self.num_node_ips
         self.stable_ssh_ports = ports
 
     def _update_stable_cluster_ips(self, max_attempts: int = 1) -> None:
@@ -2349,6 +2349,16 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if external_ssh_ports:
             return external_ssh_ports[0]
         return None
+
+    @property
+    def num_node_ips(self) -> int:
+        """Returns number of IPs of the cluster, correctly handling TPU Pod."""
+        is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(self.launched_resources)
+        if is_tpu_vm_pod:
+            num_ips = tpu_utils.get_num_tpu_devices(self.launched_resources)
+        else:
+            num_ips = self.launched_nodes
+        return num_ips
 
     def __setstate__(self, state):
         self._version = self._VERSION
