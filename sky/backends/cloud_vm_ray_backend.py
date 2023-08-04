@@ -2822,16 +2822,26 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._execute_file_mounts(handle, all_file_mounts)
         self._execute_storage_mounts(handle, storage_mounts)
 
+    def _update_envs_for_k8s(self, handle: CloudVmRayResourceHandle,
+                             task: task_lib.Task) -> None:
+        """Update envs for a task with Kubernetes specific env vars if cloud is Kubernetes."""
+        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+            temp_envs = copy.deepcopy(task.envs)
+            cloud_env_vars = handle.launched_resources.cloud.query_env_vars(
+                handle.cluster_name)
+            task.update_envs(cloud_env_vars)
+
+            # Re update the envs with the original envs to give priority to
+            # the original envs.
+            task.update_envs(temp_envs)
+
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
         start = time.time()
         style = colorama.Style
         fore = colorama.Fore
 
-        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-            cloud_env_vars = handle.launched_resources.cloud.query_env_vars(
-                handle.cluster_name)
-            task.update_envs(cloud_env_vars)
+        self._update_envs_for_k8s(handle, task)
 
         if task.setup is None:
             return
@@ -3143,6 +3153,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
         self.check_resources_fit_cluster(handle, task)
+        self._update_envs_for_k8s(handle, task)
 
         resources_str = backend_utils.get_task_resources_str(task)
 

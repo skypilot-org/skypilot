@@ -423,10 +423,9 @@ class Kubernetes(clouds.Cloud):
             stdin=False,
             stdout=True,
             tty=False,
-        )
-        return dict([
-            line.split('=', 1)
-            for line in response.split('\n')
-            if '=' in line and
-            common_utils.is_valid_env_var(line.split('=', 1)[0])
-        ])
+            _request_timeout=kubernetes.API_TIMEOUT)
+        lines: List[List[str]] = [
+            line.split('=', 1) for line in response.split('\n') if '=' in line
+        ]
+        return dict(
+            [line for line in lines if common_utils.is_valid_env_var(line[0])])

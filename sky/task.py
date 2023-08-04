@@ -18,7 +18,7 @@ from sky.data import data_utils
 from sky.skylet import constants
 from sky.utils import schemas
 from sky.utils import ux_utils
-from sky.utils.common_utils import is_valid_env_var
+from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -441,7 +441,7 @@ class Task:
                 if not isinstance(key, str):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError('Env keys must be strings.')
-                if not is_valid_env_var(key):
+                if not common_utils.is_valid_env_var(key):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Invalid env key: {key}')
         else:
