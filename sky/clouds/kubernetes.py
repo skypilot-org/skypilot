@@ -167,10 +167,10 @@ class Kubernetes(clouds.Cloud):
 
     # TODO(romilb): Add GPU Support - toggle between image depending on chosen
     #  accelerator type.
-    IMAGE_CPU = 'us-central1-docker.pkg.dev/' \
-                'skypilot-375900/skypilotk8s/skypilot:latest'
-    IMAGE_GPU = 'us-central1-docker.pkg.dev/skypilot-375900/' \
-                'skypilotk8s/skypilot-gpu:latest'
+    IMAGE_CPU = ('us-central1-docker.pkg.dev/'
+                 'skypilot-375900/skypilotk8s/skypilot:latest')
+    IMAGE_GPU = ('us-central1-docker.pkg.dev/skypilot-375900/'
+                 'skypilotk8s/skypilot-gpu:latest')
 
     @classmethod
     def _cloud_unsupported_features(
@@ -303,7 +303,7 @@ class Kubernetes(clouds.Cloud):
         mem = k.memory
         # Optionally populate accelerator information.
         acc_count = k.accelerator_count if k.accelerator_count else 0
-        acc_type = k.accelerator_type if k.accelerator_type else ''
+        acc_type = k.accelerator_type if k.accelerator_type else None
 
         # Select image based on whether we are using GPUs or not.
         image = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
@@ -344,13 +344,15 @@ class Kubernetes(clouds.Cloud):
                 return None
 
         def get_gpu_label_value(accelerator: str,
-                                gpu_label: str):
+                                gpu_label: str) -> Optional[str]:
             # Returns the GPU string from SkyPilot accelerator string
             # to use as the value with the GPU label when specifying the nodeSelector.
             # For GKE, the GPU string is the GPU type (e.g. nvidia-tesla-t4)
             # For EKS, the GPU string is the GPU type (e.g. nvidia-tesla-t4)
             # For on-prem, the GPU string is the GPU product name (e.g. Tesla-T4 or A100-SXM4-40GB)
 
+            if not accelerator:
+                return accelerator
             def get_k8s_accelerator_name(accelerator: str):
                 # Used by GKE and EKS
                 if accelerator in ('A100-80GB', 'L4'):
