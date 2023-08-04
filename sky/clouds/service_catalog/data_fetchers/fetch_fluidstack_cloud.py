@@ -16,7 +16,7 @@ import json
 from typing import Optional, List
 from sky.clouds.service_catalog import constants
 
-ENDPOINT = "http://fs-dev.herokuapp.com/api/plans" #TODO(mjibril) change to production
+ENDPOINT = "http://localhost:5001/api/plans" #TODO(mjibril) change to production
 DEFAULT_FLUIDSTACK_API_KEY_PATH = os.path.expanduser("~/.fluidstack/fluidstack_api_key")
 DEFAULT_FLUIDSTACK_API_TOKEN_PATH = os.path.expanduser(
     "~/.fluidstack/fluidstack_api_token"
@@ -65,9 +65,7 @@ def create_catalog(output_dir: str) -> None:
         and plan["type"] in ["preconfigured"]
         and plan["gpu_type"] != "NO GPU"
     ]
-    # regions = get_regions(plans)
-    # with open(os.path.join(output_dir, "regions.json"), mode="w") as f:
-    #     json.dump(regions, f)
+  
 
     with open(os.path.join(output_dir, "vms.csv"), mode="w") as f:
         writer = csv.writer(f, delimiter=",", quotechar='"')

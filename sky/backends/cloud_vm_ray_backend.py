@@ -1296,7 +1296,7 @@ class RetryingVmProvisioner(object):
             clouds.Local: self._update_blocklist_on_local_error,
             clouds.Kubernetes: self._update_blocklist_on_kubernetes_error,
             clouds.OCI: self._update_blocklist_on_oci_error,
-            clouds.FluidStack: self._update_blocklist_on_fluidstack_error,
+            clouds.Fluidstack: self._update_blocklist_on_fluidstack_error,
         }
         cloud = launchable_resources.cloud
         cloud_type = type(cloud)

@@ -418,7 +418,7 @@ def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     public_key = None
     with open(public_key_path, "r") as f:
         public_key = f.read()
-    client.add_ssh_key(public_key)
+    client.get_or_add_ssh_key(public_key)
 
     # Need to use ~ relative path because Ray uses the same
     # path for finding the public key path on both local and head node.
@@ -427,6 +427,7 @@ def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     file_mounts = config["file_mounts"]
     file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
     config["file_mounts"] = file_mounts
+    return config
 
 
 def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:

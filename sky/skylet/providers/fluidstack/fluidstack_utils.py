@@ -12,7 +12,7 @@ def get_key_suffix():
     return str(uuid.uuid4()).replace("-", "")[:8]
 
 
-ENDPOINT = "http//:localhost:5001/" # TODO(mjibril) change to live endpoint when ready
+ENDPOINT = "http://localhost:5001/" # TODO(mjibril) change to live endpoint when ready
 FLUIDSTACK_API_KEY_PATH = "~/.fluidstack/api_key"
 FLUIDSTACK_API_TOKEN_PATH = "~/.fluidstack/api_token"
 
@@ -57,8 +57,8 @@ class FluidstackClient:
 
     def create_instance(
         self,
-        instance_type: str = "94d76997-44ec-4f1e-8291-231de42b6030",
-        region: str = "Norway 2, EU",
+        instance_type: str = "1xRTX_A6000_RAM-55GB_Disk-500GB_nCPU-6_C4F9D7",
+        region: str = "norway_2_eu",
         ssh_pub_key: str = "",
     ) -> List[str]:
         """Launch new instances."""
@@ -78,7 +78,6 @@ class FluidstackClient:
         raise_fluidstack_error(response)
         return response.json().get("server", {}).get("id")
 
-    @lru_cache
     def list_ssh_keys(self):
         response = requests.get(
             ENDPOINT + "api/ssh_key", auth=(self.api_key, self.api_token)
@@ -88,7 +87,6 @@ class FluidstackClient:
 
     def get_or_add_ssh_key(self, ssh_pub_key: str = None) -> None:
         """Add ssh key if not already added."""
-        self.list_ssh_keys.clear_cache()
         ssh_keys = self.list_ssh_keys()
         for key in ssh_keys:
             if key["Public_Key"].strip() == ssh_pub_key.strip():
