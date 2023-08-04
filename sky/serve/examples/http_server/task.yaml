@@ -11,7 +11,6 @@ service:
   port: 8081
   readiness_probe:
     path: /health
-    readiness_timeout: 12000
+    readiness_timeout: 120
   replica_policy:
-    min_replica: 1
-    max_replica: 1
+    min_replica: 2
