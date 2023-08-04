@@ -1,6 +1,6 @@
 """InfraProvider: handles the creation and deletion of endpoint replicas."""
 from concurrent import futures
-import copy
+import enum
 import logging
 import multiprocessing
 import os
@@ -16,7 +16,7 @@ from sky import backends
 from sky import core
 from sky import status_lib
 from sky.skylet import job_lib
-from sky import global_user_state as gus
+from sky import global_user_state
 
 logger = logging.getLogger(__name__)
 
@@ -27,32 +27,101 @@ _ENDPOINT_PROBE_INTERVAL = 10
 _CONSECUTIVE_FAILURE_THRESHOLD = 180 // _ENDPOINT_PROBE_INTERVAL
 
 
+class ProcessStatus(enum.Enum):
+    """Process status."""
+
+    # The process is running
+    RUNNING = 'RUNNING'
+
+    # The process is finished and success
+    SUCCESS = 'SUCCESS'
+
+    # The process is finished and failed
+    FAILED = 'FAILED'
+
+
+class ReplicaStatusProperty:
+    """Some properties that determine replica status."""
+
+    def __init__(self) -> None:
+        # Process status of sky.launch
+        # Initial value is RUNNING since each `ReplicaInfo` is created
+        # when `sky.launch` is called.
+        self.sky_launch_status: ProcessStatus = ProcessStatus.RUNNING
+        # User job status in [FAILED, FAILED_SETUP]
+        self.user_app_failed: bool = False
+        # Latest readiness probe result
+        self.service_ready_now: bool = False
+        # Whether the service has been ready at least once
+        self.service_once_ready: bool = False
+        # Process status of sky.down. None means sky.down is not called yet.
+        self.sky_down_status: Optional[ProcessStatus] = None
+
+    def should_cleanup_after_teardown(self) -> bool:
+        return self.service_ready_now
+
+    def should_track_status(self) -> bool:
+        if self.sky_launch_status != ProcessStatus.SUCCESS:
+            return False
+        if self.sky_down_status is not None:
+            return False
+        if self.user_app_failed:
+            return False
+        return True
+
+    def to_replica_status(self) -> status_lib.ReplicaStatus:
+        if self.sky_launch_status == ProcessStatus.RUNNING:
+            # Still launching
+            return status_lib.ReplicaStatus.PROVISIONING
+        if self.sky_launch_status == ProcessStatus.FAILED:
+            # sky.launch failed
+            return status_lib.ReplicaStatus.FAILED
+        if self.sky_down_status is not None:
+            if self.sky_down_status == ProcessStatus.RUNNING:
+                # sky.down is running
+                return status_lib.ReplicaStatus.SHUTTING_DOWN
+            if self.sky_down_status == ProcessStatus.FAILED:
+                # sky.down failed
+                return status_lib.ReplicaStatus.FAILED
+            if self.user_app_failed:
+                # Failed on user setup/run
+                return status_lib.ReplicaStatus.FAILED_DELETED
+            if not self.service_once_ready:
+                # Readiness timeout exceeded
+                return status_lib.ReplicaStatus.FAILED_DELETED
+            if not self.service_ready_now:
+                # Max continuous failure exceeded
+                return status_lib.ReplicaStatus.FAILED_DELETED
+            # This indicate it is a scale_down with correct teardown.
+            # Should have been cleaned from the replica_info.
+            return status_lib.ReplicaStatus.UNKNOWN
+        if self.service_ready_now:
+            # Service is ready
+            return status_lib.ReplicaStatus.READY
+        if self.user_app_failed:
+            # Failed on user setup/run
+            return status_lib.ReplicaStatus.FAILED
+        if self.service_once_ready:
+            # Service was ready before but not now
+            return status_lib.ReplicaStatus.NOT_READY
+        else:
+            # No readiness probe passed and sky.launch finished
+            return status_lib.ReplicaStatus.STARTING
+
+
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    def __init__(self, cluster_name: str,
-                 status: status_lib.ReplicaStatus) -> None:
+    def __init__(self, cluster_name: str) -> None:
         self.cluster_name: str = cluster_name
-        self.status: status_lib.ReplicaStatus = status
         self.first_not_ready_time: Optional[float] = None
         self.consecutive_failure_cnt: int = 0
-
-    def trancision_with_expected(self, expected_status: Union[
-        status_lib.ReplicaStatus, List[status_lib.ReplicaStatus]],
-                                 new_status: status_lib.ReplicaStatus) -> bool:
-        if isinstance(expected_status, status_lib.ReplicaStatus):
-            expected_status = [expected_status]
-        if self.status not in expected_status:
-            logger.info(f'Expected status {expected_status}, but got '
-                        f'status {self.status}. Refuse to change to '
-                        f'status {new_status}.')
-            return False
-        self.status = new_status
-        return True
+        self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
 
     @property
     def handle(self) -> Optional[backends.CloudVmRayResourceHandle]:
-        cluster_record = gus.get_cluster_from_name(self.cluster_name)
+        cluster_record = global_user_state.get_cluster_from_name(
+            self.cluster_name)
         if cluster_record is None:
             return None
         handle = cluster_record['handle']
@@ -66,14 +135,16 @@ class ReplicaInfo:
             return None
         return handle.head_ip
 
-    def to_info_dict(self) -> Optional[Dict[str, Any]]:
-        record = copy.deepcopy(self.__dict__)
-        record['handle'] = self.handle
-        if record['handle'] is None:
-            # This means the cluster is already deleted
-            # but the status is not updated yet.
-            return None
-        return record
+    @property
+    def status(self) -> status_lib.ReplicaStatus:
+        return self.status_property.to_replica_status()
+
+    def to_info_dict(self) -> Dict[str, Any]:
+        return {
+            'name': self.cluster_name,
+            'status': self.status,
+            'handle': self.handle,
+        }
 
 
 class InfraProvider:
@@ -163,21 +234,31 @@ class SkyPilotInfraProvider(InfraProvider):
                             logger.info(
                                 f'{op} process for {cluster_name} exited '
                                 f'abnormally with code {p.exitcode}.')
-                            info.trancision_with_expected(
-                                status_lib.ReplicaStatus.PROVISIONING,
-                                status_lib.ReplicaStatus.FAILED)
+                            if op == 'Launch':
+                                info.status_property.sky_launch_status = (
+                                    ProcessStatus.FAILED)
+                            else:
+                                info.status_property.sky_down_status = (
+                                    ProcessStatus.FAILED)
                         else:
                             if op == 'Launch':
-                                info.trancision_with_expected(
-                                    status_lib.ReplicaStatus.PROVISIONING,
-                                    status_lib.ReplicaStatus.STARTING)
+                                info.status_property.sky_launch_status = (
+                                    ProcessStatus.SUCCESS)
                             else:
-                                # TODO(tian): after we introduce SHUTTING_DOWN,
-                                # we should change back to FAILED
-                                # (Maybe FAILED_DOWN?)
-                                if (info.status !=
-                                        status_lib.ReplicaStatus.FAILED):
+                                if (info.status_property.
+                                        should_cleanup_after_teardown()):
+                                    # This means the cluster is deleted due to
+                                    # a scale down. Delete the replica info
+                                    # so it won't count as a replica.
                                     del self.replica_info[cluster_name]
+                                else:
+                                    # Failed replica still count as a replica.
+                                    # In our current design, we want to fail
+                                    # early if user code have any error. This
+                                    # will prevent infinite loop of teardown
+                                    # and re-provision.
+                                    info.status_property.sky_down_status = (
+                                        ProcessStatus.SUCCESS)
             time.sleep(_PROCESS_POOL_REFRESH_INTERVAL)
 
     def _start_refresh_process_pool(self) -> None:
@@ -186,18 +267,11 @@ class SkyPilotInfraProvider(InfraProvider):
             target=self._refresh_process_pool)
         self.refresh_process_pool_thread.start()
 
-    def _terminate_refresh_process_pool(self) -> None:
-        self.refresh_process_pool_stop_event.set()
-        self.refresh_process_pool_thread.join()
-
     def _fetch_job_status(self) -> None:
         while not self.fetch_job_status_stop_event.is_set():
             logger.info('Refreshing job status.')
-            for cluster_name, replica_info in self.replica_info.items():
-                if not replica_info.status in [
-                        status_lib.ReplicaStatus.STARTING,
-                        status_lib.ReplicaStatus.READY
-                ]:
+            for cluster_name, info in self.replica_info.items():
+                if not info.status_property.should_track_status():
                     continue
                 # Only fetch job 1, which stands for user task job
                 job_statuses = core.job_status(cluster_name, [1])
@@ -205,10 +279,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 if job_status in [
                         job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
                 ]:
-                    replica_info.trancision_with_expected([
-                        status_lib.ReplicaStatus.STARTING,
-                        status_lib.ReplicaStatus.READY
-                    ], status_lib.ReplicaStatus.FAILED)
+                    info.status_property.user_app_failed = True
             time.sleep(_JOB_STATUS_FETCH_INTERVAL)
 
     def _start_fetch_job_status(self) -> None:
@@ -217,17 +288,14 @@ class SkyPilotInfraProvider(InfraProvider):
             target=self._fetch_job_status)
         self.fetch_job_status_thread.start()
 
-    def _terminate_fetch_job_status(self) -> None:
+    def _terminate_daemon_threads(self) -> None:
         self.fetch_job_status_stop_event.set()
+        self.refresh_process_pool_stop_event.set()
         self.fetch_job_status_thread.join()
+        self.refresh_process_pool_thread.join()
 
     def get_replica_info(self) -> List[Dict[str, Any]]:
-        infos = []
-        for info in self.replica_info.values():
-            info_dict = info.to_info_dict()
-            if info_dict is not None:
-                infos.append(info_dict)
-        return infos
+        return [info.to_info_dict() for info in self.replica_info.values()]
 
     def total_replica_num(self) -> int:
         return len(self.replica_info)
@@ -256,8 +324,7 @@ class SkyPilotInfraProvider(InfraProvider):
         self.launch_process_pool[cluster_name] = p
         p.start()
         assert cluster_name not in self.replica_info
-        self.replica_info[cluster_name] = ReplicaInfo(
-            cluster_name, status_lib.ReplicaStatus.PROVISIONING)
+        self.replica_info[cluster_name] = ReplicaInfo(cluster_name)
 
     def _scale_up(self, n: int) -> None:
         # Launch n new clusters
@@ -276,6 +343,8 @@ class SkyPilotInfraProvider(InfraProvider):
             logger.warning(f'Down process for cluster {cluster_name} already '
                            'exists. Skipping.')
             return
+        info = self.replica_info[cluster_name]
+        info.status_property.sky_down_status = ProcessStatus.RUNNING
         p = multiprocessing.Process(target=sky.down,
                                     args=(cluster_name,),
                                     kwargs={'purge': True})
@@ -284,14 +353,15 @@ class SkyPilotInfraProvider(InfraProvider):
 
     def _scale_down(self, n: int) -> None:
         # Rendomly delete n clusters
-        num_replicas = len(self.replica_info)
+        all_ready_replicas = self.get_ready_replicas()
+        num_replicas = len(all_ready_replicas)
         if num_replicas > 0:
             if n > num_replicas:
                 logger.warning(
                     f'Trying to delete {n} clusters, but only {num_replicas} '
                     'clusters exist. Deleting all clusters.')
                 n = num_replicas
-            cluster_to_terminate = random.sample(self.replica_info.keys(), n)
+            cluster_to_terminate = random.sample(all_ready_replicas, n)
             for cluster_name in cluster_to_terminate:
                 logger.info(f'Deleting SkyPilot cluster {cluster_name}')
                 self._teardown_cluster(cluster_name)
@@ -300,8 +370,9 @@ class SkyPilotInfraProvider(InfraProvider):
         self._scale_down(n)
 
     def terminate(self) -> Optional[str]:
-        self._terminate_refresh_process_pool()
-        self._terminate_fetch_job_status()
+        logger.info('Terminating daemon threads...')
+        self._terminate_daemon_threads()
+        logger.info('Terminating clusters...')
         for name, p in self.launch_process_pool.items():
             # Use keyboard interrupt here since sky.launch has great
             # handling for it
@@ -314,13 +385,20 @@ class SkyPilotInfraProvider(InfraProvider):
                 self._teardown_cluster(name)
                 logger.info(f'Interrupted launch process for cluster {name} '
                             'and deleted the cluster.')
-        for cluster_name in self.replica_info:
-            self._teardown_cluster(cluster_name)
+        for name, info in self.replica_info.items():
+            # Skip those already deleted and those are deleting
+            if info.status not in [
+                    status_lib.ReplicaStatus.FAILED_DELETED,
+                    status_lib.ReplicaStatus.SHUTTING_DOWN
+            ]:
+                self._teardown_cluster(name)
         msg = []
         for name, p in self.down_process_pool.items():
             p.join()
             logger.info(f'Down process for cluster {name} finished.')
             if p.exitcode != 0:
+                logger.warning(f'Down process for cluster {name} exited '
+                               f'anormally with code {p.exitcode}.')
                 msg.append(f'Down process for cluster {name} exited abnormally'
                            f' with code {p.exitcode}. Please login to the '
                            'controller and make sure the cluster is released.')
@@ -384,49 +462,42 @@ class SkyPilotInfraProvider(InfraProvider):
         probe_futures = []
         with futures.ThreadPoolExecutor() as executor:
             for cluster_name, info in self.replica_info.items():
-                # Optimize: only probe replicas in STARTING or READY status
-                # since probe to other replicas will fail anyway.
-                if info.status not in [
-                        status_lib.ReplicaStatus.STARTING,
-                        status_lib.ReplicaStatus.READY
-                ]:
+                if not info.status_property.should_track_status():
                     continue
                 probe_futures.append(executor.submit(_probe_replica, info))
 
         for future in futures.as_completed(probe_futures):
             cluster_name, res = future.result()
-            if res:
-                info = self.replica_info[cluster_name]
-                if info.status == status_lib.ReplicaStatus.STARTING:
-                    info.trancision_with_expected(
-                        status_lib.ReplicaStatus.STARTING,
-                        status_lib.ReplicaStatus.READY)
-                continue
             info = self.replica_info[cluster_name]
+            info.status_property.service_ready_now = res
+            if res:
+                if not info.status_property.service_once_ready:
+                    info.status_property.service_once_ready = True
+                continue
             if info.first_not_ready_time is None:
                 info.first_not_ready_time = time.time()
-            if time.time() - info.first_not_ready_time > self.readiness_timeout:
-                is_starting = info.trancision_with_expected(
-                    status_lib.ReplicaStatus.STARTING,
-                    status_lib.ReplicaStatus.FAILED)
-                if is_starting:
-                    logger.info(f'Replica {cluster_name} is not ready and '
-                                'exceeded readiness timeout. Terminating.')
+            if info.status_property.service_once_ready:
+                info.consecutive_failure_cnt += 1
+                if (info.consecutive_failure_cnt >
+                        _CONSECUTIVE_FAILURE_THRESHOLD):
+                    logger.info(f'Replica {cluster_name} is consecutively '
+                                'not ready for too long and exceeding '
+                                'conservative failure threshold. '
+                                'Terminating.')
                     self._teardown_cluster(cluster_name)
                 else:
-                    info.consecutive_failure_cnt += 1
-                    if (info.consecutive_failure_cnt >
-                            _CONSECUTIVE_FAILURE_THRESHOLD):
-                        info.trancision_with_expected(
-                            status_lib.ReplicaStatus.READY,
-                            status_lib.ReplicaStatus.FAILED)
-                        logger.info(f'Terminating replica {cluster_name}.')
-                        self._teardown_cluster(cluster_name)
-                    else:
-                        # TODO(tian): Change to NOT_READY?
-                        logger.info(f'Replica {cluster_name} is not ready but '
-                                    'within consecutive failure threshold. '
-                                    'Skipping.')
+                    logger.info(f'Replica {cluster_name} is not ready but '
+                                'within consecutive failure threshold. '
+                                f'{info.consecutive_failure_cnt} / '
+                                f'{_CONSECUTIVE_FAILURE_THRESHOLD}. '
+                                'Skipping.')
             else:
-                logger.info(f'Replica {cluster_name} is not ready but within '
-                            'readiness timeout. Skipping.')
+                if time.time(
+                ) - info.first_not_ready_time > self.readiness_timeout:
+                    logger.info(f'Replica {cluster_name} is not ready and '
+                                'exceeding readiness timeout. Terminating.')
+                    self._teardown_cluster(cluster_name)
+                else:
+                    logger.info(
+                        f'Replica {cluster_name} is not ready but within '
+                        'readiness timeout. Skipping.')

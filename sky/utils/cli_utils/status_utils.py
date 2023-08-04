@@ -143,12 +143,12 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
 
 def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
     status_columns = [
-        StatusColumn('NAME', _get_cluster_name),
+        StatusColumn('NAME', _get_name),
         StatusColumn('RESOURCES',
-                     _get_resources,
+                     _get_replica_resources,
                      trunc_length=70 if not show_all else 0),
-        StatusColumn('REGION', _get_region),
-        StatusColumn('ZONE', _get_zone, show_by_default=False),
+        StatusColumn('REGION', _get_replica_region),
+        StatusColumn('ZONE', _get_replica_zone, show_by_default=False),
         StatusColumn('STATUS', _get_status_colored),
     ]
 
@@ -372,7 +372,6 @@ _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
 _get_controller_cluster_name = (
     lambda service_record: service_record['controller_cluster_name'])
 _get_endpoint = (lambda service_record: service_record['endpoint'])
-_get_cluster_name = (lambda cluster_record: cluster_record['cluster_name'])
 _get_policy = (lambda service_record: service_record['policy'])
 _get_requested_resources = (
     lambda service_record: service_record['requested_resources'])
@@ -424,6 +423,27 @@ def _get_zone(cluster_record: _ClusterRecord) -> str:
     if zone_str is None:
         zone_str = '-'
     return zone_str
+
+
+def _get_replica_resources(cluster_record: _ClusterRecord) -> str:
+    handle = cluster_record['handle']
+    if handle is None:
+        return '-'
+    return _get_resources(cluster_record)
+
+
+def _get_replica_region(cluster_record: _ClusterRecord) -> str:
+    handle = cluster_record['handle']
+    if handle is None:
+        return '-'
+    return _get_region(cluster_record)
+
+
+def _get_replica_zone(cluster_record: _ClusterRecord) -> str:
+    handle = cluster_record['handle']
+    if handle is None:
+        return '-'
+    return _get_zone(cluster_record)
 
 
 def _get_autostop(cluster_record: _ClusterRecord) -> str:
