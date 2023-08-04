@@ -303,10 +303,13 @@ class Optimizer:
 
                     if minimize_cost:
                         cost_per_node = resources.get_cost(estimated_runtime)
-                        number_of_available_reservation_resources = resources.get_available_reservation_resources()
-                        # We consider the cost of the unused reservation resources to be 0 since we are already paying
-                        # for them.
-                        estimated_cost_or_time = cost_per_node * (node.num_nodes - number_of_available_reservation_resources)
+                        available_reservation_resources = (
+                            resources.get_available_reservation_resources())
+                        # We consider the cost of the unused reservation
+                        # resources to be 0 since we are already paying for
+                        # them.
+                        estimated_cost_or_time = cost_per_node * (
+                            node.num_nodes - available_reservation_resources)
                     else:
                         # Minimize run time.
                         estimated_cost_or_time = estimated_runtime

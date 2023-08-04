@@ -859,7 +859,9 @@ def write_cluster_config(
     specific_reservations = None
     if isinstance(cloud, clouds.GCP):
         gcp_project_id = cloud.get_project_id(dryrun=dryrun)
-        specific_reservations = ["projects/shopify-ml-adhoc/reservations/sidekick-a100s"]
+        specific_reservations = [
+            'projects/shopify-ml-adhoc/reservations/sidekick-a100s'
+        ]
 
     assert cluster_name is not None
     credentials = sky_check.get_cloud_credential_file_mounts()

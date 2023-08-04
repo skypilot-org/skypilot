@@ -524,6 +524,39 @@ class GCP(clouds.Cloud):
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
                                                                 clouds='gcp')
 
+    def get_available_reservation_resources(
+        self,
+        instance_type: str,
+        region: str,
+        zone: Optional[str],
+        specific_reservations: List[str],
+    ) -> int:
+        assert zone is not None, 'GCP requires zone to get available reservations.'
+        list_reservations_cmd = (
+            'gcloud compute reservations list '
+            f'--filter="zone={zone} AND specificReservation.instanceProperties.machineType={instance_type} AND status=READY" '
+            '--format="json(specificReservation.count, specificReservation.inUseCount, specificReservationRequired, selfLink)"'
+        )
+        returncode, stdout, stderr = subprocess_utils.run_with_retries(
+            list_reservations_cmd,
+            retry_returncode=[255],
+        )
+        subprocess_utils.handle_returncode(
+            returncode,
+            list_reservations_cmd,
+            error_msg=
+            f'Failed to get list reservations for {instance_type!r} in {zone!r}.',
+            stderr=stderr,
+            stream_logs=True,
+        )
+        reservations = json.loads(stdout)
+        return sum(
+            int(r['specificReservation']['count']) -
+            int(r['specificReservation']['inUseCount'])
+            for r in reservations
+            if not r['specificReservationRequired'] or
+            r['selfLink'] in specific_reservations)
+
     @classmethod
     def _find_application_key_path(cls) -> str:
         # Check the application default credentials in the environment variable.

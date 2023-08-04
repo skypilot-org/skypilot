@@ -803,7 +803,8 @@ class Resources:
 
     def get_available_reservation_resources(self) -> int:
         """Returns the number of available reservation resources."""
-        return self.cloud.get_available_reservation_resources(self._instance_type, self._region, self._zone)
+        return self.cloud.get_available_reservation_resources(
+            self._instance_type, self._region, self._zone)
 
     def less_demanding_than(self,
                             other: Union[List['Resources'], 'Resources'],

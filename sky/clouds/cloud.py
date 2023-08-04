@@ -309,11 +309,19 @@ class Cloud:
     def _get_feasible_launchable_resources(self, resources):
         raise NotImplementedError
 
-    def get_available_reservation_resources(self, instance_type: str, region: str, zone: str) -> int:
+    def get_available_reservation_resources(
+        self,
+        instance_type: str,
+        region: str,
+        zone: Optional[str],
+        specific_reservations: List[str],
+    ) -> int:
         """"
-        Returns the number of available reservation resources for the given instance type in the given region/zone.
+        Returns the number of available reservation resources for the given
+        instance type in the given region/zone.
         Default implementation returns 0 for non-implemented clouds.
         """
+        _ = instance_type, region, zone, specific_reservations
         return 0
 
     @classmethod
