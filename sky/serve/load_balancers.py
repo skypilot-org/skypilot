@@ -35,6 +35,7 @@ class LoadBalancer:
                          'Use default interval instead.')
             self.set_query_interval(None)
         assert self.query_interval is not None
+        # TODO(tian): Optimize by binary search.
         while (self.request_timestamps and
                time.time() - self.request_timestamps[0] > self.query_interval):
             self.request_timestamps.popleft()
