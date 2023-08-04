@@ -167,10 +167,10 @@ class Kubernetes(clouds.Cloud):
 
     # TODO(romilb): Add GPU Support - toggle between image depending on chosen
     #  accelerator type.
-    IMAGE_CPU = ('us-central1-docker.pkg.dev/'
-                 'skypilot-375900/skypilotk8s/skypilot:latest')
-    IMAGE_GPU = ('us-central1-docker.pkg.dev/skypilot-375900/'
-                 'skypilotk8s/skypilot-gpu:latest')
+    IMAGE_CPU = 'us-central1-docker.pkg.dev/' \
+                'skypilot-375900/skypilotk8s/skypilot:latest'
+    IMAGE_GPU = 'us-central1-docker.pkg.dev/skypilot-375900/' \
+                'skypilotk8s/skypilot-gpu:latest'
 
     @classmethod
     def _cloud_unsupported_features(
