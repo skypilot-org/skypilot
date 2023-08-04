@@ -327,6 +327,8 @@ class Kubernetes(clouds.Cloud):
                 node_labels.update(node.metadata.labels.keys())
 
             # Check if the node labels contain any of the GPU label prefixes
+            # TODO(romilb): First read from config and if not configured, then
+            #  do auto-detection.
             if any(label.startswith(GKE_GPU_LABEL_PREFIX) for label in node_labels):
                 return GKE_GPU_LABEL_PREFIX
             elif any(label.startswith(EKS_GPU_LABEL_PREFIX) for label in node_labels):
