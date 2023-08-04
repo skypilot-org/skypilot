@@ -15,32 +15,13 @@ def get_replica_info() -> str:
     resp = requests.get(_CONTROL_PLANE_URL + '/control_plane/get_replica_info')
     if resp.status_code != 200:
         raise ValueError(f'Failed to get replica info: {resp.text}')
-    resp = base64.b64encode(pickle.dumps(resp)).decode('utf-8')
-    return common_utils.encode_payload(resp)
+    return common_utils.encode_payload(resp.json()['replica_info'])
 
 
 def load_replica_info(payload: str) -> List[Dict[str, Any]]:
     replica_info = common_utils.decode_payload(payload)
     replica_info = pickle.loads(base64.b64decode(replica_info))
-    decoded_info = []
-    for info in replica_info.json()['replica_info']:
-        decoded_info.append(
-            {k: pickle.loads(base64.b64decode(v)) for k, v in info.items()})
-    return decoded_info
-
-
-def get_replica_nums() -> str:
-    resp = requests.get(_CONTROL_PLANE_URL + '/control_plane/get_replica_nums')
-    if resp.status_code != 200:
-        raise ValueError(f'Failed to get replica nums: {resp.text}')
-    resp = base64.b64encode(pickle.dumps(resp)).decode('utf-8')
-    return common_utils.encode_payload(resp)
-
-
-def load_replica_nums(payload: str) -> Dict[str, str]:
-    replica_nums_resp = common_utils.decode_payload(payload)
-    replica_nums_resp = pickle.loads(base64.b64decode(replica_nums_resp))
-    return replica_nums_resp.json()
+    return replica_info
 
 
 def terminate_service() -> str:
@@ -69,14 +50,6 @@ class ServeCodeGen:
     def get_replica_info(cls) -> str:
         code = [
             'msg = serve_utils.get_replica_info()',
-            'print(msg, end="", flush=True)'
-        ]
-        return cls._build(code)
-
-    @classmethod
-    def get_replica_nums(cls) -> str:
-        code = [
-            'msg = serve_utils.get_replica_nums()',
             'print(msg, end="", flush=True)'
         ]
         return cls._build(code)

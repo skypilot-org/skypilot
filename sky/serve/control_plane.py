@@ -3,8 +3,10 @@
 Responsible for autoscaling and replica management.
 """
 import argparse
+import base64
 import fastapi
 import logging
+import pickle
 from typing import Optional
 import uvicorn
 
@@ -62,15 +64,10 @@ class ControlPlane:
 
         @self.app.get('/control_plane/get_replica_info')
         def get_replica_info():
-            return {'replica_info': self.infra_provider.get_replica_info()}
-
-        @self.app.get('/control_plane/get_replica_nums')
-        def get_replica_nums():
+            infos = self.infra_provider.get_replica_info()
             return {
-                'num_ready_replicas': self.infra_provider.ready_replica_num(),
-                'num_unhealthy_replicas':
-                    self.infra_provider.unhealthy_replica_num(),
-                'num_failed_replicas': self.infra_provider.failed_replica_num()
+                'replica_info': base64.b64encode(pickle.dumps(infos)
+                                                ).decode('utf-8')
             }
 
         @self.app.post('/control_plane/terminate')

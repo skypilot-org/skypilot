@@ -972,8 +972,8 @@ def serve_up(
     requested_resources = list(task.resources)[0]
     global_user_state.add_or_update_service(
         service_name, controller_cluster_name, '',
-        status_lib.ServiceStatus.CONTROLLER_INIT, 0, 0, 0, policy,
-        requested_resources)
+        status_lib.ServiceStatus.CONTROLLER_INIT, policy, requested_resources,
+        [])
     app_port = int(task.service.app_port)
     assert len(task.resources) == 1, task
     original_resources = list(task.resources)[0]
@@ -1077,8 +1077,8 @@ def serve_up(
 
         global_user_state.add_or_update_service(
             service_name, controller_cluster_name, endpoint,
-            status_lib.ServiceStatus.REPLICA_INIT, 0, 0, 0, policy,
-            requested_resources)
+            status_lib.ServiceStatus.REPLICA_INIT, policy, requested_resources,
+            [])
 
         print(f'{colorama.Style.BRIGHT}{colorama.Fore.CYAN}'
               'Gateway endpoint serving at '
@@ -1119,11 +1119,7 @@ def serve_down(
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name} does not exist.')
     controller_cluster_name = service_record['controller_cluster_name']
-    num_ready_replicas = service_record['num_ready_replicas']
-    num_unhealthy_replicas = service_record['num_unhealthy_replicas']
-    num_failed_replicas = service_record['num_failed_replicas']
-    num_replicas = (num_ready_replicas + num_unhealthy_replicas +
-                    num_failed_replicas)
+    num_replicas = len(service_record['replica_info'])
     global_user_state.set_service_status(service_name,
                                          status_lib.ServiceStatus.SHUTTING_DOWN)
     handle = global_user_state.get_handle_from_cluster_name(

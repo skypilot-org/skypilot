@@ -100,11 +100,9 @@ def create_table(cursor, conn):
         controller_cluster_name TEXT,
         endpoint TEXT,
         status TEXT,
-        num_ready_replicas INTEGER DEFAULT 0,
-        num_unhealthy_replicas INTEGER DEFAULT 0,
-        num_failed_replicas INTEGER DEFAULT 0,
         policy TEXT,
-        requested_resources BLOB)""")
+        requested_resources BLOB,
+        replica_info BLOB)""")
     # For backward compatibility.
     # TODO(zhwu): Remove this function after all users have migrated to
     # the latest version of SkyPilot.
@@ -287,14 +285,13 @@ def add_or_update_cluster(cluster_name: str,
 
 def add_or_update_service(
         name: str, controller_cluster_name: str, endpoint: str,
-        status: status_lib.ServiceStatus, num_ready_replicas: int,
-        num_unhealthy_replicas: int, num_failed_replicas, policy: str,
-        requested_resources: Optional['resources_lib.Resources']):
+        status: status_lib.ServiceStatus, policy: str,
+        requested_resources: Optional['resources_lib.Resources'],
+        replica_info: List[Dict[str, Any]]) -> None:
     _DB.cursor.execute(
         'INSERT or REPLACE INTO services'
         '(name, controller_cluster_name, endpoint, status, '
-        'num_ready_replicas, num_unhealthy_replicas, '
-        'num_failed_replicas, policy, requested_resources) '
+        'policy, requested_resources, replica_info) '
         'VALUES ('
         # name
         '?, '
@@ -304,15 +301,11 @@ def add_or_update_service(
         '?, '
         # status
         '?, '
-        # num_ready_replicas
-        '?, '
-        # num_unhealthy_replicas
-        '?, '
-        # num_failed_replicas
-        '?, '
         # policy
         '?, '
         # requested_resources
+        '?, '
+        # replica_info
         '?'
         ')',
         (
@@ -324,16 +317,11 @@ def add_or_update_service(
             endpoint,
             # status
             status.value,
-            # num_ready_replicas
-            num_ready_replicas,
-            # num_unhealthy_replicas
-            num_unhealthy_replicas,
-            # num_failed_replicas
-            num_failed_replicas,
             # policy
             policy,
             # requested_resources
             pickle.dumps(requested_resources),
+            pickle.dumps(replica_info),
         ))
 
     _DB.conn.commit()
@@ -624,20 +612,17 @@ def get_service_from_name(
         # Explicitly specify the number of fields to unpack, so that
         # we can add new fields to the database in the future without
         # breaking the previous code.
-        (name, controller_cluster_name, endpoint, status, num_ready_replicas,
-         num_unhealthy_replicas, num_failed_replicas, policy,
-         requested_resources) = row[:9]
+        (name, controller_cluster_name, endpoint, status, policy,
+         requested_resources, replica_info) = row[:7]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
             'controller_cluster_name': controller_cluster_name,
             'endpoint': endpoint,
             'status': status_lib.ServiceStatus[status],
-            'num_ready_replicas': num_ready_replicas,
-            'num_unhealthy_replicas': num_unhealthy_replicas,
-            'num_failed_replicas': num_failed_replicas,
             'policy': policy,
             'requested_resources': pickle.loads(requested_resources),
+            'replica_info': pickle.loads(replica_info),
         }
         return record
     return None
@@ -673,9 +658,8 @@ def get_services() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('select * from services').fetchall()
     records = []
     for row in rows:
-        (name, controller_cluster_name, endpoint, status, num_ready_replicas,
-         num_unhealthy_replicas, num_failed_replicas, policy,
-         requested_resources) = row[:9]
+        (name, controller_cluster_name, endpoint, status, policy,
+         requested_resources, replica_info) = row[:7]
         # TODO: use namedtuple instead of dict
 
         record = {
@@ -683,11 +667,9 @@ def get_services() -> List[Dict[str, Any]]:
             'controller_cluster_name': controller_cluster_name,
             'endpoint': endpoint,
             'status': status_lib.ServiceStatus[status],
-            'num_ready_replicas': num_ready_replicas,
-            'num_unhealthy_replicas': num_unhealthy_replicas,
-            'num_failed_replicas': num_failed_replicas,
             'policy': policy,
             'requested_resources': pickle.loads(requested_resources),
+            'replica_info': pickle.loads(replica_info),
         }
 
         records.append(record)

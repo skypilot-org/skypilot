@@ -86,16 +86,22 @@ _SERVICE_STATUS_TO_COLOR = {
 class ReplicaStatus(enum.Enum):
     """Replica status."""
 
-    # Replica is initializing
-    INIT = 'INIT'
+    # The replica VM is being provisioned. i.e., the `sky.launch` is still
+    # running.
+    PROVISIONING = 'PROVISIONING'
 
-    # Replica is running
+    # The replica VM is provisioned and the service is starting. This indicates
+    # user's `setup` section and `run` section is still running, and the
+    # readiness probe failed.
+    STARTING = 'STARTING'
+
+    # The replica VM is provisioned and the service is ready, i.e. the readiness
+    # probe passed.
     READY = 'READY'
 
-    # Replica is unhealthy (e.g., health probe failed)
-    UNHEALTHY = 'UNHEALTHY'
-
-    # Replica is failed
+    # Any error happened during the whole process. Replica will be deleted and
+    # **NOT** re-provisioned in the current design, since we want to avoid
+    # infinite loop of re-provisioning and failing every time.
     FAILED = 'FAILED'
 
     def colored_str(self):
@@ -104,8 +110,8 @@ class ReplicaStatus(enum.Enum):
 
 
 _REPLICA_STATUS_TO_COLOR = {
-    ReplicaStatus.INIT: colorama.Fore.BLUE,
+    ReplicaStatus.PROVISIONING: colorama.Fore.BLUE,
+    ReplicaStatus.STARTING: colorama.Fore.CYAN,
     ReplicaStatus.READY: colorama.Fore.GREEN,
-    ReplicaStatus.UNHEALTHY: colorama.Fore.YELLOW,
     ReplicaStatus.FAILED: colorama.Fore.RED,
 }

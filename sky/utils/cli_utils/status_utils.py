@@ -117,9 +117,6 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
                      _get_controller_cluster_name,
                      show_by_default=False),
         StatusColumn('ENDPOINT', _get_endpoint),
-        StatusColumn('#READY_REPLICAS', _get_ready_replicas),
-        StatusColumn('#UNHEALTHY_REPLICAS', _get_unhealthy_replicas),
-        StatusColumn('#FAILED_REPLICAS', _get_failed_replicas),
         StatusColumn('STATUS', _get_service_status_colored),
         StatusColumn('POLICY', _get_policy, show_by_default=False),
         StatusColumn('REQUESTED_RESOURCES',
@@ -146,11 +143,12 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
 
 def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
     status_columns = [
-        StatusColumn('NAME', _get_name),
+        StatusColumn('NAME', _get_cluster_name),
         StatusColumn('RESOURCES',
                      _get_resources,
                      trunc_length=70 if not show_all else 0),
         StatusColumn('REGION', _get_region),
+        StatusColumn('ZONE', _get_zone, show_by_default=False),
         StatusColumn('STATUS', _get_status_colored),
     ]
 
@@ -374,12 +372,7 @@ _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
 _get_controller_cluster_name = (
     lambda service_record: service_record['controller_cluster_name'])
 _get_endpoint = (lambda service_record: service_record['endpoint'])
-_get_ready_replicas = (
-    lambda service_record: service_record['num_ready_replicas'])
-_get_unhealthy_replicas = (
-    lambda service_record: service_record['num_unhealthy_replicas'])
-_get_failed_replicas = (
-    lambda service_record: service_record['num_failed_replicas'])
+_get_cluster_name = (lambda cluster_record: cluster_record['cluster_name'])
 _get_policy = (lambda service_record: service_record['policy'])
 _get_requested_resources = (
     lambda service_record: service_record['requested_resources'])

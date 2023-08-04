@@ -1,4 +1,5 @@
 """Util constants/functions for the backends."""
+import collections
 from datetime import datetime
 import difflib
 import enum
@@ -2413,6 +2414,16 @@ def get_clusters(
     return kept_records
 
 
+def _service_status_from_replica_info(
+        replica_info: List[Dict[str, Any]]) -> status_lib.ServiceStatus:
+    status2num = collections.Counter([i['status'] for i in replica_info])
+    if status2num[status_lib.ReplicaStatus.FAILED] > 0:
+        return status_lib.ServiceStatus.FAILED
+    if status2num[status_lib.ReplicaStatus.READY] > 0:
+        return status_lib.ServiceStatus.READY
+    return status_lib.ServiceStatus.REPLICA_INIT
+
+
 def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
     if service_name is None:
         service_records = global_user_state.get_services()
@@ -2435,56 +2446,26 @@ def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
         backend = get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
 
-        code = serve_lib.ServeCodeGen.get_replica_nums()
-        returncode, replica_nums_payload, stderr = backend.run_on_head(
+        code = serve_lib.ServeCodeGen.get_replica_info()
+        returncode, replica_info_payload, stderr = backend.run_on_head(
             handle,
             code,
             require_outputs=True,
             stream_logs=False,
             separate_stderr=True)
-        try:
-            subprocess_utils.handle_returncode(returncode,
-                                               code,
-                                               'Failed to fetch replica nums',
-                                               stderr,
-                                               stream_logs=False)
-        except exceptions.CommandError as e:
-            raise RuntimeError(e.error_msg) from e
-        replica_nums = serve_lib.load_replica_nums(replica_nums_payload)
-        record.update(replica_nums)
+        if returncode != 0:
+            logger.warning('Failed to refresh replica info from the '
+                           'controller. Use cached data which might outdated. '
+                           f'Reason: {stderr}')
+            continue
 
+        replica_info = serve_lib.load_replica_info(replica_info_payload)
         if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
-            # TODO(tian): Current behaviour for user bugs in setup section
-            # is to teardown and relaunching forever. We should have a way
-            # to detect such bugs and stop relaunching.
-            if record['num_failed_replicas'] > 0:
-                record['status'] = status_lib.ServiceStatus.FAILED
-            elif record['num_ready_replicas'] > 0:
-                record['status'] = status_lib.ServiceStatus.READY
-            elif record['num_unhealthy_replicas'] > 0:
-                record['status'] = status_lib.ServiceStatus.REPLICA_INIT
+            record['status'] = _service_status_from_replica_info(replica_info)
+        record['replica_info'] = replica_info
+
         global_user_state.add_or_update_service(**record)
 
-        if service_name is not None:
-            assert record['name'] == service_name
-            code = serve_lib.ServeCodeGen.get_replica_info()
-            returncode, replica_info_payload, stderr = backend.run_on_head(
-                handle,
-                code,
-                require_outputs=True,
-                stream_logs=False,
-                separate_stderr=True)
-            try:
-                subprocess_utils.handle_returncode(
-                    returncode,
-                    code,
-                    'Failed to fetch replica info',
-                    stderr,
-                    stream_logs=False)
-            except exceptions.CommandError as e:
-                raise RuntimeError(e.error_msg) from e
-            record['replica_info'] = serve_lib.load_replica_info(
-                replica_info_payload)
     return service_records
 
 

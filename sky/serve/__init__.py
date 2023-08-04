@@ -5,5 +5,4 @@ from sky.serve.constants import (CONTROLLER_PREFIX, CONTROLLER_TEMPLATE,
 from sky.serve.service_spec import SkyServiceSpec
 from sky.serve.serve_utils import ServeCodeGen
 from sky.serve.serve_utils import load_replica_info
-from sky.serve.serve_utils import load_replica_nums
 from sky.serve.serve_utils import load_terminate_service_result
