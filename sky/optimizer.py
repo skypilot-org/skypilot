@@ -258,6 +258,7 @@ class Optimizer:
                 launchable_resources = {list(node_resources)[0]: node_resources}
 
             num_resources = len(node.get_resources())
+
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
                     location_hint = ''
@@ -890,6 +891,9 @@ def _make_launchables_for_valid_region_zones(
     # on-demand instances in the same region regardless of the zones. On the
     # other hand, for spot instances, we do not batch the requests because the
     # "AWS" spot prices may vary across zones.
+    # For GCP, we do not batch the requests because GCP reservation system is
+    # zone based. Therefore, price estimation is potentially different across
+    # zones.
 
     # NOTE(woosuk): GCP does not support region-level provisioning APIs. Thus,
     # while we return per-region resources here, the provisioner will still
@@ -903,7 +907,8 @@ def _make_launchables_for_valid_region_zones(
     launchables = []
     regions = launchable_resources.get_valid_regions_for_launchable()
     for region in regions:
-        if launchable_resources.use_spot and region.zones is not None:
+        if launchable_resources.use_spot and region.zones is not None \
+            or isinstance(launchable_resources.cloud, clouds.GCP):
             # Spot instances.
             # Do not batch the per-zone requests.
             for zone in region.zones:

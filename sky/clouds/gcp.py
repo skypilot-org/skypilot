@@ -532,6 +532,16 @@ class GCP(clouds.Cloud):
         specific_reservations: List[str],
     ) -> int:
         assert zone is not None, 'GCP requires zone to get available reservations.'
+        reservations = self._list_reservations_for_instance_type_in_zone(
+            instance_type, zone)
+        return self._count_available_resources_for_reservations(
+            reservations, specific_reservations)
+
+    def _list_reservations_for_instance_type_in_zone(
+        self,
+        instance_type: str,
+        zone: Optional[str],
+    ) -> List[Dict]:
         list_reservations_cmd = (
             'gcloud compute reservations list '
             f'--filter="zone={zone} AND specificReservation.instanceProperties.machineType={instance_type} AND status=READY" '
@@ -549,13 +559,27 @@ class GCP(clouds.Cloud):
             stderr=stderr,
             stream_logs=True,
         )
-        reservations = json.loads(stdout)
+        return json.loads(stdout)
+
+    def _count_available_resources_for_reservations(
+        self,
+        reservations: List[dict],
+        specific_reservations: List[str],
+    ) -> int:
         return sum(
             int(r['specificReservation']['count']) -
             int(r['specificReservation']['inUseCount'])
             for r in reservations
-            if not r['specificReservationRequired'] or
-            r['selfLink'] in specific_reservations)
+            if self._is_reservation_usable(r, specific_reservations))
+
+    def _is_reservation_usable(
+        self,
+        reservation: dict,
+        specific_reservations: List[str],
+    ) -> bool:
+        return (not reservation['specificReservationRequired'] or
+                reservation_self_link_to_name(
+                    reservation['selfLink']) in specific_reservations)
 
     @classmethod
     def _find_application_key_path(cls) -> str:
@@ -1067,3 +1091,9 @@ class GCP(clouds.Cloud):
             error_msg=f'Failed to delete image {image_name!r}',
             stderr=stderr,
             stream_logs=True)
+
+
+def reservation_self_link_to_name(self_link: str) -> str:
+    """Converts a reservation self link to a reservation name."""
+    parts = self_link.split('/')
+    return '/'.join(parts[-6:-4] + parts[-2:])
