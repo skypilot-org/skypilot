@@ -2351,7 +2351,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         return None
 
     @property
-    def num_node_ips(self):
+    def num_node_ips(self) -> int:
+        """Returns number of IPs of the cluster, correctly handling TPU Pod."""
         is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(self.launched_resources)
         if is_tpu_vm_pod:
             num_ips = tpu_utils.get_num_tpu_devices(self.launched_resources)
