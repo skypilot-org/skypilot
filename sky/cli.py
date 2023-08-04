@@ -3816,7 +3816,7 @@ def serve():
                 required=True,
                 type=str,
                 **_get_shell_complete_args(_complete_file_name))
-@click.option('--service',
+@click.option('--service-name',
               '-s',
               default=None,
               type=str,
@@ -3830,7 +3830,7 @@ def serve():
               help='Skip confirmation prompt.')
 def serve_up(
     entrypoint: str,
-    service: Optional[str],
+    service_name: Optional[str],
     yes: bool,
 ):
     """Launches a SkyServe instance.
@@ -3843,9 +3843,12 @@ def serve_up(
 
         sky serve up service.yaml
     """
-    if service is None:
-        # TODO(tian): Check service name is unique.
-        service = backend_utils.generate_service_name()
+    if service_name is None:
+        service_name = backend_utils.generate_service_name()
+
+    if global_user_state.get_service_from_name(service_name) is not None:
+        click.secho(f'Service {service_name!r} already exists.', fg='red')
+        return
 
     shell_splits = shlex.split(entrypoint)
     yaml_file_provided = (len(shell_splits) == 1 and
@@ -3909,11 +3912,11 @@ def serve_up(
         return
 
     if not yes:
-        prompt = f'Launching a new service {service}. Proceed?'
+        prompt = f'Launching a new service {service_name}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.serve_up(task, service, entrypoint)
+    sky.serve_up(task, service_name)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
@@ -3923,35 +3926,53 @@ def serve_up(
               is_flag=True,
               required=False,
               help='Show all information in full.')
-@click.argument('service',
+@click.argument('service_name',
                 required=False,
                 type=str,
                 **_get_shell_complete_args(_complete_service_name))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def serve_status(all: bool, service: Optional[str]):
-    service_records = core.service_status(service)
+def serve_status(all: bool, service_name: Optional[str]):
+    """Show statuses of SkyServe services.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # Show status for all services
+      sky serve status
+      \b
+      # Show detailed status for all services
+      sky serve status -a
+      \b
+      # Show service status and replica status for a specific service
+      sky serve status my-service
+      \b
+      # Show detailed service status and replica status for a specific service
+      sky serve status my-service -a
+    """
+    service_records = core.service_status(service_name)
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Services'
                f'{colorama.Style.RESET_ALL}')
     status_utils.show_service_table(service_records, all)
-    if service is not None:
+    if service_name is not None:
         # If service not exist, we should already raise an error in
         # core.service_status.
         assert len(service_records) == 1, service_records
         service_record = service_records[0]
         if 'replica_info' not in service_record:
-            click.secho(f'Failed to refresh status of service: {service}.',
+            click.secho(f'Failed to refresh status of service: {service_name}.',
                         fg='red')
             return
-        click.echo(
-            f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Replicas of {service}'
-            f'{colorama.Style.RESET_ALL}')
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Replicas of {service_name}{colorama.Style.RESET_ALL}')
         status_utils.show_replica_table(service_record['replica_info'], all)
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
-@click.argument('service',
+@click.argument('service_name',
                 required=True,
+                type=str,
                 **_get_shell_complete_args(_complete_service_name))
 @click.option('--yes',
               '-y',
@@ -3966,7 +3987,7 @@ def serve_status(all: bool, service: Optional[str]):
               required=False,
               help='Ignore errors (if any). ')
 def serve_down(
-    service: str,
+    service_name: str,
     yes: bool,
     purge: bool,
 ):
@@ -3979,10 +4000,79 @@ def serve_down(
         sky serve down my-service
     """
     if not yes:
-        prompt = f'Tearing down service {service}. Proceed?'
+        prompt = f'Tearing down service {service_name}. Proceed?'
         click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.serve_down(service, purge)
+    sky.serve_down(service_name, purge)
+
+
+@serve.command('logs', cls=_DocumentedCodeCommand)
+@click.option(
+    '--follow/--no-follow',
+    is_flag=True,
+    default=True,
+    help=('Follow the logs of the job. [default: --follow] '
+          'If --no-follow is specified, print the log so far and exit.'))
+@click.option('--control-plane',
+              '-c',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Show the control plane logs of this service.')
+@click.option('--redirector',
+              '-r',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Show the redirector logs of this service.')
+@click.option('--replica-id',
+              '-i',
+              default=None,
+              required=False,
+              help='Show the logs of a specific replica.')
+@click.argument('service_name',
+                required=True,
+                type=str,
+                **_get_shell_complete_args(_complete_service_name))
+@usage_lib.entrypoint
+def serve_logs(
+    service_name: str,
+    follow: bool,
+    control_plane: bool,
+    redirector: bool,
+    replica_id: Optional[str],
+):
+    """Tail the log of a service.
+
+    Example:
+
+    .. code-block:: bash
+
+        # Tail the control plane logs of a service
+        sky serve logs -c [SERVICE_ID]
+        \b
+        # Print the redirector logs so far and exit
+        sky serve logs -r --no-follow [SERVICE_ID]
+    """
+    have_replica_id = replica_id is not None
+    if (control_plane + redirector + have_replica_id) != 1:
+        click.secho(
+            'Only one of --control-plane, --redirector, --replica-id '
+            'can be specified. See `sky serve logs --help` for more '
+            'information.',
+            fg='red')
+        return
+    service_record = global_user_state.get_service_from_name(service_name)
+    if service_record is None:
+        click.secho(f'Service {service_name!r} not found.', fg='red')
+        return
+    controller_name = service_record['controller_cluster_name']
+    if control_plane:
+        core.tail_logs(controller_name, job_id=1, follow=follow)
+    if redirector:
+        core.tail_logs(controller_name, job_id=2, follow=follow)
+    if have_replica_id:
+        raise NotImplementedError
 
 
 # ==============================

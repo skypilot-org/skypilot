@@ -158,6 +158,13 @@ def get_service_schema():
                     'readiness_timeout': {
                         'type': 'number',
                     },
+                    'post_data': {
+                        'anyOf': [{
+                            'type': 'string',
+                        }, {
+                            'type': 'object',
+                        }]
+                    }
                 }
             },
             'replica_policy': {

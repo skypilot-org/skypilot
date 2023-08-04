@@ -1,0 +1,34 @@
+#SkyPilot YAML to run stable diffusion web tool on 1 V100 GPU.
+
+resources:
+  cloud: gcp
+  accelerators: V100:1
+
+service:
+  port: 7860
+  readiness_probe:
+    path: /
+    readiness_timeout: 1200
+  replica_policy:
+    min_replica: 2
+
+file_mounts:
+  /stable_diffusion: examples/stable_diffusion
+
+setup: |
+  sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+  sudo chmod +x /usr/local/bin/docker-compose
+  cd stable-diffusion-webui-docker  
+  sudo rm -r stable-diffusion-webui-docker
+  git clone https://github.com/AbdBarho/stable-diffusion-webui-docker.git
+  cd stable-diffusion-webui-docker
+  git reset --hard 0d8b7d4ac8f9ba99e041ca332547eab9d65e6360
+  wget https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt -P models
+  mv models/sd-v1-4.ckpt models/model.ckpt
+  docker pull berkeleyskypilot/stable-diffusion
+  rm docker-compose.yml
+  cp /stable_diffusion/docker-compose.yml .
+
+run: |
+  cd stable-diffusion-webui-docker
+  docker-compose up

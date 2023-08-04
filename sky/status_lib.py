@@ -61,9 +61,9 @@ class ServiceStatus(enum.Enum):
     REPLICA_INIT = 'REPLICA_INIT'
 
     # At least one replica is ready
-    RUNNING = 'RUNNING'
+    READY = 'READY'
 
-    # Service is being stopped
+    # Service is being shutting down
     SHUTTING_DOWN = 'SHUTTING_DOWN'
 
     # At least one replica is failed
@@ -77,9 +77,35 @@ class ServiceStatus(enum.Enum):
 _SERVICE_STATUS_TO_COLOR = {
     ServiceStatus.CONTROLLER_INIT: colorama.Fore.BLUE,
     ServiceStatus.REPLICA_INIT: colorama.Fore.BLUE,
-    ServiceStatus.RUNNING: colorama.Fore.GREEN,
+    ServiceStatus.READY: colorama.Fore.GREEN,
     ServiceStatus.SHUTTING_DOWN: colorama.Fore.YELLOW,
     ServiceStatus.FAILED: colorama.Fore.RED,
 }
 
-# TODO(tian): Add status for replicas to distinguish 'skypilot UP' and 'health probe succeeded'
+
+class ReplicaStatus(enum.Enum):
+    """Replica status."""
+
+    # Replica is initializing
+    INIT = 'INIT'
+
+    # Replica is running
+    READY = 'READY'
+
+    # Replica is unhealthy (e.g., health probe failed)
+    UNHEALTHY = 'UNHEALTHY'
+
+    # Replica is failed
+    FAILED = 'FAILED'
+
+    def colored_str(self):
+        color = _REPLICA_STATUS_TO_COLOR[self]
+        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
+
+_REPLICA_STATUS_TO_COLOR = {
+    ReplicaStatus.INIT: colorama.Fore.BLUE,
+    ReplicaStatus.READY: colorama.Fore.GREEN,
+    ReplicaStatus.UNHEALTHY: colorama.Fore.YELLOW,
+    ReplicaStatus.FAILED: colorama.Fore.RED,
+}
