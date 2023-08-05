@@ -1,12 +1,35 @@
-"""AWS cloud adaptors"""
+"""AWS cloud adaptors
+
+Thread safety notes:
+
+The results of session(), resource(), and client() are cached by each thread
+in a thread.local() storage. This means using their results is completely
+thread-safe.
+
+Calling them is thread-safe too, since they use a lock to protect
+each object's first creation.
+
+This is informed by the following boto3 docs:
+- Unlike Resources and Sessions, clients are generally thread-safe.
+  https://boto3.amazonaws.com/v1/documentation/api/latest/guide/clients.html
+- Resource instances are not thread safe and should not be shared across
+  threads or processes
+  https://boto3.amazonaws.com/v1/documentation/api/latest/guide/resources.html
+- Similar to Resource objects, Session objects are not thread safe and
+  should not be shared across threads and processes.
+  https://boto3.amazonaws.com/v1/documentation/api/latest/guide/session.html
+"""
 
 # pylint: disable=import-outside-toplevel
 
 import functools
+import logging
 import threading
 import time
 
 from sky.utils import common_utils
+
+logger = logging.getLogger(__name__)
 
 boto3 = None
 botocore = None
@@ -63,6 +86,7 @@ def session():
         except (botocore_exceptions().CredentialRetrievalError,
                 botocore_exceptions().NoCredentialsError) as e:
             time.sleep(backoff.current_backoff())
+            logger.info(f'Retry creating AWS session due to {e}.')
             err = e
             attempt += 1
     raise err
@@ -72,11 +96,8 @@ def session():
 def resource(service_name: str, **kwargs):
     """Create an AWS resource of a certain service.
 
-    It is relatively fast to create a resource from the session (<1s), so we
-    don't need to cache the resource object.
-
     Args:
-        resource_name: AWS resource name (e.g., 's3').
+        service_name: AWS resource name (e.g., 's3').
         kwargs: Other options.
     """
     if not hasattr(_local, 'resource'):
