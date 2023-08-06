@@ -384,8 +384,10 @@ def _execute(
             env = dict(os.environ,
                        **{env_options.Options.DISABLE_LOGGING.value: '1'})
             subprocess_utils.run('sky status --no-show-spot-jobs', env=env)
-        print()
-        print('\x1b[?25h', end='')  # Show cursor.
+        if (cluster_name is None or
+                not cluster_name.startswith(serve.CONTROLLER_PREFIX)):
+            print()
+            print('\x1b[?25h', end='')  # Show cursor.
 
 
 @timeline.event
@@ -972,7 +974,7 @@ def serve_up(
     assert len(task.resources) == 1
     requested_resources = list(task.resources)[0]
     global_user_state.add_or_update_service(
-        service_name, controller_cluster_name, '',
+        service_name, None, controller_cluster_name, '',
         status_lib.ServiceStatus.CONTROLLER_INIT, policy, requested_resources,
         [])
     app_port = int(task.service.app_port)
@@ -1079,12 +1081,11 @@ def serve_up(
         print(f'{colorama.Fore.GREEN}Redirector process is running.'
               f'{colorama.Style.RESET_ALL}')
 
-        global_user_state.add_or_update_service(
-            service_name, controller_cluster_name, endpoint,
-            status_lib.ServiceStatus.REPLICA_INIT, policy, requested_resources,
-            [])
+        global_user_state.set_service_status(
+            service_name, status_lib.ServiceStatus.REPLICA_INIT)
+        global_user_state.set_service_endpoint(service_name, endpoint)
 
-        print(f'{colorama.Fore.CYAN}Service name: '
+        print(f'\n{colorama.Fore.CYAN}Service name: '
               f'{colorama.Style.BRIGHT}{service_name}{colorama.Style.RESET_ALL}'
               '\nTo see detailed info about replicas:'
               f'\t{backend_utils.BOLD}sky serve status {service_name} (-a)'

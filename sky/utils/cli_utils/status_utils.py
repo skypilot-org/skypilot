@@ -113,6 +113,7 @@ def show_status_table(cluster_records: List[_ClusterRecord],
 def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
     status_columns = [
         StatusColumn('NAME', _get_name),
+        StatusColumn('UPTIME', _get_uptime),
         StatusColumn('CONTROLLER_CLUSTER_NAME',
                      _get_controller_cluster_name,
                      show_by_default=False),
@@ -376,6 +377,8 @@ _get_controller_cluster_name = (
 _get_policy = (lambda service_record: service_record['policy'])
 _get_requested_resources = (
     lambda service_record: service_record['requested_resources'])
+_get_uptime = (lambda service_record: log_utils.readable_time_duration(
+    service_record['launched_at'], absolute=True))
 
 
 def _get_endpoint(service_record: _ServiceRecord) -> str:
