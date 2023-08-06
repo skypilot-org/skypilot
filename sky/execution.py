@@ -1177,8 +1177,8 @@ def serve_down(
         if not purge:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Cannot find controller cluster {controller_cluster_name}. '
-                    'It is likely due to manually `sky down` the controller. '
+                    f'Cannot find controller cluster {controller_cluster_name}.'
+                    ' It is likely due to manually `sky down` the controller. '
                     'Please login to the cloud console and make sure the '
                     'replica VMs are properly cleaned.')
 

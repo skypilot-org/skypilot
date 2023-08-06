@@ -143,6 +143,7 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
 
 def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
     status_columns = [
+        StatusColumn('REPLICA_ID', _get_replica_id),
         StatusColumn('NAME', _get_name),
         StatusColumn('RESOURCES',
                      _get_replica_resources,
@@ -369,12 +370,19 @@ _get_region = (
 _get_command = (lambda cluster_record: cluster_record['last_use'])
 _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
+_get_replica_id = lambda service_record: service_record['replica_id']
 _get_controller_cluster_name = (
     lambda service_record: service_record['controller_cluster_name'])
-_get_endpoint = (lambda service_record: service_record['endpoint'])
 _get_policy = (lambda service_record: service_record['policy'])
 _get_requested_resources = (
     lambda service_record: service_record['requested_resources'])
+
+
+def _get_endpoint(service_record: _ServiceRecord) -> str:
+    endpoint = service_record['endpoint']
+    if not endpoint:
+        return '-'
+    return endpoint
 
 
 def _get_service_status(

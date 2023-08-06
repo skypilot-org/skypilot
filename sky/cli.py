@@ -4027,8 +4027,8 @@ def serve_down(
               help='Show the redirector logs of this service.')
 @click.option('--replica-id',
               '-i',
-              default=None,
               required=False,
+              type=int,
               help='Show the logs of a specific replica.')
 @click.argument('service_name',
                 required=True,
@@ -4040,7 +4040,7 @@ def serve_logs(
     follow: bool,
     control_plane: bool,
     redirector: bool,
-    replica_id: Optional[str],
+    replica_id: int,
 ):
     """Tail the log of a service.
 
@@ -4053,6 +4053,9 @@ def serve_logs(
         \b
         # Print the redirector logs so far and exit
         sky serve logs -r --no-follow [SERVICE_ID]
+        \b
+        # Tail the logs of replica 1
+        sky serve logs -i 1 [SERVICE_ID]
     """
     have_replica_id = replica_id is not None
     if (control_plane + redirector + have_replica_id) != 1:
@@ -4069,10 +4072,10 @@ def serve_logs(
     controller_name = service_record['controller_cluster_name']
     if control_plane:
         core.tail_logs(controller_name, job_id=1, follow=follow)
-    if redirector:
+    elif redirector:
         core.tail_logs(controller_name, job_id=2, follow=follow)
-    if have_replica_id:
-        raise NotImplementedError
+    else:
+        core.serve_tail_logs(service_name, replica_id, follow=follow)
 
 
 # ==============================

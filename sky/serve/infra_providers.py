@@ -15,6 +15,7 @@ import sky
 from sky import backends
 from sky import core
 from sky import status_lib
+from sky.serve import serve_utils
 from sky.skylet import job_lib
 from sky import global_user_state
 
@@ -112,7 +113,8 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    def __init__(self, cluster_name: str) -> None:
+    def __init__(self, replica_id: int, cluster_name: str) -> None:
+        self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
         self.first_not_ready_time: Optional[float] = None
         self.consecutive_failure_cnt: int = 0
@@ -141,6 +143,7 @@ class ReplicaInfo:
 
     def to_info_dict(self) -> Dict[str, Any]:
         return {
+            'replica_id': self.replica_id,
             'name': self.cluster_name,
             'status': self.status,
             'handle': self.handle,
@@ -200,12 +203,12 @@ class InfraProvider:
 class SkyPilotInfraProvider(InfraProvider):
     """Infra provider for SkyPilot clusters."""
 
-    def __init__(self, task_yaml_path: str, cluster_name_prefix: str, *args,
+    def __init__(self, task_yaml_path: str, service_name: str, *args,
                  **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.task_yaml_path: str = task_yaml_path
-        self.cluster_name_prefix: str = cluster_name_prefix + '-'
-        self.id_counter: int = 1
+        self.service_name: str = service_name
+        self.next_replica_id: int = 1
         self.launch_process_pool: Dict[str, multiprocessing.Process] = dict()
         self.down_process_pool: Dict[str, multiprocessing.Process] = dict()
 
@@ -308,11 +311,14 @@ class SkyPilotInfraProvider(InfraProvider):
                 ready_replicas.add(info.ip)
         return ready_replicas
 
-    def _launch_cluster(self, cluster_name: str, task: sky.Task) -> None:
+    def _launch_cluster(self, replica_id: int, task: sky.Task) -> None:
+        cluster_name = serve_utils.generate_replica_cluster_name(
+            self.service_name, replica_id)
         if cluster_name in self.launch_process_pool:
             logger.warning(f'Launch process for cluster {cluster_name} '
                            'already exists. Skipping.')
             return
+        logger.info(f'Creating SkyPilot cluster {cluster_name}')
         p = multiprocessing.Process(target=sky.launch,
                                     args=(task,),
                                     kwargs={
@@ -324,16 +330,14 @@ class SkyPilotInfraProvider(InfraProvider):
         self.launch_process_pool[cluster_name] = p
         p.start()
         assert cluster_name not in self.replica_info
-        self.replica_info[cluster_name] = ReplicaInfo(cluster_name)
+        self.replica_info[cluster_name] = ReplicaInfo(replica_id, cluster_name)
 
     def _scale_up(self, n: int) -> None:
         # Launch n new clusters
         task = sky.Task.from_yaml(self.task_yaml_path)
         for _ in range(0, n):
-            cluster_name = f'{self.cluster_name_prefix}{self.id_counter}'
-            logger.info(f'Creating SkyPilot cluster {cluster_name}')
-            self._launch_cluster(cluster_name, task)
-            self.id_counter += 1
+            self._launch_cluster(self.next_replica_id, task)
+            self.next_replica_id += 1
 
     def scale_up(self, n: int) -> None:
         self._scale_up(n)

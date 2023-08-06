@@ -115,6 +115,25 @@ def service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
 
 
 @usage_lib.entrypoint
+def serve_tail_logs(service_name: str, replica_id: int, follow: bool) -> None:
+    service_record = service_status(service_name)[0]
+    if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_INIT:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Service {service_name!r} is still initializing its '
+                'controller. Please try again later.')
+    controller_cluster_name = service_record['controller_cluster_name']
+    handle = global_user_state.get_handle_from_cluster_name(
+        controller_cluster_name)
+    if handle is None:
+        raise ValueError(f'Cannot find controller for service {service_name}.')
+    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend), backend
+    backend.tail_serve_logs(handle, service_name, replica_id, follow=follow)
+
+
+@usage_lib.entrypoint
 def cost_report() -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
