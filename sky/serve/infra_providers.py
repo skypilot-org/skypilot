@@ -59,7 +59,11 @@ class ReplicaStatusProperty:
         self.sky_down_status: Optional[ProcessStatus] = None
 
     def should_cleanup_after_teardown(self) -> bool:
-        return self.service_ready_now
+        if self.sky_launch_status != ProcessStatus.SUCCESS:
+            return False
+        if self.user_app_failed:
+            return False
+        return self.service_once_ready
 
     def should_track_status(self) -> bool:
         if self.sky_launch_status != ProcessStatus.SUCCESS:
@@ -248,20 +252,19 @@ class SkyPilotInfraProvider(InfraProvider):
                                 info.status_property.sky_launch_status = (
                                     ProcessStatus.SUCCESS)
                             else:
+                                # Failed replica still count as a replica.
+                                # In our current design, we want to fail
+                                # early if user code have any error. This
+                                # will prevent infinite loop of teardown
+                                # and re-provision.
+                                info.status_property.sky_down_status = (
+                                    ProcessStatus.SUCCESS)
                                 if (info.status_property.
                                         should_cleanup_after_teardown()):
                                     # This means the cluster is deleted due to
                                     # a scale down. Delete the replica info
                                     # so it won't count as a replica.
                                     del self.replica_info[cluster_name]
-                                else:
-                                    # Failed replica still count as a replica.
-                                    # In our current design, we want to fail
-                                    # early if user code have any error. This
-                                    # will prevent infinite loop of teardown
-                                    # and re-provision.
-                                    info.status_property.sky_down_status = (
-                                        ProcessStatus.SUCCESS)
             time.sleep(_PROCESS_POOL_REFRESH_INTERVAL)
 
     def _start_refresh_process_pool(self) -> None:
