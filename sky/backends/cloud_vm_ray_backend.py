@@ -2785,7 +2785,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             auth_config = common_utils.read_yaml(handle.cluster_yaml)['auth']
             backend_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
                                                       ip_list, auth_config,
-                                                      ssh_port_list)
+                                                      ssh_port_list,
+                                                      handle.docker_user)
 
             common_utils.remove_file_if_exists(lock_path)
 
@@ -3791,7 +3792,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         auth_config = config['auth']
         backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name,
                                                      handle.head_ip,
-                                                     auth_config)
+                                                     auth_config,
+                                                     handle.docker_user)
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
