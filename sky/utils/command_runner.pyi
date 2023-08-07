@@ -44,7 +44,7 @@ class SSHCommandRunner:
                  ssh_user: str,
                  ssh_private_key: str,
                  ssh_control_name: Optional[str] = ...,
-                 port: int = ...,
+                 port: str = ...,
                  docker_user: Optional[str] = ...) -> None:
         ...
 

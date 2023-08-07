@@ -163,6 +163,8 @@ class Kubernetes(clouds.Cloud):
                                                              'tiers are not '
                                                              'supported in '
                                                              'Kubernetes.',
+        clouds.CloudImplementationFeatures.NATIVE_DOCKER_SUPPORT:
+            ('Native docker is not supported in Kubernetes. ')
     }
 
     IMAGE = 'us-central1-docker.pkg.dev/' \

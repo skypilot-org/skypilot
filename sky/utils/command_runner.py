@@ -173,6 +173,8 @@ class SSHCommandRunner:
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
         if docker_user is not None:
+            assert port is None or port == 22, (
+                f'port must be None or 22 for docker_user, got {port}.')
             self.ip = 'localhost'
             self.ssh_user = docker_user
             self.port = constants.DEFAULT_DOCKER_PORT
@@ -196,10 +198,7 @@ class SSHCommandRunner:
         docker_user: Optional[str] = None,
     ) -> List['SSHCommandRunner']:
         """Helper function for creating runners with the same ssh credentials"""
-        if docker_user is not None:
-            assert port_list is None
-            port_list = [None] * len(ip_list)
-        elif not port_list:
+        if not port_list:
             port_list = [22] * len(ip_list)
         return [
             SSHCommandRunner(ip, ssh_user, ssh_private_key, ssh_control_name,
