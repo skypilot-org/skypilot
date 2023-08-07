@@ -7,5 +7,7 @@ resources:
     - {{port}}
 {%- endfor %}
 
+setup: pip install skypilot[serve]
+
 file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}
