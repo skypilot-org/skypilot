@@ -52,6 +52,8 @@ class OCI(clouds.Cloud):
                 (f'Native docker is not supported in {cls._REPR}. '
                  'You can try running docker command inside the '
                  '`run` section in task.yaml.'),
+            clouds.CloudImplementationFeatures.OPEN_PORTS:
+                (f'Opening ports is not supported in {cls._REPR}.'),
         }
 
     @classmethod

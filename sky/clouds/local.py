@@ -38,6 +38,8 @@ class Local(clouds.Cloud):
             ('Native docker is not supported in Local. '
              'You can try running docker command inside the '
              '`run` section in task.yaml.'),
+        clouds.CloudImplementationFeatures.OPEN_PORTS:
+            ('Opening ports is not supported for Local.'),
     }
 
     @classmethod

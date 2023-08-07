@@ -31,6 +31,7 @@ class CloudImplementationFeatures(enum.Enum):
     NATIVE_DOCKER_SUPPORT = 'native_docker_support'
     SPOT_INSTANCE = 'spot_instance'
     CUSTOM_DISK_TIER = 'custom_disk_tier'
+    OPEN_PORTS = 'open_ports'
 
 
 class Region(collections.namedtuple('Region', ['name'])):

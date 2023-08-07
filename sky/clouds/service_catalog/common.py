@@ -67,7 +67,7 @@ def read_catalog(filename: str,
     """
     assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
     assert (pull_frequency_hours is None or
-            pull_frequency_hours > 0), pull_frequency_hours
+            pull_frequency_hours >= 0), pull_frequency_hours
     catalog_path = get_catalog_path(filename)
     cloud = cloud_lib.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
 

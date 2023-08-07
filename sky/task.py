@@ -484,6 +484,8 @@ class Task:
             return clouds.AWS()
         elif self.inputs.startswith('gs:'):
             return clouds.GCP()
+        elif self.inputs.startswith('cos:'):
+            return clouds.IBM()
         else:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'cloud path not supported: {self.inputs}')
@@ -820,6 +822,19 @@ class Task:
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
+                elif store_type is storage_lib.StoreType.IBM:
+                    if isinstance(storage.source,
+                                  str) and storage.source.startswith('cos://'):
+                        # source is a cos bucket's uri
+                        blob_path = storage.source
+                    else:
+                        # source is a bucket name.
+                        assert storage.name is not None, storage
+                        # extract region from rclone.conf
+                        cos_region = data_utils.Rclone.get_region_from_rclone(
+                            storage.name, data_utils.Rclone.RcloneClouds.IBM)
+                        blob_path = f'cos://{cos_region}/{storage.name}'
+                    self.update_file_mounts({mnt_path: blob_path})
                 elif store_type is storage_lib.StoreType.AZURE:
                     # TODO when Azure Blob is done: sync ~/.azure
                     raise NotImplementedError('Azure Blob not mountable yet')

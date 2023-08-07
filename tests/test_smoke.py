@@ -25,6 +25,7 @@
 import hashlib
 import inspect
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -41,12 +42,15 @@ import pytest
 
 import sky
 from sky import global_user_state
-from sky.data import storage as storage_lib
+from sky.adaptors import ibm
 from sky.adaptors import cloudflare
+from sky.clouds import AWS, GCP, Azure
+from sky.data import data_utils
+from sky.data import storage as storage_lib
+from sky.data.data_utils import Rclone
 from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
-from sky.clouds import AWS, GCP, Azure
 
 # For uniquefying users on shared-account cloud providers. Used as part of the
 # cluster names.
@@ -866,6 +870,35 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
         run_one_test(test)
 
 
+@pytest.mark.ibm
+def test_ibm_storage_mounts():
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
+        storage_name, Rclone.RcloneClouds.IBM)
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_ibm_cos_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud ibm {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'rclone ls {bucket_rclone_profile}:{storage_name}/hello.txt',
+        ]
+        test = Test(
+            'ibm_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
 # ---------- CLI logs ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_logs instead.
 def test_cli_logs(generic_cloud: str):
@@ -1351,6 +1384,40 @@ def test_multi_hostname(generic_cloud: str):
             f'sky logs {name} 1 | grep "My hostname:" | wc -l | grep 2',  # Ensure there are 2 hosts.
             f'sky exec {name} examples/multi_hostname.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Web apps with custom ports on GCP. ----------
+@pytest.mark.gcp
+def test_gcp_http_server_with_custom_ports():
+    name = _get_cluster_name()
+    test = Test(
+        'gcp_http_server_with_custom_ports',
+        [
+            f'sky launch -y -d -c {name} --cloud gcp examples/http_server_with_custom_ports/task.yaml',
+            'sleep 10',
+            'ip=$(grep -A1 "Host ' + name +
+            '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Web apps with custom ports on AWS. ----------
+@pytest.mark.aws
+def test_aws_http_server_with_custom_ports():
+    name = _get_cluster_name()
+    test = Test(
+        'aws_http_server_with_custom_ports',
+        [
+            f'sky launch -y -d -c {name} --cloud aws examples/http_server_with_custom_ports/task.yaml',
+            'sleep 10',
+            'ip=$(grep -A1 "Host ' + name +
+            '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
         ],
         f'sky down -y {name}',
     )
@@ -2195,7 +2262,7 @@ def test_spot_tpu():
             f'sky spot launch -n {name} examples/tpu/tpuvm_mnist.yaml -y -d',
             'sleep 5',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep STARTING',
-            'sleep 720',  # TPU takes a while to launch
+            'sleep 840',  # TPU takes a while to launch
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         _SPOT_CANCEL_WAIT.format(job_name=name),
@@ -2237,6 +2304,23 @@ def test_inline_env(generic_cloud: str):
             f'sky launch -c {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
             f'sky logs {name} 1 --status',
             f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Testing env file ----------
+def test_inline_env_file(generic_cloud: str):
+    """Test env"""
+    name = _get_cluster_name()
+    test = Test(
+        'test-inline-env-file',
+        [
+            f'sky launch -c {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} --env-file examples/sample_dotenv "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
@@ -2477,6 +2561,115 @@ class TestStorageWithCredentials:
         'abc_',  # ends with an underscore
     ]
 
+    IBM_INVALID_NAMES = [
+        'ab',  # less than 3 characters
+        'abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz1',
+        # more than 63 characters
+        'Abcdef',  # contains an uppercase letter
+        'abc def',  # contains a space
+        'abc..def',  # two adjacent periods
+        '192.168.5.4',  # formatted as an IP address
+        'xn--bucket',  # starts with 'xn--' prefix
+        '.abc',  # starts with a dot
+        'abc.',  # ends with a dot
+        '-abc',  # starts with a hyphen
+        'abc-',  # ends with a hyphen
+        'a.-bc',  # contains the sequence '.-'
+        'a-.bc',  # contains the sequence '-.'
+        'a&bc'  # contains special characters
+        'ab^c'  # contains special characters
+    ]
+    GITIGNORE_SYNC_TEST_DIR_STRUCTURE = {
+        'double_asterisk': {
+            'double_asterisk_excluded': None,
+            'double_asterisk_excluded_dir': {
+                'dir_excluded': None,
+            },
+        },
+        'double_asterisk_parent': {
+            'parent': {
+                'also_excluded.txt': None,
+                'child': {
+                    'double_asterisk_parent_child_excluded.txt': None,
+                },
+                'double_asterisk_parent_excluded.txt': None,
+            },
+        },
+        'excluded.log': None,
+        'excluded_dir': {
+            'excluded.txt': None,
+            'nested_excluded': {
+                'excluded': None,
+            },
+        },
+        'exp-1': {
+            'be_excluded': None,
+        },
+        'exp-2': {
+            'be_excluded': None,
+        },
+        'front_slash_excluded': None,
+        'included.log': None,
+        'included.txt': None,
+        'include_dir': {
+            'excluded.log': None,
+            'included.log': None,
+        },
+        'nested_double_asterisk': {
+            'one': {
+                'also_exclude.txt': None,
+            },
+            'two': {
+                'also_exclude.txt': None,
+            },
+        },
+        'nested_wildcard_dir': {
+            'monday': {
+                'also_exclude.txt': None,
+            },
+            'tuesday': {
+                'also_exclude.txt': None,
+            },
+        },
+        'no_slash_excluded': None,
+        'no_slash_tests': {
+            'no_slash_excluded': {
+                'also_excluded.txt': None,
+            },
+        },
+        'question_mark': {
+            'excluded1.txt': None,
+            'excluded@.txt': None,
+        },
+        'square_bracket': {
+            'excluded1.txt': None,
+        },
+        'square_bracket_alpha': {
+            'excludedz.txt': None,
+        },
+        'square_bracket_excla': {
+            'excluded2.txt': None,
+            'excluded@.txt': None,
+        },
+        'square_bracket_single': {
+            'excluded0.txt': None,
+        },
+    }
+
+    @staticmethod
+    def create_dir_structure(base_path, structure):
+        # creates a given file STRUCTURE in BASE_PATH
+        for name, substructure in structure.items():
+            path = os.path.join(base_path, name)
+            if substructure is None:
+                # Create a file
+                open(path, 'a').close()
+            else:
+                # Create a subdirectory
+                os.mkdir(path)
+                TestStorageWithCredentials.create_dir_structure(
+                    path, substructure)
+
     @staticmethod
     def cli_delete_cmd(store_type, bucket_name):
         if store_type == storage_lib.StoreType.S3:
@@ -2484,11 +2677,16 @@ class TestStorageWithCredentials:
             return f'aws s3 rb {url} --force'
         if store_type == storage_lib.StoreType.GCS:
             url = f'gs://{bucket_name}'
-            return f'gsutil -m rm -r {url}'
+            gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+            return f'{alias_gen}; {gsutil_alias} rm -r {url}'
         if store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
+        if store_type == storage_lib.StoreType.IBM:
+            bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
+                bucket_name, Rclone.RcloneClouds.IBM)
+            return f'rclone purge {bucket_rclone_profile}:{bucket_name} && rclone config delete {bucket_rclone_profile}'
 
     @staticmethod
     def cli_ls_cmd(store_type, bucket_name, suffix=''):
@@ -2511,6 +2709,39 @@ class TestStorageWithCredentials:
             else:
                 url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
+        if store_type == storage_lib.StoreType.IBM:
+            bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
+                bucket_name, Rclone.RcloneClouds.IBM)
+            return f'rclone ls {bucket_rclone_profile}:{bucket_name}/{suffix}'
+
+    @staticmethod
+    def cli_count_name_in_bucket(store_type, bucket_name, file_name, suffix=''):
+        if store_type == storage_lib.StoreType.S3:
+            if suffix:
+                return f'aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)"'
+            else:
+                return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)"'
+        elif store_type == storage_lib.StoreType.GCS:
+            if suffix:
+                return f'gsutil ls -r gs://{bucket_name}/{suffix} | grep "{file_name}" | wc -l'
+            else:
+                return f'gsutil ls -r gs://{bucket_name} | grep "{file_name}" | wc -l'
+        elif store_type == storage_lib.StoreType.R2:
+            endpoint_url = cloudflare.create_endpoint()
+            if suffix:
+                return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=r2'
+            else:
+                return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=r2'
+
+    @staticmethod
+    def cli_count_file_in_bucket(store_type, bucket_name):
+        if store_type == storage_lib.StoreType.S3:
+            return f'aws s3 ls s3://{bucket_name} --recursive | wc -l'
+        elif store_type == storage_lib.StoreType.GCS:
+            return f'gsutil ls -r gs://{bucket_name}/** | wc -l'
+        elif store_type == storage_lib.StoreType.R2:
+            endpoint_url = cloudflare.create_endpoint()
+            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile=r2 | wc -l'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -2625,6 +2856,37 @@ class TestStorageWithCredentials:
                                              mode=storage_lib.StorageMode.COPY)
 
     @pytest.fixture
+    def tmp_gitignore_storage_obj(self, tmp_bucket_name, gitignore_structure):
+        # Creates a temporary storage object for testing .gitignore filter.
+        # GITIGINORE_STRUCTURE is representing a file structure in a dictionary
+        # foramt. Created storage object will contain the file structure along
+        # with .gitignore and .git/info/exclude files to test exclude filter.
+        # Stores must be added in the test.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Creates file structure to be uploaded in the Storage
+            self.create_dir_structure(tmpdir, gitignore_structure)
+
+            # Create .gitignore and list files/dirs to be excluded in it
+            skypilot_path = os.path.dirname(os.path.dirname(sky.__file__))
+            temp_path = f'{tmpdir}/.gitignore'
+            file_path = os.path.join(skypilot_path, 'tests/gitignore_test')
+            shutil.copyfile(file_path, temp_path)
+
+            # Create .git/info/exclude and list files/dirs to be excluded in it
+            temp_path = f'{tmpdir}/.git/info/'
+            os.makedirs(temp_path)
+            temp_exclude_path = os.path.join(temp_path, 'exclude')
+            file_path = os.path.join(skypilot_path,
+                                     'tests/git_info_exclude_test')
+            shutil.copyfile(file_path, temp_exclude_path)
+
+            # Create sky Storage with the files created
+            yield from self.yield_storage_object(
+                name=tmp_bucket_name,
+                source=tmpdir,
+                mode=storage_lib.StorageMode.COPY)
+
+    @pytest.fixture
     def tmp_awscli_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using awscli
         subprocess.check_call(['aws', 's3', 'mb', f's3://{tmp_bucket_name}'])
@@ -2652,6 +2914,13 @@ class TestStorageWithCredentials:
             shell=True)
 
     @pytest.fixture
+    def tmp_ibm_cos_bucket(self, tmp_bucket_name):
+        # Creates a temporary bucket using IBM COS API
+        storage_obj = storage_lib.IBMCosStore(source="", name=tmp_bucket_name)
+        yield tmp_bucket_name
+        storage_obj.delete()
+
+    @pytest.fixture
     def tmp_public_storage_obj(self, request):
         # Initializes a storage object with a public bucket
         storage_obj = storage_lib.Storage(source=request.param)
@@ -2661,6 +2930,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
@@ -2684,7 +2954,8 @@ class TestStorageWithCredentials:
     @pytest.mark.xdist_group('multiple_bucket_deletion')
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm)
     ])
     def test_multiple_buckets_creation_and_deletion(
             self, tmp_multiple_scratch_storage_obj, store_type):
@@ -2722,6 +2993,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
     def test_bucket_external_deletion(self, tmp_scratch_storage_obj,
@@ -2750,6 +3022,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
     def test_bucket_bulk_deletion(self, store_type, tmp_bulk_del_storage_obj):
@@ -2780,6 +3053,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('nonexist_bucket_url', [
         's3://{random_name}', 'gs://{random_name}',
+        pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
         pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare)
     ])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
@@ -2798,6 +3072,19 @@ class TestStorageWithCredentials:
                 endpoint_url = cloudflare.create_endpoint()
                 command = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=r2'
                 expected_output = '404'
+            elif nonexist_bucket_url.startswith('cos'):
+                # Using API calls, since using rclone requires a profile's name
+                try:
+                    expected_output = command = "echo"  # avoid unrelated exception in case of failure.
+                    bucket_name = urllib.parse.urlsplit(
+                        nonexist_bucket_url.format(
+                            random_name=nonexist_bucket_name)).path.strip('/')
+                    client = ibm.get_cos_client('us-east')
+                    client.head_bucket(Bucket=bucket_name)
+                except ibm.ibm_botocore.exceptions.ClientError as e:
+                    if e.response['Error']['Code'] == '404':
+                        # success
+                        return
             else:
                 raise ValueError('Unsupported bucket type '
                                  f'{nonexist_bucket_url}')
@@ -2825,13 +3112,17 @@ class TestStorageWithCredentials:
             storage_obj = storage_lib.Storage(source=nonexist_bucket_url.format(
                 random_name=nonexist_bucket_name))
 
-    @pytest.mark.parametrize('private_bucket',
-                             [f's3://imagenet', f'gs://imagenet'])
+    @pytest.mark.parametrize('private_bucket', [
+        f's3://imagenet', f'gs://imagenet',
+        pytest.param('cos://us-east/bucket1', marks=pytest.mark.ibm)
+    ])
     def test_private_bucket(self, private_bucket):
         # Attempts to access private buckets not belonging to the user.
         # These buckets are known to be private, but may need to be updated if
         # they are removed by their owners.
-        private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc
+        private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc if \
+              urllib.parse.urlsplit(private_bucket).scheme != 'cos' else \
+                  urllib.parse.urlsplit(private_bucket).path.strip('/')
         with pytest.raises(
                 sky.exceptions.StorageBucketGetError,
                 match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
@@ -2841,6 +3132,9 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
+                              pytest.param('tmp_ibm_cos_bucket',
+                                           storage_lib.StoreType.IBM,
+                                           marks=pytest.mark.ibm),
                               pytest.param('tmp_awscli_bucket_r2',
                                            storage_lib.StoreType.R2,
                                            marks=pytest.mark.cloudflare)])
@@ -2885,6 +3179,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
@@ -2911,6 +3206,9 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('invalid_name_list, store_type',
                              [(AWS_INVALID_NAMES, storage_lib.StoreType.S3),
                               (GCS_INVALID_NAMES, storage_lib.StoreType.GCS),
+                              pytest.param(IBM_INVALID_NAMES,
+                                           storage_lib.StoreType.IBM,
+                                           marks=pytest.mark.ibm),
                               pytest.param(AWS_INVALID_NAMES,
                                            storage_lib.StoreType.R2,
                                            marks=pytest.mark.cloudflare)])
@@ -2921,6 +3219,44 @@ class TestStorageWithCredentials:
             with pytest.raises(sky.exceptions.StorageNameError):
                 storage_obj = storage_lib.Storage(name=name)
                 storage_obj.add_store(store_type)
+
+    @pytest.mark.parametrize(
+        'gitignore_structure, store_type',
+        [(GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.S3),
+         (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.GCS),
+         pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
+                      storage_lib.StoreType.R2,
+                      marks=pytest.mark.cloudflare)])
+    def test_excluded_file_cloud_storage_upload_copy(self, gitignore_structure,
+                                                     store_type,
+                                                     tmp_gitignore_storage_obj):
+        # tests if files included in .gitignore and .git/info/exclude are
+        # excluded from being transferred to Storage
+
+        tmp_gitignore_storage_obj.add_store(store_type)
+
+        upload_file_name = 'included'
+        # Count the number of files with the given file name
+        up_cmd = self.cli_count_name_in_bucket(store_type, \
+            tmp_gitignore_storage_obj.name, file_name=upload_file_name)
+        git_exclude_cmd = self.cli_count_name_in_bucket(store_type, \
+            tmp_gitignore_storage_obj.name, file_name='.git')
+        cnt_num_file_cmd = self.cli_count_file_in_bucket(
+            store_type, tmp_gitignore_storage_obj.name)
+
+        up_output = subprocess.check_output(up_cmd, shell=True)
+        git_exclude_output = subprocess.check_output(git_exclude_cmd,
+                                                     shell=True)
+        cnt_output = subprocess.check_output(cnt_num_file_cmd, shell=True)
+
+        assert '3' in up_output.decode('utf-8'), \
+                'Files to be included are not completely uploaded.'
+        # 1 is read as .gitignore is uploaded
+        assert '1' in git_exclude_output.decode('utf-8'), \
+               '.git directory should not be uploaded.'
+        # 4 files include .gitignore, included.log, included.txt, include_dir/included.log
+        assert '4' in cnt_output.decode('utf-8'), \
+               'Some items listed in .gitignore and .git/info/exclude are not excluded.'
 
 
 # ---------- Testing YAML Specs ----------
