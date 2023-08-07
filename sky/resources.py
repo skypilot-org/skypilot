@@ -51,7 +51,7 @@ class Resources:
         disk_size: Optional[int] = None,
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
         ports: Optional[List[Union[int, str]]] = None,
-        specific_reservations: Optional[List[str]] = None,
+        specific_reservations: Optional[Set[str]] = None,
         # Internal use only.
         _is_image_managed: Optional[bool] = None,
     ):
@@ -129,7 +129,7 @@ class Resources:
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
         self._spot_recovery = None
-        self._specific_reservations = specific_reservations
+        self._specific_reservations = specific_reservations or {}
         if spot_recovery is not None:
             if spot_recovery.strip().lower() != 'none':
                 self._spot_recovery = spot_recovery.upper()
@@ -811,6 +811,12 @@ class Resources:
         """Returns the number of available reservation resources."""
         return self.cloud.get_available_reservation_resources(
             self._instance_type, self._region, self._zone,
+            set(self._specific_reservations))
+
+    def filter_reservations_with_available_resources(self) -> List[str]:
+        """Returns the reservations name that have at least unused resources."""
+        return self.cloud.filter_reservations_with_available_resources(
+            self._instance_type, self._region, self._zone,
             self._specific_reservations)
 
     def less_demanding_than(self,
@@ -1034,8 +1040,8 @@ class Resources:
         if config.get('ports') is not None:
             resources_fields['ports'] = config.pop('ports')
         if config.get('specific_reservations') is not None:
-            resources_fields['specific_reservations'] = config.pop(
-                'specific_reservations')
+            resources_fields['specific_reservations'] = set(config.pop(
+                'specific_reservations'))
         if config.get('_is_image_managed') is not None:
             resources_fields['_is_image_managed'] = config.pop(
                 '_is_image_managed')
@@ -1067,7 +1073,7 @@ class Resources:
         add_if_not_none('image_id', self.image_id)
         add_if_not_none('disk_tier', self.disk_tier)
         add_if_not_none('ports', self.ports)
-        add_if_not_none('specific_reservations', self.specific_reservations)
+        add_if_not_none('specific_reservations', list(self.specific_reservations))
         if self._is_image_managed is not None:
             config['_is_image_managed'] = self._is_image_managed
         return config

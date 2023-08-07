@@ -6,7 +6,7 @@ import re
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Set
 
 from sky import clouds
 from sky import exceptions
@@ -529,7 +529,7 @@ class GCP(clouds.Cloud):
         instance_type: str,
         region: str,
         zone: Optional[str],
-        specific_reservations: List[str],
+        specific_reservations: Set[str],
     ) -> int:
         del region  # Unused
         assert zone is not None, 'GCP requires zone to get available reservations.'
@@ -565,7 +565,7 @@ class GCP(clouds.Cloud):
     def _count_available_resources_for_reservations(
         self,
         reservations: List[dict],
-        specific_reservations: List[str],
+        specific_reservations: Set[str],
     ) -> int:
         return sum(
             int(r['specificReservation']['count']) -
@@ -576,11 +576,28 @@ class GCP(clouds.Cloud):
     def _is_reservation_usable(
         self,
         reservation: dict,
-        specific_reservations: List[str],
+        specific_reservations: Set[str],
     ) -> bool:
         return (not reservation['specificReservationRequired'] or
                 reservation_self_link_to_name(
                     reservation['selfLink']) in specific_reservations)
+
+    def filter_reservations_with_available_resources(
+        self,
+        instance_type: str,
+        region: str,
+        zone: Optional[str],
+        specific_reservations: Set[str],
+    ) -> List[str]:
+        reservations = self._list_reservations_for_instance_type_in_zone(
+            instance_type, zone)
+        usable_reservations = {
+            reservation_self_link_to_name(r['selfLink']) for r in reservations
+            if self._is_reservation_usable(r, specific_reservations) and             int(r['specificReservation']['count']) -
+            int(r['specificReservation']['inUseCount']) > 0
+        }
+
+        return list(usable_reservations.intersection(specific_reservations))
 
     @classmethod
     def _find_application_key_path(cls) -> str:
