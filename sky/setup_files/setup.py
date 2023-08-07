@@ -157,6 +157,7 @@ extras_require: Dict[str, List[str]] = {
     'cloudflare': aws_dependencies,
     'scp': [],
     'oci': ['oci'],
+    'kubernetes': ['kubernetes'],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

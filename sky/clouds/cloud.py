@@ -603,6 +603,10 @@ class Cloud:
         Returns:
             A list of ClusterStatus representing the status of all the
             alive nodes in the cluster.
+
+        Raises:
+            exceptions.ClusterStatusFetchingError: raised if the status of the
+                cluster cannot be fetched.
         """
         raise NotImplementedError
 

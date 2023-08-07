@@ -141,6 +141,7 @@ class SSHCommandRunner:
         ssh_private_key: str,
         ssh_control_name: Optional[str] = '__default__',
         ssh_proxy_command: Optional[str] = None,
+        port: int = 22,
         docker_user: Optional[str] = None,
     ):
         """Initialize SSHCommandRunner.
@@ -161,6 +162,7 @@ class SSHCommandRunner:
             ssh_proxy_command: Optional, the value to pass to '-o
                 ProxyCommand'. Useful for communicating with clusters without
                 public IPs using a "jump server".
+            port: The port to use for ssh.
             docker_user: The docker user to use for ssh. If specified, the
                 command will be run inside a docker container which have a ssh
                 server running at port sky.skylet.constants.DEFAULT_DOCKER_PORT.
@@ -180,7 +182,7 @@ class SSHCommandRunner:
         else:
             self.ip = ip
             self.ssh_user = ssh_user
-            self.port = '22'
+            self.port = port
             self._docker_ssh_proxy_command = None
 
     @staticmethod
@@ -190,12 +192,19 @@ class SSHCommandRunner:
         ssh_private_key: str,
         ssh_control_name: Optional[str] = None,
         ssh_proxy_command: Optional[str] = None,
+        port_list: Optional[List[int]] = None,
         docker_user: Optional[str] = None,
     ) -> List['SSHCommandRunner']:
         """Helper function for creating runners with the same ssh credentials"""
+        if docker_user is not None:
+            assert port_list is None
+            port_list = [None] * len(ip_list)
+        elif not port_list:
+            port_list = [22] * len(ip_list)
         return [
             SSHCommandRunner(ip, ssh_user, ssh_private_key, ssh_control_name,
-                             ssh_proxy_command, docker_user) for ip in ip_list
+                             ssh_proxy_command, port, docker_user)
+            for ip, port in zip(ip_list, port_list)
         ]
 
     def _ssh_base_command(self, *, ssh_mode: SshMode,
