@@ -25,7 +25,9 @@ _JOB_STATUS_FETCH_INTERVAL = 30
 _PROCESS_POOL_REFRESH_INTERVAL = 20
 _ENDPOINT_PROBE_INTERVAL = 10
 # TODO(tian): Maybe let user determine this threshold
-_CONSECUTIVE_FAILURE_THRESHOLD = 180 // _ENDPOINT_PROBE_INTERVAL
+_CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT = 180
+_CONSECUTIVE_FAILURE_THRESHOLD_COUNT = (
+    _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT // _ENDPOINT_PROBE_INTERVAL)
 
 
 class ProcessStatus(enum.Enum):
@@ -392,6 +394,9 @@ class SkyPilotInfraProvider(InfraProvider):
                 self._teardown_cluster(name)
                 logger.info(f'Interrupted launch process for cluster {name} '
                             'and deleted the cluster.')
+                info = self.replica_info[name]
+                # Set to success here for correctly display as shutting down
+                info.status_property.sky_launch_status = ProcessStatus.SUCCESS
         for name, info in self.replica_info.items():
             # Skip those already deleted and those are deleting
             if info.status not in [
@@ -486,17 +491,19 @@ class SkyPilotInfraProvider(InfraProvider):
             if info.status_property.service_once_ready:
                 info.consecutive_failure_cnt += 1
                 if (info.consecutive_failure_cnt >
-                        _CONSECUTIVE_FAILURE_THRESHOLD):
+                        _CONSECUTIVE_FAILURE_THRESHOLD_COUNT):
                     logger.info(f'Replica {cluster_name} is consecutively '
                                 'not ready for too long and exceeding '
                                 'conservative failure threshold. '
                                 'Terminating.')
                     self._teardown_cluster(cluster_name)
                 else:
+                    current_unready_time = (info.consecutive_failure_cnt *
+                                            _ENDPOINT_PROBE_INTERVAL)
                     logger.info(f'Replica {cluster_name} is not ready but '
-                                'within consecutive failure threshold. '
-                                f'{info.consecutive_failure_cnt} / '
-                                f'{_CONSECUTIVE_FAILURE_THRESHOLD}. '
+                                'within consecutive failure threshold '
+                                f'({current_unready_time}s / '
+                                f'{_CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT}s). '
                                 'Skipping.')
             else:
                 if time.time(
