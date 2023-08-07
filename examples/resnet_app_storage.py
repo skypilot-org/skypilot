@@ -9,9 +9,13 @@ with sky.Dag() as dag:
     data_mount_path = '/tmp/imagenet'
 
     # Clone the repo locally to workdir
-    subprocess.run('git clone https://github.com/concretevitamin/tpu '
-                   f'{workdir} || true', shell=True, check=True)
-    subprocess.run(f'cd {workdir} && git checkout 9459fee', shell=True,
+    subprocess.run(
+        'git clone https://github.com/concretevitamin/tpu '
+        f'{workdir} || true',
+        shell=True,
+        check=True)
+    subprocess.run(f'cd {workdir} && git checkout 9459fee',
+                   shell=True,
                    check=True)
 
     # The setup command.  Will be run under the working directory.
