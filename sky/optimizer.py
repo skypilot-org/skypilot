@@ -309,6 +309,8 @@ class Optimizer:
                         # We consider the cost of the unused reservation
                         # resources to be 0 since we are already paying for
                         # them.
+                        # TODO: different policies can be applied here for
+                        # whether to choose reserved instances.
                         estimated_cost_or_time = cost_per_node * (
                             node.num_nodes - available_reservation_resources)
                     else:
@@ -907,8 +909,8 @@ def _make_launchables_for_valid_region_zones(
     launchables = []
     regions = launchable_resources.get_valid_regions_for_launchable()
     for region in regions:
-        if launchable_resources.use_spot and region.zones is not None \
-            or isinstance(launchable_resources.cloud, clouds.GCP):
+        if (launchable_resources.use_spot and region.zones is not None
+            or isinstance(launchable_resources.cloud, clouds.GCP)):
             # Spot instances.
             # Do not batch the per-zone requests.
             for zone in region.zones:

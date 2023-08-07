@@ -531,6 +531,7 @@ class GCP(clouds.Cloud):
         zone: Optional[str],
         specific_reservations: List[str],
     ) -> int:
+        del region  # Unused
         assert zone is not None, 'GCP requires zone to get available reservations.'
         reservations = self._list_reservations_for_instance_type_in_zone(
             instance_type, zone)
