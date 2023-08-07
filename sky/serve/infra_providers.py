@@ -63,6 +63,8 @@ class ReplicaStatusProperty:
     def should_cleanup_after_teardown(self) -> bool:
         if self.sky_launch_status != ProcessStatus.SUCCESS:
             return False
+        if self.sky_down_status != ProcessStatus.SUCCESS:
+            return False
         if self.user_app_failed:
             return False
         return self.service_once_ready
@@ -218,89 +220,102 @@ class SkyPilotInfraProvider(InfraProvider):
         self.launch_process_pool: Dict[str, multiprocessing.Process] = dict()
         self.down_process_pool: Dict[str, multiprocessing.Process] = dict()
 
-        self._start_refresh_process_pool()
-        self._start_fetch_job_status()
+        self._start_process_pool_refresher()
+        self._start_job_status_fetcher()
 
     def _refresh_process_pool(self) -> None:
-        while not self.refresh_process_pool_stop_event.is_set():
-            logger.info('Refreshing process pool.')
-            for op, pool in zip(
-                ['Launch', 'Down'],
-                [self.launch_process_pool, self.down_process_pool]):
-                for cluster_name, p in list(pool.items()):
-                    if not p.is_alive():
-                        # TODO(tian): Try-catch in process, and have an enum
-                        # return value to indicate which type of failure
-                        # happened. Currently we only have user code failure
-                        # since the retry_until_up flag is set to True, but it
-                        # will be helpful when we enable user choose whether to
-                        # retry or not.
-                        logger.info(
-                            f'{op} process for {cluster_name} finished.')
-                        del pool[cluster_name]
-                        info = self.replica_info[cluster_name]
-                        if p.exitcode != 0:
-                            logger.info(
-                                f'{op} process for {cluster_name} exited '
+        for cluster_name, p in list(self.launch_process_pool.items()):
+            if not p.is_alive():
+                # TODO(tian): Try-catch in process, and have an enum return
+                # value to indicate which type of failure happened.
+                # Currently we only have user code failure since the
+                # retry_until_up flag is set to True, but it will be helpful
+                # when we enable user choose whether to retry or not.
+                logger.info(f'Launch process for {cluster_name} finished.')
+                del self.launch_process_pool[cluster_name]
+                info = self.replica_info[cluster_name]
+                if p.exitcode != 0:
+                    logger.info(f'Launch process for {cluster_name} exited '
                                 f'abnormally with code {p.exitcode}.')
-                            if op == 'Launch':
-                                info.status_property.sky_launch_status = (
-                                    ProcessStatus.FAILED)
-                            else:
-                                info.status_property.sky_down_status = (
-                                    ProcessStatus.FAILED)
-                        else:
-                            if op == 'Launch':
-                                info.status_property.sky_launch_status = (
-                                    ProcessStatus.SUCCESS)
-                            else:
-                                # Failed replica still count as a replica.
-                                # In our current design, we want to fail
-                                # early if user code have any error. This
-                                # will prevent infinite loop of teardown
-                                # and re-provision.
-                                info.status_property.sky_down_status = (
-                                    ProcessStatus.SUCCESS)
-                                if (info.status_property.
-                                        should_cleanup_after_teardown()):
-                                    # This means the cluster is deleted due to
-                                    # a scale down. Delete the replica info
-                                    # so it won't count as a replica.
-                                    del self.replica_info[cluster_name]
+                    info.status_property.sky_launch_status = (
+                        ProcessStatus.FAILED)
+                else:
+                    info.status_property.sky_launch_status = (
+                        ProcessStatus.SUCCESS)
+        for cluster_name, p in list(self.down_process_pool.items()):
+            if not p.is_alive():
+                logger.info(f'Down process for {cluster_name} finished.')
+                del self.down_process_pool[cluster_name]
+                info = self.replica_info[cluster_name]
+                if p.exitcode != 0:
+                    logger.info(f'Down process for {cluster_name} exited '
+                                f'abnormally with code {p.exitcode}.')
+                    info.status_property.sky_down_status = (
+                        ProcessStatus.FAILED)
+                else:
+                    info.status_property.sky_down_status = (
+                        ProcessStatus.SUCCESS)
+                # Failed replica still count as a replica. In our current
+                # design, we want to fail early if user code have any error.
+                # This will prevent infinite loop of teardown and
+                # re-provision.
+                if info.status_property.should_cleanup_after_teardown():
+                    # This means the cluster is deleted due to
+                    # a scale down. Delete the replica info
+                    # so it won't count as a replica.
+                    del self.replica_info[cluster_name]
+
+    def _process_pool_refresher(self) -> None:
+        while not self.process_pool_refresher_stop_event.is_set():
+            logger.info('Refreshing process pool.')
+            try:
+                self._refresh_process_pool()
+            except Exception as e:  # pylint: disable=broad-except
+                # No matter what error happens, we should keep the
+                # process pool refresher running.
+                logger.error(f'Error in process pool refresher: {e}')
             time.sleep(_PROCESS_POOL_REFRESH_INTERVAL)
 
-    def _start_refresh_process_pool(self) -> None:
-        self.refresh_process_pool_stop_event = threading.Event()
-        self.refresh_process_pool_thread = threading.Thread(
-            target=self._refresh_process_pool)
-        self.refresh_process_pool_thread.start()
+    def _start_process_pool_refresher(self) -> None:
+        self.process_pool_refresher_stop_event = threading.Event()
+        self.process_pool_refresher_thread = threading.Thread(
+            target=self._process_pool_refresher)
+        self.process_pool_refresher_thread.start()
 
     def _fetch_job_status(self) -> None:
-        while not self.fetch_job_status_stop_event.is_set():
+        for cluster_name, info in self.replica_info.items():
+            if not info.status_property.should_track_status():
+                continue
+            # Only fetch job 1, which stands for user task job
+            job_statuses = core.job_status(cluster_name, [1])
+            job_status = job_statuses['1']
+            if job_status in [
+                    job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
+            ]:
+                info.status_property.user_app_failed = True
+
+    def _job_status_fetcher(self) -> None:
+        while not self.job_status_fetcher_stop_event.is_set():
             logger.info('Refreshing job status.')
-            for cluster_name, info in self.replica_info.items():
-                if not info.status_property.should_track_status():
-                    continue
-                # Only fetch job 1, which stands for user task job
-                job_statuses = core.job_status(cluster_name, [1])
-                job_status = job_statuses['1']
-                if job_status in [
-                        job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
-                ]:
-                    info.status_property.user_app_failed = True
+            try:
+                self._fetch_job_status()
+            except Exception as e:  # pylint: disable=broad-except
+                # No matter what error happens, we should keep the
+                # job status fetcher running.
+                logger.error(f'Error in job status fetcher: {e}')
             time.sleep(_JOB_STATUS_FETCH_INTERVAL)
 
-    def _start_fetch_job_status(self) -> None:
-        self.fetch_job_status_stop_event = threading.Event()
-        self.fetch_job_status_thread = threading.Thread(
-            target=self._fetch_job_status)
-        self.fetch_job_status_thread.start()
+    def _start_job_status_fetcher(self) -> None:
+        self.job_status_fetcher_stop_event = threading.Event()
+        self.job_status_fetcher_thread = threading.Thread(
+            target=self._job_status_fetcher)
+        self.job_status_fetcher_thread.start()
 
     def _terminate_daemon_threads(self) -> None:
-        self.fetch_job_status_stop_event.set()
-        self.refresh_process_pool_stop_event.set()
-        self.fetch_job_status_thread.join()
-        self.refresh_process_pool_thread.join()
+        self.job_status_fetcher_stop_event.set()
+        self.process_pool_refresher_stop_event.set()
+        self.job_status_fetcher_thread.join()
+        self.process_pool_refresher_thread.join()
 
     def get_replica_info(self) -> List[Dict[str, Any]]:
         return [info.to_info_dict() for info in self.replica_info.values()]
@@ -386,7 +401,7 @@ class SkyPilotInfraProvider(InfraProvider):
             # Use keyboard interrupt here since sky.launch has great
             # handling for it
             # Edge case: sky.launched finished after the
-            # process_pool_refresh_process terminates
+            # process_pool_refresher terminates
             if p.is_alive():
                 assert p.pid is not None
                 os.kill(p.pid, signal.SIGINT)
@@ -420,13 +435,13 @@ class SkyPilotInfraProvider(InfraProvider):
 
     def _replica_prober(self) -> None:
         while not self.replica_prober_stop_event.is_set():
-            logger.info('Running replica fetcher.')
+            logger.info('Running replica prober.')
             try:
                 self._probe_all_replicas()
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
-                # replica fetcher running.
-                logger.error(f'Error in replica fetcher: {e}')
+                # replica prober running.
+                logger.error(f'Error in replica prober: {e}')
             time.sleep(_ENDPOINT_PROBE_INTERVAL)
 
     def start_replica_prober(self) -> None:
