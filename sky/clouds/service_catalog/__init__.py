@@ -281,6 +281,7 @@ def get_common_gpus() -> List[str]:
         'A10G',
         'A100',
         'A100-80GB',
+        'H100',
         'K80',
         'L4',
         'M60',
