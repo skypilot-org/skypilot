@@ -960,7 +960,10 @@ def write_cluster_config(
                 # GCP only:
                 'gcp_project_id': gcp_project_id,
                 'specific_reservations':
-                    to_provision.filter_reservations_with_available_resources(),
+                    to_provision.filter_reservations_with_available_resources(
+                        set(
+                            skypilot_config.get_nested(
+                                ('gcp', 'specific_reservations'), set()))),
 
                 # Conda setup
                 'conda_installation_commands':

@@ -92,12 +92,6 @@ def get_resources_schema():
                     }
                 }
             },
-            'specific_reservations': {
-                'type': 'array',
-                'items': {
-                    'type': 'string',
-                }
-            },
             'image_id': {
                 'anyOf': [{
                     'type': 'string',
