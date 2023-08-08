@@ -144,6 +144,7 @@ def stream_logs(service_name: str, replica_id: int, follow: bool) -> str:
     ) == status_lib.ReplicaStatus.PROVISIONING:
         # Early exit if not following the logs.
         return ''
+
     handle = global_user_state.get_handle_from_cluster_name(
         replica_cluster_name)
     if handle is None:

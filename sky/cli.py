@@ -52,6 +52,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
+from sky import serve as serve_lib
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
@@ -3906,17 +3907,42 @@ def serve_up(
     if len(dag.tasks) > 1:
         click.secho('Multiple tasks found in the YAML file.', fg='red')
         return
-    task = dag.tasks[0]
+    task: sky.Task = dag.tasks[0]
     if task.service is None:
         click.secho('Service section not found in the YAML file.', fg='red')
         return
+
+    # TODO(tian): Support custom controller resources.
+    controller_resources_config = serve_lib.CONTROLLER_RESOURCES
+    controller_resources = sky.Resources.from_yaml_config(
+        controller_resources_config)
+    dummy_controller_task = sky.Task().set_resources(controller_resources)
+    click.secho(
+        ('SkyServe will launch a controller for your service, which responsible'
+         ' for all the control plane operations, including launching replicas, '
+         'autoscaling, and manage replica status; in the same time, redirect '
+         'all user requests to some replica chosen by a load balancer.\n'
+         'The controller will be launched with the following resources:'),
+        fg='cyan')
+    with sky.Dag() as dag:
+        dag.add(dummy_controller_task)
+    sky.optimize(dag)
+    click.echo()
+
+    click.secho(
+        'Each replica will be launched with the following estimated resources:',
+        fg='cyan')
+    with sky.Dag() as dag:
+        dag.add(task)
+    sky.optimize(dag)
+    click.echo()
 
     if not yes:
         prompt = f'Launching a new service {service_name}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.serve_up(task, service_name)
+    sky.serve_up(task, service_name, controller_resources)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)

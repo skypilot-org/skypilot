@@ -1,11 +1,4 @@
-resources:
-  cloud: gcp
-  disk_size: 100
-  cpus: 4
-  ports:
-{%- for port in ports %}
-    - {{port}}
-{%- endfor %}
+# The template for skyserve controller
 
 setup: pip install skypilot[serve]
 

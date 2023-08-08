@@ -957,6 +957,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
 def serve_up(
     task: 'sky.Task',
     service_name: str,
+    controller_resources: 'sky.Resources',
 ):
     """Serve up a service.
 
@@ -1001,7 +1002,6 @@ def serve_up(
         remote_task_yaml_path = (serve.SERVICE_YAML_PREFIX +
                                  f'/service_{service_name}.yaml')
         vars_to_fill = {
-            'ports': [app_port],
             'remote_task_yaml_path': remote_task_yaml_path,
             'local_task_yaml_path': f.name,
         }
@@ -1011,6 +1011,7 @@ def serve_up(
                                     vars_to_fill,
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
+        controller_task.set_resources(controller_resources)
 
         controller_envs = {
             'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,
