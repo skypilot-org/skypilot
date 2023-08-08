@@ -535,18 +535,27 @@ class GCP(clouds.Cloud):
         assert zone is not None, 'GCP requires zone to get available reservations.'
         reservations = self._list_reservations_for_instance_type_in_zone(
             instance_type, zone)
+
         return self._count_available_resources_for_reservations(
             reservations, specific_reservations)
 
     def _list_reservations_for_instance_type_in_zone(
         self,
         instance_type: str,
-        zone: Optional[str],
+        zone: str,
+    ) -> List[Dict]:
+        reservations = self._list_reservations_for_instance_type(instance_type)
+        return [r for r in reservations if r['zone'].endswith(f'/{zone}')]
+
+    @functools.lru_cache()
+    def _list_reservations_for_instance_type(
+        self,
+        instance_type: str,
     ) -> List[Dict]:
         list_reservations_cmd = (
             'gcloud compute reservations list '
-            f'--filter="zone={zone} AND specificReservation.instanceProperties.machineType={instance_type} AND status=READY" '
-            '--format="json(specificReservation.count, specificReservation.inUseCount, specificReservationRequired, selfLink)"'
+            f'--filter="specificReservation.instanceProperties.machineType={instance_type} AND status=READY" '
+            '--format="json(specificReservation.count, specificReservation.inUseCount, specificReservationRequired, selfLink, zone)"'
         )
         returncode, stdout, stderr = subprocess_utils.run_with_retries(
             list_reservations_cmd,
@@ -555,8 +564,7 @@ class GCP(clouds.Cloud):
         subprocess_utils.handle_returncode(
             returncode,
             list_reservations_cmd,
-            error_msg=
-            f'Failed to get list reservations for {instance_type!r} in {zone!r}.',
+            error_msg=f'Failed to get list reservations for {instance_type!r}.',
             stderr=stderr,
             stream_logs=True,
         )
@@ -589,6 +597,7 @@ class GCP(clouds.Cloud):
         zone: Optional[str],
         specific_reservations: Set[str],
     ) -> List[str]:
+        assert zone is not None, 'GCP requires zone to filter reservations.'
         reservations = self._list_reservations_for_instance_type_in_zone(
             instance_type, zone)
         usable_reservations = {
