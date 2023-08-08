@@ -1617,17 +1617,10 @@ def get_head_ssh_port(
 ) -> int:
     """Returns the ip of the head node."""
     del max_attempts  # Unused.
-    # Use port 22 for everything except Kubernetes
+    # Use port 22 for everything including Kubernetes.
+    # Note: for Kubernetes we use ssh jump host to access ray head
     # TODO(romilb): Add a get port method to the cloud classes.
     head_ssh_port = 22
-    if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-        return head_ssh_port
-    else:
-        if use_cache and handle.head_ssh_port is not None:
-            head_ssh_port = handle.head_ssh_port
-        else:
-            svc_name = f'{handle.get_cluster_name()}-ray-head-ssh'
-            head_ssh_port = clouds.Kubernetes.get_port(svc_name)
     return head_ssh_port
 
 

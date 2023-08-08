@@ -129,6 +129,7 @@ class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
+    SKY_SSH_JUMP_NAME = f'sshjump-{common_utils.get_user_hash()}'
 
     # Timeout for resource provisioning. This timeout determines how long to
     # wait for pod to be in pending status before giving up.
@@ -218,6 +219,10 @@ class Kubernetes(clouds.Cloud):
         return kubernetes_utils.get_port(svc_name, ns)
 
     @classmethod
+    def get_external_ip(cls) -> str:
+        return kubernetes_utils.get_external_ip()
+
+    @classmethod
     def get_default_instance_type(
             cls,
             cpus: Optional[str] = None,
@@ -303,6 +308,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             # TODO(romilb): Allow user to specify custom images
             'image_id': self.IMAGE,
+            'sshjump': self.SKY_SSH_JUMP_NAME
         }
 
     def _get_feasible_launchable_resources(
