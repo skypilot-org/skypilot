@@ -533,20 +533,24 @@ class GCP(clouds.Cloud):
     ) -> int:
         del region  # Unused
         assert zone is not None, 'GCP requires zone to get available reservations.'
-        reservations = self._list_reservations_for_instance_type_in_zone(
+        reservations = self._list_reservations_for_instance_type(
             instance_type, zone)
+        filtered_reservations = []
+        for reservation in reservations:
+            if reservation['zone'].endswith(zone):
+                filtered_reservations.append(reservation)
         return self._count_available_resources_for_reservations(
-            reservations, specific_reservations)
+            filtered_reservations, specific_reservations)
 
-    def _list_reservations_for_instance_type_in_zone(
+    @functools.lru_cache()
+    def _list_reservations_for_instance_type(
         self,
         instance_type: str,
-        zone: Optional[str],
     ) -> List[Dict]:
         list_reservations_cmd = (
             'gcloud compute reservations list '
-            f'--filter="zone={zone} AND specificReservation.instanceProperties.machineType={instance_type} AND status=READY" '
-            '--format="json(specificReservation.count, specificReservation.inUseCount, specificReservationRequired, selfLink)"'
+            f'--filter="specificReservation.instanceProperties.machineType={instance_type} AND status=READY" '
+            '--format="json(specificReservation.count, specificReservation.inUseCount, specificReservationRequired, selfLink, zone)"'
         )
         returncode, stdout, stderr = subprocess_utils.run_with_retries(
             list_reservations_cmd,
@@ -556,7 +560,7 @@ class GCP(clouds.Cloud):
             returncode,
             list_reservations_cmd,
             error_msg=
-            f'Failed to get list reservations for {instance_type!r} in {zone!r}.',
+            f'Failed to get list reservations for {instance_type!r}.',
             stderr=stderr,
             stream_logs=True,
         )
