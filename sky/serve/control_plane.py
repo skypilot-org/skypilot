@@ -74,8 +74,8 @@ class ControlPlane:
         def terminate(request: fastapi.Request):
             del request
             logger.info('Terminating service...')
-            self.infra_provider.terminate_replica_prober()
             if self.autoscaler is not None:
+                logger.info('Terminate autoscaler monitor...')
                 self.autoscaler.terminate_monitor()
             msg = self.infra_provider.terminate()
             return {'message': msg}

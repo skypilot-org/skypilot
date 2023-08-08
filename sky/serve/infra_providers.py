@@ -2,16 +2,15 @@
 from concurrent import futures
 import enum
 import logging
-import multiprocessing
 import os
 import random
 import requests
 import signal
+import subprocess
 import threading
 import time
 from typing import List, Dict, Set, Optional, Any, Union, Tuple
 
-import sky
 from sky import backends
 from sky import core
 from sky import status_lib
@@ -203,10 +202,6 @@ class InfraProvider:
         # Start the replica fetcher thread
         raise NotImplementedError
 
-    def terminate_replica_prober(self) -> None:
-        # Terminate the replica fetcher thread
-        raise NotImplementedError
-
 
 class SkyPilotInfraProvider(InfraProvider):
     """Infra provider for SkyPilot clusters."""
@@ -217,15 +212,15 @@ class SkyPilotInfraProvider(InfraProvider):
         self.task_yaml_path: str = task_yaml_path
         self.service_name: str = service_name
         self.next_replica_id: int = 1
-        self.launch_process_pool: Dict[str, multiprocessing.Process] = dict()
-        self.down_process_pool: Dict[str, multiprocessing.Process] = dict()
+        self.launch_process_pool: Dict[str, subprocess.Popen] = dict()
+        self.down_process_pool: Dict[str, subprocess.Popen] = dict()
 
         self._start_process_pool_refresher()
         self._start_job_status_fetcher()
 
     def _refresh_process_pool(self) -> None:
         for cluster_name, p in list(self.launch_process_pool.items()):
-            if not p.is_alive():
+            if p.poll() is not None:
                 # TODO(tian): Try-catch in process, and have an enum return
                 # value to indicate which type of failure happened.
                 # Currently we only have user code failure since the
@@ -234,22 +229,22 @@ class SkyPilotInfraProvider(InfraProvider):
                 logger.info(f'Launch process for {cluster_name} finished.')
                 del self.launch_process_pool[cluster_name]
                 info = self.replica_info[cluster_name]
-                if p.exitcode != 0:
+                if p.returncode != 0:
                     logger.info(f'Launch process for {cluster_name} exited '
-                                f'abnormally with code {p.exitcode}.')
+                                f'abnormally with code {p.returncode}.')
                     info.status_property.sky_launch_status = (
                         ProcessStatus.FAILED)
                 else:
                     info.status_property.sky_launch_status = (
                         ProcessStatus.SUCCESS)
         for cluster_name, p in list(self.down_process_pool.items()):
-            if not p.is_alive():
+            if p.poll() is not None:
                 logger.info(f'Down process for {cluster_name} finished.')
                 del self.down_process_pool[cluster_name]
                 info = self.replica_info[cluster_name]
-                if p.exitcode != 0:
+                if p.returncode != 0:
                     logger.info(f'Down process for {cluster_name} exited '
-                                f'abnormally with code {p.exitcode}.')
+                                f'abnormally with code {p.returncode}.')
                     info.status_property.sky_down_status = (
                         ProcessStatus.FAILED)
                 else:
@@ -312,8 +307,10 @@ class SkyPilotInfraProvider(InfraProvider):
         self.job_status_fetcher_thread.start()
 
     def _terminate_daemon_threads(self) -> None:
+        self.replica_prober_stop_event.set()
         self.job_status_fetcher_stop_event.set()
         self.process_pool_refresher_stop_event.set()
+        self.replica_prober_thread.join()
         self.job_status_fetcher_thread.join()
         self.process_pool_refresher_thread.join()
 
@@ -331,7 +328,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 ready_replicas.add(info.ip)
         return ready_replicas
 
-    def _launch_cluster(self, replica_id: int, task: sky.Task) -> None:
+    def _launch_cluster(self, replica_id: int) -> None:
         cluster_name = serve_utils.generate_replica_cluster_name(
             self.service_name, replica_id)
         if cluster_name in self.launch_process_pool:
@@ -339,24 +336,23 @@ class SkyPilotInfraProvider(InfraProvider):
                            'already exists. Skipping.')
             return
         logger.info(f'Creating SkyPilot cluster {cluster_name}')
-        p = multiprocessing.Process(target=sky.launch,
-                                    args=(task,),
-                                    kwargs={
-                                        'cluster_name': cluster_name,
-                                        'detach_setup': True,
-                                        'detach_run': True,
-                                        'retry_until_up': True
-                                    })
+        cmd = ['sky', 'launch', self.task_yaml_path, '-c', cluster_name, '-y']
+        cmd.extend(['--detach-setup', '--detach-run', '--retry-until-up'])
+        fn = serve_utils.generate_replica_launch_log_file_name(cluster_name)
+        with open(fn, 'w') as f:
+            # pylint: disable=consider-using-with
+            p = subprocess.Popen(cmd,
+                                 stdin=subprocess.DEVNULL,
+                                 stdout=f,
+                                 stderr=f)
         self.launch_process_pool[cluster_name] = p
-        p.start()
         assert cluster_name not in self.replica_info
         self.replica_info[cluster_name] = ReplicaInfo(replica_id, cluster_name)
 
     def _scale_up(self, n: int) -> None:
         # Launch n new clusters
-        task = sky.Task.from_yaml(self.task_yaml_path)
         for _ in range(0, n):
-            self._launch_cluster(self.next_replica_id, task)
+            self._launch_cluster(self.next_replica_id)
             self.next_replica_id += 1
 
     def scale_up(self, n: int) -> None:
@@ -367,13 +363,17 @@ class SkyPilotInfraProvider(InfraProvider):
             logger.warning(f'Down process for cluster {cluster_name} already '
                            'exists. Skipping.')
             return
+        cmd = ['sky', 'down', cluster_name, '--purge', '-y']
+        fn = serve_utils.generate_replica_down_log_file_name(cluster_name)
+        with open(fn, 'w') as f:
+            # pylint: disable=consider-using-with
+            p = subprocess.Popen(cmd,
+                                 stdin=subprocess.DEVNULL,
+                                 stdout=f,
+                                 stderr=f)
+        self.down_process_pool[cluster_name] = p
         info = self.replica_info[cluster_name]
         info.status_property.sky_down_status = ProcessStatus.RUNNING
-        p = multiprocessing.Process(target=sky.down,
-                                    args=(cluster_name,),
-                                    kwargs={'purge': True})
-        self.down_process_pool[cluster_name] = p
-        p.start()
 
     def _scale_down(self, n: int) -> None:
         # Rendomly delete n clusters
@@ -394,18 +394,18 @@ class SkyPilotInfraProvider(InfraProvider):
         self._scale_down(n)
 
     def terminate(self) -> Optional[str]:
-        logger.info('Terminating daemon threads...')
+        logger.info('Terminating infra provider daemon threads...')
         self._terminate_daemon_threads()
-        logger.info('Terminating clusters...')
+        logger.info('Terminating all clusters...')
         for name, p in self.launch_process_pool.items():
             # Use keyboard interrupt here since sky.launch has great
             # handling for it
             # Edge case: sky.launched finished after the
             # process_pool_refresher terminates
-            if p.is_alive():
+            if p.poll() is None:
                 assert p.pid is not None
-                os.kill(p.pid, signal.SIGINT)
-                p.join()
+                os.killpg(os.getpgid(p.pid), signal.SIGINT)
+                p.wait()
                 self._teardown_cluster(name)
                 logger.info(f'Interrupted launch process for cluster {name} '
                             'and deleted the cluster.')
@@ -421,13 +421,13 @@ class SkyPilotInfraProvider(InfraProvider):
                 self._teardown_cluster(name)
         msg = []
         for name, p in self.down_process_pool.items():
-            p.join()
+            p.wait()
             logger.info(f'Down process for cluster {name} finished.')
-            if p.exitcode != 0:
+            if p.returncode != 0:
                 logger.warning(f'Down process for cluster {name} exited '
-                               f'anormally with code {p.exitcode}.')
+                               f'anormally with code {p.returncode}.')
                 msg.append(f'Down process for cluster {name} exited abnormally'
-                           f' with code {p.exitcode}. Please login to the '
+                           f' with code {p.returncode}. Please login to the '
                            'controller and make sure the cluster is released.')
         if not msg:
             return None
@@ -449,10 +449,6 @@ class SkyPilotInfraProvider(InfraProvider):
         self.replica_prober_thread = threading.Thread(
             target=self._replica_prober)
         self.replica_prober_thread.start()
-
-    def terminate_replica_prober(self) -> None:
-        self.replica_prober_stop_event.set()
-        self.replica_prober_thread.join()
 
     def _probe_all_replicas(self) -> None:
         logger.info(f'All replica info: {self.get_replica_info()}')
