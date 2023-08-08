@@ -592,8 +592,10 @@ class GCP(clouds.Cloud):
         reservations = self._list_reservations_for_instance_type_in_zone(
             instance_type, zone)
         usable_reservations = {
-            reservation_self_link_to_name(r['selfLink']) for r in reservations
-            if self._is_reservation_usable(r, specific_reservations) and             int(r['specificReservation']['count']) -
+            reservation_self_link_to_name(r['selfLink'])
+            for r in reservations
+            if self._is_reservation_usable(r, specific_reservations) and
+            int(r['specificReservation']['count']) -
             int(r['specificReservation']['inUseCount']) > 0
         }
 

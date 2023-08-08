@@ -49,15 +49,16 @@ def test_reservation_self_link_to_name():
 
 @pytest.mark.parametrize((
     "specific_reservations", "mock_return", "expected_names"
-), [({'projects/<project>/reservations/<reservation>'},[{
-    "selfLink": "https://www.googleapis.com/compute/v1/projects/<project>/zones/<zone>/reservations/<reservation>",
-    "specificReservation": {
-        "count": "1",
-        "inUseCount": "0",
-    },
-    "specificReservationRequired": True,
-}], ['projects/<project>/reservations/<reservation>']),
-    ({'projects/<project>/reservations/<reservation>'},[{
+), [
+    ({'projects/<project>/reservations/<reservation>'}, [{
+        "selfLink": "https://www.googleapis.com/compute/v1/projects/<project>/zones/<zone>/reservations/<reservation>",
+        "specificReservation": {
+            "count": "1",
+            "inUseCount": "0",
+        },
+        "specificReservationRequired": True,
+    }], ['projects/<project>/reservations/<reservation>']),
+    ({'projects/<project>/reservations/<reservation>'}, [{
         "selfLink": "https://www.googleapis.com/compute/v1/projects/<project>/zones/<zone>/reservations/<reservation>",
         "specificReservation": {
             "count": "2",
@@ -65,7 +66,7 @@ def test_reservation_self_link_to_name():
         },
         "specificReservationRequired": False,
     }], ['projects/<project>/reservations/<reservation>']),
-    ({'projects/<project>/reservations/<reservation>'},[{
+    ({'projects/<project>/reservations/<reservation>'}, [{
         "selfLink": "https://www.googleapis.com/compute/v1/projects/<project2>/zones/<zone>/reservations/<reservation>",
         "specificReservation": {
             "count": "1",
@@ -73,7 +74,7 @@ def test_reservation_self_link_to_name():
         },
         "specificReservationRequired": True,
     }], []),
-        ({'projects/<project>/reservations/<reservation>'},[{
+    ({'projects/<project>/reservations/<reservation>'}, [{
         "selfLink": "https://www.googleapis.com/compute/v1/projects/<project2>/zones/<zone>/reservations/<reservation>",
         "specificReservation": {
             "count": "1",
@@ -81,7 +82,7 @@ def test_reservation_self_link_to_name():
         },
         "specificReservationRequired": True,
     }], []),
-            ({'projects/<project>/reservations/<reservation>'},[{
+    ({'projects/<project>/reservations/<reservation>'}, [{
         "selfLink": "https://www.googleapis.com/compute/v1/projects/<project2>/zones/<zone>/reservations/<reservation>",
         "specificReservation": {
             "count": "1",
@@ -89,7 +90,7 @@ def test_reservation_self_link_to_name():
         },
         "specificReservationRequired": False,
     }], []),
-        ({'projects/<project>/reservations/<reservation>'},[{
+    ({'projects/<project>/reservations/<reservation>'}, [{
         "selfLink": "https://www.googleapis.com/compute/v1/projects/<project>/zones/<zone>/reservations/<reservation>",
         "specificReservation": {
             "count": "1",
@@ -97,13 +98,14 @@ def test_reservation_self_link_to_name():
         },
         "specificReservationRequired": True,
     }], []),
-    ])
-def test_filter_reservations_with_available_resources(specific_reservations, mock_return,
-                                                     expected_names):
+])
+def test_filter_reservations_with_available_resources(specific_reservations,
+                                                      mock_return,
+                                                      expected_names):
     gcp = GCP()
     with patch.object(gcp,
-                '_list_reservations_for_instance_type_in_zone',
-                return_value=mock_return):
+                      '_list_reservations_for_instance_type_in_zone',
+                      return_value=mock_return):
         reservation_names = gcp.filter_reservations_with_available_resources(
-        "instance_type", "region", "zone", specific_reservations)
+            "instance_type", "region", "zone", specific_reservations)
         assert reservation_names == expected_names

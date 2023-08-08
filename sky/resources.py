@@ -129,7 +129,8 @@ class Resources:
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
         self._spot_recovery = None
-        self._specific_reservations = specific_reservations or {}
+        self._specific_reservations = ({} if specific_reservations is None else
+                                       specific_reservations)
         if spot_recovery is not None:
             if spot_recovery.strip().lower() != 'none':
                 self._spot_recovery = spot_recovery.upper()
@@ -1040,8 +1041,8 @@ class Resources:
         if config.get('ports') is not None:
             resources_fields['ports'] = config.pop('ports')
         if config.get('specific_reservations') is not None:
-            resources_fields['specific_reservations'] = set(config.pop(
-                'specific_reservations'))
+            resources_fields['specific_reservations'] = set(
+                config.pop('specific_reservations'))
         if config.get('_is_image_managed') is not None:
             resources_fields['_is_image_managed'] = config.pop(
                 '_is_image_managed')
@@ -1073,7 +1074,8 @@ class Resources:
         add_if_not_none('image_id', self.image_id)
         add_if_not_none('disk_tier', self.disk_tier)
         add_if_not_none('ports', self.ports)
-        add_if_not_none('specific_reservations', list(self.specific_reservations))
+        add_if_not_none('specific_reservations',
+                        list(self.specific_reservations))
         if self._is_image_managed is not None:
             config['_is_image_managed'] = self._is_image_managed
         return config
