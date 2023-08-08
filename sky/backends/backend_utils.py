@@ -404,27 +404,20 @@ class SSHConfigHelper(object):
                               proxy_command: Optional[str], port: int,
                               docker_proxy_command: Optional[str]):
         if proxy_command is not None:
+            # Already checked in resources
+            assert docker_proxy_command is None, (
+                'Cannot specify both proxy_command and docker_proxy_command.')
             proxy = f'ProxyCommand {proxy_command}'
+        elif docker_proxy_command is not None:
+            proxy = f'ProxyCommand {docker_proxy_command}'
         else:
             proxy = ''
-        if docker_proxy_command is not None:
-            docker_proxy = f'ProxyCommand {docker_proxy_command}'
-        else:
-            docker_proxy = ''
         # StrictHostKeyChecking=no skips the host key check for the first
         # time. UserKnownHostsFile=/dev/null and GlobalKnownHostsFile/dev/null
         # prevent the host key from being added to the known_hosts file and
         # always return an empty file for known hosts, making the ssh think
         # this is a first-time connection, and thus skipping the host key
         # check.
-        # Put the docker proxy command first. If two proxy commands are
-        # specified, e.g. ssh -o ProxyCommand=cmd1 -o ProxyCommand=cmd2 ...
-        # then ssh will first ssh into the host using cmd2 (the later one) and
-        # then ssh from cmd2 host to the target host using cmd1. So, we put the
-        # docker proxy command at the beginning. This way, ssh will first
-        # establish a connection to the user-specified proxy host and then
-        # proceed to ssh from the proxy host to the docker host VM,
-        # and finally, ssh into the docker container.
         codegen = textwrap.dedent(f"""\
             {autogen_comment}
             Host {host_name}
@@ -437,7 +430,6 @@ class SSHConfigHelper(object):
               UserKnownHostsFile=/dev/null
               GlobalKnownHostsFile=/dev/null
               Port {port}
-              {docker_proxy}
               {proxy}
             """.rstrip())
         codegen = codegen + '\n'
