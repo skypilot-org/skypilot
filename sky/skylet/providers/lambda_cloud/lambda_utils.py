@@ -77,6 +77,7 @@ class Metadata:
 def raise_lambda_error(response: requests.Response) -> None:
     """Raise LambdaCloudError if appropriate. """
     status_code = response.status_code
+    resp_json = None
     if status_code == 200:
         return
     if status_code == 429:
@@ -86,8 +87,10 @@ def raise_lambda_error(response: requests.Response) -> None:
         resp_json = response.json()
         code = resp_json.get('error', {}).get('code')
         message = resp_json.get('error', {}).get('message')
-    except (KeyError, json.decoder.JSONDecodeError):
-        raise LambdaCloudError(f'Unexpected error. Status code: {status_code}')
+    except json.decoder.JSONDecodeError:
+        raise LambdaCloudError('Unexpected error. Status '
+                               f'code: {status_code}; response: {response}; '
+                               f'resp_json: {resp_json}')
     raise LambdaCloudError(f'{code}: {message}')
 
 
