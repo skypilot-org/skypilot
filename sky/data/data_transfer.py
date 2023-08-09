@@ -188,6 +188,24 @@ def r2_to_s3(r2_bucket_name: str, s3_bucket_name: str) -> None:
                               'a local source for the storage object.')
 
 
+def minio_to_s3(minio_bucket_name: str, s3_bucket_name: str) -> None:
+    raise NotImplementedError('Moving data directly from MINIO to clouds is '
+                              'currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
+def minio_to_gcs(minio_bucket_name: str, s3_bucket_name: str) -> None:
+    raise NotImplementedError('Moving data directly from MINIO to clouds is '
+                              'currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
+def minio_to_r2(minio_bucket_name: str, s3_bucket_name: str) -> None:
+    raise NotImplementedError('Moving data directly from MINIO to clouds is '
+                              'currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
 def _add_bucket_iam_member(bucket_name: str, role: str, member: str) -> None:
     storage_client = gcp.storage_client()
     bucket = storage_client.bucket(bucket_name)

@@ -1,0 +1,30 @@
+num_nodes: 1
+
+resources:
+  memory: 2
+  cpus: 1
+  cloud: kubernetes
+
+file_mounts:
+
+  /dataset-demo:
+    # sky-demo-dataset bucket mounted under /dataset-demo folder
+    # in ray cluster
+    source: minio://sky-demo-dataset
+    mode: MOUNT
+
+# Typical use: pip install -r requirements.txt
+# Invoked under the workdir (i.e., can use its files).
+setup: |
+  echo "Running setup."
+
+# Typical use: make use of resources, such as running training.
+# Invoked under the workdir (i.e., can use its files).
+run: |
+  echo "Hello, how are you?"
+  conda env list
+
+  # ensure sky/data contents are listed
+  ls -l /dataset-demo
+  # Write to bucket in MOUNT mode should pass
+  echo "hello" > /dataset-demo/hello.txt

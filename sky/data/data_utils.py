@@ -14,7 +14,7 @@ from filelock import FileLock
 
 from sky import exceptions
 from sky import sky_logging
-from sky.adaptors import aws, gcp, cloudflare, ibm
+from sky.adaptors import aws, gcp, cloudflare, ibm, minio
 from sky.utils import ux_utils
 
 Client = Any
@@ -53,6 +53,18 @@ def split_r2_path(r2_path: str) -> Tuple[str, str]:
       r2_path: str; R2 Path, e.g. r2://imagenet/train/
     """
     path_parts = r2_path.replace('r2://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
+def split_minio_path(minio_path: str) -> Tuple[str, str]:
+    """Splits MINIO Path into Bucket name and Relative Path to Bucket
+
+    Args:
+      minio_path: str; minio Path, e.g. minio://imagenet/train/
+    """
+    path_parts = minio_path.replace('minio://', '').split('/')
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
@@ -129,6 +141,15 @@ def create_r2_client(region: str = 'auto') -> Client:
     return cloudflare.client('s3', region)
 
 
+def create_minio_client(region: str = 'auto') -> Client:
+    """Helper method that connects to Boto3 client for Minio Bucket
+
+    Args:
+      region: str; Region for MINIO is set to auto
+    """
+    return minio.client('s3', region)
+
+
 def verify_r2_bucket(name: str) -> bool:
     """Helper method that checks if the R2 bucket exists
 
@@ -138,6 +159,17 @@ def verify_r2_bucket(name: str) -> bool:
     r2 = cloudflare.resource('s3')
     bucket = r2.Bucket(name)
     return bucket in r2.buckets.all()
+
+
+def verify_minio_bucket(name: str) -> bool:
+    """Helper method that checks if the MINIO bucket exists
+
+    Args:
+      name: str; Name of MINIO Bucket (without minio:// prefix)
+    """
+    _minio = minio.resource('s3')
+    bucket = _minio.Bucket(name)
+    return bucket in _minio.buckets.all()
 
 
 def verify_ibm_cos_bucket(name: str) -> bool:
@@ -261,7 +293,7 @@ def parallel_upload(source_path_list: List[str],
                     max_concurrent_uploads: Optional[int] = None) -> None:
     """Helper function to run parallel uploads for a list of paths.
 
-    Used by S3Store, GCSStore, and R2Store to run rsync commands in parallel by
+    Used by S3Store, GCSStore, R2Store and MINIOStore to run rsync commands in parallel by
     providing appropriate command generators.
 
     Args:

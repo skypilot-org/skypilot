@@ -5,7 +5,7 @@ import click
 
 from sky import clouds
 from sky import global_user_state
-from sky.adaptors import cloudflare
+from sky.adaptors import cloudflare, minio
 
 
 # TODO(zhwu): add check for a single cloud to improve performance
@@ -52,7 +52,19 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
     if not r2_is_enabled:
         echo(f'    Reason: {reason}')
 
-    if len(enabled_clouds) == 0 and not r2_is_enabled:
+    cloud = 'minio (for Minio object store)'
+    echo(f'  Checking {cloud}...', nl=False)
+    minio_is_enabled, reason = minio.check_credentials()
+    echo('\r', nl=False)
+    status_msg = 'enabled' if minio_is_enabled else 'disabled'
+    status_color = 'green' if minio_is_enabled else 'red'
+    echo('  ' +
+         click.style(f'{cloud}: {status_msg}', fg=status_color, bold=True) +
+         ' ' * 10)
+    if not minio_is_enabled:
+        echo(f'    Reason: {reason}')
+
+    if len(enabled_clouds) == 0 and not r2_is_enabled and not minio_is_enabled:
         click.echo(
             click.style(
                 'No cloud is enabled. SkyPilot will not be able to run any '
@@ -91,4 +103,11 @@ def get_cloud_credential_file_mounts() -> Dict[str, str]:
     if r2_is_enabled:
         r2_credential_mounts = cloudflare.get_credential_file_mounts()
         file_mounts.update(r2_credential_mounts)
+    # get_enabled_clouds() does not support minio
+    # as only clouds with computing instances are marked
+    # as enabled by skypilot, therefore we explicitly add this here
+    minio_is_enabled, _ = minio.check_credentials()
+    if minio_is_enabled:
+        minio_credential_mounts = minio.get_credential_file_mounts()
+        file_mounts.update(minio_credential_mounts)
     return file_mounts
