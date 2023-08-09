@@ -43,7 +43,7 @@ import pytest
 import sky
 from sky import global_user_state
 from sky.adaptors import ibm
-from sky.adaptors import cloudflare
+from sky.adaptors import cloudflare, minio
 from sky.clouds import AWS, GCP, Azure
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -901,6 +901,35 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
 
         test = Test(
             'cloudflare_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
+@pytest.mark.minio
+def test_minio_storage_mounts(generic_cloud: str):
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_minio_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    endpoint_url = minio.create_endpoint()
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=minio'
+        ]
+
+        test = Test(
+            'minio_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete {storage_name}',
             timeout=20 * 60,  # 20 mins
@@ -2728,6 +2757,10 @@ class TestStorageWithCredentials:
             endpoint_url = cloudflare.create_endpoint()
             url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
+        if store_type == storage_lib.StoreType.MINIO:
+            endpoint_url = minio.create_endpoint()
+            url = f's3://{bucket_name}'
+            return f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=minio'
         if store_type == storage_lib.StoreType.IBM:
             bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
                 bucket_name, Rclone.RcloneClouds.IBM)
@@ -2754,6 +2787,13 @@ class TestStorageWithCredentials:
             else:
                 url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
+        if store_type == storage_lib.StoreType.MINIO:
+            endpoint_url = minio.create_endpoint()
+            if suffix:
+                url = f's3://{bucket_name}/{suffix}'
+            else:
+                url = f's3://{bucket_name}'
+            return f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=minio'        
         if store_type == storage_lib.StoreType.IBM:
             bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
                 bucket_name, Rclone.RcloneClouds.IBM)
@@ -2777,6 +2817,12 @@ class TestStorageWithCredentials:
                 return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=r2'
             else:
                 return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=r2'
+        elif store_type == storage_lib.StoreType.MINIO:
+            endpoint_url = minio.create_endpoint()
+            if suffix:
+                return f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=minio'
+            else:
+                return f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=minio'
 
     @staticmethod
     def cli_count_file_in_bucket(store_type, bucket_name):
@@ -2959,6 +3005,18 @@ class TestStorageWithCredentials:
             shell=True)
 
     @pytest.fixture
+    def tmp_awscli_bucket_minio(self, tmp_bucket_name):
+        # Creates a temporary bucket using awscli
+        endpoint_url = minio.create_endpoint()
+        subprocess.check_call(
+            f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3 mb s3://{tmp_bucket_name} --endpoint {endpoint_url} --profile=minio',
+            shell=True)
+        yield tmp_bucket_name
+        subprocess.check_call(
+            f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3 rb s3://{tmp_bucket_name} --force --endpoint {endpoint_url} --profile=minio',
+            shell=True)
+
+    @pytest.fixture
     def tmp_ibm_cos_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using IBM COS API
         storage_obj = storage_lib.IBMCosStore(source="", name=tmp_bucket_name)
@@ -2976,7 +3034,8 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.MINIO, marks=pytest.mark.minio)
     ])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
                                               store_type):
@@ -3000,6 +3059,7 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.MINIO, marks=pytest.mark.minio),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm)
     ])
     def test_multiple_buckets_creation_and_deletion(
@@ -3039,7 +3099,8 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.MINIO, marks=pytest.mark.minio)
     ])
     def test_bucket_external_deletion(self, tmp_scratch_storage_obj,
                                       store_type):
@@ -3068,7 +3129,8 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.MINIO, marks=pytest.mark.minio)
     ])
     def test_bucket_bulk_deletion(self, store_type, tmp_bulk_del_storage_obj):
         # Creates a temp folder with over 256 files and folders, upload
@@ -3099,7 +3161,8 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('nonexist_bucket_url', [
         's3://{random_name}', 'gs://{random_name}',
         pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
-        pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare)
+        pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.MINIO, marks=pytest.mark.minio)
     ])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
         # Attempts to create fetch a stroage with a non-existent source.
@@ -3116,6 +3179,10 @@ class TestStorageWithCredentials:
             elif nonexist_bucket_url.startswith('r2'):
                 endpoint_url = cloudflare.create_endpoint()
                 command = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=r2'
+                expected_output = '404'
+            elif nonexist_bucket_url.startswith('minio'):
+                endpoint_url = minio.create_endpoint()
+                command = f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=minio'
                 expected_output = '404'
             elif nonexist_bucket_url.startswith('cos'):
                 # Using API calls, since using rclone requires a profile's name
@@ -3182,7 +3249,11 @@ class TestStorageWithCredentials:
                                            marks=pytest.mark.ibm),
                               pytest.param('tmp_awscli_bucket_r2',
                                            storage_lib.StoreType.R2,
-                                           marks=pytest.mark.cloudflare)])
+                                           marks=pytest.mark.cloudflare),
+                              pytest.param('tmp_awscli_bucket_minio',
+                                           storage_lib.StoreType.MINIO,
+                                           marks=pytest.mark.minio),
+                              ])
     def test_upload_to_existing_bucket(self, ext_bucket_fixture, request,
                                        tmp_source, store_type):
         # Tries uploading existing files to newly created bucket (outside of
@@ -3225,7 +3296,8 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+         pytest.param(storage_lib.StoreType.MINIO, marks=pytest.mark.minio)
     ])
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
         # Uses a list in the source field to specify a file and a directory to
@@ -3256,7 +3328,12 @@ class TestStorageWithCredentials:
                                            marks=pytest.mark.ibm),
                               pytest.param(AWS_INVALID_NAMES,
                                            storage_lib.StoreType.R2,
-                                           marks=pytest.mark.cloudflare)])
+                                           marks=pytest.mark.cloudflare),
+                              pytest.param(AWS_INVALID_NAMES,
+                                           storage_lib.StoreType.MINIO,
+                                           marks=pytest.mark.minio),
+                              ]
+                             )
     def test_invalid_names(self, invalid_name_list, store_type):
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
@@ -3271,7 +3348,11 @@ class TestStorageWithCredentials:
          (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.GCS),
          pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
                       storage_lib.StoreType.R2,
-                      marks=pytest.mark.cloudflare)])
+                      marks=pytest.mark.cloudflare),
+         pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
+                      storage_lib.StoreType.MINIO,
+                      marks=pytest.mark.minio),
+         ])
     def test_excluded_file_cloud_storage_upload_copy(self, gitignore_structure,
                                                      store_type,
                                                      tmp_gitignore_storage_obj):
