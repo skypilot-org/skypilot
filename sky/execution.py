@@ -1088,23 +1088,29 @@ def serve_up(
 
         print(f'\n{colorama.Fore.CYAN}Service name: '
               f'{colorama.Style.BRIGHT}{service_name}{colorama.Style.RESET_ALL}'
-              '\nTo see detailed info about replicas:'
-              f'\t{backend_utils.BOLD}sky serve status {service_name} (-a)'
+              '\nTo see detailed info:'
+              f'\t\t{backend_utils.BOLD}sky serve status {service_name} (-a)'
               f'{backend_utils.RESET_BOLD}'
               '\nTo see logs of controller:'
-              f'\t\t{backend_utils.BOLD}sky serve logs -c {service_name}'
+              f'\t{backend_utils.BOLD}sky serve logs -c {service_name}'
               f'{backend_utils.RESET_BOLD}'
               '\nTo see logs of redirector:'
-              f'\t\t{backend_utils.BOLD}sky serve logs -r {service_name}'
+              f'\t{backend_utils.BOLD}sky serve logs -r {service_name}'
               f'{backend_utils.RESET_BOLD}'
+              '\nTo see logs of one replica:'
+              f'\t{backend_utils.BOLD}sky serve logs -i [REPLICA_ID] '
+              f'{service_name}{backend_utils.RESET_BOLD}'
               '\nTo teardown the service:'
-              f'\t\t{backend_utils.BOLD}sky serve down {service_name}'
+              f'\t{backend_utils.BOLD}sky serve down {service_name}'
               f'{backend_utils.RESET_BOLD}\n')
         print(f'{colorama.Style.BRIGHT}{colorama.Fore.CYAN}'
-              'Endpoint serving at: '
+              'Endpoint URL: '
               f'{colorama.Style.RESET_ALL}{colorama.Fore.CYAN}'
               f'{endpoint}'
               f'{colorama.Style.RESET_ALL}')
+        print(f'{colorama.Fore.GREEN}Starting replica now...'
+              f'{colorama.Style.RESET_ALL}')
+        print('Please use the above command to find the latest status.')
 
 
 def serve_down(
