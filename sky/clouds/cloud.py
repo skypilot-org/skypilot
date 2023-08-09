@@ -288,7 +288,10 @@ class Cloud:
                                                   region,
                                                   clouds=cls._REPR.lower())
 
-    def get_feasible_launchable_resources(self, resources):
+    def get_feasible_launchable_resources(
+            self,
+            resources: 'resources_lib.Resources',
+            num_nodes: int = 1) -> 'resources_lib.Resources':
         """Returns a list of feasible and launchable resources.
 
         Feasible resources refer to an offering respecting the resource
@@ -300,6 +303,9 @@ class Cloud:
         if resources.is_launchable():
             self._check_instance_type_accelerators_combination(resources)
         resources_required_features = resources.get_required_cloud_features()
+        if num_nodes > 1:
+            resources_required_features.add(
+                CloudImplementationFeatures.MULTI_NODE)
         try:
             self.check_features_are_supported(resources_required_features)
         except exceptions.NotSupportedError:
