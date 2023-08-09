@@ -1102,8 +1102,10 @@ def serve_up(
               f'{service_name}{backend_utils.RESET_BOLD}'
               '\nTo teardown the service:'
               f'\t{backend_utils.BOLD}sky serve down {service_name}'
-              f'{backend_utils.RESET_BOLD}\n')
-        print(f'{colorama.Style.BRIGHT}{colorama.Fore.CYAN}'
+              f'{backend_utils.RESET_BOLD}'
+              f'\n(use {backend_utils.BOLD}sky serve status {service_name}'
+              f'{backend_utils.RESET_BOLD} to get all valid REPLICA_ID)')
+        print(f'\n{colorama.Style.BRIGHT}{colorama.Fore.CYAN}'
               'Endpoint URL: '
               f'{colorama.Style.RESET_ALL}{colorama.Fore.CYAN}'
               f'{endpoint}'
