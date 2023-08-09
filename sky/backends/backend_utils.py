@@ -964,6 +964,7 @@ def write_cluster_config(
                         set(
                             skypilot_config.get_nested(
                                 ('gcp', 'specific_reservations'), set()))),
+                'num_reserved_nodes': to_provision.num_reserved_nodes,
 
                 # Conda setup
                 'conda_installation_commands':
