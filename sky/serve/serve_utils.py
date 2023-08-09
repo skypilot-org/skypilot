@@ -15,7 +15,7 @@ from sky.serve import constants
 from sky import status_lib
 from sky.utils import common_utils
 
-_CONTROL_PLANE_URL = f'http://0.0.0.0:{constants.CONTROL_PLANE_PORT}'
+_CONTROL_PLANE_URL = f'http://localhost:{constants.CONTROL_PLANE_PORT}'
 _SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'
 _FAILED_TO_FIND_REPLICA_MSG = (
     f'{colorama.Fore.RED}Failed to find replica '

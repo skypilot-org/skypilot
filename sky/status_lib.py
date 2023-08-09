@@ -91,16 +91,16 @@ class ReplicaStatus(enum.Enum):
     PROVISIONING = 'PROVISIONING'
 
     # The replica VM is provisioned and the service is starting. This indicates
-    # user's `setup` section and `run` section is still running, and the
-    # readiness probe failed.
+    # user's `setup` section or `run` section is still running, and the
+    # readiness probe fails.
     STARTING = 'STARTING'
 
     # The replica VM is provisioned and the service is ready, i.e. the
-    # readiness probe passed.
+    # readiness probe is passed.
     READY = 'READY'
 
     # The replica VM is provisioned, the service is started but the service
-    # is not ready, i.e. the readiness probe failed.
+    # is not ready, i.e. the readiness probe fails.
     NOT_READY = 'NOT_READY'
 
     # Any error happened during the whole process. Replica will be deleted and
