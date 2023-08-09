@@ -28,7 +28,7 @@ class CloudImplementationFeatures(enum.Enum):
     AUTOSTOP = 'autostop'
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
-    NATIVE_DOCKER_SUPPORT = 'native_docker_support'
+    DOCKER_IMAGE = 'docker_image'
     SPOT_INSTANCE = 'spot_instance'
     CUSTOM_DISK_TIER = 'custom_disk_tier'
     OPEN_PORTS = 'open_ports'

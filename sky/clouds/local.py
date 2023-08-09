@@ -34,8 +34,8 @@ class Local(clouds.Cloud):
             ('Local cloud does not support stopping instances.'),
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             ('Migrating disk is not supported for Local.'),
-        clouds.CloudImplementationFeatures.NATIVE_DOCKER_SUPPORT:
-            ('Native docker is not supported in Local. '
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            ('Docker image is not supported in Local. '
              'You can try running docker command inside the '
              '`run` section in task.yaml.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:

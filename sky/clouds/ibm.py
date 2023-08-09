@@ -38,8 +38,8 @@ class IBM(clouds.Cloud):
         return {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is not supported in {cls._REPR}.'),
-            clouds.CloudImplementationFeatures.NATIVE_DOCKER_SUPPORT:
-                (f'Native docker is not supported in {cls._REPR}. '
+            clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+                (f'Docker image is not supported in {cls._REPR}. '
                  'You can try running docker command inside the '
                  '`run` section in task.yaml.'),
             clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:

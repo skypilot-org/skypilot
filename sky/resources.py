@@ -694,7 +694,7 @@ class Resources:
                                 'Docker image is not supported for TPU VM.')
             if self.cloud is not None:
                 self.cloud.check_features_are_supported(
-                    {clouds.CloudImplementationFeatures.NATIVE_DOCKER_SUPPORT})
+                    {clouds.CloudImplementationFeatures.DOCKER_IMAGE})
             if skypilot_config.get_nested(
                 (str(self.cloud).lower(), 'ssh_proxy_command'),
                     None) is not None:
@@ -1033,8 +1033,7 @@ class Resources:
         if self.disk_tier is not None:
             features.add(clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
         if self.extract_docker_image() is not None:
-            features.add(
-                clouds.CloudImplementationFeatures.NATIVE_DOCKER_SUPPORT)
+            features.add(clouds.CloudImplementationFeatures.DOCKER_IMAGE)
         if self.ports is not None:
             features.add(clouds.CloudImplementationFeatures.OPEN_PORTS)
         return features
