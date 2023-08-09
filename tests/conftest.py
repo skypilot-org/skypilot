@@ -22,7 +22,7 @@ import pandas as pd
 # To only run tests for managed spot (without generic tests), use --managed-spot.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
-    'kubernetes'
+    'kubernetes', 'minio'
 ]
 default_clouds_to_run = ['gcp', 'azure']
 
@@ -38,7 +38,8 @@ cloud_to_pytest_keyword = {
     'ibm': 'ibm',
     'scp': 'scp',
     'oci': 'oci',
-    'kubernetes': 'kubernetes'
+    'kubernetes': 'kubernetes',
+    'minio': 'minio'
 }
 
 
@@ -93,6 +94,8 @@ def _get_cloud_to_run(config) -> List[str]:
         if config.getoption(f'--{cloud}'):
             if cloud == 'cloudflare':
                 cloud_to_run.append(default_clouds_to_run[0])
+            if cloud == 'minio':
+                cloud_to_run.append('kubernetes')
             else:
                 cloud_to_run.append(cloud)
     if not cloud_to_run:
@@ -125,6 +128,8 @@ def pytest_collection_modifyitems(config, items):
                 # Need to check both conditions as 'gcp' is added to cloud_to_run
                 # when tested for cloudflare
                 if config.getoption('--cloudflare') and cloud == 'cloudflare':
+                    continue
+                if config.getoption('--minio') and cloud == 'minio':
                     continue
                 item.add_marker(skip_marks[cloud])
 

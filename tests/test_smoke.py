@@ -3162,7 +3162,7 @@ class TestStorageWithCredentials:
         's3://{random_name}', 'gs://{random_name}',
         pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
         pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare),
-        pytest.param(storage_lib.StoreType.MINIO, marks=pytest.mark.minio)
+        pytest.param('minio://{random_name}', marks=pytest.mark.minio)
     ])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
         # Attempts to create fetch a stroage with a non-existent source.
