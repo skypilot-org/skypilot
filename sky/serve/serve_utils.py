@@ -28,6 +28,10 @@ def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
     return f'{service_name}-{replica_id}'
 
 
+def get_replica_id_from_cluster_name(cluster_name: str) -> int:
+    return int(cluster_name.split('-')[-1])
+
+
 def generate_replica_launch_log_file_name(cluster_name: str) -> str:
     cluster_name = cluster_name.replace('-', '_')
     prefix = os.path.expanduser(constants.SERVICE_YAML_PREFIX)
@@ -38,6 +42,12 @@ def generate_replica_down_log_file_name(cluster_name: str) -> str:
     cluster_name = cluster_name.replace('-', '_')
     prefix = os.path.expanduser(constants.SERVICE_YAML_PREFIX)
     return f'{prefix}/{cluster_name}_down_log.txt'
+
+
+def generate_replica_local_log_file_name(cluster_name: str) -> str:
+    cluster_name = cluster_name.replace('-', '_')
+    prefix = os.path.expanduser(constants.SERVICE_YAML_PREFIX)
+    return f'{prefix}/{cluster_name}_local_log.txt'
 
 
 def get_replica_info() -> str:
@@ -124,11 +134,26 @@ def _follow_logs(file: TextIO,
             time.sleep(1)
 
 
-def stream_logs(service_name: str, replica_id: int, follow: bool) -> str:
+def stream_logs(service_name: str,
+                replica_id: int,
+                follow: bool,
+                skip_local_log_file_check: bool = False) -> str:
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
     replica_cluster_name = generate_replica_cluster_name(
         service_name, replica_id)
+    local_log_file_name = generate_replica_local_log_file_name(
+        replica_cluster_name)
+
+    if not skip_local_log_file_check and os.path.exists(local_log_file_name):
+        # When sync down, we set skip_local_log_file_check to False so it won't
+        # detect the just created local log file. Otherwise, it indicates the
+        # replica is already been terminated. All logs should be in the local
+        # log file and we don't need to stream logs for it.
+        with open(local_log_file_name, 'r') as f:
+            print(f.read(), flush=True)
+        return ''
+
     handle = global_user_state.get_handle_from_cluster_name(
         replica_cluster_name)
     if handle is None:
@@ -160,12 +185,12 @@ def stream_logs(service_name: str, replica_id: int, follow: bool) -> str:
                 _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
         return target_info['status']
 
-    replica_is_provisioning = (lambda: follow and _get_replica_status() !=
-                               status_lib.ReplicaStatus.PROVISIONING)
+    finish_stream = (lambda: not follow or _get_replica_status() != status_lib.
+                     ReplicaStatus.PROVISIONING)
     with open(launch_log_file_name, 'r', newline='') as f:
         for line in _follow_logs(f,
                                  replica_cluster_name,
-                                 finish_stream=replica_is_provisioning):
+                                 finish_stream=finish_stream):
             print(line, end='', flush=True)
     if not follow and _get_replica_status(
     ) == status_lib.ReplicaStatus.PROVISIONING:
@@ -208,11 +233,15 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def stream_logs(cls, service_name: str, replica_id: int,
-                    follow: bool) -> str:
+    def stream_logs(cls,
+                    service_name: str,
+                    replica_id: int,
+                    follow: bool,
+                    skip_local_log_file_check: bool = False) -> str:
         code = [
-            f'msg = serve_utils.stream_logs({service_name!r}, '
-            f'{replica_id!r}, follow={follow})', 'print(msg, flush=True)'
+            f'msg = serve_utils.stream_logs({service_name!r}, {replica_id!r}, '
+            f'follow={follow}, skip_local_log_file_check='
+            f'{skip_local_log_file_check})', 'print(msg, flush=True)'
         ]
         return cls._build(code)
 

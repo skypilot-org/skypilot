@@ -376,11 +376,28 @@ class SkyPilotInfraProvider(InfraProvider):
     def scale_up(self, n: int) -> None:
         self._scale_up(n)
 
-    def _teardown_cluster(self, cluster_name: str) -> None:
+    def _teardown_cluster(self,
+                          cluster_name: str,
+                          sync_down_logs: bool = True) -> None:
         if cluster_name in self.down_process_pool:
             logger.warning(f'Down process for cluster {cluster_name} already '
                            'exists. Skipping.')
             return
+
+        if sync_down_logs:
+            logger.info(f'Syncing down logs for cluster {cluster_name}...')
+            replica_id = serve_utils.get_replica_id_from_cluster_name(
+                cluster_name)
+            code = serve_utils.ServeCodeGen.stream_logs(
+                self.service_name,
+                replica_id,
+                follow=False,
+                skip_local_log_file_check=True)
+            local_log_file_name = (
+                serve_utils.generate_replica_local_log_file_name(cluster_name))
+            with open(local_log_file_name, 'w') as f:
+                subprocess.run(code, shell=True, check=True, stdout=f)
+
         logger.info(f'Deleting SkyPilot cluster {cluster_name}')
         cmd = ['sky', 'down', cluster_name, '-y']
         fn = serve_utils.generate_replica_down_log_file_name(cluster_name)
@@ -427,7 +444,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 p.wait()
                 logger.info(f'Interrupted launch process for cluster {name} '
                             'and deleted the cluster.')
-                self._teardown_cluster(name)
+                self._teardown_cluster(name, sync_down_logs=False)
                 info = self.replica_info[name]
                 # Set to success here for correctly display as shutting down
                 info.status_property.sky_launch_status = ProcessStatus.SUCCESS
@@ -437,7 +454,7 @@ class SkyPilotInfraProvider(InfraProvider):
                     status_lib.ReplicaStatus.FAILED_AND_DOWN,
                     status_lib.ReplicaStatus.SHUTTING_DOWN
             ]:
-                self._teardown_cluster(name)
+                self._teardown_cluster(name, sync_down_logs=False)
         msg = []
         for name, p in self.down_process_pool.items():
             p.wait()
@@ -525,7 +542,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 info.first_not_ready_time = time.time()
             if info.status_property.service_once_ready:
                 info.consecutive_failure_cnt += 1
-                if (info.consecutive_failure_cnt >
+                if (info.consecutive_failure_cnt >=
                         _CONSECUTIVE_FAILURE_THRESHOLD_COUNT):
                     logger.info(f'Replica {cluster_name} is consecutively '
                                 'not ready for too long and exceeding '
