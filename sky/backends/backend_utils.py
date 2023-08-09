@@ -512,7 +512,7 @@ class SSHConfigHelper(object):
             docker_proxy_command = ' '.join(
                 ['ssh'] + command_runner.ssh_options_list(key_path, None) +
                 ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ips[0]}'])
-            head_port = int(constants.DEFAULT_DOCKER_PORT)
+            head_port = constants.DEFAULT_DOCKER_PORT
         codegen = cls._get_generated_config(sky_autogen_comment, host_name, ip,
                                             username, key_path, proxy_command,
                                             head_port, docker_proxy_command)
@@ -563,7 +563,7 @@ class SSHConfigHelper(object):
         external_worker_ips = list(sorted(external_worker_ips))
         port = 22
         if docker_user is not None:
-            port = int(constants.DEFAULT_DOCKER_PORT)
+            port = constants.DEFAULT_DOCKER_PORT
 
         overwrites = [False] * len(external_worker_ips)
         overwrite_begin_idxs: List[Optional[int]] = [None
