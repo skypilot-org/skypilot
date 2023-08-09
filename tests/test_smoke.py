@@ -1259,7 +1259,6 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not have V100 (16GB) GPUs. Run test_scp_huggingface instead.
-@pytest.mark.no_kubernetes  # Kubernetes not have gpus
 def test_huggingface(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
