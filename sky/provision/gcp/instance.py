@@ -183,6 +183,6 @@ def cleanup_ports(
                            'Skipping cleanup. Please manually delete the '
                            'firewall rules.')
             return
-        for port in provider_config['ports']:
-            rule_name = (f'{vpc_name}-user-ports-{cluster_name}-{port}')
-            handler.delete_firewall_rule(project_id, rule_name)
+        # for port in provider_config['ports']:
+        #     rule_name = (f'{vpc_name}-user-ports-{cluster_name}-{port}')
+        #     handler.delete_firewall_rule(project_id, rule_name)

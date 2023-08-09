@@ -13,6 +13,7 @@ import uvicorn
 from sky import serve
 from sky.serve import autoscalers
 from sky.serve import infra_providers
+from sky.utils import env_options
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,6 +21,14 @@ logging.basicConfig(
     datefmt='%m-%d %H:%M:%S',
     force=True)
 logger = logging.getLogger(__name__)
+
+
+class SuppressSuccessGetAccessLogsFilter(logging.Filter):
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        print('message', message)
+        return not ('GET' in message and '200' in message)
 
 
 class ControlPlane:
@@ -64,7 +73,7 @@ class ControlPlane:
 
         @self.app.get('/control_plane/get_replica_info')
         def get_replica_info():
-            infos = self.infra_provider.get_replica_info()
+            infos = self.infra_provider.get_replica_info(verbose=True)
             return {
                 'replica_info': base64.b64encode(pickle.dumps(infos)
                                                 ).decode('utf-8')
@@ -86,6 +95,12 @@ class ControlPlane:
         self.infra_provider.start_replica_prober()
         if self.autoscaler is not None:
             self.autoscaler.start_monitor()
+
+        # Disable all GET logs if SKYPILOT_DEBUG is not set to avoid overflood
+        # the control plane logs.
+        if not env_options.Options.SHOW_DEBUG_INFO.get():
+            logging.getLogger('uvicorn.access').addFilter(
+                SuppressSuccessGetAccessLogsFilter())
 
         logger.info(
             f'SkyServe Control Plane started on http://localhost:{self.port}')

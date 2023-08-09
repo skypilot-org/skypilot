@@ -13,4 +13,4 @@ service:
     path: /health
     initial_delay_seconds: 120
   replica_policy:
-    min_replica: 2
+    min_replica: 0
