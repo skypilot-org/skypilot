@@ -440,17 +440,6 @@ class Cloud:
         """
         unsupported_features2reason = cls._cloud_unsupported_features()
 
-        # Multi-node is not supported when specific_reservations is specified
-        # because if the node count is greater than the number of available
-        # resources in the specific reservations, the Google API will throw
-        # an error when trying to create the instance.
-        multi_node = CloudImplementationFeatures.MULTI_NODE
-        specific_reservations = skypilot_config.get_nested(
-            (cls._REPR.lower(), 'specific_reservations'), set())
-        if (specific_reservations and multi_node in requested_features):
-            unsupported_features2reason[multi_node] = (
-                'Multi-node is not supported when the `specific_reservations` '
-                f'is specified: {specific_reservations}')
 
         unsupported_features = set(unsupported_features2reason.keys())
         unsupported_features = requested_features.intersection(

@@ -78,11 +78,13 @@ _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 _LAUNCHED_HEAD_PATTERN = re.compile(r'(\d+) ray[._]head[._]default')
 _LAUNCHED_LOCAL_WORKER_PATTERN = re.compile(r'(\d+) node_')
 _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
+_LAUNCHED_RESERVED_WORKER_PATTERN = re.compile(
+    r'(\d+) ray[._]worker[._]reserved')
 # Intentionally not using prefix 'rf' for the string format because yapf have a
 # bug with python=3.6.
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
-    r'({}): ray[._]worker[._]default'.format(IP_ADDR_REGEX))
+    r'({}): ray[._]worker[._](?:default|reserved)'.format(IP_ADDR_REGEX))
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
 # We check network connection by going through _TEST_IP_LIST. We may need to
@@ -1153,6 +1155,9 @@ def _count_healthy_nodes_from_ray(output: str,
     else:
         ready_head = get_ready_nodes(_LAUNCHED_HEAD_PATTERN, output)
         ready_workers = get_ready_nodes(_LAUNCHED_WORKER_PATTERN, output)
+        ready_reserved_workers = get_ready_nodes(
+            _LAUNCHED_RESERVED_WORKER_PATTERN, output)
+        ready_workers += ready_reserved_workers
     assert ready_head <= 1, f'#head node should be <=1 (Got {ready_head}).'
     return ready_head, ready_workers
 
