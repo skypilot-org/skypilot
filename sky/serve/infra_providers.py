@@ -81,34 +81,39 @@ class ReplicaStatusProperty:
         if self.sky_launch_status == ProcessStatus.RUNNING:
             # Still launching
             return status_lib.ReplicaStatus.PROVISIONING
-        if self.sky_launch_status == ProcessStatus.FAILED:
-            # sky.launch failed
-            return status_lib.ReplicaStatus.FAILED
         if self.sky_down_status is not None:
             if self.sky_down_status == ProcessStatus.RUNNING:
                 # sky.down is running
                 return status_lib.ReplicaStatus.SHUTTING_DOWN
             if self.sky_down_status == ProcessStatus.FAILED:
                 # sky.down failed
-                return status_lib.ReplicaStatus.FAILED
+                return status_lib.ReplicaStatus.CLEANUP_FAILED
             if self.user_app_failed:
                 # Failed on user setup/run
-                return status_lib.ReplicaStatus.FAILED_DELETED
+                return status_lib.ReplicaStatus.FAILED_AND_DOWN
             if not self.service_once_ready:
                 # Readiness timeout exceeded
-                return status_lib.ReplicaStatus.FAILED_DELETED
+                return status_lib.ReplicaStatus.FAILED_AND_DOWN
             if not self.service_ready_now:
                 # Max continuous failure exceeded
-                return status_lib.ReplicaStatus.FAILED_DELETED
+                return status_lib.ReplicaStatus.FAILED_AND_DOWN
+            if self.sky_launch_status == ProcessStatus.FAILED:
+                # sky.launch failed
+                return status_lib.ReplicaStatus.FAILED_AND_DOWN
             # This indicate it is a scale_down with correct teardown.
             # Should have been cleaned from the replica_info.
+            return status_lib.ReplicaStatus.UNKNOWN
+        if self.sky_launch_status == ProcessStatus.FAILED:
+            # sky.launch failed
+            # down process should have been started
             return status_lib.ReplicaStatus.UNKNOWN
         if self.service_ready_now:
             # Service is ready
             return status_lib.ReplicaStatus.READY
         if self.user_app_failed:
             # Failed on user setup/run
-            return status_lib.ReplicaStatus.FAILED
+            # down process should have been started
+            return status_lib.ReplicaStatus.UNKNOWN
         if self.service_once_ready:
             # Service was ready before but not now
             return status_lib.ReplicaStatus.NOT_READY
@@ -234,6 +239,7 @@ class SkyPilotInfraProvider(InfraProvider):
                                 f'abnormally with code {p.returncode}.')
                     info.status_property.sky_launch_status = (
                         ProcessStatus.FAILED)
+                    self._teardown_cluster(cluster_name)
                 else:
                     info.status_property.sky_launch_status = (
                         ProcessStatus.SUCCESS)
@@ -288,6 +294,7 @@ class SkyPilotInfraProvider(InfraProvider):
                     job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
             ]:
                 info.status_property.user_app_failed = True
+                self._teardown_cluster(cluster_name)
 
     def _job_status_fetcher(self) -> None:
         while not self.job_status_fetcher_stop_event.is_set():
@@ -363,7 +370,7 @@ class SkyPilotInfraProvider(InfraProvider):
             logger.warning(f'Down process for cluster {cluster_name} already '
                            'exists. Skipping.')
             return
-        cmd = ['sky', 'down', cluster_name, '--purge', '-y']
+        cmd = ['sky', 'down', cluster_name, '-y']
         fn = serve_utils.generate_replica_down_log_file_name(cluster_name)
         with open(fn, 'w') as f:
             # pylint: disable=consider-using-with
@@ -415,7 +422,7 @@ class SkyPilotInfraProvider(InfraProvider):
         for name, info in self.replica_info.items():
             # Skip those already deleted and those are deleting
             if info.status not in [
-                    status_lib.ReplicaStatus.FAILED_DELETED,
+                    status_lib.ReplicaStatus.FAILED_AND_DOWN,
                     status_lib.ReplicaStatus.SHUTTING_DOWN
             ]:
                 self._teardown_cluster(name)

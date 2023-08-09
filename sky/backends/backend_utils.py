@@ -2417,7 +2417,8 @@ def get_clusters(
 def _service_status_from_replica_info(
         replica_info: List[Dict[str, Any]]) -> status_lib.ServiceStatus:
     status2num = collections.Counter([i['status'] for i in replica_info])
-    if status2num[status_lib.ReplicaStatus.FAILED] > 0:
+    if (status2num[status_lib.ReplicaStatus.FAILED_AND_DOWN] +
+            status2num[status_lib.ReplicaStatus.CLEANUP_FAILED] > 0):
         return status_lib.ServiceStatus.FAILED
     if status2num[status_lib.ReplicaStatus.READY] > 0:
         return status_lib.ServiceStatus.READY

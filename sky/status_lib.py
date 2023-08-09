@@ -106,13 +106,13 @@ class ReplicaStatus(enum.Enum):
     # Any error happened during the whole process. Replica will be deleted and
     # **NOT** re-provisioned in the current design, since we want to avoid
     # infinite loop of re-provisioning and failing every time.
-    FAILED = 'FAILED'
+    CLEANUP_FAILED = 'CLEANUP_FAILED'
 
     # The replica VM is being shut down. i.e., the `sky down` is still running.
     SHUTTING_DOWN = 'SHUTTING_DOWN'
 
     # The replica VM is once failed and has been deleted.
-    FAILED_DELETED = 'FAILED_DELETED'
+    FAILED_AND_DOWN = 'FAILED_AND_DOWN'
 
     # Unknown status. This should never happen.
     UNKNOWN = 'UNKNOWN'
@@ -127,8 +127,8 @@ _REPLICA_STATUS_TO_COLOR = {
     ReplicaStatus.STARTING: colorama.Fore.CYAN,
     ReplicaStatus.READY: colorama.Fore.GREEN,
     ReplicaStatus.NOT_READY: colorama.Fore.YELLOW,
-    ReplicaStatus.FAILED: colorama.Fore.RED,
+    ReplicaStatus.CLEANUP_FAILED: colorama.Fore.RED,
     ReplicaStatus.SHUTTING_DOWN: colorama.Fore.MAGENTA,
-    ReplicaStatus.FAILED_DELETED: colorama.Fore.RED,
+    ReplicaStatus.FAILED_AND_DOWN: colorama.Fore.RED,
     ReplicaStatus.UNKNOWN: colorama.Fore.RED,
 }
