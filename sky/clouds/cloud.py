@@ -309,6 +309,9 @@ class Cloud:
         try:
             self.check_features_are_supported(resources_required_features)
         except exceptions.NotSupportedError:
+            # TODO(zhwu): The resources are now silently filtered out. We
+            # should have some logging telling the user why the resources
+            # are not considered.
             return ([], [])
         return self._get_feasible_launchable_resources(resources)
 
