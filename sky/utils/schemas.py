@@ -155,13 +155,13 @@ def get_service_schema():
             },
             'readiness_probe': {
                 'type': 'object',
-                'required': ['path', 'readiness_timeout'],
+                'required': ['path', 'initial_delay_seconds'],
                 'additionalProperties': False,
                 'properties': {
                     'path': {
                         'type': 'string',
                     },
-                    'readiness_timeout': {
+                    'initial_delay_seconds': {
                         'type': 'number',
                     },
                     'post_data': {

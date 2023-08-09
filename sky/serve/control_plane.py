@@ -115,7 +115,7 @@ if __name__ == '__main__':
         args.task_yaml,
         args.service_name,
         readiness_path=service_spec.readiness_path,
-        readiness_timeout=service_spec.readiness_timeout,
+        initial_delay_seconds=service_spec.initial_delay_seconds,
         post_data=service_spec.post_data)
 
     # ======= Autoscaler =========

@@ -92,7 +92,7 @@ class ReplicaStatusProperty:
                 # Failed on user setup/run
                 return status_lib.ReplicaStatus.FAILED_AND_DOWN
             if not self.service_once_ready:
-                # Readiness timeout exceeded
+                # initial delay seconds exceeded
                 return status_lib.ReplicaStatus.FAILED_AND_DOWN
             if not self.service_ready_now:
                 # Max continuous failure exceeded
@@ -168,14 +168,15 @@ class InfraProvider:
     def __init__(
             self,
             readiness_path: str,
-            readiness_timeout: int,
+            initial_delay_seconds: int,
             post_data: Optional[Union[str, Dict[str, Any]]] = None) -> None:
         # TODO(tian): make this thread safe
         self.replica_info: Dict[str, ReplicaInfo] = dict()
         self.readiness_path: str = readiness_path
-        self.readiness_timeout: int = readiness_timeout
+        self.initial_delay_seconds: int = initial_delay_seconds
         self.post_data: Optional[Union[str, Dict[str, Any]]] = post_data
         logger.info(f'Readiness probe path: {self.readiness_path}')
+        logger.info(f'Initial delay seconds: {self.initial_delay_seconds}')
         logger.info(f'Post data: {self.post_data} ({type(self.post_data)})')
 
     def get_replica_info(self) -> List[Dict[str, Any]]:
@@ -293,6 +294,8 @@ class SkyPilotInfraProvider(InfraProvider):
             if job_status in [
                     job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
             ]:
+                logger.info(f'User APP for cluster {cluster_name} FAILED. '
+                            'Terminating...')
                 info.status_property.user_app_failed = True
                 self._teardown_cluster(cluster_name)
 
@@ -490,11 +493,14 @@ class SkyPilotInfraProvider(InfraProvider):
             return info.cluster_name, False
 
         probe_futures = []
+        replica_to_probe = []
         with futures.ThreadPoolExecutor() as executor:
             for cluster_name, info in self.replica_info.items():
                 if not info.status_property.should_track_status():
                     continue
+                replica_to_probe.append(info.ip)
                 probe_futures.append(executor.submit(_probe_replica, info))
+        logger.info(f'Replcia to probe: {replica_to_probe}')
 
         for future in futures.as_completed(probe_futures):
             cluster_name, res = future.result()
@@ -524,12 +530,13 @@ class SkyPilotInfraProvider(InfraProvider):
                                 f'{_CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT}s). '
                                 'Skipping.')
             else:
-                if time.time(
-                ) - info.first_not_ready_time > self.readiness_timeout:
+                current_delay_seconds = time.time() - info.first_not_ready_time
+                if current_delay_seconds > self.initial_delay_seconds:
                     logger.info(f'Replica {cluster_name} is not ready and '
-                                'exceeding readiness timeout. Terminating.')
+                                'exceeding initial delay seconds. Terminating.')
                     self._teardown_cluster(cluster_name)
                 else:
                     logger.info(
                         f'Replica {cluster_name} is not ready but within '
-                        'readiness timeout. Skipping.')
+                        f'initial delay seconds ({current_delay_seconds}s / '
+                        f'{self.initial_delay_seconds}s). Skipping.')

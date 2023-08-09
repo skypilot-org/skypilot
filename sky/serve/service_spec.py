@@ -15,7 +15,7 @@ class SkyServiceSpec:
     def __init__(
         self,
         readiness_path: str,
-        readiness_timeout: int,
+        initial_delay_seconds: int,
         app_port: int,
         min_replica: int,
         max_replica: Optional[int] = None,
@@ -35,7 +35,7 @@ class SkyServiceSpec:
                     ' Please use a different port.')
         # TODO: check if the path is valid
         self._readiness_path = f':{app_port}{readiness_path}'
-        self._readiness_timeout = readiness_timeout
+        self._initial_delay_seconds = initial_delay_seconds
         # TODO: check if the port is valid
         self._app_port = str(app_port)
         self._min_replica = min_replica
@@ -54,8 +54,8 @@ class SkyServiceSpec:
 
         service_config = {}
         service_config['readiness_path'] = config['readiness_probe']['path']
-        service_config['readiness_timeout'] = config['readiness_probe'][
-            'readiness_timeout']
+        service_config['initial_delay_seconds'] = config['readiness_probe'][
+            'initial_delay_seconds']
         service_config['app_port'] = config['port']
         service_config['min_replica'] = config['replica_policy']['min_replica']
         service_config['max_replica'] = config['replica_policy'].get(
@@ -106,8 +106,8 @@ class SkyServiceSpec:
         add_if_not_none('port', None, int(self.app_port))
         add_if_not_none('readiness_probe', 'path',
                         self.readiness_path[len(f':{self.app_port}'):])
-        add_if_not_none('readiness_probe', 'readiness_timeout',
-                        self.readiness_timeout)
+        add_if_not_none('readiness_probe', 'initial_delay_seconds',
+                        self.initial_delay_seconds)
         add_if_not_none('readiness_probe', 'post_data', self.post_data)
         add_if_not_none('replica_policy', 'min_replica', self.min_replica)
         add_if_not_none('replica_policy', 'max_replica', self.max_replica)
@@ -132,8 +132,8 @@ class SkyServiceSpec:
         return self._readiness_path
 
     @property
-    def readiness_timeout(self) -> int:
-        return self._readiness_timeout
+    def initial_delay_seconds(self) -> int:
+        return self._initial_delay_seconds
 
     @property
     def app_port(self) -> str:

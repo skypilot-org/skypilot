@@ -9,7 +9,7 @@ service:
   port: 8087
   readiness_probe:
     path: /v1/models
-    readiness_timeout: 1200
+    initial_delay_seconds: 1200
   replica_policy:
     min_replica: 2
 

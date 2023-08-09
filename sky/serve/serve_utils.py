@@ -121,7 +121,7 @@ def _follow_logs(file: TextIO,
                 if no_new_content_cnt >= no_new_content_timeout:
                     break
                 no_new_content_cnt += 1
-                time.sleep(1)
+            time.sleep(1)
 
 
 def stream_logs(service_name: str, replica_id: int, follow: bool) -> str:
