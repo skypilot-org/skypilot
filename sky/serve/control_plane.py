@@ -27,7 +27,6 @@ class SuppressSuccessGetAccessLogsFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
-        print('message', message)
         return not ('GET' in message and '200' in message)
 
 
