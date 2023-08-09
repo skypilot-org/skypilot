@@ -315,8 +315,8 @@ class Optimizer:
                         # them.
                         # TODO: different policies can be applied here for
                         # whether to choose reserved instances.
-                        estimated_cost_or_time = cost_per_node * (
-                            node.num_nodes - available_reservation_resources)
+                        estimated_cost_or_time = cost_per_node * max(
+                            node.num_nodes - available_reservation_resources, 0)
                     else:
                         # Minimize run time.
                         estimated_cost_or_time = estimated_runtime
