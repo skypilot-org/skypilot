@@ -88,8 +88,8 @@ class ControlPlane:
             self.autoscaler.start_monitor()
 
         logger.info(
-            f'SkyServe Control Plane started on http://0.0.0.0:{self.port}')
-        uvicorn.run(self.app, host='0.0.0.0', port=self.port)
+            f'SkyServe Control Plane started on http://localhost:{self.port}')
+        uvicorn.run(self.app, host='localhost', port=self.port)
 
 
 if __name__ == '__main__':

@@ -96,9 +96,9 @@ class SkyServeRedirector:
         sync_control_plane_thread.start()
 
         logger.info(
-            f'SkyServe Redirector started on http://0.0.0.0:{self.port}')
+            f'SkyServe Redirector started on http://localhost:{self.port}')
 
-        uvicorn.run(self.app, host='0.0.0.0', port=self.port)
+        uvicorn.run(self.app, host='localhost', port=self.port)
 
 
 if __name__ == '__main__':

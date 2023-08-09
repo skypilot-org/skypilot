@@ -1065,7 +1065,7 @@ def serve_up(
 
         with console.status('[yellow]Launching redirector process on '
                             'controller...[/yellow]'):
-            control_plane_addr = f'http://0.0.0.0:{serve.CONTROL_PLANE_PORT}'
+            control_plane_addr = f'http://localhost:{serve.CONTROL_PLANE_PORT}'
             _execute(
                 entrypoint=sky.Task(
                     name='run-redirector',
