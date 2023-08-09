@@ -88,19 +88,19 @@ class ReplicaStatusProperty:
                 return status_lib.ReplicaStatus.SHUTTING_DOWN
             if self.sky_down_status == ProcessStatus.FAILED:
                 # sky.down failed
-                return status_lib.ReplicaStatus.CLEANUP_FAILED
+                return status_lib.ReplicaStatus.FAILED_CLEANUP
             if self.user_app_failed:
                 # Failed on user setup/run
-                return status_lib.ReplicaStatus.FAILED_AND_DOWN
+                return status_lib.ReplicaStatus.FAILED
             if not self.service_once_ready:
                 # initial delay seconds exceeded
-                return status_lib.ReplicaStatus.FAILED_AND_DOWN
+                return status_lib.ReplicaStatus.FAILED
             if not self.service_ready_now:
                 # Max continuous failure exceeded
-                return status_lib.ReplicaStatus.FAILED_AND_DOWN
+                return status_lib.ReplicaStatus.FAILED
             if self.sky_launch_status == ProcessStatus.FAILED:
                 # sky.launch failed
-                return status_lib.ReplicaStatus.FAILED_AND_DOWN
+                return status_lib.ReplicaStatus.FAILED
             # This indicate it is a scale_down with correct teardown.
             # Should have been cleaned from the replica_info.
             return status_lib.ReplicaStatus.UNKNOWN
@@ -451,7 +451,7 @@ class SkyPilotInfraProvider(InfraProvider):
         for name, info in self.replica_info.items():
             # Skip those already deleted and those are deleting
             if info.status not in [
-                    status_lib.ReplicaStatus.FAILED_AND_DOWN,
+                    status_lib.ReplicaStatus.FAILED,
                     status_lib.ReplicaStatus.SHUTTING_DOWN
             ]:
                 self._teardown_cluster(name, sync_down_logs=False)

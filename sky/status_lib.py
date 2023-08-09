@@ -54,13 +54,13 @@ class StorageStatus(enum.Enum):
 class ServiceStatus(enum.Enum):
     """Service status as recorded in table 'services'."""
 
-    # Middleware is initializing
+    # Controller is initializing
     CONTROLLER_INIT = 'CONTROLLER_INIT'
 
-    # Replica is initializing
+    # Replica is initializing and no failure
     REPLICA_INIT = 'REPLICA_INIT'
 
-    # At least one replica is ready
+    # At least one replica is ready and no failure
     READY = 'READY'
 
     # Service is being shutting down
@@ -103,16 +103,15 @@ class ReplicaStatus(enum.Enum):
     # is not ready, i.e. the readiness probe fails.
     NOT_READY = 'NOT_READY'
 
-    # Any error happened during the whole process. Replica will be deleted and
-    # **NOT** re-provisioned in the current design, since we want to avoid
-    # infinite loop of re-provisioning and failing every time.
-    CLEANUP_FAILED = 'CLEANUP_FAILED'
-
     # The replica VM is being shut down. i.e., the `sky down` is still running.
     SHUTTING_DOWN = 'SHUTTING_DOWN'
 
     # The replica VM is once failed and has been deleted.
-    FAILED_AND_DOWN = 'FAILED_AND_DOWN'
+    FAILED = 'FAILED'
+
+    # `sky.down` failed. This is of high risk since it might have resources
+    # leak.
+    FAILED_CLEANUP = 'FAILED_CLEANUP'
 
     # Unknown status. This should never happen.
     UNKNOWN = 'UNKNOWN'
@@ -127,8 +126,8 @@ _REPLICA_STATUS_TO_COLOR = {
     ReplicaStatus.STARTING: colorama.Fore.CYAN,
     ReplicaStatus.READY: colorama.Fore.GREEN,
     ReplicaStatus.NOT_READY: colorama.Fore.YELLOW,
-    ReplicaStatus.CLEANUP_FAILED: colorama.Fore.RED,
+    ReplicaStatus.FAILED_CLEANUP: colorama.Fore.RED,
     ReplicaStatus.SHUTTING_DOWN: colorama.Fore.MAGENTA,
-    ReplicaStatus.FAILED_AND_DOWN: colorama.Fore.RED,
+    ReplicaStatus.FAILED: colorama.Fore.RED,
     ReplicaStatus.UNKNOWN: colorama.Fore.RED,
 }
