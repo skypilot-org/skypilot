@@ -1,8 +1,12 @@
-import os
+"""Manages lifecycle of sshjump pod.
+
+This script runs inside sshjump pod as the main process (PID 1).
+"""
 import datetime
+import os
 import pytz
-import time
 import sys
+import time
 
 from kubernetes import client, config
 
@@ -14,30 +18,31 @@ v1 = client.CoreV1Api()
 current_name = os.getenv("MY_POD_NAME")
 current_namespace = os.getenv("MY_POD_NAMESPACE")
 
-# In seconds
+# The amount of successive time where no Ray pods exist in which after that
+# sshjump pod terminates itself (seconds)
 alert_threshold = int(os.getenv("ALERT_THRESHOLD", "300"))
-# In seconds
-retly_interval = int(os.getenv("RETRY_INTERVAL", "60"))
+# The amount of time to wait between Ray pods existence checks (seconds)
+retry_interval = int(os.getenv("RETRY_INTERVAL", "60"))
 
+# Ray pods are labeled with this value i.e sshjump name which is unique per user (based on userhash)
 label_selector=f"skypilot-sshjump={current_name}"
 
 
 def poll():
     sys.stdout.write("enter poll()\n")
 
-    # Set alert threshold. This is the amount of time where no ray pods exist
-    # and this sshjump pod and service will get terminated
     alert_delta = datetime.timedelta(seconds=alert_threshold)
 
     # Set delay for each retry
-    retry_interval_delta = datetime.timedelta(seconds=retly_interval)
+    retry_interval_delta = datetime.timedelta(seconds=retry_interval)
 
-    # Accumulated wait time to be compared with alert threshold time
-    w8time_delta = datetime.timedelta()
+    # Accumulated time of where no Ray pod exist. Used to compare against alert_threshold
+    noray_delta = datetime.timedelta()
 
     while True:
-        time.sleep(retly_interval)
-    
+        sys.stdout.write(f"Sleep {retry_interval} seconds..\n")
+        time.sleep(retry_interval)
+
         # List the pods in the current namespace
         try:
             ret = v1.list_namespaced_pod(current_namespace, label_selector=label_selector)
@@ -46,36 +51,36 @@ def poll():
             raise
 
         if len(ret.items) == 0:
-            sys.stdout.write(f"NOT FOUND active pods with label '{label_selector}' in namespace: '{current_namespace}'\n")
-            w8time_delta = w8time_delta + retry_interval_delta
-            sys.stdout.write(f"w8time_delta after time increment: {w8time_delta}, alert threshold: {alert_delta}\n")
+            sys.stdout.write(f"DID NOT FIND pods with label '{label_selector}' in namespace: '{current_namespace}'\n")
+            noray_delta = noray_delta + retry_interval_delta
+            sys.stdout.write(f"noray_delta after time increment: {noray_delta}, alert threshold: {alert_delta}\n")
         else:
-            sys.stdout.write(f"FOUND active pods with label '{label_selector}' in namespace: '{current_namespace}'\n")
+            sys.stdout.write(f"FOUND pods with label '{label_selector}' in namespace: '{current_namespace}'\n")
             # reset ..
-            w8time_delta = datetime.timedelta()
-            sys.stdout.write(f"w8time_delta is reset: {w8time_delta}\n")
-    
-        if w8time_delta >= alert_delta:
-            sys.stdout.write(f"w8time_delta: {w8time_delta} crossed alert threshold: {alert_delta}. It's time to terminate myself\n")
+            noray_delta = datetime.timedelta()
+            sys.stdout.write(f"noray_delta is reset: {noray_delta}\n")
+
+        if noray_delta >= alert_delta:
+            sys.stdout.write(f"noray_delta: {noray_delta} crossed alert threshold: {alert_delta}. It's time to terminate myself\n")
             try:
-                # NOTE: according to template all sshjump resources under
-                # same name
+                # NOTE: sshjump resources created under same name
                 v1.delete_namespaced_service(current_name, current_namespace)
                 v1.delete_namespaced_pod(current_name, current_namespace)
             except Exception as e:
                 sys.stdout.write(f"[ERROR] exit poll() with error: {e}\n")
                 raise
 
-            sys.stdout.write("exit poll()\n")
             break
+
+    sys.stdout.write("exit poll()\n")
 
 
 def main():
     sys.stdout.write("enter main()\n")
     sys.stdout.write(f"*** current_name {current_name}\n")
     sys.stdout.write(f"*** current_namespace {current_namespace}\n")
-    sys.stdout.write(f"*** alert_threshold {alert_threshold}\n")
-    sys.stdout.write(f"*** retly_interval {retly_interval}\n")
+    sys.stdout.write(f"*** alert_threshold time {alert_threshold}\n")
+    sys.stdout.write(f"*** retry_interval time {retry_interval}\n")
     sys.stdout.write(f"*** label_selector {label_selector}\n")
 
     if not current_name or not current_namespace:
