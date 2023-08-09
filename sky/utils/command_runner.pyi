@@ -36,20 +36,25 @@ class SSHCommandRunner:
     ssh_user: str
     ssh_private_key: str
     ssh_control_name: Optional[str]
+    port: int
 
     def __init__(self,
                  ip: str,
                  ssh_user: str,
                  ssh_private_key: str,
-                 ssh_control_name: Optional[str] = ...) -> None:
+                 ssh_control_name: Optional[str] = ...,
+                 port: str = ...) -> None:
         ...
 
     @staticmethod
     def make_runner_list(
-            ip_list: List[str],
-            ssh_user: str,
-            ssh_private_key: str,
-            ssh_control_name: Optional[str] = ...) -> List['SSHCommandRunner']:
+        ip_list: List[str],
+        ssh_user: str,
+        ssh_private_key: str,
+        ssh_control_name: Optional[str] = ...,
+        ssh_proxy_command: Optional[str] = ...,
+        port_list: Optional[List[int]] = ...,
+    ) -> List['SSHCommandRunner']:
         ...
 
     @typing.overload

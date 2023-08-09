@@ -75,3 +75,13 @@ def terminate_instances(
 ) -> None:
     """Terminate running or stopped instances."""
     raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def cleanup_ports(
+    provider_name: str,
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Delete any opened ports."""
+    raise NotImplementedError
