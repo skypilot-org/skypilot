@@ -349,32 +349,19 @@ def get_accelerator_hourly_cost(accelerator: str,
                                 region: Optional[str] = None,
                                 zone: Optional[str] = None) -> float:
 
-    # TODO(tian): Maybe use pandas native API to speed up the search.
-    def get_reagion_cheapest_price(region: str) -> float:
-        df = _get_accelerator(_df, accelerator, count, region, zone)
-        assert len(set(df['Price'])) == 1, df
-        if not use_spot:
-            return df['Price'].iloc[0]
-
-        cheapest_idx = df['SpotPrice'].idxmin()
-        if pd.isnull(cheapest_idx):
-            return df['Price'].iloc[0]
-
-        cheapest = df.loc[cheapest_idx]
-        return cheapest['SpotPrice']
-
+    df = _get_accelerator(_df, accelerator, count, region, zone)
     if region is not None:
-        return get_reagion_cheapest_price(region)
+        assert len(set(df['Price'])) == 1, df
+    min_price = df['Price'].min()
+    if not use_spot:
+        return min_price
 
-    current_minimal = np.inf
-    for current_region in set(_df['Region']):
-        try:
-            current_minimal = min(current_minimal,
-                                  get_reagion_cheapest_price(current_region))
-        except AssertionError:
-            continue
+    cheapest_idx = df['SpotPrice'].idxmin()
+    if pd.isnull(cheapest_idx):
+        return min_price
 
-    return current_minimal
+    cheapest = df.loc[cheapest_idx]
+    return cheapest['SpotPrice']
 
 
 def list_accelerators(
