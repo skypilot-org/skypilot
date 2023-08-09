@@ -695,13 +695,6 @@ class Resources:
             if self.cloud is not None:
                 self.cloud.check_features_are_supported(
                     {clouds.CloudImplementationFeatures.DOCKER_IMAGE})
-            if skypilot_config.get_nested(
-                (str(self.cloud).lower(), 'ssh_proxy_command'),
-                    None) is not None:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Cannot specify ssh_proxy_command when native docker '
-                        'support is used.')
             return
 
         if self.cloud is None:

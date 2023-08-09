@@ -13,6 +13,7 @@ import colorama
 
 from sky import clouds
 from sky import exceptions
+from sky import skypilot_config
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import azure
@@ -61,13 +62,22 @@ class Azure(clouds.Cloud):
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return {
+        unsupported_features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {cls._REPR}.',
             # TODO(zhwu): our azure subscription offer ID does not support spot.
             # Need to support it.
             clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {cls._REPR}.',
             clouds.CloudImplementationFeatures.OPEN_PORTS: f'Opening ports is not supported in {cls._REPR}.',
         }
+        if skypilot_config.get_nested(
+            (str(cls._REPR).lower(), 'ssh_proxy_command'), None) is not None:
+            unsupported_features.update({
+                clouds.CloudImplementationFeatures.DOCKER_IMAGE: (
+                    f'Docker image is not supported in {cls._REPR} when proxy'
+                    'command is set. Please remove proxy command in the config.'
+                ),
+            })
+        return unsupported_features
 
     @classmethod
     def _max_cluster_name_length(cls) -> int:
