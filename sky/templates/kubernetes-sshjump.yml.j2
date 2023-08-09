@@ -13,7 +13,7 @@ pod_spec:
                 secretName: {{ secret }}
         containers:
           - name: {{ name }}
-            imagePullPolicy: Always
+            imagePullPolicy: IfNotPresent
             image: {{ image }}
             command: ["python3", "-u", "/skypilot/sky/utils/kubernetes/sshjump-lcm.py"]
             ports:

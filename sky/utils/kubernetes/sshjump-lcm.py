@@ -18,10 +18,10 @@ v1 = client.CoreV1Api()
 current_name = os.getenv("MY_POD_NAME")
 current_namespace = os.getenv("MY_POD_NAMESPACE")
 
-# The amount of successive time where no Ray pods exist in which after that
-# sshjump pod terminates itself (seconds)
+# The amount of time in seconds where no Ray pods exist in which after that time
+# sshjump pod terminates itself
 alert_threshold = int(os.getenv("ALERT_THRESHOLD", "300"))
-# The amount of time to wait between Ray pods existence checks (seconds)
+# The amount of time in seconds to wait between Ray pods existence checks
 retry_interval = int(os.getenv("RETRY_INTERVAL", "60"))
 
 # Ray pods are labeled with this value i.e sshjump name which is unique per user (based on userhash)
@@ -63,7 +63,7 @@ def poll():
         if noray_delta >= alert_delta:
             sys.stdout.write(f"noray_delta: {noray_delta} crossed alert threshold: {alert_delta}. It's time to terminate myself\n")
             try:
-                # NOTE: sshjump resources created under same name
+                # sshjump resources created under same name
                 v1.delete_namespaced_service(current_name, current_namespace)
                 v1.delete_namespaced_pod(current_name, current_namespace)
             except Exception as e:
