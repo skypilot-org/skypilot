@@ -18,7 +18,7 @@ import uuid
 
 from sky import status_lib
 from sky import clouds
-from sky.adaptors import cloudflare
+from sky.adaptors import cloudflare, minio
 from sky.data import storage as storage_lib
 from sky.utils import common_utils
 from sky.utils import db_utils
@@ -639,6 +639,9 @@ def get_enabled_storage_clouds() -> List[str]:
     r2_is_enabled, _ = cloudflare.check_credentials()
     if r2_is_enabled:
         enabled_storage_clouds.append(cloudflare.NAME)
+    minio_is_enabled, _ = minio.check_credentials()
+    if minio_is_enabled:
+        enabled_storage_clouds.append(minio.NAME)
     return enabled_storage_clouds
 
 

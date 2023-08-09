@@ -2312,7 +2312,7 @@ class MINIOStore(AbstractStore):
             sync_command = (
                 'AWS_SHARED_CREDENTIALS_FILE='
                 f'{minio.MINIO_CREDENTIALS_PATH} '
-                'aws s3 sync --no-follow-symlinks {excludes} '
+                f'aws s3 sync --no-follow-symlinks {excludes} '
                 f'{src_dir_path} '
                 f's3://{self.name}/{dest_dir_name} '
                 f'--endpoint {endpoint_url} '
