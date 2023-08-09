@@ -180,6 +180,8 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             docker_run_executed = True
 
         # SkyPilot: Setup Commands.
+        # TODO(tian): These setup commands assumed that the container is
+        # debian-based. We should make it more general.
         # Most of docker images are using root as default user, so we set an
         # alias for sudo to empty string, therefore any sudo in the following
         # commands won't fail.
