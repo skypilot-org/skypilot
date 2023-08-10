@@ -115,7 +115,7 @@ fi
 echo 'SkyPilot yapf: Done'
 
 echo 'SkyPilot isort:'
-isort sky tests examples llm "${ISORT_YAPF_EXCLUDES[@]}"
+isort sky tests examples llm docs "${ISORT_YAPF_EXCLUDES[@]}"
 
 isort --profile black -l 88 -m 3 "${BLACK_INCLUDES[@]}"
 
