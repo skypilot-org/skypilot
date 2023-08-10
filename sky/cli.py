@@ -2621,6 +2621,28 @@ def _down_or_stop_clusters(
                     f'Skipping local cluster {c}, as it does not support '
                     '`sky stop/autostop`.'))
             ]
+        name_to_reserved_prefix = dict()
+        for name in names:
+            for prefix in backend_utils.SKY_RESERVED_CLUSTER_PREFIXES:
+                if name.startswith(prefix):
+                    name_to_reserved_prefix[name] = prefix
+                    break
+        names = [name for name in names if name not in name_to_reserved_prefix]
+        reserve_prefix_str = ', '.join(
+            [f'{prefix}*' for prefix in name_to_reserved_prefix.values()])
+        if len(name_to_reserved_prefix) > 0:
+            if len(names) != 0:
+                names_str = ', '.join(map(repr, names))
+                raise click.UsageError(
+                    f'{operation} cluster(s) with reserved prefix '
+                    f'{reserve_prefix_str} with other cluster(s) '
+                    f'{names_str} is currently not supported.\n'
+                    'Please omit the cluster(s) with reserved prefix '
+                    f'{name_to_reserved_prefix.values()}.')
+            raise click.UsageError(
+                f'{operation} cluster(s) with reserved prefix '
+                f'{reserve_prefix_str} is not supported. To teardown a '
+                'service, please use `sky serve down`.')
         # Make sure the reserved clusters are explicitly specified without other
         # normal clusters.
         if len(reserved_clusters) > 0:
@@ -3923,16 +3945,15 @@ def serve_up(
         return
 
     click.secho('Service Spec:', fg='cyan')
-    click.echo(task.service, nl=False)
+    click.echo(task.service)
 
     # TODO(tian): Support custom controller resources.
     controller_resources_config = serve_lib.CONTROLLER_RESOURCES
     controller_resources = sky.Resources.from_yaml_config(
         controller_resources_config)
     dummy_controller_task = sky.Task().set_resources(controller_resources)
-    click.secho(
-        'The controller will be launched with the following resources:',
-        fg='cyan')
+    click.secho('The controller will be launched with the following resources:',
+                fg='cyan')
     with sky.Dag() as dag:
         dag.add(dummy_controller_task)
     sky.optimize(dag)

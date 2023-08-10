@@ -104,6 +104,12 @@ SKY_RESERVED_CLUSTER_NAMES: Dict[str, str] = {
     spot_lib.SPOT_CONTROLLER_NAME: 'Managed spot controller'
 }
 
+# Mapping from reserved cluster prefixes to the corresponding group name
+# (logging purpose).
+SKY_RESERVED_CLUSTER_PREFIXES: Dict[str, str] = {
+    serve_lib.CONTROLLER_PREFIX: 'SkyServe controller',
+}
+
 # Filelocks for the cluster status change.
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
@@ -2571,7 +2577,7 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
 def check_cluster_name_not_reserved(
         cluster_name: Optional[str],
         operation_str: Optional[str] = None) -> None:
-    """Errors out if the cluster is a reserved cluster (spot controller).
+    """Errors out if the cluster is a reserved cluster (spot/serve controller).
 
     Raises:
       sky.exceptions.NotSupportedError: if the cluster name is reserved, raise
@@ -2580,9 +2586,19 @@ def check_cluster_name_not_reserved(
     Returns:
       None, if the cluster name is not reserved.
     """
+    msg = None
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
         msg = (f'Cluster {cluster_name!r} is reserved for the '
                f'{SKY_RESERVED_CLUSTER_NAMES[cluster_name].lower()}.')
+    reserved_prefix = None
+    for prefix in SKY_RESERVED_CLUSTER_PREFIXES:
+        if cluster_name is not None and cluster_name.startswith(prefix):
+            reserved_prefix = prefix
+            break
+    if reserved_prefix is not None:
+        msg = (f'Cluster prefix {reserved_prefix!r} is reserved for the '
+               f'{SKY_RESERVED_CLUSTER_PREFIXES[reserved_prefix].lower()}.')
+    if msg is not None:
         if operation_str is not None:
             msg += f' {operation_str} is not allowed.'
         with ux_utils.print_exception_no_traceback():
