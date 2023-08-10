@@ -1,11 +1,13 @@
 """Clouds in Sky."""
+# TODO: isort:skip is ugly. We should have a better way to do this to avoid
+# circular imports.
+from sky.clouds.cloud_registry import CLOUD_REGISTRY  # isort:skip
+from sky.clouds.cloud import Cloud  # isort:skip
+from sky.clouds.cloud import CloudImplementationFeatures  # isort:skip
+from sky.clouds.cloud import Region  # isort:skip
+from sky.clouds.cloud import Zone  # isort:skip
 from sky.clouds.aws import AWS
 from sky.clouds.azure import Azure
-from sky.clouds.cloud import Cloud
-from sky.clouds.cloud import CloudImplementationFeatures
-from sky.clouds.cloud import Region
-from sky.clouds.cloud import Zone
-from sky.clouds.cloud_registry import CLOUD_REGISTRY
 from sky.clouds.gcp import GCP
 from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes

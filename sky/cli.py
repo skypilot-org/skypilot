@@ -62,7 +62,7 @@ from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.skylet import kubernetes_utils
+from sky.skylet.providers.kubernetes import utils as kubernetes_utils
 from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils

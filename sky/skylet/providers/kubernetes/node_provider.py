@@ -13,7 +13,6 @@ from ray.autoscaler.tags import TAG_RAY_NODE_KIND
 
 from sky.adaptors import kubernetes
 from sky.skylet.providers.kubernetes import config
-from sky.skylet.providers.kubernetes import get_head_ssh_port
 from sky.skylet.providers.kubernetes import utils
 
 logger = logging.getLogger(__name__)
@@ -119,7 +118,7 @@ class KubernetesNodeProvider(NodeProvider):
         # TODO(romilb): Implement caching here for performance.
         # TODO(romilb): Multi-node would need more handling here.
         cluster_name = node_id.split('-ray-head')[0]
-        return get_head_ssh_port(cluster_name, self.namespace)
+        return utils.get_head_ssh_port(cluster_name, self.namespace)
 
     def internal_ip(self, node_id):
         pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
