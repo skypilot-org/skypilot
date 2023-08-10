@@ -3868,7 +3868,7 @@ def serve_up(
     service_name: Optional[str],
     yes: bool,
 ):
-    """Launches a SkyServe instance.
+    """Launch a SkyServe service.
 
     ENTRYPOINT must points to a valid YAML file.
 
