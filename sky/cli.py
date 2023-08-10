@@ -3971,6 +3971,68 @@ def serve_up(
 def serve_status(all: bool, service_name: Optional[str]):
     """Show statuses of SkyServe services.
 
+    If SERVICE_NAME is not provided, show statuses of all services. Otherwise,
+    show detailed status of the service.
+
+    Each service can have one of the following statuses:
+
+    - ``CONTROLLER_INIT``: The controller is initializing.
+
+    - ``REPLICA_INIT``: The controller provisioning have succeeded; control
+      plane and redirector is alive, and there are no available replicas for
+      now. This also indicates that no replica failure has been detected.
+
+    - ``CONTROLLER_FAILED``: The controller failed to start or in an abnormal
+      state; or the control plane and redirector is not alive.
+
+    - ``READY``: The controller is ready to serve requests. This means that
+      at least one replica have passed the readiness probe. This also indicates
+      that no replica failure has been detected.
+
+    - ``SHUTTING_DOWN``: The controller is being shutting down. This usually
+      happens when the `sky serve down` command is called.
+
+    - ``FAILED``: At least one replica failed. This could be caused by several
+      reasons:
+
+      - The launching process of the replica failed.
+
+      - No readiness probe passed within initial delay seconds.
+
+      - The replica continuously failed after serving requests for a while.
+
+      - User code failed.
+
+    If you specified SERVICE_NAME, this command will show detailed information
+    about each replica of the service. Each replica can have one of the
+    following statuses:
+
+    - ``PROVISIONING``: The replica is being provisioned.
+
+    - ``STARTING``: The replica provisioning have succeeded and the replica is
+      initializing its service, e.g., installing dependencies or loading model
+      weights.
+
+    - ``READY``: The replica is ready to serve requests.
+
+    - ``NOT_READY``: Currently, this replica failed the readiness probe but not
+      continuously failed for some time. This usually happens when the replica
+      is suffering from a bad network connection or there are too many requests
+      overwhelming the replica.
+
+    - ``SHUTTING_DOWN``: The replica is being shutting down. This usually
+      happens when the replica is being scaled down or some error occurred.
+      SkyServe will terminate all replicas that have some error occurred.
+
+    - ``FAILED``: Some error occurred when the replica is serving requests.
+      This indicates that the replica is already shut down. (Otherwise, it is
+      ``SHUTTING_DOWN``.)
+
+    - ``FAILED_CLEANUP``: Some error occurred when the replica is shutting down.
+      This usually indicates some resources leakage happened since the
+      termination not finished correctly. When seeing this status, please login
+      to cloud console and check whether there are some resources not released.
+
     Examples:
 
     .. code-block:: bash
