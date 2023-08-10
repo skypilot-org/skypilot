@@ -555,6 +555,7 @@ def cancel(
     job_ids: Optional[List[int]] = None,
     # pylint: disable=invalid-name
     _try_cancel_if_cluster_is_init: bool = False,
+    _from_serve_core: bool = False,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel jobs on a cluster.
@@ -581,8 +582,10 @@ def cancel(
             'sky cancel requires either a job id '
             f'(see `sky queue {cluster_name} -s`) or the --all flag.')
 
-    backend_utils.check_cluster_name_not_reserved(
-        cluster_name, operation_str='Cancelling jobs')
+    if not _from_serve_core:
+        # Skip name checking when the call is from serve core.
+        backend_utils.check_cluster_name_not_reserved(
+            cluster_name, operation_str='Cancelling jobs')
 
     # Check the status of the cluster.
     handle = None
@@ -610,17 +613,20 @@ def cancel(
     backend = backend_utils.get_backend_from_handle(handle)
 
     if all:
-        sky_logging.print(f'{colorama.Fore.YELLOW}'
-                          f'Cancelling all jobs on cluster {cluster_name!r}...'
-                          f'{colorama.Style.RESET_ALL}')
+        if not _from_serve_core:
+            sky_logging.print(
+                f'{colorama.Fore.YELLOW}'
+                f'Cancelling all jobs on cluster {cluster_name!r}...'
+                f'{colorama.Style.RESET_ALL}')
         job_ids = None
     else:
         assert job_ids is not None, 'job_ids should not be None'
-        jobs_str = ', '.join(map(str, job_ids))
-        sky_logging.print(
-            f'{colorama.Fore.YELLOW}'
-            f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
-            f'{colorama.Style.RESET_ALL}')
+        if not _from_serve_core:
+            jobs_str = ', '.join(map(str, job_ids))
+            sky_logging.print(
+                f'{colorama.Fore.YELLOW}'
+                f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
+                f'{colorama.Style.RESET_ALL}')
 
     backend.cancel_jobs(handle, job_ids)
 

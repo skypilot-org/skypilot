@@ -1166,17 +1166,17 @@ def serve_down(
     Please refer to the sky.cli.serve_down for the document.
 
     Args:
-        name: Name of the service.
+        service_name: Name of the service.
 
-    Raises:
+        purge: If true, ignore errors when cleaning up the controller.
     """
     # Refresh the service status to get correct replica number.
-    service_record = backend_utils.refresh_service_status(service_name)[0]
-    if service_record is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {service_name} does not exist.')
+    # service_record = backend_utils.refresh_service_status(service_name)[0]
+    # num_replicas = len(service_record['replica_info'])
+    service_record = global_user_state.get_service_from_name(service_name)
+    # Already filered all inexist service in cli.py
+    assert service_record is not None, service_name
     controller_cluster_name = service_record['controller_cluster_name']
-    num_replicas = len(service_record['replica_info'])
     global_user_state.set_service_status(service_name,
                                          status_lib.ServiceStatus.SHUTTING_DOWN)
     handle = global_user_state.get_handle_from_cluster_name(
@@ -1186,12 +1186,12 @@ def serve_down(
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
         try:
-            plural = ''
-            if num_replicas > 1:
-                plural = 's'
-            print(f'{colorama.Fore.YELLOW}'
-                  f'Tearing down {num_replicas} replica{plural}...'
-                  f'{colorama.Style.RESET_ALL}')
+            # plural = ''
+            # if num_replicas > 1:
+            #     plural = 's'
+            # print(f'{colorama.Fore.YELLOW}'
+            #       f'Tearing down {num_replicas} replica{plural}...'
+            #       f'{colorama.Style.RESET_ALL}')
             code = serve.ServeCodeGen.terminate_service()
             returncode, terminate_service_payload, stderr = backend.run_on_head(
                 handle,
@@ -1203,7 +1203,7 @@ def serve_down(
                 subprocess_utils.handle_returncode(
                     returncode,
                     code,
-                    'Failed to terminate service',
+                    f'Failed to terminate service {service_name}',
                     stderr,
                     stream_logs=False)
             except exceptions.CommandError as e:
@@ -1211,59 +1211,51 @@ def serve_down(
             resp = serve.load_terminate_service_result(
                 terminate_service_payload)
             if resp.status_code != 200:
-                raise RuntimeError('Failed to terminate replica due to '
-                                   f'request failure: {resp.text}')
+                raise RuntimeError('Failed to terminate replica of service '
+                                   f'{service_name} due to request '
+                                   f'failure: {resp.text}')
             msg = resp.json()['message']
             if msg:
                 raise RuntimeError(
-                    'Unexpected message when tearing down '
-                    f'replica: {msg}. Please login to the controller '
+                    'Unexpected message when tearing down replica of service '
+                    f'{service_name}: {msg}. Please login to the controller '
                     'and make sure the service is properly cleaned.')
         except (RuntimeError, ValueError,
                 requests.exceptions.ConnectionError) as e:
             if purge:
-                logger.warning(f'Ignoring error when cleaning controller: {e}')
+                logger.warning('Ignoring error when cleaning replicas of '
+                               f'{service_name}: {e}')
             else:
-                raise e
+                raise RuntimeError() from e
     else:
         if not purge:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Cannot find controller cluster {controller_cluster_name}.'
-                    ' It is likely due to manually `sky down` the controller. '
-                    'Please login to the cloud console and make sure the '
-                    'replica VMs are properly cleaned.')
+                raise RuntimeError(
+                    f'Cannot find controller cluster of service {service_name}.'
+                )
 
     try:
-        print(
-            f'{colorama.Fore.YELLOW}'
-            f'Stopping control plane and redirector processes on controller...'
-            f'{colorama.Style.RESET_ALL}')
-        core.cancel(controller_cluster_name, all=True)
+        core.cancel(controller_cluster_name, all=True, _from_serve_core=True)
     except (ValueError, sky.exceptions.ClusterNotUpError) as e:
         if purge:
-            logger.warning(f'Ignoring error when stopping controller: {e}')
+            logger.warning('Ignoring error when stopping control plane and '
+                           f'redirector jobs of service {service_name}: {e}')
         else:
-            raise e
+            raise RuntimeError() from e
 
     try:
-        print(f'{colorama.Fore.YELLOW}'
-              'Tearing down controller...'
-              f'{colorama.Style.RESET_ALL}')
         core.down(controller_cluster_name, purge=purge)
     except (RuntimeError, ValueError) as e:
         if purge:
-            logger.warning(f'Ignoring error when cleaning controller: {e}')
+            logger.warning('Ignoring error when terminating controller VM of '
+                           f'service {service_name}: {e}')
         else:
-            raise e
+            raise RuntimeError() from e
 
     # TODO(tian): Maybe add a post_cleanup function?
+    # TODO(tian): Cleanup storege here?
     controller_yaml_path = os.path.join(serve.CONTROLLER_YAML_PREFIX,
                                         f'{service_name}.yaml')
     if os.path.exists(controller_yaml_path):
         os.remove(controller_yaml_path)
     global_user_state.remove_service(service_name)
-
-    print(f'{colorama.Fore.GREEN}'
-          f'The tearing down of service {service_name} is done.'
-          f'{colorama.Style.RESET_ALL}')

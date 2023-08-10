@@ -136,6 +136,18 @@ def _get_glob_storages(storages: List[str]) -> List[str]:
     return list(set(glob_storages))
 
 
+def _get_glob_services(service_names: List[str]) -> List[str]:
+    """Returns a list of service names that match the glob pattern."""
+    glob_service_names = []
+    for service_name in service_names:
+        glob_service_name = global_user_state.get_glob_service_names(
+            service_name)
+        if not glob_service_name:
+            click.echo(f'Service {service_name!r} not found.')
+        glob_service_names.extend(glob_service_name)
+    return list(set(glob_service_names))
+
+
 def _warn_if_local_cluster(cluster: str, local_clusters: List[str],
                            message: str) -> bool:
     """Raises warning if the cluster name is a local cluster."""
@@ -4088,10 +4100,15 @@ def serve_status(all: bool, service_name: Optional[str]):
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
-@click.argument('service_name',
-                required=True,
-                type=str,
+@click.argument('service_names',
+                nargs=-1,
+                required=False,
                 **_get_shell_complete_args(_complete_service_name))
+@click.option('--all',
+              '-a',
+              default=None,
+              is_flag=True,
+              help='Stop all existing clusters.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -4105,23 +4122,95 @@ def serve_status(all: bool, service_name: Optional[str]):
               required=False,
               help='Ignore errors (if any). ')
 def serve_down(
-    service_name: str,
+    service_names: List[str],
+    all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
     purge: bool,
 ):
-    """Stops a SkyServe instance.
+    """Tear down service(s).
+
+    SERVICE_NAMES is the name of the service (or glob pattern) to tear down. If
+    both SERVICE_NAMES and ``--all`` are supplied, the latter takes precedence.
+
+    Tear down a service will delete all associated resources, including the
+    controller VM and all replicas.
 
     Example:
 
     .. code-block:: bash
 
+        # Tear down a specific service.
         sky serve down my-service
-    """
-    if not yes:
-        prompt = f'Tearing down service {service_name}. Proceed?'
-        click.confirm(prompt, default=True, abort=True, show_default=True)
+        \b
+        # Tear down multiple services.
+        sky serve down my-service1 my-service2
+        \b
+        # Tear down all services matching glob pattern 'service-*'.
+        sky serve down "service-*"
+        \b
+        # Tear down all existing services.
+        sky serve down -a
 
-    sky.serve_down(service_name, purge)
+    """
+    if not service_names and not all:
+        raise click.UsageError(
+            '`sky serve down` requires either a service name (see '
+            '`sky serve status`) or --all to be specified.')
+    if all:
+        service_names = [
+            record['name'] for record in global_user_state.get_services()
+        ]
+    else:
+        service_names = _get_glob_services(service_names)
+
+    if not service_names:
+        click.echo('\nService(s) not found (tip: see `sky serve status`).')
+        return
+
+    plural = '' if len(service_names) == 1 else 's'
+    if not yes:
+        service_name_list = ', '.join(service_names)
+        click.confirm(
+            f'Tearing down {len(service_names)} service{plural}: '
+            f'{service_name_list}. Proceed?',
+            default=True,
+            abort=True,
+            show_default=True)
+
+    progress = rich_progress.Progress(transient=True,
+                                      redirect_stdout=False,
+                                      redirect_stderr=False)
+    task = progress.add_task(
+        f'[bold cyan]Tearing down {len(service_names)} service{plural}[/]',
+        total=len(service_names))
+
+    def _down_service(name: str):
+        success_progress = False
+        try:
+            sky.serve_down(name, purge)
+        except RuntimeError as e:
+            message = (f'{colorama.Fore.RED}Teardown service {name}...failed. '
+                       f'{colorama.Style.RESET_ALL}'
+                       f'\nReason: {common_utils.format_exception(e)}.')
+        except (exceptions.NotSupportedError,
+                exceptions.ClusterOwnerIdentityMismatchError) as e:
+            message = str(e)
+        else:
+            message = (f'{colorama.Fore.GREEN}Teardown service {name}...done.'
+                       f'{colorama.Style.RESET_ALL}')
+            success_progress = True
+
+        progress.stop()
+        click.echo(message)
+        if success_progress:
+            progress.update(task, advance=1)
+        progress.start()
+
+    with progress:
+        subprocess_utils.run_in_parallel(_down_service, service_names)
+        progress.live.transient = False
+        # Make sure the progress bar not mess up the terminal.
+        progress.refresh()
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
