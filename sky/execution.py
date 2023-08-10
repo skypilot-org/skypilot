@@ -1056,7 +1056,8 @@ def serve_up(
                                        job_id: int,
                                        retry_time: int = 30) -> bool:
             for _ in range(retry_time):
-                job_statuses = core.job_status(cluster_name, [job_id], silent=True)
+                job_statuses = core.job_status(cluster_name, [job_id],
+                                               silent=True)
                 job_status = job_statuses.get(str(job_id), None)
                 if job_status == job_lib.JobStatus.RUNNING:
                     return True

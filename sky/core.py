@@ -707,11 +707,12 @@ def download_logs(
 
 
 @usage_lib.entrypoint
-def job_status(cluster_name: str,
-               job_ids: Optional[List[int]],
-               silent: bool = False,
-               stream_logs: bool = False
-              ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
+def job_status(
+    cluster_name: str,
+    job_ids: Optional[List[int]],
+    silent: bool = False,
+    stream_logs: bool = False
+) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get the status of jobs.
 
@@ -750,8 +751,8 @@ def job_status(cluster_name: str,
 
     if not silent:
         sky_logging.print(f'{colorama.Fore.YELLOW}'
-                        'Getting job status...'
-                        f'{colorama.Style.RESET_ALL}')
+                          'Getting job status...'
+                          f'{colorama.Style.RESET_ALL}')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     statuses = backend.get_job_status(handle, job_ids, stream_logs=stream_logs)
