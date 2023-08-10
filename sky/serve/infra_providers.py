@@ -579,6 +579,7 @@ class SkyPilotInfraProvider(InfraProvider):
                                 'Terminating...')
                     self._teardown_cluster(cluster_name)
                 else:
+                    current_delay_seconds = int(current_delay_seconds)
                     logger.info(
                         f'Replica {cluster_name} is not ready but within '
                         f'initial delay seconds ({current_delay_seconds}s / '
