@@ -3931,11 +3931,7 @@ def serve_up(
         controller_resources_config)
     dummy_controller_task = sky.Task().set_resources(controller_resources)
     click.secho(
-        ('SkyServe will launch a controller for your service, which responsible'
-         ' for all the control plane operations, including launching replicas, '
-         'autoscaling, and manage replica status; in the same time, redirect '
-         'all user requests to some replica chosen by a load balancer.\n'
-         'The controller will be launched with the following resources:'),
+        'The controller will be launched with the following resources:',
         fg='cyan')
     with sky.Dag() as dag:
         dag.add(dummy_controller_task)
