@@ -14,6 +14,12 @@ provider:
     # instead of the cluster_name. This ensures that ray creates new instances
     # for different cluster_name.
     resource_group: {{resource_group}}
+{%- if ports %}
+    ports:
+{%- for port in ports %}
+      - {{port}}
+{%- endfor %}
+{%- endif %}
     # Keep (otherwise cannot reuse when re-provisioning).
     # teardown(terminate=True) will override this.
     cache_stopped_nodes: True

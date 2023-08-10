@@ -64,7 +64,6 @@ class Azure(clouds.Cloud):
             # TODO(zhwu): our azure subscription offer ID does not support spot.
             # Need to support it.
             clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {cls._REPR}.',
-            clouds.CloudImplementationFeatures.OPEN_PORTS: f'Opening ports is not supported in {cls._REPR}.',
         }
 
     @classmethod
