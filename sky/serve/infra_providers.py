@@ -56,6 +56,9 @@ class ReplicaStatusProperty:
         # Latest readiness probe result
         self.service_ready_now: bool = False
         # Whether the service has been ready at least once
+        # If service was not ready before, we count how long it takes to startup
+        # and compare it with the initial delay seconds; otherwise, we count how
+        # many consecutive failures it has.
         self.service_once_ready: bool = False
         # Process status of sky.down. None means sky.down is not called yet.
         self.sky_down_status: Optional[ProcessStatus] = None
