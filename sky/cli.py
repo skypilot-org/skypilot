@@ -3847,8 +3847,18 @@ def serve_up(
     if service_name is None:
         service_name = backend_utils.generate_service_name()
 
-    if global_user_state.get_service_from_name(service_name) is not None:
-        click.secho(f'Service {service_name!r} already exists.', fg='red')
+    previous_service_record = global_user_state.get_service_from_name(
+        service_name)
+    if previous_service_record is not None:
+        if previous_service_record['status'] in [
+                status_lib.ServiceStatus.CONTRLLER_FAILED,
+                status_lib.ServiceStatus.FAILED
+        ]:
+            prompt = (f'Service {service_name!r} failed last time. '
+                      'Please clean up the service and try again.')
+        else:
+            prompt = f'Service {service_name!r} already exists.'
+        click.secho(prompt, fg='red')
         return
 
     shell_splits = shlex.split(entrypoint)
