@@ -629,11 +629,19 @@ class RetryingVmProvisioner(object):
         GANG_FAILED = 1
         HEAD_FAILED = 2
 
-    def __init__(self, log_dir: str, dag: 'dag.Dag',
+    def __init__(self,
+                 log_dir: str,
+                 dag: 'dag.Dag',
                  optimize_target: 'optimizer.OptimizeTarget',
                  requested_features: Set[clouds.CloudImplementationFeatures],
-                 local_wheel_path: pathlib.Path, wheel_hash: str):
+                 local_wheel_path: pathlib.Path,
+                 wheel_hash: str,
+                 blocked_resources: Optional[Iterable[
+                     resources_lib.Resources]] = None):
         self._blocked_resources: Set[resources_lib.Resources] = set()
+        if blocked_resources:
+            # blocked_resources is not None and not empty.
+            self._blocked_resources.update(blocked_resources)
 
         self.log_dir = os.path.expanduser(log_dir)
         self._dag = dag
@@ -2240,7 +2248,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             ports = [head_port] + worker_ports
         else:
             # Use port 22 for other clouds
-            ports = [22] * self.launched_nodes
+            ports = [22] * self.num_node_ips
         self.stable_ssh_ports = ports
 
     def _update_stable_cluster_ips(self, max_attempts: int = 1) -> None:
@@ -2341,6 +2349,16 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if external_ssh_ports:
             return external_ssh_ports[0]
         return None
+
+    @property
+    def num_node_ips(self) -> int:
+        """Returns number of IPs of the cluster, correctly handling TPU Pod."""
+        is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(self.launched_resources)
+        if is_tpu_vm_pod:
+            num_ips = tpu_utils.get_num_tpu_devices(self.launched_resources)
+        else:
+            num_ips = self.launched_nodes
+        return num_ips
 
     def __setstate__(self, state):
         self._version = self._VERSION
@@ -2565,8 +2583,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # of optimization infinitely.
                 try:
                     provisioner = RetryingVmProvisioner(
-                        self.log_dir, self._dag, self._optimize_target,
-                        self._requested_features, local_wheel_path, wheel_hash)
+                        self.log_dir,
+                        self._dag,
+                        self._optimize_target,
+                        self._requested_features,
+                        local_wheel_path,
+                        wheel_hash,
+                        blocked_resources=task.blocked_resources)
                     config_dict = provisioner.provision_with_retries(
                         task, to_provision_config, dryrun, stream_logs)
                     break
@@ -3736,7 +3759,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             cloud = handle.launched_resources.cloud
             config = common_utils.read_yaml(handle.cluster_yaml)
             if isinstance(cloud, (clouds.AWS, clouds.GCP)):
-                # Clean up AWS SGs
+                # Clean up AWS SGs or GCP firewall rules
+                # We don't need to clean up on Azure since it is done by
+                # our sky node provider.
+                # TODO(tian): Adding a no-op cleanup_ports API after #2286
+                # merged.
                 provision_lib.cleanup_ports(repr(cloud), handle.cluster_name,
                                             config['provider'])
 
