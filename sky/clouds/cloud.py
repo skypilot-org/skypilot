@@ -7,7 +7,6 @@ from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import exceptions
 from sky.clouds import service_catalog
-from sky import skypilot_config
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
