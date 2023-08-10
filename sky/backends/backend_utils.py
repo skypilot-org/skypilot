@@ -2455,6 +2455,15 @@ def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
             stream_logs=False,
             separate_stderr=True)
         if returncode != 0:
+            cluster_record = global_user_state.get_cluster_from_name(
+                controller_cluster_name)
+            if (cluster_record is None or
+                    cluster_record['status'] != status_lib.ClusterStatus.UP):
+                global_user_state.set_service_status(
+                    record['name'], status_lib.ServiceStatus.CONTRLLER_FAILED)
+                logger.error(f'Controller cluster {controller_cluster_name!r} '
+                             'is not exist or UP. Skipping refresh status.')
+                continue
             logger.warning('Failed to refresh replica info from the '
                            'controller. Use cached data which might outdated. '
                            f'Reason: {stderr}')

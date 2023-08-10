@@ -18,6 +18,7 @@ import getpass
 import requests
 from rich import console as rich_console
 import tempfile
+import time
 import os
 import uuid
 from typing import Any, Dict, List, Optional, Union
@@ -43,6 +44,7 @@ from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.usage import usage_lib
 from sky.skylet import constants
+from sky.skylet import job_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import log_utils
@@ -1034,12 +1036,32 @@ def serve_up(
             retry_until_up=True,
         )
 
-        handle = global_user_state.get_handle_from_cluster_name(
+        cluster_record = global_user_state.get_cluster_from_name(
             controller_cluster_name)
+        if (cluster_record is None or
+                cluster_record['status'] != status_lib.ClusterStatus.UP):
+            global_user_state.set_service_status(
+                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+            print(f'{colorama.Fore.RED}Controller failed to launch. '
+                  f'Please check the logs above.{colorama.Style.RESET_ALL}')
+            return
+
+        handle = cluster_record['handle']
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         endpoint = f'{handle.head_ip}:{task.service.app_port}'
 
         console = rich_console.Console()
+
+        def _wait_until_job_is_running(cluster_name: str,
+                                       job_id: int,
+                                       retry_time: int = 30) -> bool:
+            for _ in range(retry_time):
+                job_statuses = core.job_status(cluster_name, [job_id])
+                job_status = job_statuses.get(str(job_id), None)
+                if job_status == job_lib.JobStatus.RUNNING:
+                    return True
+                time.sleep(1)
+            return False
 
         # NOTICE: The job submission order cannot be changed since the
         # `sky serve logs` CLI will identify the control plane job with
@@ -1060,6 +1082,15 @@ def serve_up(
                 cluster_name=controller_cluster_name,
                 detach_run=True,
             )
+            control_plane_job_is_running = _wait_until_job_is_running(
+                controller_cluster_name, 1)
+        if not control_plane_job_is_running:
+            global_user_state.set_service_status(
+                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+            print(f'{colorama.Fore.RED}Control plane failed to launch. '
+                  f'Please check the logs with sky serve logs {service_name} '
+                  f'--control-plane{colorama.Style.RESET_ALL}')
+            return
         print(f'{colorama.Fore.GREEN}Control plane process is running.'
               f'{colorama.Style.RESET_ALL}')
 
@@ -1079,6 +1110,15 @@ def serve_up(
                 cluster_name=controller_cluster_name,
                 detach_run=True,
             )
+            redirector_job_is_running = _wait_until_job_is_running(
+                controller_cluster_name, 2)
+        if not redirector_job_is_running:
+            global_user_state.set_service_status(
+                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+            print(f'{colorama.Fore.RED}Redirector failed to launch. '
+                  f'Please check the logs with sky serve logs {service_name} '
+                  f'--redirector{colorama.Style.RESET_ALL}')
+            return
         print(f'{colorama.Fore.GREEN}Redirector process is running.'
               f'{colorama.Style.RESET_ALL}')
 
