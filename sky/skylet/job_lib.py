@@ -3,10 +3,10 @@
 This is a remote utility module that provides job queue functionality.
 """
 import enum
+import getpass
 import json
 import os
 import pathlib
-import psutil
 import shlex
 import subprocess
 import time
@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 import filelock
-import getpass
+import psutil
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -251,7 +251,8 @@ def _create_ray_job_submission_client():
         logger.error('Failed to import ray')
         raise
     try:
-        from ray import job_submission  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from ray import job_submission
     except ImportError:
         logger.error(
             f'Failed to import job_submission with ray=={ray.__version__}')

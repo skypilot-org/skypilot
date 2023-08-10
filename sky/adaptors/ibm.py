@@ -2,13 +2,15 @@
 
 # pylint: disable=import-outside-toplevel
 
-from sky import sky_logging
-import yaml
-import os
-import json
-import requests
 import functools
+import json
 import multiprocessing
+import os
+
+import requests
+import yaml
+
+from sky import sky_logging
 
 CREDENTIAL_FILE = '~/.ibm/credentials.yaml'
 logger = sky_logging.init_logger(__name__)
@@ -28,11 +30,11 @@ def import_package(func):
         global ibm_boto3, ibm_botocore
         if None in [ibm_vpc, ibm_cloud_sdk_core, ibm_platform_services]:
             try:
-                import ibm_vpc as _ibm_vpc
-                import ibm_cloud_sdk_core as _ibm_cloud_sdk_core
-                import ibm_platform_services as _ibm_platform_services
                 import ibm_boto3 as _ibm_boto3
                 import ibm_botocore as _ibm_botocore
+                import ibm_cloud_sdk_core as _ibm_cloud_sdk_core
+                import ibm_platform_services as _ibm_platform_services
+                import ibm_vpc as _ibm_vpc
                 ibm_vpc = _ibm_vpc
                 ibm_cloud_sdk_core = _ibm_cloud_sdk_core
                 ibm_platform_services = _ibm_platform_services

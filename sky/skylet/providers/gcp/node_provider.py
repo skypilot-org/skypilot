@@ -1,11 +1,18 @@
+import copy
 import logging
 import time
-import copy
 from functools import wraps
 from threading import RLock
-from typing import Dict, List
+from typing import Dict
 
 import googleapiclient
+from ray.autoscaler._private.cli_logger import cf, cli_logger
+from ray.autoscaler.node_provider import NodeProvider
+from ray.autoscaler.tags import (
+    TAG_RAY_LAUNCH_CONFIG,
+    TAG_RAY_NODE_KIND,
+    TAG_RAY_USER_NODE_TYPE,
+)
 
 from sky.skylet.providers.gcp.config import (
     bootstrap_gcp,
@@ -13,30 +20,20 @@ from sky.skylet.providers.gcp.config import (
     get_node_type,
 )
 
-from ray.autoscaler.tags import (
-    TAG_RAY_LAUNCH_CONFIG,
-    TAG_RAY_NODE_KIND,
-    TAG_RAY_USER_NODE_TYPE,
-)
-from ray.autoscaler._private.cli_logger import cf, cli_logger
-
-
 # The logic has been abstracted away here to allow for different GCP resources
 # (API endpoints), which can differ widely, making it impossible to use
 # the same logic for everything.
-from sky.skylet.providers.gcp.node import (  # noqa
-    GCPCompute,
-    GCPNode,
-    GCPNodeType,
-    GCPResource,
-    GCPTPU,
-    # Added by SkyPilot
+from sky.skylet.providers.gcp.node import GCPTPU  # noqa; Added by SkyPilot
+from sky.skylet.providers.gcp.node import (
     INSTANCE_NAME_MAX_LEN,
     INSTANCE_NAME_UUID_LEN,
     MAX_POLLS_STOP,
     POLL_INTERVAL,
+    GCPCompute,
+    GCPNode,
+    GCPNodeType,
+    GCPResource,
 )
-from ray.autoscaler.node_provider import NodeProvider
 
 logger = logging.getLogger(__name__)
 

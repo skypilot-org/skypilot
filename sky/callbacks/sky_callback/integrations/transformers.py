@@ -1,10 +1,9 @@
 """SkyCallback integration with HuggingFace Transformers."""
 from typing import Optional
 
-import transformers
-
 from sky_callback import base
 from sky_callback import utils
+import transformers
 
 _DISABLE_CALLBACK = utils.DISABLE_CALLBACK
 

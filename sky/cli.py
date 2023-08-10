@@ -62,8 +62,9 @@ from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.utils import common_utils
+from sky.usage import usage_lib
 from sky.utils import command_runner
+from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_utils
@@ -73,7 +74,6 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
-from sky.usage import usage_lib
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib

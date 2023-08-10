@@ -47,8 +47,8 @@ from typing import Any, Dict, Iterable
 
 import yaml
 
-from sky import sky_logging
 from sky import clouds
+from sky import sky_logging
 from sky.utils import common_utils
 
 # The config path is discovered in this order:

@@ -1,8 +1,9 @@
 """Lambda Cloud."""
 import json
-import requests
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
+
+import requests
 
 from sky import clouds
 from sky import exceptions

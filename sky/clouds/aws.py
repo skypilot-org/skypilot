@@ -7,7 +7,7 @@ import re
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Any
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -472,7 +472,9 @@ class AWS(clouds.Cloud):
                         cls._STATIC_CREDENTIAL_HELP_STR)
 
         # Fetch the AWS catalogs
-        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.clouds.service_catalog import aws_catalog
+
         # Trigger the fetch of the availability zones mapping.
         aws_catalog.get_default_instance_type()
         return True, hints
@@ -719,7 +721,8 @@ class AWS(clouds.Cloud):
         region = resources.region
         use_spot = resources.use_spot
 
-        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
+        # pylint: disable=import-outside-toplevel,unused-import
+        from sky.clouds.service_catalog import aws_catalog
 
         quota_code = aws_catalog.get_quota_code(instance_type, use_spot)
 

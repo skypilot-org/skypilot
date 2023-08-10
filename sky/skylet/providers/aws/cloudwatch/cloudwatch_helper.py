@@ -8,9 +8,9 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Union
 
 import botocore
+from ray.autoscaler.tags import NODE_KIND_HEAD, TAG_RAY_CLUSTER_NAME, TAG_RAY_NODE_KIND
 
 from sky.skylet.providers.aws.utils import client_cache, resource_cache
-from ray.autoscaler.tags import NODE_KIND_HEAD, TAG_RAY_CLUSTER_NAME, TAG_RAY_NODE_KIND
 
 logger = logging.getLogger(__name__)
 

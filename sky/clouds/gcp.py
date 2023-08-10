@@ -547,8 +547,8 @@ class GCP(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
-            from google import auth  # type: ignore
             # Check google-api-python-client installation.
+            from google import auth  # type: ignore
             import googleapiclient
 
             # Check the installation of google-cloud-sdk.
@@ -652,8 +652,9 @@ class GCP(clouds.Cloud):
                   'some time.')
 
         # pylint: disable=import-outside-toplevel,unused-import
-        import googleapiclient.discovery
         import google.auth
+        import googleapiclient.discovery
+
         from sky.skylet.providers.gcp import constants
 
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
@@ -837,7 +838,8 @@ class GCP(clouds.Cloud):
         use_spot = resources.use_spot
         region = resources.region
 
-        from sky.clouds.service_catalog import gcp_catalog  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.clouds.service_catalog import gcp_catalog
 
         quota_code = gcp_catalog.get_quota_code(accelerator, use_spot)
 
@@ -878,7 +880,8 @@ class GCP(clouds.Cloud):
         """Query the status of a cluster."""
         del region  # unused
 
-        from sky.utils import tpu_utils  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.utils import tpu_utils
         use_tpu_vm = kwargs.pop('use_tpu_vm', False)
 
         label_filter_str = cls._label_filter_str(tag_filters)

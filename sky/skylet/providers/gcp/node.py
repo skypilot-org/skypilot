@@ -27,7 +27,6 @@ import abc
 import logging
 import re
 import time
-
 from collections import UserDict
 from copy import deepcopy
 from enum import Enum
@@ -37,7 +36,6 @@ from uuid import uuid4
 
 from googleapiclient.discovery import Resource
 from googleapiclient.errors import HttpError
-
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME, TAG_RAY_NODE_NAME
 
 logger = logging.getLogger(__name__)

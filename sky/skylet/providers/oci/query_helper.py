@@ -7,16 +7,18 @@ History:
  
 """
 
-import logging
-import traceback
-import time
 from datetime import datetime
-import pandas as pd
+import logging
 import re
+import time
+import traceback
 from typing import Optional
-from sky.skylet.providers.oci.config import oci_conf
-from sky.skylet.providers.oci import utils
+
+import pandas as pd
+
 from sky.adaptors import oci as oci_adaptor
+from sky.skylet.providers.oci import utils
+from sky.skylet.providers.oci.config import oci_conf
 
 logger = logging.getLogger(__name__)
 

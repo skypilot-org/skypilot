@@ -10,11 +10,6 @@ from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.resource.resources.models import DeploymentMode
-
-from sky.skylet.providers.azure.config import (
-    bootstrap_azure,
-    get_azure_sdk_function,
-)
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import (
     TAG_RAY_CLUSTER_NAME,
@@ -23,6 +18,8 @@ from ray.autoscaler.tags import (
     TAG_RAY_NODE_NAME,
     TAG_RAY_USER_NODE_TYPE,
 )
+
+from sky.skylet.providers.azure.config import bootstrap_azure, get_azure_sdk_function
 
 VM_NAME_MAX_LEN = 64
 UNIQUE_ID_LEN = 4

@@ -8,9 +8,9 @@ from typing import Dict, Optional, Tuple
 
 import colorama
 
-from sky.adaptors import docker
 from sky import sky_logging
 from sky import task as task_mod
+from sky.adaptors import docker
 
 logger = sky_logging.init_logger(__name__)
 

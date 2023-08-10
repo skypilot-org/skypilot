@@ -1,9 +1,10 @@
 """Lambda Cloud helper functions."""
 import json
 import os
-import requests
 import time
 from typing import Any, Dict, List, Optional, Tuple
+
+import requests
 
 from sky.utils import common_utils
 

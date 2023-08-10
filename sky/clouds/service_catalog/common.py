@@ -1,14 +1,14 @@
 """Common utilities for service catalog."""
 import ast
+import difflib
 import hashlib
 import os
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
-import difflib
 import filelock
-import requests
 import pandas as pd
+import requests
 
 from sky import sky_logging
 from sky.clouds import cloud as cloud_lib

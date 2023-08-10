@@ -4,16 +4,17 @@ This module contains a set of rest api functions accessing SCP Open-API.
 """
 import base64
 import datetime
+from functools import wraps
 import hashlib
 import hmac
 import json
 import logging
 import os
-import requests
 import time
-from functools import wraps
 from typing import Any, Dict, List, Optional
 from urllib import parse
+
+import requests
 
 CREDENTIALS_PATH = '~/.scp/scp_credential'
 API_ENDPOINT = 'https://openapi.samsungsdscloud.com'

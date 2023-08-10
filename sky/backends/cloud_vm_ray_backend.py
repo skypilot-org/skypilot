@@ -4,8 +4,8 @@ import copy
 import enum
 import getpass
 import inspect
-import math
 import json
+import math
 import os
 import pathlib
 import re
@@ -17,43 +17,44 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Dict, Iterable, List, Optional, Tuple, Union, Set
+from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import colorama
 import filelock
 
 import sky
 from sky import backends
-from sky import clouds
 from sky import cloud_stores
+from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import optimizer
 from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import sky_logging
-from sky import optimizer
 from sky import skypilot_config
 from sky import spot as spot_lib
 from sky import status_lib
 from sky import task as task_lib
-from sky.data import data_utils
-from sky.data import storage as storage_lib
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
 from sky.backends import wheel_utils
+from sky.data import data_utils
+from sky.data import storage as storage_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
+from sky.skylet.providers.scp.node_provider import SCPError
+from sky.skylet.providers.scp.node_provider import SCPNodeProvider
 from sky.usage import usage_lib
-from sky.utils import common_utils
 from sky.utils import command_runner
+from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
-from sky.skylet.providers.scp.node_provider import SCPNodeProvider, SCPError
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -3624,8 +3625,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             region = config['provider']['region']
 
             # pylint: disable=import-outside-toplevel
-            from sky.skylet.providers.oci.query_helper import oci_query_helper
             from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
+
+            from sky.skylet.providers.oci.query_helper import oci_query_helper
 
             # 0: All terminated successfully, failed count otherwise
             returncode = oci_query_helper.terminate_instances_by_tags(

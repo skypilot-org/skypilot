@@ -2,7 +2,7 @@ import copy
 import logging
 import threading
 import time
-from collections import defaultdict, OrderedDict
+from collections import OrderedDict, defaultdict
 from typing import Any, Dict, List
 
 import botocore
@@ -13,19 +13,9 @@ try:
 except ImportError:
     # SkyPilot: for local ray version lower than 2.0.1
     import ray.ray_constants as ray_constants
-from sky.skylet.providers.aws.cloudwatch.cloudwatch_helper import (
-    CloudwatchHelper,
-    CLOUDWATCH_AGENT_INSTALLED_AMI_TAG,
-    CLOUDWATCH_AGENT_INSTALLED_TAG,
-)
-from sky.skylet.providers.aws.config import bootstrap_aws
-from sky.skylet.providers.aws.utils import (
-    boto_exception_handler,
-    resource_cache,
-    client_cache,
-)
-from ray.autoscaler._private.cli_logger import cli_logger, cf
-from ray.autoscaler._private.constants import BOTO_MAX_RETRIES, BOTO_CREATE_MAX_RETRIES
+
+from ray.autoscaler._private.cli_logger import cf, cli_logger
+from ray.autoscaler._private.constants import BOTO_CREATE_MAX_RETRIES, BOTO_MAX_RETRIES
 from ray.autoscaler._private.log_timer import LogTimer
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import (
@@ -34,6 +24,18 @@ from ray.autoscaler.tags import (
     TAG_RAY_NODE_KIND,
     TAG_RAY_NODE_NAME,
     TAG_RAY_USER_NODE_TYPE,
+)
+
+from sky.skylet.providers.aws.cloudwatch.cloudwatch_helper import (
+    CLOUDWATCH_AGENT_INSTALLED_AMI_TAG,
+    CLOUDWATCH_AGENT_INSTALLED_TAG,
+    CloudwatchHelper,
+)
+from sky.skylet.providers.aws.config import bootstrap_aws
+from sky.skylet.providers.aws.utils import (
+    boto_exception_handler,
+    client_cache,
+    resource_cache,
 )
 
 logger = logging.getLogger(__name__)

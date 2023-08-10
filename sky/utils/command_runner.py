@@ -1,6 +1,6 @@
 """Runner for commands to be executed on the cluster."""
-import getpass
 import enum
+import getpass
 import hashlib
 import os
 import pathlib
@@ -9,8 +9,9 @@ import time
 from typing import List, Optional, Tuple, Union
 
 from sky import sky_logging
-from sky.utils import common_utils, subprocess_utils
 from sky.skylet import log_lib
+from sky.utils import common_utils
+from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 

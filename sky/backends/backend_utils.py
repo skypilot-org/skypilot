@@ -12,8 +12,7 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import (Any, Dict, List, Optional, Sequence, Set, Tuple, Union)
-from typing_extensions import Literal
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 import uuid
 
 import colorama
@@ -25,6 +24,7 @@ import requests
 from requests import adapters
 from requests.packages.urllib3.util import retry as retry_lib
 import rich.progress as rich_progress
+from typing_extensions import Literal
 import yaml
 
 import sky
@@ -35,15 +35,16 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import provision as provision_lib
-from sky import skypilot_config
 from sky import sky_logging
+from sky import skypilot_config
 from sky import spot as spot_lib
 from sky import status_lib
 from sky.backends import onprem_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
-from sky.utils import common_utils
+from sky.usage import usage_lib
 from sky.utils import command_runner
+from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import subprocess_utils
@@ -51,7 +52,6 @@ from sky.utils import timeline
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import validator
-from sky.usage import usage_lib
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -1039,7 +1039,8 @@ def write_cluster_config(
 
         user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
 
-        from sky.skylet.providers.gcp import config as gcp_config  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.skylet.providers.gcp import config as gcp_config
         config = common_utils.read_yaml(os.path.expanduser(config_dict['ray']))
         vpc_name = gcp_config.get_usable_vpc(config)
 

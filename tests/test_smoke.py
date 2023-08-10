@@ -24,6 +24,7 @@
 
 import hashlib
 import inspect
+import os
 import pathlib
 import shutil
 import subprocess
@@ -33,7 +34,6 @@ import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 import urllib.parse
 import uuid
-import os
 import warnings
 
 import colorama
@@ -42,9 +42,11 @@ import pytest
 
 import sky
 from sky import global_user_state
-from sky.adaptors import ibm
 from sky.adaptors import cloudflare
-from sky.clouds import AWS, GCP, Azure
+from sky.adaptors import ibm
+from sky.clouds import AWS
+from sky.clouds import Azure
+from sky.clouds import GCP
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.data.data_utils import Rclone

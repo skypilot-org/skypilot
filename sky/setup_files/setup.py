@@ -17,8 +17,8 @@ import io
 import os
 import platform
 import re
-import warnings
 from typing import Dict, List
+import warnings
 
 import setuptools
 

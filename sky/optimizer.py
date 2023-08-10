@@ -17,12 +17,14 @@ from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.utils import env_options
-from sky.utils import ux_utils
 from sky.utils import log_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import networkx as nx
-    from sky import dag as dag_lib  # pylint: disable=ungrouped-imports
+
+    #pylint: disable=ungrouped-imports
+    from sky import dag as dag_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -815,6 +817,7 @@ class Optimizer:
         the total estimated cost/time of the DAG becomes the minimum.
         """
         import networkx as nx  # pylint: disable=import-outside-toplevel
+
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
 

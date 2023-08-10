@@ -3,8 +3,8 @@
 
 import contextlib
 import functools
-import threading
 import os
+import threading
 from typing import Dict, Optional, Tuple
 
 from sky.utils import ux_utils
