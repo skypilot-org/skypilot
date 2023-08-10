@@ -56,6 +56,8 @@ class Azure(clouds.Cloud):
     # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
 
+    _INDENT_PREFIX = ' ' * 4
+
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
@@ -353,9 +355,9 @@ class Azure(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         help_str = (
             ' Run the following commands:'
-            '\n      $ az login'
-            '\n      $ az account set -s <subscription_id>'
-            '\n    For more info: '
+            f'\n{cls._INDENT_PREFIX}  $ az login'
+            f'\n{cls._INDENT_PREFIX}  $ az account set -s <subscription_id>'
+            f'\n{cls._INDENT_PREFIX}For more info: '
             'https://docs.microsoft.com/en-us/cli/azure/get-started-with-azure-cli'  # pylint: disable=line-too-long
         )
         # This file is required because it will be synced to remote VMs for
@@ -368,18 +370,23 @@ class Azure(clouds.Cloud):
 
         try:
             _run_output('az --version')
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
             return False, (
                 # TODO(zhwu): Change the installation hint to from PyPI.
-                'Azure CLI returned error. Run the following commands:'
-                '\n      $ pip install skypilot[azure]'
-                '\n    Credentials may also need to be set.' + help_str)
+                'Azure CLI `az --version` errored. Run the following commands:'
+                f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
+                f'\n{cls._INDENT_PREFIX}Credentials may also need to be set.'
+                f'{help_str}\n'
+                f'{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e)}')
         # If Azure is properly logged in, this will return the account email
         # address + subscription ID.
         try:
             cls.get_current_user_identity()
-        except exceptions.CloudUserIdentityError:
-            return False, 'Azure credential is not set.' + help_str
+        except exceptions.CloudUserIdentityError as e:
+            return False, (f'Getting user\'s Azure identity failed.{help_str}\n'
+                           f'{cls._INDENT_PREFIX}Details: '
+                           f'{common_utils.format_exception(e)}')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
