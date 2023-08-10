@@ -1013,7 +1013,8 @@ def serve_up(
                                     vars_to_fill,
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
-        controller_task.set_resources(controller_resources)
+        controller_task.set_resources(
+            controller_resources.copy(ports=[app_port]))
 
         controller_envs = {
             'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,
