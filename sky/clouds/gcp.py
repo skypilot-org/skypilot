@@ -115,9 +115,7 @@ class SpecificReservation:
 
 
 class GCPReservation:
-    """
-    GCP Reservation object that contains the reservation information.
-    """
+    """GCP Reservation object that contains the reservation information."""
 
     def __init__(self, self_link: str, zone: str,
                  specific_reservation: SpecificReservation,
@@ -139,9 +137,7 @@ class GCPReservation:
 
     @property
     def available_resources(self) -> int:
-        """
-        Count the resources available that can be used in this reservation.
-        """
+        """Count resources available that can be used in this reservation."""
         return (self.specific_reservation.count -
                 self.specific_reservation.in_use_count)
 
@@ -149,7 +145,8 @@ class GCPReservation:
         self,
         specific_reservations: Set[str],
     ) -> bool:
-        """
+        """Check if the reservation is consumable.
+
         Check if the reservation is consumable with the provided specific
         reservation names. This is defined by the Consumption type.
         For more details:
@@ -160,7 +157,8 @@ class GCPReservation:
 
     @property
     def name(self) -> str:
-        """Name is derived from reservation self link.
+        """Name derived from reservation self link.
+
         The naming convention can be found here:
         https://cloud.google.com/compute/docs/instances/reservations-consume#consuming_a_specific_shared_reservation
         """
@@ -631,8 +629,8 @@ class GCP(clouds.Cloud):
         self,
         instance_type: str,
     ) -> List[GCPReservation]:
-        """
-        List all reservations for the given instance type.
+        """List all reservations for the given instance type.
+
         TODO: We need to incorporate accelerators because the reserved instance
         can be consumed only when the instance_type + GPU type matches, and in
         GCP GPUs except for A100 and L4 do not have their own instance type.

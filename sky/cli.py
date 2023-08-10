@@ -1341,7 +1341,6 @@ def launch(
     no_setup: bool,
     clone_disk_from: Optional[str],
 ):
-    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1350,6 +1349,7 @@ def launch(
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
     """
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     env = _merge_env_vars(env_file, env)
     backend_utils.check_cluster_name_not_reserved(
         cluster, operation_str='Launching tasks on it')
@@ -2301,7 +2301,6 @@ def start(
         down: bool,  # pylint: disable=redefined-outer-name
         retry_until_up: bool,
         force: bool):
-    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Restart cluster(s).
 
     If a cluster is previously stopped (status is STOPPED) or failed in
@@ -2329,6 +2328,7 @@ def start(
       sky start -a
 
     """
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     if down and idle_minutes_to_autostop is None:
         raise click.UsageError(
             '--idle-minutes-to-autostop must be set if --down is set.')
