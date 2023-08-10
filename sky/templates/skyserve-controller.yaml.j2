@@ -2,10 +2,11 @@
 
 setup: |
   # Install all serve dependencies.
-  pip install skypilot[serve]
+  pip install skypilot[serve] > /dev/null 2>&1
+
   # Shutdown jupyter service that is default enabled on our GCP Deep
   # Learning Image. This is to avoid port conflict on 8080.
-  sudo systemctl stop jupyter || true
+  sudo systemctl stop jupyter > /dev/null 2>&1 || true
 
 file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}
