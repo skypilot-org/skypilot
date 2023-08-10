@@ -118,23 +118,23 @@ def test_resources_azure(monkeypatch):
     _test_resources_launch(monkeypatch, sky.Azure(), 'Standard_NC24s_v3')
 
 
-def test_resources_gcp(monkeypatch):
+def test_resources_gcp(monkeypatch, patch_gcloud_list_reservations):
     _test_resources_launch(monkeypatch, sky.GCP(), 'n1-standard-16')
 
 
-def test_partial_cpus(monkeypatch):
+def test_partial_cpus(monkeypatch, patch_gcloud_list_reservations):
     _test_resources_launch(monkeypatch, cpus=4)
     _test_resources_launch(monkeypatch, cpus='4')
     _test_resources_launch(monkeypatch, cpus='7+')
 
 
-def test_partial_memory(monkeypatch):
+def test_partial_memory(monkeypatch, patch_gcloud_list_reservations):
     _test_resources_launch(monkeypatch, memory=32)
     _test_resources_launch(monkeypatch, memory='32')
     _test_resources_launch(monkeypatch, memory='32+')
 
 
-def test_partial_k80(monkeypatch):
+def test_partial_k80(monkeypatch, patch_gcloud_list_reservations):
     _test_resources_launch(monkeypatch, accelerators='K80')
 
 
@@ -142,16 +142,16 @@ def test_partial_m60(monkeypatch):
     _test_resources_launch(monkeypatch, accelerators='M60')
 
 
-def test_partial_p100(monkeypatch):
+def test_partial_p100(monkeypatch, patch_gcloud_list_reservations):
     _test_resources_launch(monkeypatch, accelerators='P100')
 
 
-def test_partial_t4(monkeypatch):
+def test_partial_t4(monkeypatch, patch_gcloud_list_reservations):
     _test_resources_launch(monkeypatch, accelerators='T4')
     _test_resources_launch(monkeypatch, accelerators={'T4': 8}, use_spot=True)
 
 
-def test_partial_tpu(monkeypatch):
+def test_partial_tpu(monkeypatch, patch_gcloud_list_reservations):
     _test_resources_launch(monkeypatch, accelerators='tpu-v3-8')
 
 
@@ -224,7 +224,7 @@ def test_instance_type_mismatches_memory(monkeypatch):
         assert 'does not have the requested memory' in str(e.value)
 
 
-def test_instance_type_matches_cpus(monkeypatch):
+def test_instance_type_matches_cpus(monkeypatch, patch_gcloud_list_reservations):
     _test_resources_launch(monkeypatch,
                            sky.AWS(),
                            instance_type='c6i.8xlarge',
@@ -243,7 +243,7 @@ def test_instance_type_matches_cpus(monkeypatch):
                            cpus=8.0)
 
 
-def test_instance_type_matches_memory(monkeypatch):
+def test_instance_type_matches_memory(monkeypatch, patch_gcloud_list_reservations):
     _test_resources_launch(monkeypatch,
                            sky.AWS(),
                            instance_type='c6i.8xlarge',
@@ -262,7 +262,7 @@ def test_instance_type_matches_memory(monkeypatch):
                            memory=32)
 
 
-def test_instance_type_from_cpu_memory(monkeypatch, capfd):
+def test_instance_type_from_cpu_memory(monkeypatch, capfd,patch_gcloud_list_reservations):
     _test_resources_launch(monkeypatch, cpus=8)
     stdout, _ = capfd.readouterr()
     # Choose General Purpose instance types
@@ -358,7 +358,7 @@ def test_instance_type_mistmatches_accelerators(monkeypatch):
         assert 'Infeasible resource demands found' in str(e.value)
 
 
-def test_instance_type_matches_accelerators(monkeypatch):
+def test_instance_type_matches_accelerators(monkeypatch, patch_gcloud_list_reservations):
     _test_resources_launch(monkeypatch,
                            sky.AWS(),
                            instance_type='p3.2xlarge',
