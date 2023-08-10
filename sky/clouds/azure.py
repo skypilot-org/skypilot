@@ -385,10 +385,9 @@ class Azure(clouds.Cloud):
         try:
             cls.get_current_user_identity()
         except exceptions.CloudUserIdentityError as e:
-            return False, (
-                f'Azure credential is not set.{help_str}\n'
-                f'{cls._INDENT_PREFIX}Details: '
-                f'{common_utils.format_exception(e)}')
+            return False, (f'Azure credential is not set.{help_str}\n'
+                           f'{cls._INDENT_PREFIX}Details: '
+                           f'{common_utils.format_exception(e)}')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
