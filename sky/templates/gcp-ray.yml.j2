@@ -43,7 +43,7 @@ available_node_types:
     node_config:
       labels:
         skypilot-user: {{ user }}
-      {%- if num_reserved_nodes > 0 %}
+      {%- if num_reserved_workers > 0 %}
       reservationAffinity:
         consumeReservationType: SPECIFIC_RESERVATION
         key: compute.googleapis.com/reservation-name
