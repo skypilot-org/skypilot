@@ -189,7 +189,7 @@ class SkyServiceSpec:
 
     @property
     def readiness_suffix(self) -> str:
-        return f':{self._app_port}:{self._readiness_path}'
+        return f':{self._app_port}{self._readiness_path}'
 
     @property
     def readiness_path(self) -> str:
