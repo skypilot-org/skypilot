@@ -875,7 +875,6 @@ def write_cluster_config(
     num_specific_reserved_workers = max(
         min(available_specific_reservations - 1, num_nodes - 1), 0)
 
-
     assert cluster_name is not None
     credentials = sky_check.get_cloud_credential_file_mounts()
 

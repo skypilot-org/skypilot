@@ -651,7 +651,8 @@ class GCP(clouds.Cloud):
         subprocess_utils.handle_returncode(
             returncode,
             list_reservations_cmd,
-            error_msg=f'Failed to get list reservations for {instance_type!r}.',
+            error_msg=
+            f'Failed to get list reservations for {instance_type!r}:\n{stderr}',
             stderr=stderr,
             stream_logs=True,
         )
