@@ -47,8 +47,8 @@ from typing import Any, Dict, Iterable
 
 import yaml
 
-from sky import clouds
 from sky import sky_logging
+from sky.clouds import cloud_registry
 from sky.utils import common_utils
 
 # The config path is discovered in this order:
@@ -160,7 +160,7 @@ def _try_load_config() -> None:
         except yaml.YAMLError as e:
             logger.error(f'Error in loading config file ({config_path}):', e)
 
-        for cloud in clouds.CLOUD_REGISTRY:
+        for cloud in cloud_registry.CLOUD_REGISTRY:
             _syntax_check_for_ssh_proxy_command(cloud)
         logger.debug('Config syntax check passed.')
 

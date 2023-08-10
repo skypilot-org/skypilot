@@ -3,9 +3,10 @@ import collections
 import enum
 import re
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple, Type
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import exceptions
+from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.utils import log_utils
 from sky.utils import ux_utils
@@ -49,28 +50,6 @@ class Zone(collections.namedtuple('Zone', ['name'])):
     """A zone, typically grouped under a region."""
     name: str
     region: Region
-
-
-class _CloudRegistry(dict):
-    """Registry of clouds."""
-
-    def from_str(self, name: Optional[str]) -> Optional['Cloud']:
-        if name is None:
-            return None
-        if name.lower() not in self:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Cloud {name!r} is not a valid cloud among '
-                                 f'{list(self.keys())}')
-        return self.get(name.lower())
-
-    def register(self, cloud_cls: Type['Cloud']) -> Type['Cloud']:
-        name = cloud_cls.__name__.lower()
-        assert name not in self, f'{name} already registered'
-        self[name] = cloud_cls()
-        return cloud_cls
-
-
-CLOUD_REGISTRY = _CloudRegistry()
 
 
 class Cloud:
@@ -318,6 +297,21 @@ class Cloud:
     def _get_feasible_launchable_resources(self, resources):
         raise NotImplementedError
 
+    def get_reservations_available_resources(
+        self,
+        instance_type: str,
+        region: str,
+        zone: Optional[str],
+        specific_reservations: Set[str],
+    ) -> Dict[str, int]:
+        """"
+        Returns the number of available resources per reservation for the given
+        instance type in the given region/zone.
+        Default implementation returns 0 for non-implemented clouds.
+        """
+        del instance_type, region, zone
+        return {reservation: 0 for reservation in specific_reservations}
+
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud.
@@ -445,6 +439,19 @@ class Cloud:
             requested features.
         """
         unsupported_features2reason = cls._cloud_unsupported_features()
+
+        # Multi-node is not supported when specific_reservations is specified
+        # because if the node count is greater than the number of available
+        # resources in the specific reservations, the Google API will throw
+        # an error when trying to create the instance.
+        multi_node = CloudImplementationFeatures.MULTI_NODE
+        specific_reservations = skypilot_config.get_nested(
+            (cls._REPR.lower(), 'specific_reservations'), set())
+        if (specific_reservations and multi_node in requested_features):
+            unsupported_features2reason[multi_node] = (
+                'Multi-node is not supported when the `specific_reservations` '
+                f'is specified: {specific_reservations}')
+
         unsupported_features = set(unsupported_features2reason.keys())
         unsupported_features = requested_features.intersection(
             unsupported_features)

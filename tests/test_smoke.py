@@ -1423,6 +1423,23 @@ def test_aws_http_server_with_custom_ports():
     run_one_test(test)
 
 
+# ---------- Web apps with custom ports on Azure. ----------
+@pytest.mark.azure
+def test_azure_http_server_with_custom_ports():
+    name = _get_cluster_name()
+    test = Test(
+        'azure_http_server_with_custom_ports',
+        [
+            f'sky launch -y -d -c {name} --cloud azure examples/http_server_with_custom_ports/task.yaml',
+            'sleep 10',
+            'ip=$(grep -A1 "Host ' + name +
+            '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Task: n=2 nodes with setups. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA

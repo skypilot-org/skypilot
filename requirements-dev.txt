@@ -13,6 +13,7 @@ mypy==0.991
 types-PyYAML
 types-requests
 types-setuptools
+types-cachetools
 
 # testing
 pytest

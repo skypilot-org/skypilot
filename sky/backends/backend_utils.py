@@ -859,6 +859,22 @@ def write_cluster_config(
     if isinstance(cloud, clouds.GCP):
         gcp_project_id = cloud.get_project_id(dryrun=dryrun)
 
+    specific_reservations = set(
+        skypilot_config.get_nested(('gcp', 'specific_reservations'), set()))
+
+    reservations = to_provision.get_reservations_available_resources(
+        specific_reservations)
+
+    filtered_specific_reservations = [
+        r for r, available_resources in reservations.items()
+        if r in specific_reservations and available_resources > 0
+    ]
+    available_specific_reservations = sum(
+        available_resources for r, available_resources in reservations.items()
+        if r in specific_reservations)
+    num_specific_reserved_workers = max(
+        min(available_specific_reservations - 1, num_nodes - 1), 0)
+
     assert cluster_name is not None
     credentials = sky_check.get_cloud_credential_file_mounts()
 
@@ -917,7 +933,6 @@ def write_cluster_config(
     default_aws_sg_name = f'sky-sg-{common_utils.user_and_hostname_hash()}'
     if ports is not None:
         default_aws_sg_name += f'-{common_utils.truncate_and_hash_cluster_name(cluster_name)}'
-
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -960,6 +975,8 @@ def write_cluster_config(
 
                 # GCP only:
                 'gcp_project_id': gcp_project_id,
+                'specific_reservations': filtered_specific_reservations,
+                'num_specific_reserved_workers': num_specific_reserved_workers,
 
                 # Conda setup
                 'conda_installation_commands':
