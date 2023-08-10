@@ -869,8 +869,12 @@ def write_cluster_config(
         r for r, available_resources in reservations.items()
         if r in specific_reservations and available_resources > 0
     ]
+    available_specific_reservations = sum(
+        available_resources for r, available_resources in reservations.items()
+        if r in specific_reservations)
     num_reserved_workers = max(
-        min(sum(reservations.values()) - 1, num_nodes - 1), 0)
+        min(available_specific_reservations - 1, num_nodes - 1), 0)
+
 
     assert cluster_name is not None
     credentials = sky_check.get_cloud_credential_file_mounts()
