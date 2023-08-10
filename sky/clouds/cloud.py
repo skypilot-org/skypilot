@@ -440,7 +440,6 @@ class Cloud:
         """
         unsupported_features2reason = cls._cloud_unsupported_features()
 
-
         unsupported_features = set(unsupported_features2reason.keys())
         unsupported_features = requested_features.intersection(
             unsupported_features)
