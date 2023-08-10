@@ -1287,9 +1287,11 @@ def cli():
     default=False,
     is_flag=True,
     required=False,
+    # pylint: disable=bad-docstring-quotes
     help=('Whether to retry provisioning infinitely until the cluster is up, '
           'if we fail to launch the cluster on any possible region/cloud due '
-          'to unavailability errors.'))
+          'to unavailability errors.'),
+)
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -2281,8 +2283,10 @@ def autostop(
     default=False,
     is_flag=True,
     required=False,
+    # pylint: disable=bad-docstring-quotes
     help=('Retry provisioning infinitely until the cluster is up, '
-          'if we fail to start the cluster due to unavailability errors.'))
+          'if we fail to start the cluster due to unavailability errors.'),
+)
 @click.option(
     '--force',
     '-f',
@@ -2301,6 +2305,7 @@ def start(
         down: bool,  # pylint: disable=redefined-outer-name
         retry_until_up: bool,
         force: bool):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Restart cluster(s).
 
     If a cluster is previously stopped (status is STOPPED) or failed in
@@ -2328,7 +2333,6 @@ def start(
       sky start -a
 
     """
-    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     if down and idle_minutes_to_autostop is None:
         raise click.UsageError(
             '--idle-minutes-to-autostop must be set if --down is set.')
@@ -3481,11 +3485,13 @@ def spot():
     default=None,
     is_flag=True,
     required=False,
+    # pylint: disable=bad-docstring-quotes
     help=('(Default: True; this flag is deprecated and will be removed in a '
           'future release.) Whether to retry provisioning infinitely until the '
           'cluster is up, if unavailability errors are encountered. This '
           'applies to launching the spot clusters (both the initial and any '
-          'recovery attempts), not the spot controller.'))
+          'recovery attempts), not the spot controller.'),
+)
 @click.option('--yes',
               '-y',
               is_flag=True,
