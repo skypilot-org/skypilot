@@ -102,10 +102,10 @@ available_node_types:
         - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
   {%- endif %}
 {%- endif %}
-{% if num_nodes - 1 - num_reserved_workers > 0 %}
+{% if num_nodes - 1 - num_specific_reserved_workers > 0 %}
   ray_worker_default:
-    min_workers: {{num_nodes - 1 - num_reserved_workers}}
-    max_workers: {{num_nodes - 1 - num_reserved_workers}}
+    min_workers: {{num_nodes - 1 - num_specific_reserved_workers}}
+    max_workers: {{num_nodes - 1 - num_specific_reserved_workers}}
     resources: {}
     node_config:
       labels:
@@ -165,10 +165,10 @@ available_node_types:
   {%- endif %}
 {%- endif %}
 
-{% if num_reserved_workers > 0 %}
+{% if num_specific_reserved_workers > 0 %}
   ray_worker_reserved:
-    min_workers: {{num_reserved_workers}}
-    max_workers: {{num_reserved_workers}}
+    min_workers: {{num_specific_reserved_workers}}
+    max_workers: {{num_specific_reserved_workers}}
     resources: {}
     node_config:
       labels:

@@ -872,7 +872,7 @@ def write_cluster_config(
     available_specific_reservations = sum(
         available_resources for r, available_resources in reservations.items()
         if r in specific_reservations)
-    num_reserved_workers = max(
+    num_specific_reserved_workers = max(
         min(available_specific_reservations - 1, num_nodes - 1), 0)
 
 
@@ -977,7 +977,7 @@ def write_cluster_config(
                 # GCP only:
                 'gcp_project_id': gcp_project_id,
                 'specific_reservations': filtered_specific_reservations,
-                'num_reserved_workers': num_reserved_workers,
+                'num_specific_reserved_workers': num_specific_reserved_workers,
 
                 # Conda setup
                 'conda_installation_commands':
