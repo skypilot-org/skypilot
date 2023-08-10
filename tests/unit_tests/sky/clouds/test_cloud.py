@@ -1,15 +1,14 @@
+import pytest
+
 from sky.clouds.cloud import Cloud
 
 
-def test_cloud_get_available_reservation_resources():
+@pytest.mark.parametrize(("specific_reservations", "expected"), [({"a"}, {
+    "a": 0
+}), ((set(), {}))])
+def test_cloud_get_reservations_available_resources(specific_reservations,
+                                                    expected):
 
-    available_resources = Cloud().get_available_reservation_resources(
-        "instance_type", "region", "zone", set())
-    assert available_resources == 0
-
-
-def test_filter_reservations_with_available_resources():
-
-    reservation_names = Cloud().filter_reservations_with_available_resources(
-        "instance_type", "region", "zone", set())
-    assert reservation_names == []
+    available_resources = Cloud().get_reservations_available_resources(
+        "instance_type", "region", "zone", specific_reservations)
+    assert available_resources == expected

@@ -288,35 +288,20 @@ class Cloud:
     def _get_feasible_launchable_resources(self, resources):
         raise NotImplementedError
 
-    def get_available_reservation_resources(
+    def get_reservations_available_resources(
         self,
         instance_type: str,
         region: str,
         zone: Optional[str],
         specific_reservations: Set[str],
-    ) -> int:
+    ) -> Dict[str, int]:
         """"
-        Returns the number of available reservation resources for the given
+        Returns the number of available resources per reservation for the given
         instance type in the given region/zone.
         Default implementation returns 0 for non-implemented clouds.
         """
-        del instance_type, region, zone, specific_reservations
-        return 0
-
-    def filter_reservations_with_available_resources(
-        self,
-        instance_type: str,
-        region: str,
-        zone: Optional[str],
-        specific_reservations: Set[str],
-    ):
-        """"
-        Returns a list of reservations that have available resources for the
-        given instance type in the given region/zone.
-        Default implementation returns an empty list for non-implemented clouds.
-        """
-        del instance_type, region, zone, specific_reservations
-        return []
+        del instance_type, region, zone
+        return {reservation: 0 for reservation in specific_reservations}
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
@@ -445,18 +430,6 @@ class Cloud:
             requested features.
         """
         unsupported_features2reason = cls._cloud_unsupported_features()
-        unsupported_features = set(unsupported_features2reason.keys())
-        unsupported_features = requested_features.intersection(
-            unsupported_features)
-        if unsupported_features:
-            table = log_utils.create_table(['Feature', 'Reason'])
-            for feature in unsupported_features:
-                table.add_row(
-                    [feature.value, unsupported_features2reason[feature]])
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.NotSupportedError(
-                    f'The following features are not supported by {cls._REPR}:'
-                    '\n\t' + table.get_string().replace('\n', '\n\t'))
 
         # Multi-node is not supported when specific_reservations is specified
         # because if the node count is greater than the number of available
@@ -469,6 +442,19 @@ class Cloud:
             unsupported_features2reason[multi_node] = (
                 'Multi-node is not supported when the `specific_reservations` '
                 f'is specified: {specific_reservations}')
+
+        unsupported_features = set(unsupported_features2reason.keys())
+        unsupported_features = requested_features.intersection(
+            unsupported_features)
+        if unsupported_features:
+            table = log_utils.create_table(['Feature', 'Reason'])
+            for feature in unsupported_features:
+                table.add_row(
+                    [feature.value, unsupported_features2reason[feature]])
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'The following features are not supported by {cls._REPR}:'
+                    '\n\t' + table.get_string().replace('\n', '\n\t'))
 
     @classmethod
     def check_cluster_name_is_valid(cls, cluster_name: str) -> None:

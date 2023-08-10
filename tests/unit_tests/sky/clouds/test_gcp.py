@@ -4,7 +4,7 @@ import pytest
 
 
 @pytest.mark.parametrize((
-    'mock_return', 'expected_count'
+    'mock_return', 'expected'
 ), [([
     GCPReservation(
         self_link=
@@ -12,7 +12,9 @@ import pytest
         specific_reservation=SpecificReservation(count=1, in_use_count=0),
         specific_reservation_required=True,
         zone='zone')
-], 1),
+], {
+    'projects/<project>/reservations/<reservation>': 1
+}),
     ([
         GCPReservation(
             self_link=
@@ -20,7 +22,9 @@ import pytest
             specific_reservation=SpecificReservation(count=2, in_use_count=1),
             specific_reservation_required=False,
             zone='zone')
-    ], 1),
+    ], {
+        'projects/<project>/reservations/<reservation>': 1
+    }),
     ([
         GCPReservation(
             self_link=
@@ -28,81 +32,16 @@ import pytest
             specific_reservation=SpecificReservation(count=1, in_use_count=0),
             specific_reservation_required=True,
             zone='zone')
-    ], 0)])
-def test_gcp_get_get_available_reservation_resources(mock_return,
-                                                     expected_count):
+    ], {})])
+def test_gcp_get_reservations_available_resources(mock_return, expected):
     gcp = GCP()
     with patch.object(gcp,
                       '_list_reservations_for_instance_type_in_zone',
                       return_value=mock_return):
-        count = gcp.get_available_reservation_resources(
+        reservations = gcp.get_reservations_available_resources(
             'instance_type', 'region', 'zone',
             {'projects/<project>/reservations/<reservation>'})
-        assert count == expected_count
-
-
-@pytest.mark.parametrize((
-    'specific_reservations', 'mock_return', 'expected_names'
-), [
-    ({'projects/<project>/reservations/<reservation>'}, [
-        GCPReservation(
-            self_link=
-            'https://www.googleapis.com/compute/v1/projects/<project>/zones/<zone>/reservations/<reservation>',
-            specific_reservation=SpecificReservation(count=1, in_use_count=0),
-            specific_reservation_required=True,
-            zone='zone')
-    ], ['projects/<project>/reservations/<reservation>']),
-    ({'projects/<project>/reservations/<reservation>'}, [
-        GCPReservation(
-            self_link=
-            'https://www.googleapis.com/compute/v1/projects/<project>/zones/<zone>/reservations/<reservation>',
-            specific_reservation=SpecificReservation(count=2, in_use_count=1),
-            specific_reservation_required=False,
-            zone='zone')
-    ], ['projects/<project>/reservations/<reservation>']),
-    ({'projects/<project>/reservations/<reservation>'}, [
-        GCPReservation(
-            self_link=
-            'https://www.googleapis.com/compute/v1/projects/<project2>/zones/<zone>/reservations/<reservation>',
-            specific_reservation=SpecificReservation(count=1, in_use_count=0),
-            specific_reservation_required=True,
-            zone='zone')
-    ], []),
-    ({'projects/<project>/reservations/<reservation>'}, [
-        GCPReservation(
-            self_link=
-            'https://www.googleapis.com/compute/v1/projects/<project2>/zones/<zone>/reservations/<reservation>',
-            specific_reservation=SpecificReservation(count=1, in_use_count=0),
-            specific_reservation_required=True,
-            zone='zone')
-    ], []),
-    ({'projects/<project>/reservations/<reservation>'}, [
-        GCPReservation(
-            self_link=
-            'https://www.googleapis.com/compute/v1/projects/<project2>/zones/<zone>/reservations/<reservation>',
-            specific_reservation=SpecificReservation(count=1, in_use_count=0),
-            specific_reservation_required=False,
-            zone='zone')
-    ], []),
-    ({'projects/<project>/reservations/<reservation>'}, [
-        GCPReservation(
-            self_link=
-            'https://www.googleapis.com/compute/v1/projects/<project>/zones/<zone>/reservations/<reservation>',
-            specific_reservation=SpecificReservation(count=1, in_use_count=1),
-            specific_reservation_required=True,
-            zone='zone')
-    ], []),
-])
-def test_filter_reservations_with_available_resources(specific_reservations,
-                                                      mock_return,
-                                                      expected_names):
-    gcp = GCP()
-    with patch.object(gcp,
-                      '_list_reservations_for_instance_type_in_zone',
-                      return_value=mock_return):
-        reservation_names = gcp.filter_reservations_with_available_resources(
-            'instance_type', 'region', 'zone', specific_reservations)
-        assert reservation_names == expected_names
+        assert reservations == expected
 
 
 def test_gcp_reservation_from_dict():

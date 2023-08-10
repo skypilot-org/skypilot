@@ -43,7 +43,7 @@ available_node_types:
     node_config:
       labels:
         skypilot-user: {{ user }}
-      {%- if num_reserved_workers > 0 %}
+      {%- if specific_reservations %}
       reservationAffinity:
         consumeReservationType: SPECIFIC_RESERVATION
         key: compute.googleapis.com/reservation-name
@@ -102,10 +102,10 @@ available_node_types:
         - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
   {%- endif %}
 {%- endif %}
-{% if num_nodes - num_reserved_nodes > 1 %}
+{% if num_nodes - 1 - num_reserved_workers > 0 %}
   ray_worker_default:
-    min_workers: {{num_nodes - num_reserved_nodes - 1}}
-    max_workers: {{num_nodes - num_reserved_nodes - 1}}
+    min_workers: {{num_nodes - 1 - num_reserved_workers}}
+    max_workers: {{num_nodes - 1 - num_reserved_workers}}
     resources: {}
     node_config:
       labels:

@@ -51,7 +51,6 @@ class Resources:
         disk_size: Optional[int] = None,
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
         ports: Optional[List[Union[int, str]]] = None,
-        num_reserved_nodes: Optional[int] = None,
         # Internal use only.
         _is_image_managed: Optional[bool] = None,
     ):
@@ -117,15 +116,12 @@ class Resources:
           disk_tier: the disk performance tier to use. If None, defaults to
             ``'medium'``.
           ports: the ports to open on the instance.
-          num_reserved_nodes: the number of nodes that use a reservation.
         """
         self._version = self._VERSION
         self._cloud = cloud
         self._region: Optional[str] = None
         self._zone: Optional[str] = None
         self._set_region_zone(region, zone)
-        self.num_reserved_nodes = (0 if num_reserved_nodes is None else
-                                   num_reserved_nodes)
 
         self._instance_type = instance_type
 
@@ -805,17 +801,10 @@ class Resources:
                 self.accelerators, self.use_spot, self._region, self._zone)
         return hourly_cost * hours
 
-    def get_available_reservation_resources(
-            self, specific_reservations: Set[str]) -> int:
+    def get_reservations_available_resources(
+            self, specific_reservations: Set[str]) -> Dict[str, int]:
         """Returns the number of available reservation resources."""
-        return self.cloud.get_available_reservation_resources(
-            self._instance_type, self._region, self._zone,
-            specific_reservations)
-
-    def filter_reservations_with_available_resources(
-            self, specific_reservations: Set[str]) -> List[str]:
-        """Returns the reservations name that have at least unused resources."""
-        return self.cloud.filter_reservations_with_available_resources(
+        return self.cloud.get_reservations_available_resources(
             self._instance_type, self._region, self._zone,
             specific_reservations)
 
@@ -969,8 +958,6 @@ class Resources:
             image_id=override.pop('image_id', self.image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
             ports=override.pop('ports', self.ports),
-            num_reserved_nodes=override.pop('num_reserved_nodes',
-                                            self.num_reserved_nodes),
             _is_image_managed=override.pop('_is_image_managed',
                                            self._is_image_managed),
         )

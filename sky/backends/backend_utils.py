@@ -859,6 +859,19 @@ def write_cluster_config(
     if isinstance(cloud, clouds.GCP):
         gcp_project_id = cloud.get_project_id(dryrun=dryrun)
 
+    specific_reservations = set(
+        skypilot_config.get_nested(('gcp', 'specific_reservations'), set()))
+
+    reservations = to_provision.get_reservations_available_resources(
+        specific_reservations)
+
+    filtered_specific_reservations = [
+        r for r, available_resources in reservations.items()
+        if r in specific_reservations and available_resources > 0
+    ]
+    num_reserved_workers = max(
+        min(sum(reservations.values()) - 1, num_nodes - 1), 0)
+
     assert cluster_name is not None
     credentials = sky_check.get_cloud_credential_file_mounts()
 
@@ -959,12 +972,8 @@ def write_cluster_config(
 
                 # GCP only:
                 'gcp_project_id': gcp_project_id,
-                'specific_reservations':
-                    to_provision.filter_reservations_with_available_resources(
-                        set(
-                            skypilot_config.get_nested(
-                                ('gcp', 'specific_reservations'), set()))),
-                'num_reserved_nodes': to_provision.num_reserved_nodes,
+                'specific_reservations': filtered_specific_reservations,
+                'num_reserved_workers': num_reserved_workers,
 
                 # Conda setup
                 'conda_installation_commands':

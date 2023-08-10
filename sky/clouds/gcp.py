@@ -1,4 +1,5 @@
 """Google Cloud Platform."""
+import dataclasses
 import functools
 import json
 import os
@@ -22,7 +23,6 @@ from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from dataclasses import dataclass
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -104,7 +104,7 @@ def is_api_disabled(endpoint: str, project_id: str) -> bool:
     return proc.returncode != 0
 
 
-@dataclass
+@dataclasses.dataclass
 class SpecificReservation:
     count: int
     in_use_count: int
@@ -168,11 +168,6 @@ class GCPReservation:
         return '/'.join(parts[-6:-4] + parts[-2:])
 
 
-def _list_reservations_cache_ttu(key, value, now):
-    del key, value  # Unused.
-    return now + timedelta(seconds=300)
-
-
 @clouds.CLOUD_REGISTRY.register
 class GCP(clouds.Cloud):
     """Google Cloud Platform."""
@@ -220,7 +215,7 @@ class GCP(clouds.Cloud):
         super().__init__()
 
         self._list_reservations_cache = cachetools.TTLCache(
-            maxsize=1, ttl=datetime.timedelta(300), timer=datetime.now)
+            maxsize=1, ttl=datetime.timedelta(300), timer=datetime.datetime.now)
 
     @classmethod
     def _cloud_unsupported_features(
@@ -604,21 +599,23 @@ class GCP(clouds.Cloud):
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
                                                                 clouds='gcp')
 
-    def get_available_reservation_resources(
+    def get_reservations_available_resources(
         self,
         instance_type: str,
         region: str,
         zone: Optional[str],
         specific_reservations: Set[str],
-    ) -> int:
+    ) -> Dict[str, int]:
         del region  # Unused
         assert zone is not None, 'GCP requires zone to get available reservations.'
         reservations = self._list_reservations_for_instance_type_in_zone(
             instance_type, zone)
 
-        return sum(r.available_resources
-                   for r in reservations
-                   if r.is_consumable(specific_reservations))
+        return {
+            r.name: r.available_resources
+            for r in reservations
+            if r.is_consumable(specific_reservations)
+        }
 
     def _list_reservations_for_instance_type_in_zone(
         self,
@@ -659,23 +656,6 @@ class GCP(clouds.Cloud):
             stream_logs=True,
         )
         return [GCPReservation.from_dict(r) for r in json.loads(stdout)]
-
-    def filter_reservations_with_available_resources(
-        self,
-        instance_type: str,
-        region: str,
-        zone: Optional[str],
-        specific_reservations: Set[str],
-    ) -> List[str]:
-        assert zone is not None, 'GCP requires zone to filter reservations.'
-        reservations = self._list_reservations_for_instance_type_in_zone(
-            instance_type, zone)
-        consumable_reservations = {
-            r.name for r in reservations if
-            r.is_consumable(specific_reservations) and r.available_resources > 0
-        }
-
-        return list(consumable_reservations.intersection(specific_reservations))
 
     @classmethod
     def _find_application_key_path(cls) -> str:

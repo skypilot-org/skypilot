@@ -17,7 +17,8 @@ def get_resources_schema():
         'properties': {
             'cloud': {
                 'type': 'string',
-                'case_insensitive_enum': list(cloud_registry.CLOUD_REGISTRY.keys())
+                'case_insensitive_enum': list(
+                    cloud_registry.CLOUD_REGISTRY.keys())
             },
             'region': {
                 'type': 'string',
