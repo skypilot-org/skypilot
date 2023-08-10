@@ -3759,7 +3759,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             cloud = handle.launched_resources.cloud
             config = common_utils.read_yaml(handle.cluster_yaml)
             if isinstance(cloud, (clouds.AWS, clouds.GCP)):
-                # Clean up AWS SGs
+                # Clean up AWS SGs or GCP firewall rules
+                # We don't need to clean up on Azure since it is done by
+                # our sky node provider.
+                # TODO(tian): Adding a no-op cleanup_ports API after #2286
+                # merged.
                 provision_lib.cleanup_ports(repr(cloud), handle.cluster_name,
                                             config['provider'])
 
