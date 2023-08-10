@@ -10,8 +10,7 @@ SERVICE_YAML_PREFIX = '~/.sky/service'
 CONTROL_PLANE_PORT = 31001
 CONTROL_PLANE_SYNC_INTERVAL = 20
 
-# TODO(tian): Remove cloud == GCP.
-CONTROLLER_RESOURCES = {'cloud': 'gcp', 'disk_size': 100, 'cpus': '4+'}
+CONTROLLER_RESOURCES = {'disk_size': 100, 'cpus': '4+'}
 
 DEFAULT_INITIAL_DELAY_SECONDS = 1200
 DEFAULT_MIN_REPLICA = 1
