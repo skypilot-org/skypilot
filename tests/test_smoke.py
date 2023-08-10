@@ -2833,6 +2833,9 @@ class TestStorageWithCredentials:
         elif store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile=r2 | wc -l'
+        elif store_type == storage_lib.StoreType.MINIO:
+            endpoint_url = minio.create_endpoint()
+            return f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile=minio | wc -l'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -3351,7 +3354,7 @@ class TestStorageWithCredentials:
                       marks=pytest.mark.cloudflare),
          pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
                       storage_lib.StoreType.MINIO,
-                      marks=pytest.mark.minio),
+                      marks=pytest.mark.minio)
          ])
     def test_excluded_file_cloud_storage_upload_copy(self, gitignore_structure,
                                                      store_type,

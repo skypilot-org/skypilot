@@ -240,7 +240,7 @@ class MinioCloudStorage(CloudStorage):
             if obj.key == path:
                 return False
             # If there are more than 1 object in filter, then it is a directory
-            if num_objects == 3:
+            if num_objects > 1:
                 return True
 
         # A directory with few or no items
