@@ -374,7 +374,7 @@ class Azure(clouds.Cloud):
         except subprocess.CalledProcessError as e:
             return False, (
                 # TODO(zhwu): Change the installation hint to from PyPI.
-                'Azure CLI `az --version` error. Run the following commands:'
+                'Azure CLI `az --version` errored. Run the following commands:'
                 f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
                 f'\n{cls._INDENT_PREFIX}Credentials may also need to be set.'
                 f'{help_str}\n'
