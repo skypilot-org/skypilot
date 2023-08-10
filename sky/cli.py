@@ -4087,7 +4087,6 @@ def serve_logs(
         # Tail the logs of replica 1
         sky serve logs [SERVICE_ID] 1
     """
-    print(service_name, follow, control_plane, redirector, replica_id)
     have_replica_id = replica_id is not None
     if (control_plane + redirector + have_replica_id) != 1:
         click.secho(

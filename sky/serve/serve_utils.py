@@ -63,6 +63,18 @@ def load_replica_info(payload: str) -> List[Dict[str, Any]]:
     return replica_info
 
 
+def get_uptime() -> str:
+    resp = requests.get(_CONTROL_PLANE_URL + '/control_plane/get_uptime')
+    if resp.status_code != 200:
+        raise ValueError(f'Failed to get uptime: {resp.text}')
+    return common_utils.encode_payload(resp.json()['uptime'])
+
+
+def load_uptime(payload: str) -> int:
+    uptime = common_utils.decode_payload(payload)
+    return int(uptime)
+
+
 def terminate_service() -> str:
     resp = requests.post(_CONTROL_PLANE_URL + '/control_plane/terminate')
     resp = base64.b64encode(pickle.dumps(resp)).decode('utf-8')
@@ -221,6 +233,13 @@ class ServeCodeGen:
         code = [
             'msg = serve_utils.get_replica_info()',
             'print(msg, end="", flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def get_uptime(cls) -> str:
+        code = [
+            'msg = serve_utils.get_uptime()', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 

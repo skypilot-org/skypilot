@@ -145,7 +145,7 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
 
 def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
     status_columns = [
-        StatusColumn('REPLICA_ID', _get_replica_id),
+        StatusColumn('ID', _get_replica_id),
         StatusColumn('NAME', _get_name),
         StatusColumn('RESOURCES',
                      _get_replica_resources,
@@ -378,8 +378,13 @@ _get_controller_cluster_name = (
 _get_policy = (lambda service_record: service_record['policy'])
 _get_requested_resources = (
     lambda service_record: service_record['requested_resources'])
-_get_uptime = (lambda service_record: log_utils.readable_time_duration(
-    service_record['launched_at'], absolute=True))
+
+
+def _get_uptime(service_record: _ServiceRecord) -> str:
+    uptime = service_record['uptime']
+    if uptime < 0:
+        return '-'
+    return log_utils.readable_time_duration(uptime, absolute=True)
 
 
 def _get_replicas(service_record: _ServiceRecord) -> str:
@@ -388,7 +393,7 @@ def _get_replicas(service_record: _ServiceRecord) -> str:
         if _get_status(info) == status_lib.ReplicaStatus.READY:
             ready_replica_num += 1
     total_replica_num = len(service_record['replica_info'])
-    return f'{ready_replica_num} / {total_replica_num}'
+    return f'{ready_replica_num}/{total_replica_num}'
 
 
 def _get_endpoint(service_record: _ServiceRecord) -> str:

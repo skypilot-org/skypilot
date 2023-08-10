@@ -78,6 +78,10 @@ class ControlPlane:
                                                 ).decode('utf-8')
             }
 
+        @self.app.get('/control_plane/get_uptime')
+        def get_uptime():
+            return {'uptime': self.infra_provider.get_uptime()}
+
         @self.app.post('/control_plane/terminate')
         def terminate(request: fastapi.Request):
             del request

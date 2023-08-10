@@ -67,6 +67,8 @@ class ReplicaStatusProperty:
             return False
         if self.user_app_failed:
             return False
+        if not self.service_ready_now:
+            return False
         return self.service_once_ready
 
     def should_track_status(self) -> bool:
@@ -178,6 +180,7 @@ class InfraProvider:
         self.readiness_path: str = readiness_path
         self.initial_delay_seconds: int = initial_delay_seconds
         self.post_data: Optional[Union[str, Dict[str, Any]]] = post_data
+        self.uptime: Optional[float] = None
         logger.info(f'Readiness probe path: {self.readiness_path}')
         logger.info(f'Initial delay seconds: {self.initial_delay_seconds}')
         logger.info(f'Post data: {self.post_data} ({type(self.post_data)})')
@@ -185,6 +188,9 @@ class InfraProvider:
     def get_replica_info(self, verbose: bool) -> List[Dict[str, Any]]:
         # Get replica info for all replicas
         raise NotImplementedError
+
+    def get_uptime(self) -> Optional[float]:
+        return self.uptime
 
     def total_replica_num(self) -> int:
         # Returns the total number of replicas, including those under
@@ -513,6 +519,11 @@ class SkyPilotInfraProvider(InfraProvider):
                 logger.info(msg)
                 if response.status_code == 200:
                     logger.info(f'Replica {replica_ip} is ready.')
+                    if self.uptime is None:
+                        self.uptime = time.time()
+                        logger.info(f'Replica {replica_ip} is the first '
+                                    'ready replica. Setting uptime to '
+                                    f'{self.uptime}.')
                     return info.cluster_name, True
             except requests.exceptions.RequestException as e:
                 logger.info(e)

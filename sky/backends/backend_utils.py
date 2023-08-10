@@ -2425,6 +2425,19 @@ def _service_status_from_replica_info(
     return status_lib.ServiceStatus.REPLICA_INIT
 
 
+def _check_controller_status_and_set_service_status(service_name: str,
+                                                    cluster_name: str) -> bool:
+    cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+    if (cluster_record is None or
+            cluster_record['status'] != status_lib.ClusterStatus.UP):
+        global_user_state.set_service_status(
+            service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+        logger.error(f'Controller cluster {cluster_name!r} '
+                     'is not exist or UP. Skipping refresh status.')
+        return False
+    return True
+
+
 def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
     if service_name is None:
         service_records = global_user_state.get_services()
@@ -2455,24 +2468,37 @@ def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
             stream_logs=False,
             separate_stderr=True)
         if returncode != 0:
-            cluster_record = global_user_state.get_cluster_from_name(
-                controller_cluster_name)
-            if (cluster_record is None or
-                    cluster_record['status'] != status_lib.ClusterStatus.UP):
-                global_user_state.set_service_status(
-                    record['name'], status_lib.ServiceStatus.CONTRLLER_FAILED)
-                logger.error(f'Controller cluster {controller_cluster_name!r} '
-                             'is not exist or UP. Skipping refresh status.')
-                continue
-            logger.warning('Failed to refresh replica info from the '
-                           'controller. Use cached data which might outdated. '
-                           f'Reason: {stderr}')
+            if _check_controller_status_and_set_service_status(
+                    record['name'], controller_cluster_name):
+                logger.warning('Failed to refresh replica info from the '
+                               'controller. Use cached data which might '
+                               f'outdated. Reason: {stderr}')
             continue
 
         replica_info = serve_lib.load_replica_info(replica_info_payload)
-        if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
-            record['status'] = _service_status_from_replica_info(replica_info)
         record['replica_info'] = replica_info
+
+        if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
+            new_status = _service_status_from_replica_info(replica_info)
+            if (record['uptime'] < 0 and
+                    record['status'] != status_lib.ServiceStatus.READY and
+                    new_status == status_lib.ServiceStatus.READY):
+                code = serve_lib.ServeCodeGen.get_uptime()
+                returncode, uptime_payload, stderr = backend.run_on_head(
+                    handle,
+                    code,
+                    require_outputs=True,
+                    stream_logs=False,
+                    separate_stderr=True)
+                if returncode == 0:
+                    record['uptime'] = serve_lib.load_uptime(uptime_payload)
+                else:
+                    if _check_controller_status_and_set_service_status(
+                            record['name'], controller_cluster_name):
+                        logger.warning('Failed to refresh uptime from the '
+                                       'controller. Skipping update uptime. '
+                                       f'Reason: {stderr}')
+            record['status'] = new_status
 
         global_user_state.add_or_update_service(**record)
 

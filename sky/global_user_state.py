@@ -97,7 +97,7 @@ def create_table(cursor, conn):
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS services (
         name TEXT PRIMARY KEY,
-        launched_at INTEGER,
+        uptime INTEGER,
         controller_cluster_name TEXT,
         endpoint TEXT,
         status TEXT,
@@ -285,20 +285,18 @@ def add_or_update_cluster(cluster_name: str,
 
 
 def add_or_update_service(
-        name: str, launched_at: Optional[int], controller_cluster_name: str,
+        name: str, uptime: Optional[int], controller_cluster_name: str,
         endpoint: str, status: status_lib.ServiceStatus, policy: str,
         requested_resources: Optional['resources_lib.Resources'],
         replica_info: List[Dict[str, Any]]) -> None:
-    if launched_at is None:
-        launched_at = int(time.time())
     _DB.cursor.execute(
         'INSERT or REPLACE INTO services'
-        '(name, launched_at, controller_cluster_name, endpoint, '
+        '(name, uptime, controller_cluster_name, endpoint, '
         'status, policy, requested_resources, replica_info) '
         'VALUES ('
         # name
         '?, '
-        # launched_at
+        # uptime
         '?, '
         # controller_cluster_name
         '?, '
@@ -316,8 +314,8 @@ def add_or_update_service(
         (
             # name
             name,
-            # launched_at
-            launched_at,
+            # uptime
+            uptime,
             # controller_cluster_name
             controller_cluster_name,
             # endpoint
@@ -629,12 +627,12 @@ def get_service_from_name(
         # Explicitly specify the number of fields to unpack, so that
         # we can add new fields to the database in the future without
         # breaking the previous code.
-        (name, launched_at, controller_cluster_name, endpoint, status, policy,
+        (name, uptime, controller_cluster_name, endpoint, status, policy,
          requested_resources, replica_info) = row[:8]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
-            'launched_at': launched_at,
+            'uptime': uptime,
             'controller_cluster_name': controller_cluster_name,
             'endpoint': endpoint,
             'status': status_lib.ServiceStatus[status],
@@ -676,13 +674,13 @@ def get_services() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('select * from services').fetchall()
     records = []
     for row in rows:
-        (name, launched_at, controller_cluster_name, endpoint, status, policy,
+        (name, uptime, controller_cluster_name, endpoint, status, policy,
          requested_resources, replica_info) = row[:8]
         # TODO: use namedtuple instead of dict
 
         record = {
             'name': name,
-            'launched_at': launched_at,
+            'uptime': uptime,
             'controller_cluster_name': controller_cluster_name,
             'endpoint': endpoint,
             'status': status_lib.ServiceStatus[status],
