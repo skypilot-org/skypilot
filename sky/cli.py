@@ -4040,33 +4040,27 @@ def serve_down(
     help=('Follow the logs of the job. [default: --follow] '
           'If --no-follow is specified, print the log so far and exit.'))
 @click.option('--control-plane',
-              '-c',
               is_flag=True,
               default=False,
               required=False,
               help='Show the control plane logs of this service.')
 @click.option('--redirector',
-              '-r',
               is_flag=True,
               default=False,
               required=False,
               help='Show the redirector logs of this service.')
-@click.option('--replica-id',
-              '-i',
-              required=False,
-              type=int,
-              help='Show the logs of a specific replica.')
 @click.argument('service_name',
                 required=True,
                 type=str,
                 **_get_shell_complete_args(_complete_service_name))
+@click.argument('replica_id', required=False, type=int)
 @usage_lib.entrypoint
 def serve_logs(
     service_name: str,
     follow: bool,
     control_plane: bool,
     redirector: bool,
-    replica_id: int,
+    replica_id: Optional[int],
 ):
     """Tail the log of a service.
 
@@ -4075,18 +4069,19 @@ def serve_logs(
     .. code-block:: bash
 
         # Tail the control plane logs of a service
-        sky serve logs -c [SERVICE_ID]
+        sky serve logs --control-plane [SERVICE_ID]
         \b
         # Print the redirector logs so far and exit
-        sky serve logs -r --no-follow [SERVICE_ID]
+        sky serve logs --redirector --no-follow [SERVICE_ID]
         \b
         # Tail the logs of replica 1
-        sky serve logs -i 1 [SERVICE_ID]
+        sky serve logs [SERVICE_ID] 1
     """
+    print(service_name, follow, control_plane, redirector, replica_id)
     have_replica_id = replica_id is not None
     if (control_plane + redirector + have_replica_id) != 1:
         click.secho(
-            'Only one of --control-plane, --redirector, --replica-id '
+            'One and only one of --control-plane, --redirector, --replica-id '
             'can be specified. See `sky serve logs --help` for more '
             'information.',
             fg='red')
