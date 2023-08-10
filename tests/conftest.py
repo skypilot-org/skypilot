@@ -231,5 +231,6 @@ def aws_config_region(monkeypatch) -> str:
 
 @pytest.fixture
 def patch_gcloud_list_reservations():
-    with patch('sky.clouds.gcp.GCP._list_reservations_for_instance_type', return_value=[]) as mock:
+    with patch('sky.clouds.gcp.GCP._list_reservations_for_instance_type',
+               return_value=[]) as mock:
         yield mock

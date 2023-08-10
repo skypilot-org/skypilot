@@ -224,7 +224,8 @@ def test_instance_type_mismatches_memory(monkeypatch):
         assert 'does not have the requested memory' in str(e.value)
 
 
-def test_instance_type_matches_cpus(monkeypatch, patch_gcloud_list_reservations):
+def test_instance_type_matches_cpus(monkeypatch,
+                                    patch_gcloud_list_reservations):
     _test_resources_launch(monkeypatch,
                            sky.AWS(),
                            instance_type='c6i.8xlarge',
@@ -243,7 +244,8 @@ def test_instance_type_matches_cpus(monkeypatch, patch_gcloud_list_reservations)
                            cpus=8.0)
 
 
-def test_instance_type_matches_memory(monkeypatch, patch_gcloud_list_reservations):
+def test_instance_type_matches_memory(monkeypatch,
+                                      patch_gcloud_list_reservations):
     _test_resources_launch(monkeypatch,
                            sky.AWS(),
                            instance_type='c6i.8xlarge',
@@ -262,7 +264,8 @@ def test_instance_type_matches_memory(monkeypatch, patch_gcloud_list_reservation
                            memory=32)
 
 
-def test_instance_type_from_cpu_memory(monkeypatch, capfd,patch_gcloud_list_reservations):
+def test_instance_type_from_cpu_memory(monkeypatch, capfd,
+                                       patch_gcloud_list_reservations):
     _test_resources_launch(monkeypatch, cpus=8)
     stdout, _ = capfd.readouterr()
     # Choose General Purpose instance types
@@ -358,7 +361,8 @@ def test_instance_type_mistmatches_accelerators(monkeypatch):
         assert 'Infeasible resource demands found' in str(e.value)
 
 
-def test_instance_type_matches_accelerators(monkeypatch, patch_gcloud_list_reservations):
+def test_instance_type_matches_accelerators(monkeypatch,
+                                            patch_gcloud_list_reservations):
     _test_resources_launch(monkeypatch,
                            sky.AWS(),
                            instance_type='p3.2xlarge',
