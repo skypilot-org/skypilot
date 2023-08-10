@@ -93,7 +93,7 @@ def _configure_resource_group(config):
         ports = [str(port) for port in ports if port != 22]
         nsg_resource["properties"]["securityRules"].append(
             {
-                "name": f"user-ports",
+                "name": "user-ports",
                 "properties": {
                     "priority": 1001,
                     "protocol": "TCP",
