@@ -45,7 +45,8 @@ jobs:
             sky/skylet/providers/ibm/
     - name: Running isort for black formatted files
       run: |
-        isort --diff --check sky/skylet/providers/aws/ \
+        isort --diff --check --profile black -l 88 -m 3 \
+            sky/skylet/providers/aws/ \
             sky/skylet/providers/gcp/ \
             sky/skylet/providers/azure/ \
             sky/skylet/providers/ibm/
