@@ -172,16 +172,16 @@ class InfraProvider:
 
     def __init__(
             self,
-            readiness_path: str,
+            readiness_suffix: str,
             initial_delay_seconds: int,
             post_data: Optional[Union[str, Dict[str, Any]]] = None) -> None:
         # TODO(tian): make this thread safe
         self.replica_info: Dict[str, ReplicaInfo] = dict()
-        self.readiness_path: str = readiness_path
+        self.readiness_suffix: str = readiness_suffix
         self.initial_delay_seconds: int = initial_delay_seconds
         self.post_data: Optional[Union[str, Dict[str, Any]]] = post_data
         self.uptime: Optional[float] = None
-        logger.info(f'Readiness probe path: {self.readiness_path}')
+        logger.info(f'Readiness probe suffix: {self.readiness_suffix}')
         logger.info(f'Initial delay seconds: {self.initial_delay_seconds}')
         logger.info(f'Post data: {self.post_data} ({type(self.post_data)})')
 
@@ -501,15 +501,15 @@ class SkyPilotInfraProvider(InfraProvider):
             replica_ip = info.ip
             try:
                 msg = ''
-                readiness_url = f'http://{replica_ip}{self.readiness_path}'
+                readiness_suffix = f'http://{replica_ip}{self.readiness_suffix}'
                 if self.post_data is not None:
                     msg += 'Post'
-                    response = requests.post(readiness_url,
+                    response = requests.post(readiness_suffix,
                                              json=self.post_data,
                                              timeout=3)
                 else:
                     msg += 'Get'
-                    response = requests.get(readiness_url, timeout=3)
+                    response = requests.get(readiness_suffix, timeout=3)
                 msg += (f' request to {replica_ip} returned status code '
                         f'{response.status_code}')
                 if response.status_code == 200:

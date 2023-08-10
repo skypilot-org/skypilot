@@ -12,3 +12,6 @@ CONTROL_PLANE_SYNC_INTERVAL = 20
 
 # TODO(tian): Remove cloud == GCP.
 CONTROLLER_RESOURCES = {'cloud': 'gcp', 'disk_size': 100, 'cpus': '4+'}
+
+DEFAULT_INITIAL_DELAY_SECONDS = 1200
+DEFAULT_MIN_REPLICA = 1

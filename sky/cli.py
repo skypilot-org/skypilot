@@ -3922,6 +3922,9 @@ def serve_up(
         click.secho('Service section not found in the YAML file.', fg='red')
         return
 
+    click.secho('Service Spec:', fg='cyan')
+    click.echo(task.service, nl=False)
+
     # TODO(tian): Support custom controller resources.
     controller_resources_config = serve_lib.CONTROLLER_RESOURCES
     controller_resources = sky.Resources.from_yaml_config(

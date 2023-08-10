@@ -147,31 +147,35 @@ def get_service_schema():
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
-        'required': ['port', 'readiness_probe', 'replica_policy'],
+        'required': ['port', 'readiness_probe'],
         'additionalProperties': False,
         'properties': {
             'port': {
                 'type': 'integer',
             },
             'readiness_probe': {
-                'type': 'object',
-                'required': ['path', 'initial_delay_seconds'],
-                'additionalProperties': False,
-                'properties': {
-                    'path': {
-                        'type': 'string',
-                    },
-                    'initial_delay_seconds': {
-                        'type': 'number',
-                    },
-                    'post_data': {
-                        'anyOf': [{
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': ['path'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'path': {
                             'type': 'string',
-                        }, {
-                            'type': 'object',
-                        }]
+                        },
+                        'initial_delay_seconds': {
+                            'type': 'number',
+                        },
+                        'post_data': {
+                            'anyOf': [{
+                                'type': 'string',
+                            }, {
+                                'type': 'object',
+                            }]
+                        }
                     }
-                }
+                }]
             },
             'replica_policy': {
                 'type': 'object',
@@ -191,7 +195,10 @@ def get_service_schema():
                         'type': 'number',
                     },
                 }
-            }
+            },
+            'replicas': {
+                'type': 'integer',
+            },
         }
     }
 

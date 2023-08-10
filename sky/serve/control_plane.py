@@ -132,7 +132,7 @@ if __name__ == '__main__':
     _infra_provider = infra_providers.SkyPilotInfraProvider(
         args.task_yaml,
         args.service_name,
-        readiness_path=service_spec.readiness_path,
+        readiness_suffix=service_spec.readiness_suffix,
         initial_delay_seconds=service_spec.initial_delay_seconds,
         post_data=service_spec.post_data)
 
