@@ -6,10 +6,11 @@ import re
 import subprocess
 import time
 import typing
-import cachetools
+import datetime
 import operator
 from typing import Dict, Iterator, List, Optional, Tuple, Set
-from datetime import datetime, timedelta
+
+import cachetools
 
 from sky import clouds
 from sky import exceptions
@@ -218,8 +219,8 @@ class GCP(clouds.Cloud):
     def __init__(self):
         super().__init__()
 
-        self._list_reservations_cache = cachetools.TLRUCache(
-            maxsize=1, ttu=_list_reservations_cache_ttu, timer=datetime.now)
+        self._list_reservations_cache = cachetools.TTLCache(
+            maxsize=1, ttl=datetime.timedelta(300), timer=datetime.now)
 
     @classmethod
     def _cloud_unsupported_features(

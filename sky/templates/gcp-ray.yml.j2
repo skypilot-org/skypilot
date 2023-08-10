@@ -165,10 +165,10 @@ available_node_types:
   {%- endif %}
 {%- endif %}
 
-{% if num_reserved_nodes > 1 %}
+{% if num_reserved_workers > 0 %}
   ray_worker_reserved:
-    min_workers: {{num_reserved_nodes - 1}}
-    max_workers: {{num_reserved_nodes - 1}}
+    min_workers: {{num_reserved_workers}}
+    max_workers: {{num_reserved_workers}}
     resources: {}
     node_config:
       labels:
@@ -176,6 +176,7 @@ available_node_types:
       reservationAffinity:
         consumeReservationType: SPECIFIC_RESERVATION
         key: compute.googleapis.com/reservation-name
+        values: {{ specific_reservations }}
   {%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}

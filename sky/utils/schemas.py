@@ -4,7 +4,7 @@ Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
 
-from sky.clouds import CLOUD_REGISTRY
+from sky.clouds import cloud_registry
 from sky.data import storage
 
 
@@ -17,7 +17,7 @@ def get_resources_schema():
         'properties': {
             'cloud': {
                 'type': 'string',
-                'case_insensitive_enum': list(CLOUD_REGISTRY.keys())
+                'case_insensitive_enum': list(cloud_registry.CLOUD_REGISTRY.keys())
             },
             'region': {
                 'type': 'string',

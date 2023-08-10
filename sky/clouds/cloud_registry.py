@@ -1,9 +1,12 @@
 """
 Cloud need to be registered in the CLOUD_REGISTRY so that they can be discovered
 """
+import typing
 from typing import Optional, Type
+
 from sky.utils import ux_utils
-import sky  # pylint: disable=unused-import
+if typing.TYPE_CHECKING:
+    import sky
 
 
 class _CloudRegistry(dict):
