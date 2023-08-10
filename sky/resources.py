@@ -801,6 +801,13 @@ class Resources:
                 self.accelerators, self.use_spot, self._region, self._zone)
         return hourly_cost * hours
 
+    def get_reservations_available_resources(
+            self, specific_reservations: Set[str]) -> Dict[str, int]:
+        """Returns the number of available reservation resources."""
+        return self.cloud.get_reservations_available_resources(
+            self._instance_type, self._region, self._zone,
+            specific_reservations)
+
     def less_demanding_than(self,
                             other: Union[List['Resources'], 'Resources'],
                             requested_num_nodes: int = 1) -> bool:

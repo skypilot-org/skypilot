@@ -1,6 +1,7 @@
 import pytest
 import tempfile
 from typing import List
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -179,7 +180,7 @@ def generic_cloud(request) -> str:
 
 
 @pytest.fixture
-def enable_all_clouds(monkeypatch):
+def enable_all_clouds(monkeypatch, patch_gcloud_list_reservations):
     from sky import clouds
     # Monkey-patching is required because in the test environment, no cloud is
     # enabled. The optimizer checks the environment to find enabled clouds, and
@@ -226,3 +227,10 @@ def aws_config_region(monkeypatch) -> str:
         if isinstance(ssh_proxy_command, dict) and ssh_proxy_command:
             region = list(ssh_proxy_command.keys())[0]
     return region
+
+
+@pytest.fixture
+def patch_gcloud_list_reservations():
+    with patch('sky.clouds.gcp.GCP._list_reservations_for_instance_type',
+               return_value=[]) as mock:
+        yield mock
