@@ -72,8 +72,7 @@ class TestExecutionOnExistingClusters:
             requested_resources={handle.launched_resources},
             ready=False)
 
-    def test_launch_exec(self, _mock_cluster_state, monkeypatch,
-                         patch_gcloud_list_reservations):
+    def test_launch_exec(self, _mock_cluster_state, monkeypatch):
         """Test launch and exec on existing clusters.
 
         This test runs launch and exec with less demanding resources

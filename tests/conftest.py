@@ -180,7 +180,7 @@ def generic_cloud(request) -> str:
 
 
 @pytest.fixture
-def enable_all_clouds(monkeypatch):
+def enable_all_clouds(monkeypatch, patch_gcloud_list_reservations):
     from sky import clouds
     # Monkey-patching is required because in the test environment, no cloud is
     # enabled. The optimizer checks the environment to find enabled clouds, and

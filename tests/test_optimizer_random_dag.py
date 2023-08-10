@@ -138,7 +138,7 @@ def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
     assert abs(objective - min_objective) < 5e-2
 
 
-def test_optimizer(enable_all_clouds, patch_gcloud_list_reservations):
+def test_optimizer(enable_all_clouds):
     for seed in range(3):
         dag = generate_random_dag(num_tasks=5, seed=seed)
         sky.Optimizer._add_dummy_source_sink_nodes(dag)
