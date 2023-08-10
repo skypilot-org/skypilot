@@ -10,6 +10,8 @@ import pickle
 from typing import Optional
 import uvicorn
 
+import sky
+from sky import backends
 from sky import serve
 from sky.serve import autoscalers
 from sky.serve import infra_providers
@@ -40,9 +42,11 @@ class ControlPlane:
 
     def __init__(self,
                  port: int,
+                 task_yaml: str,
                  infra_provider: infra_providers.InfraProvider,
                  autoscaler: Optional[autoscalers.Autoscaler] = None) -> None:
         self.port = port
+        self.task_yaml = task_yaml
         self.infra_provider = infra_provider
         self.autoscaler = autoscaler
         self.app = fastapi.FastAPI()
@@ -90,6 +94,10 @@ class ControlPlane:
                 logger.info('Terminate autoscaler monitor...')
                 self.autoscaler.terminate_monitor()
             msg = self.infra_provider.terminate()
+            # Cleanup cloud storage
+            task = sky.Task.from_yaml(self.task_yaml)
+            backend = backends.CloudVmRayBackend()
+            backend.teardown_ephemeral_storage(task)
             return {'message': msg}
 
         # Run replica_monitor and autoscaler.monitor (if autoscaler is defined)
@@ -148,5 +156,6 @@ if __name__ == '__main__':
         query_interval=60)
 
     # ======= ControlPlane =========
-    control_plane = ControlPlane(args.port, _infra_provider, _autoscaler)
+    control_plane = ControlPlane(args.port, args.task_yaml, _infra_provider,
+                                 _autoscaler)
     control_plane.run()

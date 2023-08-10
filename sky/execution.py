@@ -991,7 +991,8 @@ def serve_up(
     task.set_resources(original_resources.copy(ports=[app_port]))
 
     # TODO(tian): Use skyserve constants.
-    # TODO(tian): Clean up storage when the service is torn down.
+    # The storage is cleanup by the control plane `terminate` method after the
+    # service is terminated.
     _maybe_translate_local_file_mounts_and_sync_up(task)
 
     with tempfile.NamedTemporaryFile(prefix=f'serve-task-{service_name}-',
@@ -1134,8 +1135,8 @@ def serve_up(
               f'\t\t{backend_utils.BOLD}sky serve status {service_name} (-a)'
               f'{backend_utils.RESET_BOLD}'
               '\nTo see logs of controller:'
-              f'\t{backend_utils.BOLD}sky serve logs -c {service_name}'
-              f'{backend_utils.RESET_BOLD}'
+              f'\t{backend_utils.BOLD}sky serve logs --control-plane '
+              f'{service_name}{backend_utils.RESET_BOLD}'
               '\nTo see logs of redirector:'
               f'\t{backend_utils.BOLD}sky serve logs --redirector '
               f'{service_name}{backend_utils.RESET_BOLD}'
@@ -1253,7 +1254,6 @@ def serve_down(
             raise RuntimeError() from e
 
     # TODO(tian): Maybe add a post_cleanup function?
-    # TODO(tian): Cleanup storege here?
     controller_yaml_path = os.path.join(serve.CONTROLLER_YAML_PREFIX,
                                         f'{service_name}.yaml')
     if os.path.exists(controller_yaml_path):
