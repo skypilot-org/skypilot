@@ -1,9 +1,10 @@
 """GCP instance provisioning."""
 import collections
-from googleapiclient import errors
 import re
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Type
+
+from googleapiclient import errors
 
 from sky import sky_logging
 from sky.provision.gcp import instance_utils
