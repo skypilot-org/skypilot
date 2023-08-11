@@ -442,7 +442,7 @@ class AzureNodeProvider(NodeProvider):
             "process_runner": process_runner,
             "use_internal_ip": use_internal_ip,
         }
-        if docker_config is not None and docker_config["container_name"] != "":
+        if docker_config and docker_config["container_name"] != "":
             return SkyDockerCommandRunner(docker_config, **common_args)
         else:
             return SSHCommandRunner(**common_args)
