@@ -853,6 +853,8 @@ class Resources:
     def get_reservations_available_resources(
             self, specific_reservations: Set[str]) -> Dict[str, int]:
         """Returns the number of available reservation resources."""
+        if self.use_spot:
+            return {}
         return self.cloud.get_reservations_available_resources(
             self._instance_type, self._region, self._zone,
             specific_reservations)
