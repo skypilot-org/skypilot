@@ -213,8 +213,7 @@ class GCP(clouds.Cloud):
     def __init__(self):
         super().__init__()
 
-        self._list_reservations_cache = cachetools.TTLCache(
-            maxsize=1, ttl=datetime.timedelta(300), timer=datetime.datetime.now)
+        self._list_reservations_cache = None
 
     @classmethod
     def _cloud_unsupported_features(
@@ -624,10 +623,18 @@ class GCP(clouds.Cloud):
         reservations = self._list_reservations_for_instance_type(instance_type)
         return [r for r in reservations if r.zone.endswith(f'/{zone}')]
 
+    def _get_or_create_ttl_cache(self):
+        if getattr(self, '_list_reservations_cache', None) is None:
+            self._list_reservations_cache = cachetools.TTLCache(
+                maxsize=1,
+                ttl=datetime.timedelta(300),
+                timer=datetime.datetime.now)
+        return self._list_reservations_cache
+
     @cachetools.cachedmethod(
         # Default to None for backward compatibility for GCP clusters launched
         # before #2352.
-        cache=lambda self: getattr(self, '_list_reservations_cache', None))
+        cache=lambda self: self._get_or_create_ttl_cache())
     def _list_reservations_for_instance_type(
         self,
         instance_type: str,
