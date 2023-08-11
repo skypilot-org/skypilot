@@ -150,15 +150,18 @@ def terminate_instances(
     handler_to_instances = _filter_instances(handlers, project_id, zone,
                                              label_filters, lambda _: None)
     operations = collections.defaultdict(list)
-    try:
-        for handler, instances in handler_to_instances.items():
-            for instance in instances:
+    errs = []
+    for handler, instances in handler_to_instances.items():
+        for instance in instances:
+            try:
                 operations[handler].append(
                     handler.terminate(project_id, zone, instance))
-        _wait_for_operations(operations, project_id, zone)
-    except errors.HttpError as e:
-        if _RESOURCE_NOT_FOUND_PATTERN.search(e.reason) is None:
-            raise
+            except errors.HttpError as e:
+                if _RESOURCE_NOT_FOUND_PATTERN.search(e.reason) is None:
+                    errs.append(e)
+    _wait_for_operations(operations, project_id, zone)
+    if errs:
+        raise RuntimeError(f'Failed to terminate instances: {errs}')
     # We don't wait for the instances to be terminated, as it can take a long
     # time (same as what we did in ray's node_provider).
 
