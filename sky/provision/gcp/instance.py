@@ -20,7 +20,8 @@ POLL_INTERVAL = 5
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'
 
-_RESOURCE_NOT_FOUND_PATTERN = re.compile(r'The resource .* was not found')
+_INSTANCE_RESOURCE_NOT_FOUND_PATTERN = re.compile(
+    r'The resource \'projects/.*/zones/.*/instances/.*\' was not found')
 
 
 def _filter_instances(
@@ -156,7 +157,8 @@ def terminate_instances(
                 operations[handler].append(
                     handler.terminate(project_id, zone, instance))
             except gcp.http_error_exception() as e:
-                if _RESOURCE_NOT_FOUND_PATTERN.search(e.reason) is None:
+                if _INSTANCE_RESOURCE_NOT_FOUND_PATTERN.search(
+                        e.reason) is None:
                     errs.append(e)
                 else:
                     logger.warning(f'Instance {instance} does not exist. '
