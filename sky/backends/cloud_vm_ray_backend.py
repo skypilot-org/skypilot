@@ -3557,7 +3557,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 operation_fn = provision_lib.terminate_instances
             try:
                 provider_config = config['provider']
-                provider_config['allow_resource_not_found'] = allow_resource_not_found
+                provider_config[
+                    'allow_resource_not_found'] = allow_resource_not_found
                 operation_fn(repr(cloud),
                              cluster_name,
                              provider_config=provider_config)
