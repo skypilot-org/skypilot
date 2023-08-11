@@ -629,6 +629,9 @@ class GCP(clouds.Cloud):
 
     def _get_or_create_ttl_cache(self):
         if getattr(self, '_list_reservations_cache', None) is None:
+            # Backward compatibility: Clusters created before #2352 has GCP
+            # objects serialized without the attribute. So we access it this
+            # way.
             self._list_reservations_cache = cachetools.TTLCache(
                 maxsize=1,
                 ttl=datetime.timedelta(300),
@@ -636,8 +639,6 @@ class GCP(clouds.Cloud):
         return self._list_reservations_cache
 
     @cachetools.cachedmethod(
-        # Create if not found for backward compatibility for GCP clusters
-        # launched before #2352.
         cache=lambda self: self._get_or_create_ttl_cache())
     def _list_reservations_for_instance_type(
         self,
