@@ -2702,15 +2702,3 @@ def check_rsync_installed() -> None:
                 ' it is not installed. For Debian/Ubuntu system, '
                 'install it with:\n'
                 '  $ sudo apt install rsync') from None
-
-
-def get_storage_mounts(handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle') -> Optional[Dict[Path, 'storage_lib.Storage']]:
-    """Gets 'storage_mounts' object from cluster's storage metadata"""
-    cluster_name = handle.cluster_name
-    cluster_metadata: Dict[str, Any] = global_user_state.get_cluster_metadata(cluster_name)
-    if not 'storage' in cluster_metadata.keys():
-        return None
-    if not 'storage_mounts' in cluster_metadata['storage'].keys():
-        return None
-    storage_mounts = cluster_metadata['storage']['storage_mounts']
-    return storage_mounts

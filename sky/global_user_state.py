@@ -100,7 +100,7 @@ def create_table(cursor, conn):
                                  'INTEGER DEFAULT -1')
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'metadata',
-                                 'TEXT DEFAULT "{}"')
+                                 'BLOB')
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'to_down',
                                  'INTEGER DEFAULT 0')
@@ -374,13 +374,18 @@ def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
     for (metadata,) in rows:
         if metadata is None:
             return None
-        return json.loads(metadata)
+        try:
+            metadata_obj = pickle.loads(metadata)
+        except TypeError as e:
+            if 'bytes-like object is required' in str(e):
+                metadata_obj = json.loads(metadata)
+        return metadata_obj
     return None
 
 
 def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
     _DB.cursor.execute('UPDATE clusters SET metadata=(?) WHERE name=(?)', (
-        json.dumps(metadata),
+        pickle.dumps(metadata),
         cluster_name,
     ))
     count = _DB.cursor.rowcount
@@ -518,6 +523,11 @@ def get_cluster_from_name(
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner, cluster_hash) = row[:10]
         # TODO: use namedtuple instead of dict
+        try:
+            metadata_obj = pickle.loads(metadata)
+        except TypeError as e:
+            if 'bytes-like object is required' in str(e):
+                metadata_obj = json.loads(metadata)
         record = {
             'name': name,
             'launched_at': launched_at,
@@ -527,7 +537,7 @@ def get_cluster_from_name(
             'autostop': autostop,
             'to_down': bool(to_down),
             'owner': _load_owner(owner),
-            'metadata': json.loads(metadata),
+            'metadata': metadata_obj,
             'cluster_hash': cluster_hash,
         }
         return record
@@ -542,7 +552,12 @@ def get_clusters() -> List[Dict[str, Any]]:
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner, cluster_hash) = row[:10]
         # TODO: use namedtuple instead of dict
-
+        try:
+            metadata_obj = pickle.loads(metadata)
+        except TypeError as e:
+            if 'bytes-like object is required' in str(e):
+                metadata_obj = json.loads(metadata)
+        
         record = {
             'name': name,
             'launched_at': launched_at,
@@ -552,7 +567,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'autostop': autostop,
             'to_down': bool(to_down),
             'owner': _load_owner(owner),
-            'metadata': json.loads(metadata),
+            'metadata': metadata_obj,
             'cluster_hash': cluster_hash,
         }
 
