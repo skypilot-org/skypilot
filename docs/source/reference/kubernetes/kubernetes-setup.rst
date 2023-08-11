@@ -59,6 +59,16 @@ Deploying on GKE
 
         $ sky check
 
+5. [Required for GPU support] If your GKE nodes have GPUs, you may need to to manually install nvidia drivers. You can do so by deploying the daemonset depending on the OS of your nodes:
+
+    .. code-block:: console
+
+        # For Container Optimized OS (COS) based nodes:
+        $ kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml
+
+        # For Ubuntu (COS) based nodes:
+        kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/ubuntu/daemonset-preloaded.yaml
+
 .. note::
     GKE autopilot clusters are currently not supported. Only GKE standard clusters are supported.
 
