@@ -104,17 +104,6 @@ def is_api_disabled(endpoint: str, project_id: str) -> bool:
     return proc.returncode != 0
 
 
-def _attrgetter_with_default(attr, default=None):
-    getter = operator.attrgetter(attr)
-
-    def wrapper(obj):
-        try:
-            return getter(obj)
-        except AttributeError:
-            return default
-
-    return wrapper
-
 
 @dataclasses.dataclass
 class SpecificReservation:
@@ -637,8 +626,8 @@ class GCP(clouds.Cloud):
         reservations = self._list_reservations_for_instance_type(instance_type)
         return [r for r in reservations if r.zone.endswith(f'/{zone}')]
 
-    @cachetools.cachedmethod(cache=_attrgetter_with_default(
-        '_list_reservations_cache', default=None))
+    @cachetools.cachedmethod(cache=lambda self: getattr(self,
+        '_list_reservations_cache', None))
     def _list_reservations_for_instance_type(
         self,
         instance_type: str,
