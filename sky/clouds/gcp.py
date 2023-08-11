@@ -14,7 +14,6 @@ import cachetools
 
 from sky import clouds
 from sky import exceptions
-from sky import skypilot_config
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import gcp
@@ -219,16 +218,7 @@ class GCP(clouds.Cloud):
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        unsupported_features = dict()
-        if skypilot_config.get_nested(
-            (str(cls._REPR).lower(), 'ssh_proxy_command'), None) is not None:
-            unsupported_features.update({
-                clouds.CloudImplementationFeatures.DOCKER_IMAGE: (
-                    f'Docker image is not supported in {cls._REPR} when proxy'
-                    'command is set. Please remove proxy command in the config.'
-                ),
-            })
-        return unsupported_features
+        return {}
 
     @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:

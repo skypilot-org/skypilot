@@ -12,7 +12,6 @@ from typing import Dict, Iterator, List, Optional, Tuple, Any
 from sky import clouds
 from sky import exceptions
 from sky import provision as provision_lib
-from sky import skypilot_config
 from sky import sky_logging
 from sky.adaptors import aws
 from sky.clouds import service_catalog
@@ -107,16 +106,7 @@ class AWS(clouds.Cloud):
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        unsupported_features = dict()
-        if skypilot_config.get_nested(
-            (str(cls._REPR).lower(), 'ssh_proxy_command'), None) is not None:
-            unsupported_features.update({
-                clouds.CloudImplementationFeatures.DOCKER_IMAGE: (
-                    f'Docker image is not supported in {cls._REPR} when proxy'
-                    'command is set. Please remove proxy command in the config.'
-                ),
-            })
-        return unsupported_features
+        return dict()
 
     @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:
