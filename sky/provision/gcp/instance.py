@@ -4,9 +4,8 @@ import re
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
-from googleapiclient import errors
-
 from sky import sky_logging
+from sky.adaptors import gcp
 from sky.provision.gcp import instance_utils
 from sky.utils import common_utils
 
@@ -156,7 +155,7 @@ def terminate_instances(
             try:
                 operations[handler].append(
                     handler.terminate(project_id, zone, instance))
-            except errors.HttpError as e:
+            except gcp.http_error_exception() as e:
                 if _RESOURCE_NOT_FOUND_PATTERN.search(e.reason) is None:
                     errs.append(e)
                 else:
