@@ -3956,13 +3956,23 @@ def serve_up(
         click.secho('Service section not found in the YAML file.', fg='red')
         return
 
+    if task.service.controller_resources is not None:
+        controller_resources_config = task.service.controller_resources
+    else:
+        controller_resources_config = serve_lib.CONTROLLER_RESOURCES
+    try:
+        controller_resources = sky.Resources.from_yaml_config(
+            controller_resources_config)
+    except ValueError as e:
+        raise ValueError(
+            'Encountered error when parsing controller resources') from e
+    if controller_resources.ports is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Cannot specify ports in controller resources.')
+
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
-    # TODO(tian): Support custom controller resources.
-    controller_resources_config = serve_lib.CONTROLLER_RESOURCES
-    controller_resources = sky.Resources.from_yaml_config(
-        controller_resources_config)
     dummy_controller_task = sky.Task().set_resources(controller_resources)
     click.secho('The controller will be launched with the following resources:',
                 fg='cyan')
@@ -3970,6 +3980,9 @@ def serve_up(
         dag.add(dummy_controller_task)
     sky.optimize(dag)
     click.echo()
+
+    dummy_controller_task: sky.Task = dag.tasks[0]
+    controller_best_resources = dummy_controller_task.best_resources
 
     click.secho(
         'Each replica will be launched with the following estimated resources:',
@@ -3984,7 +3997,7 @@ def serve_up(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.serve_up(task, service_name, controller_resources)
+    sky.serve_up(task, service_name, controller_best_resources)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)

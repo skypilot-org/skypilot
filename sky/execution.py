@@ -959,7 +959,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
 def serve_up(
     task: 'sky.Task',
     service_name: str,
-    controller_resources: 'sky.Resources',
+    controller_best_resources: 'sky.Resources',
 ):
     """Serve up a service.
 
@@ -1014,8 +1014,8 @@ def serve_up(
                                     vars_to_fill,
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
-        controller_task.set_resources(
-            controller_resources.copy(ports=[app_port]))
+        controller_task.best_resources = (controller_best_resources.copy(
+            ports=[app_port]))
 
         controller_envs = {
             'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,
@@ -1026,7 +1026,6 @@ def serve_up(
         }
         controller_task.update_envs(controller_envs)
 
-        assert len(controller_task.resources) == 1, controller_task
         print(f'{colorama.Fore.YELLOW}'
               f'Launching controller for {service_name}...'
               f'{colorama.Style.RESET_ALL}')
