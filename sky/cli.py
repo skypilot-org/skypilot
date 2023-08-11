@@ -3955,6 +3955,13 @@ def serve_up(
     if task.service is None:
         click.secho('Service section not found in the YAML file.', fg='red')
         return
+    assert len(task.resources) == 1
+    if list(task.resources)[0].ports is not None:
+        click.secho(
+            ('Cannot specify ports in resources. SkyServe will use the port '
+             'specified in the service section.'),
+            fg='red')
+        return
 
     if task.service.controller_resources is not None:
         controller_resources_config = task.service.controller_resources
@@ -3967,8 +3974,11 @@ def serve_up(
         raise ValueError(
             'Encountered error when parsing controller resources') from e
     if controller_resources.ports is not None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Cannot specify ports in controller resources.')
+        click.secho(
+            ('Cannot specify ports in controller resources. SkyServe will use '
+             'the port specified in the service section.'),
+            fg='red')
+        return
 
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
