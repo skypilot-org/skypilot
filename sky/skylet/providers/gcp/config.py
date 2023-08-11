@@ -12,23 +12,23 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient import discovery, errors
-from ray.autoscaler._private.util import check_legacy_fields
 
-from sky.skylet.providers.gcp.constants import (
-    FIREWALL_RULES_REQUIRED,
-    FIREWALL_RULES_TEMPLATE,
-    SKYPILOT_VPC_NAME,
-    TPU_MINIMAL_PERMISSIONS,
-    VM_MINIMAL_PERMISSIONS,
-    VPC_TEMPLATE,
-)
 from sky.skylet.providers.gcp.node import (
     MAX_POLLS,
     POLL_INTERVAL,
-    GCPCompute,
     GCPNodeType,
+    GCPCompute,
+)
+from sky.skylet.providers.gcp.constants import (
+    SKYPILOT_VPC_NAME,
+    VPC_TEMPLATE,
+    FIREWALL_RULES_TEMPLATE,
+    FIREWALL_RULES_REQUIRED,
+    VM_MINIMAL_PERMISSIONS,
+    TPU_MINIMAL_PERMISSIONS,
 )
 from sky.utils import common_utils
+from ray.autoscaler._private.util import check_legacy_fields
 
 logger = logging.getLogger(__name__)
 

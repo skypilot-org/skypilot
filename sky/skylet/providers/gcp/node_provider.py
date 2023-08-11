@@ -1,9 +1,9 @@
-import copy
 import logging
 import time
+import copy
 from functools import wraps
 from threading import RLock
-from typing import Dict
+from typing import Dict, List
 
 import googleapiclient
 
@@ -12,7 +12,6 @@ from sky.skylet.providers.gcp.config import (
     construct_clients_from_provider_config,
     get_node_type,
 )
-from sky.skylet.providers.command_runner import SkyDockerCommandRunner
 
 from ray.autoscaler.tags import (
     TAG_RAY_LAUNCH_CONFIG,
@@ -20,23 +19,24 @@ from ray.autoscaler.tags import (
     TAG_RAY_USER_NODE_TYPE,
 )
 from ray.autoscaler._private.cli_logger import cf, cli_logger
-from ray.autoscaler._private.command_runner import SSHCommandRunner
 
 
 # The logic has been abstracted away here to allow for different GCP resources
 # (API endpoints), which can differ widely, making it impossible to use
 # the same logic for everything.
-from sky.skylet.providers.gcp.node import GCPTPU  # noqa; Added by SkyPilot
-from sky.skylet.providers.gcp.node import (
-    INSTANCE_NAME_MAX_LEN,
-    INSTANCE_NAME_UUID_LEN,
-    MAX_POLLS_STOP,
-    POLL_INTERVAL,
+from sky.skylet.providers.gcp.node import (  # noqa
     GCPCompute,
     GCPNode,
     GCPNodeType,
     GCPResource,
+    GCPTPU,
+    # Added by SkyPilot
+    INSTANCE_NAME_MAX_LEN,
+    INSTANCE_NAME_UUID_LEN,
+    MAX_POLLS_STOP,
+    POLL_INTERVAL,
 )
+from ray.autoscaler.node_provider import NodeProvider
 
 logger = logging.getLogger(__name__)
 
@@ -364,27 +364,3 @@ class GCPNodeProvider(NodeProvider):
     @staticmethod
     def bootstrap_config(cluster_config):
         return bootstrap_gcp(cluster_config)
-
-    def get_command_runner(
-        self,
-        log_prefix,
-        node_id,
-        auth_config,
-        cluster_name,
-        process_runner,
-        use_internal_ip,
-        docker_config=None,
-    ):
-        common_args = {
-            "log_prefix": log_prefix,
-            "node_id": node_id,
-            "provider": self,
-            "auth_config": auth_config,
-            "cluster_name": cluster_name,
-            "process_runner": process_runner,
-            "use_internal_ip": use_internal_ip,
-        }
-        if docker_config and docker_config["container_name"] != "":
-            return SkyDockerCommandRunner(docker_config, **common_args)
-        else:
-            return SSHCommandRunner(**common_args)
