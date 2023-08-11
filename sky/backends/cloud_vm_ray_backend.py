@@ -130,8 +130,6 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
 # Restart skylet when the version does not match to keep the skylet up-to-date.
 _MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
 
-_GCP_RESOURCE_NOT_FOUND_PATTERN = re.compile(r'The resource .* was not found')
-
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
@@ -3558,9 +3556,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if terminate:
                 operation_fn = provision_lib.terminate_instances
             try:
+                provider_config = config['provider']
+                provider_config['allow_resource_not_found'] = allow_resource_not_found
                 operation_fn(repr(cloud),
                              cluster_name,
-                             provider_config=config['provider'])
+                             provider_config=provider_config)
             except Exception as e:  # pylint: disable=broad-except
                 if purge:
                     logger.warning(
@@ -3568,11 +3568,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             reason='stopping/terminating cluster nodes',
                             details=common_utils.format_exception(
                                 e, use_bracket=True)))
-                elif allow_resource_not_found:
-                    resource_not_found = _GCP_RESOURCE_NOT_FOUND_PATTERN.search(
-                        repr(e))
-                    if resource_not_found is None:
-                        raise
                 else:
                     raise
 

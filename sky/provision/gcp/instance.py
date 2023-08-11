@@ -1,5 +1,7 @@
 """GCP instance provisioning."""
 import collections
+from googleapiclient import errors
+import re
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
@@ -17,6 +19,8 @@ POLL_INTERVAL = 5
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'
+
+_RESOURCE_NOT_FOUND_PATTERN = re.compile(r'The resource .* was not found')
 
 
 def _filter_instances(
@@ -131,6 +135,7 @@ def terminate_instances(
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
     use_tpu_vms = provider_config.get('_has_tpus', False)
+    allow_resource_not_found = provider_config['allow_resource_not_found']
 
     label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name}
     if worker_only:
@@ -145,11 +150,17 @@ def terminate_instances(
     handler_to_instances = _filter_instances(handlers, project_id, zone,
                                              label_filters, lambda _: None)
     operations = collections.defaultdict(list)
-    for handler, instances in handler_to_instances.items():
-        for instance in instances:
-            operations[handler].append(
-                handler.terminate(project_id, zone, instance))
-    _wait_for_operations(operations, project_id, zone)
+    try:
+        for handler, instances in handler_to_instances.items():
+            for instance in instances:
+                operations[handler].append(
+                    handler.terminate(project_id, zone, instance))
+        _wait_for_operations(operations, project_id, zone)
+    except errors.HttpError as e:
+        if not allow_resource_not_found:
+            raise
+        if _RESOURCE_NOT_FOUND_PATTERN.search(e.reason) is None:
+            raise
     # We don't wait for the instances to be terminated, as it can take a long
     # time (same as what we did in ray's node_provider).
 
