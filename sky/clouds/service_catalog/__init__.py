@@ -4,12 +4,10 @@ import importlib
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
-from sky.clouds.service_catalog.constants import (
-    HOSTED_CATALOG_DIR_URL,
-    CATALOG_SCHEMA_VERSION,
-    LOCAL_CATALOG_DIR,
-)
 from sky.clouds.service_catalog.config import use_default_catalog
+from sky.clouds.service_catalog.constants import CATALOG_SCHEMA_VERSION
+from sky.clouds.service_catalog.constants import HOSTED_CATALOG_DIR_URL
+from sky.clouds.service_catalog.constants import LOCAL_CATALOG_DIR
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud

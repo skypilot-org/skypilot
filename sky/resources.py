@@ -1,12 +1,13 @@
 """Resources: compute requirements of Tasks."""
-from typing import Dict, List, Optional, Union, Set
-from typing_extensions import Literal
+from typing import Dict, List, Optional, Set, Union
 
 import colorama
+from typing_extensions import Literal
 
 from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky import spot
 from sky.backends import backend_utils
 from sky.skylet import constants
@@ -14,7 +15,6 @@ from sky.utils import accelerator_registry
 from sky.utils import schemas
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
-from sky import skypilot_config
 
 logger = sky_logging.init_logger(__name__)
 

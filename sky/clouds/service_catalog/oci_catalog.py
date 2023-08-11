@@ -9,17 +9,19 @@ History:
    excluding those unsubscribed regions.
 """
 
-import typing
 import logging
 import threading
+import typing
 from typing import Dict, List, Optional, Tuple
+
+from sky.adaptors import oci as oci_adaptor
 from sky.clouds.service_catalog import common
 from sky.skylet.providers.oci.config import oci_conf
-from sky.adaptors import oci as oci_adaptor
 
 if typing.TYPE_CHECKING:
-    from sky.clouds import cloud
     import pandas as pd
+
+    from sky.clouds import cloud  # pylint: disable=ungrouped-imports
 
 logger = logging.getLogger(__name__)
 

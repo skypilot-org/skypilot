@@ -5,6 +5,7 @@ import typing
 from typing import Optional, Type
 
 from sky.utils import ux_utils
+
 if typing.TYPE_CHECKING:
     import sky
 

@@ -240,7 +240,8 @@ class Azure(clouds.Cloud):
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
-        from sky.clouds.service_catalog import azure_catalog  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.clouds.service_catalog import azure_catalog
         gen_version = azure_catalog.get_gen_version_from_instance_type(
             r.instance_type)
         image_config = self._get_image_config(gen_version, r.instance_type)

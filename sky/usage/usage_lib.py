@@ -1,9 +1,8 @@
 """Logging events to Grafana Loki."""
 
-import enum
-import click
 import contextlib
 import datetime
+import enum
 import inspect
 import json
 import os
@@ -12,6 +11,7 @@ import traceback
 import typing
 from typing import Any, Callable, Dict, List, Optional, Union
 
+import click
 import requests
 
 import sky
@@ -21,8 +21,8 @@ from sky.utils import common_utils
 from sky.utils import env_options
 
 if typing.TYPE_CHECKING:
-    from sky import status_lib
     from sky import resources as resources_lib
+    from sky import status_lib
     from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)

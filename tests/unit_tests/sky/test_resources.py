@@ -1,5 +1,6 @@
-from sky.resources import Resources
 from unittest.mock import Mock
+
+from sky.resources import Resources
 
 
 def test_get_reservations_available_resources():

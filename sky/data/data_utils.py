@@ -4,17 +4,20 @@ import concurrent.futures
 from enum import Enum
 from multiprocessing import pool
 import os
+import re
 import subprocess
 import textwrap
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
-import re
 
 from filelock import FileLock
 
 from sky import exceptions
 from sky import sky_logging
-from sky.adaptors import aws, gcp, cloudflare, ibm
+from sky.adaptors import aws
+from sky.adaptors import cloudflare
+from sky.adaptors import gcp
+from sky.adaptors import ibm
 from sky.utils import ux_utils
 
 Client = Any

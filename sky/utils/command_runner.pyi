@@ -6,11 +6,13 @@ determine the return type based on the value of require_outputs.
 """
 import enum
 import typing
+from typing import List, Optional, Tuple, Union
+
+from typing_extensions import Literal
+
 from sky import sky_logging as sky_logging
 from sky.skylet import log_lib as log_lib
 from sky.utils import subprocess_utils as subprocess_utils
-from typing import List, Optional, Tuple, Union
-from typing_extensions import Literal
 
 GIT_EXCLUDE: str
 RSYNC_DISPLAY_OPTION: str

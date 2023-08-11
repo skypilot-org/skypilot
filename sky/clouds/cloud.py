@@ -12,8 +12,8 @@ from sky.utils import log_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import status_lib
     from sky import resources as resources_lib
+    from sky import status_lib
 
 
 class CloudImplementationFeatures(enum.Enum):

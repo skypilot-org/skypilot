@@ -1,9 +1,10 @@
 """Autostop utilities."""
 import pickle
-import psutil
 import shlex
 import time
 from typing import List, Optional
+
+import psutil
 
 from sky import sky_logging
 from sky.skylet import configs

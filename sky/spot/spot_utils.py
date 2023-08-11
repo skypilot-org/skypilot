@@ -8,10 +8,10 @@ import shlex
 import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
-from typing_extensions import Literal
 
 import colorama
 import filelock
+from typing_extensions import Literal
 
 from sky import backends
 from sky import exceptions
@@ -22,14 +22,14 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet.log_lib import run_bash_command_with_log
+from sky.spot import spot_state
 from sky.utils import common_utils
 from sky.utils import log_utils
-from sky.spot import spot_state
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
-    from sky import dag as dag_lib
     import sky
+    from sky import dag as dag_lib
 
 logger = sky_logging.init_logger(__name__)
 

@@ -6,20 +6,20 @@ History:
  - Hysun He (hysun.he@oracle.com) @ May 4, 2023: Support use the default
    image_id (configurable) if no image_id specified in the task yaml.
 """
-import os
 import json
-import typing
 import logging
+import os
+import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
 from sky import status_lib
+from sky.adaptors import oci as oci_adaptor
 from sky.clouds import service_catalog
+from sky.skylet.providers.oci.config import oci_conf
 from sky.utils import common_utils
 from sky.utils import ux_utils
-from sky.adaptors import oci as oci_adaptor
-from sky.skylet.providers.oci.config import oci_conf
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.

@@ -1,13 +1,12 @@
 """Logging utils."""
 import enum
 import threading
-from typing import Optional, List
-
-import rich.console as rich_console
+from typing import List, Optional
 
 import colorama
 import pendulum
 import prettytable
+import rich.console as rich_console
 
 from sky import sky_logging
 

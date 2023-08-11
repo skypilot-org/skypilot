@@ -1,9 +1,10 @@
 """IBM Web Services."""
-import colorama
-import os
 import json
+import os
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
+
+import colorama
 
 from sky import clouds
 from sky import sky_logging

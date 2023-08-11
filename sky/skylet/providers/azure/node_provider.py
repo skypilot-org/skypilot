@@ -15,9 +15,6 @@ from sky.skylet.providers.azure.config import (
     bootstrap_azure,
     get_azure_sdk_function,
 )
-from sky.skylet.providers.command_runner import SkyDockerCommandRunner
-
-from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import (
     TAG_RAY_CLUSTER_NAME,
@@ -422,27 +419,3 @@ class AzureNodeProvider(NodeProvider):
     @staticmethod
     def bootstrap_config(cluster_config):
         return bootstrap_azure(cluster_config)
-
-    def get_command_runner(
-        self,
-        log_prefix,
-        node_id,
-        auth_config,
-        cluster_name,
-        process_runner,
-        use_internal_ip,
-        docker_config=None,
-    ):
-        common_args = {
-            "log_prefix": log_prefix,
-            "node_id": node_id,
-            "provider": self,
-            "auth_config": auth_config,
-            "cluster_name": cluster_name,
-            "process_runner": process_runner,
-            "use_internal_ip": use_internal_ip,
-        }
-        if docker_config and docker_config["container_name"] != "":
-            return SkyDockerCommandRunner(docker_config, **common_args)
-        else:
-            return SSHCommandRunner(**common_args)

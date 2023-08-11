@@ -1,8 +1,9 @@
 """Utility functions for the storage module."""
-import colorama
 import os
 import subprocess
 from typing import Any, Dict, List
+
+import colorama
 
 from sky import exceptions
 from sky import sky_logging
