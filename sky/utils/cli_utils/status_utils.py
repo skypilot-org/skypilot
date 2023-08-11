@@ -148,7 +148,6 @@ def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
     status_columns = [
         StatusColumn('SERVICE_NAME', _get_service_name),
         StatusColumn('ID', _get_replica_id),
-        StatusColumn('NAME', _get_name),
         StatusColumn('RESOURCES',
                      _get_replica_resources,
                      trunc_length=70 if not show_all else 0),
