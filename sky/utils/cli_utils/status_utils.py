@@ -114,12 +114,12 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
     status_columns = [
         StatusColumn('NAME', _get_name),
         StatusColumn('UPTIME', _get_uptime),
+        StatusColumn('STATUS', _get_service_status_colored),
         StatusColumn('REPLICAS', _get_replicas),
         StatusColumn('CONTROLLER_CLUSTER_NAME',
                      _get_controller_cluster_name,
                      show_by_default=False),
         StatusColumn('ENDPOINT', _get_endpoint),
-        StatusColumn('STATUS', _get_service_status_colored),
         StatusColumn('POLICY', _get_policy, show_by_default=False),
         StatusColumn('REQUESTED_RESOURCES',
                      _get_requested_resources,
