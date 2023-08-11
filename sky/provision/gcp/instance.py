@@ -136,7 +136,6 @@ def terminate_instances(
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
     use_tpu_vms = provider_config.get('_has_tpus', False)
-    allow_resource_not_found = provider_config['allow_resource_not_found']
 
     label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name}
     if worker_only:
@@ -158,8 +157,6 @@ def terminate_instances(
                     handler.terminate(project_id, zone, instance))
         _wait_for_operations(operations, project_id, zone)
     except errors.HttpError as e:
-        if not allow_resource_not_found:
-            raise
         if _RESOURCE_NOT_FOUND_PATTERN.search(e.reason) is None:
             raise
     # We don't wait for the instances to be terminated, as it can take a long

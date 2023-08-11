@@ -1638,11 +1638,8 @@ class RetryingVmProvisioner(object):
             # so we must terminate/stop here too. E.g., node is up, and ray
             # autoscaler proceeds to setup commands, which may fail:
             #   ERR updater.py:138 -- New status: update-failed
-            # We allow resource not found error here since user could out
-            # of capacity and the resources have not been created.
             CloudVmRayBackend().teardown_no_lock(handle,
-                                                 terminate=terminate_or_stop,
-                                                 allow_resource_not_found=True)
+                                                 terminate=terminate_or_stop)
 
         if to_provision.zone is not None:
             message = (
@@ -3490,8 +3487,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          terminate: bool,
                          purge: bool = False,
                          post_teardown_cleanup: bool = True,
-                         refresh_cluster_status: bool = True,
-                         allow_resource_not_found: bool = False) -> None:
+                         refresh_cluster_status: bool = True) -> None:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
@@ -3556,12 +3552,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if terminate:
                 operation_fn = provision_lib.terminate_instances
             try:
-                provider_config = config['provider']
-                provider_config[
-                    'allow_resource_not_found'] = allow_resource_not_found
                 operation_fn(repr(cloud),
                              cluster_name,
-                             provider_config=provider_config)
+                             provider_config=config['provider'])
             except Exception as e:  # pylint: disable=broad-except
                 if purge:
                     logger.warning(
