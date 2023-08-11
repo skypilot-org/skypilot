@@ -159,6 +159,9 @@ def terminate_instances(
             except errors.HttpError as e:
                 if _RESOURCE_NOT_FOUND_PATTERN.search(e.reason) is None:
                     errs.append(e)
+                else:
+                    logger.warning(f'Instance {instance} does not exist. '
+                                   'Skip terminating it.')
     _wait_for_operations(operations, project_id, zone)
     if errs:
         raise RuntimeError(f'Failed to terminate instances: {errs}')
