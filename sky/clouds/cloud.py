@@ -29,6 +29,7 @@ class CloudImplementationFeatures(enum.Enum):
     AUTOSTOP = 'autostop'
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
+    DOCKER_IMAGE = 'docker_image'
     SPOT_INSTANCE = 'spot_instance'
     CUSTOM_DISK_TIER = 'custom_disk_tier'
     OPEN_PORTS = 'open_ports'
@@ -440,17 +441,15 @@ class Cloud:
         """
         unsupported_features2reason = cls._cloud_unsupported_features()
 
-        # Multi-node is not supported when specific_reservations is specified
-        # because if the node count is greater than the number of available
-        # resources in the specific reservations, the Google API will throw
-        # an error when trying to create the instance.
-        multi_node = CloudImplementationFeatures.MULTI_NODE
-        specific_reservations = skypilot_config.get_nested(
-            (cls._REPR.lower(), 'specific_reservations'), set())
-        if (specific_reservations and multi_node in requested_features):
-            unsupported_features2reason[multi_node] = (
-                'Multi-node is not supported when the `specific_reservations` '
-                f'is specified: {specific_reservations}')
+        # Docker image is not compatible with ssh proxy command.
+        if skypilot_config.get_nested(
+            (str(cls._REPR).lower(), 'ssh_proxy_command'), None) is not None:
+            unsupported_features2reason.update({
+                CloudImplementationFeatures.DOCKER_IMAGE: (
+                    f'Docker image is not supported in {cls._REPR} when proxy '
+                    'command is set. Please remove proxy command in the config.'
+                ),
+            })
 
         unsupported_features = set(unsupported_features2reason.keys())
         unsupported_features = requested_features.intersection(

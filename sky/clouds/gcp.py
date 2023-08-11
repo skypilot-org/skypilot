@@ -466,7 +466,8 @@ class GCP(clouds.Cloud):
                     # CUDA driver version 525.105.17, CUDA Library 11.8
                     image_id = 'skypilot:gpu-debian-11'
 
-        if resources.image_id is not None:
+        if resources.image_id is not None and resources.extract_docker_image(
+        ) is None:
             if None in resources.image_id:
                 image_id = resources.image_id[None]
             else:
