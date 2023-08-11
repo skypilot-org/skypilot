@@ -854,6 +854,8 @@ class Resources:
             self, specific_reservations: Set[str]) -> Dict[str, int]:
         """Returns the number of available reservation resources."""
         if self.use_spot:
+            # GCP's & AWS's reservations do not support spot instances. We
+            # assume other clouds behave the same.
             return {}
         return self.cloud.get_reservations_available_resources(
             self._instance_type, self._region, self._zone,
