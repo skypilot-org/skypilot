@@ -605,7 +605,11 @@ class GCP(clouds.Cloud):
         specific_reservations: Set[str],
     ) -> Dict[str, int]:
         del region  # Unused
-        assert zone is not None, 'GCP requires zone to get available reservations.'
+        if zone is None:
+            # For backward compatibility, the cluster in INIT state launched
+            # before #2352 may not have zone information. In this case, we
+            # return 0 for all reservations.
+            return {reservation: 0 for reservation in specific_reservations}
         reservations = self._list_reservations_for_instance_type_in_zone(
             instance_type, zone)
 
