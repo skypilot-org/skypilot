@@ -60,8 +60,6 @@ if typing.TYPE_CHECKING:
     from sky.backends import local_docker_backend
     from sky.data import storage as storage_lib
 
-Path = str
-
 logger = sky_logging.init_logger(__name__)
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
