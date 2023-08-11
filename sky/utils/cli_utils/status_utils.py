@@ -13,6 +13,7 @@ from sky.utils import common_utils
 from sky.utils import log_utils
 
 COMMAND_TRUNC_LENGTH = 25
+REPLICA_TRUNC_NUM = 10
 NUM_COST_REPORT_LINES = 5
 
 # A record in global_user_state's 'clusters' table.
@@ -145,6 +146,7 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
 
 def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
     status_columns = [
+        StatusColumn('SERVICE_NAME', _get_service_name),
         StatusColumn('ID', _get_replica_id),
         StatusColumn('NAME', _get_name),
         StatusColumn('RESOURCES',
@@ -154,6 +156,12 @@ def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
         StatusColumn('ZONE', _get_replica_zone, show_by_default=False),
         StatusColumn('STATUS', _get_status_colored),
     ]
+
+    truncate_hint = ''
+    if not show_all:
+        if len(replica_records) > REPLICA_TRUNC_NUM:
+            truncate_hint = '... (use --all to show all replicas)\n'
+        replica_records = replica_records[:REPLICA_TRUNC_NUM]
 
     columns = []
     for status_column in status_columns:
@@ -170,6 +178,7 @@ def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
         click.echo(replica_table)
     else:
         click.echo('No existing replicas.')
+    click.echo(truncate_hint, nl=False)
 
 
 def get_total_cost_of_displayed_records(
@@ -378,6 +387,7 @@ _get_controller_cluster_name = (
 _get_policy = (lambda service_record: service_record['policy'])
 _get_requested_resources = (
     lambda service_record: service_record['requested_resources'])
+_get_service_name = (lambda service_record: service_record['service_name'])
 
 
 def _get_uptime(service_record: _ServiceRecord) -> str:

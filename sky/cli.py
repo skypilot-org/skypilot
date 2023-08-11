@@ -4024,10 +4024,10 @@ def serve_up(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def serve_status(all: bool, service_name: Optional[str]):
-    """Show statuses of SkyServe services.
+    """Show statuses of SkyServe service.
 
-    If SERVICE_NAME is not provided, show statuses of all services. Otherwise,
-    show detailed status of the service.
+    Show detailed statuses of the service. If SERVICE_NAME is not provided,
+    show all services' status.
 
     Each service can have one of the following statuses:
 
@@ -4058,9 +4058,7 @@ def serve_status(all: bool, service_name: Optional[str]):
 
       - User code failed.
 
-    If you specified SERVICE_NAME, this command will show detailed information
-    about each replica of the service. Each replica can have one of the
-    following statuses:
+    Each replica can have one of the following statuses:
 
     - ``PROVISIONING``: The replica is being provisioned.
 
@@ -4098,28 +4096,24 @@ def serve_status(all: bool, service_name: Optional[str]):
       # Show detailed status for all services
       sky serve status -a
       \b
-      # Show service status and replica status for a specific service
+      # Only show status of my-service
       sky serve status my-service
-      \b
-      # Show detailed service status and replica status for a specific service
-      sky serve status my-service -a
     """
     service_records = core.service_status(service_name)
+    if service_name is not None and not service_records:
+        click.secho(f'Service {service_name!r} not found.', fg='red')
+        return
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Services'
                f'{colorama.Style.RESET_ALL}')
     status_utils.show_service_table(service_records, all)
-    if service_name is not None:
-        # If service not exist, we should already raise an error in
-        # core.service_status.
-        assert len(service_records) == 1, service_records
-        service_record = service_records[0]
-        if 'replica_info' not in service_record:
-            click.secho(f'Failed to refresh status of service: {service_name}.',
-                        fg='red')
-            return
-        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Replicas{colorama.Style.RESET_ALL}')
-        status_utils.show_replica_table(service_record['replica_info'], all)
+    click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'Replicas{colorama.Style.RESET_ALL}')
+    replica_infos = []
+    for service_record in service_records:
+        for replica_record in service_record['replica_info']:
+            replica_record['service_name'] = service_record['name']
+            replica_infos.append(replica_record)
+    status_utils.show_replica_table(replica_infos, all)
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)

@@ -114,6 +114,10 @@ SKY_RESERVED_CLUSTER_PREFIXES: Dict[str, str] = {
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 
+# Filelocks for the service status change.
+SERVICE_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.service.{}.lock')
+SERVICE_STATUS_LOCK_TIMEOUT_SECONDS = 20
+
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 
@@ -2431,84 +2435,132 @@ def _service_status_from_replica_info(
     return status_lib.ServiceStatus.REPLICA_INIT
 
 
-def _check_controller_status_and_set_service_status(service_name: str,
-                                                    cluster_name: str) -> bool:
+def _check_controller_status_and_set_service_status(
+        service_name: str, cluster_name: str) -> Optional[str]:
     cluster_record = global_user_state.get_cluster_from_name(cluster_name)
     if (cluster_record is None or
             cluster_record['status'] != status_lib.ClusterStatus.UP):
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
-        logger.error(f'Controller cluster {cluster_name!r} '
-                     'is not exist or UP. Skipping refresh status.')
-        return False
-    return True
+        return f'Controller cluster {cluster_name!r} is not exist or UP.'
+    return None
+
+
+def _refresh_service_record_no_lock(
+        service_name: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    record = global_user_state.get_service_from_name(service_name)
+    if record is None:
+        return None, None
+
+    try:
+        check_network_connection()
+    except exceptions.NetworkError:
+        return record, 'Failed to refresh replica info due to network error.'
+
+    if not record['endpoint']:
+        # Service controller is still initializing. Skipped refresh status.
+        return record, None
+
+    controller_cluster_name = record['controller_cluster_name']
+    handle = global_user_state.get_handle_from_cluster_name(
+        controller_cluster_name)
+    assert handle is not None
+    backend = get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+
+    code = serve_lib.ServeCodeGen.get_replica_info()
+    returncode, replica_info_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+    if returncode != 0:
+        msg = _check_controller_status_and_set_service_status(
+            record['name'], controller_cluster_name)
+        if msg is None:
+            msg = ('Failed to refresh replica info from the controller. '
+                   f'Using the cached record. Reason: {stderr}')
+        return record, msg
+
+    replica_info = serve_lib.load_replica_info(replica_info_payload)
+    record['replica_info'] = replica_info
+
+    msg = None
+    if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
+        new_status = _service_status_from_replica_info(replica_info)
+        if (record['uptime'] < 0 and
+                record['status'] != status_lib.ServiceStatus.READY and
+                new_status == status_lib.ServiceStatus.READY):
+            code = serve_lib.ServeCodeGen.get_uptime()
+            returncode, uptime_payload, stderr = backend.run_on_head(
+                handle,
+                code,
+                require_outputs=True,
+                stream_logs=False,
+                separate_stderr=True)
+            if returncode == 0:
+                record['uptime'] = serve_lib.load_uptime(uptime_payload)
+            else:
+                msg = _check_controller_status_and_set_service_status(
+                    record['name'], controller_cluster_name)
+                if msg is None:
+                    msg = ('Failed to refresh uptime from the controller. '
+                           f'Skipping update uptime. Reason: {stderr}')
+        record['status'] = new_status
+
+    global_user_state.add_or_update_service(**record)
+
+    return record, msg
+
+
+def _refresh_service_record(
+        service_name: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    try:
+        # TODO(tian): remove pylint disabling when filelock
+        # version updated
+        # pylint: disable=abstract-class-instantiated
+        with filelock.FileLock(SERVICE_STATUS_LOCK_PATH.format(service_name),
+                               SERVICE_STATUS_LOCK_TIMEOUT_SECONDS):
+            return _refresh_service_record_no_lock(service_name)
+    except filelock.Timeout:
+        msg = ('Failed get the lock for service '
+               f'{service_name!r}. Using the cached record.')
+        return global_user_state.get_service_from_name(service_name), msg
 
 
 def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
     if service_name is None:
-        service_records = global_user_state.get_services()
+        service_names = [
+            record['name'] for record in global_user_state.get_services()
+        ]
     else:
-        service_record = global_user_state.get_service_from_name(service_name)
-        if service_record is None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Service {service_name} does not exist.')
-        service_records = [service_record]
-    # TODO(tian): Make it run in parallel.
-    for record in service_records:
-        endpoint = record['endpoint']
-        if not endpoint:
-            continue
+        service_names = [service_name]
 
-        controller_cluster_name = record['controller_cluster_name']
-        handle = global_user_state.get_handle_from_cluster_name(
-            controller_cluster_name)
-        assert handle is not None
-        backend = get_backend_from_handle(handle)
-        assert isinstance(backend, backends.CloudVmRayBackend)
+    plural = 's' if len(service_names) > 1 else ''
+    progress = rich_progress.Progress(transient=True,
+                                      redirect_stdout=False,
+                                      redirect_stderr=False)
+    task = progress.add_task(
+        (f'[bold cyan]Refreshing status for {len(service_names)} '
+         f'service{plural}[/]'),
+        total=len(service_names))
 
-        code = serve_lib.ServeCodeGen.get_replica_info()
-        returncode, replica_info_payload, stderr = backend.run_on_head(
-            handle,
-            code,
-            require_outputs=True,
-            stream_logs=False,
-            separate_stderr=True)
-        if returncode != 0:
-            if _check_controller_status_and_set_service_status(
-                    record['name'], controller_cluster_name):
-                logger.warning('Failed to refresh replica info from the '
-                               'controller. Use cached data which might '
-                               f'outdated. Reason: {stderr}')
-            continue
+    def _refresh_service(service_name: str) -> Optional[Dict[str, Any]]:
+        record, msg = _refresh_service_record(service_name)
+        if msg is not None:
+            progress.stop()
+            print(
+                f'{colorama.Fore.YELLOW}Error occurred when refreshing service '
+                f'{service_name}: {msg}{colorama.Style.RESET_ALL}')
+        progress.update(task, advance=1)
+        return record
 
-        replica_info = serve_lib.load_replica_info(replica_info_payload)
-        record['replica_info'] = replica_info
+    with progress:
+        updated_records = subprocess_utils.run_in_parallel(
+            _refresh_service, service_names)
 
-        if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
-            new_status = _service_status_from_replica_info(replica_info)
-            if (record['uptime'] < 0 and
-                    record['status'] != status_lib.ServiceStatus.READY and
-                    new_status == status_lib.ServiceStatus.READY):
-                code = serve_lib.ServeCodeGen.get_uptime()
-                returncode, uptime_payload, stderr = backend.run_on_head(
-                    handle,
-                    code,
-                    require_outputs=True,
-                    stream_logs=False,
-                    separate_stderr=True)
-                if returncode == 0:
-                    record['uptime'] = serve_lib.load_uptime(uptime_payload)
-                else:
-                    if _check_controller_status_and_set_service_status(
-                            record['name'], controller_cluster_name):
-                        logger.warning('Failed to refresh uptime from the '
-                                       'controller. Skipping update uptime. '
-                                       f'Reason: {stderr}')
-            record['status'] = new_status
-
-        global_user_state.add_or_update_service(**record)
-
-    return service_records
+    return [record for record in updated_records if record is not None]
 
 
 @typing.overload
