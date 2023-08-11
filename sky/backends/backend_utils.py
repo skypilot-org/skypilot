@@ -2012,7 +2012,7 @@ def _update_cluster_status_no_lock(
             # `ray get head-ip/worker-ips`. Setting it to True is safe because
             # in the worst case we time out in the `ray status` SSH command
             # below.
-            external_ips = handle.external_ips(use_cached_ips=True)
+            external_ips = handle.external_ips()
             # This happens to a stopped TPU VM as we use gcloud to query the IP.
             # Or user interrupt the `sky launch` process before the first time
             # resources handle is written back to local database.
