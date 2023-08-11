@@ -8,7 +8,6 @@ import subprocess
 import time
 import typing
 import datetime
-import operator
 from typing import Dict, Iterator, List, Optional, Tuple, Set
 
 import cachetools
@@ -102,7 +101,6 @@ def is_api_disabled(endpoint: str, project_id: str) -> bool:
                           stderr=subprocess.PIPE,
                           stdout=subprocess.PIPE)
     return proc.returncode != 0
-
 
 
 @dataclasses.dataclass
@@ -626,8 +624,10 @@ class GCP(clouds.Cloud):
         reservations = self._list_reservations_for_instance_type(instance_type)
         return [r for r in reservations if r.zone.endswith(f'/{zone}')]
 
-    @cachetools.cachedmethod(cache=lambda self: getattr(self,
-        '_list_reservations_cache', None))
+    @cachetools.cachedmethod(
+        # Default to None for backward compatibility for GCP clusters launched
+        # before #2352.
+        cache=lambda self: getattr(self, '_list_reservations_cache', None))
     def _list_reservations_for_instance_type(
         self,
         instance_type: str,
