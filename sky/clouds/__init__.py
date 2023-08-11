@@ -1,6 +1,4 @@
 """Clouds in Sky."""
-# TODO: isort:skip is ugly. We should have a better way to do this to avoid
-# circular imports.
 from sky.clouds.cloud import Cloud
 from sky.clouds.cloud import CloudImplementationFeatures
 from sky.clouds.cloud import Region
