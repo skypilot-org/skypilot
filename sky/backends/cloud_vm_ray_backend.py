@@ -130,6 +130,8 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
 # Restart skylet when the version does not match to keep the skylet up-to-date.
 _MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
 
+_GCP_RESOURCE_NOT_FOUND_PATTERN = re.compile(r'The resource .* was not found')
+
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
@@ -1638,8 +1640,11 @@ class RetryingVmProvisioner(object):
             # so we must terminate/stop here too. E.g., node is up, and ray
             # autoscaler proceeds to setup commands, which may fail:
             #   ERR updater.py:138 -- New status: update-failed
+            # We allow resource not found error here since user could out
+            # of capacity and the resources have not been created.
             CloudVmRayBackend().teardown_no_lock(handle,
-                                                 terminate=terminate_or_stop)
+                                                 terminate=terminate_or_stop,
+                                                 allow_resource_not_found=True)
 
         if to_provision.zone is not None:
             message = (
@@ -3487,7 +3492,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          terminate: bool,
                          purge: bool = False,
                          post_teardown_cleanup: bool = True,
-                         refresh_cluster_status: bool = True) -> None:
+                         refresh_cluster_status: bool = True,
+                         allow_resource_not_found: bool = False) -> None:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
@@ -3562,6 +3568,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             reason='stopping/terminating cluster nodes',
                             details=common_utils.format_exception(
                                 e, use_bracket=True)))
+                elif allow_resource_not_found:
+                    resource_not_found = _GCP_RESOURCE_NOT_FOUND_PATTERN.search(
+                        repr(e))
+                    if resource_not_found is None:
+                        raise
                 else:
                     raise
 
