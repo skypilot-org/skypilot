@@ -1,10 +1,12 @@
 """SkyCallback integration with Keras."""
 from typing import Dict, Optional
 
-from sky_callback import base
-from sky_callback import utils
 from tensorflow import keras
 import tensorflow as tf
+
+# isort: split
+from sky_callback import base
+from sky_callback import utils
 
 _DISABLE_CALLBACK = utils.DISABLE_CALLBACK
 
