@@ -8,7 +8,6 @@ import subprocess
 import time
 import typing
 import datetime
-import operator
 from typing import Dict, Iterator, List, Optional, Tuple, Set
 
 import cachetools
@@ -212,8 +211,7 @@ class GCP(clouds.Cloud):
     def __init__(self):
         super().__init__()
 
-        self._list_reservations_cache = cachetools.TTLCache(
-            maxsize=1, ttl=datetime.timedelta(300), timer=datetime.datetime.now)
+        self._list_reservations_cache = None
 
     @classmethod
     def _cloud_unsupported_features(
@@ -605,7 +603,11 @@ class GCP(clouds.Cloud):
         specific_reservations: Set[str],
     ) -> Dict[str, int]:
         del region  # Unused
-        assert zone is not None, 'GCP requires zone to get available reservations.'
+        if zone is None:
+            # For backward compatibility, the cluster in INIT state launched
+            # before #2352 may not have zone information. In this case, we
+            # return 0 for all reservations.
+            return {reservation: 0 for reservation in specific_reservations}
         reservations = self._list_reservations_for_instance_type_in_zone(
             instance_type, zone)
 
@@ -623,8 +625,18 @@ class GCP(clouds.Cloud):
         reservations = self._list_reservations_for_instance_type(instance_type)
         return [r for r in reservations if r.zone.endswith(f'/{zone}')]
 
-    @cachetools.cachedmethod(
-        cache=operator.attrgetter('_list_reservations_cache'))
+    def _get_or_create_ttl_cache(self):
+        if getattr(self, '_list_reservations_cache', None) is None:
+            # Backward compatibility: Clusters created before #2352 has GCP
+            # objects serialized without the attribute. So we access it this
+            # way.
+            self._list_reservations_cache = cachetools.TTLCache(
+                maxsize=1,
+                ttl=datetime.timedelta(300),
+                timer=datetime.datetime.now)
+        return self._list_reservations_cache
+
+    @cachetools.cachedmethod(cache=lambda self: self._get_or_create_ttl_cache())
     def _list_reservations_for_instance_type(
         self,
         instance_type: str,
