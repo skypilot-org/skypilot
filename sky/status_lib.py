@@ -64,13 +64,13 @@ class ServiceStatus(enum.Enum):
     # status abnormal
     CONTRLLER_FAILED = 'CONTROLLER_FAILED'
 
-    # At least one replica is ready and no failure
+    # At least one replica is ready
     READY = 'READY'
 
     # Service is being shutting down
     SHUTTING_DOWN = 'SHUTTING_DOWN'
 
-    # At least one replica is failed
+    # At least one replica is failed and no replica is ready
     FAILED = 'FAILED'
 
     def colored_str(self):

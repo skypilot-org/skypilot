@@ -4041,14 +4041,13 @@ def serve_status(all: bool, service_name: Optional[str]):
       state; or the control plane and redirector is not alive.
 
     - ``READY``: The controller is ready to serve requests. This means that
-      at least one replica have passed the readiness probe. This also indicates
-      that no replica failure has been detected.
+      at least one replica have passed the readiness probe.
 
     - ``SHUTTING_DOWN``: The controller is being shutting down. This usually
       happens when the `sky serve down` command is called.
 
-    - ``FAILED``: At least one replica failed. This could be caused by several
-      reasons:
+    - ``FAILED``: At least one replica failed and no replica is ready. This
+      could be caused by several reasons:
 
       - The launching process of the replica failed.
 
