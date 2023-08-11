@@ -27,7 +27,13 @@ If you only have access to certain clouds, use any combination of
 the pip extras above (e.g., :code:`"[aws,gcp]"`) to reduce the
 dependencies installed.
 
-You may also install SkyPilot from source.
+To get the latest features/updates, either install the nightly build:
+
+.. code-block:: console
+
+  $ pip install -U "skypilot-nightly[all]"
+
+or install from source:
 
 .. code-block:: console
 
