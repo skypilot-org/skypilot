@@ -99,8 +99,7 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'autostop',
                                  'INTEGER DEFAULT -1')
 
-    db_utils.add_column_to_table(cursor, conn, 'clusters', 'metadata',
-                                 'BLOB')
+    db_utils.add_column_to_table(cursor, conn, 'clusters', 'metadata', 'BLOB')
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'to_down',
                                  'INTEGER DEFAULT 0')
@@ -557,7 +556,7 @@ def get_clusters() -> List[Dict[str, Any]]:
         except TypeError as e:
             if 'bytes-like object is required' in str(e):
                 metadata_obj = json.loads(metadata)
-        
+
         record = {
             'name': name,
             'launched_at': launched_at,

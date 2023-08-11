@@ -4241,16 +4241,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
 
-
-    def _set_cluster_metadata_storage_mounts(self, handle: CloudVmRayResourceHandle,
-                                storage_mounts: Dict[Path,
-                                                     storage_lib.Storage]) -> None:
+    def _set_cluster_metadata_storage_mounts(
+            self, handle: CloudVmRayResourceHandle,
+            storage_mounts: Dict[Path, storage_lib.Storage]) -> None:
         """Sets 'storage_mounts' object in cluster's storage metadata"""
         if not storage_mounts:
             return
 
         cluster_name = handle.cluster_name
-        cluster_metadata: Dict[str, Any] = global_user_state.get_cluster_metadata(cluster_name)
+        cluster_metadata = global_user_state.get_cluster_metadata(cluster_name)
         if not 'storage' in cluster_metadata.keys():
             cluster_metadata['storage'] = {}
         for _, storage_obj in storage_mounts.items():
@@ -4260,11 +4259,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_metadata['storage']['storage_mounts'] = storage_mounts
         global_user_state.set_cluster_metadata(cluster_name, cluster_metadata)
 
-
-    def get_cluster_metadata_storage_mounts(self, handle: CloudVmRayResourceHandle) -> Optional[Dict[Path, storage_lib.Storage]]:
+    def get_cluster_metadata_storage_mounts(
+        self, handle: CloudVmRayResourceHandle
+    ) -> Optional[Dict[Path, storage_lib.Storage]]:
         """Gets 'storage_mounts' object from cluster's storage metadata"""
         cluster_name = handle.cluster_name
-        cluster_metadata: Dict[str, Any] = global_user_state.get_cluster_metadata(cluster_name)
+        cluster_metadata = global_user_state.get_cluster_metadata(cluster_name)
         if not 'storage' in cluster_metadata.keys():
             return None
         if not 'storage_mounts' in cluster_metadata['storage'].keys():
@@ -4274,7 +4274,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             for _, store_obj in storage_obj.stores.items():
                 store_obj.bucket = store_obj.get_handle()
         return storage_mounts
-
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
