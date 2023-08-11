@@ -510,8 +510,9 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         else:
             value = os.path.basename(os.environ['SHELL'])
 
-    zshrc_diff = '# For SkyPilot shell completion\n. ~/.sky/.sky-complete.zsh'
-    bashrc_diff = '# For SkyPilot shell completion\n. ~/.sky/.sky-complete.bash'
+    zshrc_diff = '\n# For SkyPilot shell completion\n. ~/.sky/.sky-complete.zsh'
+    bashrc_diff = ('\n# For SkyPilot shell completion'
+                   '\n. ~/.sky/.sky-complete.bash')
 
     if value == 'bash':
         install_cmd = f'_SKY_COMPLETE=bash_source sky > \

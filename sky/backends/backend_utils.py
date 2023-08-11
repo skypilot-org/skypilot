@@ -78,11 +78,13 @@ _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 _LAUNCHED_HEAD_PATTERN = re.compile(r'(\d+) ray[._]head[._]default')
 _LAUNCHED_LOCAL_WORKER_PATTERN = re.compile(r'(\d+) node_')
 _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
+_LAUNCHED_RESERVED_WORKER_PATTERN = re.compile(
+    r'(\d+) ray[._]worker[._]reserved')
 # Intentionally not using prefix 'rf' for the string format because yapf have a
 # bug with python=3.6.
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
-    r'({}): ray[._]worker[._]default'.format(IP_ADDR_REGEX))
+    r'({}): ray[._]worker[._](?:default|reserved)'.format(IP_ADDR_REGEX))
 WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
 # We check network connection by going through _TEST_IP_LIST. We may need to
@@ -909,6 +911,22 @@ def write_cluster_config(
     if isinstance(cloud, clouds.GCP):
         gcp_project_id = cloud.get_project_id(dryrun=dryrun)
 
+    specific_reservations = set(
+        skypilot_config.get_nested(('gcp', 'specific_reservations'), set()))
+
+    reservations = to_provision.get_reservations_available_resources(
+        specific_reservations)
+
+    filtered_specific_reservations = [
+        r for r, available_resources in reservations.items()
+        if r in specific_reservations and available_resources > 0
+    ]
+    available_specific_reservations = sum(
+        available_resources for r, available_resources in reservations.items()
+        if r in specific_reservations)
+    num_specific_reserved_workers = max(
+        min(available_specific_reservations - 1, num_nodes - 1), 0)
+
     assert cluster_name is not None
     credentials = sky_check.get_cloud_credential_file_mounts()
 
@@ -967,7 +985,6 @@ def write_cluster_config(
     default_aws_sg_name = f'sky-sg-{common_utils.user_and_hostname_hash()}'
     if ports is not None:
         default_aws_sg_name += f'-{common_utils.truncate_and_hash_cluster_name(cluster_name)}'
-
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -1010,6 +1027,8 @@ def write_cluster_config(
 
                 # GCP only:
                 'gcp_project_id': gcp_project_id,
+                'specific_reservations': filtered_specific_reservations,
+                'num_specific_reserved_workers': num_specific_reserved_workers,
 
                 # Conda setup
                 'conda_installation_commands':
@@ -1186,6 +1205,9 @@ def _count_healthy_nodes_from_ray(output: str,
     else:
         ready_head = get_ready_nodes(_LAUNCHED_HEAD_PATTERN, output)
         ready_workers = get_ready_nodes(_LAUNCHED_WORKER_PATTERN, output)
+        ready_reserved_workers = get_ready_nodes(
+            _LAUNCHED_RESERVED_WORKER_PATTERN, output)
+        ready_workers += ready_reserved_workers
     assert ready_head <= 1, f'#head node should be <=1 (Got {ready_head}).'
     return ready_head, ready_workers
 

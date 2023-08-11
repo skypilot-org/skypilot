@@ -1,6 +1,6 @@
 """Clouds in Sky."""
 from sky.clouds.cloud import Cloud
-from sky.clouds.cloud import CLOUD_REGISTRY
+from sky.clouds.cloud_registry import CLOUD_REGISTRY
 from sky.clouds.cloud import CloudImplementationFeatures
 from sky.clouds.cloud import Region
 from sky.clouds.cloud import Zone

@@ -1,6 +1,7 @@
 import pytest
 import tempfile
 from typing import List
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -214,6 +215,10 @@ def enable_all_clouds(monkeypatch):
 
     monkeypatch.setattr('sky.backends.backend_utils.check_owner_identity',
                         lambda _: None)
+
+    monkeypatch.setattr(
+        'sky.clouds.gcp.GCP._list_reservations_for_instance_type',
+        lambda *_args, **_kwargs: [])
 
 
 @pytest.fixture

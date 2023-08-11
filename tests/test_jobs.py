@@ -21,7 +21,7 @@ class TestExecutionOnExistingClusters:
     @pytest.fixture
     def _mock_cluster_state(self, _mock_db_conn, enable_all_clouds):
         """Add clusters to the global state.
-        
+
         This fixture adss three clusters to the global state:
         - test-cluster1: AWS, 2x p4d.24xlarge (8x A100)
         - test-cluster2: GCP, 1x n1-highmem-64, 4x V100
@@ -74,7 +74,7 @@ class TestExecutionOnExistingClusters:
 
     def test_launch_exec(self, _mock_cluster_state, monkeypatch):
         """Test launch and exec on existing clusters.
-        
+
         This test runs launch and exec with less demanding resources
         than the existing clusters can pass the check.
         """
