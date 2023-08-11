@@ -3489,15 +3489,14 @@ def spot():
     default=None,
     is_flag=True,
     required=False,
-    help=(
-        '(Default: True; this flag is deprecated and will be removed in a '
-        'future release.) Whether to retry provisioning infinitely until the '
-        'cluster is up, if unavailability errors are encountered. This '
-        # Disabling quote check here, as there seems to be a bug in pylint,
-        # which incorrectly recognizes the help string as a docstring.
-        # pylint: disable=bad-docstring-quotes
-        'applies to launching the spot clusters (both the initial and any '
-        'recovery attempts), not the spot controller.'))
+    # Disabling quote check here, as there seems to be a bug in pylint,
+    # which incorrectly recognizes the help string as a docstring.
+    # pylint: disable=bad-docstring-quotes
+    help=('(Default: True; this flag is deprecated and will be removed in a '
+          'future release.) Whether to retry provisioning infinitely until the '
+          'cluster is up, if unavailability errors are encountered. This '
+          'applies to launching the spot clusters (both the initial and any '
+          'recovery attempts), not the spot controller.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
