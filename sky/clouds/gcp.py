@@ -636,8 +636,8 @@ class GCP(clouds.Cloud):
         return self._list_reservations_cache
 
     @cachetools.cachedmethod(
-        # Default to None for backward compatibility for GCP clusters launched
-        # before #2352.
+        # Create if not found for backward compatibility for GCP clusters
+        # launched before #2352.
         cache=lambda self: self._get_or_create_ttl_cache())
     def _list_reservations_for_instance_type(
         self,
