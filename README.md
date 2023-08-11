@@ -52,9 +52,13 @@ SkyPilot **cuts your cloud costs**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes. 
 
-Install with pip or [from source](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html):
+Install with pip:
 ```
 pip install "skypilot[aws,gcp,azure,ibm,oci,scp,lambda]"  # choose your clouds
+```
+To get the latest features/updates, install [from source](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html) or the nightly build:
+```bash
+pip install -U "skypilot-nightly[aws,gcp,azure,ibm,oci,scp,lambda]"  # choose your clouds
 ```
 
 Current supported providers (AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI, Cloudflare):
