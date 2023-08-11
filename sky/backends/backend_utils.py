@@ -2359,10 +2359,15 @@ def check_cluster_available(
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
     """
+    record = global_user_state.get_cluster_from_name(cluster_name)
     if dryrun:
-        record = global_user_state.get_cluster_from_name(cluster_name)
         assert record is not None, cluster_name
         return record['handle']
+
+    previous_cluster_status = None
+    if record is not None:
+        previous_cluster_status = record['status']
+
     try:
         cluster_status, handle = refresh_cluster_status_handle(cluster_name)
     except exceptions.ClusterStatusFetchingError as e:
@@ -2381,7 +2386,6 @@ def check_cluster_available(
             f'Failed to refresh the status for cluster {cluster_name!r}. It is '
             f'not fatal, but {operation} might hang if the cluster is not up.\n'
             f'Detailed reason: {e}')
-        record = global_user_state.get_cluster_from_name(cluster_name)
         if record is None:
             cluster_status, handle = None, None
         else:
@@ -2390,10 +2394,15 @@ def check_cluster_available(
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
     if handle is None:
+        if previous_cluster_status is None:
+            error_msg = f'Cluster {cluster_name!r} does not exist.'
+        else:
+            error_msg = (
+                f'Cluster {cluster_name!r} was manually terminated in console.')
+
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} does not '
-                f'exist.{reset}')
+            raise ValueError(f'{colorama.Fore.YELLOW}{error_msg}{reset}')
+    assert cluster_status is not None, 'handle is not None but status is None'
     backend = get_backend_from_handle(handle)
     if check_cloud_vm_ray_backend and not isinstance(
             backend, backends.CloudVmRayBackend):
