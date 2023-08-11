@@ -638,8 +638,7 @@ class GCP(clouds.Cloud):
                 timer=datetime.datetime.now)
         return self._list_reservations_cache
 
-    @cachetools.cachedmethod(
-        cache=lambda self: self._get_or_create_ttl_cache())
+    @cachetools.cachedmethod(cache=lambda self: self._get_or_create_ttl_cache())
     def _list_reservations_for_instance_type(
         self,
         instance_type: str,
