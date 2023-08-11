@@ -9,8 +9,7 @@ import re
 import subprocess
 import time
 import typing
-import datetime
-from typing import Dict, Iterator, List, Optional, Tuple, Set
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 import cachetools
 
