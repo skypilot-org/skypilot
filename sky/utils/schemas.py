@@ -66,6 +66,16 @@ def get_resources_schema():
             'disk_tier': {
                 'type': 'string',
             },
+            'ports': {
+                'type': 'array',
+                'items': {
+                    'anyOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'integer',
+                    }]
+                }
+            },
             'accelerator_args': {
                 'type': 'object',
                 'required': [],

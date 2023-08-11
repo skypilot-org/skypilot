@@ -4,7 +4,7 @@ import json
 import os
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import yaml
 
@@ -118,6 +118,7 @@ class Task:
         # Advanced:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
+        blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
     ):
         """Initializes a Task.
 
@@ -172,6 +173,7 @@ class Task:
           docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
+          blocked_resources: A set of resources that this task cannot run on.
         """
         self.name = name
         self.run = run
@@ -194,6 +196,9 @@ class Task:
         self.estimated_outputs_size_gigabytes = None
         # Default to CPUNode
         self.resources = {sky.Resources()}
+        # Resources that this task cannot run on.
+        self.blocked_resources = blocked_resources
+
         self.time_estimator_func: Optional[Callable[['sky.Resources'],
                                                     int]] = None
         self.file_mounts: Optional[Dict[str, str]] = None
@@ -484,6 +489,8 @@ class Task:
             return clouds.AWS()
         elif self.inputs.startswith('gs:'):
             return clouds.GCP()
+        elif self.inputs.startswith('cos:'):
+            return clouds.IBM()
         else:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'cloud path not supported: {self.inputs}')
@@ -820,6 +827,19 @@ class Task:
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
+                elif store_type is storage_lib.StoreType.IBM:
+                    if isinstance(storage.source,
+                                  str) and storage.source.startswith('cos://'):
+                        # source is a cos bucket's uri
+                        blob_path = storage.source
+                    else:
+                        # source is a bucket name.
+                        assert storage.name is not None, storage
+                        # extract region from rclone.conf
+                        cos_region = data_utils.Rclone.get_region_from_rclone(
+                            storage.name, data_utils.Rclone.RcloneClouds.IBM)
+                        blob_path = f'cos://{cos_region}/{storage.name}'
+                    self.update_file_mounts({mnt_path: blob_path})
                 elif store_type is storage_lib.StoreType.AZURE:
                     # TODO when Azure Blob is done: sync ~/.azure
                     raise NotImplementedError('Azure Blob not mountable yet')

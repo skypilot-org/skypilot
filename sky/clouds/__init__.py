@@ -12,6 +12,7 @@ from sky.clouds.local import Local
 from sky.clouds.ibm import IBM
 from sky.clouds.scp import SCP
 from sky.clouds.oci import OCI
+from sky.clouds.kubernetes import Kubernetes
 
 __all__ = [
     'IBM',
@@ -23,6 +24,7 @@ __all__ = [
     'Local',
     'SCP',
     'OCI',
+    'Kubernetes',
     'CloudImplementationFeatures',
     'Region',
     'Zone',

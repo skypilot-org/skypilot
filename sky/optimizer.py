@@ -969,7 +969,8 @@ def _fill_in_launchable_resources(
             all_fuzzy_candidates = set()
             for cloud in clouds_list:
                 (feasible_resources, fuzzy_candidate_list) = (
-                    cloud.get_feasible_launchable_resources(resources))
+                    cloud.get_feasible_launchable_resources(
+                        resources, num_nodes=task.num_nodes))
                 if len(feasible_resources) > 0:
                     # Assume feasible_resources is sorted by prices.
                     cheapest = feasible_resources[0]
