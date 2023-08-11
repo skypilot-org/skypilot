@@ -403,9 +403,15 @@ class SSHConfigHelper(object):
     @classmethod
     def _get_generated_config(cls, autogen_comment: str, host_name: str,
                               ip: str, username: str, ssh_key_path: str,
-                              proxy_command: Optional[str], port: int):
+                              proxy_command: Optional[str], port: int,
+                              docker_proxy_command: Optional[str]):
         if proxy_command is not None:
+            # Already checked in resources
+            assert docker_proxy_command is None, (
+                'Cannot specify both proxy_command and docker_proxy_command.')
             proxy = f'ProxyCommand {proxy_command}'
+        elif docker_proxy_command is not None:
+            proxy = f'ProxyCommand {docker_proxy_command}'
         else:
             proxy = ''
         # StrictHostKeyChecking=no skips the host key check for the first
@@ -433,8 +439,14 @@ class SSHConfigHelper(object):
 
     @classmethod
     @timeline.FileLockEvent(ssh_conf_lock_path)
-    def add_cluster(cls, cluster_name: str, ips: List[str],
-                    auth_config: Dict[str, str], ports: List[int]):
+    def add_cluster(
+        cls,
+        cluster_name: str,
+        ips: List[str],
+        auth_config: Dict[str, str],
+        ports: List[int],
+        docker_user: Optional[str] = None,
+    ):
         """Add authentication information for cluster to local SSH config file.
 
         If a host with `cluster_name` already exists and the configuration was
@@ -451,8 +463,11 @@ class SSHConfigHelper(object):
               node.
             auth_config: read_yaml(handle.cluster_yaml)['auth']
             ports: List of port numbers for SSH corresponding to ips
+            docker_user: If not None, use this user to ssh into the docker
         """
         username = auth_config['ssh_user']
+        if docker_user is not None:
+            username = docker_user
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
@@ -460,6 +475,8 @@ class SSHConfigHelper(object):
         overwrite = False
         overwrite_begin_idx = None
         ip = ips[0]
+        if docker_user is not None:
+            ip = 'localhost'
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
         if os.path.exists(config_path):
@@ -491,10 +508,16 @@ class SSHConfigHelper(object):
             os.chmod(config_path, 0o644)
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
+        docker_proxy_command = None
         head_port = ports[0]
+        if docker_user is not None:
+            docker_proxy_command = ' '.join(
+                ['ssh'] + command_runner.ssh_options_list(key_path, None) +
+                ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ips[0]}'])
+            head_port = constants.DEFAULT_DOCKER_PORT
         codegen = cls._get_generated_config(sky_autogen_comment, host_name, ip,
                                             username, key_path, proxy_command,
-                                            head_port)
+                                            head_port, docker_proxy_command)
 
         # Add (or overwrite) the new config.
         if overwrite:
@@ -519,7 +542,7 @@ class SSHConfigHelper(object):
 
         if len(ips) > 1:
             SSHConfigHelper._add_multinode_config(cluster_name, ips[1:],
-                                                  auth_config)
+                                                  auth_config, docker_user)
 
     @classmethod
     def _add_multinode_config(
@@ -527,8 +550,11 @@ class SSHConfigHelper(object):
         cluster_name: str,
         external_worker_ips: List[str],
         auth_config: Dict[str, str],
+        docker_user: Optional[str] = None,
     ):
         username = auth_config['ssh_user']
+        if docker_user is not None:
+            username = docker_user
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
@@ -537,6 +563,9 @@ class SSHConfigHelper(object):
         # Ensure stableness of the aliases worker-<i> by sorting based on
         # public IPs.
         external_worker_ips = list(sorted(external_worker_ips))
+        port = 22
+        if docker_user is not None:
+            port = constants.DEFAULT_DOCKER_PORT
 
         overwrites = [False] * len(external_worker_ips)
         overwrite_begin_idxs: List[Optional[int]] = [None
@@ -582,6 +611,11 @@ class SSHConfigHelper(object):
             config = f.readlines()
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
+        if docker_user is not None:
+            docker_proxy_command_generator = lambda ip: ' '.join(
+                ['ssh'] + command_runner.ssh_options_list(key_path, None) +
+                ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ip}'])
+        docker_proxy_command = None
 
         # Check if ~/.ssh/config contains existing names
         host_lines = [f'Host {c_name}' for c_name in worker_names]
@@ -593,15 +627,14 @@ class SSHConfigHelper(object):
                                f'host named {worker_names[idx]}.')
                 host_name = external_worker_ips[idx]
                 logger.warning(f'Using {host_name} to identify host instead.')
+                ip = external_worker_ips[idx]
+                if docker_user is not None:
+                    docker_proxy_command = docker_proxy_command_generator(ip)
+                    ip = 'localhost'
                 # TODO(romilb): Update port number when k8s supports multinode
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment,
-                    host_name,
-                    external_worker_ips[idx],
-                    username,
-                    key_path,
-                    proxy_command,
-                    port=22)
+                    sky_autogen_comment, host_name, ip, username, key_path,
+                    proxy_command, port, docker_proxy_command)
 
         # All workers go to SKY_USER_FILE_PATH/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
@@ -612,26 +645,24 @@ class SSHConfigHelper(object):
                     host_name = worker_names[idx]
                     overwrites[idx] = True
                     overwrite_begin_idxs[idx] = i - 1
+                ip = external_worker_ips[idx]
+                if docker_user is not None:
+                    docker_proxy_command = docker_proxy_command_generator(ip)
+                    ip = 'localhost'
                 # TODO(romilb): Update port number when k8s supports multinode
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment,
-                    host_name,
-                    external_worker_ips[idx],
-                    username,
-                    key_path,
-                    proxy_command,
-                    port=22)
+                    sky_autogen_comment, host_name, ip, username, key_path,
+                    proxy_command, port, docker_proxy_command)
 
         # This checks if all codegens have been created.
         for idx, ip in enumerate(external_worker_ips):
+            if docker_user is not None:
+                docker_proxy_command = docker_proxy_command_generator(ip)
+                ip = 'localhost'
             if not codegens[idx]:
-                codegens[idx] = cls._get_generated_config(sky_autogen_comment,
-                                                          worker_names[idx],
-                                                          ip,
-                                                          username,
-                                                          key_path,
-                                                          proxy_command,
-                                                          port=22)
+                codegens[idx] = cls._get_generated_config(
+                    sky_autogen_comment, worker_names[idx], ip, username,
+                    key_path, proxy_command, port, docker_proxy_command)
 
         for idx in range(len(external_worker_ips)):
             # Add (or overwrite) the new config.
@@ -665,6 +696,7 @@ class SSHConfigHelper(object):
         cluster_name: str,
         ip: str,
         auth_config: Dict[str, str],
+        docker_user: Optional[str] = None,
     ):
         """Remove authentication information for cluster from local SSH config.
 
@@ -674,6 +706,7 @@ class SSHConfigHelper(object):
         Args:
             ip: Head node's IP address.
             auth_config: read_yaml(handle.cluster_yaml)['auth']
+            docker_user: If not None, use this user to ssh into the docker
         """
         username = auth_config['ssh_user']
         config_path = os.path.expanduser(cls.ssh_conf_path)
@@ -687,8 +720,25 @@ class SSHConfigHelper(object):
         # Scan the config for the cluster name.
         for i, line in enumerate(config):
             next_line = config[i + 1] if i + 1 < len(config) else ''
-            if (line.strip() == f'HostName {ip}' and
-                    next_line.strip() == f'User {username}'):
+            if docker_user is None:
+                found = (line.strip() == f'HostName {ip}' and
+                         next_line.strip() == f'User {username}')
+            else:
+                found = (line.strip() == 'HostName localhost' and
+                         next_line.strip() == f'User {docker_user}')
+                if found:
+                    # Find the line starting with ProxyCommand and contains the ip
+                    found = False
+                    for idx in range(i, len(config)):
+                        # Stop if we reach an empty line, which means a new host
+                        if not config[idx].strip():
+                            break
+                        if config[idx].strip().startswith('ProxyCommand'):
+                            proxy_command_line = config[idx].strip()
+                            if proxy_command_line.endswith(f'@{ip}'):
+                                found = True
+                                break
+            if found:
                 start_line_idx = i - 1
                 break
 
@@ -849,8 +899,8 @@ def write_cluster_config(
     # the ResourcesUnavailableError is overly used. Also, it would be better to
     # move the check out of this function, i.e. the caller should be responsible
     # for the validation.
-    resources_vars = cloud.make_deploy_resources_variables(
-        to_provision, region, zones)
+    # TODO(tian): Move more cloud agnostic vars to resources.py.
+    resources_vars = to_provision.make_deploy_variables(region, zones)
     config_dict = {}
 
     azure_subscription_id = None
@@ -1162,6 +1212,23 @@ def _count_healthy_nodes_from_ray(output: str,
     return ready_head, ready_workers
 
 
+def get_docker_user(ip: str, cluster_config_file: str) -> str:
+    """Find docker container username."""
+    ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
+    runner = command_runner.SSHCommandRunner(ip, **ssh_credentials)
+    container_name = constants.DEFAULT_DOCKER_CONTAINER_NAME
+    whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
+        f'sudo docker exec {container_name} whoami',
+        stream_logs=False,
+        require_outputs=True)
+    assert whoami_returncode == 0, (
+        f'Failed to get docker container user. Return '
+        f'code: {whoami_returncode}, Error: {whoami_stderr}')
+    docker_user = whoami_stdout.strip()
+    logger.debug(f'Docker container user: {docker_user}')
+    return docker_user
+
+
 @timeline.event
 def wait_until_ray_cluster_ready(
     cluster_config_file: str,
@@ -1169,11 +1236,12 @@ def wait_until_ray_cluster_ready(
     log_path: str,
     is_local_cloud: bool = False,
     nodes_launching_progress_timeout: Optional[int] = None,
-) -> bool:
-    """Returns whether the entire ray cluster is ready."""
-    if num_nodes <= 1:
-        return True
+) -> Tuple[bool, Optional[str]]:
+    """Wait until the ray cluster is set up on VMs or in containers.
 
+    Returns:  whether the entire ray cluster is ready, and docker username
+    if launched with docker.
+    """
     # Manually fetching head ip instead of using `ray exec` to avoid the bug
     # that `ray exec` fails to connect to the head node after some workers
     # launched especially for Azure.
@@ -1182,9 +1250,18 @@ def wait_until_ray_cluster_ready(
             cluster_config_file, max_attempts=WAIT_HEAD_NODE_IP_MAX_ATTEMPTS)
     except RuntimeError as e:
         logger.error(e)
-        return False  # failed
+        return False, None  # failed
 
-    ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
+    config = common_utils.read_yaml(cluster_config_file)
+
+    docker_user = None
+    if 'docker' in config:
+        docker_user = get_docker_user(head_ip, cluster_config_file)
+
+    if num_nodes <= 1:
+        return True, docker_user
+
+    ssh_credentials = ssh_credential_from_yaml(cluster_config_file, docker_user)
     last_nodes_so_far = 0
     start = time.time()
     runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
@@ -1243,7 +1320,7 @@ def wait_until_ray_cluster_ready(
                     'Timed out: waited for more than '
                     f'{nodes_launching_progress_timeout} seconds for new '
                     'workers to be provisioned, but no progress.')
-                return False  # failed
+                return False, None  # failed
 
             if '(no pending nodes)' in output and '(no failures)' in output:
                 # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes
@@ -1253,12 +1330,14 @@ def wait_until_ray_cluster_ready(
                 logger.error(
                     'Failed to launch multiple nodes on '
                     'GCP due to a nondeterministic bug in ray autoscaler.')
-                return False  # failed
+                return False, None  # failed
             time.sleep(10)
-    return True  # success
+    return True, docker_user  # success
 
 
-def ssh_credential_from_yaml(cluster_yaml: str) -> Dict[str, str]:
+def ssh_credential_from_yaml(cluster_yaml: str,
+                             docker_user: Optional[str] = None
+                            ) -> Dict[str, str]:
     """Returns ssh_user, ssh_private_key and ssh_control name."""
     config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
@@ -1266,12 +1345,15 @@ def ssh_credential_from_yaml(cluster_yaml: str) -> Dict[str, str]:
     ssh_private_key = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
-    return {
+    credentials = {
         'ssh_user': ssh_user,
         'ssh_private_key': ssh_private_key,
         'ssh_control_name': ssh_control_name,
         'ssh_proxy_command': ssh_proxy_command,
     }
+    if docker_user is not None:
+        credentials['docker_user'] = docker_user
+    return credentials
 
 
 def parallel_data_transfer_to_nodes(
@@ -1942,7 +2024,8 @@ def _update_cluster_status_no_lock(
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
             # Check if ray cluster status is healthy.
-            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
+            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
+                                                       handle.docker_user)
             runner = command_runner.SSHCommandRunner(external_ips[0],
                                                      **ssh_credentials,
                                                      port=handle.head_ssh_port)

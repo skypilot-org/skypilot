@@ -109,8 +109,15 @@ Available fields:
         tpu_vm: False  # False to use TPU nodes (the default); True to use TPU VMs.
 
       # Custom image id (optional, advanced). The image id used to boot the
-      # instances. Only supported for AWS and GCP. If not specified, SkyPilot
-      # will use the default debian-based image suitable for machine learning tasks.
+      # instances. Only supported for AWS and GCP (for non-docker image). If not
+      # specified, SkyPilot will use the default debian-based image suitable for
+      # machine learning tasks.
+      #
+      # Docker support
+      # You can specify docker image to use by setting the image_id to
+      # `docker:<image name>` for Azure, AWS and GCP. For example,
+      #   image_id: docker:ubuntu:latest
+      # Currently, only debian and ubuntu images are supported.
       #
       # AWS
       # To find AWS AMI ids: https://leaherb.com/how-to-find-an-aws-marketplace-ami-image-id

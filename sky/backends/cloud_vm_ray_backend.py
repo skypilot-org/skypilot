@@ -1666,7 +1666,8 @@ class RetryingVmProvisioner(object):
         This is a workaround for Ray Autoscaler where `ray up` does not
         run setup or launch ray cluster on TPU VM Pod nodes.
         """
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            cluster_yaml, cluster_handle.docker_user)
         all_ips = cluster_handle.external_ips(use_cached_ips=False)
         num_tpu_devices = tpu_utils.get_num_tpu_devices(
             cluster_handle.launched_resources)
@@ -2131,9 +2132,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         for all nodes in a cluster. Filled in after successful task execution.
     - (optional) Launched num nodes
     - (optional) Launched resources
+    - (optional) Docker user name
     - (optional) If TPU(s) are managed, a path to a deletion script.
     """
-    _VERSION = 4
+    _VERSION = 5
 
     def __init__(self,
                  *,
@@ -2156,6 +2158,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.stable_ssh_ports = stable_ssh_ports
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
+        self.docker_user: Optional[str] = None
         self.tpu_create_script = tpu_create_script
         self.tpu_delete_script = tpu_delete_script
         self._maybe_make_local_handle()
@@ -2172,6 +2175,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'{self.cluster_yaml}, '
                 f'\n\tlaunched_resources={self.launched_nodes}x '
                 f'{self.launched_resources}, '
+                f'\n\tdocker_user={self.docker_user},'
                 f'\n\ttpu_create_script={self.tpu_create_script}, '
                 f'\n\ttpu_delete_script={self.tpu_delete_script})')
 
@@ -2332,6 +2336,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                        self.launched_nodes)
         return hourly_cost
 
+    def setup_docker_user(self, cluster_config_file: str):
+        ip_list = self.external_ips()
+        assert ip_list is not None
+        docker_user = backend_utils.get_docker_user(ip_list[0],
+                                                    cluster_config_file)
+        self.docker_user = docker_user
+
     @property
     def cluster_yaml(self):
         return os.path.expanduser(self._cluster_yaml)
@@ -2375,6 +2386,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if version < 4:
             # Version 4 adds self.stable_ssh_ports for Kubernetes support
             state['stable_ssh_ports'] = None
+        if version < 5:
+            state['docker_user'] = None
 
         self.__dict__.update(state)
 
@@ -2651,6 +2664,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             assert ip_list is not None, handle
             assert ssh_port_list is not None, handle
 
+            config = common_utils.read_yaml(cluster_config_file)
+            if 'docker' in config:
+                handle.setup_docker_user(cluster_config_file)
+
             if 'tpu_name' in config_dict:
                 self._set_tpu_name(handle, config_dict['tpu_name'])
 
@@ -2668,7 +2685,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     handle.launched_resources.cloud.get_zone_shell_cmd())
                 if get_zone_cmd is not None:
                     ssh_credentials = backend_utils.ssh_credential_from_yaml(
-                        handle.cluster_yaml)
+                        handle.cluster_yaml, handle.docker_user)
                     runners = command_runner.SSHCommandRunner.make_runner_list(
                         ip_list, port_list=ssh_port_list, **ssh_credentials)
 
@@ -2730,7 +2747,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # update_status will query the ray job status for all INIT /
             # PENDING / RUNNING jobs for the real status, since we do not
             # know the actual previous status of the cluster.
-            job_owner = onprem_utils.get_job_owner(handle.cluster_yaml)
+            job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
+                                                   handle.docker_user)
             cmd = job_lib.JobLibCodeGen.update_status(job_owner)
             with log_utils.safe_rich_status('[bold cyan]Preparing Job Queue'):
                 returncode, _, stderr = self.run_on_head(handle,
@@ -2767,7 +2785,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             auth_config = common_utils.read_yaml(handle.cluster_yaml)['auth']
             backend_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
                                                       ip_list, auth_config,
-                                                      ssh_port_list)
+                                                      ssh_port_list,
+                                                      handle.docker_user)
 
             common_utils.remove_file_if_exists(lock_path)
 
@@ -2805,7 +2824,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
 
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml)
+            handle.cluster_yaml, handle.docker_user)
 
         # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -2866,7 +2885,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             port_list = handle.external_ssh_ports()
             assert ip_list is not None, 'external_ips is not cached in handle'
             ssh_credentials = backend_utils.ssh_credential_from_yaml(
-                handle.cluster_yaml)
+                handle.cluster_yaml, handle.docker_user)
             # Disable connection sharing for setup script to avoid old
             # connections being reused, which may cause stale ssh agent
             # forwarding.
@@ -2953,7 +2972,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         style = colorama.Style
         fore = colorama.Fore
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml)
+            handle.cluster_yaml, handle.docker_user)
         head_ssh_port = backend_utils.get_head_ssh_port(handle)
         runner = command_runner.SSHCommandRunner(handle.head_ip,
                                                  port=head_ssh_port,
@@ -2975,8 +2994,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
-        ray_job_id = job_lib.make_ray_job_id(job_id,
-                                             ssh_credentials['ssh_user'])
+        job_owner = ssh_credentials['ssh_user']
+        if handle.docker_user is not None:
+            job_owner = handle.docker_user
+        ray_job_id = job_lib.make_ray_job_id(job_id, job_owner)
         if isinstance(handle.launched_resources.cloud, clouds.Local):
             # Ray Multitenancy is unsupported.
             # (Git Issue) https://github.com/ray-project/ray/issues/6800
@@ -3089,7 +3110,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     ):
         """Generates and prepares job submission code for local clusters."""
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml)
+            handle.cluster_yaml, handle.docker_user)
         ssh_user = ssh_credentials['ssh_user']
         runner = command_runner.SSHCommandRunner(handle.head_ip,
                                                  **ssh_credentials)
@@ -3300,7 +3321,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def cancel_jobs(self, handle: CloudVmRayResourceHandle,
                     jobs: Optional[List[int]]):
-        job_owner = onprem_utils.get_job_owner(handle.cluster_yaml)
+        job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
+                                               handle.docker_user)
         code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs)
 
         # All error messages should have been redirected to stdout.
@@ -3361,7 +3383,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert ssh_port_list is not None, 'external_ssh_ports is not cached ' \
                                           'in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml)
+            handle.cluster_yaml, handle.docker_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, port_list=ssh_port_list, **ssh_credentials)
 
@@ -3399,7 +3421,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   job_id: Optional[int],
                   spot_job_id: Optional[int] = None,
                   follow: bool = True) -> int:
-        job_owner = onprem_utils.get_job_owner(handle.cluster_yaml)
+        job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
+                                               handle.docker_user)
         code = job_lib.JobLibCodeGen.tail_logs(job_owner,
                                                job_id,
                                                spot_job_id=spot_job_id,
@@ -3773,7 +3796,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         auth_config = config['auth']
         backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name,
                                                      handle.head_ip,
-                                                     auth_config)
+                                                     auth_config,
+                                                     handle.docker_user)
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
@@ -3880,7 +3904,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         head_ssh_port = backend_utils.get_head_ssh_port(handle,
                                                         _FETCH_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml)
+            handle.cluster_yaml, handle.docker_user)
         runner = command_runner.SSHCommandRunner(head_ip,
                                                  port=head_ssh_port,
                                                  **ssh_credentials)
@@ -4014,7 +4038,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         ip_list = handle.external_ips()
         assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml)
+            handle.cluster_yaml, handle.docker_user)
 
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, port_list=None, **ssh_credentials)
@@ -4051,7 +4075,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         port_list = handle.external_ssh_ports()
         assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml)
+            handle.cluster_yaml, handle.docker_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, port_list=port_list, **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
@@ -4199,7 +4223,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         port_list = handle.external_ssh_ports()
         assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml)
+            handle.cluster_yaml, handle.docker_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, port_list=port_list, **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
