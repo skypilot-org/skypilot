@@ -2397,8 +2397,8 @@ def check_cluster_available(
         if previous_cluster_status is None:
             error_msg = f'Cluster {cluster_name!r} does not exist.'
         else:
-            error_msg = (
-                f'Cluster {cluster_name!r} was manually terminated in console.')
+            error_msg = (f'Cluster {cluster_name!r} was preempted or manually '
+                         'terminated in console.')
 
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'{colorama.Fore.YELLOW}{error_msg}{reset}')
