@@ -855,7 +855,8 @@ class Resources:
         """Returns the number of available reservation resources."""
         if self.use_spot:
             # GCP's & AWS's reservations do not support spot instances. We
-            # assume other clouds behave the same.
+            # assume other clouds behave the same. We can move this check down
+            # to each cloud if any cloud supports reservations for spot.
             return {}
         return self.cloud.get_reservations_available_resources(
             self._instance_type, self._region, self._zone,
