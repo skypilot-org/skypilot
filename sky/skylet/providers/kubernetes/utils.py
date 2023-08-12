@@ -1,9 +1,7 @@
 from typing import Optional, Tuple
-
 from urllib.parse import urlparse
 
 from sky.adaptors import kubernetes
-from sky.utils import common_utils
 from sky.utils import common_utils
 
 DEFAULT_NAMESPACE = 'default'

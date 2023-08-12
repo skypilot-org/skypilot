@@ -4,11 +4,12 @@ This script runs inside sshjump pod as the main process (PID 1).
 """
 import datetime
 import os
-import pytz
 import sys
 import time
 
-from kubernetes import client, config
+from kubernetes import client
+from kubernetes import config
+import pytz
 
 # Load kube config
 config.load_incluster_config()
@@ -25,7 +26,7 @@ alert_threshold = int(os.getenv("ALERT_THRESHOLD", "300"))
 retry_interval = int(os.getenv("RETRY_INTERVAL", "60"))
 
 # Ray pods are labeled with this value i.e sshjump name which is unique per user (based on userhash)
-label_selector=f"skypilot-sshjump={current_name}"
+label_selector = f"skypilot-sshjump={current_name}"
 
 
 def poll():
@@ -45,23 +46,32 @@ def poll():
 
         # List the pods in the current namespace
         try:
-            ret = v1.list_namespaced_pod(current_namespace, label_selector=label_selector)
+            ret = v1.list_namespaced_pod(current_namespace,
+                                         label_selector=label_selector)
         except Exception as e:
             sys.stdout.write(f"[ERROR] exit poll() with error: {e}\n")
             raise
 
         if len(ret.items) == 0:
-            sys.stdout.write(f"DID NOT FIND pods with label '{label_selector}' in namespace: '{current_namespace}'\n")
+            sys.stdout.write(
+                f"DID NOT FIND pods with label '{label_selector}' in namespace: '{current_namespace}'\n"
+            )
             noray_delta = noray_delta + retry_interval_delta
-            sys.stdout.write(f"noray_delta after time increment: {noray_delta}, alert threshold: {alert_delta}\n")
+            sys.stdout.write(
+                f"noray_delta after time increment: {noray_delta}, alert threshold: {alert_delta}\n"
+            )
         else:
-            sys.stdout.write(f"FOUND pods with label '{label_selector}' in namespace: '{current_namespace}'\n")
+            sys.stdout.write(
+                f"FOUND pods with label '{label_selector}' in namespace: '{current_namespace}'\n"
+            )
             # reset ..
             noray_delta = datetime.timedelta()
             sys.stdout.write(f"noray_delta is reset: {noray_delta}\n")
 
         if noray_delta >= alert_delta:
-            sys.stdout.write(f"noray_delta: {noray_delta} crossed alert threshold: {alert_delta}. It's time to terminate myself\n")
+            sys.stdout.write(
+                f"noray_delta: {noray_delta} crossed alert threshold: {alert_delta}. It's time to terminate myself\n"
+            )
             try:
                 # sshjump resources created under same name
                 v1.delete_namespaced_service(current_name, current_namespace)

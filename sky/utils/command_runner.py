@@ -48,7 +48,8 @@ def ssh_options_list(ssh_private_key: Optional[str],
                      ssh_proxy_command: Optional[str] = None,
                      docker_ssh_proxy_command: Optional[str] = None,
                      timeout: int = 30,
-                     port: int = 22) -> List[str]:
+                     port: int = 22,
+                     run_on_k8s: Optional[bool] = False) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     # Forked from Ray SSHOptions:
     # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
@@ -77,10 +78,13 @@ def ssh_options_list(ssh_private_key: Optional[str],
         # Agent forwarding for git.
         'ForwardAgent': 'yes',
     }
-    """
     # SSH Control will have a severe delay when using docker_ssh_proxy_command.
     # TODO(tian): Investigate why.
-    if ssh_control_name is not None and docker_ssh_proxy_command is None:
+    # k8s instances are accessed with an ssh session using Proxycommand. The
+    # process running Proxycommand is kept running as long as the ssh session
+    # is running and the ControlMaster keeps the session, which results in
+    # 'ControlPersist' number of seconds delay per ssh commands ran.
+    if ssh_control_name is not None and docker_ssh_proxy_command is None and not run_on_k8s:
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
@@ -88,7 +92,6 @@ def ssh_options_list(ssh_private_key: Optional[str],
             'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
             'ControlPersist': '300s',
         })
-    """
     ssh_key_option = [
         '-i',
         ssh_private_key,
@@ -204,8 +207,11 @@ class SSHCommandRunner:
             for ip, port in zip(ip_list, port_list)
         ]
 
-    def _ssh_base_command(self, *, ssh_mode: SshMode,
-                          port_forward: Optional[List[int]]) -> List[str]:
+    def _ssh_base_command(self,
+                          *,
+                          ssh_mode: SshMode,
+                          port_forward: Optional[List[int]],
+                          run_on_k8s: Optional[bool] = False) -> List[str]:
         ssh = ['ssh']
         if ssh_mode == SshMode.NON_INTERACTIVE:
             # Disable pseudo-terminal allocation. Otherwise, the output of
@@ -230,7 +236,7 @@ class SSHCommandRunner:
             ssh_proxy_command=self._ssh_proxy_command,
             docker_ssh_proxy_command=docker_ssh_proxy_command,
             port=self.port,
-        ) + [f'{self.ssh_user}@{self.ip}']
+            run_on_k8s=run_on_k8s) + [f'{self.ssh_user}@{self.ip}']
 
     def run(
             self,
@@ -245,6 +251,7 @@ class SSHCommandRunner:
             stream_logs: bool = True,
             ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
             separate_stderr: bool = False,
+            run_on_k8s: Optional[bool] = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -271,7 +278,8 @@ class SSHCommandRunner:
             A tuple of (returncode, stdout, stderr).
         """
         base_ssh_command = self._ssh_base_command(ssh_mode=ssh_mode,
-                                                  port_forward=port_forward)
+                                                  port_forward=port_forward,
+                                                  run_on_k8s=run_on_k8s)
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
             command = base_ssh_command + cmd

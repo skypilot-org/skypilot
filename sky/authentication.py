@@ -33,7 +33,6 @@ import colorama
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.backends import default_backend
 import jinja2
 import yaml
 
@@ -41,14 +40,15 @@ import sky
 from sky import clouds
 from sky import sky_logging
 from sky import skypilot_config
-from sky.adaptors import gcp, ibm, kubernetes
+from sky.adaptors import gcp
+from sky.adaptors import ibm
+from sky.adaptors import kubernetes
 from sky.backends import backend_utils
+from sky.skylet.providers.kubernetes import utils as kubernetes_utils
+from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from sky.skylet.providers.kubernetes import utils as kubernetes_utils
-from sky.skylet.providers.lambda_cloud import lambda_utils
-
 
 logger = sky_logging.init_logger(__name__)
 
@@ -385,12 +385,13 @@ def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 def _get_kubernetes_proxy_command(ingress, ipaddress, ssh_setup_mode):
     if ssh_setup_mode == 'nodeport':
         proxy_command = 'ssh -tt -i {privkey} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -p {ingress} -W %h:%p sky@{ipaddress}'.format(
-            privkey=PRIVATE_SSH_KEY_PATH, ingress=ingress, ipaddress=ipaddress) 
+            privkey=PRIVATE_SSH_KEY_PATH, ingress=ingress, ipaddress=ipaddress)
     # Setting kubectl port-forward/socat to establish ssh session using
     # ClusterIP service
     else:
         ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-        port_forward_proxy_cmd_path = os.path.expanduser(kubernetes.PORT_FORWARD_PROXY_CMD_PATH)
+        port_forward_proxy_cmd_path = os.path.expanduser(
+            kubernetes.PORT_FORWARD_PROXY_CMD_PATH)
         vars_to_fill = {
             'ssh_jump_name': ssh_jump_name,
             'ipaddress': ipaddress,
@@ -399,16 +400,21 @@ def _get_kubernetes_proxy_command(ingress, ipaddress, ssh_setup_mode):
         backend_utils.fill_template(kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE,
                                     vars_to_fill,
                                     output_path=port_forward_proxy_cmd_path)
-        os.chmod(port_forward_proxy_cmd_path, os.stat(port_forward_proxy_cmd_path).st_mode | 0o111)
+        os.chmod(port_forward_proxy_cmd_path,
+                 os.stat(port_forward_proxy_cmd_path).st_mode | 0o111)
         proxy_command = 'ssh -tt -i {privkey} -o ProxyCommand=\'{port_forward_proxy_cmd_path}\' -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -p {ingress} -W %h:%p sky@{ipaddress}'.format(
-            privkey=PRIVATE_SSH_KEY_PATH, ingress=ingress, ipaddress=ipaddress, port_forward_proxy_cmd_path=port_forward_proxy_cmd_path)
-    return proxy_command 
+            privkey=PRIVATE_SSH_KEY_PATH,
+            ingress=ingress,
+            ipaddress=ipaddress,
+            port_forward_proxy_cmd_path=port_forward_proxy_cmd_path)
+    return proxy_command
 
 
 def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Default ssh session is established with kubectl port-forwarding with
-    # ClusterIP service 
-    ssh_setup_mode = skypilot_config.get_nested(('kubernetes', 'networking'), 'port-forward').lower()
+    # ClusterIP service
+    ssh_setup_mode = skypilot_config.get_nested(('kubernetes', 'networking'),
+                                                'port-forward').lower()
     get_or_generate_keys()
     # Run kubectl command to add the public key to the cluster.
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
@@ -435,7 +441,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             raise
 
     sshjump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-    sshjump_image =  clouds.Kubernetes.IMAGE
+    sshjump_image = clouds.Kubernetes.IMAGE
     namespace = kubernetes_utils.get_current_kube_config_context_namespace()
     ssh_jump_ip = clouds.Kubernetes.get_external_ip()
     if ssh_setup_mode == 'nodeport':
@@ -446,27 +452,33 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     else:
         service_type = 'ClusterIP'
 
-    template_path = os.path.join(sky.__root_dir__, 'templates', 'kubernetes-sshjump.yml.j2')
+    template_path = os.path.join(sky.__root_dir__, 'templates',
+                                 'kubernetes-sshjump.yml.j2')
     if not os.path.exists(template_path):
-        raise FileNotFoundError('Template "kubernetes-sshjump.j2" does not exist.')
+        raise FileNotFoundError(
+            'Template "kubernetes-sshjump.j2" does not exist.')
     with open(template_path) as fin:
         template = fin.read()
     j2_template = jinja2.Template(template)
-    _content = j2_template.render(name=sshjump_name, image=sshjump_image, secret=key_label, service_type=service_type)
+    _content = j2_template.render(name=sshjump_name,
+                                  image=sshjump_image,
+                                  secret=key_label,
+                                  service_type=service_type)
     content = yaml.safe_load(_content)
 
     # ServiceAccount
     try:
-        kubernetes.core_api().create_namespaced_service_account(namespace, content['service_account'])
+        kubernetes.core_api().create_namespaced_service_account(
+            namespace, content['service_account'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
-                f'SSH Jump ServiceAcount already exists in the cluster, using it...')
+                f'SSH Jump ServiceAcount already exists in the cluster, using it...'
+            )
         else:
             raise
     else:
-        logger.info(
-            f'Creating SSH Jump ServiceAcount in the cluster...')
+        logger.info(f'Creating SSH Jump ServiceAcount in the cluster...')
     # Role
     try:
         kubernetes.auth_api().create_namespaced_role(namespace, content['role'])
@@ -477,40 +489,43 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         else:
             raise
     else:
-        logger.info(
-            f'Creating SSH Jump Role in the cluster...')
+        logger.info(f'Creating SSH Jump Role in the cluster...')
     # RoleBinding
     try:
-        kubernetes.auth_api().create_namespaced_role_binding(namespace, content['role_binding'])
+        kubernetes.auth_api().create_namespaced_role_binding(
+            namespace, content['role_binding'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
-                f'SSH Jump RoleBinding already exists in the cluster, using it...')
+                f'SSH Jump RoleBinding already exists in the cluster, using it...'
+            )
         else:
             raise
     else:
-        logger.info(
-            f'Creating SSH Jump RoleBinding in the cluster...')
+        logger.info(f'Creating SSH Jump RoleBinding in the cluster...')
 
     # Pod
     try:
-        kubernetes.core_api().create_namespaced_pod(namespace, content['pod_spec'])
+        kubernetes.core_api().create_namespaced_pod(namespace,
+                                                    content['pod_spec'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
-                f'SSH Jump Host {sshjump_name} already exists in the cluster, using it...')
+                f'SSH Jump Host {sshjump_name} already exists in the cluster, using it...'
+            )
         else:
             raise
     else:
-        logger.info(
-            f'Creating SSH Jump Host {sshjump_name} in the cluster...')
+        logger.info(f'Creating SSH Jump Host {sshjump_name} in the cluster...')
     # Service
     try:
-        kubernetes.core_api().create_namespaced_service(namespace, content['service_spec'])
+        kubernetes.core_api().create_namespaced_service(namespace,
+                                                        content['service_spec'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
-                f'SSH Jump Service {sshjump_name} already exists in the cluster, using it...')
+                f'SSH Jump Service {sshjump_name} already exists in the cluster, using it...'
+            )
         else:
             raise
     else:
@@ -522,6 +537,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         ssh_jump_port = clouds.Kubernetes.get_port(sshjump_name)
     else:
         ssh_jump_port = kubernetes.LOCAL_PORT_FOR_PORT_FORWARD
-    config['auth']['ssh_proxy_command'] = _get_kubernetes_proxy_command(ssh_jump_port, ssh_jump_ip, ssh_setup_mode)
+    config['auth']['ssh_proxy_command'] = _get_kubernetes_proxy_command(
+        ssh_jump_port, ssh_jump_ip, ssh_setup_mode)
 
     return config
