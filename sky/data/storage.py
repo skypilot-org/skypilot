@@ -314,9 +314,9 @@ class AbstractStore:
           mount_path: str; Mount path on remote server
         """
         raise NotImplementedError
-    
+
     def make_picklable(self) -> None:
-        """
+        """Sets the attributes that are non-picklable to None
         """
         raise NotImplementedError
 
@@ -1319,9 +1319,10 @@ class S3Store(AbstractStore):
         return True
 
     def make_picklable(self) -> None:
+        """Sets the attributes that are non-picklable to None
+        """
         self.client = None
         self.bucket = None
-
 
 
 class GcsStore(AbstractStore):
@@ -1762,8 +1763,10 @@ class GcsStore(AbstractStore):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketDeleteError(
                         f'Failed to delete GCS bucket {bucket_name}.')
-                    
+
     def make_picklable(self) -> None:
+        """Sets the attributes that are non-picklable to None
+        """
         self.client = None
         self.bucket = None
 
@@ -2128,6 +2131,8 @@ class R2Store(AbstractStore):
         return True
 
     def make_picklable(self) -> None:
+        """Sets the attributes that are non-picklable to None
+        """
         self.client = None
         self.bucket = None
 
@@ -2518,5 +2523,7 @@ class IBMCosStore(AbstractStore):
         Rclone.delete_rclone_bucket_profile(self.name, Rclone.RcloneClouds.IBM)
 
     def make_picklable(self) -> None:
+        """Sets the attributes that are non-picklable to None
+        """
         self.client = None
         self.bucket = None

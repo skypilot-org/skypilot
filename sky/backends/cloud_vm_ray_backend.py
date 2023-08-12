@@ -17,7 +17,7 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Dict, Iterable, List, Optional, Tuple, Union, Set, Any
+from typing import Dict, Iterable, List, Optional, Tuple, Union, Set
 
 import colorama
 import filelock
@@ -4250,10 +4250,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         cluster_name = handle.cluster_name
         cluster_metadata = global_user_state.get_cluster_metadata(cluster_name)
+        if cluster_metadata is None:
+            return None
         if not 'storage' in cluster_metadata.keys():
             cluster_metadata['storage'] = {}
         for _, storage_obj in storage_mounts.items():
             for _, store_obj in storage_obj.stores.items():
+                # Update some of the non-picklabe attributes of store instances
                 store_obj.make_picklable()
         cluster_metadata['storage']['storage_mounts'] = storage_mounts
         global_user_state.set_cluster_metadata(cluster_name, cluster_metadata)
@@ -4264,6 +4267,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Gets 'storage_mounts' object from cluster's storage metadata"""
         cluster_name = handle.cluster_name
         cluster_metadata = global_user_state.get_cluster_metadata(cluster_name)
+        if cluster_metadata is None:
+            return None
         if not 'storage' in cluster_metadata.keys():
             return None
         if not 'storage_mounts' in cluster_metadata['storage'].keys():
@@ -4271,6 +4276,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts = cluster_metadata['storage']['storage_mounts']
         for _, storage_obj in storage_mounts.items():
             for _, store_obj in storage_obj.stores.items():
+                # Restoring removed attributes due to non-picklable character
                 store_obj.bucket = store_obj.get_handle()
         return storage_mounts
 
