@@ -2630,7 +2630,7 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
 def check_cluster_name_not_reserved(
         cluster_name: Optional[str],
         operation_str: Optional[str] = None) -> None:
-    """Errors out if the cluster is a reserved cluster (spot/serve controller).
+    """Errors out if the cluster name is reserved (e.g., spot/serve controller).
 
     Raises:
       sky.exceptions.NotSupportedError: if the cluster name is reserved, raise
