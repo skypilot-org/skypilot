@@ -2284,7 +2284,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             worker_ip_max_attempts=max_attempts,
             get_internal_ips=False)
 
-        if self.external_ips() == cluster_external_ips:
+        if self._external_ips == cluster_external_ips:
             # Optimization: If the cached external IPs are the same as the
             # retrieved external IPs, then we can skip retrieving internal
             # IPs since the cached IPs are up-to-date.
@@ -2323,25 +2323,35 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             internal_external_ips[1:], key=lambda x: x[1])
         self.stable_internal_external_ips = stable_internal_external_ips
 
+    @property
+    def _internal_ips(self) -> Optional[List[str]]:
+        if self.stable_internal_external_ips is not None:
+            return [ips[0] for ips in self.stable_internal_external_ips]
+        return None
+
     def internal_ips(
             self,
             max_attempts: int = _FETCH_IP_MAX_ATTEMPTS) -> Optional[List[str]]:
-        if self.stable_internal_external_ips is not None:
-            return [ips[0] for ips in self.stable_internal_external_ips]
+        internal_ips = self._internal_ips
+        if internal_ips is not None:
+            return internal_ips
         self._update_stable_cluster_ips(max_attempts=max_attempts)
+        return self._internal_ips
+
+    @property
+    def _external_ips(self) -> Optional[List[str]]:
         if self.stable_internal_external_ips is not None:
-            return [ips[0] for ips in self.stable_internal_external_ips]
+            return [ips[1] for ips in self.stable_internal_external_ips]
         return None
 
     def external_ips(
             self,
             max_attempts: int = _FETCH_IP_MAX_ATTEMPTS) -> Optional[List[str]]:
-        if self.stable_internal_external_ips is not None:
-            return [ips[1] for ips in self.stable_internal_external_ips]
+        external_ips = self._external_ips
+        if external_ips is not None:
+            return self._external_ips
         self._update_stable_cluster_ips(max_attempts=max_attempts)
-        if self.stable_internal_external_ips is not None:
-            return [ips[1] for ips in self.stable_internal_external_ips]
-        return None
+        return self._external_ips
 
     def external_ssh_ports(
             self,
@@ -2673,7 +2683,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             ip_list = handle.external_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
             ssh_port_list = handle.external_ssh_ports(
-                max_attempts=_FETCH_IP_MAX_ATTEMPTS, use_cached_ports=False)
+                max_attempts=_FETCH_IP_MAX_ATTEMPTS)
             assert ip_list is not None, handle
             assert ssh_port_list is not None, handle
 
