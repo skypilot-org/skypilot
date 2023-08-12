@@ -384,12 +384,10 @@ def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def _get_kubernetes_proxy_command(ingress, ipaddress, ssh_setup_mode):
     if ssh_setup_mode == 'port-forward':
-        timeout = skypilot_config.get_nested(('kubernetes', 'port-forward-timeout'), 3600)
         ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
         port_forward_proxy_cmd_path = os.path.expanduser(kubernetes.PORT_FORWARD_PROXY_CMD_PATH)
         vars_to_fill = {
             'ssh_jump_name': ssh_jump_name,
-            'timeout': timeout,
             'ipaddress': ipaddress,
             'local_port': ingress,
         }
