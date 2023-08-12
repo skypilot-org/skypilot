@@ -4,7 +4,6 @@ This script runs inside sshjump pod as the main process (PID 1).
 """
 import datetime
 import os
-import pytz
 import sys
 import time
 
