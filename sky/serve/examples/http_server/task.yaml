@@ -1,7 +1,6 @@
 resources:
   cloud: gcp
-  ports:
-    - 8081
+  cpus: 2+
 
 workdir: sky/serve/examples/http_server
 
@@ -13,3 +12,6 @@ service:
     path: /health
     initial_delay_seconds: 20
   replicas: 2
+  controller_resources:
+    cloud: gcp
+    cpus: 4+
