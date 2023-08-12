@@ -33,7 +33,8 @@ class SkyServiceSpec:
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'max_replicas must be greater than or equal to min_replicas')
+                    'max_replicas must be greater than or equal to min_replicas'
+                )
         if app_port == constants.CONTROL_PLANE_PORT:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(

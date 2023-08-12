@@ -2490,7 +2490,8 @@ def _refresh_service_record_no_lock(
 
     msg = None
     if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
-        new_status = _service_status_from_replica_info(latest_info['replica_info'])
+        new_status = _service_status_from_replica_info(
+            latest_info['replica_info'])
         record['status'] = new_status
 
     global_user_state.add_or_update_service(**record)
@@ -2629,7 +2630,7 @@ def check_cluster_name_not_reserved(
     for prefix in SKY_RESERVED_CLUSTER_PREFIXES:
         if cluster_name is not None and cluster_name.startswith(prefix):
             msg = (f'Cluster prefix {prefix!r} is reserved for the '
-               f'{SKY_RESERVED_CLUSTER_PREFIXES[reserved_prefix].lower()}.')
+                   f'{SKY_RESERVED_CLUSTER_PREFIXES[prefix].lower()}.')
             break
     if msg is not None:
         if operation_str is not None:

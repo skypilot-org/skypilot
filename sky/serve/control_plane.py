@@ -76,8 +76,9 @@ class ControlPlane:
 
         @self.app.get('/control_plane/get_latest_info')
         def get_latest_info():
-            latest_info =  {
-                'replica_info': self.infra_provider.get_replica_info(verbose=True),
+            latest_info = {
+                'replica_info':
+                    self.infra_provider.get_replica_info(verbose=True),
                 'uptime': self.infra_provider.get_uptime(),
             }
             latest_info = {

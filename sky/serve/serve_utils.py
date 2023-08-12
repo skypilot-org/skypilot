@@ -60,8 +60,7 @@ def get_latest_info() -> str:
 def load_latest_info(payload: str) -> Dict[str, Any]:
     latest_info = common_utils.decode_payload(payload)
     latest_info = {
-        k: pickle.loads(base64.b64decode(v))
-        for k, v in latest_info.items()
+        k: pickle.loads(base64.b64decode(v)) for k, v in latest_info.items()
     }
     return latest_info
 
