@@ -39,7 +39,9 @@ import yaml
 import sky
 from sky import clouds
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import gcp, ibm, kubernetes
+from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -378,9 +380,32 @@ def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return _replace_ssh_info_in_config(config, public_key)
 
 
-def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    get_or_generate_keys()
+def _get_kubernetes_proxy_command(ingress, ipaddress, ssh_setup_mode):
+    if ssh_setup_mode == 'port-forward':
+        timeout = skypilot_config.get_nested(('kubernetes', 'port-forward-timeout'), 3600)
+        ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
+        port_forward_proxy_cmd_path = os.path.expanduser(kubernetes.PORT_FORWARD_PROXY_CMD_PATH)
+        vars_to_fill = {
+            'ssh_jump_name': ssh_jump_name,
+            'timeout': timeout,
+            'ipaddress': ipaddress,
+            'local_port': ingress,
+        }
+        backend_utils.fill_template(kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE,
+                                    vars_to_fill,
+                                    output_path=port_forward_proxy_cmd_path)
+        os.chmod(port_forward_proxy_cmd_path, os.stat(port_forward_proxy_cmd_path).st_mode | 0o111)
+        proxy_command = 'ssh -tt -i {privkey} -o ProxyCommand=\'{port_forward_proxy_cmd_path}\' -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -p {ingress} -W %h:%p sky@{ipaddress}'.format(
+            privkey=PRIVATE_SSH_KEY_PATH, ingress=ingress, ipaddress=ipaddress, port_forward_proxy_cmd_path=port_forward_proxy_cmd_path)
+    else:
+        proxy_command = 'ssh -tt -i {privkey} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -p {ingress} -W %h:%p sky@{ipaddress}'.format(
+            privkey=PRIVATE_SSH_KEY_PATH, ingress=ingress, ipaddress=ipaddress)    
+    return proxy_command 
 
+
+def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    ssh_setup_mode = skypilot_config.get_nested(('kubernetes', 'networking'), None)
+    get_or_generate_keys()
     # Run kubectl command to add the public key to the cluster.
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     key_label = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
@@ -408,6 +433,13 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     sshjump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
     sshjump_image =  clouds.Kubernetes.IMAGE
     namespace = kubernetes_utils.get_current_kube_config_context_namespace()
+    ssh_jump_ip = clouds.Kubernetes.get_external_ip()
+    # If ssh connection is establisehd with kubectl port-forward, the jump pod
+    # will run on ClusterIP service.
+    if ssh_setup_mode == 'port-forward':
+        service_type = 'ClusterIP'
+    else:
+        service_type = 'NodePort'
 
     template_path = os.path.join(sky.__root_dir__, 'templates', 'kubernetes-sshjump.yml.j2')
     if not os.path.exists(template_path):
@@ -415,7 +447,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     with open(template_path) as fin:
         template = fin.read()
     j2_template = jinja2.Template(template)
-    _content = j2_template.render(name=sshjump_name, image=sshjump_image, secret=key_label)
+    _content = j2_template.render(name=sshjump_name, image=sshjump_image, secret=key_label, service_type=service_type)
 
     content = yaml.safe_load(_content)
 
@@ -481,11 +513,11 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(
             f'Creating SSH Jump Service {sshjump_name} in the cluster...')
 
-    ssh_jump_port = clouds.Kubernetes.get_port(sshjump_name)
     ssh_jump_ip = clouds.Kubernetes.get_external_ip()
-
-    config['auth']['ssh_proxy_command'] = \
-        'ssh -tt -i {privkey} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -p {ingress} -W %h:%p sky@{ipaddress}'.format(
-        privkey=PRIVATE_SSH_KEY_PATH, ingress=ssh_jump_port, ipaddress=ssh_jump_ip)
+    if ssh_setup_mode == 'port-forward':
+        ssh_jump_port = kubernetes.LOCAL_PORT_FOR_PORT_FORWARD
+    else:
+        ssh_jump_port = clouds.Kubernetes.get_port(sshjump_name)
+    config['auth']['ssh_proxy_command'] = _get_kubernetes_proxy_command(ssh_jump_port, ssh_jump_ip, ssh_setup_mode)
 
     return config

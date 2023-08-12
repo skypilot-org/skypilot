@@ -48,7 +48,7 @@ service_spec:
     metadata:
         name: {{ name }}
     spec:
-        type: NodePort
+        type: {{ service_type }}
         selector:
             component: {{ name }}
         ports:

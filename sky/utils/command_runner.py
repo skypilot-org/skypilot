@@ -74,6 +74,7 @@ def ssh_options_list(ssh_private_key: Optional[str],
         # Agent forwarding for git.
         'ForwardAgent': 'yes',
     }
+    """
     if ssh_control_name is not None:
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
@@ -82,6 +83,7 @@ def ssh_options_list(ssh_private_key: Optional[str],
             'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
             'ControlPersist': '300s',
         })
+    """
     ssh_key_option = [
         '-i',
         ssh_private_key,

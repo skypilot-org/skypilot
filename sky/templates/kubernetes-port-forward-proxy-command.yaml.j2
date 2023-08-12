@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+
+# Ignore this function and `e home` if you use something like `kubectx` to manage your kubectl contexts and environments
+e(){
+    export KUBECONFIG="/home/gcpuser/.kube/config"
+}
+
+e home
+
+pgrep -f "kubectl port-forward svc/{{ ssh_jump_name }} {{ local_port }}:22" > /dev/null
+
+# If the command is running, kill it
+if [ $? -eq 0 ]; then
+    pkill -f "kubectl port-forward svc/{{ ssh_jump_name }} {{ local_port }}:22"
+fi
+
+kubectl port-forward svc/{{ ssh_jump_name }} {{ local_port }}:22 &
+K8S_PID=$!
+trap "kill -9 $K8S_PID" EXIT
+
+while ! nc -z {{ ipaddress }} {{ local_port }}; do
+    sleep 0.1
+done
+
+socat - tcp:{{ ipaddress }}:{{ local_port }}
