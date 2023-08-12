@@ -179,13 +179,13 @@ def get_service_schema():
             },
             'replica_policy': {
                 'type': 'object',
-                'required': ['min_replica'],
+                'required': ['min_replicas'],
                 'additionalProperties': False,
                 'properties': {
-                    'min_replica': {
+                    'min_replicas': {
                         'type': 'integer',
                     },
-                    'max_replica': {
+                    'max_replicas': {
                         'type': 'integer',
                     },
                     'qps_upper_threshold': {

@@ -150,8 +150,8 @@ if __name__ == '__main__':
     _autoscaler = autoscalers.RequestRateAutoscaler(
         _infra_provider,
         frequency=20,
-        min_nodes=service_spec.min_replica,
-        max_nodes=service_spec.max_replica,
+        min_nodes=service_spec.min_replicas,
+        max_nodes=service_spec.max_replicas,
         upper_threshold=service_spec.qps_upper_threshold,
         lower_threshold=service_spec.qps_lower_threshold,
         cooldown=60,
