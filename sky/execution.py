@@ -991,8 +991,8 @@ def serve_up(
     task.set_resources(original_resources.copy(ports=[app_port]))
 
     # TODO(tian): Use skyserve constants.
-    # The storage will be cleaned up by the control plane `terminate` method after the
-    # service is terminated.
+    # The storage will be cleaned up by the control plane `terminate` method
+    # after the service is terminated.
     _maybe_translate_local_file_mounts_and_sync_up(task)
 
     with tempfile.NamedTemporaryFile(prefix=f'serve-task-{service_name}-',
@@ -1170,9 +1170,6 @@ def serve_down(
 
         purge: If true, ignore errors when cleaning up the controller.
     """
-    # Refresh the service status to get correct replica number.
-    # service_record = backend_utils.refresh_service_status(service_name)[0]
-    # num_replicas = len(service_record['replica_info'])
     service_record = global_user_state.get_service_from_name(service_name)
     # Already filered all inexist service in cli.py
     assert service_record is not None, service_name
@@ -1186,12 +1183,6 @@ def serve_down(
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
         try:
-            # plural = ''
-            # if num_replicas > 1:
-            #     plural = 's'
-            # print(f'{colorama.Fore.YELLOW}'
-            #       f'Tearing down {num_replicas} replica{plural}...'
-            #       f'{colorama.Style.RESET_ALL}')
             code = serve.ServeCodeGen.terminate_service()
             returncode, terminate_service_payload, stderr = backend.run_on_head(
                 handle,

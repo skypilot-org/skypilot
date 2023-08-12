@@ -3957,10 +3957,10 @@ def serve_up(
         return
     assert len(task.resources) == 1
     if list(task.resources)[0].ports is not None:
-        click.secho(
-            ('Specifying ports in resources is not allowed. SkyServe will use the port '
-             'specified in the service section.'),
-            fg='red')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Specifying ports in resources is not allowed. SkyServe will '
+                'use the port specified in the service section.')
         return
 
     if task.service.controller_resources is not None:
@@ -3974,18 +3974,17 @@ def serve_up(
         raise ValueError(
             'Encountered error when parsing controller resources') from e
     if controller_resources.ports is not None:
-        click.secho(
-            ('Cannot specify ports in controller resources. SkyServe will use '
-             'the port specified in the service section.'),
-            fg='red')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Cannot specify ports in controller resources. SkyServe '
+                'will use the port specified in the service section.')
         return
 
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
     dummy_controller_task = sky.Task().set_resources(controller_resources)
-    click.secho('The controller will use the following resources:',
-                fg='cyan')
+    click.secho('The controller will use the following resources:', fg='cyan')
     with sky.Dag() as dag:
         dag.add(dummy_controller_task)
     sky.optimize(dag)
@@ -3994,9 +3993,7 @@ def serve_up(
     dummy_controller_task: sky.Task = dag.tasks[0]
     controller_best_resources = dummy_controller_task.best_resources
 
-    click.secho(
-        'Each replica will use the following resource:',
-        fg='cyan')
+    click.secho('Each replica will use the following resource:', fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
     sky.optimize(dag)
@@ -4292,7 +4289,7 @@ def serve_logs(
     elif redirector:
         core.tail_logs(controller_name, job_id=2, follow=follow)
     else:
-        core.serve_tail_logs(service_name, replica_id, follow=follow)
+        core.serve_tail_logs(service_record, replica_id, follow=follow)
 
 
 # ==============================

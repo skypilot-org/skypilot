@@ -115,8 +115,9 @@ def service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
 
 
 @usage_lib.entrypoint
-def serve_tail_logs(service_name: str, replica_id: int, follow: bool) -> None:
-    service_record = service_status(service_name)[0]
+def serve_tail_logs(service_record: Dict[str, Any], replica_id: int,
+                    follow: bool) -> None:
+    service_name = service_record['name']
     if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_INIT:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
