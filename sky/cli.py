@@ -3870,7 +3870,7 @@ def serve_up(
 ):
     """Launch a SkyServe service.
 
-    ENTRYPOINT must points to a valid YAML file.
+    ENTRYPOINT must point to a valid YAML file.
 
     Example:
 
