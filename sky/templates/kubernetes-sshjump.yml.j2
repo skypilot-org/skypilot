@@ -55,6 +55,9 @@ service_spec:
           - protocol: TCP
             port: 22
             targetPort: 22
+
+# The following ServiceAccount/Role/RoleBinding sets up an RBAC for life cycle
+# management of the jump pod/service
 service_account:
     apiVersion: v1
     kind: ServiceAccount

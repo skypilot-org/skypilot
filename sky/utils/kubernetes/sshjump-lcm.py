@@ -1,6 +1,11 @@
 """Manages lifecycle of sshjump pod.
 
 This script runs inside sshjump pod as the main process (PID 1).
+
+It terminates itself (by removing sshjump service and pod via a call to kubeapi),
+if it does not see ray pods in the duration of 10 minutes. If the user re-launches
+a task before the duration is over, then sshjump pod is being reused and will terminate
+itself when it sees that no ray cluster exist in that amount duration.
 """
 import datetime
 import os
