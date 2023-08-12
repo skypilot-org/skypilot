@@ -12,5 +12,7 @@ CONTROL_PLANE_SYNC_INTERVAL = 20
 
 CONTROLLER_RESOURCES = {'disk_size': 100, 'cpus': '4+'}
 
+# A period of time to initialize your service. Any readiness probe failures
+# during this period will be ignored.
 DEFAULT_INITIAL_DELAY_SECONDS = 1200
 DEFAULT_MIN_REPLICA = 1
