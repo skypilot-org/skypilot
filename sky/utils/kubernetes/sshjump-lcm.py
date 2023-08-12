@@ -19,7 +19,7 @@ current_namespace = os.getenv("MY_POD_NAMESPACE")
 
 # The amount of time in seconds where no Ray pods exist in which after that time
 # sshjump pod terminates itself
-alert_threshold = int(os.getenv("ALERT_THRESHOLD", "300"))
+alert_threshold = int(os.getenv("ALERT_THRESHOLD", "600"))
 # The amount of time in seconds to wait between Ray pods existence checks
 retry_interval = int(os.getenv("RETRY_INTERVAL", "60"))
 
