@@ -991,7 +991,7 @@ def serve_up(
     task.set_resources(original_resources.copy(ports=[app_port]))
 
     # TODO(tian): Use skyserve constants.
-    # The storage is cleanup by the control plane `terminate` method after the
+    # The storage will be cleaned up by the control plane `terminate` method after the
     # service is terminated.
     _maybe_translate_local_file_mounts_and_sync_up(task)
 

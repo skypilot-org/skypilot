@@ -3888,7 +3888,7 @@ def serve_up(
                 status_lib.ServiceStatus.CONTRLLER_FAILED,
                 status_lib.ServiceStatus.FAILED
         ]:
-            prompt = (f'Service {service_name!r} failed last time. '
+            prompt = (f'Service {service_name!r} has failed. '
                       'Please clean up the service and try again.')
         else:
             prompt = f'Service {service_name!r} already exists.'
@@ -3958,7 +3958,7 @@ def serve_up(
     assert len(task.resources) == 1
     if list(task.resources)[0].ports is not None:
         click.secho(
-            ('Cannot specify ports in resources. SkyServe will use the port '
+            ('Specifying ports in resources is not allowed. SkyServe will use the port '
              'specified in the service section.'),
             fg='red')
         return
@@ -3984,7 +3984,7 @@ def serve_up(
     click.echo(task.service)
 
     dummy_controller_task = sky.Task().set_resources(controller_resources)
-    click.secho('The controller will be launched with the following resources:',
+    click.secho('The controller will use the following resources:',
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(dummy_controller_task)
@@ -3995,7 +3995,7 @@ def serve_up(
     controller_best_resources = dummy_controller_task.best_resources
 
     click.secho(
-        'Each replica will be launched with the following estimated resources:',
+        'Each replica will use the following resource:',
         fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
@@ -4277,7 +4277,7 @@ def serve_logs(
     have_replica_id = replica_id is not None
     if (control_plane + redirector + have_replica_id) != 1:
         click.secho(
-            'One and only one of --control-plane, --redirector, --replica-id '
+            'Only one of --control-plane, --redirector, --replica-id '
             'can be specified. See `sky serve logs --help` for more '
             'information.',
             fg='red')

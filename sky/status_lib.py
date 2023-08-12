@@ -104,8 +104,7 @@ class ReplicaStatus(enum.Enum):
     # readiness probe is passed.
     READY = 'READY'
 
-    # The replica VM is provisioned, the service is started but the service
-    # is not ready, i.e. the readiness probe fails.
+    # The service was ready before, but it becomes not ready now, i.e. the readiness probe fails.
     NOT_READY = 'NOT_READY'
 
     # The replica VM is being shut down. i.e., the `sky down` is still running.

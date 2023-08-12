@@ -39,7 +39,7 @@ class ProcessStatus(enum.Enum):
     # The process is finished and success
     SUCCESS = 'SUCCESS'
 
-    # The process is finished and failed
+    # The process failed
     FAILED = 'FAILED'
 
 
