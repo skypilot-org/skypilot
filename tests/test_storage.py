@@ -1,7 +1,7 @@
+import tempfile
 import time
 
 import pytest
-import tempfile
 
 from sky import exceptions
 from sky.data import storage as storage_lib

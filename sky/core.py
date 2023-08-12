@@ -5,24 +5,24 @@ from typing import Any, Dict, List, Optional, Union
 
 import colorama
 
+from sky import backends
 from sky import clouds
 from sky import dag
-from sky import task
-from sky import backends
 from sky import data
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot
 from sky import status_lib
+from sky import task
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import log_utils
+from sky.utils import subprocess_utils
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
-from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 

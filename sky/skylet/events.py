@@ -11,8 +11,10 @@ import psutil
 import yaml
 
 from sky import sky_logging
-from sky.backends import backend_utils, cloud_vm_ray_backend
-from sky.skylet import autostop_lib, job_lib
+from sky.backends import backend_utils
+from sky.backends import cloud_vm_ray_backend
+from sky.skylet import autostop_lib
+from sky.skylet import job_lib
 from sky.spot import spot_utils
 from sky.utils import common_utils
 
@@ -197,7 +199,8 @@ class AutostopEvent(SkyletEvent):
 
     def _stop_cluster_with_new_provisioner(self, autostop_config,
                                            cluster_config, provider_name):
-        from sky import provision as provision_lib  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky import provision as provision_lib
         autostop_lib.set_autostopping_started()
 
         cluster_name = cluster_config['cluster_name']

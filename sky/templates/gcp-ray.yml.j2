@@ -6,6 +6,17 @@ max_workers: {{num_nodes - 1}}
 upscaling_speed: {{num_nodes - 1}}
 idle_timeout_minutes: 60
 
+{%- if docker_image is not none %}
+docker:
+  image: {{docker_image}}
+  container_name: {{docker_container_name}}
+  run_options:
+    - --ulimit nofile=1048576:1048576
+    {%- if gpu is not none %}
+      --gpus all
+    {%- endif %}
+{%- endif %}
+
 provider:
   # We use a custom node provider for GCP to support instance stop and reuse.
   type: external  # type: gcp
@@ -43,6 +54,12 @@ available_node_types:
     node_config:
       labels:
         skypilot-user: {{ user }}
+      {%- if specific_reservations %}
+      reservationAffinity:
+        consumeReservationType: SPECIFIC_RESERVATION
+        key: compute.googleapis.com/reservation-name
+        values: {{ specific_reservations }}
+      {%- endif %}
 {%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}
@@ -96,14 +113,81 @@ available_node_types:
         - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
   {%- endif %}
 {%- endif %}
-{% if num_nodes > 1 %}
+{% if num_nodes - 1 - num_specific_reserved_workers > 0 %}
   ray_worker_default:
-    min_workers: {{num_nodes - 1}}
-    max_workers: {{num_nodes - 1}}
+    min_workers: {{num_nodes - 1 - num_specific_reserved_workers}}
+    max_workers: {{num_nodes - 1 - num_specific_reserved_workers}}
     resources: {}
     node_config:
       labels:
         skypilot-user: {{ user }}
+  {%- if tpu_vm %}
+      acceleratorType: {{tpu_type}}
+      runtimeVersion: {{runtime_version}}
+      metadata:
+        # TPU VM's metadata has different format than normal VMs.
+        # After replacing the variables, this will become username:ssh_public_key_content.
+        # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
+        ssh-keys: |
+              skypilot:ssh_user:skypilot:ssh_public_key_content
+    {%- if use_spot %}
+      schedulingConfig:
+        preemptible: true
+    {%- endif %}
+  {%- else %}
+      machineType: {{instance_type}}
+    {%- if machine_image is not none %}
+      sourceMachineImage: {{machine_image}}
+    {%- endif %}
+      disks:
+        - boot: true
+          autoDelete: true
+          type: PERSISTENT
+          initializeParams:
+            diskSizeGb: {{disk_size}}
+            # See https://cloud.google.com/deep-learning-vm/docs/images
+          {%- if machine_image is none %}
+            sourceImage: {{image_id}}
+          {%- endif %}
+            diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
+    {%- if gpu is not none %}
+      guestAccelerators:
+        - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
+          acceleratorCount: {{gpu_count}}
+    {%- endif %}
+      metadata:
+        items:
+          - key: ssh-keys
+            # After replacing the variables, this will become username:ssh_public_key_content.
+            # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
+            value: |
+              skypilot:ssh_user:skypilot:ssh_public_key_content
+    {%- if gpu is not none %}
+          - key: install-nvidia-driver
+            value: "True"
+    {%- endif %}
+      scheduling:
+    {%- if use_spot %}
+        - preemptible: true
+    {%- endif %}
+    {%- if gpu is not none %}
+        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
+    {%- endif %}
+  {%- endif %}
+{%- endif %}
+
+{% if num_specific_reserved_workers > 0 %}
+  ray_worker_reserved:
+    min_workers: {{num_specific_reserved_workers}}
+    max_workers: {{num_specific_reserved_workers}}
+    resources: {}
+    node_config:
+      labels:
+        skypilot-user: {{ user }}
+      reservationAffinity:
+        consumeReservationType: SPECIFIC_RESERVATION
+        key: compute.googleapis.com/reservation-name
+        values: {{ specific_reservations }}
   {%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}
@@ -192,9 +276,11 @@ setup_commands:
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   - function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
+    {%- if docker_image is none %}
     sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;
     sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
+    {%- endif %}
     p=$(mylsof "/var/lib/dpkg/lock-frontend"); echo "$p";
     sudo kill -9 `echo "$p" | tail -n 1` || true;
     sudo rm /var/lib/dpkg/lock-frontend;
@@ -207,13 +293,16 @@ setup_commands:
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
     source ~/.bashrc;
   {%- if tpu_vm %}
-    test -f /home/gcpuser/miniconda3/etc/profile.d/conda.sh && source /home/gcpuser/miniconda3/etc/profile.d/conda.sh && conda activate base || true;
+    test -f ~/miniconda3/etc/profile.d/conda.sh && source ~/miniconda3/etc/profile.d/conda.sh && conda activate base || true;
     pip3 install --upgrade google-api-python-client;
   {%- endif %}
-    (pip3 list | grep "ray " | grep {{ray_version}} 2>&1 > /dev/null || pip3 install --exists-action w -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+    mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+    (pip3 list | grep "ray " | grep {{ray_version}} 2>&1 > /dev/null || pip3 install --exists-action w -U ray[default]=={{ray_version}});
     (pip3 list | grep "skypilot " && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[gcp]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
+    {%- if docker_image is none %}
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
+    {%- endif %}
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');

@@ -3,11 +3,10 @@
 This module provides a standard low-level interface that all
 providers supported by SkyPilot need to follow.
 """
-from typing import Any, Dict, List, Optional
-
 import functools
 import importlib
 import inspect
+from typing import Any, Dict, List, Optional
 
 from sky import status_lib
 

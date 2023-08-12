@@ -1,8 +1,9 @@
 """Lambda Cloud."""
 import json
-import requests
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
+
+import requests
 
 from sky import clouds
 from sky import exceptions
@@ -37,6 +38,10 @@ class Lambda(clouds.Cloud):
         clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE: (
+            f'Docker image is not supported in {_REPR}. '
+            'You can try running docker command inside the `run` section in task.yaml.'
+        ),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.OPEN_PORTS: f'Opening ports is not supported in {_REPR}.',

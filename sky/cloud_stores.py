@@ -10,9 +10,11 @@ TODO:
 import subprocess
 import urllib.parse
 
+from sky.adaptors import aws
+from sky.adaptors import cloudflare
+from sky.adaptors import ibm
 from sky.clouds import gcp
 from sky.data import data_utils
-from sky.adaptors import aws, cloudflare, ibm
 from sky.data.data_utils import Rclone
 
 

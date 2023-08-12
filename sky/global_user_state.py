@@ -13,11 +13,11 @@ import pickle
 import sqlite3
 import time
 import typing
-from typing import Any, Dict, List, Tuple, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
-from sky import status_lib
 from sky import clouds
+from sky import status_lib
 from sky.adaptors import cloudflare
 from sky.data import storage as storage_lib
 from sky.utils import common_utils

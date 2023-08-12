@@ -3,10 +3,10 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from typing import List, Optional, Tuple, NamedTuple
+from typing import List, NamedTuple, Optional, Tuple
 
-import colorama
 from click import testing as cli_testing
+import colorama
 import pytest
 import yaml
 

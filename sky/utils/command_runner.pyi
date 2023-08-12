@@ -6,11 +6,13 @@ determine the return type based on the value of require_outputs.
 """
 import enum
 import typing
+from typing import List, Optional, Tuple, Union
+
+from typing_extensions import Literal
+
 from sky import sky_logging as sky_logging
 from sky.skylet import log_lib as log_lib
 from sky.utils import subprocess_utils as subprocess_utils
-from typing import List, Optional, Tuple, Union
-from typing_extensions import Literal
 
 GIT_EXCLUDE: str
 RSYNC_DISPLAY_OPTION: str
@@ -36,6 +38,7 @@ class SSHCommandRunner:
     ssh_user: str
     ssh_private_key: str
     ssh_control_name: Optional[str]
+    docker_user: str
     port: int
 
     def __init__(self,
@@ -43,7 +46,8 @@ class SSHCommandRunner:
                  ssh_user: str,
                  ssh_private_key: str,
                  ssh_control_name: Optional[str] = ...,
-                 port: str = ...) -> None:
+                 port: str = ...,
+                 docker_user: Optional[str] = ...) -> None:
         ...
 
     @staticmethod
@@ -54,6 +58,7 @@ class SSHCommandRunner:
         ssh_control_name: Optional[str] = ...,
         ssh_proxy_command: Optional[str] = ...,
         port_list: Optional[List[int]] = ...,
+        docker_user: Optional[str] = ...,
     ) -> List['SSHCommandRunner']:
         ...
 

@@ -5,15 +5,15 @@ processes of proc_pid.
 """
 
 import argparse
-import requests
 import sys
 import time
 
 import psutil
-
-from sky.skylet import job_lib
 from ray.dashboard.modules.job import common as job_common
 from ray.dashboard.modules.job import sdk as job_sdk
+import requests
+
+from sky.skylet import job_lib
 
 if __name__ == '__main__':
 

@@ -4,7 +4,8 @@ import json
 import os
 import re
 import typing
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
+                    Union)
 
 import yaml
 
@@ -13,8 +14,8 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky.backends import backend_utils
-from sky.data import storage as storage_lib
 from sky.data import data_utils
+from sky.data import storage as storage_lib
 from sky.skylet import constants
 from sky.utils import schemas
 from sky.utils import ux_utils
