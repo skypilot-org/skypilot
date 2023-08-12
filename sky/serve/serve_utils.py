@@ -50,29 +50,20 @@ def generate_replica_local_log_file_name(cluster_name: str) -> str:
     return f'{prefix}/{cluster_name}_local_log.txt'
 
 
-def get_replica_info() -> str:
-    resp = requests.get(_CONTROL_PLANE_URL + '/control_plane/get_replica_info')
+def get_latest_info() -> str:
+    resp = requests.get(_CONTROL_PLANE_URL + '/control_plane/get_latest_info')
     if resp.status_code != 200:
         raise ValueError(f'Failed to get replica info: {resp.text}')
-    return common_utils.encode_payload(resp.json()['replica_info'])
+    return common_utils.encode_payload(resp.json())
 
 
-def load_replica_info(payload: str) -> List[Dict[str, Any]]:
-    replica_info = common_utils.decode_payload(payload)
-    replica_info = pickle.loads(base64.b64decode(replica_info))
-    return replica_info
-
-
-def get_uptime() -> str:
-    resp = requests.get(_CONTROL_PLANE_URL + '/control_plane/get_uptime')
-    if resp.status_code != 200:
-        raise ValueError(f'Failed to get uptime: {resp.text}')
-    return common_utils.encode_payload(resp.json()['uptime'])
-
-
-def load_uptime(payload: str) -> int:
-    uptime = common_utils.decode_payload(payload)
-    return int(uptime)
+def load_latest_info(payload: str) -> Dict[str, Any]:
+    latest_info = common_utils.decode_payload(payload)
+    latest_info = {
+        k: pickle.loads(base64.b64decode(v))
+        for k, v in latest_info.items()
+    }
+    return latest_info
 
 
 def terminate_service() -> str:
@@ -180,7 +171,7 @@ def stream_logs(service_name: str,
 
     def _get_replica_status() -> status_lib.ReplicaStatus:
         resp = requests.get(_CONTROL_PLANE_URL +
-                            '/control_plane/get_replica_info')
+                            '/control_plane/get_latest_info')
         if resp.status_code != 200:
             raise ValueError(
                 f'{colorama.Fore.RED}Failed to get replica info for service '
@@ -222,24 +213,17 @@ class ServeCodeGen:
     """Code generator for SkyServe.
 
     Usage:
-      >> code = ServeCodeGen.get_replica_info()
+      >> code = ServeCodeGen.get_latest_info()
     """
     _PREFIX = [
         'from sky.serve import serve_utils',
     ]
 
     @classmethod
-    def get_replica_info(cls) -> str:
+    def get_latest_info(cls) -> str:
         code = [
-            'msg = serve_utils.get_replica_info()',
+            'msg = serve_utils.get_latest_info()',
             'print(msg, end="", flush=True)'
-        ]
-        return cls._build(code)
-
-    @classmethod
-    def get_uptime(cls) -> str:
-        code = [
-            'msg = serve_utils.get_uptime()', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 

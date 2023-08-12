@@ -977,7 +977,7 @@ def serve_up(
     assert len(task.resources) == 1
     requested_resources = list(task.resources)[0]
     global_user_state.add_or_update_service(
-        service_name, -1, controller_cluster_name, '',
+        service_name, None, controller_cluster_name, '',
         status_lib.ServiceStatus.CONTROLLER_INIT, policy, requested_resources,
         [])
     app_port = int(task.service.app_port)

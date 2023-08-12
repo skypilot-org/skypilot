@@ -2469,8 +2469,8 @@ def _refresh_service_record_no_lock(
     backend = get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = serve_lib.ServeCodeGen.get_replica_info()
-    returncode, replica_info_payload, stderr = backend.run_on_head(
+    code = serve_lib.ServeCodeGen.get_latest_info()
+    returncode, latest_info_payload, stderr = backend.run_on_head(
         handle,
         code,
         require_outputs=True,
@@ -2484,30 +2484,13 @@ def _refresh_service_record_no_lock(
                    f'Using the cached record. Reason: {stderr}')
         return record, msg
 
-    replica_info = serve_lib.load_replica_info(replica_info_payload)
-    record['replica_info'] = replica_info
+    latest_info = serve_lib.load_latest_info(latest_info_payload)
+    record['replica_info'] = latest_info['replica_info']
+    record['uptime'] = latest_info['uptime']
 
     msg = None
     if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
-        new_status = _service_status_from_replica_info(replica_info)
-        if (record['uptime'] < 0 and
-                record['status'] != status_lib.ServiceStatus.READY and
-                new_status == status_lib.ServiceStatus.READY):
-            code = serve_lib.ServeCodeGen.get_uptime()
-            returncode, uptime_payload, stderr = backend.run_on_head(
-                handle,
-                code,
-                require_outputs=True,
-                stream_logs=False,
-                separate_stderr=True)
-            if returncode == 0:
-                record['uptime'] = serve_lib.load_uptime(uptime_payload)
-            else:
-                msg = _check_controller_status_and_set_service_status(
-                    record['name'], controller_cluster_name)
-                if msg is None:
-                    msg = ('Failed to refresh uptime from the controller. '
-                           f'Skipping update uptime. Reason: {stderr}')
+        new_status = _service_status_from_replica_info(latest_info['replica_info'])
         record['status'] = new_status
 
     global_user_state.add_or_update_service(**record)

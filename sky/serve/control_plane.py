@@ -74,17 +74,17 @@ class ControlPlane:
         def get_ready_replicas():
             return {'ready_replicas': self.infra_provider.get_ready_replicas()}
 
-        @self.app.get('/control_plane/get_replica_info')
-        def get_replica_info():
-            infos = self.infra_provider.get_replica_info(verbose=True)
-            return {
-                'replica_info': base64.b64encode(pickle.dumps(infos)
-                                                ).decode('utf-8')
+        @self.app.get('/control_plane/get_latest_info')
+        def get_latest_info():
+            latest_info =  {
+                'replica_info': self.infra_provider.get_replica_info(verbose=True),
+                'uptime': self.infra_provider.get_uptime(),
             }
-
-        @self.app.get('/control_plane/get_uptime')
-        def get_uptime():
-            return {'uptime': self.infra_provider.get_uptime()}
+            latest_info = {
+                k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
+                for k, v in latest_info.items()
+            }
+            return latest_info
 
         @self.app.post('/control_plane/terminate')
         def terminate(request: fastapi.Request):
@@ -95,6 +95,8 @@ class ControlPlane:
                 self.autoscaler.terminate_monitor()
             msg = self.infra_provider.terminate()
             # Cleanup cloud storage
+            # TODO(tian): move to local serve_down so that we can cleanup
+            # local storage cache as well.
             task = sky.Task.from_yaml(self.task_yaml)
             backend = backends.CloudVmRayBackend()
             backend.teardown_ephemeral_storage(task)

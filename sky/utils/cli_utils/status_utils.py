@@ -391,7 +391,7 @@ _get_service_name = (lambda service_record: service_record['service_name'])
 
 def _get_uptime(service_record: _ServiceRecord) -> str:
     uptime = service_record['uptime']
-    if uptime < 0:
+    if uptime is None:
         return '-'
     return log_utils.readable_time_duration(uptime, absolute=True)
 
