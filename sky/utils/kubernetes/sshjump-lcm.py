@@ -9,7 +9,6 @@ import time
 
 from kubernetes import client
 from kubernetes import config
-import pytz
 
 # Load kube config
 config.load_incluster_config()
