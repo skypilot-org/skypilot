@@ -2643,14 +2643,11 @@ def check_cluster_name_not_reserved(
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
         msg = (f'Cluster {cluster_name!r} is reserved for the '
                f'{SKY_RESERVED_CLUSTER_NAMES[cluster_name].lower()}.')
-    reserved_prefix = None
     for prefix in SKY_RESERVED_CLUSTER_PREFIXES:
         if cluster_name is not None and cluster_name.startswith(prefix):
-            reserved_prefix = prefix
-            break
-    if reserved_prefix is not None:
-        msg = (f'Cluster prefix {reserved_prefix!r} is reserved for the '
+            msg = (f'Cluster prefix {prefix!r} is reserved for the '
                f'{SKY_RESERVED_CLUSTER_PREFIXES[reserved_prefix].lower()}.')
+            break
     if msg is not None:
         if operation_str is not None:
             msg += f' {operation_str} is not allowed.'
