@@ -1909,7 +1909,8 @@ class RetryingVmProvisioner(object):
             # The line looks like: 'Local node IP: <internal head_ip>\n'
             position = stdout.rfind('Local node IP')
             line = stdout[position + 1:].partition('\n')[0]
-            internal_ip_list = re.findall(backend_utils.IP_ADDR_REGEX, line)
+            internal_ip_list = re.findall(backend_utils.IP_ADDR_REGEX,
+                                          common_utils.remove_color(line))
             if len(internal_ip_list) == 1:
                 head_internal_ip = internal_ip_list[0]
 
@@ -1917,6 +1918,7 @@ class RetryingVmProvisioner(object):
             head_ips = None
             if head_external_ip is not None and head_internal_ip is not None:
                 head_ips = (head_internal_ip, head_external_ip)
+            print('Get head ips from ray up stdout: ', head_ips)
             return GangSchedulingStatus.CLUSTER_READY, stdout, stderr, head_ips
 
         # All code below is handling num_nodes > 1.
