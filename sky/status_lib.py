@@ -114,8 +114,7 @@ class ReplicaStatus(enum.Enum):
     # The replica VM is once failed and has been deleted.
     FAILED = 'FAILED'
 
-    # `sky.down` failed. This is of high risk since it might have resources
-    # leak.
+    # `sky.down` failed during service teardown. This could mean resource leakage.
     FAILED_CLEANUP = 'FAILED_CLEANUP'
 
     # Unknown status. This should never happen.
