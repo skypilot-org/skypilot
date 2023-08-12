@@ -2443,7 +2443,7 @@ def _check_controller_status_and_set_service_status(
             cluster_record['status'] != status_lib.ClusterStatus.UP):
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
-        return f'Controller cluster {cluster_name!r} is not exist or UP.'
+        return f'Controller cluster {cluster_name!r} is not found or UP.'
     return None
 
 
