@@ -383,7 +383,12 @@ def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _get_kubernetes_proxy_command(ingress, ipaddress, ssh_setup_mode):
-    if ssh_setup_mode == 'port-forward':
+    if ssh_setup_mode == 'nodeport':
+        proxy_command = 'ssh -tt -i {privkey} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -p {ingress} -W %h:%p sky@{ipaddress}'.format(
+            privkey=PRIVATE_SSH_KEY_PATH, ingress=ingress, ipaddress=ipaddress) 
+    # Setting kubectl port-forward/socat to establish ssh session using
+    # ClusterIP service
+    else:
         ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
         port_forward_proxy_cmd_path = os.path.expanduser(kubernetes.PORT_FORWARD_PROXY_CMD_PATH)
         vars_to_fill = {
@@ -397,14 +402,13 @@ def _get_kubernetes_proxy_command(ingress, ipaddress, ssh_setup_mode):
         os.chmod(port_forward_proxy_cmd_path, os.stat(port_forward_proxy_cmd_path).st_mode | 0o111)
         proxy_command = 'ssh -tt -i {privkey} -o ProxyCommand=\'{port_forward_proxy_cmd_path}\' -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -p {ingress} -W %h:%p sky@{ipaddress}'.format(
             privkey=PRIVATE_SSH_KEY_PATH, ingress=ingress, ipaddress=ipaddress, port_forward_proxy_cmd_path=port_forward_proxy_cmd_path)
-    else:
-        proxy_command = 'ssh -tt -i {privkey} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -p {ingress} -W %h:%p sky@{ipaddress}'.format(
-            privkey=PRIVATE_SSH_KEY_PATH, ingress=ingress, ipaddress=ipaddress)    
     return proxy_command 
 
 
 def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    ssh_setup_mode = skypilot_config.get_nested(('kubernetes', 'networking'), None)
+    # Default ssh session is established with kubectl port-forwarding with
+    # ClusterIP service 
+    ssh_setup_mode = skypilot_config.get_nested(('kubernetes', 'networking'), 'port-forward').lower()
     get_or_generate_keys()
     # Run kubectl command to add the public key to the cluster.
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
@@ -434,12 +438,13 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     sshjump_image =  clouds.Kubernetes.IMAGE
     namespace = kubernetes_utils.get_current_kube_config_context_namespace()
     ssh_jump_ip = clouds.Kubernetes.get_external_ip()
-    # If ssh connection is establisehd with kubectl port-forward, the jump pod
-    # will run on ClusterIP service.
-    if ssh_setup_mode == 'port-forward':
-        service_type = 'ClusterIP'
-    else:
+    if ssh_setup_mode == 'nodeport':
         service_type = 'NodePort'
+    # If ssh connection is establisehd with kubectl port-forward, the jump pod
+    # will run on ClusterIP service. This enables to establish ssh session
+    # without opening any ports on the Kubernetes cluster.
+    else:
+        service_type = 'ClusterIP'
 
     template_path = os.path.join(sky.__root_dir__, 'templates', 'kubernetes-sshjump.yml.j2')
     if not os.path.exists(template_path):
@@ -448,7 +453,6 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         template = fin.read()
     j2_template = jinja2.Template(template)
     _content = j2_template.render(name=sshjump_name, image=sshjump_image, secret=key_label, service_type=service_type)
-
     content = yaml.safe_load(_content)
 
     # ServiceAccount
@@ -514,10 +518,10 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             f'Creating SSH Jump Service {sshjump_name} in the cluster...')
 
     ssh_jump_ip = clouds.Kubernetes.get_external_ip()
-    if ssh_setup_mode == 'port-forward':
-        ssh_jump_port = kubernetes.LOCAL_PORT_FOR_PORT_FORWARD
-    else:
+    if ssh_setup_mode == 'nodeport':
         ssh_jump_port = clouds.Kubernetes.get_port(sshjump_name)
+    else:
+        ssh_jump_port = kubernetes.LOCAL_PORT_FOR_PORT_FORWARD
     config['auth']['ssh_proxy_command'] = _get_kubernetes_proxy_command(ssh_jump_port, ssh_jump_ip, ssh_setup_mode)
 
     return config
