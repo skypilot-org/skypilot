@@ -314,6 +314,11 @@ class AbstractStore:
           mount_path: str; Mount path on remote server
         """
         raise NotImplementedError
+    
+    def make_picklable(self) -> None:
+        """
+        """
+        raise NotImplementedError
 
     def __deepcopy__(self, memo):
         # S3 Client and GCS Client cannot be deep copied, hence the
@@ -1313,6 +1318,11 @@ class S3Store(AbstractStore):
             time.sleep(0.1)
         return True
 
+    def make_picklable(self) -> None:
+        self.client = None
+        self.bucket = None
+
+
 
 class GcsStore(AbstractStore):
     """GcsStore inherits from Storage Object and represents the backend
@@ -1752,6 +1762,10 @@ class GcsStore(AbstractStore):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketDeleteError(
                         f'Failed to delete GCS bucket {bucket_name}.')
+                    
+    def make_picklable(self) -> None:
+        self.client = None
+        self.bucket = None
 
 
 class R2Store(AbstractStore):
@@ -2112,6 +2126,10 @@ class R2Store(AbstractStore):
         while data_utils.verify_r2_bucket(bucket_name):
             time.sleep(0.1)
         return True
+
+    def make_picklable(self) -> None:
+        self.client = None
+        self.bucket = None
 
 
 class IBMCosStore(AbstractStore):
@@ -2498,3 +2516,7 @@ class IBMCosStore(AbstractStore):
             if e.__class__.__name__ == 'NoSuchBucket':
                 logger.debug('bucket already removed')
         Rclone.delete_rclone_bucket_profile(self.name, Rclone.RcloneClouds.IBM)
+
+    def make_picklable(self) -> None:
+        self.client = None
+        self.bucket = None

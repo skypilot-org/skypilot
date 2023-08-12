@@ -4254,8 +4254,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             cluster_metadata['storage'] = {}
         for _, storage_obj in storage_mounts.items():
             for _, store_obj in storage_obj.stores.items():
-                store_obj.client = None
-                store_obj.bucket = None
+                store_obj.make_picklable()
         cluster_metadata['storage']['storage_mounts'] = storage_mounts
         global_user_state.set_cluster_metadata(cluster_name, cluster_metadata)
 
