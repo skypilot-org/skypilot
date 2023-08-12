@@ -62,18 +62,18 @@ from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.utils import common_utils
+from sky.skylet.providers.kubernetes import utils as kubernetes_utils
+from sky.usage import usage_lib
 from sky.utils import command_runner
+from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
-from sky.utils import kubernetes_utils
 from sky.utils import log_utils
 from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
-from sky.usage import usage_lib
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
@@ -510,8 +510,9 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         else:
             value = os.path.basename(os.environ['SHELL'])
 
-    zshrc_diff = '# For SkyPilot shell completion\n. ~/.sky/.sky-complete.zsh'
-    bashrc_diff = '# For SkyPilot shell completion\n. ~/.sky/.sky-complete.bash'
+    zshrc_diff = '\n# For SkyPilot shell completion\n. ~/.sky/.sky-complete.zsh'
+    bashrc_diff = ('\n# For SkyPilot shell completion'
+                   '\n. ~/.sky/.sky-complete.bash')
 
     if value == 'bash':
         install_cmd = f'_SKY_COMPLETE=bash_source sky > \

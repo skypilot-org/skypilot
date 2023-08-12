@@ -8,9 +8,9 @@ import colorama
 from rich import console as rich_console
 
 from sky import backends
-from sky.adaptors import docker
 from sky import global_user_state
 from sky import sky_logging
+from sky.adaptors import docker
 from sky.backends import backend_utils
 from sky.backends import docker_utils
 from sky.data import storage as storage_lib

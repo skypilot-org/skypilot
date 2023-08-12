@@ -3,14 +3,13 @@
 The timeline follows the trace event format defined here:
 https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
 """  # pylint: disable=line-too-long
-import functools
-from typing import Optional, Union, Callable
-
 import atexit
+import functools
 import json
 import os
 import threading
 import time
+from typing import Callable, Optional, Union
 
 import filelock
 

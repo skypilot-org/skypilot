@@ -30,6 +30,7 @@ from typing import Any, Dict, Tuple
 import uuid
 
 import colorama
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
@@ -47,6 +48,7 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.skylet.providers.kubernetes import utils as kubernetes_utils
 from sky.skylet.providers.lambda_cloud import lambda_utils
+
 
 logger = sky_logging.init_logger(__name__)
 

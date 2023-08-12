@@ -1,17 +1,18 @@
 """Common utilities for service catalog."""
 import ast
+import difflib
 import hashlib
 import os
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
-import difflib
 import filelock
-import requests
 import pandas as pd
+import requests
 
 from sky import sky_logging
 from sky.clouds import cloud as cloud_lib
+from sky.clouds import cloud_registry
 from sky.clouds.service_catalog import constants
 from sky.utils import log_utils
 from sky.utils import ux_utils
@@ -69,7 +70,7 @@ def read_catalog(filename: str,
     assert (pull_frequency_hours is None or
             pull_frequency_hours >= 0), pull_frequency_hours
     catalog_path = get_catalog_path(filename)
-    cloud = cloud_lib.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
+    cloud = cloud_registry.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
 
     meta_path = os.path.join(_CATALOG_DIR, '.meta', filename)
     os.makedirs(os.path.dirname(meta_path), exist_ok=True)
