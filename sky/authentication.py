@@ -418,8 +418,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         template = fin.read()
     j2_template = jinja2.Template(template)
     cont = j2_template.render(name=sshjump_name,
-                                  image=sshjump_image,
-                                  secret=key_label)
+                              image=sshjump_image,
+                              secret=key_label)
 
     content = yaml.safe_load(cont)
 
@@ -431,8 +431,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         if e.status == 409:
             logger.warning(
                 'SSH Jump ServiceAcount already exists in the cluster, using '
-                'it...'
-            )
+                'it...')
         else:
             raise
     else:
@@ -456,8 +455,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         if e.status == 409:
             logger.warning(
                 'SSH Jump RoleBinding already exists in the cluster, using '
-                'it...'
-            )
+                'it...')
         else:
             raise
     else:
@@ -471,8 +469,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         if e.status == 409:
             logger.warning(
                 f'SSH Jump Host {sshjump_name} already exists in the cluster, '
-                'using it...'
-            )
+                'using it...')
         else:
             raise
     else:
@@ -485,8 +482,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         if e.status == 409:
             logger.warning(
                 f'SSH Jump Service {sshjump_name} already exists in the '
-                'cluster, using it...'
-            )
+                'cluster, using it...')
         else:
             raise
     else:
