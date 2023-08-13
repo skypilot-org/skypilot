@@ -1,6 +1,7 @@
-import requests
 import json
+
 import openai
+import requests
 
 stream = True
 model = "Llama-2-7b-chat-hf"

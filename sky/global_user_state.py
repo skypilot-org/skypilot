@@ -25,8 +25,8 @@ from sky.utils import db_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
-    from sky.data import Storage
     from sky import resources as resources_lib
+    from sky.data import Storage
 
 _ENABLED_CLOUDS_KEY = 'enabled_clouds'
 

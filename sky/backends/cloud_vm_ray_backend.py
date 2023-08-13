@@ -31,10 +31,10 @@ from sky import global_user_state
 from sky import optimizer
 from sky import provision as provision_lib
 from sky import resources as resources_lib
+from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky import spot as spot_lib
-from sky import serve as serve_lib
 from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils

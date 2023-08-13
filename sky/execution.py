@@ -15,16 +15,15 @@ Current task launcher:
 import copy
 import enum
 import getpass
-import requests
-from rich import console as rich_console
-import tempfile
-import time
 import os
 import tempfile
+import time
 from typing import Any, Dict, List, Optional, Union
 import uuid
 
 import colorama
+import requests
+from rich import console as rich_console
 
 import sky
 from sky import backends
@@ -33,10 +32,10 @@ from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
+from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
 from sky import spot
-from sky import serve
 from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils

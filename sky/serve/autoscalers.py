@@ -4,8 +4,8 @@ import threading
 import time
 from typing import Optional
 
-from sky.serve import infra_providers
 from sky.serve import constants
+from sky.serve import infra_providers
 
 logger = logging.getLogger(__name__)
 

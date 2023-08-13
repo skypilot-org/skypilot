@@ -4,12 +4,13 @@ import enum
 import logging
 import os
 import random
-import requests
 import signal
 import subprocess
 import threading
 import time
-from typing import List, Dict, Set, Optional, Any, Union, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
+
+import requests
 
 from sky import backends
 from sky import core

@@ -1,9 +1,10 @@
 """Service specification for SkyServe."""
-import os
 import json
-import yaml
+import os
 import textwrap
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
+import yaml
 
 from sky.backends import backend_utils
 from sky.serve import constants

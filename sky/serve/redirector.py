@@ -1,11 +1,12 @@
 """Redirector: redirect any incoming request to an endpoint replica."""
 import argparse
-import fastapi
 import logging
 import threading
 import time
-import uvicorn
+
+import fastapi
 import requests
+import uvicorn
 
 from sky.serve import constants
 from sky.serve import load_balancers

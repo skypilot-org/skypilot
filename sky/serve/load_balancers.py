@@ -1,9 +1,10 @@
 """LoadBalancer: select endpoint by load balancing algorithm."""
 from collections import deque
-import fastapi
-import time
 import logging
-from typing import Optional, Deque, Set
+import time
+from typing import Deque, Optional, Set
+
+import fastapi
 
 logger = logging.getLogger(__name__)
 

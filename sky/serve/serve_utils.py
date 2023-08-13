@@ -1,18 +1,19 @@
 """User interface with the SkyServe."""
 import base64
-import colorama
 import os
 import pickle
 import re
-import requests
 import shlex
 import time
-from typing import Any, Dict, List, Optional, Iterator, TextIO, Callable
+from typing import Any, Callable, Dict, Iterator, List, Optional, TextIO
+
+import colorama
+import requests
 
 from sky import backends
 from sky import global_user_state
-from sky.serve import constants
 from sky import status_lib
+from sky.serve import constants
 from sky.utils import common_utils
 
 _CONTROL_PLANE_URL = f'http://localhost:{constants.CONTROL_PLANE_PORT}'

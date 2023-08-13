@@ -4,10 +4,11 @@ Responsible for autoscaling and replica management.
 """
 import argparse
 import base64
-import fastapi
 import logging
 import pickle
 from typing import Optional
+
+import fastapi
 import uvicorn
 
 import sky
