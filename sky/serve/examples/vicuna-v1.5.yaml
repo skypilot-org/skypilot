@@ -1,0 +1,40 @@
+resources:
+  accelerators: A100:1
+  disk_size: 1024
+  disk_tier: high
+
+service:
+  port: 8087
+  readiness_probe: /v1/models
+  replicas: 2
+
+envs:
+  MODEL_SIZE: 7
+
+setup: |
+  conda activate chatbot
+  if [ $? -ne 0 ]; then
+    conda create -n chatbot python=3.9 -y
+    conda activate chatbot
+  fi
+
+  # Install dependencies
+  pip install git+https://github.com/lm-sys/FastChat.git
+  pip install transformers torch accelerate sentencepiece
+
+run: |
+  conda activate chatbot
+  
+  echo 'Starting controller...'
+  python -u -m fastchat.serve.controller > ~/controller.log 2>&1 &
+  sleep 10
+  echo 'Starting model worker...'
+  python -u -m fastchat.serve.model_worker \
+            --model-path lmsys/vicuna-${MODEL_SIZE}b-v1.5 2>&1 \
+            | tee model_worker.log &
+
+  echo 'Waiting for model worker to start...'
+  while ! `cat model_worker.log | grep -q 'Uvicorn running on'`; do sleep 1; done
+
+  echo 'Starting openai api server server...'
+  python -u -m fastchat.serve.openai_api_server --host 0.0.0.0 --port 8087 | tee ~/openai_api_server.log
