@@ -177,7 +177,7 @@ available_node_types:
             name: dshm
           - mountPath: /dev/fuse    # Required for FUSE mounting
             name: dev-fuse
-          securityContext:          # Required for FUSE mounting, but may be a security risk
+          securityContext:          # Required for FUSE mounting. TODO(romilb): See if we can grant a reduced set of privileges.
             privileged: true
           lifecycle:
             postStart:
@@ -189,7 +189,7 @@ available_node_types:
               memory: {{memory}}G
               nvidia.com/gpu: {{accelerator_count}}
             limits:
-              cpu: {{cpus}} # CPUs limits are required for Ray CPU count initialization
+              cpu: {{cpus}} # TODO(romilb): Ideally, we should not specify CPU limits here to allow jobs to use idle CPU cycles. However, CPUs limits are required for Ray CPU count initialization.
               nvidia.com/gpu: {{accelerator_count}} # Limits need to be defined for GPU requests
   ray_worker_default:
     # Minimum number of Ray workers of this Pod type.
@@ -244,7 +244,7 @@ available_node_types:
             name: dshm
           - mountPath: /dev/fuse    # Required for fuse mounting
             name: dev-fuse
-          securityContext:          # Required for FUSE mounting. TODO(romilb) - evaluate security risk
+          securityContext:          # Required for FUSE mounting. TODO(romilb): See if we can grant a reduced set of privileges.
             privileged: true
           resources:
             requests:
@@ -252,7 +252,7 @@ available_node_types:
               memory: {{memory}}G
               nvidia.com/gpu: {{accelerator_count}}
             limits:
-              cpu: {{cpus}} # CPUs limits are required for Ray CPU count initialization
+              cpu: {{cpus}} # TODO(romilb): Ideally, we should not specify CPU limits here to allow jobs to use idle CPU cycles. However, CPUs limits are required for Ray CPU count initialization.
               nvidia.com/gpu: {{accelerator_count}} # Limits need to be defined for GPU requests
 
 setup_commands:

@@ -115,9 +115,8 @@ def get_autodetected_resources(container_data):
         for resource_name in ['cpu', 'gpu']
     }
 
-    # TODO(romilb): Update this to allow fractional resources.
     memory_limits = get_resource(container_resources, 'memory')
-    node_type_resources['memory'] = int(memory_limits)
+    node_type_resources['memory'] = memory_limits
 
     return node_type_resources
 

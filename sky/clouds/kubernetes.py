@@ -1,15 +1,17 @@
 """Kubernetes."""
 import json
+import math
 import os
 import re
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
 from sky import clouds
 from sky import exceptions
 from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import ux_utils
 from sky.skylet.providers.kubernetes import utils as kubernetes_utils
 
@@ -38,6 +40,8 @@ class KubernetesInstanceType:
     appending "--{a}{type}" where a is the number of accelerators and
     type is the accelerator type.
 
+    CPU and memory can be specified as floats. Accelerator count must be int.
+
     Examples:
         - 4CPU--16GB
         - 0.5CPU--1.5GB
@@ -47,7 +51,7 @@ class KubernetesInstanceType:
     def __init__(self,
                  cpus: Optional[float] = None,
                  memory: Optional[float] = None,
-                 accelerator_count: Optional[float] = None,
+                 accelerator_count: Optional[int] = None,
                  accelerator_type: Optional[str] = None):
         self.cpus = cpus
         self.memory = memory
@@ -57,7 +61,8 @@ class KubernetesInstanceType:
     @property
     def name(self) -> str:
         """Returns the name of the instance."""
-        name = f'{self.cpus}CPU--{self.memory}GB'
+        name = (f'{self._format_count(self.cpus)}CPU--' 
+                f'{self._format_count(self.memory)}GB')
         if self.accelerator_count:
             name += f'--{self.accelerator_count}{self.accelerator_type}'
         return name
@@ -84,7 +89,7 @@ class KubernetesInstanceType:
             accelerator_count = match.group('accelerator_count')
             accelerator_type = match.group('accelerator_type')
             if accelerator_count:
-                accelerator_count = float(accelerator_count)
+                accelerator_count = int(accelerator_count)
                 accelerator_type = str(accelerator_type)
             else:
                 accelerator_count = None
@@ -111,8 +116,14 @@ class KubernetesInstanceType:
                        memory: float,
                        accelerator_count: float = 0,
                        accelerator_type: str = '') -> 'KubernetesInstanceType':
-        """Returns an instance name object from the given resources."""
+        """Returns an instance name object from the given resources.
+
+        If accelerator_count is not an int, it will be rounded up since GPU
+        requests in Kubernetes must be int.
+        """
         name = f'{cpus}CPU--{memory}GB'
+        # Round up accelerator_count if it is not an int.
+        accelerator_count = math.ceil(accelerator_count)
         if accelerator_count > 0:
             name += f'--{accelerator_count}{accelerator_type}'
         return cls(cpus=cpus,
@@ -122,6 +133,14 @@ class KubernetesInstanceType:
 
     def __str__(self):
         return self.name
+
+    @classmethod
+    def _format_count(cls, num: Union[float, int]) -> str:
+        """Formats a float to not show decimal point if it is a whole number"""
+        if isinstance(num, int):
+            return str(num)
+        return '{:.0f}'.format(num) if num.is_integer() else '{:.1f}'.format(
+            num)
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -228,18 +247,14 @@ class Kubernetes(clouds.Cloud):
             memory: Optional[str] = None,
             disk_tier: Optional[str] = None) -> Optional[str]:
         del disk_tier  # Unused.
-        # TODO(romilb): Allow fractional CPUs and memory
         # TODO(romilb): We should check the maximum number of CPUs and memory
         #  that can be requested, and return None if the requested resources
         #  exceed the maximum. This may require thought about how to handle
         #  autoscaling clusters.
         # We strip '+' from resource requests since Kubernetes can provision
         # exactly the requested resources.
-        instance_cpus = int(
-            cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
-        instance_mem = int(
-            memory.strip('+')
-        ) if memory is not None else \
+        instance_cpus = float(cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
+        instance_mem = float(memory.strip('+')) if memory is not None else \
             instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
         virtual_instance_type = KubernetesInstanceType(instance_cpus,
                                                        instance_mem).name
@@ -250,7 +265,6 @@ class Kubernetes(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        # TODO(romilb): Add GPU support.
         inst = KubernetesInstanceType.from_instance_type(instance_type)
         return {
             inst.accelerator_type: inst.accelerator_count
@@ -308,51 +322,23 @@ class Kubernetes(clouds.Cloud):
         # Select image based on whether we are using GPUs or not.
         image = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
 
-        GKE_GPU_LABEL_PREFIX = 'cloud.google.com/gke-accelerator'
-        EKS_GPU_LABEL_PREFIX = 'k8s.amazonaws.com/accelerator'
-        NVIDIA_GFD_GPU_LABEL_PREFIX = 'nvidia.com/gpu.product'
+        # ==================== #
+        # If GPU, set up GPU env
+        # ==================== #
 
-        def detect_cluster_gpu_labels():
-            # Detects and returns the node labels for identifying GPU type
-            # available on the node. This varies for GKE, EKS and on-prem
-            # (Nvidia GPU Operator).
-            # For GKE, the node labels are:
-            # cloud.google.com/gke-accelerator: nvidia-tesla-t4
-            # cloud.google.com/gke-accelerator-count: 1
-            # cloud.google.com/gke-accelerator-type: NVIDIA_TESLA_T4
-            # For EKS, the node labels are:
-            # k8s.amazonaws.com/accelerator: nvidia-tesla-t4
-            # For on-prem, the node labels are:
-            # nvidia.com/gpu.product: Tesla T4
+        k8s_acc_label_key = None
+        k8s_acc_label_value = None
 
-            # Get the set of labels across all nodes
-            # TODO(romilb): This is not efficient. We should cache the node labels
-            node_labels = set()
-            for node in kubernetes.core_api().list_node().items:
-                node_labels.update(node.metadata.labels.keys())
+        if acc_count > 0:
+            class GPULabelFormatter:
+                @classmethod
+                def get_label_key(cls) -> str:
+                    raise NotImplementedError
 
-            # Check if the node labels contain any of the GPU label prefixes
-            # TODO(romilb): First read from config and if not configured, then
-            #  do auto-detection.
-            if any(label.startswith(GKE_GPU_LABEL_PREFIX) for label in node_labels):
-                return GKE_GPU_LABEL_PREFIX
-            elif any(label.startswith(EKS_GPU_LABEL_PREFIX) for label in node_labels):
-                return EKS_GPU_LABEL_PREFIX
-            elif any(label.startswith(NVIDIA_GFD_GPU_LABEL_PREFIX) for label in node_labels):
-                return NVIDIA_GFD_GPU_LABEL_PREFIX
-            else:
-                return None
+                @classmethod
+                def get_label_value(cls, accelerator: str) -> str:
+                    raise NotImplementedError
 
-        def get_gpu_label_value(accelerator: str,
-                                gpu_label: str) -> Optional[str]:
-            # Returns the GPU string from SkyPilot accelerator string
-            # to use as the value with the GPU label when specifying the nodeSelector.
-            # For GKE, the GPU string is the GPU type (e.g. nvidia-tesla-t4)
-            # For EKS, the GPU string is the GPU type (e.g. nvidia-tesla-t4)
-            # For on-prem, the GPU string is the GPU product name (e.g. Tesla-T4 or A100-SXM4-40GB)
-
-            if not accelerator:
-                return accelerator
             def get_k8s_accelerator_name(accelerator: str):
                 # Used by GKE and EKS
                 if accelerator in ('A100-80GB', 'L4'):
@@ -362,19 +348,81 @@ class Kubernetes(clouds.Cloud):
                     return 'nvidia-tesla-{}'.format(
                         accelerator.lower())
 
-            if gpu_label.startswith(GKE_GPU_LABEL_PREFIX):
-                return get_k8s_accelerator_name(accelerator)
-            elif gpu_label.startswith(EKS_GPU_LABEL_PREFIX):
-                return get_k8s_accelerator_name(accelerator)
-            elif gpu_label.startswith(NVIDIA_GFD_GPU_LABEL_PREFIX):
-                raise NotImplementedError('On-prem GPU label not supported yet')
-            else:
-                raise NotImplementedError('GPU label not supported')
+            class GKELabelFormatter(GPULabelFormatter):
+                @classmethod
+                def get_label_key(cls) -> str:
+                    return 'cloud.google.com/gke-accelerator'
 
+                @classmethod
+                def get_label_value(cls, accelerator: str) -> str:
+                    return get_k8s_accelerator_name(accelerator)
 
-        k8s_acc_label_key = detect_cluster_gpu_labels()
-        k8s_acc_label_value = get_gpu_label_value(acc_type, k8s_acc_label_key)
+            class EKSLabelFormatter(GPULabelFormatter):
+                @classmethod
+                def get_label_key(cls) -> str:
+                    return 'k8s.amazonaws.com/accelerator'
 
+                @classmethod
+                def get_label_value(cls, accelerator: str) -> str:
+                    return get_k8s_accelerator_name(accelerator)
+
+            class SkyPilotLabelFormatter(GPULabelFormatter):
+                @classmethod
+                def get_label_key(cls) -> str:
+                    return 'skypilot.co/accelerator'
+
+                @classmethod
+                def get_label_value(cls, accelerator: str) -> str:
+                    return get_k8s_accelerator_name(accelerator)
+
+            class NvidiaGFDLabelFormatter(GPULabelFormatter):
+                @classmethod
+                def get_label_key(cls) -> str:
+                    return 'nvidia.com/gpu.product'
+
+                @classmethod
+                def get_label_value(cls, accelerator: str) -> str:
+                    raise NotImplementedError
+
+            # has to be in order
+            LABEL_FORMATTER_REGISTRY = [SkyPilotLabelFormatter, GKELabelFormatter, EKSLabelFormatter, NvidiaGFDLabelFormatter]
+
+            def detect_gpu_label_formatter() -> [Optional[GPULabelFormatter],
+                                                 Set[str]]:
+                # Get the set of labels across all nodes
+                # TODO(romilb): This is not efficient. We should cache the node labels
+                node_labels = set()
+                for node in kubernetes.core_api().list_node().items:
+                    node_labels.update(node.metadata.labels.keys())
+
+                # Check if the node labels contain any of the GPU label prefixes
+                for label_formatter in LABEL_FORMATTER_REGISTRY:
+                    if label_formatter.get_label_key() in node_labels:
+                        return label_formatter, node_labels
+                return None, node_labels
+
+            label_formatter, node_labels = detect_gpu_label_formatter()
+            if label_formatter is None:
+                # TODO(romilb): This will fail early for autoscaling clusters.
+                #  For AS clusters, we may need a way for users to specify the
+                #  GPULabelFormatter to use since the cluster may be scaling up
+                #  from zero nodes and may not have any GPU nodes yet.
+                with ux_utils.print_exception_no_traceback():
+                    suffix = ''
+                    if env_options.Options.SHOW_DEBUG_INFO.get():
+                        suffix = ' Found node labels: {}'.format(node_labels)
+                    raise KeyError(
+                        'Could not detect GPU labels in Kubernetes cluster. '
+                        'Please ensure at least one node in the cluster has '
+                        'node labels of the format '
+                        f'{SkyPilotLabelFormatter.get_label_key()}, '
+                        f'{GKELabelFormatter.get_label_key()} or '
+                        f'{EKSLabelFormatter.get_label_key()}. Please refer to '
+                        ' the documentation on how to set up node labels.'
+                        f'{suffix}')
+
+            k8s_acc_label_key = label_formatter.get_label_key()
+            k8s_acc_label_value = label_formatter.get_label_value(acc_type)
         vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -430,9 +478,9 @@ class Kubernetes(clouds.Cloud):
         # TODO(romilb): Add GPU support.
         acc_type, acc_count = list(accelerators.items())[0]
         default_inst = KubernetesInstanceType.from_instance_type(default_instance_type)
-        instance_type = KubernetesInstanceType.from_resources(int(default_inst.cpus),
-                                                              int(default_inst.memory),
-                                                              int(acc_count),
+        instance_type = KubernetesInstanceType.from_resources(default_inst.cpus,
+                                                              default_inst.memory,
+                                                              acc_count,
                                                               acc_type).name
         # No fuzzy lists for Kubernetes
         return _make([instance_type]), []
