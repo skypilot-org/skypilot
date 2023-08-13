@@ -9,6 +9,10 @@ from sky.serve import infra_providers
 
 logger = logging.getLogger(__name__)
 
+# Since sky.launch is very resource demanding, we limit the number of
+# concurrent sky.launch process to avoid overloading the machine.
+_MAX_BOOTSTRAPING_NUM = 5
+
 
 class Autoscaler:
     """Abstract class for autoscalers."""
@@ -114,15 +118,12 @@ class RequestRateAutoscaler(Autoscaler):
                              if num_nodes else num_requests_per_second)
 
         logger.info(f'Requests per node: {requests_per_node}')
-        # logger.info(f'Upper threshold: {self.upper_threshold} qps/node, '
-        #             f'lower threshold: {self.lower_threshold} qps/node, '
-        #             f'queries per node: {requests_per_node} qps/node')
 
         # Bootstrap case
         logger.info(f'Number of nodes: {num_nodes}')
         if num_nodes < self.min_nodes:
             logger.info('Bootstrapping service.')
-            self.scale_up(1)
+            self.scale_up(min(self.min_nodes - num_nodes, _MAX_BOOTSTRAPING_NUM))
             self.last_scale_operation = current_time
         elif (self.upper_threshold is not None and
               requests_per_node > self.upper_threshold):
