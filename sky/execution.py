@@ -1072,8 +1072,8 @@ def serve_up(
         # `sky serve logs` CLI will identify the control plane job with
         # the first job submitted and the redirector job with the second
         # job submitted.
-        with console.status('[yellow]Launching control plane process on '
-                            'controller...[/yellow]'):
+        with console.status(
+                '[yellow]Launching control plane process...[/yellow]'):
             _execute(
                 entrypoint=sky.Task(
                     name='run-control-plane',
@@ -1096,11 +1096,10 @@ def serve_up(
                   f'Please check the logs with sky serve logs {service_name} '
                   f'--control-plane{colorama.Style.RESET_ALL}')
             return
-        print(f'{colorama.Fore.GREEN}Control plane process is running.'
+        print(f'{colorama.Fore.GREEN}Launching control plane process...done.'
               f'{colorama.Style.RESET_ALL}')
 
-        with console.status('[yellow]Launching redirector process on '
-                            'controller...[/yellow]'):
+        with console.status('[yellow]Launching redirector process...[/yellow]'):
             control_plane_addr = f'http://localhost:{serve.CONTROL_PLANE_PORT}'
             _execute(
                 entrypoint=sky.Task(
@@ -1124,7 +1123,7 @@ def serve_up(
                   f'Please check the logs with sky serve logs {service_name} '
                   f'--redirector{colorama.Style.RESET_ALL}')
             return
-        print(f'{colorama.Fore.GREEN}Redirector process is running.'
+        print(f'{colorama.Fore.GREEN}Launching redirector process...done.'
               f'{colorama.Style.RESET_ALL}')
 
         global_user_state.set_service_status(
