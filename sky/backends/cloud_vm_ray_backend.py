@@ -1495,9 +1495,10 @@ class RetryingVmProvisioner(object):
                     dryrun=dryrun,
                     keep_launch_fields_in_existing_config=cluster_exists)
             except exceptions.ResourcesUnavailableError as e:
-                # Failed due to catalog issue, e.g. image not found.
-                logger.info(
-                    f'Failed to find catalog in region {region.name}: {e}')
+                # Failed due to catalog issue, e.g. image not found, or
+                # GPUs are requested in a Kubernetes cluster but the cluster
+                # does not have nodes labeled with GPU types.
+                logger.info(f'{e}')
                 continue
             if dryrun:
                 return config_dict
@@ -2824,7 +2825,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _update_envs_for_k8s(self, handle: CloudVmRayResourceHandle,
                              task: task_lib.Task) -> None:
-        """Update envs for a task with Kubernetes specific env vars if cloud is Kubernetes."""
+        """Update envs with env vars from Kubernetes if cloud is Kubernetes."""
         if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
             temp_envs = copy.deepcopy(task.envs)
             cloud_env_vars = handle.launched_resources.cloud.query_env_vars(

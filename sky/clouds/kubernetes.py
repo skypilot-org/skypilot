@@ -4,7 +4,7 @@ import math
 import os
 import re
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky import exceptions
@@ -49,8 +49,8 @@ class KubernetesInstanceType:
     """
 
     def __init__(self,
-                 cpus: Optional[float] = None,
-                 memory: Optional[float] = None,
+                 cpus: float,
+                 memory: float,
                  accelerator_count: Optional[int] = None,
                  accelerator_type: Optional[str] = None):
         self.cpus = cpus
@@ -61,7 +61,9 @@ class KubernetesInstanceType:
     @property
     def name(self) -> str:
         """Returns the name of the instance."""
-        name = (f'{self._format_count(self.cpus)}CPU--' 
+        assert self.cpus is not None
+        assert self.memory is not None
+        name = (f'{self._format_count(self.cpus)}CPU--'
                 f'{self._format_count(self.memory)}GB')
         if self.accelerator_count:
             name += f'--{self.accelerator_count}{self.accelerator_type}'
@@ -76,7 +78,7 @@ class KubernetesInstanceType:
     @classmethod
     def _parse_instance_type(
             cls,
-            name: str) -> Tuple[float, float, Optional[float], Optional[str]]:
+            name: str) -> Tuple[float, float, Optional[int], Optional[str]]:
         """Returns the cpus, memory, accelerator_count, and accelerator_type
         from the given name."""
         pattern = re.compile(
@@ -114,7 +116,7 @@ class KubernetesInstanceType:
     def from_resources(cls,
                        cpus: float,
                        memory: float,
-                       accelerator_count: float = 0,
+                       accelerator_count: int = 0,
                        accelerator_type: str = '') -> 'KubernetesInstanceType':
         """Returns an instance name object from the given resources.
 
@@ -239,11 +241,10 @@ class Kubernetes(clouds.Cloud):
         return kubernetes_utils.get_port(svc_name, ns)
 
     @classmethod
-    def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[str] = None) -> str:
         del disk_tier  # Unused.
         # TODO(romilb): We should check the maximum number of CPUs and memory
         #  that can be requested, and return None if the requested resources
@@ -251,7 +252,8 @@ class Kubernetes(clouds.Cloud):
         #  autoscaling clusters.
         # We strip '+' from resource requests since Kubernetes can provision
         # exactly the requested resources.
-        instance_cpus = float(cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
+        instance_cpus = float(
+            cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
         instance_mem = float(memory.strip('+')) if memory is not None else \
             instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
         virtual_instance_type = KubernetesInstanceType(instance_cpus,
@@ -266,7 +268,7 @@ class Kubernetes(clouds.Cloud):
         inst = KubernetesInstanceType.from_instance_type(instance_type)
         return {
             inst.accelerator_type: inst.accelerator_count
-        } if inst.accelerator_count else None
+        } if (inst.accelerator_count and inst.accelerator_type) else None
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
@@ -320,51 +322,37 @@ class Kubernetes(clouds.Cloud):
         # Select image based on whether we are using GPUs or not.
         image = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
 
-        # ==================== #
-        # If GPU, set up GPU env
-        # ==================== #
-
         k8s_acc_label_key = None
         k8s_acc_label_value = None
 
-        if acc_count > 0:
-            def detect_gpu_label_formatter() -> [Optional[GPULabelFormatter],
-                                                 Set[str]]:
-                # Get the set of labels across all nodes
-                # TODO(romilb): This is not efficient. We should cache the node labels
-                node_labels = set()
-                for node in kubernetes.core_api().list_node().items:
-                    node_labels.update(node.metadata.labels.keys())
-
-                # Check if the node labels contain any of the GPU label prefixes
-                for label_formatter in LABEL_FORMATTER_REGISTRY:
-                    if label_formatter.get_label_key() in node_labels:
-                        return label_formatter, node_labels
-                return None, node_labels
-
-            label_formatter, node_labels = detect_gpu_label_formatter()
+        # If GPUs are requested, set node label to match the GPU type.
+        if acc_count > 0 and acc_type is not None:
+            label_formatter, node_labels = \
+                kubernetes_utils.detect_gpu_label_formatter()
             if label_formatter is None:
                 # TODO(romilb): This will fail early for autoscaling clusters.
                 #  For AS clusters, we may need a way for users to specify the
                 #  GPULabelFormatter to use since the cluster may be scaling up
                 #  from zero nodes and may not have any GPU nodes yet.
                 with ux_utils.print_exception_no_traceback():
+                    supported_formats = ', '.join([
+                        f.get_label_key()
+                        for f in kubernetes_utils.LABEL_FORMATTER_REGISTRY
+                    ])
                     suffix = ''
                     if env_options.Options.SHOW_DEBUG_INFO.get():
                         suffix = ' Found node labels: {}'.format(node_labels)
                     raise exceptions.ResourcesUnavailableError(
                         'Could not detect GPU labels in Kubernetes cluster. '
                         'Please ensure at least one node in the cluster has '
-                        'node labels of the format '
-                        f'{SkyPilotLabelFormatter.get_label_key()}, '
-                        f'{GKELabelFormatter.get_label_key()} or '
-                        f'{EKSLabelFormatter.get_label_key()}. Please refer to '
+                        'node labels of either of these formats: '
+                        f'{supported_formats}. Please refer to '
                         'the documentation on how to set up node labels.'
                         f'{suffix}')
 
             k8s_acc_label_key = label_formatter.get_label_key()
             k8s_acc_label_value = label_formatter.get_label_value(acc_type)
-        vars = {
+        deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
@@ -378,9 +366,7 @@ class Kubernetes(clouds.Cloud):
             # TODO(romilb): Allow user to specify custom images
             'image_id': image,
         }
-        return vars
-
-
+        return deploy_vars
 
     def _get_feasible_launchable_resources(
             self, resources: 'resources_lib.Resources'):
@@ -417,11 +403,10 @@ class Kubernetes(clouds.Cloud):
         assert len(accelerators) == 1, resources
         # GPUs requested - build instance type.
         acc_type, acc_count = list(accelerators.items())[0]
-        default_inst = KubernetesInstanceType.from_instance_type(default_instance_type)
-        instance_type = KubernetesInstanceType.from_resources(default_inst.cpus,
-                                                              default_inst.memory,
-                                                              acc_count,
-                                                              acc_type).name
+        default_inst = KubernetesInstanceType.from_instance_type(
+            default_instance_type)
+        instance_type = KubernetesInstanceType.from_resources(
+            default_inst.cpus, default_inst.memory, acc_count, acc_type).name
         # No fuzzy lists for Kubernetes
         return _make([instance_type]), []
 
@@ -507,8 +492,18 @@ class Kubernetes(clouds.Cloud):
             stdout=True,
             tty=False,
             _request_timeout=kubernetes.API_TIMEOUT)
-        lines: List[List[str]] = [
-            line.split('=', 1) for line in response.split('\n') if '=' in line
-        ]
-        return dict(
-            [line for line in lines if common_utils.is_valid_env_var(line[0])])
+        # Split response by newline and filter lines containing '='
+        raw_lines = response.split('\n')
+        filtered_lines = [line for line in raw_lines if '=' in line]
+
+        # Split each line at the first '=' occurrence
+        lines = [line.split('=', 1) for line in filtered_lines]
+
+        # Construct the dictionary using only valid environment variable names
+        env_vars = {}
+        for line in lines:
+            key = line[0]
+            if common_utils.is_valid_env_var(key):
+                env_vars[key] = line[1]
+
+        return env_vars

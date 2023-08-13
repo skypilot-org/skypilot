@@ -1,4 +1,5 @@
-from typing import Tuple, Optional
+"""Kubernetes utilities for SkyPilot."""
+from typing import Optional, Set, Tuple
 
 from sky.utils import common_utils
 from sky.adaptors import kubernetes
@@ -16,8 +17,12 @@ class GPULabelFormatter:
         raise NotImplementedError
 
 
-def get_k8s_accelerator_name(accelerator: str):
-    # Used by GKE and EKS
+def get_gke_eks_accelerator_name(accelerator: str) -> str:
+    """Returns the accelerator name for GKE and EKS clusters
+
+    Both use the same format - nvidia-tesla-<accelerator>.
+    A100-80GB and L4 are an exception - they use nvidia-<accelerator>.
+    """
     if accelerator in ('A100-80GB', 'L4'):
         # A100-80GB and L4 have a different name pattern.
         return 'nvidia-{}'.format(accelerator.lower())
@@ -33,7 +38,7 @@ class GKELabelFormatter(GPULabelFormatter):
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
-        return get_k8s_accelerator_name(accelerator)
+        return get_gke_eks_accelerator_name(accelerator)
 
 
 class EKSLabelFormatter(GPULabelFormatter):
@@ -43,7 +48,7 @@ class EKSLabelFormatter(GPULabelFormatter):
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
-        return get_k8s_accelerator_name(accelerator)
+        return get_gke_eks_accelerator_name(accelerator)
 
 
 class SkyPilotLabelFormatter(GPULabelFormatter):
@@ -53,22 +58,31 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
-        return get_k8s_accelerator_name(accelerator)
+        # For SkyPilot formatter, we adopt GKE/EKS accelerator format.
+        return get_gke_eks_accelerator_name(accelerator)
 
 
-class NvidiaGFDLabelFormatter(GPULabelFormatter):
-    @classmethod
-    def get_label_key(cls) -> str:
-        return 'nvidia.com/gpu.product'
-
-    @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
-        raise NotImplementedError
-
-
-# has to be in order
+# LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
+# discover the accelerator type from. The order of the list is important, as
+# it will be used to determine the priority of the label formats.
 LABEL_FORMATTER_REGISTRY = [SkyPilotLabelFormatter, GKELabelFormatter,
-                            EKSLabelFormatter, NvidiaGFDLabelFormatter]
+                            EKSLabelFormatter]
+
+
+def detect_gpu_label_formatter() -> Tuple[Optional[GPULabelFormatter],
+Set[str]]:
+    # Get the set of labels across all nodes
+    # TODO(romilb): This is not efficient. We should cache the node labels
+    node_labels: Set[str] = set()
+    for node in kubernetes.core_api().list_node().items:
+        node_labels.update(node.metadata.labels.keys())
+
+    # Check if the node labels contain any of the GPU label prefixes
+    for label_formatter in LABEL_FORMATTER_REGISTRY:
+        if label_formatter.get_label_key() in node_labels:
+            return label_formatter(), node_labels
+    return None, node_labels
+
 
 def get_head_ssh_port(cluster_name: str, namespace: str) -> int:
     svc_name = f'{cluster_name}-ray-head-ssh'
@@ -108,8 +122,8 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
     except ImportError:
         # TODO(romilb): Update these error strs to also include link to docs
         #  when docs are ready.
-        return False, f'`kubernetes` package is not installed. ' \
-                      f'Install it with: pip install kubernetes'
+        return False, '`kubernetes` package is not installed. ' \
+                      'Install it with: pip install kubernetes'
     except kubernetes.api_exception() as e:
         # Check if the error is due to invalid credentials
         if e.status == 401:
@@ -125,7 +139,7 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
                       'is stable.'
     except ValueError as e:
         return False, common_utils.format_exception(e)
-    except Exception as e:
+    except Exception as e: # pylint: disable=broad-except
         return False, f'An error occurred: {str(e)}'
 
 
