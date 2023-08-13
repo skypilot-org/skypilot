@@ -421,14 +421,14 @@ class SkyPilotInfraProvider(InfraProvider):
         info.status_property.sky_down_status = ProcessStatus.RUNNING
 
     def _scale_down(self, n: int) -> None:
-        # Rendomly delete n ready replicas
+        # Randomly delete n ready replicas
         all_ready_replicas = self.get_ready_replicas()
         num_replicas = len(all_ready_replicas)
         if num_replicas > 0:
             if n > num_replicas:
                 logger.warning(
-                    f'Trying to delete {n} clusters, but only {num_replicas} '
-                    'clusters exist. Deleting all clusters.')
+                    f'Trying to delete {n} replicas, but only {num_replicas} '
+                    'replicas exist. Deleting all replicas.')
                 n = num_replicas
             cluster_to_terminate = random.sample(all_ready_replicas, n)
             for cluster_name in cluster_to_terminate:
@@ -470,7 +470,7 @@ class SkyPilotInfraProvider(InfraProvider):
             logger.info(f'Down process for cluster {name} finished.')
             if p.returncode != 0:
                 logger.warning(f'Down process for cluster {name} exited '
-                               f'anormally with code {p.returncode}.')
+                               f'abnormally with code {p.returncode}.')
                 msg.append(f'Down process for cluster {name} exited abnormally'
                            f' with code {p.returncode}. Please login to the '
                            'controller and make sure the cluster is released.')
@@ -558,10 +558,9 @@ class SkyPilotInfraProvider(InfraProvider):
                 info.consecutive_failure_cnt += 1
                 if (info.consecutive_failure_cnt >=
                         _CONSECUTIVE_FAILURE_THRESHOLD_COUNT):
-                    logger.info(f'Replica {cluster_name} is '
-                                'not ready for too long and exceeding '
-                                'conservative failure threshold. '
-                                'Terminating the replica...')
+                    logger.info(f'Replica {cluster_name} is  not ready for too '
+                                'long and exceeding consecutive failure '
+                                'threshold. Terminating the replica...')
                     self._teardown_cluster(cluster_name)
                 else:
                     current_unready_time = (info.consecutive_failure_cnt *
