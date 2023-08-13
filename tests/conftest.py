@@ -24,7 +24,7 @@ all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
     'kubernetes'
 ]
-default_clouds_to_run = ['gcp', 'azure', 'kubernetes']
+default_clouds_to_run = ['gcp', 'azure']
 
 # Translate cloud name to pytest keyword. We need this because
 # @pytest.mark.lambda is not allowed, so we use @pytest.mark.lambda_cloud
