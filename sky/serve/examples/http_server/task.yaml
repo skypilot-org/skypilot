@@ -1,5 +1,6 @@
 resources:
   cpus: 2+
+  cloud: gcp
 
 workdir: sky/serve/examples/http_server
 
@@ -11,3 +12,5 @@ service:
     path: /health
     initial_delay_seconds: 20
   replicas: 2
+  controller_resources:
+    cloud: gcp

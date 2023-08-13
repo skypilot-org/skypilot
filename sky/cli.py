@@ -1737,12 +1737,22 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                                       refresh=refresh)
         nonreserved_cluster_records = []
         reserved_clusters = []
+        # TODO(tian): Rename this variable if other reserved prefix are added.
+        skyserve_controllers = []
         for cluster_record in cluster_records:
             cluster_name = cluster_record['name']
             if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
                 reserved_clusters.append(cluster_record)
             else:
-                nonreserved_cluster_records.append(cluster_record)
+                is_skyserve_controller = False
+                for prefix in backend_utils.SKY_RESERVED_CLUSTER_PREFIXES:
+                    if cluster_name.startswith(prefix):
+                        is_skyserve_controller = True
+                        break
+                if is_skyserve_controller:
+                    skyserve_controllers.append(cluster_record)
+                else:
+                    nonreserved_cluster_records.append(cluster_record)
         local_clusters = onprem_utils.check_and_get_local_clusters(
             suppress_error=True)
 
@@ -1750,6 +1760,11 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
         num_pending_autostop += status_utils.show_status_table(
             nonreserved_cluster_records + reserved_clusters, all)
         status_utils.show_local_status_table(local_clusters)
+
+        if skyserve_controllers:
+            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}\n'
+                       f'SkyServe Controllers{colorama.Style.RESET_ALL}')
+            status_utils.show_status_table(skyserve_controllers, all)
 
         hints = []
         if show_spot_jobs:
