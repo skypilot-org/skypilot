@@ -1,16 +1,10 @@
 resources:
   accelerators: A100:1
-  cloud: gcp
-  image_id: projects/skypilot-375900/global/images/coder
-  # use_spot: True
-  
-num_nodes: 1
 
 service:
   port: 8082
   readiness_probe: /health
+  replicas: 2
 
 run: |
-  volume=/home/gcpuser/sky_workdir/huggingface-vscode-endpoint-server/data/
-  model=WizardLM/WizardCoder-15B-V1.0
-  docker run  --gpus all --shm-size 1g -p 8082:80 -v $volume:/data ghcr.io/huggingface/text-generation-inference --model-id $model
+  docker run --gpus all --shm-size 1g -p 8082:80 -v ~/data:/data ghcr.io/huggingface/text-generation-inference --model-id WizardLM/WizardCoder-15B-V1.0

@@ -1,6 +1,8 @@
 """Service specification for SkyServe."""
 import os
+import json
 import yaml
+import textwrap
 from typing import Optional, Dict, Any
 
 from sky.backends import backend_utils
@@ -15,34 +17,48 @@ class SkyServiceSpec:
     def __init__(
         self,
         readiness_path: str,
-        readiness_timeout: int,
+        initial_delay_seconds: int,
         app_port: int,
-        min_replica: int,
-        max_replica: Optional[int] = None,
+        min_replicas: int,
+        max_replicas: Optional[int] = None,
         qps_upper_threshold: Optional[float] = None,
         qps_lower_threshold: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
+        controller_resources: Optional[Dict[str, Any]] = None,
     ):
-        if max_replica is not None and max_replica < min_replica:
+        if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'max_replica must be greater than or equal to min_replica')
+                    'min_replicas must be greater than or equal to 0')
+        if max_replicas is not None and max_replicas < min_replicas:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'max_replicas must be greater than or equal to min_replicas'
+                )
         if app_port == constants.CONTROL_PLANE_PORT:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'App port cannot be {constants.CONTROL_PLANE_PORT} '
                     'since it is reserved for the control plane. '
                     ' Please use a different port.')
-        # TODO: check if the path is valid
-        self._readiness_path = f':{app_port}{readiness_path}'
-        self._readiness_timeout = readiness_timeout
-        # TODO: check if the port is valid
+        if not readiness_path.startswith('/'):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('readiness_path must start with a slash (/). '
+                                 f'Got: {readiness_path}')
+        self._readiness_path = readiness_path
+        self._initial_delay_seconds = initial_delay_seconds
+        if app_port < 0 or app_port > 65535:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Invalid app port: {app_port}. '
+                    'Please use a port number between 0 and 65535.')
         self._app_port = str(app_port)
-        self._min_replica = min_replica
-        self._max_replica = max_replica
+        self._min_replicas = min_replicas
+        self._max_replicas = max_replicas
         self._qps_upper_threshold = qps_upper_threshold
         self._qps_lower_threshold = qps_lower_threshold
         self._post_data = post_data
+        self._controller_resources = controller_resources
 
     @staticmethod
     def from_yaml_config(config: Optional[Dict[str, Any]]):
@@ -51,21 +67,62 @@ class SkyServiceSpec:
 
         backend_utils.validate_schema(config, schemas.get_service_schema(),
                                       'Invalid service YAML:')
+        if 'replicas' in config and 'replica_policy' in config:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify both `replicas` and `replica_policy` in '
+                    'the service YAML. Please use one of them.')
 
         service_config = {}
-        service_config['readiness_path'] = config['readiness_probe']['path']
-        service_config['readiness_timeout'] = config['readiness_probe'][
-            'readiness_timeout']
         service_config['app_port'] = config['port']
-        service_config['min_replica'] = config['replica_policy']['min_replica']
-        service_config['max_replica'] = config['replica_policy'].get(
-            'max_replica', None)
-        service_config['qps_upper_threshold'] = config['replica_policy'].get(
-            'qps_upper_threshold', None)
-        service_config['qps_lower_threshold'] = config['replica_policy'].get(
-            'qps_lower_threshold', None)
-        service_config['post_data'] = config['readiness_probe'].get(
-            'post_data', None)
+
+        readiness_section = config['readiness_probe']
+        if isinstance(readiness_section, str):
+            service_config['readiness_path'] = readiness_section
+            initial_delay_seconds = None
+            post_data = None
+        else:
+            service_config['readiness_path'] = readiness_section['path']
+            initial_delay_seconds = readiness_section.get(
+                'initial_delay_seconds', None)
+            post_data = readiness_section.get('post_data', None)
+        if initial_delay_seconds is None:
+            ids = constants.DEFAULT_INITIAL_DELAY_SECONDS
+            initial_delay_seconds = ids
+        service_config['initial_delay_seconds'] = initial_delay_seconds
+        if isinstance(post_data, str):
+            try:
+                post_data = json.loads(post_data)
+            except json.JSONDecodeError as e:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Invalid JSON string for `post_data` in the '
+                        '`readiness_probe` section of your service YAML.'
+                    ) from e
+        service_config['post_data'] = post_data
+
+        policy_section = config.get('replica_policy', None)
+        simplified_policy_section = config.get('replicas', None)
+        if policy_section is None or simplified_policy_section is not None:
+            if simplified_policy_section is not None:
+                min_replicas = simplified_policy_section
+            else:
+                min_replicas = constants.DEFAULT_MIN_REPLICAS
+            service_config['min_replicas'] = min_replicas
+            service_config['max_replicas'] = None
+            service_config['qps_upper_threshold'] = None
+            service_config['qps_lower_threshold'] = None
+        else:
+            service_config['min_replicas'] = policy_section['min_replicas']
+            service_config['max_replicas'] = policy_section.get(
+                'max_replicas', None)
+            service_config['qps_upper_threshold'] = policy_section.get(
+                'qps_upper_threshold', None)
+            service_config['qps_lower_threshold'] = policy_section.get(
+                'qps_lower_threshold', None)
+
+        service_config['controller_resources'] = config.pop(
+            'controller_resources', None)
 
         return SkyServiceSpec(**service_config)
 
@@ -104,48 +161,67 @@ class SkyServiceSpec:
                     config[section][key] = value
 
         add_if_not_none('port', None, int(self.app_port))
-        add_if_not_none('readiness_probe', 'path',
-                        self.readiness_path[len(f':{self.app_port}'):])
-        add_if_not_none('readiness_probe', 'readiness_timeout',
-                        self.readiness_timeout)
+        add_if_not_none('readiness_probe', 'path', self.readiness_path)
+        add_if_not_none('readiness_probe', 'initial_delay_seconds',
+                        self.initial_delay_seconds)
         add_if_not_none('readiness_probe', 'post_data', self.post_data)
-        add_if_not_none('replica_policy', 'min_replica', self.min_replica)
-        add_if_not_none('replica_policy', 'max_replica', self.max_replica)
+        add_if_not_none('replica_policy', 'min_replicas', self.min_replicas)
+        add_if_not_none('replica_policy', 'max_replicas', self.max_replicas)
         add_if_not_none('replica_policy', 'qps_upper_threshold',
                         self.qps_upper_threshold)
         add_if_not_none('replica_policy', 'qps_lower_threshold',
                         self.qps_lower_threshold)
+        add_if_not_none('controller_resources', None,
+                        self._controller_resources)
 
         return config
 
+    def probe_str(self):
+        if self.post_data is None:
+            return f'GET {self.readiness_path}'
+        return f'POST {self.readiness_path} {json.dumps(self.post_data)}'
+
     def policy_str(self):
-        if self.max_replica == self.min_replica or self.max_replica is None:
-            plural = ''
-            if self.min_replica > 1:
-                plural = 'S'
-            return f'#REPLICA{plural}: {self.min_replica}'
+        min_plural = '' if self.min_replicas == 1 else 's'
+        if self.max_replicas == self.min_replicas or self.max_replicas is None:
+            return f'Fixed {self.min_replicas} replica{min_plural}'
         # TODO(tian): Refactor to contain more information
-        return f'AUTOSCALE [{self.min_replica}, {self.max_replica}]'
+        max_plural = '' if self.max_replicas == 1 else 's'
+        return (f'Autoscaling from {self.min_replicas} to '
+                f'{self.max_replicas} replica{max_plural}')
+
+    def __repr__(self) -> str:
+        return textwrap.dedent(f"""\
+            Readiness probe method:        {self.probe_str()}
+            Replica autoscaling policy:    {self.policy_str()}
+            Service initial delay seconds: {self.initial_delay_seconds}
+
+            Please refer to SkyPilot Serve document for detailed explanations.
+        """)
+
+    @property
+    def readiness_suffix(self) -> str:
+        return f':{self._app_port}{self._readiness_path}'
 
     @property
     def readiness_path(self) -> str:
         return self._readiness_path
 
     @property
-    def readiness_timeout(self) -> int:
-        return self._readiness_timeout
+    def initial_delay_seconds(self) -> int:
+        return self._initial_delay_seconds
 
     @property
     def app_port(self) -> str:
         return self._app_port
 
     @property
-    def min_replica(self) -> int:
-        return self._min_replica
+    def min_replicas(self) -> int:
+        return self._min_replicas
 
     @property
-    def max_replica(self) -> Optional[int]:
-        return self._max_replica
+    def max_replicas(self) -> Optional[int]:
+        return self._max_replicas
 
     @property
     def qps_upper_threshold(self) -> Optional[float]:
@@ -158,3 +234,7 @@ class SkyServiceSpec:
     @property
     def post_data(self) -> Optional[Dict[str, Any]]:
         return self._post_data
+
+    @property
+    def controller_resources(self) -> Optional[Dict[str, Any]]:
+        return self._controller_resources

@@ -141,41 +141,45 @@ def get_service_schema():
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
-        'required': ['port', 'readiness_probe', 'replica_policy'],
+        'required': ['port', 'readiness_probe'],
         'additionalProperties': False,
         'properties': {
             'port': {
                 'type': 'integer',
             },
             'readiness_probe': {
-                'type': 'object',
-                'required': ['path', 'readiness_timeout'],
-                'additionalProperties': False,
-                'properties': {
-                    'path': {
-                        'type': 'string',
-                    },
-                    'readiness_timeout': {
-                        'type': 'number',
-                    },
-                    'post_data': {
-                        'anyOf': [{
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': ['path'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'path': {
                             'type': 'string',
-                        }, {
-                            'type': 'object',
-                        }]
+                        },
+                        'initial_delay_seconds': {
+                            'type': 'number',
+                        },
+                        'post_data': {
+                            'anyOf': [{
+                                'type': 'string',
+                            }, {
+                                'type': 'object',
+                            }]
+                        }
                     }
-                }
+                }]
             },
             'replica_policy': {
                 'type': 'object',
-                'required': ['min_replica'],
+                'required': ['min_replicas'],
                 'additionalProperties': False,
                 'properties': {
-                    'min_replica': {
+                    'min_replicas': {
                         'type': 'integer',
                     },
-                    'max_replica': {
+                    'max_replicas': {
                         'type': 'integer',
                     },
                     'qps_upper_threshold': {
@@ -185,7 +189,14 @@ def get_service_schema():
                         'type': 'number',
                     },
                 }
-            }
+            },
+            'replicas': {
+                'type': 'integer',
+            },
+            # resources config is validated separately using RESOURCES_SCHEMA
+            'controller_resources': {
+                'type': 'object',
+            },
         }
     }
 

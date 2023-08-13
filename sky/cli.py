@@ -52,6 +52,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
+from sky import serve as serve_lib
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
@@ -133,6 +134,18 @@ def _get_glob_storages(storages: List[str]) -> List[str]:
             click.echo(f'Deleting {len(glob_storage)} storage object{plural}.')
         glob_storages.extend(glob_storage)
     return list(set(glob_storages))
+
+
+def _get_glob_services(service_names: List[str]) -> List[str]:
+    """Returns a list of service names that match the glob pattern."""
+    glob_service_names = []
+    for service_name in service_names:
+        glob_service_name = global_user_state.get_glob_service_names(
+            service_name)
+        if not glob_service_name:
+            click.echo(f'Service {service_name!r} not found.')
+        glob_service_names.extend(glob_service_name)
+    return list(set(glob_service_names))
 
 
 def _warn_if_local_cluster(cluster: str, local_clusters: List[str],
@@ -2620,6 +2633,28 @@ def _down_or_stop_clusters(
                     f'Skipping local cluster {c}, as it does not support '
                     '`sky stop/autostop`.'))
             ]
+        name_to_reserved_prefix = dict()
+        for name in names:
+            for prefix in backend_utils.SKY_RESERVED_CLUSTER_PREFIXES:
+                if name.startswith(prefix):
+                    name_to_reserved_prefix[name] = prefix
+                    break
+        names = [name for name in names if name not in name_to_reserved_prefix]
+        reserve_prefix_str = ', '.join(
+            [f'{prefix}*' for prefix in name_to_reserved_prefix.values()])
+        if len(name_to_reserved_prefix) > 0:
+            if len(names) != 0:
+                names_str = ', '.join(map(repr, names))
+                raise click.UsageError(
+                    f'{operation} cluster(s) with reserved prefix '
+                    f'{reserve_prefix_str} with other cluster(s) '
+                    f'{names_str} is currently not supported.\n'
+                    'Please omit the cluster(s) with reserved prefix '
+                    f'{name_to_reserved_prefix.values()}.')
+            raise click.UsageError(
+                f'{operation} cluster(s) with reserved prefix '
+                f'{reserve_prefix_str} is not supported. To teardown a '
+                'service, please use `sky serve down`.')
         # Make sure the reserved clusters are explicitly specified without other
         # normal clusters.
         if len(reserved_clusters) > 0:
@@ -3817,7 +3852,7 @@ def serve():
                 type=str,
                 **_get_shell_complete_args(_complete_file_name))
 @click.option('--service-name',
-              '-s',
+              '-n',
               default=None,
               type=str,
               help='A service name. Unique for each service. If not provided, '
@@ -3833,9 +3868,9 @@ def serve_up(
     service_name: Optional[str],
     yes: bool,
 ):
-    """Launches a SkyServe instance.
+    """Launch a SkyServe service.
 
-    ENTRYPOINT must points to a valid YAML file.
+    ENTRYPOINT must point to a valid YAML file.
 
     Example:
 
@@ -3846,8 +3881,18 @@ def serve_up(
     if service_name is None:
         service_name = backend_utils.generate_service_name()
 
-    if global_user_state.get_service_from_name(service_name) is not None:
-        click.secho(f'Service {service_name!r} already exists.', fg='red')
+    previous_service_record = global_user_state.get_service_from_name(
+        service_name)
+    if previous_service_record is not None:
+        if previous_service_record['status'] in [
+                status_lib.ServiceStatus.CONTRLLER_FAILED,
+                status_lib.ServiceStatus.FAILED
+        ]:
+            prompt = (f'Service {service_name!r} has failed. '
+                      'Please clean up the service and try again.')
+        else:
+            prompt = f'Service {service_name!r} already exists.'
+        click.secho(prompt, fg='red')
         return
 
     shell_splits = shlex.split(entrypoint)
@@ -3906,17 +3951,60 @@ def serve_up(
     if len(dag.tasks) > 1:
         click.secho('Multiple tasks found in the YAML file.', fg='red')
         return
-    task = dag.tasks[0]
+    task: sky.Task = dag.tasks[0]
     if task.service is None:
         click.secho('Service section not found in the YAML file.', fg='red')
         return
+    assert len(task.resources) == 1
+    if list(task.resources)[0].ports is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Specifying ports in resources is not allowed. SkyServe will '
+                'use the port specified in the service section.')
+        return
+
+    if task.service.controller_resources is not None:
+        controller_resources_config = task.service.controller_resources
+    else:
+        controller_resources_config = serve_lib.CONTROLLER_RESOURCES
+    try:
+        controller_resources = sky.Resources.from_yaml_config(
+            controller_resources_config)
+    except ValueError as e:
+        raise ValueError(
+            'Encountered error when parsing controller resources') from e
+    if controller_resources.ports is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Cannot specify ports in controller resources. SkyServe '
+                'will use the port specified in the service section.')
+        return
+
+    click.secho('Service Spec:', fg='cyan')
+    click.echo(task.service)
+
+    dummy_controller_task = sky.Task().set_resources(controller_resources)
+    click.secho('The controller will use the following resources:', fg='cyan')
+    with sky.Dag() as dag:
+        dag.add(dummy_controller_task)
+    sky.optimize(dag)
+    click.echo()
+
+    dummy_controller_task: sky.Task = dag.tasks[0]
+    controller_best_resources = dummy_controller_task.best_resources
+
+    click.secho('Each replica will use the following resource:', fg='cyan')
+    with sky.Dag() as dag:
+        dag.add(task)
+    sky.optimize(dag)
+    click.echo()
 
     if not yes:
         prompt = f'Launching a new service {service_name}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.serve_up(task, service_name)
+    sky.serve_up(task, service_name, controller_best_resources)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
@@ -3933,7 +4021,66 @@ def serve_up(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def serve_status(all: bool, service_name: Optional[str]):
-    """Show statuses of SkyServe services.
+    """Show statuses of SkyServe service.
+
+    Show detailed statuses of the service. If SERVICE_NAME is not provided,
+    show all services' status.
+
+    Each service can have one of the following statuses:
+
+    - ``CONTROLLER_INIT``: The controller is initializing.
+
+    - ``REPLICA_INIT``: The controller provisioning have succeeded; control
+      plane and redirector is alive, and there are no available replicas for
+      now. This also indicates that no replica failure has been detected.
+
+    - ``CONTROLLER_FAILED``: The controller failed to start or in an abnormal
+      state; or the control plane and redirector is not alive.
+
+    - ``READY``: The controller is ready to serve requests. This means that
+      at least one replica have passed the readiness probe.
+
+    - ``SHUTTING_DOWN``: The controller is being shutting down. This usually
+      happens when the `sky serve down` command is called.
+
+    - ``FAILED``: At least one replica failed and no replica is ready. This
+      could be caused by several reasons:
+
+      - The launching process of the replica failed.
+
+      - No readiness probe passed within initial delay seconds.
+
+      - The replica continuously failed after serving requests for a while.
+
+      - User code failed.
+
+    Each replica can have one of the following statuses:
+
+    - ``PROVISIONING``: The replica is being provisioned.
+
+    - ``STARTING``: The replica provisioning have succeeded and the replica is
+      initializing its service, e.g., installing dependencies or loading model
+      weights.
+
+    - ``READY``: The replica is ready to serve requests.
+
+    - ``NOT_READY``: Currently, this replica failed the readiness probe but not
+      continuously failed for some time. This usually happens when the replica
+      is suffering from a bad network connection or there are too many requests
+      overwhelming the replica.
+
+    - ``SHUTTING_DOWN``: The replica is being shutting down. This usually
+      happens when the replica is being scaled down or some error occurred.
+      SkyServe will terminate all replicas that have some error occurred.
+
+    - ``FAILED``: Some error occurred when the replica is serving requests.
+      This indicates that the replica is already shut down. (Otherwise, it is
+      ``SHUTTING_DOWN``.)
+
+    - ``FAILED_CLEANUP``: Some error occurred when the replica is shutting down.
+      This usually indicates some resources leakage happened since the
+      termination not finished correctly. When seeing this status, please login
+      to cloud console and check whether there are some resources not released.
 
     Examples:
 
@@ -3945,35 +4092,36 @@ def serve_status(all: bool, service_name: Optional[str]):
       # Show detailed status for all services
       sky serve status -a
       \b
-      # Show service status and replica status for a specific service
+      # Only show status of my-service
       sky serve status my-service
-      \b
-      # Show detailed service status and replica status for a specific service
-      sky serve status my-service -a
     """
     service_records = core.service_status(service_name)
+    if service_name is not None and not service_records:
+        click.secho(f'Service {service_name!r} not found.', fg='red')
+        return
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Services'
                f'{colorama.Style.RESET_ALL}')
     status_utils.show_service_table(service_records, all)
-    if service_name is not None:
-        # If service not exist, we should already raise an error in
-        # core.service_status.
-        assert len(service_records) == 1, service_records
-        service_record = service_records[0]
-        if 'replica_info' not in service_record:
-            click.secho(f'Failed to refresh status of service: {service_name}.',
-                        fg='red')
-            return
-        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Replicas of {service_name}{colorama.Style.RESET_ALL}')
-        status_utils.show_replica_table(service_record['replica_info'], all)
+    click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'Replicas{colorama.Style.RESET_ALL}')
+    replica_infos = []
+    for service_record in service_records:
+        for replica_record in service_record['replica_info']:
+            replica_record['service_name'] = service_record['name']
+            replica_infos.append(replica_record)
+    status_utils.show_replica_table(replica_infos, all)
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
-@click.argument('service_name',
-                required=True,
-                type=str,
+@click.argument('service_names',
+                nargs=-1,
+                required=False,
                 **_get_shell_complete_args(_complete_service_name))
+@click.option('--all',
+              '-a',
+              default=None,
+              is_flag=True,
+              help='Stop all existing clusters.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3987,23 +4135,95 @@ def serve_status(all: bool, service_name: Optional[str]):
               required=False,
               help='Ignore errors (if any). ')
 def serve_down(
-    service_name: str,
+    service_names: List[str],
+    all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
     purge: bool,
 ):
-    """Stops a SkyServe instance.
+    """Tear down service(s).
+
+    SERVICE_NAMES is the name of the service (or glob pattern) to tear down. If
+    both SERVICE_NAMES and ``--all`` are supplied, the latter takes precedence.
+
+    Tear down a service will delete all associated resources, including the
+    controller VM and all replicas.
 
     Example:
 
     .. code-block:: bash
 
+        # Tear down a specific service.
         sky serve down my-service
-    """
-    if not yes:
-        prompt = f'Tearing down service {service_name}. Proceed?'
-        click.confirm(prompt, default=True, abort=True, show_default=True)
+        \b
+        # Tear down multiple services.
+        sky serve down my-service1 my-service2
+        \b
+        # Tear down all services matching glob pattern 'service-*'.
+        sky serve down "service-*"
+        \b
+        # Tear down all existing services.
+        sky serve down -a
 
-    sky.serve_down(service_name, purge)
+    """
+    if not service_names and not all:
+        raise click.UsageError(
+            '`sky serve down` requires either a service name (see '
+            '`sky serve status`) or --all to be specified.')
+    if all:
+        service_names = [
+            record['name'] for record in global_user_state.get_services()
+        ]
+    else:
+        service_names = _get_glob_services(service_names)
+
+    if not service_names:
+        click.echo('\nService(s) not found (tip: see `sky serve status`).')
+        return
+
+    plural = '' if len(service_names) == 1 else 's'
+    if not yes:
+        service_name_list = ', '.join(service_names)
+        click.confirm(
+            f'Tearing down {len(service_names)} service{plural}: '
+            f'{service_name_list}. Proceed?',
+            default=True,
+            abort=True,
+            show_default=True)
+
+    progress = rich_progress.Progress(transient=True,
+                                      redirect_stdout=False,
+                                      redirect_stderr=False)
+    task = progress.add_task(
+        f'[bold cyan]Tearing down {len(service_names)} service{plural}[/]',
+        total=len(service_names))
+
+    def _down_service(name: str):
+        success_progress = False
+        try:
+            sky.serve_down(name, purge)
+        except RuntimeError as e:
+            message = (f'{colorama.Fore.RED}Teardown service {name}...failed. '
+                       f'{colorama.Style.RESET_ALL}'
+                       f'\nReason: {common_utils.format_exception(e)}.')
+        except (exceptions.NotSupportedError,
+                exceptions.ClusterOwnerIdentityMismatchError) as e:
+            message = str(e)
+        else:
+            message = (f'{colorama.Fore.GREEN}Teardown service {name}...done.'
+                       f'{colorama.Style.RESET_ALL}')
+            success_progress = True
+
+        progress.stop()
+        click.echo(message)
+        if success_progress:
+            progress.update(task, advance=1)
+        progress.start()
+
+    with progress:
+        subprocess_utils.run_in_parallel(_down_service, service_names)
+        progress.live.transient = False
+        # Make sure the progress bar not mess up the terminal.
+        progress.refresh()
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
@@ -4014,33 +4234,27 @@ def serve_down(
     help=('Follow the logs of the job. [default: --follow] '
           'If --no-follow is specified, print the log so far and exit.'))
 @click.option('--control-plane',
-              '-c',
               is_flag=True,
               default=False,
               required=False,
               help='Show the control plane logs of this service.')
 @click.option('--redirector',
-              '-r',
               is_flag=True,
               default=False,
               required=False,
               help='Show the redirector logs of this service.')
-@click.option('--replica-id',
-              '-i',
-              default=None,
-              required=False,
-              help='Show the logs of a specific replica.')
 @click.argument('service_name',
                 required=True,
                 type=str,
                 **_get_shell_complete_args(_complete_service_name))
+@click.argument('replica_id', required=False, type=int)
 @usage_lib.entrypoint
 def serve_logs(
     service_name: str,
     follow: bool,
     control_plane: bool,
     redirector: bool,
-    replica_id: Optional[str],
+    replica_id: Optional[int],
 ):
     """Tail the log of a service.
 
@@ -4049,10 +4263,13 @@ def serve_logs(
     .. code-block:: bash
 
         # Tail the control plane logs of a service
-        sky serve logs -c [SERVICE_ID]
+        sky serve logs --control-plane [SERVICE_ID]
         \b
         # Print the redirector logs so far and exit
-        sky serve logs -r --no-follow [SERVICE_ID]
+        sky serve logs --redirector --no-follow [SERVICE_ID]
+        \b
+        # Tail the logs of replica 1
+        sky serve logs [SERVICE_ID] 1
     """
     have_replica_id = replica_id is not None
     if (control_plane + redirector + have_replica_id) != 1:
@@ -4069,10 +4286,10 @@ def serve_logs(
     controller_name = service_record['controller_cluster_name']
     if control_plane:
         core.tail_logs(controller_name, job_id=1, follow=follow)
-    if redirector:
+    elif redirector:
         core.tail_logs(controller_name, job_id=2, follow=follow)
-    if have_replica_id:
-        raise NotImplementedError
+    else:
+        core.serve_tail_logs(service_record, replica_id, follow=follow)
 
 
 # ==============================

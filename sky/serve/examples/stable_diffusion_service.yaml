@@ -1,16 +1,12 @@
 #SkyPilot YAML to run stable diffusion web tool on 1 V100 GPU.
 
 resources:
-  cloud: gcp
   accelerators: V100:1
 
 service:
   port: 7860
-  readiness_probe:
-    path: /
-    readiness_timeout: 1200
-  replica_policy:
-    min_replica: 2
+  readiness_probe: /
+  replicas: 2
 
 file_mounts:
   /stable_diffusion: examples/stable_diffusion

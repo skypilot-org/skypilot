@@ -113,9 +113,6 @@ install_requires = [
     # Ray job has an issue with pydantic>2.0.0, due to API changes of pydantic. See
     # https://github.com/ray-project/ray/issues/36990
     'pydantic<2.0',
-    # Required by the SkyServe library
-    'uvicorn',
-    'fastapi'
 ]
 
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
@@ -147,6 +144,7 @@ extras_require: Dict[str, List[str]] = {
     'cloudflare': aws_dependencies,
     'scp': [],
     'oci': ['oci'],
+    'serve': ['uvicorn', 'fastapi'],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

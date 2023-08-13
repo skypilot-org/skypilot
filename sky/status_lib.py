@@ -54,11 +54,15 @@ class StorageStatus(enum.Enum):
 class ServiceStatus(enum.Enum):
     """Service status as recorded in table 'services'."""
 
-    # Middleware is initializing
+    # Controller is initializing
     CONTROLLER_INIT = 'CONTROLLER_INIT'
 
-    # Replica is initializing
+    # Replica is initializing and no failure
     REPLICA_INIT = 'REPLICA_INIT'
+
+    # Controller failed to initialize / control plane or redirector jobs
+    # status abnormal
+    CONTRLLER_FAILED = 'CONTROLLER_FAILED'
 
     # At least one replica is ready
     READY = 'READY'
@@ -66,7 +70,7 @@ class ServiceStatus(enum.Enum):
     # Service is being shutting down
     SHUTTING_DOWN = 'SHUTTING_DOWN'
 
-    # At least one replica is failed
+    # At least one replica is failed and no replica is ready
     FAILED = 'FAILED'
 
     def colored_str(self):
@@ -77,6 +81,7 @@ class ServiceStatus(enum.Enum):
 _SERVICE_STATUS_TO_COLOR = {
     ServiceStatus.CONTROLLER_INIT: colorama.Fore.BLUE,
     ServiceStatus.REPLICA_INIT: colorama.Fore.BLUE,
+    ServiceStatus.CONTRLLER_FAILED: colorama.Fore.RED,
     ServiceStatus.READY: colorama.Fore.GREEN,
     ServiceStatus.SHUTTING_DOWN: colorama.Fore.YELLOW,
     ServiceStatus.FAILED: colorama.Fore.RED,
@@ -86,17 +91,35 @@ _SERVICE_STATUS_TO_COLOR = {
 class ReplicaStatus(enum.Enum):
     """Replica status."""
 
-    # Replica is initializing
-    INIT = 'INIT'
+    # The replica VM is being provisioned. i.e., the `sky.launch` is still
+    # running.
+    PROVISIONING = 'PROVISIONING'
 
-    # Replica is running
+    # The replica VM is provisioned and the service is starting. This indicates
+    # user's `setup` section or `run` section is still running, and the
+    # readiness probe fails.
+    STARTING = 'STARTING'
+
+    # The replica VM is provisioned and the service is ready, i.e. the
+    # readiness probe is passed.
     READY = 'READY'
 
-    # Replica is unhealthy (e.g., health probe failed)
-    UNHEALTHY = 'UNHEALTHY'
+    # The service was ready before, but it becomes not ready now, i.e. the
+    # readiness probe fails.
+    NOT_READY = 'NOT_READY'
 
-    # Replica is failed
+    # The replica VM is being shut down. i.e., the `sky down` is still running.
+    SHUTTING_DOWN = 'SHUTTING_DOWN'
+
+    # The replica VM is once failed and has been deleted.
     FAILED = 'FAILED'
+
+    # `sky.down` failed during service teardown. This could mean resource
+    # leakage.
+    FAILED_CLEANUP = 'FAILED_CLEANUP'
+
+    # Unknown status. This should never happen.
+    UNKNOWN = 'UNKNOWN'
 
     def colored_str(self):
         color = _REPLICA_STATUS_TO_COLOR[self]
@@ -104,8 +127,12 @@ class ReplicaStatus(enum.Enum):
 
 
 _REPLICA_STATUS_TO_COLOR = {
-    ReplicaStatus.INIT: colorama.Fore.BLUE,
+    ReplicaStatus.PROVISIONING: colorama.Fore.BLUE,
+    ReplicaStatus.STARTING: colorama.Fore.CYAN,
     ReplicaStatus.READY: colorama.Fore.GREEN,
-    ReplicaStatus.UNHEALTHY: colorama.Fore.YELLOW,
+    ReplicaStatus.NOT_READY: colorama.Fore.YELLOW,
+    ReplicaStatus.FAILED_CLEANUP: colorama.Fore.RED,
+    ReplicaStatus.SHUTTING_DOWN: colorama.Fore.MAGENTA,
     ReplicaStatus.FAILED: colorama.Fore.RED,
+    ReplicaStatus.UNKNOWN: colorama.Fore.RED,
 }

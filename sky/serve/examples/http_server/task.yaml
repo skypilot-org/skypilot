@@ -1,7 +1,5 @@
 resources:
-  cloud: gcp
-  ports:
-    - 8081
+  cpus: 2+
 
 workdir: sky/serve/examples/http_server
 
@@ -11,7 +9,5 @@ service:
   port: 8081
   readiness_probe:
     path: /health
-    readiness_timeout: 12000
-  replica_policy:
-    min_replica: 1
-    max_replica: 1
+    initial_delay_seconds: 20
+  replicas: 2

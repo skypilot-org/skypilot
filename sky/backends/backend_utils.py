@@ -1,5 +1,5 @@
 """Util constants/functions for the backends."""
-import base64
+import collections
 from datetime import datetime
 import difflib
 import enum
@@ -7,7 +7,6 @@ import getpass
 import json
 import os
 import pathlib
-import pickle
 import re
 import subprocess
 import tempfile
@@ -105,9 +104,19 @@ SKY_RESERVED_CLUSTER_NAMES: Dict[str, str] = {
     spot_lib.SPOT_CONTROLLER_NAME: 'Managed spot controller'
 }
 
+# Mapping from reserved cluster prefixes to the corresponding group name
+# (logging purpose).
+SKY_RESERVED_CLUSTER_PREFIXES: Dict[str, str] = {
+    serve_lib.CONTROLLER_PREFIX: 'SkyServe controller',
+}
+
 # Filelocks for the cluster status change.
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
+
+# Filelocks for the service status change.
+SERVICE_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.service.{}.lock')
+SERVICE_STATUS_LOCK_TIMEOUT_SECONDS = 20
 
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
@@ -2401,60 +2410,139 @@ def get_clusters(
     return kept_records
 
 
+def _service_status_from_replica_info(
+        replica_info: List[Dict[str, Any]]) -> status_lib.ServiceStatus:
+    status2num = collections.Counter([i['status'] for i in replica_info])
+    # If one replica is READY, the service is READY.
+    if status2num[status_lib.ReplicaStatus.READY] > 0:
+        return status_lib.ServiceStatus.READY
+    if (status2num[status_lib.ReplicaStatus.FAILED] +
+            status2num[status_lib.ReplicaStatus.FAILED_CLEANUP] > 0):
+        return status_lib.ServiceStatus.FAILED
+    return status_lib.ServiceStatus.REPLICA_INIT
+
+
+def _check_controller_status_and_set_service_status(
+        service_name: str, cluster_name: str) -> Optional[str]:
+    cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+    if (cluster_record is None or
+            cluster_record['status'] != status_lib.ClusterStatus.UP):
+        global_user_state.set_service_status(
+            service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+        return f'Controller cluster {cluster_name!r} is not found or UP.'
+    return None
+
+
+def _refresh_service_record_no_lock(
+        service_name: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    record = global_user_state.get_service_from_name(service_name)
+    if record is None:
+        return None, None
+
+    try:
+        check_network_connection()
+    except exceptions.NetworkError:
+        return record, 'Failed to refresh replica info due to network error.'
+
+    if not record['endpoint']:
+        # Service controller is still initializing. Skipped refresh status.
+        return record, None
+
+    controller_cluster_name = record['controller_cluster_name']
+    handle = global_user_state.get_handle_from_cluster_name(
+        controller_cluster_name)
+    assert handle is not None
+    backend = get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+
+    code = serve_lib.ServeCodeGen.get_latest_info()
+    returncode, latest_info_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+    if returncode != 0:
+        # If we cannot get the latest info, there are two possibilities:
+        #   1. The controller is not in a healthy state;
+        #   2. The control plane process somehow not respond to the request.
+        # For the first case, we want to catch the error and set the service
+        # status to CONTROLLER_FAILED.
+        # TODO(tian): Since we disabled sky down the controller, we might could
+        # assert cluster status is UP here and remove this function.
+        msg = _check_controller_status_and_set_service_status(
+            record['name'], controller_cluster_name)
+        if msg is None:
+            msg = ('Failed to refresh replica info from the controller. '
+                   f'Using the cached record. Reason: {stderr}')
+        return record, msg
+
+    latest_info = serve_lib.load_latest_info(latest_info_payload)
+    record['replica_info'] = latest_info['replica_info']
+    record['uptime'] = latest_info['uptime']
+
+    msg = None
+    # When the service is shutting down, there is a period of time which the
+    # control plane still responds to the request, and the replica is not
+    # terminated, so the return value for _service_status_from_replica_info
+    # will still be READY, but we don't want change service status to READY.
+    if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
+        new_status = _service_status_from_replica_info(
+            latest_info['replica_info'])
+        record['status'] = new_status
+
+    global_user_state.add_or_update_service(**record)
+
+    return record, msg
+
+
+def _refresh_service_record(
+        service_name: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    try:
+        # TODO(tian): remove pylint disabling when filelock
+        # version updated
+        # pylint: disable=abstract-class-instantiated
+        with filelock.FileLock(SERVICE_STATUS_LOCK_PATH.format(service_name),
+                               SERVICE_STATUS_LOCK_TIMEOUT_SECONDS):
+            return _refresh_service_record_no_lock(service_name)
+    except filelock.Timeout:
+        msg = ('Failed get the lock for service '
+               f'{service_name!r}. Using the cached record.')
+        return global_user_state.get_service_from_name(service_name), msg
+
+
 def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
     if service_name is None:
-        service_records = global_user_state.get_services()
+        service_names = [
+            record['name'] for record in global_user_state.get_services()
+        ]
     else:
-        service_record = global_user_state.get_service_from_name(service_name)
-        if service_record is None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Service {service_name} does not exist.')
-        service_records = [service_record]
-    # TODO(tian): Make it run in parallel.
-    for record in service_records:
-        endpoint = record['endpoint']
-        if not endpoint:
-            continue
-        # TODO(tian): Refactor: store ip and app_port separately.
-        controller_ip = endpoint.split(':')[0]
-        controller_url = f'http://{controller_ip}:{serve_lib.CONTROL_PLANE_PORT}'
-        try:
-            resp = requests.get(controller_url +
-                                '/control_plane/get_replica_nums',
-                                timeout=5)
-        except requests.RequestException:
-            pass
-        else:
-            record.update(resp.json())
-            if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
-                # TODO(tian): Current behaviour for user bugs in setup section
-                # is to teardown and relaunching forever. We should have a way
-                # to detect such bugs and stop relaunching.
-                if record['num_failed_replicas'] > 0:
-                    record['status'] = status_lib.ServiceStatus.FAILED
-                elif record['num_ready_replicas'] > 0:
-                    record['status'] = status_lib.ServiceStatus.READY
-                elif record['num_unhealthy_replicas'] > 0:
-                    record['status'] = status_lib.ServiceStatus.REPLICA_INIT
-        global_user_state.add_or_update_service(**record)
-        if service_name is not None:
-            assert record['name'] == service_name
-            try:
-                resp = requests.get(controller_url +
-                                    '/control_plane/get_replica_info',
-                                    timeout=5)
-            except requests.RequestException:
-                pass
-            else:
-                record['replica_info'] = resp.json()['replica_info']
-                decoded_info = []
-                for info in record['replica_info']:
-                    decoded_info.append({
-                        k: pickle.loads(base64.b64decode(v))
-                        for k, v in info.items()
-                    })
-                record['replica_info'] = decoded_info
-    return service_records
+        service_names = [service_name]
+
+    plural = 's' if len(service_names) > 1 else ''
+    progress = rich_progress.Progress(transient=True,
+                                      redirect_stdout=False,
+                                      redirect_stderr=False)
+    task = progress.add_task(
+        (f'[bold cyan]Refreshing status for {len(service_names)} '
+         f'service{plural}[/]'),
+        total=len(service_names))
+
+    def _refresh_service(service_name: str) -> Optional[Dict[str, Any]]:
+        record, msg = _refresh_service_record(service_name)
+        if msg is not None:
+            progress.stop()
+            print(
+                f'{colorama.Fore.YELLOW}Error occurred when refreshing service '
+                f'{service_name}: {msg}{colorama.Style.RESET_ALL}')
+        progress.update(task, advance=1)
+        return record
+
+    with progress:
+        updated_records = subprocess_utils.run_in_parallel(
+            _refresh_service, service_names)
+
+    return [record for record in updated_records if record is not None]
 
 
 @typing.overload
@@ -2523,7 +2611,7 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
 def check_cluster_name_not_reserved(
         cluster_name: Optional[str],
         operation_str: Optional[str] = None) -> None:
-    """Errors out if the cluster is a reserved cluster (spot controller).
+    """Errors out if the cluster name is reserved (e.g., spot/serve controller).
 
     Raises:
       sky.exceptions.NotSupportedError: if the cluster name is reserved, raise
@@ -2532,9 +2620,16 @@ def check_cluster_name_not_reserved(
     Returns:
       None, if the cluster name is not reserved.
     """
+    msg = None
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
         msg = (f'Cluster {cluster_name!r} is reserved for the '
                f'{SKY_RESERVED_CLUSTER_NAMES[cluster_name].lower()}.')
+    for prefix in SKY_RESERVED_CLUSTER_PREFIXES:
+        if cluster_name is not None and cluster_name.startswith(prefix):
+            msg = (f'Cluster prefix {prefix!r} is reserved for the '
+                   f'{SKY_RESERVED_CLUSTER_PREFIXES[prefix].lower()}.')
+            break
+    if msg is not None:
         if operation_str is not None:
             msg += f' {operation_str} is not allowed.'
         with ux_utils.print_exception_no_traceback():
