@@ -123,7 +123,8 @@ class RequestRateAutoscaler(Autoscaler):
         logger.info(f'Number of nodes: {num_nodes}')
         if num_nodes < self.min_nodes:
             logger.info('Bootstrapping service.')
-            self.scale_up(min(self.min_nodes - num_nodes, _MAX_BOOTSTRAPING_NUM))
+            self.scale_up(min(self.min_nodes - num_nodes,
+                              _MAX_BOOTSTRAPING_NUM))
             self.last_scale_operation = current_time
         elif (self.upper_threshold is not None and
               requests_per_node > self.upper_threshold):
