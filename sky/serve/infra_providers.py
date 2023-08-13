@@ -421,7 +421,7 @@ class SkyPilotInfraProvider(InfraProvider):
         info.status_property.sky_down_status = ProcessStatus.RUNNING
 
     def _scale_down(self, n: int) -> None:
-        # Rendomly delete n clusters
+        # Rendomly delete n ready replicas
         all_ready_replicas = self.get_ready_replicas()
         num_replicas = len(all_ready_replicas)
         if num_replicas > 0:
@@ -558,10 +558,10 @@ class SkyPilotInfraProvider(InfraProvider):
                 info.consecutive_failure_cnt += 1
                 if (info.consecutive_failure_cnt >=
                         _CONSECUTIVE_FAILURE_THRESHOLD_COUNT):
-                    logger.info(f'Replica {cluster_name} is consecutively '
+                    logger.info(f'Replica {cluster_name} is '
                                 'not ready for too long and exceeding '
                                 'conservative failure threshold. '
-                                'Terminating...')
+                                'Terminating the replica...')
                     self._teardown_cluster(cluster_name)
                 else:
                     current_unready_time = (info.consecutive_failure_cnt *
@@ -576,7 +576,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 if current_delay_seconds > self.initial_delay_seconds:
                     logger.info(f'Replica {cluster_name} is not ready and '
                                 'exceeding initial delay seconds. '
-                                'Terminating...')
+                                'Terminating the replica...')
                     self._teardown_cluster(cluster_name)
                 else:
                     current_delay_seconds = int(current_delay_seconds)
