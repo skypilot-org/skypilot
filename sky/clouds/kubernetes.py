@@ -184,8 +184,6 @@ class Kubernetes(clouds.Cloud):
                                                              'Kubernetes.',
     }
 
-    # TODO(romilb): Add GPU Support - toggle between image depending on chosen
-    #  accelerator type.
     IMAGE_CPU = ('us-central1-docker.pkg.dev/'
                  'skypilot-375900/skypilotk8s/skypilot:latest')
     IMAGE_GPU = ('us-central1-docker.pkg.dev/skypilot-375900/'
@@ -351,7 +349,7 @@ class Kubernetes(clouds.Cloud):
             class GKELabelFormatter(GPULabelFormatter):
                 @classmethod
                 def get_label_key(cls) -> str:
-                    return 'cloud.google.com/gke-accelerator'
+                    return 'mycloud.google.com/gke-accelerator'
 
                 @classmethod
                 def get_label_value(cls, accelerator: str) -> str:
@@ -418,7 +416,7 @@ class Kubernetes(clouds.Cloud):
                         f'{SkyPilotLabelFormatter.get_label_key()}, '
                         f'{GKELabelFormatter.get_label_key()} or '
                         f'{EKSLabelFormatter.get_label_key()}. Please refer to '
-                        ' the documentation on how to set up node labels.'
+                        'the documentation on how to set up node labels.'
                         f'{suffix}')
 
             k8s_acc_label_key = label_formatter.get_label_key()
@@ -474,8 +472,7 @@ class Kubernetes(clouds.Cloud):
                 return _make([default_instance_type]), []
 
         assert len(accelerators) == 1, resources
-        # If GPUs are requested, return an empty list.
-        # TODO(romilb): Add GPU support.
+        # GPUs requested - build instance type.
         acc_type, acc_count = list(accelerators.items())[0]
         default_inst = KubernetesInstanceType.from_instance_type(default_instance_type)
         instance_type = KubernetesInstanceType.from_resources(default_inst.cpus,
