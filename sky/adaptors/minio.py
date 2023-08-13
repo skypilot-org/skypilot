@@ -58,7 +58,8 @@ def get_minio_credentials(boto3_session):
     Args:
         boto3_session: The boto3 session object.
     Returns:
-        botocore.credentials.ReadOnlyCredentials object with the MINIO credentials.
+        botocore.credentials.ReadOnlyCredentials object with the MINIO
+        credentials.
     """
     with _load_minio_credentials_env():
         minio_credentials = boto3_session.get_credentials()
@@ -107,13 +108,12 @@ def resource(resource_name: str, **kwargs):
     minio_credentials = get_minio_credentials(session_)
     endpoint = create_endpoint()
 
-    return session_.resource(
-        resource_name,
-        endpoint_url=endpoint,
-        aws_access_key_id=minio_credentials.access_key,
-        aws_secret_access_key=minio_credentials.secret_key,
-        region_name='auto',
-        **kwargs)
+    return session_.resource(resource_name,
+                             endpoint_url=endpoint,
+                             aws_access_key_id=minio_credentials.access_key,
+                             aws_secret_access_key=minio_credentials.secret_key,
+                             region_name='auto',
+                             **kwargs)
 
 
 @functools.lru_cache()
@@ -133,12 +133,11 @@ def client(service_name: str, region):
     minio_credentials = get_minio_credentials(session_)
     endpoint = create_endpoint()
 
-    return session_.client(
-        service_name,
-        endpoint_url=endpoint,
-        aws_access_key_id=minio_credentials.access_key,
-        aws_secret_access_key=minio_credentials.secret_key,
-        region_name=region)
+    return session_.client(service_name,
+                           endpoint_url=endpoint,
+                           aws_access_key_id=minio_credentials.access_key,
+                           aws_secret_access_key=minio_credentials.secret_key,
+                           region_name=region)
 
 
 @import_package
@@ -156,7 +155,7 @@ def create_endpoint():
         endpoint: "http://my-minio-host:9000"
 
     """
-    endpoint = skypilot_config.get_nested(("minio", "endpoint"), None)
+    endpoint = skypilot_config.get_nested(('minio', 'endpoint'), None)
     return endpoint
 
 
@@ -173,7 +172,7 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
     hints = None
     if not minio_profile_in_aws_cred():
         hints = f'[{MINIO_PROFILE_NAME}] profile is not set in {MINIO_CREDENTIALS_PATH}.'
-    if not skypilot_config.get_nested(("minio", "endpoint"), None):
+    if not skypilot_config.get_nested(('minio', 'endpoint'), None):
         if hints:
             hints += ' Additionally, '
         else:
@@ -185,7 +184,7 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
         if not minio_profile_in_aws_cred():
             hints += f'\n{_INDENT_PREFIX}  $ pip install boto3'
             hints += f'\n{_INDENT_PREFIX}  $ AWS_SHARED_CREDENTIALS_FILE={MINIO_CREDENTIALS_PATH} aws configure --profile minio'  # pylint: disable=line-too-long
-        if not skypilot_config.get_nested(("minio", "endpoint"), None):
+        if not skypilot_config.get_nested(('minio', 'endpoint'), None):
             hints += f'\n{_INDENT_PREFIX}  $ echo {{"minio": {{ "endpoint": "<YOUR MINIO ENDPOINT HERE>" }} }} > ~/.sky/config.yaml'  # pylint: disable=line-too-long
         hints += f'\n{_INDENT_PREFIX}For more info: '
         hints += 'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#minio-minio'  # pylint: disable=line-too-long
@@ -215,7 +214,5 @@ def get_credential_file_mounts() -> Dict[str, str]:
         file_mounts: stores path to credential files of clouds
     """
 
-    minio_credential_mounts = {
-        MINIO_CREDENTIALS_PATH: MINIO_CREDENTIALS_PATH
-    }
+    minio_credential_mounts = {MINIO_CREDENTIALS_PATH: MINIO_CREDENTIALS_PATH}
     return minio_credential_mounts

@@ -230,9 +230,9 @@ class MinioCloudStorage(CloudStorage):
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
         """
-        _minio = minio.resource('s3')
+        minio_res = minio.resource('s3')
         bucket_name, path = data_utils.split_minio_path(url)
-        bucket = _minio.Bucket(bucket_name)
+        bucket = minio_res.Bucket(bucket_name)
 
         num_objects = 0
         for obj in bucket.objects.filter(Prefix=path):

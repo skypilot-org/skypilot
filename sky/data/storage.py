@@ -648,9 +648,9 @@ class Storage(object):
         def validate_name(name):
             """ Checks for validating the storage name.
 
-            Checks if the name starts the s3, gcs, r2 or minio prefix and raise error
-            if it does. Store specific validation checks (e.g., S3 specific
-            rules) happen in the corresponding store class.
+            Checks if the name starts the s3, gcs, r2 or minio prefix and raise
+            error if it does. Store specific validation checks (e.g., S3
+            specific rules) happen in the corresponding store class.
             """
             prefix = name.split('://')[0]
             prefix = prefix.lower()
@@ -735,7 +735,8 @@ class Storage(object):
         add it to Storage.
 
         Args:
-          store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2, MINIO, IBM]
+          store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2,
+          MINIO, IBM]
         """
         if isinstance(store_type, str):
             store_type = StoreType(store_type)
@@ -978,9 +979,10 @@ class S3Store(AbstractStore):
                     f'Source specified as {self.source}, a R2 bucket. ',
                     'R2 Bucket should exist.')
             elif self.source.startswith('minio://'):
-                assert self.name == data_utils.split_minio_path(self.source)[0], (
-                    'MINIO Bucket is specified as path, the name should be '
-                    'the same as MINIO bucket.')
+                assert self.name == data_utils.split_minio_path(
+                    self.source)[0], (
+                        'MINIO Bucket is specified as path, the name should be '
+                        'the same as MINIO bucket.')
                 assert data_utils.verify_minio_bucket(self.name), (
                     f'Source specified as {self.source}, a MINIO bucket. ',
                     'MINIO Bucket should exist.')
@@ -1388,8 +1390,9 @@ class GcsStore(AbstractStore):
                 elif self.source.startswith('minio://'):
                     assert self.name == data_utils.split_minio_path(
                         self.source
-                    )[0], ('MINIO Bucket is specified as path, the name should be '
-                           'the same as MINIO bucket.')
+                    )[0], (
+                        'MINIO Bucket is specified as path, the name should be '
+                        'the same as MINIO bucket.')
                     assert data_utils.verify_minio_bucket(self.name), (
                         f'Source specified as {self.source}, a MINIO bucket. ',
                         'MINIO Bucket should exist.')
@@ -1638,7 +1641,8 @@ class GcsStore(AbstractStore):
             data_transfer.s3_to_gcs(self.name, self.name)
         elif isinstance(self.source, str) and self.source.startswith('r2://'):
             data_transfer.r2_to_gcs(self.name, self.name)
-        elif isinstance(self.source, str) and self.source.startswith('minio://'):
+        elif isinstance(self.source,
+                        str) and self.source.startswith('minio://'):
             data_transfer.minio_to_gcs(self.name, self.name)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
@@ -1831,9 +1835,10 @@ class R2Store(AbstractStore):
                     'R2 Bucket is specified as path, the name should be '
                     'the same as R2 bucket.')
             elif self.source.startswith('minio://'):
-                assert self.name == data_utils.split_minio_path(self.source)[0], (
-                    'MINIO Bucket is specified as path, the name should be '
-                    'the same as MINIO bucket.')
+                assert self.name == data_utils.split_minio_path(
+                    self.source)[0], (
+                        'MINIO Bucket is specified as path, the name should be '
+                        'the same as MINIO bucket.')
                 assert data_utils.verify_minio_bucket(self.name), (
                     f'Source specified as {self.source}, a MINIO bucket. ',
                     'MINIO Bucket should exist.')
@@ -2164,6 +2169,10 @@ class R2Store(AbstractStore):
 
 
 class MINIOStore(AbstractStore):
+    """MINIOStore inherits from S3Store Object and represents the backend
+    for minio buckets.
+    """
+
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
 
     def __init__(self,
@@ -2201,9 +2210,10 @@ class MINIOStore(AbstractStore):
                     f'Source specified as {self.source}, a R2 bucket. ',
                     'R2 Bucket should exist.')
             elif self.source.startswith('minio://'):
-                assert self.name == data_utils.split_minio_path(self.source)[0], (
-                    'MINIO Bucket is specified as path, the name should be '
-                    'the same as MINIO bucket.')
+                assert self.name == data_utils.split_minio_path(
+                    self.source)[0], (
+                        'MINIO Bucket is specified as path, the name should be '
+                        'the same as MINIO bucket.')
 
     def initialize(self):
         """Initializes the MINIO store object on the cloud.
@@ -2268,8 +2278,8 @@ class MINIOStore(AbstractStore):
         return cloudflare.resource('s3').Bucket(self.name)
 
     def batch_minio_rsync(self,
-                        source_path_list: List[Path],
-                        create_dirs: bool = False) -> None:
+                          source_path_list: List[Path],
+                          create_dirs: bool = False) -> None:
         """Invokes aws s3 sync to batch upload a list of local paths to Minio
 
         AWS Sync by default uses 10 threads to upload files to the bucket.  To
@@ -2309,14 +2319,13 @@ class MINIOStore(AbstractStore):
             excludes = ' '.join(
                 [f'--exclude "{file_name}"' for file_name in excluded_list])
             endpoint_url = minio.create_endpoint()
-            sync_command = (
-                'AWS_SHARED_CREDENTIALS_FILE='
-                f'{minio.MINIO_CREDENTIALS_PATH} '
-                f'aws s3 sync --no-follow-symlinks {excludes} '
-                f'{src_dir_path} '
-                f's3://{self.name}/{dest_dir_name} '
-                f'--endpoint {endpoint_url} '
-                f'--profile={minio.MINIO_PROFILE_NAME}')
+            sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
+                            f'{minio.MINIO_CREDENTIALS_PATH} '
+                            f'aws s3 sync --no-follow-symlinks {excludes} '
+                            f'{src_dir_path} '
+                            f's3://{self.name}/{dest_dir_name} '
+                            f'--endpoint {endpoint_url} '
+                            f'--profile={minio.MINIO_PROFILE_NAME}')
             return sync_command
 
         # Generate message for upload
@@ -2327,7 +2336,8 @@ class MINIOStore(AbstractStore):
 
         with log_utils.safe_rich_status(
                 f'[bold cyan]Syncing '
-                f'[green]{source_message}[/] to [green]minio://{self.name}/[/]'):
+                f'[green]{source_message}[/] to [green]minio://{self.name}/[/]'
+        ):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -2338,9 +2348,10 @@ class MINIOStore(AbstractStore):
                 max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
 
     def _transfer_to_minio(self) -> None:
-        raise NotImplementedError('Moving data directly from clouds to MINIO is '
-                                  'currently not supported. Please specify '
-                                  'a local source for the storage object.')
+        raise NotImplementedError(
+            'Moving data directly from clouds to MINIO is '
+            'currently not supported. Please specify '
+            'a local source for the storage object.')
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the R2 bucket.
@@ -2356,8 +2367,8 @@ class MINIOStore(AbstractStore):
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
         """
-        _minio = minio.resource('s3')
-        bucket = _minio.Bucket(self.name)
+        minio_res = minio.resource('s3')
+        bucket = minio_res.Bucket(self.name)
         endpoint_url = minio.create_endpoint()
         try:
             # Try Public bucket case.
@@ -2436,8 +2447,8 @@ class MINIOStore(AbstractStore):
                                                    mount_cmd)
 
     def _create_minio_bucket(self,
-                          bucket_name: str,
-                          region='auto') -> StorageHandle:
+                             bucket_name: str,
+                             region='auto') -> StorageHandle:
         """Creates Minio bucket with specific name in specific region
 
         Args:
@@ -2448,7 +2459,8 @@ class MINIOStore(AbstractStore):
         """
         minio_client = self.client
         try:
-            # NOTE (weit) region not currently relevant
+            # NOTE: region not relevant
+            del region
             minio_client.create_bucket(Bucket=bucket_name)
         except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():

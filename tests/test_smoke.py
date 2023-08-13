@@ -2793,7 +2793,7 @@ class TestStorageWithCredentials:
                 url = f's3://{bucket_name}/{suffix}'
             else:
                 url = f's3://{bucket_name}'
-            return f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=minio'        
+            return f'AWS_SHARED_CREDENTIALS_FILE={minio.MINIO_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=minio'
         if store_type == storage_lib.StoreType.IBM:
             bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
                 bucket_name, Rclone.RcloneClouds.IBM)
@@ -3244,19 +3244,19 @@ class TestStorageWithCredentials:
                     name=private_bucket_name)):
             storage_obj = storage_lib.Storage(source=private_bucket)
 
-    @pytest.mark.parametrize('ext_bucket_fixture, store_type',
-                             [('tmp_awscli_bucket', storage_lib.StoreType.S3),
-                              ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
-                              pytest.param('tmp_ibm_cos_bucket',
-                                           storage_lib.StoreType.IBM,
-                                           marks=pytest.mark.ibm),
-                              pytest.param('tmp_awscli_bucket_r2',
-                                           storage_lib.StoreType.R2,
-                                           marks=pytest.mark.cloudflare),
-                              pytest.param('tmp_awscli_bucket_minio',
-                                           storage_lib.StoreType.MINIO,
-                                           marks=pytest.mark.minio),
-                              ])
+    @pytest.mark.parametrize('ext_bucket_fixture, store_type', [
+        ('tmp_awscli_bucket', storage_lib.StoreType.S3),
+        ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
+        pytest.param('tmp_ibm_cos_bucket',
+                     storage_lib.StoreType.IBM,
+                     marks=pytest.mark.ibm),
+        pytest.param('tmp_awscli_bucket_r2',
+                     storage_lib.StoreType.R2,
+                     marks=pytest.mark.cloudflare),
+        pytest.param('tmp_awscli_bucket_minio',
+                     storage_lib.StoreType.MINIO,
+                     marks=pytest.mark.minio),
+    ])
     def test_upload_to_existing_bucket(self, ext_bucket_fixture, request,
                                        tmp_source, store_type):
         # Tries uploading existing files to newly created bucket (outside of
@@ -3300,7 +3300,7 @@ class TestStorageWithCredentials:
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
-         pytest.param(storage_lib.StoreType.MINIO, marks=pytest.mark.minio)
+        pytest.param(storage_lib.StoreType.MINIO, marks=pytest.mark.minio)
     ])
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
         # Uses a list in the source field to specify a file and a directory to
@@ -3323,20 +3323,19 @@ class TestStorageWithCredentials:
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
 
-    @pytest.mark.parametrize('invalid_name_list, store_type',
-                             [(AWS_INVALID_NAMES, storage_lib.StoreType.S3),
-                              (GCS_INVALID_NAMES, storage_lib.StoreType.GCS),
-                              pytest.param(IBM_INVALID_NAMES,
-                                           storage_lib.StoreType.IBM,
-                                           marks=pytest.mark.ibm),
-                              pytest.param(AWS_INVALID_NAMES,
-                                           storage_lib.StoreType.R2,
-                                           marks=pytest.mark.cloudflare),
-                              pytest.param(AWS_INVALID_NAMES,
-                                           storage_lib.StoreType.MINIO,
-                                           marks=pytest.mark.minio),
-                              ]
-                             )
+    @pytest.mark.parametrize('invalid_name_list, store_type', [
+        (AWS_INVALID_NAMES, storage_lib.StoreType.S3),
+        (GCS_INVALID_NAMES, storage_lib.StoreType.GCS),
+        pytest.param(IBM_INVALID_NAMES,
+                     storage_lib.StoreType.IBM,
+                     marks=pytest.mark.ibm),
+        pytest.param(AWS_INVALID_NAMES,
+                     storage_lib.StoreType.R2,
+                     marks=pytest.mark.cloudflare),
+        pytest.param(AWS_INVALID_NAMES,
+                     storage_lib.StoreType.MINIO,
+                     marks=pytest.mark.minio),
+    ])
     def test_invalid_names(self, invalid_name_list, store_type):
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
@@ -3354,8 +3353,7 @@ class TestStorageWithCredentials:
                       marks=pytest.mark.cloudflare),
          pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
                       storage_lib.StoreType.MINIO,
-                      marks=pytest.mark.minio)
-         ])
+                      marks=pytest.mark.minio)])
     def test_excluded_file_cloud_storage_upload_copy(self, gitignore_structure,
                                                      store_type,
                                                      tmp_gitignore_storage_obj):

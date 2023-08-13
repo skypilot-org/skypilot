@@ -167,9 +167,9 @@ def verify_minio_bucket(name: str) -> bool:
     Args:
       name: str; Name of MINIO Bucket (without minio:// prefix)
     """
-    _minio = minio.resource('s3')
-    bucket = _minio.Bucket(name)
-    return bucket in _minio.buckets.all()
+    minio_res = minio.resource('s3')
+    bucket = minio_res.Bucket(name)
+    return bucket in minio_res.buckets.all()
 
 
 def verify_ibm_cos_bucket(name: str) -> bool:
@@ -293,8 +293,8 @@ def parallel_upload(source_path_list: List[str],
                     max_concurrent_uploads: Optional[int] = None) -> None:
     """Helper function to run parallel uploads for a list of paths.
 
-    Used by S3Store, GCSStore, R2Store and MINIOStore to run rsync commands in parallel by
-    providing appropriate command generators.
+    Used by S3Store, GCSStore, R2Store and MINIOStore to run rsync commands in
+    parallel by providing appropriate command generators.
 
     Args:
         source_path_list: List of paths to local files or directories
