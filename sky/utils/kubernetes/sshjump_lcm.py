@@ -61,18 +61,15 @@ def poll():
         if len(ret.items) == 0:
             sys.stdout.write(
                 f'DID NOT FIND pods with label "{label_selector}" in '
-                f'namespace: "{current_namespace}"\n'
-            )
+                f'namespace: "{current_namespace}"\n')
             noray_delta = noray_delta + retry_interval_delta
             sys.stdout.write(
                 f'noray_delta after time increment: {noray_delta}, alert '
-                f'threshold: {alert_delta}\n'
-            )
+                f'threshold: {alert_delta}\n')
         else:
             sys.stdout.write(
                 f'FOUND pods with label "{label_selector}" in namespace: '
-                f'"{current_namespace}"\n'
-            )
+                f'"{current_namespace}"\n')
             # reset ..
             noray_delta = datetime.timedelta()
             sys.stdout.write(f'noray_delta is reset: {noray_delta}\n')
@@ -80,8 +77,7 @@ def poll():
         if noray_delta >= alert_delta:
             sys.stdout.write(
                 f'noray_delta: {noray_delta} crossed alert threshold: '
-                f'{alert_delta}. Time to terminate myself\n'
-            )
+                f'{alert_delta}. Time to terminate myself\n')
             try:
                 # sshjump resources created under same name
                 v1.delete_namespaced_service(current_name, current_namespace)

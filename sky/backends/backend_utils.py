@@ -1616,6 +1616,8 @@ def get_head_ssh_port(
     max_attempts: int = 1,
 ) -> int:
     """Returns the ip of the head node."""
+    del handle  # Unused.
+    del use_cache  # Unused.
     del max_attempts  # Unused.
     # Use port 22 for everything including Kubernetes.
     # Note: for Kubernetes we use ssh jump host to access ray head
