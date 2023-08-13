@@ -386,6 +386,8 @@ def _execute(
             env = dict(os.environ,
                        **{env_options.Options.DISABLE_LOGGING.value: '1'})
             subprocess_utils.run('sky status --no-show-spot-jobs', env=env)
+        # UX: Don't show cursor if we are initializing a skyserve controller,
+        # since it will mess up the progress bar.
         if (cluster_name is None or
                 not cluster_name.startswith(serve.CONTROLLER_PREFIX)):
             print()

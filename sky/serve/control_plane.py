@@ -92,8 +92,8 @@ class ControlPlane:
             del request
             logger.info('Terminating service...')
             if self.autoscaler is not None:
-                logger.info('Terminate autoscaler monitor...')
-                self.autoscaler.terminate_monitor()
+                logger.info('Terminate autoscaler...')
+                self.autoscaler.terminate()
             msg = self.infra_provider.terminate()
             # Cleanup cloud storage
             # TODO(tian): move to local serve_down so that we can cleanup
@@ -103,12 +103,12 @@ class ControlPlane:
             backend.teardown_ephemeral_storage(task)
             return {'message': msg}
 
-        # Run replica_monitor and autoscaler.monitor (if autoscaler is defined)
+        # Run replica_prober and autoscaler (if autoscaler is defined)
         # in separate threads in the background.
         # This should not block the main thread.
         self.infra_provider.start_replica_prober()
         if self.autoscaler is not None:
-            self.autoscaler.start_monitor()
+            self.autoscaler.start()
 
         # Disable all GET logs if SKYPILOT_DEBUG is not set to avoid overflood
         # the control plane logs.

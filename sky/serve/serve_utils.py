@@ -35,19 +35,19 @@ def get_replica_id_from_cluster_name(cluster_name: str) -> int:
 def generate_replica_launch_log_file_name(cluster_name: str) -> str:
     cluster_name = cluster_name.replace('-', '_')
     prefix = os.path.expanduser(constants.SERVICE_YAML_PREFIX)
-    return f'{prefix}/{cluster_name}_launch_log.txt'
+    return f'{prefix}/{cluster_name}_launch.log'
 
 
 def generate_replica_down_log_file_name(cluster_name: str) -> str:
     cluster_name = cluster_name.replace('-', '_')
     prefix = os.path.expanduser(constants.SERVICE_YAML_PREFIX)
-    return f'{prefix}/{cluster_name}_down_log.txt'
+    return f'{prefix}/{cluster_name}_down.log'
 
 
 def generate_replica_local_log_file_name(cluster_name: str) -> str:
     cluster_name = cluster_name.replace('-', '_')
     prefix = os.path.expanduser(constants.SERVICE_YAML_PREFIX)
-    return f'{prefix}/{cluster_name}_local_log.txt'
+    return f'{prefix}/{cluster_name}_local.log'
 
 
 def get_latest_info() -> str:

@@ -63,7 +63,7 @@ class ReplicaStatusProperty:
         # Process status of sky.down. None means sky.down is not called yet.
         self.sky_down_status: Optional[ProcessStatus] = None
 
-    def should_cleanup_after_teardown(self) -> bool:
+    def is_scale_down_no_failure(self) -> bool:
         if self.sky_launch_status != ProcessStatus.SUCCESS:
             return False
         if self.sky_down_status != ProcessStatus.SUCCESS:
@@ -157,7 +157,11 @@ class ReplicaInfo:
 
     @property
     def status(self) -> status_lib.ReplicaStatus:
-        return self.status_property.to_replica_status()
+        replica_status = self.status_property.to_replica_status()
+        if replica_status == status_lib.ReplicaStatus.UNKNOWN:
+            logger.error('Detecting UNKNOWN replica status for cluster '
+                         f'{self.cluster_name}')
+        return replica_status
 
     def to_info_dict(self, with_handle: bool) -> Dict[str, Any]:
         info_dict = {
@@ -236,6 +240,9 @@ class SkyPilotInfraProvider(InfraProvider):
         self._start_process_pool_refresher()
         self._start_job_status_fetcher()
 
+    # This process periodically checks all sky.launch and sky.down process
+    # on the fly. If any of them finished, it will update the status of
+    # the corresponding replica.
     def _refresh_process_pool(self) -> None:
         for cluster_name, p in list(self.launch_process_pool.items()):
             if p.poll() is not None:
@@ -274,11 +281,17 @@ class SkyPilotInfraProvider(InfraProvider):
                 # design, we want to fail early if user code have any error.
                 # This will prevent infinite loop of teardown and
                 # re-provision.
-                if info.status_property.should_cleanup_after_teardown():
+                if info.status_property.is_scale_down_no_failure():
                     # This means the cluster is deleted due to
                     # a scale down. Delete the replica info
                     # so it won't count as a replica.
                     del self.replica_info[cluster_name]
+                    logger.info(f'Cluster {cluster_name} removed from the '
+                                'replica info normally.')
+                else:
+                    logger.info(f'Termination of cluster {cluster_name} '
+                                'finished. Replica info is kept since some '
+                                'failure detected.')
 
     # TODO(tian): Maybe use decorator?
     def _process_pool_refresher(self) -> None:

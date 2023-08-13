@@ -7,4 +7,4 @@ service:
   replicas: 2
 
 run: |
-  docker run --gpus all --shm-size 1g -p 8082:80 -v ~/data:/data ghcr.io/huggingface/text-generation-inference --model-id lmsys/vicuna-7b-v1.5
+  docker run --gpus all --shm-size 1g -p 8082:80 -v ~/data:/data ghcr.io/huggingface/text-generation-inference --model-id WizardLM/WizardCoder-15B-V1.0
