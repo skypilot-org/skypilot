@@ -139,7 +139,7 @@ class step_iterator:
         create/use this class.
     """
 
-    def __init__(self, iterable: collections.Iterable) -> None:
+    def __init__(self, iterable: collections.abc.Iterable) -> None:
         self._iterable = iterable
         if _DISABLE_CALLBACK:
             return

@@ -5,11 +5,12 @@ This module loads the service catalog file and can be used to query
 instance types and pricing information for IBM.
 """
 
+from typing import Dict, List, Optional, Tuple
+
 from sky import sky_logging
+from sky.adaptors import ibm
 from sky.clouds import cloud
 from sky.clouds.service_catalog import common
-from sky.adaptors import ibm
-from typing import Dict, List, Optional, Tuple
 
 logger = sky_logging.init_logger(__name__)
 

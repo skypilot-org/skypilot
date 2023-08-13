@@ -23,30 +23,30 @@ import re
 import socket
 import threading
 import time
-from pprint import pprint
 from pathlib import Path
+from pprint import pprint
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from sky.adaptors import ibm
-from typing import Any, Dict, List, Optional
-
 from ray.autoscaler._private.cli_logger import cli_logger
-from ray.autoscaler._private.util import hash_runtime_conf, hash_launch_conf
+from ray.autoscaler._private.util import hash_launch_conf, hash_runtime_conf
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import (
     NODE_KIND_HEAD,
     NODE_KIND_WORKER,
     TAG_RAY_CLUSTER_NAME,
+    TAG_RAY_FILE_MOUNTS_CONTENTS,
+    TAG_RAY_LAUNCH_CONFIG,
     TAG_RAY_NODE_KIND,
     TAG_RAY_NODE_NAME,
-    TAG_RAY_LAUNCH_CONFIG,
+    TAG_RAY_NODE_STATUS,
     TAG_RAY_RUNTIME_CONFIG,
     TAG_RAY_USER_NODE_TYPE,
-    TAG_RAY_NODE_STATUS,
-    TAG_RAY_FILE_MOUNTS_CONTENTS,
 )
+
+from sky.adaptors import ibm
+from sky.skylet.providers.ibm.utils import RAY_RECYCLABLE, get_logger
 from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
-from sky.skylet.providers.ibm.utils import get_logger, RAY_RECYCLABLE
 
 logger = get_logger("node_provider_")
 

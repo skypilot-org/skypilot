@@ -1,19 +1,20 @@
 """Resources: compute requirements of Tasks."""
-from typing import Dict, List, Optional, Union
-from typing_extensions import Literal
+from typing import Dict, List, Optional, Set, Union
 
 import colorama
+from typing_extensions import Literal
 
 from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky import spot
 from sky.backends import backend_utils
+from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import schemas
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
-from sky import skypilot_config
 
 logger = sky_logging.init_logger(__name__)
 
@@ -33,7 +34,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 10
+    _VERSION = 11
 
     def __init__(
         self,
@@ -50,6 +51,7 @@ class Resources:
         image_id: Union[Dict[str, str], str, None] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
+        ports: Optional[List[Union[int, str]]] = None,
         # Internal use only.
         _is_image_managed: Optional[bool] = None,
     ):
@@ -114,6 +116,7 @@ class Resources:
           disk_size: the size of the OS disk in GiB.
           disk_tier: the disk performance tier to use. If None, defaults to
             ``'medium'``.
+          ports: the ports to open on the instance.
         """
         self._version = self._VERSION
         self._cloud = cloud
@@ -154,6 +157,7 @@ class Resources:
         self._is_image_managed = _is_image_managed
 
         self._disk_tier = disk_tier
+        self._ports = ports
 
         self._set_cpus(cpus)
         self._set_memory(memory)
@@ -162,10 +166,10 @@ class Resources:
         self._try_validate_local()
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
-        self._try_validate_accelerators()
         self._try_validate_spot()
         self._try_validate_image_id()
         self._try_validate_disk_tier()
+        self._try_validate_ports()
 
     def __repr__(self) -> str:
         """Returns a string representation for display.
@@ -228,6 +232,10 @@ class Resources:
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
 
+        ports = ''
+        if self.ports is not None:
+            ports = f', ports={self.ports}'
+
         if self._instance_type is not None:
             instance_type = f'{self._instance_type}'
         else:
@@ -239,7 +247,7 @@ class Resources:
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
-            f'{disk_tier}{disk_size}')
+            f'{disk_tier}{disk_size}{ports}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):
@@ -336,6 +344,10 @@ class Resources:
     @property
     def disk_tier(self) -> str:
         return self._disk_tier
+
+    @property
+    def ports(self) -> Optional[List[Union[int, str]]]:
+        return self._ports
 
     @property
     def is_image_managed(self) -> Optional[bool]:
@@ -505,7 +517,8 @@ class Resources:
         may have restricted the regions to be considered (e.g., a
         ssh_proxy_command dict with region names as keys).
         """
-        assert self.is_launchable()
+        assert self.is_launchable(), self
+
         regions = self._cloud.regions_with_offering(self._instance_type,
                                                     self.accelerators,
                                                     self._use_spot,
@@ -624,56 +637,6 @@ class Resources:
                             f'memory. {self.instance_type} has {mem} GB '
                             f'memory, but {self.memory} is requested.')
 
-    def _try_validate_accelerators(self) -> None:
-        """Validate accelerators against the instance type and region/zone."""
-        acc_requested = self.accelerators
-        if (isinstance(self.cloud, clouds.GCP) and
-                self.instance_type is not None):
-            # Do this check even if acc_requested is None.
-            clouds.GCP.check_host_accelerator_compatibility(
-                self.instance_type, acc_requested)
-
-        if acc_requested is None:
-            return
-
-        if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
-            # GCP attaches accelerators to VMs, so no need for this check.
-            acc_requested = self.accelerators
-            acc_from_instance_type = (
-                self.cloud.get_accelerators_from_instance_type(
-                    self._instance_type))
-            if not Resources(accelerators=acc_requested).less_demanding_than(
-                    Resources(accelerators=acc_from_instance_type)):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Infeasible resource demands found:\n'
-                        f'  Instance type requested: {self._instance_type}\n'
-                        f'  Accelerators for {self._instance_type}: '
-                        f'{acc_from_instance_type}\n'
-                        f'  Accelerators requested: {acc_requested}\n'
-                        f'To fix: either only specify instance_type, or change '
-                        'the accelerators field to be consistent.')
-            # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
-            # because e.g., the instance may have 4 GPUs, while the task
-            # specifies to use 1 GPU.
-
-        # Validate whether accelerator is available in specified region/zone.
-        acc, acc_count = list(acc_requested.items())[0]
-        # Fractional accelerators are temporarily bumped up to 1.
-        if 0 < acc_count < 1:
-            acc_count = 1
-        if self.region is not None or self.zone is not None:
-            if not self._cloud.accelerator_in_region_or_zone(
-                    acc, acc_count, self.region, self.zone):
-                error_str = (f'Accelerator "{acc}" is not available in '
-                             '"{}".')
-                if self.zone:
-                    error_str = error_str.format(self.zone)
-                else:
-                    error_str = error_str.format(self.region)
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(error_str)
-
     def _try_validate_spot(self) -> None:
         if self._spot_recovery is None:
             return
@@ -708,8 +671,30 @@ class Resources:
                         'Local/On-prem mode does not support custom '
                         'images.')
 
+    def extract_docker_image(self) -> Optional[str]:
+        if self.image_id is None:
+            return None
+        if len(self.image_id) == 1 and self.region in self.image_id:
+            image_id = self.image_id[self.region]
+            if image_id.startswith('docker:'):
+                return image_id[len('docker:'):]
+        return None
+
     def _try_validate_image_id(self) -> None:
         if self._image_id is None:
+            return
+
+        if self.extract_docker_image() is not None:
+            # TODO(tian): validate the docker image exists / of reasonable size
+            if self.accelerators is not None:
+                for acc in self.accelerators.keys():
+                    if acc.lower().startswith('tpu'):
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                'Docker image is not supported for TPU VM.')
+            if self.cloud is not None:
+                self.cloud.check_features_are_supported(
+                    {clouds.CloudImplementationFeatures.DOCKER_IMAGE})
             return
 
         if self.cloud is None:
@@ -781,6 +766,52 @@ class Resources:
             self.cloud.check_disk_tier_enabled(self.instance_type,
                                                self.disk_tier)
 
+    def _try_validate_ports(self) -> None:
+        if self.ports is None:
+            return
+        if skypilot_config.get_nested(('aws', 'security_group_name'),
+                                      None) is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify ports when AWS security group name is '
+                    'specified.')
+        if self.cloud is not None:
+            self.cloud.check_features_are_supported(
+                {clouds.CloudImplementationFeatures.OPEN_PORTS})
+        for port in self.ports:
+            if isinstance(port, int):
+                if port < 1 or port > 65535:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid port {port}. Please use a port number '
+                            'between 1 and 65535.')
+            elif isinstance(port, str):
+                port_range = port.split('-')
+                if len(port_range) != 2:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid port {port}. Please use a port range '
+                            'such as 10022-10040.')
+                try:
+                    from_port = int(port_range[0])
+                    to_port = int(port_range[1])
+                except ValueError as e:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid port {port}. Please use a integer inside'
+                            ' the range.') from e
+                if (from_port < 1 or from_port > 65535 or to_port < 1 or
+                        to_port > 65535):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid port {port}. Please use port '
+                            'numbers between 1 and 65535.')
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Invalid port {port}. Please use an integer or '
+                        'a range such as 10022-10040.')
+
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
@@ -792,6 +823,44 @@ class Resources:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
                 self.accelerators, self.use_spot, self._region, self._zone)
         return hourly_cost * hours
+
+    def make_deploy_variables(
+            self, region: clouds.Region,
+            zones: Optional[List[clouds.Zone]]) -> Dict[str, Optional[str]]:
+        """Converts planned sky.Resources to resource variables.
+
+        These variables are devided into two categories: cloud-specific and
+        cloud-agnostic. The cloud-specific variables are generated by the
+        cloud.make_deploy_resources_variables() method, and the cloud-agnostic
+        variables are generated by this method.
+        """
+        cloud_specific_variables = self.cloud.make_deploy_resources_variables(
+            self, region, zones)
+        docker_image = self.extract_docker_image()
+        return dict(
+            cloud_specific_variables,
+            **{
+                # Docker config
+                # docker_image: the image name used to pull the image, e.g.
+                #   ubuntu:latest.
+                # docker_container_name: the name of the container. Default to
+                #   `sky_container`.
+                'docker_image': docker_image,
+                'docker_container_name':
+                    constants.DEFAULT_DOCKER_CONTAINER_NAME,
+            })
+
+    def get_reservations_available_resources(
+            self, specific_reservations: Set[str]) -> Dict[str, int]:
+        """Returns the number of available reservation resources."""
+        if self.use_spot:
+            # GCP's & AWS's reservations do not support spot instances. We
+            # assume other clouds behave the same. We can move this check down
+            # to each cloud if any cloud supports reservations for spot.
+            return {}
+        return self.cloud.get_reservations_available_resources(
+            self._instance_type, self._region, self._zone,
+            specific_reservations)
 
     def less_demanding_than(self,
                             other: Union[List['Resources'], 'Resources'],
@@ -866,6 +935,23 @@ class Resources:
                 return types.index(self.disk_tier) < types.index(
                     other.disk_tier)
 
+        if self.ports is not None:
+            if other.ports is None:
+                return False
+
+            def parse_ports(ports):
+                port_set = set()
+                for p in ports:
+                    if isinstance(p, int):
+                        port_set.add(p)
+                    else:
+                        from_port, to_port = p.split('-')
+                        port_set.update(range(int(from_port), int(to_port) + 1))
+                return port_set
+
+            if not parse_ports(self.ports) <= parse_ports(other.ports):
+                return False
+
         # self <= other
         return True
 
@@ -904,6 +990,7 @@ class Resources:
             self.disk_size == _DEFAULT_DISK_SIZE_GB,
             self.disk_tier is None,
             self._image_id is None,
+            self.ports is None,
         ])
 
     def copy(self, **override) -> 'Resources':
@@ -924,6 +1011,7 @@ class Resources:
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
+            ports=override.pop('ports', self.ports),
             _is_image_managed=override.pop('_is_image_managed',
                                            self._is_image_managed),
         )
@@ -940,6 +1028,20 @@ class Resources:
             if None not in self.image_id and region not in self.image_id:
                 return False
         return True
+
+    def get_required_cloud_features(
+            self) -> Set[clouds.CloudImplementationFeatures]:
+        """Returns the set of cloud features required by this Resources."""
+        features = set()
+        if self.use_spot:
+            features.add(clouds.CloudImplementationFeatures.SPOT_INSTANCE)
+        if self.disk_tier is not None:
+            features.add(clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
+        if self.extract_docker_image() is not None:
+            features.add(clouds.CloudImplementationFeatures.DOCKER_IMAGE)
+        if self.ports is not None:
+            features.add(clouds.CloudImplementationFeatures.OPEN_PORTS)
+        return features
 
     @classmethod
     def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
@@ -978,6 +1080,8 @@ class Resources:
             resources_fields['image_id'] = config.pop('image_id')
         if config.get('disk_tier') is not None:
             resources_fields['disk_tier'] = config.pop('disk_tier')
+        if config.get('ports') is not None:
+            resources_fields['ports'] = config.pop('ports')
         if config.get('_is_image_managed') is not None:
             resources_fields['_is_image_managed'] = config.pop(
                 '_is_image_managed')
@@ -1008,6 +1112,7 @@ class Resources:
         add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
         add_if_not_none('disk_tier', self.disk_tier)
+        add_if_not_none('ports', self.ports)
         if self._is_image_managed is not None:
             config['_is_image_managed'] = self._is_image_managed
         return config
@@ -1074,5 +1179,8 @@ class Resources:
 
         if version < 10:
             self._is_image_managed = None
+
+        if version < 11:
+            self._ports = None
 
         self.__dict__.update(state)

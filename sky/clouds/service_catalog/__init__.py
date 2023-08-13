@@ -4,12 +4,10 @@ import importlib
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
-from sky.clouds.service_catalog.constants import (
-    HOSTED_CATALOG_DIR_URL,
-    CATALOG_SCHEMA_VERSION,
-    LOCAL_CATALOG_DIR,
-)
 from sky.clouds.service_catalog.config import use_default_catalog
+from sky.clouds.service_catalog.constants import CATALOG_SCHEMA_VERSION
+from sky.clouds.service_catalog.constants import HOSTED_CATALOG_DIR_URL
+from sky.clouds.service_catalog.constants import LOCAL_CATALOG_DIR
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -260,22 +258,6 @@ def get_region_zones_for_accelerators(
                                acc_name, acc_count, use_spot)
 
 
-def check_host_accelerator_compatibility(instance_type: str,
-                                         accelerators: Optional[Dict[str, int]],
-                                         clouds: CloudFilter = None) -> None:
-    """GCP only: Check if host VM type is compatible with the accelerators.
-
-    This function is invoked whenever a Resources object is created.
-    This function ensures that TPUs and GPUs (except A100) are attached to N1,
-    and A100 GPUs are attached to A2 machines. However, it does NOT check
-    the maximum vCPU count and maximum memory limits for the accelerators
-    because any Resources like GCP(n1-highmem-64, {'V100': 0.01}) can be valid
-    for sky exec/launch on an existing cluster.
-    """
-    _map_clouds_catalog(clouds, 'check_host_accelerator_compatibility',
-                        instance_type, accelerators)
-
-
 def check_accelerator_attachable_to_host(instance_type: str,
                                          accelerators: Optional[Dict[str, int]],
                                          zone: Optional[str] = None,
@@ -297,7 +279,9 @@ def get_common_gpus() -> List[str]:
         'A10G',
         'A100',
         'A100-80GB',
+        'H100',
         'K80',
+        'L4',
         'M60',
         'P100',
         'T4',

@@ -1,11 +1,16 @@
 """Google Cloud Platform."""
+import dataclasses
+import datetime
 import functools
 import json
 import os
+import re
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
+
+import cachetools
 
 from sky import clouds
 from sky import exceptions
@@ -98,6 +103,70 @@ def is_api_disabled(endpoint: str, project_id: str) -> bool:
     return proc.returncode != 0
 
 
+@dataclasses.dataclass
+class SpecificReservation:
+    count: int
+    in_use_count: int
+
+    @classmethod
+    def from_dict(cls, d: dict) -> 'SpecificReservation':
+        return cls(count=int(d['count']), in_use_count=int(d['inUseCount']))
+
+
+class GCPReservation:
+    """
+    GCP Reservation object that contains the reservation information.
+    """
+
+    def __init__(self, self_link: str, zone: str,
+                 specific_reservation: SpecificReservation,
+                 specific_reservation_required: bool) -> None:
+        self.self_link = self_link
+        self.zone = zone
+        self.specific_reservation = specific_reservation
+        self.specific_reservation_required = specific_reservation_required
+
+    @classmethod
+    def from_dict(cls, d: dict) -> 'GCPReservation':
+        return cls(
+            self_link=d['selfLink'],
+            zone=d['zone'],
+            specific_reservation=SpecificReservation.from_dict(
+                d['specificReservation']),
+            specific_reservation_required=d['specificReservationRequired'],
+        )
+
+    @property
+    def available_resources(self) -> int:
+        """
+        Count the resources available that can be used in this reservation.
+        """
+        return (self.specific_reservation.count -
+                self.specific_reservation.in_use_count)
+
+    def is_consumable(
+        self,
+        specific_reservations: Set[str],
+    ) -> bool:
+        """
+        Check if the reservation is consumable with the provided specific
+        reservation names. This is defined by the Consumption type.
+        For more details:
+        https://cloud.google.com/compute/docs/instances/reservations-overview#how-reservations-work
+        """
+        return (not self.specific_reservation_required or
+                self.name in specific_reservations)
+
+    @property
+    def name(self) -> str:
+        """Name is derived from reservation self link.
+        The naming convention can be found here:
+        https://cloud.google.com/compute/docs/instances/reservations-consume#consuming_a_specific_shared_reservation
+        """
+        parts = self.self_link.split('/')
+        return '/'.join(parts[-6:-4] + parts[-2:])
+
+
 @clouds.CLOUD_REGISTRY.register
 class GCP(clouds.Cloud):
     """Google Cloud Platform."""
@@ -140,6 +209,11 @@ class GCP(clouds.Cloud):
         f'{_INDENT_PREFIX}For more info: '
         'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
+
+    def __init__(self):
+        super().__init__()
+
+        self._list_reservations_cache = None
 
     @classmethod
     def _cloud_unsupported_features(
@@ -270,8 +344,13 @@ class GCP(clouds.Cloud):
     def is_same_cloud(self, other):
         return isinstance(other, GCP)
 
+    @classmethod
+    def _is_machine_image(cls, image_id: str) -> bool:
+        find_machine = re.match(r'projects/.*/.*/machineImages/.*', image_id)
+        return find_machine is not None
+
     def get_image_size(self, image_id: str, region: Optional[str]) -> float:
-        del region  # unused
+        del region  # Unused.
         if image_id.startswith('skypilot:'):
             return DEFAULT_GCP_IMAGE_GB
         try:
@@ -287,9 +366,22 @@ class GCP(clouds.Cloud):
                 raise ValueError(f'Image {image_id!r} not found in GCP.')
             project = image_attrs[1]
             image_name = image_attrs[-1]
-            image_infos = compute.images().get(project=project,
-                                               image=image_name).execute()
-            return float(image_infos['diskSizeGb'])
+            # We support both GCP's Machine Images and Custom Images, both
+            # of which are specified with the image_id field. We will
+            # distinguish them by checking if the image_id contains
+            # 'machineImages'.
+            if self._is_machine_image(image_id):
+                image_infos = compute.machineImages().get(
+                    project=project, machineImage=image_name).execute()
+                # The VM launching in a different region than the machine
+                # image is supported by GCP, so we do not need to check the
+                # storageLocations.
+                return float(
+                    image_infos['instanceProperties']['disks'][0]['diskSizeGb'])
+            else:
+                image_infos = compute.images().get(project=project,
+                                                   image=image_name).execute()
+                return float(image_infos['diskSizeGb'])
         except gcp.http_error_exception() as e:
             if e.resp.status == 403:
                 with ux_utils.print_exception_no_traceback():
@@ -325,7 +417,7 @@ class GCP(clouds.Cloud):
         # --no-standard-images
         # We use the debian image, as the ubuntu image has some connectivity
         # issue when first booted.
-        image_id = 'skypilot:cpu-debian-10'
+        image_id = 'skypilot:cpu-debian-11'
 
         r = resources
         # Find GPU spec, if any.
@@ -358,8 +450,8 @@ class GCP(clouds.Cloud):
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
-                if acc == 'A100-80GB':
-                    # A100-80GB has a different name pattern.
+                if acc in ('A100-80GB', 'L4'):
+                    # A100-80GB and L4 have a different name pattern.
                     resources_vars['gpu'] = 'nvidia-{}'.format(acc.lower())
                 else:
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
@@ -371,13 +463,11 @@ class GCP(clouds.Cloud):
                     # CUDA driver version 470.57.02, CUDA Library 11.4
                     image_id = 'skypilot:k80-debian-10'
                 else:
-                    # Though the image is called cu113, it actually has later
-                    # versions of CUDA as noted below.
-                    # CUDA driver version 510.47.03, CUDA Library 11.6
-                    # Does not support torch==1.13.0 with cu117
-                    image_id = 'skypilot:gpu-debian-10'
+                    # CUDA driver version 525.105.17, CUDA Library 11.8
+                    image_id = 'skypilot:gpu-debian-11'
 
-        if resources.image_id is not None:
+        if resources.image_id is not None and resources.extract_docker_image(
+        ) is None:
             if None in resources.image_id:
                 image_id = resources.image_id[None]
             else:
@@ -389,12 +479,17 @@ class GCP(clouds.Cloud):
 
         assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
+        resources_vars['machine_image'] = None
+
+        if self._is_machine_image(image_id):
+            resources_vars['machine_image'] = image_id
+            resources_vars['image_id'] = None
 
         resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier)
 
         return resources_vars
 
-    def get_feasible_launchable_resources(self, resources):
+    def _get_feasible_launchable_resources(self, resources):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             return ([resources], [])
@@ -503,6 +598,79 @@ class GCP(clouds.Cloud):
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
                                                                 clouds='gcp')
 
+    def get_reservations_available_resources(
+        self,
+        instance_type: str,
+        region: str,
+        zone: Optional[str],
+        specific_reservations: Set[str],
+    ) -> Dict[str, int]:
+        del region  # Unused
+        if zone is None:
+            # For backward compatibility, the cluster in INIT state launched
+            # before #2352 may not have zone information. In this case, we
+            # return 0 for all reservations.
+            return {reservation: 0 for reservation in specific_reservations}
+        reservations = self._list_reservations_for_instance_type_in_zone(
+            instance_type, zone)
+
+        return {
+            r.name: r.available_resources
+            for r in reservations
+            if r.is_consumable(specific_reservations)
+        }
+
+    def _list_reservations_for_instance_type_in_zone(
+        self,
+        instance_type: str,
+        zone: str,
+    ) -> List[GCPReservation]:
+        reservations = self._list_reservations_for_instance_type(instance_type)
+        return [r for r in reservations if r.zone.endswith(f'/{zone}')]
+
+    def _get_or_create_ttl_cache(self):
+        if getattr(self, '_list_reservations_cache', None) is None:
+            # Backward compatibility: Clusters created before #2352 has GCP
+            # objects serialized without the attribute. So we access it this
+            # way.
+            self._list_reservations_cache = cachetools.TTLCache(
+                maxsize=1,
+                ttl=datetime.timedelta(300),
+                timer=datetime.datetime.now)
+        return self._list_reservations_cache
+
+    @cachetools.cachedmethod(cache=lambda self: self._get_or_create_ttl_cache())
+    def _list_reservations_for_instance_type(
+        self,
+        instance_type: str,
+    ) -> List[GCPReservation]:
+        """
+        List all reservations for the given instance type.
+        TODO: We need to incorporate accelerators because the reserved instance
+        can be consumed only when the instance_type + GPU type matches, and in
+        GCP GPUs except for A100 and L4 do not have their own instance type.
+        For example, if we have a specific reservation with n1-highmem-8
+        in us-central1-c. `sky launch --gpus V100` will fail.
+        """
+        list_reservations_cmd = (
+            'gcloud compute reservations list '
+            f'--filter="specificReservation.instanceProperties.machineType={instance_type} AND status=READY" '
+            '--format="json(specificReservation.count, specificReservation.inUseCount, specificReservationRequired, selfLink, zone)"'
+        )
+        returncode, stdout, stderr = subprocess_utils.run_with_retries(
+            list_reservations_cmd,
+            retry_returncode=[255],
+        )
+        subprocess_utils.handle_returncode(
+            returncode,
+            list_reservations_cmd,
+            error_msg=
+            f'Failed to get list reservations for {instance_type!r}:\n{stderr}',
+            stderr=stderr,
+            stream_logs=True,
+        )
+        return [GCPReservation.from_dict(r) for r in json.loads(stdout)]
+
     @classmethod
     def _find_application_key_path(cls) -> str:
         # Check the application default credentials in the environment variable.
@@ -526,8 +694,8 @@ class GCP(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
-            from google import auth  # type: ignore
             # Check google-api-python-client installation.
+            from google import auth  # type: ignore
             import googleapiclient
 
             # Check the installation of google-cloud-sdk.
@@ -631,8 +799,9 @@ class GCP(clouds.Cloud):
                   'some time.')
 
         # pylint: disable=import-outside-toplevel,unused-import
-        import googleapiclient.discovery
         import google.auth
+        import googleapiclient.discovery
+
         from sky.skylet.providers.gcp import constants
 
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
@@ -766,18 +935,12 @@ class GCP(clouds.Cloud):
         return project_id
 
     @staticmethod
-    def check_host_accelerator_compatibility(
-            instance_type: str, accelerators: Optional[Dict[str, int]]) -> None:
-        service_catalog.check_host_accelerator_compatibility(
-            instance_type, accelerators, 'gcp')
-
-    @staticmethod
-    def check_accelerator_attachable_to_host(
-            instance_type: str,
-            accelerators: Optional[Dict[str, int]],
-            zone: Optional[str] = None) -> None:
+    def _check_instance_type_accelerators_combination(
+            resources: 'resources.Resources') -> None:
+        assert resources.is_launchable(), resources
         service_catalog.check_accelerator_attachable_to_host(
-            instance_type, accelerators, zone, 'gcp')
+            resources.instance_type, resources.accelerators, resources.zone,
+            'gcp')
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
@@ -799,13 +962,73 @@ class GCP(clouds.Cloud):
         return ' '.join(f'labels.{k}={v}' for k, v in tag_filters.items())
 
     @classmethod
+    def check_quota_available(cls, resources: 'resources.Resources') -> bool:
+        """Check if GCP quota is available based on `resources`.
+
+        GCP-specific implementation of check_quota_available. The function works by
+        matching the `accelerator` to the a corresponding GCP keyword, and then using
+        the GCP CLI commands to query for the specific quota (the `accelerator` as
+        defined by `resources`).
+
+        Returns:
+            False if the quota is found to be zero, and True otherwise.
+        Raises:
+            CalledProcessError: error with the GCP CLI command.
+        """
+
+        if not resources.accelerators:
+            # TODO(hriday): We currently only support checking quotas for GPUs.
+            # For CPU-only instances, we need to try provisioning to check quotas.
+            return True
+
+        accelerator = list(resources.accelerators.keys())[0]
+        use_spot = resources.use_spot
+        region = resources.region
+
+        # pylint: disable=import-outside-toplevel
+        from sky.clouds.service_catalog import gcp_catalog
+
+        quota_code = gcp_catalog.get_quota_code(accelerator, use_spot)
+
+        if quota_code is None:
+            # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
+            return True
+
+        command = f'gcloud compute regions describe {region} |grep -B 1 "{quota_code}" | awk \'/limit/ {{print; exit}}\''
+        try:
+            proc = subprocess_utils.run(cmd=command,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE)
+
+        except subprocess.CalledProcessError as e:
+            logger.warning(f'Quota check command failed with error: '
+                           f'{e.stderr.decode()}')
+            return True
+
+        # Extract quota from output
+        # Example output:  "- limit: 16.0"
+        out = proc.stdout.decode()
+        try:
+            quota = int(float(out.split('limit:')[-1].strip()))
+        except (ValueError, IndexError, AttributeError) as e:
+            logger.warning('Parsing the subprocess output failed '
+                           f'with error: {e}')
+            return True
+
+        if quota == 0:
+            return False
+        # Quota found to be greater than zero, try provisioning
+        return True
+
+    @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
         """Query the status of a cluster."""
         del region  # unused
 
-        from sky.utils import tpu_utils  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.utils import tpu_utils
         use_tpu_vm = kwargs.pop('use_tpu_vm', False)
 
         label_filter_str = cls._label_filter_str(tag_filters)

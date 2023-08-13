@@ -14,15 +14,18 @@ from sky import exceptions
 from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.utils import env_options
-from sky.utils import ux_utils
 from sky.utils import log_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import networkx as nx
-    from sky import dag as dag_lib  # pylint: disable=ungrouped-imports
+
+    #pylint: disable=ungrouped-imports
+    from sky import dag as dag_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -231,6 +234,8 @@ class Optimizer:
 
         # node -> cloud -> list of resources that satisfy user's requirements.
         node_to_candidate_map: _TaskToPerCloudCandidates = {}
+        specific_reservations = set(
+            skypilot_config.get_nested(('gcp', 'specific_reservations'), set()))
 
         # Compute the estimated cost/time for each node.
         for node_i, node in enumerate(topo_order):
@@ -258,6 +263,7 @@ class Optimizer:
                 launchable_resources = {list(node_resources)[0]: node_resources}
 
             num_resources = len(node.get_resources())
+
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
                     location_hint = ''
@@ -273,7 +279,7 @@ class Optimizer:
                     error_msg = (
                         'No launchable resource found for task '
                         f'{node}.{location_hint}\nThis means the '
-                        'catalog does not contain any instance types that '
+                        'catalog does not contain any resources that '
                         'satisfy this request.\n'
                         'To fix: relax or change the resource requirements.\n'
                         'Hint: \'sky show-gpus --all\' '
@@ -303,7 +309,17 @@ class Optimizer:
 
                     if minimize_cost:
                         cost_per_node = resources.get_cost(estimated_runtime)
-                        estimated_cost_or_time = cost_per_node * node.num_nodes
+                        num_available_reserved_nodes = sum(
+                            resources.get_reservations_available_resources(
+                                specific_reservations).values())
+
+                        # We consider the cost of the unused reservation
+                        # resources to be 0 since we are already paying for
+                        # them.
+                        # TODO: different policies can be applied here for
+                        # whether to choose reserved instances.
+                        estimated_cost_or_time = cost_per_node * max(
+                            node.num_nodes - num_available_reserved_nodes, 0)
                     else:
                         # Minimize run time.
                         estimated_cost_or_time = estimated_runtime
@@ -815,6 +831,7 @@ class Optimizer:
         the total estimated cost/time of the DAG becomes the minimum.
         """
         import networkx as nx  # pylint: disable=import-outside-toplevel
+
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
 
@@ -855,6 +872,8 @@ class Optimizer:
 class DummyResources(resources_lib.Resources):
     """A dummy Resources that has zero egress cost from/to."""
 
+    _REPR = 'DummyResources'
+
     def __repr__(self) -> str:
         return DummyResources._REPR
 
@@ -884,6 +903,9 @@ def _make_launchables_for_valid_region_zones(
     # on-demand instances in the same region regardless of the zones. On the
     # other hand, for spot instances, we do not batch the requests because the
     # "AWS" spot prices may vary across zones.
+    # For GCP, we do not batch the requests because GCP reservation system is
+    # zone based. Therefore, price estimation is potentially different across
+    # zones.
 
     # NOTE(woosuk): GCP does not support region-level provisioning APIs. Thus,
     # while we return per-region resources here, the provisioner will still
@@ -897,7 +919,8 @@ def _make_launchables_for_valid_region_zones(
     launchables = []
     regions = launchable_resources.get_valid_regions_for_launchable()
     for region in regions:
-        if launchable_resources.use_spot and region.zones is not None:
+        if (launchable_resources.use_spot and region.zones is not None or
+                isinstance(launchable_resources.cloud, clouds.GCP)):
             # Spot instances.
             # Do not batch the per-zone requests.
             for zone in region.zones:
@@ -954,30 +977,6 @@ def _fill_in_launchable_resources(
                     f'{colorama.Style.BRIGHT}'
                     f'sky check {colorama.Style.RESET_ALL}, or change the '
                     'cloud requirement')
-        elif resources.is_launchable():
-            if isinstance(resources.cloud, clouds.GCP):
-                # Check if the host VM satisfies the max vCPU and memory limits.
-                clouds.GCP.check_accelerator_attachable_to_host(
-                    resources.instance_type, resources.accelerators,
-                    resources.zone)
-            # If the user has specified a GCP zone and the zone does not support
-            # the host-accelerator combination, then an error will be raised by
-            # the above check_accelerator_attachable_to_host() call.
-            # If the user has not specified any zone, a launchable will be made
-            # for every zone even if some of the zones do not support the
-            # host-accelerator combination. Then the provisioner may try to
-            # launch the instance, and fail over to other zones. We find this
-            # behavior acceptable because this will happen only when the user
-            # requested GCP 4:P100 or 8:K80 with a very large host VM.
-            elif isinstance(resources.cloud, clouds.SCP):
-                # Check if the host VM satisfies the min/max disk size limits.
-                is_allowed, launchable[resources] = \
-                    clouds.SCP.is_disk_size_allowed(resources)
-                if not is_allowed:
-                    continue
-
-            launchable[resources] = _make_launchables_for_valid_region_zones(
-                resources)
         else:
             clouds_list = ([resources.cloud]
                            if resources.cloud is not None else enabled_clouds)
@@ -993,7 +992,8 @@ def _fill_in_launchable_resources(
             all_fuzzy_candidates = set()
             for cloud in clouds_list:
                 (feasible_resources, fuzzy_candidate_list) = (
-                    cloud.get_feasible_launchable_resources(resources))
+                    cloud.get_feasible_launchable_resources(
+                        resources, num_nodes=task.num_nodes))
                 if len(feasible_resources) > 0:
                     # Assume feasible_resources is sorted by prices.
                     cheapest = feasible_resources[0]
@@ -1025,5 +1025,4 @@ def _fill_in_launchable_resources(
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)
-
     return launchable, cloud_candidates

@@ -6,8 +6,8 @@ import datetime
 import itertools
 from multiprocessing import pool as mp_pool
 import os
-import sys
 import subprocess
+import sys
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
