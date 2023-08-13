@@ -1,4 +1,4 @@
-"""Control Plane: the central control plane of SkyServe.
+"""Controller: the central controller of SkyServe.
 
 Responsible for autoscaling and replica management.
 """
@@ -18,9 +18,9 @@ from sky.serve import infra_providers
 from sky.utils import env_options
 
 # Use the explicit logger name so that the logger is under the
-# `sky.serve.control_plane` namespace when executed directly, so as
+# `sky.serve.controller` namespace when executed directly, so as
 # to inherit the setup from the `sky` logger.
-logger = sky_logging.init_logger('sky.serve.control_plane')
+logger = sky_logging.init_logger('sky.serve.controller')
 
 
 class SuppressSuccessGetAccessLogsFilter(logging.Filter):
@@ -30,8 +30,8 @@ class SuppressSuccessGetAccessLogsFilter(logging.Filter):
         return not ('GET' in message and '200' in message)
 
 
-class ControlPlane:
-    """Control Plane: control everything about replica.
+class Controller:
+    """Controller: control everything about replica.
 
     This class is responsible for:
         - Starting and terminating the replica monitor and autoscaler.
@@ -49,7 +49,7 @@ class ControlPlane:
 
     def run(self) -> None:
 
-        @self.app.post('/control_plane/update_num_requests')
+        @self.app.post('/controller/update_num_requests')
         async def update_num_requests(request: fastapi.Request):
             # await request
             request_data = await request.json()
@@ -60,17 +60,17 @@ class ControlPlane:
                 self.autoscaler.set_num_requests(num_requests)
             return {'message': 'Success'}
 
-        @self.app.get('/control_plane/get_autoscaler_query_interval')
+        @self.app.get('/controller/get_autoscaler_query_interval')
         def get_autoscaler_query_interval():
             if isinstance(self.autoscaler, autoscalers.RequestRateAutoscaler):
                 return {'query_interval': self.autoscaler.get_query_interval()}
             return {'query_interval': None}
 
-        @self.app.get('/control_plane/get_ready_replicas')
+        @self.app.get('/controller/get_ready_replicas')
         def get_ready_replicas():
             return {'ready_replicas': self.infra_provider.get_ready_replicas()}
 
-        @self.app.get('/control_plane/get_latest_info')
+        @self.app.get('/controller/get_latest_info')
         def get_latest_info():
             latest_info = {
                 'replica_info':
@@ -83,7 +83,7 @@ class ControlPlane:
             }
             return latest_info
 
-        @self.app.post('/control_plane/terminate')
+        @self.app.post('/controller/terminate')
         def terminate(request: fastapi.Request):
             del request
             logger.info('Terminating service...')
@@ -101,18 +101,18 @@ class ControlPlane:
             self.autoscaler.start()
 
         # Disable all GET logs if SKYPILOT_DEBUG is not set to avoid overflood
-        # the control plane logs.
+        # the controller logs.
         if not env_options.Options.SHOW_DEBUG_INFO.get():
             logging.getLogger('uvicorn.access').addFilter(
                 SuppressSuccessGetAccessLogsFilter())
 
         logger.info(
-            f'SkyServe Control Plane started on http://localhost:{self.port}')
+            f'SkyServe Controller started on http://localhost:{self.port}')
         uvicorn.run(self.app, host='localhost', port=self.port)
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='SkyServe Control Plane')
+    parser = argparse.ArgumentParser(description='SkyServe Controller')
     parser.add_argument('--service-name',
                         type=str,
                         help='Name of the service',
@@ -124,7 +124,7 @@ if __name__ == '__main__':
     parser.add_argument('--port',
                         '-p',
                         type=int,
-                        help='Port to run the control plane',
+                        help='Port to run the controller',
                         required=True)
     args = parser.parse_args()
 
@@ -148,6 +148,6 @@ if __name__ == '__main__':
         cooldown=60,
         query_interval=60)
 
-    # ======= ControlPlane =========
-    control_plane = ControlPlane(args.port, _infra_provider, _autoscaler)
-    control_plane.run()
+    # ======= Controller =========
+    controller = Controller(args.port, _infra_provider, _autoscaler)
+    controller.run()

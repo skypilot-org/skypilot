@@ -1,5 +1,5 @@
 """Modules for SkyServe services."""
-from sky.serve.constants import CONTROL_PLANE_PORT
+from sky.serve.constants import CONTROLLER_PORT
 from sky.serve.constants import CONTROLLER_PREFIX
 from sky.serve.constants import CONTROLLER_RESOURCES
 from sky.serve.constants import CONTROLLER_TEMPLATE

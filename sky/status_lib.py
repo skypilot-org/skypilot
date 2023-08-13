@@ -60,7 +60,7 @@ class ServiceStatus(enum.Enum):
     # Replica is initializing and no failure
     REPLICA_INIT = 'REPLICA_INIT'
 
-    # Controller failed to initialize / control plane or redirector jobs
+    # Controller failed to initialize / controller or redirector process
     # status abnormal
     CONTRLLER_FAILED = 'CONTROLLER_FAILED'
 

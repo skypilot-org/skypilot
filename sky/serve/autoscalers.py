@@ -27,9 +27,9 @@ class Autoscaler:
         # Default to fixed node, i.e. min_nodes == max_nodes.
         self.max_nodes: int = max_nodes or min_nodes
         self.frequency = frequency  # Time to sleep in seconds.
-        if frequency < constants.CONTROL_PLANE_SYNC_INTERVAL:
+        if frequency < constants.CONTROLLER_SYNC_INTERVAL:
             logger.warning('Autoscaler frequency is less than '
-                           'control plane sync interval. It might '
+                           'controller sync interval. It might '
                            'not always got the latest information.')
 
     def evaluate_scaling(self) -> None:

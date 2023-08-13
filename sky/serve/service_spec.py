@@ -36,12 +36,12 @@ class SkyServiceSpec:
                 raise ValueError(
                     'max_replicas must be greater than or equal to min_replicas'
                 )
-        if app_port == constants.CONTROL_PLANE_PORT:
+        if app_port == constants.CONTROLLER_PORT:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'App port cannot be {constants.CONTROL_PLANE_PORT} '
-                    'since it is reserved for the control plane. '
-                    ' Please use a different port.')
+                    f'App port cannot be {constants.CONTROLLER_PORT} '
+                    'since it is reserved for the controller. '
+                    'Please use a different port.')
         if not readiness_path.startswith('/'):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('readiness_path must start with a slash (/). '

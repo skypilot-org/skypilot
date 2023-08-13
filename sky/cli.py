@@ -4110,12 +4110,12 @@ def serve_status(all: bool, service_name: Optional[str]):
 
     - ``CONTROLLER_INIT``: The controller is initializing.
 
-    - ``REPLICA_INIT``: The controller provisioning have succeeded; control
-      plane and redirector is alive, and there are no available replicas for
+    - ``REPLICA_INIT``: The controller provisioning have succeeded; controller
+      and redirector process is alive, and there are no available replicas for
       now. This also indicates that no replica failure has been detected.
 
     - ``CONTROLLER_FAILED``: The controller failed to start or in an abnormal
-      state; or the control plane and redirector is not alive.
+      state; or the controller and redirector process is not alive.
 
     - ``READY``: The controller is ready to serve requests. This means that
       at least one replica have passed the readiness probe.
@@ -4313,11 +4313,11 @@ def serve_down(
     default=True,
     help=('Follow the logs of the job. [default: --follow] '
           'If --no-follow is specified, print the log so far and exit.'))
-@click.option('--control-plane',
+@click.option('--controller',
               is_flag=True,
               default=False,
               required=False,
-              help='Show the control plane logs of this service.')
+              help='Show the controller logs of this service.')
 @click.option('--redirector',
               is_flag=True,
               default=False,
@@ -4332,7 +4332,7 @@ def serve_down(
 def serve_logs(
     service_name: str,
     follow: bool,
-    control_plane: bool,
+    controller: bool,
     redirector: bool,
     replica_id: Optional[int],
 ):
@@ -4342,8 +4342,8 @@ def serve_logs(
 
     .. code-block:: bash
 
-        # Tail the control plane logs of a service
-        sky serve logs --control-plane [SERVICE_ID]
+        # Tail the controller logs of a service
+        sky serve logs --controller [SERVICE_ID]
         \b
         # Print the redirector logs so far and exit
         sky serve logs --redirector --no-follow [SERVICE_ID]
@@ -4352,9 +4352,9 @@ def serve_logs(
         sky serve logs [SERVICE_ID] 1
     """
     have_replica_id = replica_id is not None
-    if (control_plane + redirector + have_replica_id) != 1:
+    if (controller + redirector + have_replica_id) != 1:
         click.secho(
-            'Only one of --control-plane, --redirector, --replica-id '
+            'Only one of --controller, --redirector, --replica-id '
             'can be specified. See `sky serve logs --help` for more '
             'information.',
             fg='red')
@@ -4363,11 +4363,11 @@ def serve_logs(
     if service_record is None:
         click.secho(f'Service {service_name!r} not found.', fg='red')
         return
-    controller_name = service_record['controller_cluster_name']
-    if control_plane:
-        core.tail_logs(controller_name, job_id=1, follow=follow)
+    controller_cluster_name = service_record['controller_cluster_name']
+    if controller:
+        core.tail_logs(controller_cluster_name, job_id=1, follow=follow)
     elif redirector:
-        core.tail_logs(controller_name, job_id=2, follow=follow)
+        core.tail_logs(controller_cluster_name, job_id=2, follow=follow)
     else:
         core.serve_tail_logs(service_record, replica_id, follow=follow)
 

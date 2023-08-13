@@ -2660,8 +2660,8 @@ def _refresh_service_record_no_lock(
         separate_stderr=True)
     if returncode != 0:
         # If we cannot get the latest info, there are two possibilities:
-        #   1. The controller is not in a healthy state;
-        #   2. The control plane process somehow not respond to the request.
+        #   1. The controller cluster is not in a healthy state;
+        #   2. The controller process somehow not respond to the request.
         # For the first case, we want to catch the error and set the service
         # status to CONTROLLER_FAILED.
         # TODO(tian): Since we disabled sky down the controller, we might could
@@ -2679,7 +2679,7 @@ def _refresh_service_record_no_lock(
 
     msg = None
     # When the service is shutting down, there is a period of time which the
-    # control plane still responds to the request, and the replica is not
+    # controller still responds to the request, and the replica is not
     # terminated, so the return value for _service_status_from_replica_info
     # will still be READY, but we don't want change service status to READY.
     if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:

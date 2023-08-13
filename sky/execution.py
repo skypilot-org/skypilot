@@ -992,8 +992,6 @@ def serve_up(
     task.set_resources(original_resources.copy(ports=[app_port]))
 
     # TODO(tian): Use skyserve constants.
-    # The storage will be cleaned up by the control plane `terminate` method
-    # after the service is terminated.
     _maybe_translate_local_file_mounts_and_sync_up(task)
 
     task_config = task.to_yaml_config()
@@ -1064,44 +1062,44 @@ def serve_up(
         return False
 
     # NOTICE: The job submission order cannot be changed since the
-    # `sky serve logs` CLI will identify the control plane job with
+    # `sky serve logs` CLI will identify the controller job with
     # the first job submitted and the redirector job with the second
     # job submitted.
-    with console.status('[yellow]Launching control plane process...[/yellow]'):
+    with console.status('[yellow]Launching controller process...[/yellow]'):
         _execute(
             entrypoint=sky.Task(
-                name='run-control-plane',
+                name='run-controller',
                 envs=controller_envs,
-                run='python -m sky.serve.control_plane --service-name '
+                run='python -m sky.serve.controller --service-name '
                 f'{service_name} --task-yaml {remote_task_yaml_path} '
-                f'--port {serve.CONTROL_PLANE_PORT}'),
+                f'--port {serve.CONTROLLER_PORT}'),
             stream_logs=False,
             handle=handle,
             stages=[Stage.EXEC],
             cluster_name=controller_cluster_name,
             detach_run=True,
         )
-        control_plane_job_is_running = _wait_until_job_is_running(
+        controller_job_is_running = _wait_until_job_is_running(
             controller_cluster_name, 1)
-    if not control_plane_job_is_running:
+    if not controller_job_is_running:
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
-        print(f'{colorama.Fore.RED}Control plane failed to launch. '
+        print(f'{colorama.Fore.RED}Controller failed to launch. '
               f'Please check the logs with sky serve logs {service_name} '
-              f'--control-plane{colorama.Style.RESET_ALL}')
+              f'--controller{colorama.Style.RESET_ALL}')
         return
-    print(f'{colorama.Fore.GREEN}Launching control plane process...done.'
+    print(f'{colorama.Fore.GREEN}Launching controller process...done.'
           f'{colorama.Style.RESET_ALL}')
 
     with console.status('[yellow]Launching redirector process...[/yellow]'):
-        control_plane_addr = f'http://localhost:{serve.CONTROL_PLANE_PORT}'
+        controller_addr = f'http://localhost:{serve.CONTROLLER_PORT}'
         _execute(
             entrypoint=sky.Task(
                 name='run-redirector',
                 envs=controller_envs,
                 run='python -m sky.serve.redirector --task-yaml '
                 f'{remote_task_yaml_path} --port {app_port} '
-                f'--control-plane-addr {control_plane_addr}'),
+                f'--controller-addr {controller_addr}'),
             stream_logs=False,
             handle=handle,
             stages=[Stage.EXEC],
@@ -1130,7 +1128,7 @@ def serve_up(
           f'\t\t{backend_utils.BOLD}sky serve status {service_name} (-a)'
           f'{backend_utils.RESET_BOLD}'
           '\nTo see logs of controller:'
-          f'\t{backend_utils.BOLD}sky serve logs --control-plane '
+          f'\t{backend_utils.BOLD}sky serve logs --controller '
           f'{service_name}{backend_utils.RESET_BOLD}'
           '\nTo see logs of redirector:'
           f'\t{backend_utils.BOLD}sky serve logs --redirector '
@@ -1225,7 +1223,7 @@ def serve_down(
         core.cancel(controller_cluster_name, all=True, _from_serve_core=True)
     except (ValueError, sky.exceptions.ClusterNotUpError) as e:
         if purge:
-            logger.warning('Ignoring error when stopping control plane and '
+            logger.warning('Ignoring error when stopping controller and '
                            f'redirector jobs of service {service_name}: {e}')
         else:
             raise RuntimeError() from e

@@ -16,7 +16,7 @@ from sky import status_lib
 from sky.serve import constants
 from sky.utils import common_utils
 
-_CONTROL_PLANE_URL = f'http://localhost:{constants.CONTROL_PLANE_PORT}'
+CONTROLLER_SYNC_INTERVAL = f'http://localhost:{constants.CONTROLLER_PORT}'
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
 _SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'
 _FAILED_TO_FIND_REPLICA_MSG = (
@@ -75,7 +75,7 @@ def generate_replica_local_log_file_name(cluster_name: str) -> str:
 
 
 def get_latest_info() -> str:
-    resp = requests.get(_CONTROL_PLANE_URL + '/control_plane/get_latest_info')
+    resp = requests.get(CONTROLLER_SYNC_INTERVAL + '/controller/get_latest_info')
     if resp.status_code != 200:
         raise ValueError(f'Failed to get replica info: {resp.text}')
     return common_utils.encode_payload(resp.json())
@@ -90,7 +90,7 @@ def load_latest_info(payload: str) -> Dict[str, Any]:
 
 
 def terminate_service() -> str:
-    resp = requests.post(_CONTROL_PLANE_URL + '/control_plane/terminate')
+    resp = requests.post(CONTROLLER_SYNC_INTERVAL + '/controller/terminate')
     resp = base64.b64encode(pickle.dumps(resp)).decode('utf-8')
     return common_utils.encode_payload(resp)
 
@@ -193,8 +193,8 @@ def stream_logs(service_name: str,
                 f'{colorama.Style.RESET_ALL}')
 
     def _get_replica_status() -> status_lib.ReplicaStatus:
-        resp = requests.get(_CONTROL_PLANE_URL +
-                            '/control_plane/get_latest_info')
+        resp = requests.get(CONTROLLER_SYNC_INTERVAL +
+                            '/controller/get_latest_info')
         if resp.status_code != 200:
             raise ValueError(
                 f'{colorama.Fore.RED}Failed to get replica info for service '
