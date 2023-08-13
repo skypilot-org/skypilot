@@ -24,6 +24,7 @@
 
 import hashlib
 import inspect
+import os
 import pathlib
 import shutil
 import subprocess
@@ -33,7 +34,6 @@ import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 import urllib.parse
 import uuid
-import os
 import warnings
 
 import colorama
@@ -42,9 +42,11 @@ import pytest
 
 import sky
 from sky import global_user_state
-from sky.adaptors import ibm
 from sky.adaptors import cloudflare
-from sky.clouds import AWS, GCP, Azure
+from sky.adaptors import ibm
+from sky.clouds import AWS
+from sky.clouds import Azure
+from sky.clouds import GCP
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.data.data_utils import Rclone
@@ -1017,6 +1019,37 @@ def test_job_queue(generic_cloud: str):
     run_one_test(test)
 
 
+# ---------- Job Queue with Docker. ----------
+@pytest.mark.no_lambda_cloud  # Doesn't support Lambda Cloud for now
+@pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
+@pytest.mark.no_scp  # Doesn't support SCP for now
+@pytest.mark.no_oci  # Doesn't support OCI for now
+def test_job_queue_with_docker(generic_cloud: str):
+    name = _get_cluster_name()
+    test = Test(
+        'job_queue_with_docker',
+        [
+            f'sky launch -y -c {name} --cloud {generic_cloud} examples/job_queue/cluster_docker.yaml',
+            f'sky exec {name} -n {name}-1 -d examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-2 -d examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-3 -d examples/job_queue/job_docker.yaml',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep PENDING',
+            f'sky cancel -y {name} 2',
+            'sleep 5',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep RUNNING',
+            f'sky cancel -y {name} 3',
+            f'sky exec {name} --gpus T4:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus T4:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky logs {name} 4 --status',
+            f'sky logs {name} 5 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 @pytest.mark.lambda_cloud
 def test_lambda_job_queue():
     name = _get_cluster_name()
@@ -1229,6 +1262,25 @@ def test_ibm_job_queue_multinode():
     run_one_test(test)
 
 
+# ---------- Docker with preinstalled package. ----------
+@pytest.mark.no_lambda_cloud  # Doesn't support Lambda Cloud for now
+@pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
+@pytest.mark.no_scp  # Doesn't support SCP for now
+@pytest.mark.no_oci  # Doesn't support OCI for now
+def test_docker_preinstalled_package(generic_cloud: str):
+    name = _get_cluster_name()
+    test = Test(
+        'docker_with_preinstalled_package',
+        [
+            f'sky launch -y -c {name} --cloud {generic_cloud} --image-id docker:nginx',
+            f'sky exec {name} "nginx -V" | grep SUCCEEDED',
+            f'sky exec {name} whoami | grep root',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Submitting multiple tasks to the same cluster. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus
@@ -1410,6 +1462,23 @@ def test_aws_http_server_with_custom_ports():
         'aws_http_server_with_custom_ports',
         [
             f'sky launch -y -d -c {name} --cloud aws examples/http_server_with_custom_ports/task.yaml',
+            'sleep 10',
+            'ip=$(grep -A1 "Host ' + name +
+            '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Web apps with custom ports on Azure. ----------
+@pytest.mark.azure
+def test_azure_http_server_with_custom_ports():
+    name = _get_cluster_name()
+    test = Test(
+        'azure_http_server_with_custom_ports',
+        [
+            f'sky launch -y -d -c {name} --cloud azure examples/http_server_with_custom_ports/task.yaml',
             'sleep 10',
             'ip=$(grep -A1 "Host ' + name +
             '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',

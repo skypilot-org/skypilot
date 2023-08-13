@@ -6,12 +6,14 @@ black==22.10.0
 # https://github.com/edaniszewski/pylint-quotes
 pylint-quotes==0.2.3
 toml==0.10.2
+isort==5.12.0
 
 # type checking
 mypy==0.991
 types-PyYAML
 types-requests
 types-setuptools
+types-cachetools
 
 # testing
 pytest

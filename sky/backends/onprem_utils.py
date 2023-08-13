@@ -140,8 +140,10 @@ def get_python_executable(cluster_name: str) -> str:
     return config['python']
 
 
-def get_job_owner(cluster_yaml: str) -> str:
+def get_job_owner(cluster_yaml: str, docker_user: Optional[str] = None) -> str:
     """Get the owner of the job."""
+    if docker_user is not None:
+        return docker_user
     cluster_config = common_utils.read_yaml(os.path.expanduser(cluster_yaml))
     # User name is guaranteed to exist (on all jinja files)
     return cluster_config['auth']['ssh_user']

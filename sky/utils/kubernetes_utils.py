@@ -1,8 +1,8 @@
 """Kubernetes utilities for SkyPilot."""
 from typing import Optional, Set, Tuple
 
-from sky.utils import common_utils
 from sky.adaptors import kubernetes
+from sky.utils import common_utils
 
 DEFAULT_NAMESPACE = 'default'
 

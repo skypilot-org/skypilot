@@ -1,9 +1,10 @@
 """IBM Web Services."""
-import colorama
-import os
 import json
+import os
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
+
+import colorama
 
 from sky import clouds
 from sky import sky_logging
@@ -38,6 +39,10 @@ class IBM(clouds.Cloud):
         return {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is not supported in {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+                (f'Docker image is not supported in {cls._REPR}. '
+                 'You can try running docker command inside the '
+                 '`run` section in task.yaml.'),
             clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
                 (f'Custom disk tier is not supported in {cls._REPR}.'),
             clouds.CloudImplementationFeatures.OPEN_PORTS:

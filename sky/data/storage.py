@@ -12,22 +12,22 @@ import colorama
 
 from sky import check
 from sky import clouds
-from sky.adaptors import aws
-from sky.adaptors import gcp
-from sky.adaptors import cloudflare
-from sky.adaptors import ibm
-from sky.backends import backend_utils
-from sky.utils import schemas
-from sky.data import data_transfer
-from sky.data import data_utils
-from sky.data import mounting_utils
-from sky.data.data_utils import Rclone
-from sky.data import storage_utils
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
+from sky.adaptors import aws
+from sky.adaptors import cloudflare
+from sky.adaptors import gcp
+from sky.adaptors import ibm
+from sky.backends import backend_utils
+from sky.data import data_transfer
+from sky.data import data_utils
+from sky.data import mounting_utils
+from sky.data import storage_utils
+from sky.data.data_utils import Rclone
 from sky.utils import log_utils
+from sky.utils import schemas
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

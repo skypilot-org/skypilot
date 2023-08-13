@@ -1,11 +1,11 @@
 """AWS instance provisioning."""
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional
 
 from botocore import config
 
+from sky import status_lib
 from sky.adaptors import aws
 from sky.utils import common_utils
-from sky import status_lib
 
 BOTO_MAX_RETRIES = 12
 # Tag uniquely identifying all nodes of a cluster
