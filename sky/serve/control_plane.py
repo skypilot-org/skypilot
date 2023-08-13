@@ -20,7 +20,7 @@ from sky.utils import env_options
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s | %(levelname)-6s | %(name)-40s || %(message)s',
+    format='%(asctime)s | %(levelname)-6s | %(name)-10s || %(message)s',
     datefmt='%m-%d %H:%M:%S',
     force=True)
 logger = logging.getLogger(__name__)
