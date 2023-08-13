@@ -149,6 +149,7 @@ def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
     status_columns = [
         StatusColumn('SERVICE_NAME', _get_service_name),
         StatusColumn('ID', _get_replica_id),
+        StatusColumn('IP', _get_head_ip),
         StatusColumn('RESOURCES',
                      _get_replica_resources,
                      trunc_length=70 if not show_all else 0),
@@ -461,25 +462,25 @@ def _get_zone(cluster_record: _ClusterRecord) -> str:
     return zone_str
 
 
-def _get_replica_resources(cluster_record: _ClusterRecord) -> str:
-    handle = cluster_record['handle']
+def _get_replica_resources(service_record: _ClusterRecord) -> str:
+    handle = service_record['handle']
     if handle is None:
         return '-'
-    return _get_resources(cluster_record)
+    return _get_resources(service_record)
 
 
-def _get_replica_region(cluster_record: _ClusterRecord) -> str:
-    handle = cluster_record['handle']
+def _get_replica_region(service_record: _ClusterRecord) -> str:
+    handle = service_record['handle']
     if handle is None:
         return '-'
-    return _get_region(cluster_record)
+    return _get_region(service_record)
 
 
-def _get_replica_zone(cluster_record: _ClusterRecord) -> str:
-    handle = cluster_record['handle']
+def _get_replica_zone(service_record: _ClusterRecord) -> str:
+    handle = service_record['handle']
     if handle is None:
         return '-'
-    return _get_zone(cluster_record)
+    return _get_zone(service_record)
 
 
 def _get_autostop(cluster_record: _ClusterRecord) -> str:
