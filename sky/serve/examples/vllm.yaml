@@ -1,21 +1,13 @@
 resources:
   accelerators: A100:1
-  cloud: gcp
-  # region: us-central1
-  # use_spot: True
-  image_id: projects/skypilot-375900/global/images/fastchat-serve-v0
-  
-num_nodes: 1
-
-file_mounts:
-  ~/chatlogs:
-    name: skypilot-chatbot-logs
-    store: gcs
-    mode: MOUNT
 
 service:
   port: 8081
-  readiness_probe: /health/v1/models
+  readiness_probe:
+    path: /v1/models
+    # vllm takes 5-10 minutes to install
+    initial_delay_seconds: 1200
+  replicas: 2
 
 setup: |
   conda activate chatbot
@@ -25,32 +17,28 @@ setup: |
     # Setup the environment
     conda create -n chatbot python=3.10 -y
     conda activate chatbot
-    pip3 install fschat
+    pip install pip install git+https://github.com/lm-sys/FastChat.git
+    pip install vllm
+    pip install accelerate
   fi
 
 run: |
   conda activate chatbot
-  python3 -m fastchat.serve.controller --host 0.0.0.0 --port 21001 > ~/controller.log 2>&1 &
 
   WORKER_IP=$(hostname -I | cut -d' ' -f1)
   CONTROLLER_PORT=21001
   WORKER_PORT=21002
-  # python3 -m fastchat.serve.model_worker \
-  #   --model-path lmsys/vicuna-7b-v1.3 \
-  #   --controller-address http://${WORKER_IP}:${CONTROLLER_PORT} \
-  #   --worker-address http://${WORKER_IP}:${WORKER_PORT} \
-  #   --host 0.0.0.0 \
-  #   --port ${WORKER_PORT} > ~/worker.log 2>&1 &
+
+  python3 -m fastchat.serve.controller --host 0.0.0.0 --port ${CONTROLLER_PORT} > ~/controller.log 2>&1 &
 
   cd FastChat
   python3 -m fastchat.serve.vllm_worker \
-    --model-path lmsys/vicuna-7b-v1.3 \
+    --model-path lmsys/vicuna-7b-v1.5 \
     --controller-address http://${WORKER_IP}:${CONTROLLER_PORT} \
     --worker-address http://${WORKER_IP}:${WORKER_PORT} \
     --host 0.0.0.0 \
     --port ${WORKER_PORT} \
     --tokenizer hf-internal-testing/llama-tokenizer > ~/worker.log 2>&1 &
-
 
   HOST_IP=$(hostname -I | cut -d' ' -f1)
   python3 -m fastchat.serve.openai_api_server --host ${HOST_IP} --port 8081

@@ -13,6 +13,7 @@ from sky.utils import common_utils
 from sky.utils import log_utils
 
 COMMAND_TRUNC_LENGTH = 25
+REPLICA_TRUNC_NUM = 10
 NUM_COST_REPORT_LINES = 5
 
 # A record in global_user_state's 'clusters' table.
@@ -113,14 +114,13 @@ def show_status_table(cluster_records: List[_ClusterRecord],
 def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
     status_columns = [
         StatusColumn('NAME', _get_name),
+        StatusColumn('UPTIME', _get_uptime),
+        StatusColumn('STATUS', _get_service_status_colored),
+        StatusColumn('REPLICAS', _get_replicas),
         StatusColumn('CONTROLLER_CLUSTER_NAME',
                      _get_controller_cluster_name,
                      show_by_default=False),
         StatusColumn('ENDPOINT', _get_endpoint),
-        StatusColumn('#READY_REPLICAS', _get_ready_replicas),
-        StatusColumn('#UNHEALTHY_REPLICAS', _get_unhealthy_replicas),
-        StatusColumn('#FAILED_REPLICAS', _get_failed_replicas),
-        StatusColumn('STATUS', _get_service_status_colored),
         StatusColumn('POLICY', _get_policy, show_by_default=False),
         StatusColumn('REQUESTED_RESOURCES',
                      _get_requested_resources,
@@ -146,13 +146,21 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
 
 def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
     status_columns = [
-        StatusColumn('NAME', _get_name),
+        StatusColumn('SERVICE_NAME', _get_service_name),
+        StatusColumn('ID', _get_replica_id),
         StatusColumn('RESOURCES',
-                     _get_resources,
+                     _get_replica_resources,
                      trunc_length=70 if not show_all else 0),
-        StatusColumn('REGION', _get_region),
+        StatusColumn('REGION', _get_replica_region),
+        StatusColumn('ZONE', _get_replica_zone, show_by_default=False),
         StatusColumn('STATUS', _get_status_colored),
     ]
+
+    truncate_hint = ''
+    if not show_all:
+        if len(replica_records) > REPLICA_TRUNC_NUM:
+            truncate_hint = '... (use --all to show all replicas)\n'
+        replica_records = replica_records[:REPLICA_TRUNC_NUM]
 
     columns = []
     for status_column in status_columns:
@@ -169,6 +177,7 @@ def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
         click.echo(replica_table)
     else:
         click.echo('No existing replicas.')
+    click.echo(truncate_hint, nl=False)
 
 
 def get_total_cost_of_displayed_records(
@@ -371,18 +380,36 @@ _get_region = (
 _get_command = (lambda cluster_record: cluster_record['last_use'])
 _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
+_get_replica_id = lambda service_record: service_record['replica_id']
 _get_controller_cluster_name = (
     lambda service_record: service_record['controller_cluster_name'])
-_get_endpoint = (lambda service_record: service_record['endpoint'])
-_get_ready_replicas = (
-    lambda service_record: service_record['num_ready_replicas'])
-_get_unhealthy_replicas = (
-    lambda service_record: service_record['num_unhealthy_replicas'])
-_get_failed_replicas = (
-    lambda service_record: service_record['num_failed_replicas'])
 _get_policy = (lambda service_record: service_record['policy'])
 _get_requested_resources = (
     lambda service_record: service_record['requested_resources'])
+_get_service_name = (lambda service_record: service_record['service_name'])
+
+
+def _get_uptime(service_record: _ServiceRecord) -> str:
+    uptime = service_record['uptime']
+    if uptime is None:
+        return '-'
+    return log_utils.readable_time_duration(uptime, absolute=True)
+
+
+def _get_replicas(service_record: _ServiceRecord) -> str:
+    ready_replica_num = 0
+    for info in service_record['replica_info']:
+        if _get_status(info) == status_lib.ReplicaStatus.READY:
+            ready_replica_num += 1
+    total_replica_num = len(service_record['replica_info'])
+    return f'{ready_replica_num}/{total_replica_num}'
+
+
+def _get_endpoint(service_record: _ServiceRecord) -> str:
+    endpoint = service_record['endpoint']
+    if not endpoint:
+        return '-'
+    return endpoint
 
 
 def _get_service_status(
@@ -431,6 +458,27 @@ def _get_zone(cluster_record: _ClusterRecord) -> str:
     if zone_str is None:
         zone_str = '-'
     return zone_str
+
+
+def _get_replica_resources(cluster_record: _ClusterRecord) -> str:
+    handle = cluster_record['handle']
+    if handle is None:
+        return '-'
+    return _get_resources(cluster_record)
+
+
+def _get_replica_region(cluster_record: _ClusterRecord) -> str:
+    handle = cluster_record['handle']
+    if handle is None:
+        return '-'
+    return _get_region(cluster_record)
+
+
+def _get_replica_zone(cluster_record: _ClusterRecord) -> str:
+    handle = cluster_record['handle']
+    if handle is None:
+        return '-'
+    return _get_zone(cluster_record)
 
 
 def _get_autostop(cluster_record: _ClusterRecord) -> str:

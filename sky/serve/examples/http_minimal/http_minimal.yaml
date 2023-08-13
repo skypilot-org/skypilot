@@ -1,0 +1,10 @@
+service:
+  port: 9090
+  readiness_probe: /
+
+resources:
+  cpus: 2+
+
+workdir: .
+
+run: python3 -m http.server 9090

@@ -53,7 +53,7 @@ class SkyServeRedirector:
                     # send request num in last query interval
                     response = session.post(
                         self.control_plane_url +
-                        '/control_plane/get_num_requests',
+                        '/control_plane/update_num_requests',
                         json={
                             'num_requests':
                                 self.load_balancer.deprecate_old_requests()
@@ -78,7 +78,9 @@ class SkyServeRedirector:
 
         if replica_ip is None:
             raise fastapi.HTTPException(status_code=503,
-                                        detail='No available replicas')
+                                        detail='No available replicas. '
+                                        'Use "sky serve status [SERVICE_ID]" '
+                                        'to check the replica status.')
 
         path = f'http://{replica_ip}:{self.port}{request.url.path}'
         logger.info(f'Redirecting request to {path}')

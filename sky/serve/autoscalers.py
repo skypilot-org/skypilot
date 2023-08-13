@@ -39,25 +39,25 @@ class Autoscaler:
         logger.debug(f'Scaling down by {num_nodes_to_remove} nodes')
         self.infra_provider.scale_down(num_nodes_to_remove)
 
-    def monitor(self) -> None:
+    def run(self) -> None:
         logger.info('Starting autoscaler monitor.')
-        while not self.monitor_thread_stop_event.is_set():
+        while not self.run_thread_stop_event.is_set():
             try:
                 self.evaluate_scaling()
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # monitor running.
-                logger.error(f'Error in autoscaler monitor: {e}')
+                logger.error(f'Error in autoscaler: {e}')
             time.sleep(self.frequency)
 
-    def start_monitor(self) -> None:
-        self.monitor_thread_stop_event = threading.Event()
-        self.monitor_thread = threading.Thread(target=self.monitor)
-        self.monitor_thread.start()
+    def start(self) -> None:
+        self.run_thread_stop_event = threading.Event()
+        self.run_thread = threading.Thread(target=self.run)
+        self.run_thread.start()
 
-    def terminate_monitor(self) -> None:
-        self.monitor_thread_stop_event.set()
-        self.monitor_thread.join()
+    def terminate(self) -> None:
+        self.run_thread_stop_event.set()
+        self.run_thread.join()
 
 
 class RequestRateAutoscaler(Autoscaler):

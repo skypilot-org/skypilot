@@ -3315,6 +3315,24 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             stdin=subprocess.DEVNULL,
         )
 
+    def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
+                        service_name: str, replica_id: int,
+                        follow: bool) -> None:
+        code = serve_lib.ServeCodeGen.stream_logs(service_name, replica_id,
+                                                  follow)
+
+        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+
+        self.run_on_head(
+            handle,
+            code,
+            stream_logs=True,
+            process_stream=False,
+            ssh_mode=command_runner.SshMode.INTERACTIVE,
+            stdin=subprocess.DEVNULL,
+        )
+
     def teardown_no_lock(self,
                          handle: CloudVmRayResourceHandle,
                          terminate: bool,
