@@ -1761,12 +1761,15 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
             nonreserved_cluster_records + reserved_clusters, all)
         status_utils.show_local_status_table(local_clusters)
 
+        hints = []
         if skyserve_controllers:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}\n'
                        f'SkyServe Controllers{colorama.Style.RESET_ALL}')
             status_utils.show_status_table(skyserve_controllers, all)
+            hints.append(
+                f'* To see detailed service status: {colorama.Style.BRIGHT}'
+                f'sky serve status{colorama.Style.RESET_ALL}')
 
-        hints = []
         if show_spot_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed spot jobs{colorama.Style.RESET_ALL}')
