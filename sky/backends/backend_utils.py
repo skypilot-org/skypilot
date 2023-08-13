@@ -2731,6 +2731,7 @@ def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
             print(
                 f'{colorama.Fore.YELLOW}Error occurred when refreshing service '
                 f'{service_name}: {msg}{colorama.Style.RESET_ALL}')
+            progress.start()
         progress.update(task, advance=1)
         return record
 
