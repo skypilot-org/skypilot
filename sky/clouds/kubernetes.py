@@ -12,8 +12,8 @@ from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import kubernetes_utils
 from sky.utils import ux_utils
-from sky.skylet.providers.kubernetes import utils as kubernetes_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -328,63 +328,6 @@ class Kubernetes(clouds.Cloud):
         k8s_acc_label_value = None
 
         if acc_count > 0:
-            class GPULabelFormatter:
-                @classmethod
-                def get_label_key(cls) -> str:
-                    raise NotImplementedError
-
-                @classmethod
-                def get_label_value(cls, accelerator: str) -> str:
-                    raise NotImplementedError
-
-            def get_k8s_accelerator_name(accelerator: str):
-                # Used by GKE and EKS
-                if accelerator in ('A100-80GB', 'L4'):
-                    # A100-80GB and L4 have a different name pattern.
-                    return 'nvidia-{}'.format(accelerator.lower())
-                else:
-                    return 'nvidia-tesla-{}'.format(
-                        accelerator.lower())
-
-            class GKELabelFormatter(GPULabelFormatter):
-                @classmethod
-                def get_label_key(cls) -> str:
-                    return 'mycloud.google.com/gke-accelerator'
-
-                @classmethod
-                def get_label_value(cls, accelerator: str) -> str:
-                    return get_k8s_accelerator_name(accelerator)
-
-            class EKSLabelFormatter(GPULabelFormatter):
-                @classmethod
-                def get_label_key(cls) -> str:
-                    return 'k8s.amazonaws.com/accelerator'
-
-                @classmethod
-                def get_label_value(cls, accelerator: str) -> str:
-                    return get_k8s_accelerator_name(accelerator)
-
-            class SkyPilotLabelFormatter(GPULabelFormatter):
-                @classmethod
-                def get_label_key(cls) -> str:
-                    return 'skypilot.co/accelerator'
-
-                @classmethod
-                def get_label_value(cls, accelerator: str) -> str:
-                    return get_k8s_accelerator_name(accelerator)
-
-            class NvidiaGFDLabelFormatter(GPULabelFormatter):
-                @classmethod
-                def get_label_key(cls) -> str:
-                    return 'nvidia.com/gpu.product'
-
-                @classmethod
-                def get_label_value(cls, accelerator: str) -> str:
-                    raise NotImplementedError
-
-            # has to be in order
-            LABEL_FORMATTER_REGISTRY = [SkyPilotLabelFormatter, GKELabelFormatter, EKSLabelFormatter, NvidiaGFDLabelFormatter]
-
             def detect_gpu_label_formatter() -> [Optional[GPULabelFormatter],
                                                  Set[str]]:
                 # Get the set of labels across all nodes
@@ -409,7 +352,7 @@ class Kubernetes(clouds.Cloud):
                     suffix = ''
                     if env_options.Options.SHOW_DEBUG_INFO.get():
                         suffix = ' Found node labels: {}'.format(node_labels)
-                    raise KeyError(
+                    raise exceptions.ResourcesUnavailableError(
                         'Could not detect GPU labels in Kubernetes cluster. '
                         'Please ensure at least one node in the cluster has '
                         'node labels of the format '

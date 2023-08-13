@@ -6,6 +6,70 @@ from sky.adaptors import kubernetes
 DEFAULT_NAMESPACE = 'default'
 
 
+class GPULabelFormatter:
+    @classmethod
+    def get_label_key(cls) -> str:
+        raise NotImplementedError
+
+    @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        raise NotImplementedError
+
+
+def get_k8s_accelerator_name(accelerator: str):
+    # Used by GKE and EKS
+    if accelerator in ('A100-80GB', 'L4'):
+        # A100-80GB and L4 have a different name pattern.
+        return 'nvidia-{}'.format(accelerator.lower())
+    else:
+        return 'nvidia-tesla-{}'.format(
+            accelerator.lower())
+
+
+class GKELabelFormatter(GPULabelFormatter):
+    @classmethod
+    def get_label_key(cls) -> str:
+        return 'cloud.google.com/gke-accelerator'
+
+    @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        return get_k8s_accelerator_name(accelerator)
+
+
+class EKSLabelFormatter(GPULabelFormatter):
+    @classmethod
+    def get_label_key(cls) -> str:
+        return 'k8s.amazonaws.com/accelerator'
+
+    @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        return get_k8s_accelerator_name(accelerator)
+
+
+class SkyPilotLabelFormatter(GPULabelFormatter):
+    @classmethod
+    def get_label_key(cls) -> str:
+        return 'skypilot.co/accelerator'
+
+    @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        return get_k8s_accelerator_name(accelerator)
+
+
+class NvidiaGFDLabelFormatter(GPULabelFormatter):
+    @classmethod
+    def get_label_key(cls) -> str:
+        return 'nvidia.com/gpu.product'
+
+    @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        raise NotImplementedError
+
+
+# has to be in order
+LABEL_FORMATTER_REGISTRY = [SkyPilotLabelFormatter, GKELabelFormatter,
+                            EKSLabelFormatter, NvidiaGFDLabelFormatter]
+
 def get_head_ssh_port(cluster_name: str, namespace: str) -> int:
     svc_name = f'{cluster_name}-ray-head-ssh'
     return get_port(svc_name, namespace)
