@@ -323,8 +323,15 @@ class SkyPilotInfraProvider(InfraProvider):
                     job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
             ]:
                 info.status_property.user_app_failed = True
-                logger.info(f'User APP for cluster {cluster_name} FAILED. '
-                            'Terminating...')
+                logger.warning(f'User APP for cluster {cluster_name} FAILED. '
+                               'Start streaming logs...')
+                backend = backends.CloudVmRayBackend()
+                handle = info.handle
+                assert handle is not None, info
+                # Always tail the logs of the first job, which represent user
+                # setup & run.
+                backend.tail_logs(handle, job_id=1, follow=False)
+                logger.info('Terminating...')
                 self._teardown_cluster(cluster_name)
 
     def _job_status_fetcher(self) -> None:
