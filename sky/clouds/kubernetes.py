@@ -332,6 +332,8 @@ class Kubernetes(clouds.Cloud):
             label_formatter, node_labels = \
                 kubernetes_utils.detect_gpu_label_formatter()
             if label_formatter is None:
+                # If GPU labels are not detected, trigger failover by
+                # raising ResourcesUnavailableError.
                 # TODO(romilb): This will fail early for autoscaling clusters.
                 #  For AS clusters, we may need a way for users to specify the
                 #  GPULabelFormatter to use since the cluster may be scaling up
