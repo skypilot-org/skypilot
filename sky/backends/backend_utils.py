@@ -2732,6 +2732,12 @@ def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
                 f'{colorama.Fore.YELLOW}Error occurred when refreshing service '
                 f'{service_name}: {msg}{colorama.Style.RESET_ALL}')
             progress.start()
+        if record is not None:
+            service_task = sky.Task.from_yaml(record['service_yaml'])
+            assert service_task.service is not None, record['service_yaml']
+            record['policy'] = service_task.service.policy_str()
+            assert len(service_task.resources) == 1
+            record['requested_resources'] = list(service_task.resources)[0]
         progress.update(task, advance=1)
         return record
 

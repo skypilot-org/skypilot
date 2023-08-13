@@ -4025,7 +4025,8 @@ def serve_up(
         return
 
     if task.service.controller_resources is not None:
-        controller_resources_config = task.service.controller_resources
+        controller_resources_config = copy.deepcopy(
+            task.service.controller_resources)
     else:
         controller_resources_config = serve_lib.CONTROLLER_RESOURCES
     try:

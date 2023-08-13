@@ -115,6 +115,7 @@ def show_status_table(cluster_records: List[_ClusterRecord],
 def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
     status_columns = [
         StatusColumn('NAME', _get_name),
+        StatusColumn('LAUNCHED', _get_launched, show_by_default=False),
         StatusColumn('UPTIME', _get_uptime),
         StatusColumn('STATUS', _get_service_status_colored),
         StatusColumn('REPLICAS', _get_replicas),

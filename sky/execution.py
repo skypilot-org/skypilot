@@ -974,15 +974,13 @@ def serve_up(
 
     Raises:
     """
-    controller_cluster_name = serve.CONTROLLER_PREFIX + service_name
+    controller_cluster_name = serve.generate_controller_cluster_name(
+        service_name)
+    service_yaml = serve.generate_service_yaml_file_name(service_name)
     assert task.service is not None, task
-    policy = task.service.policy_str()
-    assert len(task.resources) == 1
-    requested_resources = list(task.resources)[0]
     global_user_state.add_or_update_service(
-        service_name, None, controller_cluster_name, '',
-        status_lib.ServiceStatus.CONTROLLER_INIT, policy, requested_resources,
-        [])
+        service_name, None, None, controller_cluster_name, '',
+        status_lib.ServiceStatus.CONTROLLER_INIT, service_yaml, [])
     app_port = int(task.service.app_port)
     assert len(task.resources) == 1, task
     original_resources = list(task.resources)[0]
@@ -998,165 +996,161 @@ def serve_up(
     # after the service is terminated.
     _maybe_translate_local_file_mounts_and_sync_up(task)
 
-    with tempfile.NamedTemporaryFile(prefix=f'serve-task-{service_name}-',
-                                     mode='w') as f:
-        task_config = task.to_yaml_config()
-        if 'resources' in task_config and 'spot_recovery' in task_config[
-                'resources']:
-            del task_config['resources']['spot_recovery']
-        common_utils.dump_yaml(f.name, task_config)
-        remote_task_yaml_path = (serve.SERVICE_YAML_PREFIX +
-                                 f'/service_{service_name}.yaml')
-        vars_to_fill = {
-            'remote_task_yaml_path': remote_task_yaml_path,
-            'local_task_yaml_path': f.name,
-        }
-        controller_yaml_path = os.path.join(serve.CONTROLLER_YAML_PREFIX,
-                                            f'{service_name}.yaml')
-        backend_utils.fill_template(serve.CONTROLLER_TEMPLATE,
-                                    vars_to_fill,
-                                    output_path=controller_yaml_path)
-        controller_task = task_lib.Task.from_yaml(controller_yaml_path)
-        controller_task.best_resources = (controller_best_resources.copy(
-            ports=[app_port]))
+    task_config = task.to_yaml_config()
+    if 'resources' in task_config and 'spot_recovery' in task_config[
+            'resources']:
+        del task_config['resources']['spot_recovery']
+    common_utils.dump_yaml(service_yaml, task_config)
+    remote_task_yaml_path = serve.generate_remote_task_yaml_file_name(
+        service_name)
+    vars_to_fill = {
+        'remote_task_yaml_path': remote_task_yaml_path,
+        'local_task_yaml_path': service_yaml,
+    }
+    controller_yaml_path = serve.generate_controller_yaml_file_name(
+        service_name)
+    backend_utils.fill_template(serve.CONTROLLER_TEMPLATE,
+                                vars_to_fill,
+                                output_path=controller_yaml_path)
+    controller_task = task_lib.Task.from_yaml(controller_yaml_path)
+    controller_task.best_resources = (controller_best_resources.copy(
+        ports=[app_port]))
 
-        controller_envs = {
-            'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,
-            'SKYPILOT_DEV': env_options.Options.IS_DEVELOPER.get(),
-            'SKYPILOT_DEBUG': env_options.Options.SHOW_DEBUG_INFO.get(),
-            'SKYPILOT_DISABLE_USAGE_COLLECTION':
-                env_options.Options.DISABLE_LOGGING.get(),
-        }
-        controller_task.update_envs(controller_envs)
+    controller_envs = {
+        'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,
+        'SKYPILOT_DEV': env_options.Options.IS_DEVELOPER.get(),
+        'SKYPILOT_DEBUG': env_options.Options.SHOW_DEBUG_INFO.get(),
+        'SKYPILOT_DISABLE_USAGE_COLLECTION':
+            env_options.Options.DISABLE_LOGGING.get(),
+    }
+    controller_task.update_envs(controller_envs)
 
-        print(f'{colorama.Fore.YELLOW}'
-              f'Launching controller for {service_name}...'
-              f'{colorama.Style.RESET_ALL}')
+    print(f'{colorama.Fore.YELLOW}'
+          f'Launching controller for {service_name}...'
+          f'{colorama.Style.RESET_ALL}')
 
-        _execute(
-            entrypoint=controller_task,
-            stream_logs=True,
-            cluster_name=controller_cluster_name,
-            retry_until_up=True,
-        )
+    _execute(
+        entrypoint=controller_task,
+        stream_logs=True,
+        cluster_name=controller_cluster_name,
+        retry_until_up=True,
+    )
 
-        cluster_record = global_user_state.get_cluster_from_name(
-            controller_cluster_name)
-        if (cluster_record is None or
-                cluster_record['status'] != status_lib.ClusterStatus.UP):
-            global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
-            print(f'{colorama.Fore.RED}Controller failed to launch. '
-                  f'Please check the logs above.{colorama.Style.RESET_ALL}')
-            return
-
-        handle = cluster_record['handle']
-        assert isinstance(handle, backends.CloudVmRayResourceHandle)
-        endpoint = f'{handle.head_ip}:{task.service.app_port}'
-
-        console = rich_console.Console()
-
-        def _wait_until_job_is_running(cluster_name: str,
-                                       job_id: int,
-                                       retry_time: int = 30) -> bool:
-            for _ in range(retry_time):
-                job_statuses = core.job_status(cluster_name, [job_id],
-                                               silent=True)
-                job_status = job_statuses.get(str(job_id), None)
-                if job_status == job_lib.JobStatus.RUNNING:
-                    return True
-                time.sleep(1)
-            return False
-
-        # NOTICE: The job submission order cannot be changed since the
-        # `sky serve logs` CLI will identify the control plane job with
-        # the first job submitted and the redirector job with the second
-        # job submitted.
-        with console.status(
-                '[yellow]Launching control plane process...[/yellow]'):
-            _execute(
-                entrypoint=sky.Task(
-                    name='run-control-plane',
-                    envs=controller_envs,
-                    run='python -m sky.serve.control_plane --service-name '
-                    f'{service_name} --task-yaml {remote_task_yaml_path} '
-                    f'--port {serve.CONTROL_PLANE_PORT}'),
-                stream_logs=False,
-                handle=handle,
-                stages=[Stage.EXEC],
-                cluster_name=controller_cluster_name,
-                detach_run=True,
-            )
-            control_plane_job_is_running = _wait_until_job_is_running(
-                controller_cluster_name, 1)
-        if not control_plane_job_is_running:
-            global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
-            print(f'{colorama.Fore.RED}Control plane failed to launch. '
-                  f'Please check the logs with sky serve logs {service_name} '
-                  f'--control-plane{colorama.Style.RESET_ALL}')
-            return
-        print(f'{colorama.Fore.GREEN}Launching control plane process...done.'
-              f'{colorama.Style.RESET_ALL}')
-
-        with console.status('[yellow]Launching redirector process...[/yellow]'):
-            control_plane_addr = f'http://localhost:{serve.CONTROL_PLANE_PORT}'
-            _execute(
-                entrypoint=sky.Task(
-                    name='run-redirector',
-                    envs=controller_envs,
-                    run='python -m sky.serve.redirector --task-yaml '
-                    f'{remote_task_yaml_path} --port {app_port} '
-                    f'--control-plane-addr {control_plane_addr}'),
-                stream_logs=False,
-                handle=handle,
-                stages=[Stage.EXEC],
-                cluster_name=controller_cluster_name,
-                detach_run=True,
-            )
-            redirector_job_is_running = _wait_until_job_is_running(
-                controller_cluster_name, 2)
-        if not redirector_job_is_running:
-            global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
-            print(f'{colorama.Fore.RED}Redirector failed to launch. '
-                  f'Please check the logs with sky serve logs {service_name} '
-                  f'--redirector{colorama.Style.RESET_ALL}')
-            return
-        print(f'{colorama.Fore.GREEN}Launching redirector process...done.'
-              f'{colorama.Style.RESET_ALL}')
-
+    cluster_record = global_user_state.get_cluster_from_name(
+        controller_cluster_name)
+    if (cluster_record is None or
+            cluster_record['status'] != status_lib.ClusterStatus.UP):
         global_user_state.set_service_status(
-            service_name, status_lib.ServiceStatus.REPLICA_INIT)
-        global_user_state.set_service_endpoint(service_name, endpoint)
+            service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+        print(f'{colorama.Fore.RED}Controller failed to launch. '
+              f'Please check the logs above.{colorama.Style.RESET_ALL}')
+        return
 
-        print(f'\n{colorama.Fore.CYAN}Service name: '
-              f'{colorama.Style.BRIGHT}{service_name}{colorama.Style.RESET_ALL}'
-              '\nTo see detailed info:'
-              f'\t\t{backend_utils.BOLD}sky serve status {service_name} (-a)'
-              f'{backend_utils.RESET_BOLD}'
-              '\nTo see logs of controller:'
-              f'\t{backend_utils.BOLD}sky serve logs --control-plane '
-              f'{service_name}{backend_utils.RESET_BOLD}'
-              '\nTo see logs of redirector:'
-              f'\t{backend_utils.BOLD}sky serve logs --redirector '
-              f'{service_name}{backend_utils.RESET_BOLD}'
-              '\nTo see logs of one replica:'
-              f'\t{backend_utils.BOLD}sky serve logs {service_name} '
-              f'[REPLICA_ID]{backend_utils.RESET_BOLD}'
-              '\nTo teardown the service:'
-              f'\t{backend_utils.BOLD}sky serve down {service_name}'
-              f'{backend_utils.RESET_BOLD}'
-              f'\n(use {backend_utils.BOLD}sky serve status {service_name}'
-              f'{backend_utils.RESET_BOLD} to get all valid REPLICA_ID)')
-        print(f'\n{colorama.Style.BRIGHT}{colorama.Fore.CYAN}'
-              'Endpoint URL: '
-              f'{colorama.Style.RESET_ALL}{colorama.Fore.CYAN}'
-              f'{endpoint}'
-              f'{colorama.Style.RESET_ALL}')
-        print(f'{colorama.Fore.GREEN}Starting replica now...'
-              f'{colorama.Style.RESET_ALL}')
-        print('Please use the above command to find the latest status.')
+    handle = cluster_record['handle']
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    endpoint = f'{handle.head_ip}:{task.service.app_port}'
+
+    console = rich_console.Console()
+
+    def _wait_until_job_is_running(cluster_name: str,
+                                   job_id: int,
+                                   retry_time: int = 30) -> bool:
+        for _ in range(retry_time):
+            job_statuses = core.job_status(cluster_name, [job_id], silent=True)
+            job_status = job_statuses.get(str(job_id), None)
+            if job_status == job_lib.JobStatus.RUNNING:
+                return True
+            time.sleep(1)
+        return False
+
+    # NOTICE: The job submission order cannot be changed since the
+    # `sky serve logs` CLI will identify the control plane job with
+    # the first job submitted and the redirector job with the second
+    # job submitted.
+    with console.status('[yellow]Launching control plane process...[/yellow]'):
+        _execute(
+            entrypoint=sky.Task(
+                name='run-control-plane',
+                envs=controller_envs,
+                run='python -m sky.serve.control_plane --service-name '
+                f'{service_name} --task-yaml {remote_task_yaml_path} '
+                f'--port {serve.CONTROL_PLANE_PORT}'),
+            stream_logs=False,
+            handle=handle,
+            stages=[Stage.EXEC],
+            cluster_name=controller_cluster_name,
+            detach_run=True,
+        )
+        control_plane_job_is_running = _wait_until_job_is_running(
+            controller_cluster_name, 1)
+    if not control_plane_job_is_running:
+        global_user_state.set_service_status(
+            service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+        print(f'{colorama.Fore.RED}Control plane failed to launch. '
+              f'Please check the logs with sky serve logs {service_name} '
+              f'--control-plane{colorama.Style.RESET_ALL}')
+        return
+    print(f'{colorama.Fore.GREEN}Launching control plane process...done.'
+          f'{colorama.Style.RESET_ALL}')
+
+    with console.status('[yellow]Launching redirector process...[/yellow]'):
+        control_plane_addr = f'http://localhost:{serve.CONTROL_PLANE_PORT}'
+        _execute(
+            entrypoint=sky.Task(
+                name='run-redirector',
+                envs=controller_envs,
+                run='python -m sky.serve.redirector --task-yaml '
+                f'{remote_task_yaml_path} --port {app_port} '
+                f'--control-plane-addr {control_plane_addr}'),
+            stream_logs=False,
+            handle=handle,
+            stages=[Stage.EXEC],
+            cluster_name=controller_cluster_name,
+            detach_run=True,
+        )
+        redirector_job_is_running = _wait_until_job_is_running(
+            controller_cluster_name, 2)
+    if not redirector_job_is_running:
+        global_user_state.set_service_status(
+            service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+        print(f'{colorama.Fore.RED}Redirector failed to launch. '
+              f'Please check the logs with sky serve logs {service_name} '
+              f'--redirector{colorama.Style.RESET_ALL}')
+        return
+    print(f'{colorama.Fore.GREEN}Launching redirector process...done.'
+          f'{colorama.Style.RESET_ALL}')
+
+    global_user_state.set_service_status(service_name,
+                                         status_lib.ServiceStatus.REPLICA_INIT)
+    global_user_state.set_service_endpoint(service_name, endpoint)
+
+    print(f'\n{colorama.Fore.CYAN}Service name: '
+          f'{colorama.Style.BRIGHT}{service_name}{colorama.Style.RESET_ALL}'
+          '\nTo see detailed info:'
+          f'\t\t{backend_utils.BOLD}sky serve status {service_name} (-a)'
+          f'{backend_utils.RESET_BOLD}'
+          '\nTo see logs of controller:'
+          f'\t{backend_utils.BOLD}sky serve logs --control-plane '
+          f'{service_name}{backend_utils.RESET_BOLD}'
+          '\nTo see logs of redirector:'
+          f'\t{backend_utils.BOLD}sky serve logs --redirector '
+          f'{service_name}{backend_utils.RESET_BOLD}'
+          '\nTo see logs of one replica:'
+          f'\t{backend_utils.BOLD}sky serve logs {service_name} '
+          f'[REPLICA_ID]{backend_utils.RESET_BOLD}'
+          '\nTo teardown the service:'
+          f'\t{backend_utils.BOLD}sky serve down {service_name}'
+          f'{backend_utils.RESET_BOLD}'
+          f'\n(use {backend_utils.BOLD}sky serve status {service_name}'
+          f'{backend_utils.RESET_BOLD} to get all valid REPLICA_ID)')
+    print(f'\n{colorama.Style.BRIGHT}{colorama.Fore.CYAN}'
+          'Endpoint URL: '
+          f'{colorama.Style.RESET_ALL}{colorama.Fore.CYAN}'
+          f'{endpoint}'
+          f'{colorama.Style.RESET_ALL}')
+    print(f'{colorama.Fore.GREEN}Starting replica now...'
+          f'{colorama.Style.RESET_ALL}')
+    print('Please use the above command to find the latest status.')
 
 
 def serve_down(
@@ -1246,8 +1240,15 @@ def serve_down(
             raise RuntimeError() from e
 
     # TODO(tian): Maybe add a post_cleanup function?
-    controller_yaml_path = os.path.join(serve.CONTROLLER_YAML_PREFIX,
-                                        f'{service_name}.yaml')
+    controller_yaml_path = serve.generate_controller_yaml_file_name(
+        service_name)
     if os.path.exists(controller_yaml_path):
         os.remove(controller_yaml_path)
+    service_yaml = serve.generate_service_yaml_file_name(service_name)
+    service_task = task_lib.Task.from_yaml(service_yaml)
+    backend = backends.CloudVmRayBackend()
+    # Cleanup cloud storage
+    backend.teardown_ephemeral_storage(service_task)
+    if os.path.exists(service_yaml):
+        os.remove(service_yaml)
     global_user_state.remove_service(service_name)

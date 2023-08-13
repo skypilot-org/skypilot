@@ -25,6 +25,29 @@ _FAILED_TO_FIND_REPLICA_MSG = (
     f' to check all valid replica id.{colorama.Style.RESET_ALL}')
 
 
+def generate_controller_cluster_name(service_name: str) -> str:
+    return constants.CONTROLLER_PREFIX + service_name
+
+
+def generate_remote_task_yaml_file_name(service_name: str) -> str:
+    service_name = service_name.replace('-', '_')
+    # Don't expand here since it is used for remote machine.
+    prefix = constants.SERVE_PREFIX
+    return os.path.join(prefix, f'{service_name}.yaml')
+
+
+def generate_service_yaml_file_name(service_name: str) -> str:
+    service_name = service_name.replace('-', '_')
+    prefix = os.path.expanduser(constants.SERVE_PREFIX)
+    return os.path.join(prefix, f'{service_name}.yaml')
+
+
+def generate_controller_yaml_file_name(service_name: str) -> str:
+    service_name = service_name.replace('-', '_')
+    prefix = os.path.expanduser(constants.SERVE_PREFIX)
+    return os.path.join(prefix, f'{service_name}_controller.yaml')
+
+
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
     return f'{service_name}-{replica_id}'
 
@@ -35,20 +58,20 @@ def get_replica_id_from_cluster_name(cluster_name: str) -> int:
 
 def generate_replica_launch_log_file_name(cluster_name: str) -> str:
     cluster_name = cluster_name.replace('-', '_')
-    prefix = os.path.expanduser(constants.SERVICE_YAML_PREFIX)
-    return f'{prefix}/{cluster_name}_launch.log'
+    prefix = os.path.expanduser(constants.SERVE_PREFIX)
+    return os.path.join(prefix, f'{cluster_name}_launch.log')
 
 
 def generate_replica_down_log_file_name(cluster_name: str) -> str:
     cluster_name = cluster_name.replace('-', '_')
-    prefix = os.path.expanduser(constants.SERVICE_YAML_PREFIX)
-    return f'{prefix}/{cluster_name}_down.log'
+    prefix = os.path.expanduser(constants.SERVE_PREFIX)
+    return os.path.join(prefix, f'{cluster_name}_down.log')
 
 
 def generate_replica_local_log_file_name(cluster_name: str) -> str:
     cluster_name = cluster_name.replace('-', '_')
-    prefix = os.path.expanduser(constants.SERVICE_YAML_PREFIX)
-    return f'{prefix}/{cluster_name}_local.log'
+    prefix = os.path.expanduser(constants.SERVE_PREFIX)
+    return os.path.join(prefix, f'{cluster_name}_local.log')
 
 
 def get_latest_info() -> str:
