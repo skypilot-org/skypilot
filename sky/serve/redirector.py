@@ -1,6 +1,5 @@
 """Redirector: redirect any incoming request to an endpoint replica."""
 import argparse
-import logging
 import threading
 import time
 
@@ -8,16 +7,14 @@ import fastapi
 import requests
 import uvicorn
 
+from sky import sky_logging
 from sky.serve import constants
 from sky.serve import load_balancers
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)-6s | %(name)-10s || %(message)s',
-    datefmt='%m-%d %H:%M:%S',
-    # force=True,
-)
-logger = logging.getLogger(__name__)
+# Use the explicit logger name so that the logger is under the
+# `sky.serve.control_plane` namespace when executed directly, so as
+# to inherit the setup from the `sky` logger.
+logger = sky_logging.init_logger('sky.serve.redirector')
 
 
 class SkyServeRedirector:

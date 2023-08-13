@@ -14,16 +14,15 @@ import uvicorn
 import sky
 from sky import backends
 from sky import serve
+from sky import sky_logging
 from sky.serve import autoscalers
 from sky.serve import infra_providers
 from sky.utils import env_options
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)-6s | %(name)-10s || %(message)s',
-    datefmt='%m-%d %H:%M:%S',
-    force=True)
-logger = logging.getLogger(__name__)
+# Use the explicit logger name so that the logger is under the
+# `sky.serve.control_plane` namespace when executed directly, so as
+# to inherit the setup from the `sky` logger.
+logger = sky_logging.init_logger('sky.serve.control_plane')
 
 
 class SuppressSuccessGetAccessLogsFilter(logging.Filter):
