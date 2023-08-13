@@ -462,21 +462,21 @@ def _get_zone(cluster_record: _ClusterRecord) -> str:
     return zone_str
 
 
-def _get_replica_resources(service_record: _ClusterRecord) -> str:
+def _get_replica_resources(service_record: _ServiceRecord) -> str:
     handle = service_record['handle']
     if handle is None:
         return '-'
     return _get_resources(service_record)
 
 
-def _get_replica_region(service_record: _ClusterRecord) -> str:
+def _get_replica_region(service_record: _ServiceRecord) -> str:
     handle = service_record['handle']
     if handle is None:
         return '-'
     return _get_region(service_record)
 
 
-def _get_replica_zone(service_record: _ClusterRecord) -> str:
+def _get_replica_zone(service_record: _ServiceRecord) -> str:
     handle = service_record['handle']
     if handle is None:
         return '-'
