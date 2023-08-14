@@ -18,10 +18,10 @@ class GPULabelFormatter:
         raise NotImplementedError
 
 
-def get_gke_eks_accelerator_name(accelerator: str) -> str:
-    """Returns the accelerator name for GKE and EKS clusters
+def get_gke_accelerator_name(accelerator: str) -> str:
+    """Returns the accelerator name for GKE clusters
 
-    Both use the same format - nvidia-tesla-<accelerator>.
+    Uses the format - nvidia-tesla-<accelerator>.
     A100-80GB and L4 are an exception - they use nvidia-<accelerator>.
     """
     if accelerator in ('A100-80GB', 'L4'):
@@ -39,18 +39,7 @@ class GKELabelFormatter(GPULabelFormatter):
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
-        return get_gke_eks_accelerator_name(accelerator)
-
-
-class EKSLabelFormatter(GPULabelFormatter):
-
-    @classmethod
-    def get_label_key(cls) -> str:
-        return 'k8s.amazonaws.com/accelerator'
-
-    @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
-        return get_gke_eks_accelerator_name(accelerator)
+        return get_gke_accelerator_name(accelerator)
 
 
 class SkyPilotLabelFormatter(GPULabelFormatter):
@@ -61,15 +50,15 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
-        # For SkyPilot formatter, we adopt GKE/EKS accelerator format.
-        return get_gke_eks_accelerator_name(accelerator)
+        # For SkyPilot formatter, we adopt GKE accelerator format.
+        return get_gke_accelerator_name(accelerator)
 
 
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
 # discover the accelerator type from. The order of the list is important, as
 # it will be used to determine the priority of the label formats.
 LABEL_FORMATTER_REGISTRY = [
-    SkyPilotLabelFormatter, GKELabelFormatter, EKSLabelFormatter
+    SkyPilotLabelFormatter, GKELabelFormatter
 ]
 
 
