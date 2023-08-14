@@ -2374,14 +2374,15 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             return [ips[0] for ips in self.stable_internal_external_ips]
         return None
 
-    def internal_ips(
-            self,
-            max_attempts: int = _FETCH_IP_MAX_ATTEMPTS) -> Optional[List[str]]:
+    def internal_ips(self,
+                     max_attempts: int = _FETCH_IP_MAX_ATTEMPTS) -> List[str]:
         internal_ips = self._internal_ips
         if internal_ips is not None:
             return internal_ips
         self.update_cluster_ips(max_attempts=max_attempts)
-        return self._internal_ips
+        internal_ips = self._internal_ips
+        assert internal_ips is not None, 'update_cluster_ips failed.'
+        return internal_ips
 
     @property
     def _external_ips(self) -> Optional[List[str]]:
@@ -2389,14 +2390,15 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             return [ips[1] for ips in self.stable_internal_external_ips]
         return None
 
-    def external_ips(
-            self,
-            max_attempts: int = _FETCH_IP_MAX_ATTEMPTS) -> Optional[List[str]]:
+    def external_ips(self,
+                     max_attempts: int = _FETCH_IP_MAX_ATTEMPTS) -> List[str]:
         external_ips = self._external_ips
         if external_ips is not None:
-            return self._external_ips
+            return external_ips
         self.update_cluster_ips(max_attempts=max_attempts)
-        return self._external_ips
+        external_ips = self._external_ips
+        assert external_ips is not None, 'update_cluster_ips failed.'
+        return external_ips
 
     def external_ssh_ports(
             self,
@@ -2426,7 +2428,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
     @property
     def head_ip(self):
-        external_ips = self.external_ips()
+        external_ips = self._external_ips
         if external_ips is not None:
             return external_ips[0]
         return None
@@ -3943,6 +3945,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node.
 
+        It will try to fetch the head node IP if it is not cached.
+
         Args:
             handle: The ResourceHandle to the cluster.
             cmd: The command to run.
@@ -3967,7 +3971,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             exceptions.FetchIPError: If the head node IP cannot be fetched.
         """
         # This will try to fetch the head node IP if it is not cached.
-        head_ip = handle.head_ip
+        external_ips = handle.external_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
+        head_ip = external_ips[0]
         head_ssh_port = backend_utils.get_head_ssh_port(handle,
                                                         _FETCH_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
