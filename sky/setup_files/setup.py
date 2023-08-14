@@ -89,7 +89,7 @@ install_requires = [
     'python-dotenv',
     # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
-    'ray[default]>=2.2.0,<=2.4.0',
+    'ray[default]>=2.2.0,<=2.6.2, != 2.6.0',
     'rich',
     'tabulate',
     # Light weight requirement, can be replaced with "typing" once
@@ -113,7 +113,9 @@ install_requires = [
     'pulp',
     # Ray job has an issue with pydantic>2.0.0, due to API changes of pydantic. See
     # https://github.com/ray-project/ray/issues/36990
-    'pydantic<2.0',
+    # >=1.10.8 is needed for ray>=2.6. See
+    # https://github.com/ray-project/ray/issues/35661
+    'pydantic<2.0, >=1.10.8',
     # Cython 3.0 release breaks PyYAML installed by aws-cli.
     # https://github.com/yaml/pyyaml/issues/601
     # https://github.com/aws/aws-cli/issues/8036
