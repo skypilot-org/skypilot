@@ -1583,9 +1583,21 @@ class RetryingVmProvisioner(object):
                 # from the output of 'ray up'.
                 if (handle.launched_nodes == 1 and
                         head_internal_external_ips is not None):
+                    # We optimize for the case where the cluster has a single
+                    # node and the head node's internal and external IPs can be
+                    # parsed from the output of 'ray up'.
                     handle.stable_internal_external_ips = [
                         head_internal_external_ips
                     ]
+                else:
+                    # We must query the IPs from the cloud provider, when the
+                    # provisioning is done, to make sure the cluster IPs are
+                    # up-to-date.
+                    # The staled IPs may be caused by:
+                    #   1. The node is restarted manually in the console.
+                    #   2. The node is restarted by the cloud provider.
+                    handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
+                handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
 
                 config_dict['handle'] = handle
                 plural = '' if num_nodes == 1 else 's'
@@ -1677,6 +1689,8 @@ class RetryingVmProvisioner(object):
         """
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             cluster_yaml, cluster_handle.docker_user)
+        # TODO: This will cause the cluster which is rebooted in the console
+        # having the wrong IP
         all_ips = cluster_handle.external_ips()
         num_tpu_devices = tpu_utils.get_num_tpu_devices(
             cluster_handle.launched_resources)
@@ -1915,6 +1929,7 @@ class RetryingVmProvisioner(object):
                 head_internal_ip = internal_ip_list[0]
 
             # If something's wrong. Ok to not return a head_ip.
+            
             head_ips = None
             if head_external_ip is not None and head_internal_ip is not None:
                 head_ips = (head_internal_ip, head_external_ip)
@@ -2264,7 +2279,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         self.launched_resources = self.launched_resources.copy(region=region)
 
-    def _update_stable_ssh_ports(self, max_attempts: int = 1) -> None:
+    def update_ssh_ports(self, max_attempts: int = 1) -> None:
         # TODO(romilb): Replace this with a call to the cloud class to get ports
         if isinstance(self.launched_resources.cloud, clouds.Kubernetes):
             head_port = backend_utils.get_head_ssh_port(
@@ -2277,7 +2292,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             ports = [22] * self.num_node_ips
         self.stable_ssh_ports = ports
 
-    def _update_stable_cluster_ips(self, max_attempts: int = 1) -> None:
+    def update_cluster_ips(self, max_attempts: int = 1) -> None:
         cluster_external_ips = backend_utils.get_node_ips(
             self.cluster_yaml,
             self.launched_nodes,
@@ -2337,7 +2352,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         internal_ips = self._internal_ips
         if internal_ips is not None:
             return internal_ips
-        self._update_stable_cluster_ips(max_attempts=max_attempts)
+        self.update_cluster_ips(max_attempts=max_attempts)
         return self._internal_ips
 
     @property
@@ -2352,7 +2367,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         external_ips = self._external_ips
         if external_ips is not None:
             return self._external_ips
-        self._update_stable_cluster_ips(max_attempts=max_attempts)
+        self.update_cluster_ips(max_attempts=max_attempts)
         return self._external_ips
 
     def external_ssh_ports(
@@ -2360,7 +2375,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             max_attempts: int = _FETCH_IP_MAX_ATTEMPTS) -> Optional[List[int]]:
         if self.stable_ssh_ports is not None:
             return self.stable_ssh_ports
-        self._update_stable_ssh_ports(max_attempts=max_attempts)
+        self.update_ssh_ports(max_attempts=max_attempts)
         if self.stable_ssh_ports is not None:
             return self.stable_ssh_ports
         return None
@@ -2425,18 +2440,18 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         self.__dict__.update(state)
 
-        # Because the _update_stable_cluster_ips and _update_stable_ssh_ports
+        # Because the update_cluster_ips and update_ssh_ports
         # functions use the handle, we call it on the current instance
         # after the state is updated.
         if version < 3 and head_ip is not None:
             try:
-                self._update_stable_cluster_ips()
+                self.update_cluster_ips()
             except exceptions.FetchIPError:
                 # This occurs when an old cluster from was autostopped,
                 # so the head IP in the database is not updated.
                 pass
         if version < 4:
-            self._update_stable_ssh_ports()
+            self.update_ssh_ports()
 
         self._update_cluster_region()
 
@@ -2683,9 +2698,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             cluster_config_file = config_dict['ray']
             handle = config_dict['handle']
 
-            ip_list = handle.external_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
-            ssh_port_list = handle.external_ssh_ports(
-                max_attempts=_FETCH_IP_MAX_ATTEMPTS)
+            ip_list = handle.external_ips()
+            ssh_port_list = handle.external_ssh_ports()
             assert ip_list is not None, handle
             assert ssh_port_list is not None, handle
 
