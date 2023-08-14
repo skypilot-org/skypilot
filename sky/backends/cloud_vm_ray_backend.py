@@ -1558,13 +1558,31 @@ class RetryingVmProvisioner(object):
                 'region_name': region.name,
                 'zone_str': zone_str,
             }
-            status, stdout, stderr, head_internal_external_ips = (
+            status, stdout, stderr, head_internal_ip, head_external_ip = (
                 self._gang_schedule_ray_up(to_provision.cloud,
                                            cluster_config_file, handle,
                                            log_abs_path, stream_logs,
                                            logging_info, to_provision.use_spot))
 
             if status == GangSchedulingStatus.CLUSTER_READY:
+                # Optimize the case where the cluster's head IPs can be parsed
+                # from the output of 'ray up'.
+                # We must query the IPs from the cloud provider, when the
+                # provisioning is done, to make sure the cluster IPs are
+                # up-to-date.
+                # The staled IPs may be caused by:
+                #   1. The node is restarted manually in the console.
+                #   2. The node is restarted by the cloud provider.
+                kwargs = {}
+                if handle.launched_nodes == 1:
+                    kwargs = {
+                        'internal_ips': [head_internal_ip],
+                        'external_ips': [head_external_ip]
+                    }
+                handle.update_cluster_ips(
+                    max_attempts=_FETCH_IP_MAX_ATTEMPTS,
+                    **kwargs)
+                handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
                 if cluster_exists:
                     # Guard against the case where there's an existing cluster
                     # with ray runtime messed up (e.g., manually killed) by (1)
@@ -1579,25 +1597,6 @@ class RetryingVmProvisioner(object):
                     # started).
                     self._ensure_cluster_ray_started(handle, log_abs_path)
 
-                # Optimize the case where the cluster's head IPs can be parsed
-                # from the output of 'ray up'.
-                if (handle.launched_nodes == 1 and
-                        head_internal_external_ips is not None):
-                    # We optimize for the case where the cluster has a single
-                    # node and the head node's internal and external IPs can be
-                    # parsed from the output of 'ray up'.
-                    handle.stable_internal_external_ips = [
-                        head_internal_external_ips
-                    ]
-                else:
-                    # We must query the IPs from the cloud provider, when the
-                    # provisioning is done, to make sure the cluster IPs are
-                    # up-to-date.
-                    # The staled IPs may be caused by:
-                    #   1. The node is restarted manually in the console.
-                    #   2. The node is restarted by the cloud provider.
-                    handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
-                handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
 
                 config_dict['handle'] = handle
                 plural = '' if num_nodes == 1 else 's'
@@ -1728,7 +1727,7 @@ class RetryingVmProvisioner(object):
         self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
         cluster_handle: 'backends.CloudVmRayResourceHandle', log_abs_path: str,
         stream_logs: bool, logging_info: dict, use_spot: bool
-    ) -> Tuple[GangSchedulingStatus, str, str, Optional[Tuple[str, str]]]:
+    ) -> Tuple[GangSchedulingStatus, str, str, Optional[str], Optional[str]]:
         """Provisions a cluster via 'ray up' and wait until fully provisioned.
 
         Returns:
@@ -1899,7 +1898,7 @@ class RetryingVmProvisioner(object):
         logger.debug(f'`ray up` takes {time.time() - start:.1f} seconds with '
                      f'{retry_cnt} retries.')
         if returncode != 0:
-            return GangSchedulingStatus.HEAD_FAILED, stdout, stderr, None
+            return GangSchedulingStatus.HEAD_FAILED, stdout, stderr, None, None
 
         resources = cluster_handle.launched_resources
         if tpu_utils.is_tpu_vm_pod(resources):
@@ -1928,13 +1927,8 @@ class RetryingVmProvisioner(object):
             if len(internal_ip_list) == 1:
                 head_internal_ip = internal_ip_list[0]
 
-            # If something's wrong. Ok to not return a head_ip.
-            
-            head_ips = None
-            if head_external_ip is not None and head_internal_ip is not None:
-                head_ips = (head_internal_ip, head_external_ip)
-            print('Get head ips from ray up stdout: ', head_ips)
-            return GangSchedulingStatus.CLUSTER_READY, stdout, stderr, head_ips
+            print('Get head ips from ray up stdout: ', head_internal_ip, head_external_ip)
+            return (GangSchedulingStatus.CLUSTER_READY, stdout, stderr, head_internal_ip, head_external_ip)
 
         # All code below is handling num_nodes > 1.
 
@@ -1978,13 +1972,13 @@ class RetryingVmProvisioner(object):
                     f'Upscaling reset takes {time.time() - start} seconds.')
                 if returncode != 0:
                     return (GangSchedulingStatus.GANG_FAILED, stdout, stderr,
-                            None)
+                            None, None)
         else:
             cluster_status = GangSchedulingStatus.GANG_FAILED
 
         # Do not need stdout/stderr if gang scheduling failed.
         # gang_succeeded = False, if head OK, but workers failed.
-        return cluster_status, '', '', None
+        return cluster_status, '', '', None, None
 
     def _ensure_cluster_ray_started(self, handle: 'CloudVmRayResourceHandle',
                                     log_abs_path) -> None:
@@ -2292,14 +2286,19 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             ports = [22] * self.num_node_ips
         self.stable_ssh_ports = ports
 
-    def update_cluster_ips(self, max_attempts: int = 1) -> None:
-        cluster_external_ips = backend_utils.get_node_ips(
-            self.cluster_yaml,
-            self.launched_nodes,
-            handle=self,
-            head_ip_max_attempts=max_attempts,
-            worker_ip_max_attempts=max_attempts,
-            get_internal_ips=False)
+    def update_cluster_ips(self, max_attempts: int = 1,
+                           internal_ips: Optional[List[Optional[str]]] = None,
+                           external_ips: Optional[List[Optional[str]]] = None) -> None:
+        if external_ips is not None and all(ip is not None for ip in external_ips):
+            cluster_external_ips = external_ips
+        else:
+            cluster_external_ips = backend_utils.get_node_ips(
+                self.cluster_yaml,
+                self.launched_nodes,
+                handle=self,
+                head_ip_max_attempts=max_attempts,
+                worker_ip_max_attempts=max_attempts,
+                get_internal_ips=False)
 
         if self._external_ips == cluster_external_ips:
             # Optimization: If the cached external IPs are the same as the
@@ -2317,6 +2316,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # thus the first list of IPs returned above are already private
             # IPs. So skip the second query.
             cluster_internal_ips = list(cluster_external_ips)
+        elif internal_ips is not None and all(ip is not None for ip in internal_ips):
+            cluster_internal_ips = internal_ips
         else:
             cluster_internal_ips = backend_utils.get_node_ips(
                 self.cluster_yaml,
