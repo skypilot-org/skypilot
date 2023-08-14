@@ -1527,7 +1527,17 @@ def get_node_ips(cluster_yaml: str,
                  worker_ip_max_attempts: int = 1,
                  get_internal_ips: bool = False) -> List[str]:
     """Returns the IPs of all nodes in the cluster, with head node at front.
-    
+
+    Args:
+        cluster_yaml: Path to the cluster yaml.
+        expected_num_nodes: Expected number of nodes in the cluster.
+        handle: handle to the cluster. It is only needed when the cluster is a
+            TPU VM or a local cluster.
+        head_ip_max_attempts: Max attempts to get the head IP.
+        worker_ip_max_attempts: Max attempts to get the worker IPs.
+        get_internal_ips: Whether to get internal IPs.
+
+
     Raises:
         exceptions.FetchIPError: if we failed to get the IPs. e.reason is
             either HEAD or WORKER.
