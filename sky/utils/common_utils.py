@@ -22,6 +22,7 @@ from sky import sky_logging
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
+USER_HASH_LENGTH_IN_CLUSTER_NAME = 4
 
 CLUSTER_NAME_HASH_LENGTH = 4
 
@@ -90,13 +91,12 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
 
 def truncate_and_hash_cluster_name(cluster_name: str,
                                    max_length: Optional[int] = 15) -> str:
-    if (max_length is None or
-            len(cluster_name) < max_length - USER_HASH_LENGTH - 1):
+    if (max_length is None or len(cluster_name) <=
+            max_length - USER_HASH_LENGTH_IN_CLUSTER_NAME - 1):
         return f'{cluster_name}-{get_user_hash()}'
-    assert max_length > CLUSTER_NAME_HASH_LENGTH + USER_HASH_LENGTH + 2, (
-        cluster_name, max_length)
     truncate_cluster_name_length = (max_length - CLUSTER_NAME_HASH_LENGTH -
-                                    USER_HASH_LENGTH - 2)
+                                    USER_HASH_LENGTH_IN_CLUSTER_NAME - 2)
+    assert truncate_cluster_name_length > 0, (cluster_name, max_length)
     cluster_name_hash = hashlib.md5(cluster_name.encode()).hexdigest()
     return (f'{cluster_name[:truncate_cluster_name_length]}'
             f'-{cluster_name_hash[:CLUSTER_NAME_HASH_LENGTH]}'
