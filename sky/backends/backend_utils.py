@@ -1995,22 +1995,11 @@ def _update_cluster_status_no_lock(
             # TODO(zhwu): This function cannot distinguish transient network
             # error in ray's get IPs vs. ray runtime failing.
             #
-            # NOTE: using use_cached_ips=False is very slow as it calls into
-            # `ray get head-ip/worker-ips`. Setting it to True is safe because
-            # in the worst case we time out in the `ray status` SSH command
-            # below.
+            # This will automatically try to fetch the IPs if the IPs are not
+            # cached, and raise FetchIPError if failed.
             external_ips = handle.external_ips()
-            # This happens to a stopped TPU VM as we use gcloud to query the IP.
-            # Or user interrupt the `sky launch` process before the first time
-            # resources handle is written back to local database.
-            # This is helpful when user interrupt after the provision is done
-            # and before the skylet is restarted. After #2304 is merged, this
-            # helps keep the cluster status to INIT after `sky status -r`, so
-            # user will be notified that any auto stop/down might not be
-            # triggered.
-            if external_ips is None or len(external_ips) == 0:
-                raise exceptions.FetchIPError(
-                    reason=exceptions.FetchIPError.Reason.HEAD)
+            # TODO(zhwu): check the correctness of stopped TPU VM
+
             # Check if ray cluster status is healthy.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                        handle.docker_user)
