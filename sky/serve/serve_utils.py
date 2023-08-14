@@ -21,7 +21,7 @@ from sky.utils import common_utils
 if typing.TYPE_CHECKING:
     import sky
 
-CONTROLLER_SYNC_INTERVAL = f'http://localhost:{constants.CONTROLLER_PORT}'
+_CONTROLLER_URL = f'http://localhost:{constants.CONTROLLER_PORT}'
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
 _SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'
 _FAILED_TO_FIND_REPLICA_MSG = (
@@ -130,7 +130,7 @@ class ServiceHandle(object):
 
 
 def get_latest_info() -> str:
-    resp = requests.get(CONTROLLER_SYNC_INTERVAL +
+    resp = requests.get(_CONTROLLER_URL +
                         '/controller/get_latest_info')
     if resp.status_code != 200:
         raise ValueError(f'Failed to get replica info: {resp.text}')
@@ -146,7 +146,7 @@ def load_latest_info(payload: str) -> Dict[str, Any]:
 
 
 def terminate_service() -> str:
-    resp = requests.post(CONTROLLER_SYNC_INTERVAL + '/controller/terminate')
+    resp = requests.post(_CONTROLLER_URL + '/controller/terminate')
     resp = base64.b64encode(pickle.dumps(resp)).decode('utf-8')
     return common_utils.encode_payload(resp)
 
@@ -249,7 +249,7 @@ def stream_logs(service_name: str,
                 f'{colorama.Style.RESET_ALL}')
 
     def _get_replica_status() -> status_lib.ReplicaStatus:
-        resp = requests.get(CONTROLLER_SYNC_INTERVAL +
+        resp = requests.get(_CONTROLLER_URL +
                             '/controller/get_latest_info')
         if resp.status_code != 200:
             raise ValueError(
