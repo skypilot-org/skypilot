@@ -45,8 +45,6 @@ from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
-from sky.skylet.providers.scp.node_provider import SCPError
-from sky.skylet.providers.scp.node_provider import SCPNodeProvider
 from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
@@ -1522,6 +1520,7 @@ class RetryingVmProvisioner(object):
             # means a second 'sky launch -c <name>' will attempt to reuse.
             handle = CloudVmRayResourceHandle(
                 cluster_name=cluster_name,
+                cluster_name_on_cloud=config_dict['cluster_name_on_cloud'],
                 cluster_yaml=cluster_config_file,
                 launched_nodes=num_nodes,
                 # OK for this to be shown in CLI as status == INIT.
@@ -2152,7 +2151,9 @@ class RetryingVmProvisioner(object):
 
 
 class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
-    """A pickle-able tuple of:
+    """A handle for the cluster created by CloudVmRayBackend.
+
+    The handle object will last for the whole lifecycle of the cluster.
 
     - (required) Cluster name.
     - (required) Path to a cluster.yaml file.
@@ -2165,11 +2166,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     - (optional) Docker user name
     - (optional) If TPU(s) are managed, a path to a deletion script.
     """
-    _VERSION = 5
+    _VERSION = 6
 
     def __init__(self,
                  *,
                  cluster_name: str,
+                 cluster_name_on_cloud: str,
                  cluster_yaml: str,
                  launched_nodes: int,
                  launched_resources: resources_lib.Resources,
@@ -2180,6 +2182,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                  tpu_delete_script: Optional[str] = None) -> None:
         self._version = self._VERSION
         self.cluster_name = cluster_name
+        self._cluster_name_on_cloud = cluster_name_on_cloud
         self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'), '~',
                                                   1)
         # List of (internal_ip, external_ip) tuples for all the nodes
@@ -2196,6 +2199,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def __repr__(self):
         return (f'ResourceHandle('
                 f'\n\tcluster_name={self.cluster_name},'
+                f'\n\tcluster_name_on_cloud={self.cluster_name_on_cloud},'
                 f'\n\thead_ip={self.head_ip},'
                 '\n\tstable_internal_external_ips='
                 f'{self.stable_internal_external_ips},'
@@ -2211,6 +2215,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
     def get_cluster_name(self):
         return self.cluster_name
+
+    @property
+    def cluster_name_on_cloud(self):
+        if self._cluster_name_on_cloud is None:
+            return self.cluster_name
+        return self._cluster_name_on_cloud
 
     def _maybe_make_local_handle(self):
         """Adds local handle for the local cloud case.
@@ -2465,6 +2475,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             state['stable_ssh_ports'] = None
         if version < 5:
             state['docker_user'] = None
+
+        if version < 6:
+            state['_cluster_name_on_cloud'] = None
 
         self.__dict__.update(state)
 
@@ -3585,6 +3598,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cloud = handle.launched_resources.cloud
         config = common_utils.read_yaml(handle.cluster_yaml)
         cluster_name = handle.cluster_name
+        cluster_name_on_cloud = handle.cluster_name_on_cloud
 
         # Avoid possibly unbound warnings. Code below must overwrite these vars:
         returncode = 0
@@ -3615,7 +3629,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 operation_fn = provision_lib.terminate_instances
             try:
                 operation_fn(repr(cloud),
-                             cluster_name,
+                             cluster_name_on_cloud,
                              provider_config=config['provider'])
             except Exception as e:  # pylint: disable=broad-except
                 if purge:
@@ -3654,12 +3668,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             config_provider = common_utils.read_yaml(
                 handle.cluster_yaml)['provider']
             region = config_provider['region']
-            cluster_name = handle.cluster_name
             search_client = ibm.search_client()
             vpc_found = False
             # pylint: disable=unsubscriptable-object
             vpcs_filtered_by_tags_and_region = search_client.search(
-                query=f'type:vpc AND tags:{cluster_name} AND region:{region}',
+                query=(f'type:vpc AND tags:{cluster_name_on_cloud} '
+                       f'AND region:{region}'),
                 fields=['tags', 'region', 'type'],
                 limit=1000).get_result()['items']
             vpc_id = None
@@ -3676,14 +3690,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # pylint: disable=line-too-long E1136
                 # Delete VPC and it's associated resources
                 vpc_provider = IBMVPCProvider(
-                    config_provider['resource_group_id'], region, cluster_name)
+                    config_provider['resource_group_id'], region,
+                    cluster_name_on_cloud)
                 vpc_provider.delete_vpc(vpc_id, region)
                 # successfully removed cluster as no exception was raised
                 returncode = 0
 
         elif terminate and isinstance(cloud, clouds.SCP):
+            # pylint: disable=import-outside-toplevel
+            from sky.skylet.providers.scp.node_provider import SCPError
+            from sky.skylet.providers.scp.node_provider import SCPNodeProvider
             config['provider']['cache_stopped_nodes'] = not terminate
-            provider = SCPNodeProvider(config['provider'], handle.cluster_name)
+            provider = SCPNodeProvider(config['provider'],
+                                       cluster_name_on_cloud)
             try:
                 if not os.path.exists(provider.metadata.path):
                     raise SCPError('SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
@@ -3715,7 +3734,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             # 0: All terminated successfully, failed count otherwise
             returncode = oci_query_helper.terminate_instances_by_tags(
-                {TAG_RAY_CLUSTER_NAME: cluster_name}, region)
+                {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}, region)
 
             # To avoid undefined local variables error.
             stdout = stderr = ''
@@ -3770,7 +3789,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 raise RuntimeError(
                     _TEARDOWN_FAILURE_MESSAGE.format(
                         extra_reason='',
-                        cluster_name=handle.cluster_name,
+                        cluster_name=cluster_name_on_cloud,
                         stdout=stdout,
                         stderr=stderr))
 
@@ -3798,6 +3817,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
+        cluster_name_on_cloud = handle.cluster_name_on_cloud
 
         if (handle.tpu_delete_script is not None and
                 os.path.exists(handle.tpu_delete_script)):
@@ -3820,7 +3840,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise RuntimeError(
                         _TEARDOWN_FAILURE_MESSAGE.format(
                             extra_reason='It is caused by TPU failure.',
-                            cluster_name=handle.cluster_name,
+                            cluster_name=cluster_name_on_cloud,
                             stdout=tpu_stdout,
                             stderr=tpu_stderr))
         if (terminate and handle.launched_resources.is_image_managed is True):
@@ -3850,7 +3870,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # our sky node provider.
                 # TODO(tian): Adding a no-op cleanup_ports API after #2286
                 # merged.
-                provision_lib.cleanup_ports(repr(cloud), handle.cluster_name,
+                provision_lib.cleanup_ports(repr(cloud), cluster_name_on_cloud,
                                             config['provider'])
 
         # The cluster file must exist because the cluster_yaml will only

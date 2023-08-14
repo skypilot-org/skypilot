@@ -5,7 +5,6 @@ from botocore import config
 
 from sky import status_lib
 from sky.adaptors import aws
-from sky.utils import common_utils
 
 BOTO_MAX_RETRIES = 12
 # Tag uniquely identifying all nodes of a cluster
@@ -165,8 +164,7 @@ def cleanup_ports(
         config=config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}))
     # TODO(tian): Add a function to generate SG name for AWS, then replace here
     # and backend_utils::write_cluster_config
-    sg_name = (f'sky-sg-{common_utils.user_and_hostname_hash()}'
-               f'-{common_utils.truncate_and_hash_cluster_name(cluster_name)}')
+    sg_name = f'sky-sg-{cluster_name}'
     sgs = ec2.security_groups.filter(GroupNames=[sg_name])
     if len(list(sgs)) != 1:
         raise ValueError(f'Expected security group {sg_name} not found. '

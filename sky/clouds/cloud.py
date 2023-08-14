@@ -8,6 +8,7 @@ from typing import Dict, Iterator, List, Optional, Set, Tuple
 from sky import exceptions
 from sky import skypilot_config
 from sky.clouds import service_catalog
+from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
@@ -83,6 +84,12 @@ class Cloud:
         None means no limit.
         """
         return None
+
+    @classmethod
+    def truncate_and_hash_cluster_name(cls, cluster_name: str) -> str:
+        """Truncates/hashes the cluster name to avoid exceeding the limit."""
+        return common_utils.truncate_and_hash_cluster_name(
+            cluster_name, max_length=cls._max_cluster_name_length())
 
     #### Regions/Zones ####
 
@@ -477,7 +484,6 @@ class Cloud:
         """
         if cluster_name is None:
             return
-        max_cluster_name_len_limit = cls._max_cluster_name_length()
         valid_regex = '[a-z]([-a-z0-9]*[a-z0-9])?'
         if re.fullmatch(valid_regex, cluster_name) is None:
             with ux_utils.print_exception_no_traceback():
@@ -486,14 +492,6 @@ class Cloud:
                     'ensure it is fully matched by regex (e.g., '
                     'only contains lower letters, numbers and dash): '
                     f'{valid_regex}')
-        if (max_cluster_name_len_limit is not None and
-                len(cluster_name) > max_cluster_name_len_limit):
-            cloud_name = '' if cls is Cloud else f' on {cls._REPR}'
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InvalidClusterNameError(
-                    f'Cluster name {cluster_name!r} has {len(cluster_name)} '
-                    'chars; maximum length is '
-                    f'{max_cluster_name_len_limit} chars{cloud_name}.')
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,

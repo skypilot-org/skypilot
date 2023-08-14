@@ -88,11 +88,19 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
     return user_hash
 
 
-def truncate_and_hash_cluster_name(cluster_name: str) -> str:
-    if len(cluster_name) < 15:
-        return cluster_name
-    return cluster_name[:10] + hashlib.md5(
-        cluster_name.encode()).hexdigest()[:CLUSTER_NAME_HASH_LENGTH]
+def truncate_and_hash_cluster_name(cluster_name: str,
+                                   max_length: Optional[int] = 15) -> str:
+    if (max_length is None or
+            len(cluster_name) < max_length - USER_HASH_LENGTH - 1):
+        return f'{cluster_name}-{get_user_hash()}'
+    assert max_length > CLUSTER_NAME_HASH_LENGTH + USER_HASH_LENGTH + 2, (
+        cluster_name, max_length)
+    truncate_cluster_name_length = (max_length - CLUSTER_NAME_HASH_LENGTH -
+                                    USER_HASH_LENGTH - 2)
+    cluster_name_hash = hashlib.md5(cluster_name.encode()).hexdigest()
+    return (f'{cluster_name[:truncate_cluster_name_length]}'
+            f'-{cluster_name_hash[:CLUSTER_NAME_HASH_LENGTH]}'
+            f'-{get_user_hash()}')
 
 
 def get_global_job_id(job_timestamp: str,
