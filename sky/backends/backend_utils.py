@@ -1994,7 +1994,7 @@ def _update_cluster_status_no_lock(
         try:
             # TODO(zhwu): This function cannot distinguish transient network
             # error in ray's get IPs vs. ray runtime failing.
-            #
+
             # This will automatically try to fetch the IPs if the IPs are not
             # cached, and raise FetchIPError if failed.
             external_ips = handle.external_ips()
