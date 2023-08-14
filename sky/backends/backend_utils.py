@@ -2623,17 +2623,18 @@ def _refresh_service_record_no_lock(
     record = global_user_state.get_service_from_name(service_name)
     if record is None:
         return None, None
+    service_handle: serve_lib.ServiceHandle = record['handle']
 
     try:
         check_network_connection()
     except exceptions.NetworkError:
         return record, 'Failed to refresh replica info due to network error.'
 
-    if not record['endpoint']:
+    if not service_handle.endpoint:
         # Service controller is still initializing. Skipped refresh status.
         return record, None
 
-    controller_cluster_name = record['controller_cluster_name']
+    controller_cluster_name = service_handle.controller_cluster_name
     cluster_record = global_user_state.get_cluster_from_name(
         controller_cluster_name)
     assert cluster_record is not None
@@ -2667,8 +2668,8 @@ def _refresh_service_record_no_lock(
         return record, msg
 
     latest_info = serve_lib.load_latest_info(latest_info_payload)
-    record['replica_info'] = latest_info['replica_info']
-    record['uptime'] = latest_info['uptime']
+    service_handle.replica_info = latest_info['replica_info']
+    service_handle.uptime = latest_info['uptime']
 
     # When the service is shutting down, there is a period of time which the
     # controller still responds to the request, and the replica is not
@@ -2724,12 +2725,6 @@ def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
                 f'{colorama.Fore.YELLOW}Error occurred when refreshing service '
                 f'{service_name}: {msg}{colorama.Style.RESET_ALL}')
             progress.start()
-        if record is not None:
-            service_task = sky.Task.from_yaml(record['service_yaml'])
-            assert service_task.service is not None, record['service_yaml']
-            record['policy'] = service_task.service.policy_str()
-            assert len(service_task.resources) == 1
-            record['requested_resources'] = list(service_task.resources)[0]
         progress.update(task, advance=1)
         return record
 

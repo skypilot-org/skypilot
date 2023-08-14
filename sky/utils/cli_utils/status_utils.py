@@ -1,5 +1,6 @@
 """Utilities for sky status."""
 import re
+import typing
 from typing import Any, Callable, Dict, List, Optional
 
 import click
@@ -11,6 +12,10 @@ from sky import status_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import log_utils
+
+if typing.TYPE_CHECKING:
+    import sky
+    from sky import serve
 
 COMMAND_TRUNC_LENGTH = 25
 REPLICA_TRUNC_NUM = 10
@@ -383,17 +388,33 @@ _get_region = (
 _get_command = (lambda cluster_record: cluster_record['last_use'])
 _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
-_get_replica_id = lambda service_record: service_record['replica_id']
-_get_controller_cluster_name = (
-    lambda service_record: service_record['controller_cluster_name'])
-_get_policy = (lambda service_record: service_record['policy'])
-_get_requested_resources = (
-    lambda service_record: service_record['requested_resources'])
+_get_replica_id = lambda replica_record: replica_record['replica_id']
 _get_service_name = (lambda service_record: service_record['service_name'])
 
 
+def _get_service_handle(
+        service_record: _ServiceRecord) -> 'serve.ServiceHandle':
+    return service_record['handle']
+
+
+def _get_controller_cluster_name(service_record: _ServiceRecord) -> str:
+    handle = _get_service_handle(service_record)
+    return handle.controller_cluster_name
+
+
+def _get_policy(service_record: _ServiceRecord) -> str:
+    handle = _get_service_handle(service_record)
+    return handle.policy
+
+
+def _get_requested_resources(service_record: _ServiceRecord) -> 'sky.Resources':
+    handle = _get_service_handle(service_record)
+    return handle.requested_resources
+
+
 def _get_uptime(service_record: _ServiceRecord) -> str:
-    uptime = service_record['uptime']
+    handle = _get_service_handle(service_record)
+    uptime = handle.uptime
     if uptime is None:
         return '-'
     return log_utils.readable_time_duration(uptime, absolute=True)
@@ -401,15 +422,17 @@ def _get_uptime(service_record: _ServiceRecord) -> str:
 
 def _get_replicas(service_record: _ServiceRecord) -> str:
     ready_replica_num = 0
-    for info in service_record['replica_info']:
+    handle = _get_service_handle(service_record)
+    for info in handle.replica_info:
         if _get_status(info) == status_lib.ReplicaStatus.READY:
             ready_replica_num += 1
-    total_replica_num = len(service_record['replica_info'])
+    total_replica_num = len(handle.replica_info)
     return f'{ready_replica_num}/{total_replica_num}'
 
 
 def _get_endpoint(service_record: _ServiceRecord) -> str:
-    endpoint = service_record['endpoint']
+    handle = _get_service_handle(service_record)
+    endpoint = handle.endpoint
     if not endpoint:
         return '-'
     return endpoint

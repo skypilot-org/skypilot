@@ -5,6 +5,7 @@ import pickle
 import re
 import shlex
 import time
+import typing
 from typing import Any, Callable, Dict, Iterator, List, Optional, TextIO
 
 import colorama
@@ -13,8 +14,12 @@ import requests
 from sky import backends
 from sky import global_user_state
 from sky import status_lib
+from sky.data import storage as storage_lib
 from sky.serve import constants
 from sky.utils import common_utils
+
+if typing.TYPE_CHECKING:
+    import sky
 
 CONTROLLER_SYNC_INTERVAL = f'http://localhost:{constants.CONTROLLER_PORT}'
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
@@ -33,12 +38,6 @@ def generate_remote_task_yaml_file_name(service_name: str) -> str:
     service_name = service_name.replace('-', '_')
     # Don't expand here since it is used for remote machine.
     prefix = constants.SERVE_PREFIX
-    return os.path.join(prefix, f'{service_name}.yaml')
-
-
-def generate_service_yaml_file_name(service_name: str) -> str:
-    service_name = service_name.replace('-', '_')
-    prefix = os.path.expanduser(constants.SERVE_PREFIX)
     return os.path.join(prefix, f'{service_name}.yaml')
 
 
@@ -72,6 +71,62 @@ def generate_replica_local_log_file_name(cluster_name: str) -> str:
     cluster_name = cluster_name.replace('-', '_')
     prefix = os.path.expanduser(constants.SERVE_PREFIX)
     return os.path.join(prefix, f'{cluster_name}_local.log')
+
+
+class ServiceHandle(object):
+    """A pickle-able tuple of:
+
+    - (required) Controller cluster name.
+    - (required) Service autoscaling policy descriotion str.
+    - (required) Service requested resources.
+    - (required) All replica info.
+    - (optional) Service uptime.
+    - (optional) Service endpoint.
+    - (optional) Epemeral storage generated for the service.
+
+    This class is only used as a cache for information fetched from controller.
+    """
+    _VERSION = 1
+
+    def __init__(
+            self,
+            *,
+            controller_cluster_name: str,
+            policy: str,
+            requested_resources: 'sky.Resources',
+            replica_info: List[Dict[str, Any]],
+            uptime: Optional[int] = None,
+            endpoint: Optional[str] = None,
+            ephemeral_storage: Optional[List[Dict[str, Any]]] = None) -> None:
+        self._version = self._VERSION
+        self.controller_cluster_name = controller_cluster_name
+        self.replica_info = replica_info
+        self.uptime = uptime
+        self.endpoint = endpoint
+        self.policy = policy
+        self.requested_resources = requested_resources
+        self.ephemeral_storage = ephemeral_storage
+
+    def __repr__(self):
+        return ('ServiceHandle('
+                f'\n\tcontroller_cluster_name={self.controller_cluster_name},'
+                f'\n\treplica_info={self.replica_info},'
+                f'\n\tuptime={self.uptime},'
+                f'\n\tendpoint={self.endpoint},'
+                f'\n\tpolicy={self.policy},'
+                f'\n\trequested_resources={self.requested_resources},'
+                f'\n\tephemeral_storage={self.ephemeral_storage})')
+
+    def cleanup_ephemeral_storage(self) -> None:
+        if self.ephemeral_storage is None:
+            return
+        for storage_config in self.ephemeral_storage:
+            storage = storage_lib.Storage.from_yaml_config(storage_config)
+            storage.delete(silent=True)
+
+    def __setsate__(self, state):
+        self._version = self._VERSION
+        self.__dict__.update(state)
 
 
 def get_latest_info() -> str:
