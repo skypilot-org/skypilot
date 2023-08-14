@@ -119,7 +119,12 @@ def process_subprocess_stream(proc, args: _ProcessingArgs) -> Tuple[str, str]:
             # work in a thread, which is used in
             # log_utils.RayUpLineProcessor.
             stdout = _handle_io_stream(proc.stdout, sys.stdout, args)
-            stderr = stderr_fut.get()
+            try:
+                stderr = stderr_fut.get()
+            except PermissionError as e:
+                if 'Failed to upload files' in e:
+                    proc.kill()
+                    raise PermissionError(f'{e}')
     else:
         stdout = _handle_io_stream(proc.stdout, sys.stdout, args)
         stderr = ''

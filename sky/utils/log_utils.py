@@ -9,6 +9,8 @@ import prettytable
 import rich.console as rich_console
 
 from sky import sky_logging
+from sky.utils import ux_utils
+
 
 logger = sky_logging.init_logger(__name__)
 
@@ -56,8 +58,8 @@ def force_update_rich_status(msg: str):
 
 
 class LineProcessor(object):
-    """A processor for log lines."""
-
+    """A processor for log lines.""" 
+    
     def __enter__(self):
         pass
 
@@ -110,6 +112,27 @@ class RayUpLineProcessor(LineProcessor):
     def __exit__(self, except_type, except_value, traceback):
         del except_type, except_value, traceback  # unused
         self.status_display.stop()
+
+
+class StorageUploadLineProcessor(LineProcessor):
+    """A processor for `ray up` log lines."""
+    def __init__(self, access_denied_message):
+        self.access_denied_message = access_denied_message
+    
+    def __enter__(self):
+        pass
+        
+    def process_line(self, log_line):
+        if self.access_denied_message in log_line:
+            with ux_utils.print_exception_no_traceback():
+                raise PermissionError(
+                    'Failed to upload files to '
+                    'the remote bucket. The bucket does not have '
+                    'write permissions. It is possible that '
+                    'the bucket is public.')
+
+    def __exit__(self, except_type, except_value, traceback):
+        del except_type, except_value, traceback  # unused
 
 
 def create_table(field_names: List[str], **kwargs) -> prettytable.PrettyTable:

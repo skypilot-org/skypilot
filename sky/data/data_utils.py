@@ -18,6 +18,9 @@ from sky.adaptors import aws
 from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
+from sky.skylet import log_lib
+from sky.utils import log_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 Client = Any
@@ -261,7 +264,8 @@ def parallel_upload(source_path_list: List[str],
                     bucket_name: str,
                     access_denied_message: str,
                     create_dirs: bool = False,
-                    max_concurrent_uploads: Optional[int] = None) -> None:
+                    max_concurrent_uploads: Optional[int] = None,
+                    log_path: str = os.devnull) -> None:
     """Helper function to run parallel uploads for a list of paths.
 
     Used by S3Store, GCSStore, and R2Store to run rsync commands in parallel by
@@ -305,7 +309,7 @@ def parallel_upload(source_path_list: List[str],
         p.starmap(
             run_upload_cli,
             zip(commands, [access_denied_message] * len(commands),
-                [bucket_name] * len(commands)))
+                [bucket_name] * len(commands), [log_path] * len(commands)))
 
 
 def get_gsutil_command() -> Tuple[str, str]:
@@ -346,37 +350,19 @@ def get_gsutil_command() -> Tuple[str, str]:
     return gsutil_alias, alias_gen
 
 
-def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
+def run_upload_cli(command: str, access_denied_message: str, bucket_name: str, log_path: str):
     # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
     # to a log file.
-    with subprocess.Popen(command,
-                          stderr=subprocess.PIPE,
-                          stdout=subprocess.DEVNULL,
-                          shell=True) as process:
-        stderr = []
-        assert process.stderr is not None  # for mypy
-        while True:
-            line = process.stderr.readline()
-            if not line:
-                break
-            str_line = line.decode('utf-8')
-            stderr.append(str_line)
-            if access_denied_message in str_line:
-                process.kill()
-                with ux_utils.print_exception_no_traceback():
-                    raise PermissionError(
-                        'Failed to upload files to '
-                        'the remote bucket. The bucket does not have '
-                        'write permissions. It is possible that '
-                        'the bucket is public.')
-        returncode = process.wait()
-        if returncode != 0:
-            stderr_str = '\n'.join(stderr)
-            with ux_utils.print_exception_no_traceback():
-                logger.error(stderr_str)
-                raise exceptions.StorageUploadError(
-                    f'Upload to bucket failed for store {bucket_name}. '
-                    'Please check the logs.')
+    line_processor = log_utils.StorageUploadLineProcessor(access_denied_message=access_denied_message)
+    # use log_lib.run_with_log()
+    returncode, stdout, stderr = log_lib.run_with_log(command, log_path, require_outputs=True, stream_logs=True, process_stream=True, shell=True, line_processor=line_processor)
+    # use subprocess_utils.handle_returncode()
+    err_msg = (f'Upload to bucket failed for store {bucket_name}. '
+               f'Please check the logs in {log_path}.')
+    subprocess_utils.handle_returncode(returncode,
+                                    command,
+                                    err_msg,
+                                    stderr=stdout + stderr)
 
 
 def get_cos_regions() -> List[str]:
