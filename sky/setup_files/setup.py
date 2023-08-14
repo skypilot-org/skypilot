@@ -25,15 +25,6 @@ import setuptools
 ROOT_DIR = os.path.dirname(__file__)
 
 system = platform.system()
-if system == 'Darwin':
-    mac_version = platform.mac_ver()[0]
-    mac_major, mac_minor = mac_version.split('.')[:2]
-    mac_major = int(mac_major)
-    mac_minor = int(mac_minor)
-    if mac_major < 10 or (mac_major == 10 and mac_minor < 15):
-        warnings.warn(
-            f'\'Detected MacOS version {mac_version}. MacOS version >=10.15 '
-            'is required to install ray>=1.9\'')
 
 
 def find_version(*filepath):
