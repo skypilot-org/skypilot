@@ -4040,13 +4040,11 @@ def serve_up(
             raise ValueError(
                 'Specifying ports in resources is not allowed. SkyServe will '
                 'use the port specified in the service section.')
-        return
 
+    controller_resources_config = copy.copy(serve_lib.CONTROLLER_RESOURCES)
     if task.service.controller_resources is not None:
-        controller_resources_config = copy.deepcopy(
+        controller_resources_config.update(
             task.service.controller_resources)
-    else:
-        controller_resources_config = serve_lib.CONTROLLER_RESOURCES
     try:
         controller_resources = sky.Resources.from_yaml_config(
             controller_resources_config)
