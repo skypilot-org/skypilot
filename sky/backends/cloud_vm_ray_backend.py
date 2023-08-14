@@ -1565,14 +1565,13 @@ class RetryingVmProvisioner(object):
                                            logging_info, to_provision.use_spot))
 
             if status == GangSchedulingStatus.CLUSTER_READY:
-                # Optimize the case where the cluster's head IPs can be parsed
-                # from the output of 'ray up'.
                 # We must query the IPs from the cloud provider, when the
                 # provisioning is done, to make sure the cluster IPs are
                 # up-to-date.
-                # The staled IPs may be caused by:
-                #   1. The node is restarted manually in the console.
-                #   2. The node is restarted by the cloud provider.
+                # The staled IPs may be caused by the node being restarted
+                # manually or by the cloud provider.
+                # Optimize the case where the cluster's head IPs can be parsed
+                # from the output of 'ray up'.
                 kwargs = {}
                 if handle.launched_nodes == 1:
                     kwargs = {
