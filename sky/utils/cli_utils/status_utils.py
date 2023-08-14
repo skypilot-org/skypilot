@@ -490,7 +490,14 @@ def _get_replica_resources(service_record: _ServiceRecord) -> str:
     handle = service_record['handle']
     if handle is None:
         return '-'
-    return _get_resources(service_record)
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    launched_resource_str = f'{handle.launched_resources.cloud}'
+    if handle.launched_resources.accelerators is None:
+        launched_resource_str += '()'
+    else:
+        launched_resource_str += f'({handle.launched_resources.accelerators})'
+    resources_str = (f'{handle.launched_nodes}x {launched_resource_str}')
+    return resources_str
 
 
 def _get_replica_region(service_record: _ServiceRecord) -> str:

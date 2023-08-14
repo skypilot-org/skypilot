@@ -130,8 +130,7 @@ class ServiceHandle(object):
 
 
 def get_latest_info() -> str:
-    resp = requests.get(_CONTROLLER_URL +
-                        '/controller/get_latest_info')
+    resp = requests.get(_CONTROLLER_URL + '/controller/get_latest_info')
     if resp.status_code != 200:
         raise ValueError(f'Failed to get replica info: {resp.text}')
     return common_utils.encode_payload(resp.json())
@@ -249,8 +248,7 @@ def stream_logs(service_name: str,
                 f'{colorama.Style.RESET_ALL}')
 
     def _get_replica_status() -> status_lib.ReplicaStatus:
-        resp = requests.get(_CONTROLLER_URL +
-                            '/controller/get_latest_info')
+        resp = requests.get(_CONTROLLER_URL + '/controller/get_latest_info')
         if resp.status_code != 200:
             raise ValueError(
                 f'{colorama.Fore.RED}Failed to get replica info for service '
