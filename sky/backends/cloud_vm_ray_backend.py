@@ -1578,9 +1578,8 @@ class RetryingVmProvisioner(object):
                         'internal_ips': [head_internal_ip],
                         'external_ips': [head_external_ip]
                     }
-                handle.update_cluster_ips(
-                    max_attempts=_FETCH_IP_MAX_ATTEMPTS,
-                    **kwargs)
+                handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
+                                          **kwargs)
                 handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
                 if cluster_exists:
                     # Guard against the case where there's an existing cluster
@@ -1595,7 +1594,6 @@ class RetryingVmProvisioner(object):
                     # freshly launched ones (which should have ray runtime
                     # started).
                     self._ensure_cluster_ray_started(handle, log_abs_path)
-
 
                 config_dict['handle'] = handle
                 plural = '' if num_nodes == 1 else 's'
@@ -1926,8 +1924,10 @@ class RetryingVmProvisioner(object):
             if len(internal_ip_list) == 1:
                 head_internal_ip = internal_ip_list[0]
 
-            print('Get head ips from ray up stdout: ', head_internal_ip, head_external_ip)
-            return (GangSchedulingStatus.CLUSTER_READY, stdout, stderr, head_internal_ip, head_external_ip)
+            print('Get head ips from ray up stdout: ', head_internal_ip,
+                  head_external_ip)
+            return (GangSchedulingStatus.CLUSTER_READY, stdout, stderr,
+                    head_internal_ip, head_external_ip)
 
         # All code below is handling num_nodes > 1.
 
@@ -2285,9 +2285,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             ports = [22] * self.num_node_ips
         self.stable_ssh_ports = ports
 
-    def update_cluster_ips(self, max_attempts: int = 1,
-                           internal_ips: Optional[List[Optional[str]]] = None,
-                           external_ips: Optional[List[Optional[str]]] = None) -> None:
+    def update_cluster_ips(
+            self,
+            max_attempts: int = 1,
+            internal_ips: Optional[List[Optional[str]]] = None,
+            external_ips: Optional[List[Optional[str]]] = None) -> None:
         """Updates the cluster IPs cached in the handle.
         
         We cache the cluster IPs in the handle to avoid having to retrieve
@@ -2313,8 +2315,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 internal_ips, it is an optimization to avoid retrieving the
                 external IPs from the cloud provider.
         """
-        if external_ips is not None and all(ip is not None for ip in external_ips):
-            cluster_external_ips = external_ips
+        if (external_ips is not None and
+                all(ip is not None for ip in external_ips)):
+            cluster_external_ips = typing.cast(List[str], external_ips)
         else:
             cluster_external_ips = backend_utils.get_node_ips(
                 self.cluster_yaml,
@@ -2340,8 +2343,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # thus the first list of IPs returned above are already private
             # IPs. So skip the second query.
             cluster_internal_ips = list(cluster_external_ips)
-        elif internal_ips is not None and all(ip is not None for ip in internal_ips):
-            cluster_internal_ips = internal_ips
+        elif (internal_ips is not None and
+              all(ip is not None for ip in internal_ips)):
+            cluster_internal_ips = typing.cast(List[str], internal_ips)
         else:
             cluster_internal_ips = backend_utils.get_node_ips(
                 self.cluster_yaml,
@@ -2356,7 +2360,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             f'Expected same number of internal IPs {cluster_internal_ips}'
             f' and external IPs {cluster_external_ips}.')
 
-        internal_external_ips = list(
+        internal_external_ips: List[Tuple[str, str]] = list(
             zip(cluster_internal_ips, cluster_external_ips))
 
         # Ensure head node is the first element, then sort based on the
