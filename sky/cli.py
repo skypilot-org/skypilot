@@ -4350,12 +4350,9 @@ def serve_logs(
     """
     have_replica_id = replica_id is not None
     if (controller + redirector + have_replica_id) != 1:
-        click.secho(
-            'Only one of --controller, --redirector, --replica-id '
-            'can be specified. See `sky serve logs --help` for more '
-            'information.',
-            fg='red')
-        return
+        raise click.UsageError(
+            'One and only one of --controller, --redirector, '
+            '[REPLICA_ID] can be specified.')
     service_record = global_user_state.get_service_from_name(service_name)
     if service_record is None:
         click.secho(f'Service {service_name!r} not found.', fg='red')

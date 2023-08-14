@@ -978,17 +978,17 @@ def serve_up(
         service_name)
     assert task.service is not None, task
     assert len(task.resources) == 1, task
-    original_resources = list(task.resources)[0]
+    requested_resources = list(task.resources)[0]
     service_handle = serve.ServiceHandle(
         controller_cluster_name=controller_cluster_name,
         policy=task.service.policy_str(),
-        requested_resources=original_resources,
+        requested_resources=requested_resources,
         replica_info=[])
     global_user_state.add_or_update_service(
         service_name, None, service_handle,
         status_lib.ServiceStatus.CONTROLLER_INIT)
     app_port = int(task.service.app_port)
-    task.set_resources(original_resources.copy(ports=[app_port]))
+    task.set_resources(requested_resources.copy(ports=[app_port]))
 
     # TODO(tian): Use skyserve constants.
     _maybe_translate_local_file_mounts_and_sync_up(task)
