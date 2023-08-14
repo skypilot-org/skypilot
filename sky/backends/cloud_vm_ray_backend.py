@@ -2288,6 +2288,31 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def update_cluster_ips(self, max_attempts: int = 1,
                            internal_ips: Optional[List[Optional[str]]] = None,
                            external_ips: Optional[List[Optional[str]]] = None) -> None:
+        """Updates the cluster IPs cached in the handle.
+        
+        We cache the cluster IPs in the handle to avoid having to retrieve
+        them from the cloud provider every time we need them. This method
+        updates the cached IPs.
+
+        Optimizations:
+            1) If the external IPs are provided (e.g. from the provision logs),
+                we use them instead of retrieving them from the cloud provider.
+            2) If the cached external IPs match the provided (fetched) external
+                IPs, we don't need to update the internal IPs.
+            3) If the internal IPs are provided (e.g. from the provision logs),
+                we use them instead of retrieving them from the cloud provider.
+             
+
+        Args:
+            max_attempts: The maximum number of attempts to get the head IP.
+            internal_ips: The internal IPs to use for the cluster. It is an
+                optimization to avoid retrieving the internal IPs from the
+                cloud provider. Typically, it can be parsed from the provision
+                logs.
+            external_ips: The external IPs to use for the cluster. Similar to
+                internal_ips, it is an optimization to avoid retrieving the
+                external IPs from the cloud provider.
+        """
         if external_ips is not None and all(ip is not None for ip in external_ips):
             cluster_external_ips = external_ips
         else:
