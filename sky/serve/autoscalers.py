@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 # Since sky.launch is very resource demanding, we limit the number of
 # concurrent sky.launch process to avoid overloading the machine.
+# TODO(tian): determine this value based on controller resources.
 _MAX_BOOTSTRAPING_NUM = 5
 
 
