@@ -13,69 +13,48 @@ To build this image locally and optionally push to the SkyPilot registry, run:
 ./build_image.sh
 # Build and push image (CAREFUL - this will push to the SkyPilot registry!)
 ./build_image.sh -p
+# Build and push GPU image (CAREFUL - this will push to the SkyPilot registry!)
+./build_image.sh -p -g
 ```
 
 ## Running a local development cluster
 We use (kind)[https://kind.sigs.k8s.io/] to run a local Kubernetes cluster 
-for development.
+for development. To create a local development cluster, run:
 
 ```bash 
 sky local up
 ```
 
 ## Running a GKE cluster
-1. Make sure ports 30000-32767 are open in your node pool VPC's firewall.
-2. Create a GKE cluster with at least 1 node. We recommend creating nodes with at least 4 vCPUs.
+1. Create a GKE cluster with at least 1 node. We recommend creating nodes with at least 4 vCPUs.
    * Note - only GKE standard clusters are supported. GKE autopilot clusters are not supported.
+   * Tip - to create an example GPU cluster for testing, this command will create a 2 node cluster with 1x T4 and another with 1x V100:
+     ```bash
+     gcloud beta container --project "skypilot-375900" clusters create "testcluster" --zone "us-central1-c" --no-enable-basic-auth --cluster-version "1.27.2-gke.1200" --release-channel "regular" --machine-type "n1-standard-8" --accelerator "type=nvidia-tesla-t4,count=1" --image-type "COS_CONTAINERD" --disk-type "pd-balanced" --disk-size "100" --metadata disable-legacy-endpoints=true --scopes "https://www.googleapis.com/auth/devstorage.read_only","https://www.googleapis.com/auth/logging.write","https://www.googleapis.com/auth/monitoring","https://www.googleapis.com/auth/servicecontrol","https://www.googleapis.com/auth/service.management.readonly","https://www.googleapis.com/auth/trace.append" --num-nodes "1" --logging=SYSTEM,WORKLOAD --monitoring=SYSTEM --enable-ip-alias --network "projects/skypilot-375900/global/networks/default" --subnetwork "projects/skypilot-375900/regions/us-central1/subnetworks/default" --no-enable-intra-node-visibility --default-max-pods-per-node "110" --security-posture=standard --workload-vulnerability-scanning=disabled --no-enable-master-authorized-networks --addons HorizontalPodAutoscaling,HttpLoadBalancing,GcePersistentDiskCsiDriver --enable-autoupgrade --enable-autorepair --max-surge-upgrade 1 --max-unavailable-upgrade 0 --enable-managed-prometheus --enable-shielded-nodes --node-locations "us-central1-c" && gcloud beta container --project "skypilot-375900" node-pools create "v100" --cluster "testcluster" --zone "us-central1-c" --machine-type "n1-standard-8" --accelerator "type=nvidia-tesla-v100,count=1" --image-type "COS_CONTAINERD" --disk-type "pd-balanced" --disk-size "100" --metadata disable-legacy-endpoints=true --scopes "https://www.googleapis.com/auth/devstorage.read_only","https://www.googleapis.com/auth/logging.write","https://www.googleapis.com/auth/monitoring","https://www.googleapis.com/auth/servicecontrol","https://www.googleapis.com/auth/service.management.readonly","https://www.googleapis.com/auth/trace.append" --num-nodes "1" --enable-autoupgrade --enable-autorepair --max-surge-upgrade 1 --max-unavailable-upgrade 0 --node-locations "us-central1-c"
+     ```
+2. Make sure ports 30000-32767 are open in your node pool VPC's firewall.
 3. Get the kubeconfig for your cluster and place it in `~/.kube/config`:
-```bash
-gcloud container clusters get-credentials <cluster-name> --region <region>
-# Example:
-# gcloud container clusters get-credentials testcluster --region us-central1-c
-```
+   ```bash
+   gcloud container clusters get-credentials <cluster-name> --region <region>
+   # Example:
+   # gcloud container clusters get-credentials testcluster --region us-central1-c
+   ```
 4. Verify by running `kubectl get nodes`. You should see your nodes.
+5. **If you want GPU support**, make sure you install GPU drivers by running:
+   ```bash
+   # If using COS based nodes (e.g., in the example above):
+   kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml
+   
+   # If using Ubuntu based nodes:
+   kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/ubuntu/daemonset-preloaded.yaml
+   ```
+   This will create a resource like `nvidia.com/gpu: 1`. You can verify this resource is available by running:
+   ```bash
+   kubectl describe nodes
+   ```
 5. You can run SkyPilot tasks now. 
 
 ## Other useful scripts
 `scripts` directory contains other useful scripts for development, including 
 Kubernetes dashboard, ray yaml for testing the SkyPilot Kubernetes node provider 
 and more.
-
-# GKE GPU support guide
-
-Create a GKE cluster using the cloud console. Use standard cluster, not autopilot.
-
-
-## Creating a GPU GKE Cluster from the command line
-
-This command will create a GKE cluster with 2 nodes - one with 1x T4 and another with 1x V100.
-
-```
-gcloud beta container --project "skypilot-375900" clusters create "testcluster" --zone "us-central1-c" --no-enable-basic-auth --cluster-version "1.27.2-gke.1200" --release-channel "regular" --machine-type "n1-standard-8" --accelerator "type=nvidia-tesla-t4,count=1" --image-type "COS_CONTAINERD" --disk-type "pd-balanced" --disk-size "100" --metadata disable-legacy-endpoints=true --scopes "https://www.googleapis.com/auth/devstorage.read_only","https://www.googleapis.com/auth/logging.write","https://www.googleapis.com/auth/monitoring","https://www.googleapis.com/auth/servicecontrol","https://www.googleapis.com/auth/service.management.readonly","https://www.googleapis.com/auth/trace.append" --num-nodes "1" --logging=SYSTEM,WORKLOAD --monitoring=SYSTEM --enable-ip-alias --network "projects/skypilot-375900/global/networks/default" --subnetwork "projects/skypilot-375900/regions/us-central1/subnetworks/default" --no-enable-intra-node-visibility --default-max-pods-per-node "110" --security-posture=standard --workload-vulnerability-scanning=disabled --no-enable-master-authorized-networks --addons HorizontalPodAutoscaling,HttpLoadBalancing,GcePersistentDiskCsiDriver --enable-autoupgrade --enable-autorepair --max-surge-upgrade 1 --max-unavailable-upgrade 0 --enable-managed-prometheus --enable-shielded-nodes --node-locations "us-central1-c" && gcloud beta container --project "skypilot-375900" node-pools create "v100" --cluster "testcluster" --zone "us-central1-c" --machine-type "n1-standard-8" --accelerator "type=nvidia-tesla-v100,count=1" --image-type "COS_CONTAINERD" --disk-type "pd-balanced" --disk-size "100" --metadata disable-legacy-endpoints=true --scopes "https://www.googleapis.com/auth/devstorage.read_only","https://www.googleapis.com/auth/logging.write","https://www.googleapis.com/auth/monitoring","https://www.googleapis.com/auth/servicecontrol","https://www.googleapis.com/auth/service.management.readonly","https://www.googleapis.com/auth/trace.append" --num-nodes "1" --enable-autoupgrade --enable-autorepair --max-surge-upgrade 1 --max-unavailable-upgrade 0 --node-locations "us-central1-c"
-```
-
-## Setup local kubectl
-```bash
-gcloud container clusters get-credentials testcluster --region us-central1-c
-```
-
-## Install nvidia drivers (if needed)
-If you're using GKE and running GKE < 1.27.2-gke.1200, you'll need to manually install nvidia drivers.
-```bash
-# For COS image:
-kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml
-
-# For ubuntu image:
-kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/ubuntu/daemonset-preloaded.yaml
-```
-
-[Not sure] This will create a resource like `nvidia.com/gpu: 1`. However, we still need labels for GPU type (e.g., A100).
-
-## Install GPU feature discovery
-NOTE - GFD does not work on GKE! https://github.com/NVIDIA/gpu-feature-discovery/issues/44
-We can use Nvidia [gpu-feature-discovery](https://github.com/NVIDIA/gpu-feature-discovery/blob/main/README.md) to detect GPUs on the nodes and automatically label the nodes.
-
-```bash
-kubectl apply -f https://raw.githubusercontent.com/NVIDIA/gpu-feature-discovery/v0.8.1/deployments/static/nfd.yaml
-kubectl apply -f https://raw.githubusercontent.com/NVIDIA/gpu-feature-discovery/v0.8.1/deployments/static/gpu-feature-discovery-daemonset.yaml
-```
