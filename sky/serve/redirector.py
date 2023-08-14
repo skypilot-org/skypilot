@@ -50,8 +50,7 @@ class SkyServeRedirector:
                 try:
                     # send request num in last query interval
                     response = session.post(
-                        self.controller_url +
-                        '/controller/update_num_requests',
+                        self.controller_url + '/controller/update_num_requests',
                         json={
                             'num_requests':
                                 self.load_balancer.deprecate_old_requests()

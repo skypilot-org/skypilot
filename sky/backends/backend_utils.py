@@ -2634,7 +2634,8 @@ def _refresh_service_record_no_lock(
         return record, None
 
     controller_cluster_name = record['controller_cluster_name']
-    cluster_record = global_user_state.get_cluster_from_name(controller_cluster_name)
+    cluster_record = global_user_state.get_cluster_from_name(
+        controller_cluster_name)
     assert cluster_record is not None
     handle = cluster_record['handle']
     backend = get_backend_from_handle(handle)
@@ -2657,7 +2658,9 @@ def _refresh_service_record_no_lock(
                 cluster_record['status'] != status_lib.ClusterStatus.UP):
             global_user_state.set_service_status(
                 service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
-            msg = (f'Controller cluster {controller_cluster_name!r} is not found'' or UP.')
+            msg = (
+                f'Controller cluster {controller_cluster_name!r} is not found'
+                ' or UP.')
         else:
             msg = ('Failed to refresh replica info from the controller. '
                    f'Using the cached record. Reason: {stderr}')
@@ -2667,7 +2670,6 @@ def _refresh_service_record_no_lock(
     record['replica_info'] = latest_info['replica_info']
     record['uptime'] = latest_info['uptime']
 
-    msg = None
     # When the service is shutting down, there is a period of time which the
     # controller still responds to the request, and the replica is not
     # terminated, so the return value for _service_status_from_replica_info
@@ -2679,7 +2681,7 @@ def _refresh_service_record_no_lock(
 
     global_user_state.add_or_update_service(**record)
 
-    return record, msg
+    return record, None
 
 
 def _refresh_service_record(

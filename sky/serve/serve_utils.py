@@ -75,7 +75,8 @@ def generate_replica_local_log_file_name(cluster_name: str) -> str:
 
 
 def get_latest_info() -> str:
-    resp = requests.get(CONTROLLER_SYNC_INTERVAL + '/controller/get_latest_info')
+    resp = requests.get(CONTROLLER_SYNC_INTERVAL +
+                        '/controller/get_latest_info')
     if resp.status_code != 200:
         raise ValueError(f'Failed to get replica info: {resp.text}')
     return common_utils.encode_payload(resp.json())

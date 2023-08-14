@@ -4043,8 +4043,7 @@ def serve_up(
 
     controller_resources_config = copy.copy(serve_lib.CONTROLLER_RESOURCES)
     if task.service.controller_resources is not None:
-        controller_resources_config.update(
-            task.service.controller_resources)
+        controller_resources_config.update(task.service.controller_resources)
     try:
         controller_resources = sky.Resources.from_yaml_config(
             controller_resources_config)
