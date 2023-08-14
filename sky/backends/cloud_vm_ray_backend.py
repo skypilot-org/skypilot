@@ -2355,6 +2355,31 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             return external_ips[0]
         return None
 
+    def get_head_ip(
+        self,
+        max_attempts: int = 1,
+    ) -> str:
+        """Returns the ip of the head node.
+
+        First try to use the cached head ip. If it is not available, query
+        the head ip from the cluster.
+
+        Args:
+            handle: The ResourceHandle of the cluster.
+            max_attempts: The maximum number of attempts to query the head ip.
+
+        Returns:
+            The ip of the head node.
+
+        Raises:
+            exceptions.FetchIPError: if we failed to get the head IP.
+        """
+        head_ip = self.head_ip
+        if head_ip is not None:
+            return head_ip
+        self.external_ips(max_attempts=max_attempts, use_cached_ips=False)
+        return self.head_ip
+
     @property
     def head_ssh_port(self):
         external_ssh_ports = self.external_ssh_ports()
@@ -3540,7 +3565,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # non-zero return code when calling Ray stop,
                 # even when the command was executed successfully.
                 self.run_on_head(handle, 'ray stop --force')
-            except RuntimeError:
+            except exceptions.FetchIPError:
                 # This error is expected if the previous cluster IP is
                 # failed to be found,
                 # i.e., the cluster is already stopped/terminated.
@@ -3901,8 +3926,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             process_stream: Whether to post-process the stdout/stderr of the
                 command, such as replacing or skipping lines on the fly. If
                 enabled, lines are printed only when '\r' or '\n' is found.
+        
+        Raises:
+            exceptions.FetchIPError: If the head node IP cannot be fetched.
         """
-        head_ip = backend_utils.get_head_ip(handle, _FETCH_IP_MAX_ATTEMPTS)
+        # We fetch the head node IP and SSH port here to avoid staled IPs
+        # in the handle.
+        head_ip = handle.get_head_ip(_FETCH_IP_MAX_ATTEMPTS)
         head_ssh_port = backend_utils.get_head_ssh_port(handle,
                                                         _FETCH_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
