@@ -57,9 +57,7 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
 # discover the accelerator type from. The order of the list is important, as
 # it will be used to determine the priority of the label formats.
-LABEL_FORMATTER_REGISTRY = [
-    SkyPilotLabelFormatter, GKELabelFormatter
-]
+LABEL_FORMATTER_REGISTRY = [SkyPilotLabelFormatter, GKELabelFormatter]
 
 
 def detect_gpu_label_formatter(
