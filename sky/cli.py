@@ -4055,7 +4055,6 @@ def serve_up(
             raise ValueError(
                 'Cannot specify ports in controller resources. SkyServe '
                 'will use the port specified in the service section.')
-        return
 
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
