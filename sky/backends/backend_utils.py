@@ -1256,8 +1256,8 @@ def wait_until_ray_cluster_ready(
     try:
         head_ip = _query_head_ip_with_retries(
             cluster_config_file, max_attempts=WAIT_HEAD_NODE_IP_MAX_ATTEMPTS)
-    except RuntimeError as e:
-        logger.error(e)
+    except exceptions.FetchIPError as e:
+        logger.error(common_utils.format_exception(e))
         return False, None  # failed
 
     config = common_utils.read_yaml(cluster_config_file)
@@ -1488,7 +1488,7 @@ def _query_head_ip_with_retries(cluster_yaml: str,
     """Returns the IP of the head node by querying the cloud.
 
     Raises:
-      RuntimeError: if we failed to get the head IP.
+      exceptions.FetchIPError: if we failed to get the head IP.
     """
     backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
     for i in range(max_attempts):
@@ -1517,7 +1517,8 @@ def _query_head_ip_with_retries(cluster_yaml: str,
             break
         except subprocess.CalledProcessError as e:
             if i == max_attempts - 1:
-                raise RuntimeError('Failed to get head ip') from e
+                raise exceptions.FetchIPError(
+                    reason=exceptions.FetchIPError.Reason.HEAD) from e
             # Retry if the cluster is not up yet.
             logger.debug('Retrying to get head ip.')
             time.sleep(backoff.current_backoff())
@@ -1532,7 +1533,21 @@ def get_node_ips(cluster_yaml: str,
                  head_ip_max_attempts: int = 1,
                  worker_ip_max_attempts: int = 1,
                  get_internal_ips: bool = False) -> List[str]:
-    """Returns the IPs of all nodes in the cluster, with head node at front."""
+    """Returns the IPs of all nodes in the cluster, with head node at front.
+
+    Args:
+        cluster_yaml: Path to the cluster yaml.
+        expected_num_nodes: Expected number of nodes in the cluster.
+        handle: Cloud VM Ray resource handle. It is only required for TPU VM or
+            on-prem clusters.
+        head_ip_max_attempts: Max attempts to get head ip.
+        worker_ip_max_attempts: Max attempts to get worker ips.
+        get_internal_ips: Whether to get internal IPs.
+
+    Raises:
+        exceptions.FetchIPError: if we failed to get the IPs. e.reason is
+            HEAD or WORKER.
+    """
     # When ray up launches TPU VM Pod, Pod workers (except for the head)
     # won't be connected to Ray cluster. Thus "ray get-worker-ips"
     # won't work and we need to query the node IPs with gcloud as
@@ -1562,12 +1577,8 @@ def get_node_ips(cluster_yaml: str,
     # ray get-head-ip below, if a long-lasting network connection failure
     # happens.
     check_network_connection()
-    try:
-        head_ip = _query_head_ip_with_retries(cluster_yaml,
-                                              max_attempts=head_ip_max_attempts)
-    except RuntimeError as e:
-        raise exceptions.FetchIPError(
-            exceptions.FetchIPError.Reason.HEAD) from e
+    head_ip = _query_head_ip_with_retries(cluster_yaml,
+                                          max_attempts=head_ip_max_attempts)
     head_ip_list = [head_ip]
     if expected_num_nodes > 1:
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
@@ -1695,30 +1706,6 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
         all_ips.extend(ips)
 
     return all_ips
-
-
-@timeline.event
-def get_head_ip(
-    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-    max_attempts: int = 1,
-) -> str:
-    """Returns the ip of the head node.
-
-    First try to use the cached head ip. If it is not available, query
-    the head ip from the cluster.
-
-    Args:
-        handle: The ResourceHandle of the cluster.
-        max_attempts: The maximum number of attempts to query the head ip.
-
-    Returns:
-        The ip of the head node.
-    """
-    head_ip = handle.head_ip
-    if head_ip is not None:
-        return head_ip
-    head_ip = _query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
-    return head_ip
 
 
 @timeline.event

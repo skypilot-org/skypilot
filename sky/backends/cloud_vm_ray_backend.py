@@ -3615,7 +3615,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # non-zero return code when calling Ray stop,
                 # even when the command was executed successfully.
                 self.run_on_head(handle, 'ray stop --force')
-            except RuntimeError:
+            except exceptions.FetchIPError:
                 # This error is expected if the previous cluster IP is
                 # failed to be found,
                 # i.e., the cluster is already stopped/terminated.
@@ -3982,8 +3982,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             process_stream: Whether to post-process the stdout/stderr of the
                 command, such as replacing or skipping lines on the fly. If
                 enabled, lines are printed only when '\r' or '\n' is found.
+
+        Raises:
+            exceptions.FetchIPError: If the head node IP cannot be fetched.
         """
-        head_ip = backend_utils.get_head_ip(handle, _FETCH_IP_MAX_ATTEMPTS)
+        # This will try to fetch the head node IP if it is not cached.
+        head_ip = handle.head_ip
         head_ssh_port = backend_utils.get_head_ssh_port(handle,
                                                         _FETCH_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
