@@ -8,6 +8,7 @@ DEFAULT_NAMESPACE = 'default'
 
 
 class GPULabelFormatter:
+
     @classmethod
     def get_label_key(cls) -> str:
         raise NotImplementedError
@@ -27,11 +28,11 @@ def get_gke_eks_accelerator_name(accelerator: str) -> str:
         # A100-80GB and L4 have a different name pattern.
         return 'nvidia-{}'.format(accelerator.lower())
     else:
-        return 'nvidia-tesla-{}'.format(
-            accelerator.lower())
+        return 'nvidia-tesla-{}'.format(accelerator.lower())
 
 
 class GKELabelFormatter(GPULabelFormatter):
+
     @classmethod
     def get_label_key(cls) -> str:
         return 'cloud.google.com/gke-accelerator'
@@ -42,6 +43,7 @@ class GKELabelFormatter(GPULabelFormatter):
 
 
 class EKSLabelFormatter(GPULabelFormatter):
+
     @classmethod
     def get_label_key(cls) -> str:
         return 'k8s.amazonaws.com/accelerator'
@@ -52,6 +54,7 @@ class EKSLabelFormatter(GPULabelFormatter):
 
 
 class SkyPilotLabelFormatter(GPULabelFormatter):
+
     @classmethod
     def get_label_key(cls) -> str:
         return 'skypilot.co/accelerator'
@@ -65,12 +68,13 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
 # discover the accelerator type from. The order of the list is important, as
 # it will be used to determine the priority of the label formats.
-LABEL_FORMATTER_REGISTRY = [SkyPilotLabelFormatter, GKELabelFormatter,
-                            EKSLabelFormatter]
+LABEL_FORMATTER_REGISTRY = [
+    SkyPilotLabelFormatter, GKELabelFormatter, EKSLabelFormatter
+]
 
 
-def detect_gpu_label_formatter() -> Tuple[Optional[GPULabelFormatter],
-Set[str]]:
+def detect_gpu_label_formatter(
+) -> Tuple[Optional[GPULabelFormatter], Set[str]]:
     # Get the set of labels across all nodes
     # TODO(romilb): This is not efficient. We should cache the node labels
     node_labels: Set[str] = set()
@@ -139,7 +143,7 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
                       'is stable.'
     except ValueError as e:
         return False, common_utils.format_exception(e)
-    except Exception as e: # pylint: disable=broad-except
+    except Exception as e:  # pylint: disable=broad-except
         return False, f'An error occurred: {str(e)}'
 
 
