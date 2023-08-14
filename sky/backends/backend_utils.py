@@ -2637,7 +2637,13 @@ def _refresh_service_record_no_lock(
     controller_cluster_name = service_handle.controller_cluster_name
     cluster_record = global_user_state.get_cluster_from_name(
         controller_cluster_name)
-    assert cluster_record is not None
+    if (cluster_record is None or
+            cluster_record['status'] != status_lib.ClusterStatus.UP):
+        global_user_state.set_service_status(
+            service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+        return record, (f'Controller cluster {controller_cluster_name!r} '
+                        'is not found or UP.')
+
     handle = cluster_record['handle']
     backend = get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -2650,22 +2656,8 @@ def _refresh_service_record_no_lock(
         stream_logs=False,
         separate_stderr=True)
     if returncode != 0:
-        # If we cannot get the latest info, there are two possibilities:
-        #   1. The controller cluster is not in a healthy state;
-        #   2. The controller process somehow not respond to the request.
-        # For the first case, we want to catch the error and set the service
-        # status to CONTROLLER_FAILED.
-        if (cluster_record is None or
-                cluster_record['status'] != status_lib.ClusterStatus.UP):
-            global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
-            msg = (
-                f'Controller cluster {controller_cluster_name!r} is not found'
-                ' or UP.')
-        else:
-            msg = ('Failed to refresh replica info from the controller. '
-                   f'Using the cached record. Reason: {stderr}')
-        return record, msg
+        return record, ('Failed to refresh replica info from the controller. '
+                        f'Using the cached record. Reason: {stderr}')
 
     latest_info = serve_lib.load_latest_info(latest_info_payload)
     service_handle.replica_info = latest_info['replica_info']
@@ -2676,12 +2668,10 @@ def _refresh_service_record_no_lock(
     # terminated, so the return value for _service_status_from_replica_info
     # will still be READY, but we don't want change service status to READY.
     if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
-        new_status = _service_status_from_replica_info(
+        record['status'] = _service_status_from_replica_info(
             latest_info['replica_info'])
-        record['status'] = new_status
 
     global_user_state.add_or_update_service(**record)
-
     return record, None
 
 
