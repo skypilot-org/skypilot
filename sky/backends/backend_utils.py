@@ -2618,17 +2618,6 @@ def _service_status_from_replica_info(
     return status_lib.ServiceStatus.REPLICA_INIT
 
 
-def _check_controller_status_and_set_service_status(
-        service_name: str, cluster_name: str) -> Optional[str]:
-    cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-    if (cluster_record is None or
-            cluster_record['status'] != status_lib.ClusterStatus.UP):
-        global_user_state.set_service_status(
-            service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
-        return f'Controller cluster {cluster_name!r} is not found or UP.'
-    return None
-
-
 def _refresh_service_record_no_lock(
         service_name: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     record = global_user_state.get_service_from_name(service_name)
@@ -2645,9 +2634,9 @@ def _refresh_service_record_no_lock(
         return record, None
 
     controller_cluster_name = record['controller_cluster_name']
-    handle = global_user_state.get_handle_from_cluster_name(
-        controller_cluster_name)
-    assert handle is not None
+    cluster_record = global_user_state.get_cluster_from_name(controller_cluster_name)
+    assert cluster_record is not None
+    handle = cluster_record['handle']
     backend = get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
@@ -2664,11 +2653,12 @@ def _refresh_service_record_no_lock(
         #   2. The controller process somehow not respond to the request.
         # For the first case, we want to catch the error and set the service
         # status to CONTROLLER_FAILED.
-        # TODO(tian): Since we disabled sky down the controller, we might could
-        # assert cluster status is UP here and remove this function.
-        msg = _check_controller_status_and_set_service_status(
-            record['name'], controller_cluster_name)
-        if msg is None:
+        if (cluster_record is None or
+                cluster_record['status'] != status_lib.ClusterStatus.UP):
+            global_user_state.set_service_status(
+                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+            msg = (f'Controller cluster {controller_cluster_name!r} is not found'' or UP.')
+        else:
             msg = ('Failed to refresh replica info from the controller. '
                    f'Using the cached record. Reason: {stderr}')
         return record, msg
