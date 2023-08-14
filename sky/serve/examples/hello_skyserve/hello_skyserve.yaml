@@ -1,5 +1,5 @@
 service:
-  port: 9090
+  port: 8080
   readiness_probe: /
 
 resources:
@@ -7,4 +7,4 @@ resources:
 
 workdir: .
 
-run: python3 -m http.server 9090
+run: python3 -m http.server 8080
