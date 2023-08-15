@@ -8,13 +8,21 @@ DEFAULT_NAMESPACE = 'default'
 
 
 class GPULabelFormatter:
+    """Base class to define a GPU label formatter for a Kubernetes cluster
+
+    A GPU label formatter is a class that defines how to use GPU type labels in
+    a Kubernetes cluster. It is used by the Kubernetes cloud class to pick the
+    key:value pair to use as node selector for GPU nodes.
+    """
 
     @classmethod
     def get_label_key(cls) -> str:
+        """Returns the label key for GPU type used by the Kubernetes cluster"""
         raise NotImplementedError
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
+        """Given a GPU type, returns the label value to be used"""
         raise NotImplementedError
 
 
@@ -32,10 +40,17 @@ def get_gke_accelerator_name(accelerator: str) -> str:
 
 
 class GKELabelFormatter(GPULabelFormatter):
+    """GKE label formatter
+
+    GKE nodes by default are populated with `cloud.google.com/gke-accelerator`
+    label, which is used to identify the GPU type.
+    """
+
+    LABEL_KEY = 'cloud.google.com/gke-accelerator'
 
     @classmethod
     def get_label_key(cls) -> str:
-        return 'cloud.google.com/gke-accelerator'
+        return cls.LABEL_KEY
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
@@ -43,10 +58,17 @@ class GKELabelFormatter(GPULabelFormatter):
 
 
 class SkyPilotLabelFormatter(GPULabelFormatter):
+    """Custom label formatter for SkyPilot
+
+    Uses skypilot.co/accelerator as the key, and SkyPilot accelerator str as the
+    value.
+    """
+
+    LABEL_KEY = 'skypilot.co/accelerator'
 
     @classmethod
     def get_label_key(cls) -> str:
-        return 'skypilot.co/accelerator'
+        return cls.LABEL_KEY
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
