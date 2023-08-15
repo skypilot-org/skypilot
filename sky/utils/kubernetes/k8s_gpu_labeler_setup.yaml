@@ -96,7 +96,7 @@ data:
         if gpu_name:
             for allowed_name in allowed_gpu_names:
                 if allowed_name.lower() in gpu_name.lower():
-                    label_node(allowed_name)
+                    label_node(allowed_name.lower())
         else:
             print('No supported GPU detected.')
     
