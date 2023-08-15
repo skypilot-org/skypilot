@@ -81,7 +81,7 @@ class ServiceHandle(object):
     - (required) Service requested resources.
     - (required) All replica info.
     - (optional) Service uptime.
-    - (optional) Service endpoint.
+    - (optional) Service endpoint URL.
     - (optional) Epemeral storage generated for the service.
 
     This class is only used as a cache for information fetched from controller.

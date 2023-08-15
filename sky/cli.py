@@ -1424,7 +1424,7 @@ def launch(
         logger.info(
             f'{colorama.Fore.YELLOW}Service section will be ignored when using '
             f'`sky launch`. {colorama.Style.RESET_ALL}\n{colorama.Fore.YELLOW}'
-            'To spin up a service, use SkyServe CLI instead: '
+            'To spin up a service, use SkyServe CLI: '
             f'{colorama.Style.RESET_ALL}{colorama.Style.BRIGHT}sky serve up'
             f'{colorama.Style.RESET_ALL}')
 
