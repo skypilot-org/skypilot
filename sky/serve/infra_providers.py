@@ -493,14 +493,21 @@ class SkyPilotInfraProvider(InfraProvider):
                 info = self.replica_info[name]
                 # Set to success here for correctly display as shutting down
                 info.status_property.sky_launch_status = ProcessStatus.SUCCESS
+        msg = []
         for name, info in self.replica_info.items():
+            if info.status in [
+                    status_lib.ReplicaStatus.FAILED_CLEANUP,
+                    status_lib.ReplicaStatus.UNKNOWN,
+            ]:
+                msg.append(f'Cluster with status {info.status} found. Please '
+                           'manually check the cloud console to make sure no '
+                           'resource leak.')
             # Skip those already deleted and those are deleting
             if info.status not in [
                     status_lib.ReplicaStatus.FAILED,
                     status_lib.ReplicaStatus.SHUTTING_DOWN
             ]:
                 self._teardown_cluster(name, sync_down_logs=False)
-        msg = []
         for name, p in self.down_process_pool.items():
             p.wait()
             logger.info(f'Down process for cluster {name} finished.')
