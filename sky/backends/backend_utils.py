@@ -1223,7 +1223,7 @@ def _count_healthy_nodes_from_ray(output: str,
 def get_docker_user(ip: str, cluster_config_file: str) -> str:
     """Find docker container username."""
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
-    runner = command_runner.SSHCommandRunner(ip, **ssh_credentials)
+    runner = command_runner.SSHCommandRunner(ip, port=22, **ssh_credentials)
     container_name = constants.DEFAULT_DOCKER_CONTAINER_NAME
     whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
         f'sudo docker exec {container_name} whoami',
@@ -1272,7 +1272,9 @@ def wait_until_ray_cluster_ready(
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file, docker_user)
     last_nodes_so_far = 0
     start = time.time()
-    runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
+    runner = command_runner.SSHCommandRunner(head_ip,
+                                             port=22,
+                                             **ssh_credentials)
     with log_utils.console.status(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
@@ -1708,28 +1710,6 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
     return all_ips
 
 
-@timeline.event
-def get_head_ssh_port(
-    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-    use_cache: bool = True,
-    max_attempts: int = 1,
-) -> int:
-    """Returns the ip of the head node."""
-    del max_attempts  # Unused.
-    # Use port 22 for everything except Kubernetes
-    # TODO(romilb): Add a get port method to the cloud classes.
-    head_ssh_port = 22
-    if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-        return head_ssh_port
-    else:
-        if use_cache and handle.head_ssh_port is not None:
-            head_ssh_port = handle.head_ssh_port
-        else:
-            svc_name = f'{handle.get_cluster_name()}-ray-head-ssh'
-            head_ssh_port = clouds.Kubernetes.get_port(svc_name)
-    return head_ssh_port
-
-
 def check_network_connection():
     # Tolerate 3 retries as it is observed that connections can fail.
     adapter = adapters.HTTPAdapter(max_retries=retry_lib.Retry(total=3))
@@ -2003,12 +1983,12 @@ def _update_cluster_status_no_lock(
         try:
             # TODO(zhwu): This function cannot distinguish transient network
             # error in ray's get IPs vs. ray runtime failing.
-            #
-            # NOTE: using use_cached_ips=False is very slow as it calls into
-            # `ray get head-ip/worker-ips`. Setting it to True is safe because
+
+            # NOTE: fetching the IPs is very slow as it calls into
+            # `ray get head-ip/worker-ips`. Using cached IPs is safe because
             # in the worst case we time out in the `ray status` SSH command
             # below.
-            external_ips = handle.external_ips()
+            external_ips = handle.cached_external_ips
             # This happens to a stopped TPU VM as we use gcloud to query the IP.
             # Or user interrupt the `sky launch` process before the first time
             # resources handle is written back to local database.
@@ -2020,6 +2000,7 @@ def _update_cluster_status_no_lock(
             if external_ips is None or len(external_ips) == 0:
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
+
             # Check if ray cluster status is healthy.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                        handle.docker_user)
