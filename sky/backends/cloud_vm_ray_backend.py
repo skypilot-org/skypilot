@@ -4044,7 +4044,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'{cluster_name!r} [Username: {ssh_user}].'
                         f'{colorama.Style.RESET_ALL}\n'
                         'Run `sky status` to see existing clusters.')
-        else:
+        elif not cluster_name.startswith(serve_lib.CONTROLLER_PREFIX):
             logger.info(
                 f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
                 f'[{task.num_nodes}x {to_provision}].'
