@@ -1780,7 +1780,7 @@ def test_cancel_azure():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
-@pytest.mark.no_kubernetes  # Kubernetes does not support GPU yet
+@pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1 yet
 def test_cancel_pytorch(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
