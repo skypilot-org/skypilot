@@ -76,13 +76,13 @@ install_requires = [
     'pendulum',
     # PrettyTable with version >=2.0.0 is required for the support of
     # `add_rows` method.
-    'PrettyTable > =2.0.0',
+    'PrettyTable >= 2.0.0',
     'python-dotenv',
     # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
     # Excluded 2.6.0 as it has a bug in the cluster launcher:
     # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
-    'ray[default] >= 2.2.0, <= 2.6.2, != 2.6.0',
+    'ray[default] >= 2.2.0, <= 2.6.3, != 2.6.0',
     'rich',
     'tabulate',
     # Light weight requirement, can be replaced with "typing" once
