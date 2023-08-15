@@ -51,9 +51,9 @@ from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import global_user_state
+from sky import serve as serve_lib
 from sky import sky_logging
 from sky import spot as spot_lib
-from sky import serve as serve_lib
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
@@ -1420,6 +1420,14 @@ def launch(
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'{backend_name} backend is not supported.')
 
+    if task.service is not None:
+        logger.info(
+            f'{colorama.Fore.YELLOW}Service section will be ignored when using '
+            f'`sky launch`. {colorama.Style.RESET_ALL}\n{colorama.Fore.YELLOW}'
+            'To spin up a service, use SkyServe CLI: '
+            f'{colorama.Style.RESET_ALL}{colorama.Style.BRIGHT}sky serve up'
+            f'{colorama.Style.RESET_ALL}')
+
     _launch_with_confirm(task,
                          backend,
                          cluster,
@@ -1729,12 +1737,22 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                                       refresh=refresh)
         nonreserved_cluster_records = []
         reserved_clusters = []
+        # TODO(tian): Rename this variable if other reserved prefix are added.
+        skyserve_controllers = []
         for cluster_record in cluster_records:
             cluster_name = cluster_record['name']
             if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
                 reserved_clusters.append(cluster_record)
             else:
-                nonreserved_cluster_records.append(cluster_record)
+                is_skyserve_controller = False
+                for prefix in backend_utils.SKY_RESERVED_CLUSTER_PREFIXES:
+                    if cluster_name.startswith(prefix):
+                        is_skyserve_controller = True
+                        break
+                if is_skyserve_controller:
+                    skyserve_controllers.append(cluster_record)
+                else:
+                    nonreserved_cluster_records.append(cluster_record)
         local_clusters = onprem_utils.check_and_get_local_clusters(
             suppress_error=True)
 
@@ -1744,6 +1762,14 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
         status_utils.show_local_status_table(local_clusters)
 
         hints = []
+        if skyserve_controllers:
+            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}\n'
+                       f'SkyServe Controllers{colorama.Style.RESET_ALL}')
+            status_utils.show_status_table(skyserve_controllers, all)
+            hints.append(
+                f'* To see detailed service status: {colorama.Style.BRIGHT}'
+                f'sky serve status{colorama.Style.RESET_ALL}')
+
         if show_spot_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed spot jobs{colorama.Style.RESET_ALL}')
@@ -4014,30 +4040,22 @@ def serve_up(
             raise ValueError(
                 'Specifying ports in resources is not allowed. SkyServe will '
                 'use the port specified in the service section.')
-        return
 
+    controller_resources_config = copy.copy(serve_lib.CONTROLLER_RESOURCES)
     if task.service.controller_resources is not None:
-        controller_resources_config = task.service.controller_resources
-    else:
-        controller_resources_config = serve_lib.CONTROLLER_RESOURCES
+        controller_resources_config.update(task.service.controller_resources)
     try:
         controller_resources = sky.Resources.from_yaml_config(
             controller_resources_config)
     except ValueError as e:
         raise ValueError(
             'Encountered error when parsing controller resources') from e
-    if controller_resources.ports is not None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Cannot specify ports in controller resources. SkyServe '
-                'will use the port specified in the service section.')
-        return
 
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
     dummy_controller_task = sky.Task().set_resources(controller_resources)
-    click.secho('The controller will use the following resources:', fg='cyan')
+    click.secho('The controller will use the following resource:', fg='cyan')
     with sky.Dag() as dag:
         dag.add(dummy_controller_task)
     sky.optimize(dag)
@@ -4083,12 +4101,12 @@ def serve_status(all: bool, service_name: Optional[str]):
 
     - ``CONTROLLER_INIT``: The controller is initializing.
 
-    - ``REPLICA_INIT``: The controller provisioning have succeeded; control
-      plane and redirector is alive, and there are no available replicas for
+    - ``REPLICA_INIT``: The controller provisioning have succeeded; controller
+      and redirector process is alive, and there are no available replicas for
       now. This also indicates that no replica failure has been detected.
 
     - ``CONTROLLER_FAILED``: The controller failed to start or in an abnormal
-      state; or the control plane and redirector is not alive.
+      state; or the controller and redirector process is not alive.
 
     - ``READY``: The controller is ready to serve requests. This means that
       at least one replica have passed the readiness probe.
@@ -4159,7 +4177,8 @@ def serve_status(all: bool, service_name: Optional[str]):
                f'Replicas{colorama.Style.RESET_ALL}')
     replica_infos = []
     for service_record in service_records:
-        for replica_record in service_record['replica_info']:
+        service_handle: serve_lib.ServiceHandle = service_record['handle']
+        for replica_record in service_handle.replica_info:
             replica_record['service_name'] = service_record['name']
             replica_infos.append(replica_record)
     status_utils.show_replica_table(replica_infos, all)
@@ -4193,7 +4212,7 @@ def serve_down(
     yes: bool,
     purge: bool,
 ):
-    """Tear down service(s).
+    """Teardown service(s).
 
     SERVICE_NAMES is the name of the service (or glob pattern) to tear down. If
     both SERVICE_NAMES and ``--all`` are supplied, the latter takes precedence.
@@ -4286,11 +4305,11 @@ def serve_down(
     default=True,
     help=('Follow the logs of the job. [default: --follow] '
           'If --no-follow is specified, print the log so far and exit.'))
-@click.option('--control-plane',
+@click.option('--controller',
               is_flag=True,
               default=False,
               required=False,
-              help='Show the control plane logs of this service.')
+              help='Show the controller logs of this service.')
 @click.option('--redirector',
               is_flag=True,
               default=False,
@@ -4305,7 +4324,7 @@ def serve_down(
 def serve_logs(
     service_name: str,
     follow: bool,
-    control_plane: bool,
+    controller: bool,
     redirector: bool,
     replica_id: Optional[int],
 ):
@@ -4315,8 +4334,8 @@ def serve_logs(
 
     .. code-block:: bash
 
-        # Tail the control plane logs of a service
-        sky serve logs --control-plane [SERVICE_ID]
+        # Tail the controller logs of a service
+        sky serve logs --controller [SERVICE_ID]
         \b
         # Print the redirector logs so far and exit
         sky serve logs --redirector --no-follow [SERVICE_ID]
@@ -4325,22 +4344,19 @@ def serve_logs(
         sky serve logs [SERVICE_ID] 1
     """
     have_replica_id = replica_id is not None
-    if (control_plane + redirector + have_replica_id) != 1:
-        click.secho(
-            'Only one of --control-plane, --redirector, --replica-id '
-            'can be specified. See `sky serve logs --help` for more '
-            'information.',
-            fg='red')
-        return
+    if (controller + redirector + have_replica_id) != 1:
+        raise click.UsageError(
+            'One and only one of --controller, --redirector, '
+            '[REPLICA_ID] can be specified.')
     service_record = global_user_state.get_service_from_name(service_name)
     if service_record is None:
         click.secho(f'Service {service_name!r} not found.', fg='red')
         return
-    controller_name = service_record['controller_cluster_name']
-    if control_plane:
-        core.tail_logs(controller_name, job_id=1, follow=follow)
+    controller_cluster_name = service_record['handle'].controller_cluster_name
+    if controller:
+        core.tail_logs(controller_cluster_name, job_id=1, follow=follow)
     elif redirector:
-        core.tail_logs(controller_name, job_id=2, follow=follow)
+        core.tail_logs(controller_cluster_name, job_id=2, follow=follow)
     else:
         core.serve_tail_logs(service_record, replica_id, follow=follow)
 

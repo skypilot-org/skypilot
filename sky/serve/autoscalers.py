@@ -4,10 +4,15 @@ import threading
 import time
 from typing import Optional
 
-from sky.serve import infra_providers
 from sky.serve import constants
+from sky.serve import infra_providers
 
 logger = logging.getLogger(__name__)
+
+# Since sky.launch is very resource demanding, we limit the number of
+# concurrent sky.launch process to avoid overloading the machine.
+# TODO(tian): determine this value based on controller resources.
+_MAX_BOOTSTRAPING_NUM = 5
 
 
 class Autoscaler:
@@ -23,9 +28,9 @@ class Autoscaler:
         # Default to fixed node, i.e. min_nodes == max_nodes.
         self.max_nodes: int = max_nodes or min_nodes
         self.frequency = frequency  # Time to sleep in seconds.
-        if frequency < constants.CONTROL_PLANE_SYNC_INTERVAL:
+        if frequency < constants.CONTROLLER_SYNC_INTERVAL:
             logger.warning('Autoscaler frequency is less than '
-                           'control plane sync interval. It might '
+                           'controller sync interval. It might '
                            'not always got the latest information.')
 
     def evaluate_scaling(self) -> None:
@@ -114,15 +119,13 @@ class RequestRateAutoscaler(Autoscaler):
                              if num_nodes else num_requests_per_second)
 
         logger.info(f'Requests per node: {requests_per_node}')
-        # logger.info(f'Upper threshold: {self.upper_threshold} qps/node, '
-        #             f'lower threshold: {self.lower_threshold} qps/node, '
-        #             f'queries per node: {requests_per_node} qps/node')
 
         # Bootstrap case
         logger.info(f'Number of nodes: {num_nodes}')
         if num_nodes < self.min_nodes:
             logger.info('Bootstrapping service.')
-            self.scale_up(1)
+            self.scale_up(min(self.min_nodes - num_nodes,
+                              _MAX_BOOTSTRAPING_NUM))
             self.last_scale_operation = current_time
         elif (self.upper_threshold is not None and
               requests_per_node > self.upper_threshold):

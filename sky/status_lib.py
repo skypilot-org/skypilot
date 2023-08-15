@@ -60,7 +60,7 @@ class ServiceStatus(enum.Enum):
     # Replica is initializing and no failure
     REPLICA_INIT = 'REPLICA_INIT'
 
-    # Controller failed to initialize / control plane or redirector jobs
+    # Controller failed to initialize / controller or redirector process
     # status abnormal
     CONTRLLER_FAILED = 'CONTROLLER_FAILED'
 
@@ -120,6 +120,10 @@ class ReplicaStatus(enum.Enum):
 
     # Unknown status. This should never happen.
     UNKNOWN = 'UNKNOWN'
+
+    @classmethod
+    def failed_statuses(cls):
+        return [cls.FAILED, cls.FAILED_CLEANUP, cls.UNKNOWN]
 
     def colored_str(self):
         color = _REPLICA_STATUS_TO_COLOR[self]

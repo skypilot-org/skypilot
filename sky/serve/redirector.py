@@ -1,22 +1,20 @@
 """Redirector: redirect any incoming request to an endpoint replica."""
 import argparse
-import fastapi
-import logging
 import threading
 import time
-import uvicorn
-import requests
 
+import fastapi
+import requests
+import uvicorn
+
+from sky import sky_logging
 from sky.serve import constants
 from sky.serve import load_balancers
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)-6s | %(name)-40s || %(message)s',
-    datefmt='%m-%d %H:%M:%S',
-    # force=True,
-)
-logger = logging.getLogger(__name__)
+# Use the explicit logger name so that the logger is under the
+# `sky.serve.redirector` namespace when executed directly, so as
+# to inherit the setup from the `sky` logger.
+logger = sky_logging.init_logger('sky.serve.redirector')
 
 
 class SkyServeRedirector:
@@ -26,16 +24,16 @@ class SkyServeRedirector:
     to the appropriate endpoint replica.
     """
 
-    def __init__(self, control_plane_url: str, port: int,
+    def __init__(self, controller_url: str, port: int,
                  load_balancer: load_balancers.LoadBalancer):
         self.app = fastapi.FastAPI()
-        self.control_plane_url = control_plane_url
+        self.controller_url = controller_url
         self.port = port
         self.load_balancer = load_balancer
 
         for i in range(3):
-            resp = requests.get(self.control_plane_url +
-                                '/control_plane/get_autoscaler_query_interval')
+            resp = requests.get(self.controller_url +
+                                '/controller/get_autoscaler_query_interval')
             if resp.status_code == 200:
                 self.load_balancer.set_query_interval(
                     resp.json()['query_interval'])
@@ -46,14 +44,13 @@ class SkyServeRedirector:
                 self.load_balancer.set_query_interval(None)
             time.sleep(10)
 
-    def _sync_with_control_plane(self):
+    def _sync_with_controller(self):
         while True:
             with requests.Session() as session:
                 try:
                     # send request num in last query interval
                     response = session.post(
-                        self.control_plane_url +
-                        '/control_plane/update_num_requests',
+                        self.controller_url + '/controller/update_num_requests',
                         json={
                             'num_requests':
                                 self.load_balancer.deprecate_old_requests()
@@ -61,8 +58,8 @@ class SkyServeRedirector:
                         timeout=5)
                     response.raise_for_status()
                     # get replica ips
-                    response = session.get(self.control_plane_url +
-                                           '/control_plane/get_ready_replicas')
+                    response = session.get(self.controller_url +
+                                           '/controller/get_ready_replicas')
                     response.raise_for_status()
                     ready_replicas = response.json()['ready_replicas']
                 except requests.RequestException as e:
@@ -70,7 +67,7 @@ class SkyServeRedirector:
                 else:
                     logger.info(f'Available Replica IPs: {ready_replicas}')
                     self.load_balancer.set_ready_replicas(ready_replicas)
-            time.sleep(constants.CONTROL_PLANE_SYNC_INTERVAL)
+            time.sleep(constants.CONTROLLER_SYNC_INTERVAL)
 
     async def _redirector_handler(self, request: fastapi.Request):
         self.load_balancer.increment_request_count(1)
@@ -91,9 +88,9 @@ class SkyServeRedirector:
                                self._redirector_handler,
                                methods=['GET', 'POST', 'PUT', 'DELETE'])
 
-        sync_control_plane_thread = threading.Thread(
-            target=self._sync_with_control_plane, daemon=True)
-        sync_control_plane_thread.start()
+        sync_controller_thread = threading.Thread(
+            target=self._sync_with_controller, daemon=True)
+        sync_controller_thread.start()
 
         logger.info(
             f'SkyServe Redirector started on http://0.0.0.0:{self.port}')
@@ -113,9 +110,9 @@ if __name__ == '__main__':
                         type=int,
                         help='Port to run the redirector on.',
                         required=True)
-    parser.add_argument('--control-plane-addr',
+    parser.add_argument('--controller-addr',
                         type=str,
-                        help='Control plane address (ip:port).',
+                        help='Controller address (ip:port).',
                         required=True)
     args = parser.parse_args()
 
@@ -123,7 +120,7 @@ if __name__ == '__main__':
     _load_balancer = load_balancers.RoundRobinLoadBalancer()
 
     # ======= Redirector =========
-    redirector = SkyServeRedirector(control_plane_url=args.control_plane_addr,
+    redirector = SkyServeRedirector(controller_url=args.controller_addr,
                                     port=args.port,
                                     load_balancer=_load_balancer)
     redirector.run()

@@ -1,27 +1,50 @@
 """User interface with the SkyServe."""
 import base64
-import colorama
 import os
 import pickle
 import re
-import requests
 import shlex
 import time
-from typing import Any, Dict, List, Optional, Iterator, TextIO, Callable
+import typing
+from typing import Any, Callable, Dict, Iterator, List, Optional, TextIO
+
+import colorama
+import requests
 
 from sky import backends
 from sky import global_user_state
-from sky.serve import constants
 from sky import status_lib
+from sky.data import storage as storage_lib
+from sky.serve import constants
 from sky.utils import common_utils
 
-_CONTROL_PLANE_URL = f'http://localhost:{constants.CONTROL_PLANE_PORT}'
+if typing.TYPE_CHECKING:
+    import sky
+
+_CONTROLLER_URL = f'http://localhost:{constants.CONTROLLER_PORT}'
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
 _SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'
 _FAILED_TO_FIND_REPLICA_MSG = (
     f'{colorama.Fore.RED}Failed to find replica '
     '{replica_id}. Please use `sky serve status [SERVICE_ID]`'
     f' to check all valid replica id.{colorama.Style.RESET_ALL}')
+
+
+def generate_controller_cluster_name(service_name: str) -> str:
+    return constants.CONTROLLER_PREFIX + service_name
+
+
+def generate_remote_task_yaml_file_name(service_name: str) -> str:
+    service_name = service_name.replace('-', '_')
+    # Don't expand here since it is used for remote machine.
+    prefix = constants.SERVE_PREFIX
+    return os.path.join(prefix, f'{service_name}.yaml')
+
+
+def generate_controller_yaml_file_name(service_name: str) -> str:
+    service_name = service_name.replace('-', '_')
+    prefix = os.path.expanduser(constants.SERVE_PREFIX)
+    return os.path.join(prefix, f'{service_name}_controller.yaml')
 
 
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
@@ -34,24 +57,80 @@ def get_replica_id_from_cluster_name(cluster_name: str) -> int:
 
 def generate_replica_launch_log_file_name(cluster_name: str) -> str:
     cluster_name = cluster_name.replace('-', '_')
-    prefix = os.path.expanduser(constants.SERVICE_YAML_PREFIX)
-    return f'{prefix}/{cluster_name}_launch.log'
+    prefix = os.path.expanduser(constants.SERVE_PREFIX)
+    return os.path.join(prefix, f'{cluster_name}_launch.log')
 
 
 def generate_replica_down_log_file_name(cluster_name: str) -> str:
     cluster_name = cluster_name.replace('-', '_')
-    prefix = os.path.expanduser(constants.SERVICE_YAML_PREFIX)
-    return f'{prefix}/{cluster_name}_down.log'
+    prefix = os.path.expanduser(constants.SERVE_PREFIX)
+    return os.path.join(prefix, f'{cluster_name}_down.log')
 
 
 def generate_replica_local_log_file_name(cluster_name: str) -> str:
     cluster_name = cluster_name.replace('-', '_')
-    prefix = os.path.expanduser(constants.SERVICE_YAML_PREFIX)
-    return f'{prefix}/{cluster_name}_local.log'
+    prefix = os.path.expanduser(constants.SERVE_PREFIX)
+    return os.path.join(prefix, f'{cluster_name}_local.log')
+
+
+class ServiceHandle(object):
+    """A pickle-able tuple of:
+
+    - (required) Controller cluster name.
+    - (required) Service autoscaling policy descriotion str.
+    - (required) Service requested resources.
+    - (required) All replica info.
+    - (optional) Service uptime.
+    - (optional) Service endpoint URL.
+    - (optional) Epemeral storage generated for the service.
+
+    This class is only used as a cache for information fetched from controller.
+    """
+    _VERSION = 1
+
+    def __init__(
+            self,
+            *,
+            controller_cluster_name: str,
+            policy: str,
+            requested_resources: 'sky.Resources',
+            replica_info: List[Dict[str, Any]],
+            uptime: Optional[int] = None,
+            endpoint: Optional[str] = None,
+            ephemeral_storage: Optional[List[Dict[str, Any]]] = None) -> None:
+        self._version = self._VERSION
+        self.controller_cluster_name = controller_cluster_name
+        self.replica_info = replica_info
+        self.uptime = uptime
+        self.endpoint = endpoint
+        self.policy = policy
+        self.requested_resources = requested_resources
+        self.ephemeral_storage = ephemeral_storage
+
+    def __repr__(self):
+        return ('ServiceHandle('
+                f'\n\tcontroller_cluster_name={self.controller_cluster_name},'
+                f'\n\treplica_info={self.replica_info},'
+                f'\n\tuptime={self.uptime},'
+                f'\n\tendpoint={self.endpoint},'
+                f'\n\tpolicy={self.policy},'
+                f'\n\trequested_resources={self.requested_resources},'
+                f'\n\tephemeral_storage={self.ephemeral_storage})')
+
+    def cleanup_ephemeral_storage(self) -> None:
+        if self.ephemeral_storage is None:
+            return
+        for storage_config in self.ephemeral_storage:
+            storage = storage_lib.Storage.from_yaml_config(storage_config)
+            storage.delete(silent=True)
+
+    def __setsate__(self, state):
+        self._version = self._VERSION
+        self.__dict__.update(state)
 
 
 def get_latest_info() -> str:
-    resp = requests.get(_CONTROL_PLANE_URL + '/control_plane/get_latest_info')
+    resp = requests.get(_CONTROLLER_URL + '/controller/get_latest_info')
     if resp.status_code != 200:
         raise ValueError(f'Failed to get replica info: {resp.text}')
     return common_utils.encode_payload(resp.json())
@@ -66,7 +145,7 @@ def load_latest_info(payload: str) -> Dict[str, Any]:
 
 
 def terminate_service() -> str:
-    resp = requests.post(_CONTROL_PLANE_URL + '/control_plane/terminate')
+    resp = requests.post(_CONTROLLER_URL + '/controller/terminate')
     resp = base64.b64encode(pickle.dumps(resp)).decode('utf-8')
     return common_utils.encode_payload(resp)
 
@@ -169,8 +248,7 @@ def stream_logs(service_name: str,
                 f'{colorama.Style.RESET_ALL}')
 
     def _get_replica_status() -> status_lib.ReplicaStatus:
-        resp = requests.get(_CONTROL_PLANE_URL +
-                            '/control_plane/get_latest_info')
+        resp = requests.get(_CONTROLLER_URL + '/controller/get_latest_info')
         if resp.status_code != 200:
             raise ValueError(
                 f'{colorama.Fore.RED}Failed to get replica info for service '

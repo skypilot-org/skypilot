@@ -31,10 +31,10 @@ from sky import global_user_state
 from sky import optimizer
 from sky import provision as provision_lib
 from sky import resources as resources_lib
+from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky import spot as spot_lib
-from sky import serve as serve_lib
 from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -3093,8 +3093,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{backend_utils.BOLD}sky spot dashboard'
                     f'{backend_utils.RESET_BOLD}')
             elif not name.startswith(serve_lib.CONTROLLER_PREFIX):
-                # Skip logging for submit control plane & redirector jobs
-                # to controller
+                # Skip logging for submit controller & redirector jobs
+                # to skyserve controller cluster
                 logger.info(f'{fore.CYAN}Job ID: '
                             f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
                             '\nTo cancel the job:\t'
@@ -4044,7 +4044,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'{cluster_name!r} [Username: {ssh_user}].'
                         f'{colorama.Style.RESET_ALL}\n'
                         'Run `sky status` to see existing clusters.')
-        else:
+        elif not cluster_name.startswith(serve_lib.CONTROLLER_PREFIX):
             logger.info(
                 f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
                 f'[{task.num_nodes}x {to_provision}].'

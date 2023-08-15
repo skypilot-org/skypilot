@@ -15,16 +15,15 @@ Current task launcher:
 import copy
 import enum
 import getpass
-import requests
-from rich import console as rich_console
-import tempfile
-import time
 import os
 import tempfile
+import time
 from typing import Any, Dict, List, Optional, Union
 import uuid
 
 import colorama
+import requests
+from rich import console as rich_console
 
 import sky
 from sky import backends
@@ -33,10 +32,10 @@ from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
+from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
 from sky import spot
-from sky import serve
 from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -965,39 +964,40 @@ def serve_up(
     service_name: str,
     controller_best_resources: 'sky.Resources',
 ):
-    """Serve up a service.
+    """Spin up a service.
 
     Please refer to the sky.cli.serve_up for the document.
 
     Args:
         task: sky.Task to serve up.
-        name: Name of the RESTful API.
-
-    Raises:
+        service_name: Name of the service.
+        controller_best_resources: The optimized resources for the controller.
     """
-    controller_cluster_name = serve.CONTROLLER_PREFIX + service_name
+    controller_cluster_name = serve.generate_controller_cluster_name(
+        service_name)
     assert task.service is not None, task
-    policy = task.service.policy_str()
-    assert len(task.resources) == 1
-    requested_resources = list(task.resources)[0]
-    global_user_state.add_or_update_service(
-        service_name, None, controller_cluster_name, '',
-        status_lib.ServiceStatus.CONTROLLER_INIT, policy, requested_resources,
-        [])
-    app_port = int(task.service.app_port)
     assert len(task.resources) == 1, task
-    original_resources = list(task.resources)[0]
-    if original_resources.ports is not None and (len(original_resources.ports)
-                                                 != 1):
-        if original_resources.ports[0] != app_port:
-            logger.warning('Ignoring port specification '
-                           f'{original_resources.ports} in resources.')
-    task.set_resources(original_resources.copy(ports=[app_port]))
+    requested_resources = list(task.resources)[0]
+    service_handle = serve.ServiceHandle(
+        controller_cluster_name=controller_cluster_name,
+        policy=task.service.policy_str(),
+        requested_resources=requested_resources,
+        replica_info=[])
+    global_user_state.add_or_update_service(
+        service_name, None, service_handle,
+        status_lib.ServiceStatus.CONTROLLER_INIT)
+    app_port = int(task.service.app_port)
+    task.set_resources(requested_resources.copy(ports=[app_port]))
 
     # TODO(tian): Use skyserve constants.
-    # The storage will be cleaned up by the control plane `terminate` method
-    # after the service is terminated.
     _maybe_translate_local_file_mounts_and_sync_up(task)
+    ephemeral_storage = []
+    if task.storage_mounts is not None:
+        for storage in task.storage_mounts.values():
+            if not storage.persistent:
+                ephemeral_storage.append(storage.to_yaml_config())
+    service_handle.ephemeral_storage = ephemeral_storage
+    global_user_state.set_service_handle(service_name, service_handle)
 
     with tempfile.NamedTemporaryFile(prefix=f'serve-task-{service_name}-',
                                      mode='w') as f:
@@ -1006,20 +1006,24 @@ def serve_up(
                 'resources']:
             del task_config['resources']['spot_recovery']
         common_utils.dump_yaml(f.name, task_config)
-        remote_task_yaml_path = (serve.SERVICE_YAML_PREFIX +
-                                 f'/service_{service_name}.yaml')
+        remote_task_yaml_path = serve.generate_remote_task_yaml_file_name(
+            service_name)
         vars_to_fill = {
             'remote_task_yaml_path': remote_task_yaml_path,
             'local_task_yaml_path': f.name,
         }
-        controller_yaml_path = os.path.join(serve.CONTROLLER_YAML_PREFIX,
-                                            f'{service_name}.yaml')
+        controller_yaml_path = serve.generate_controller_yaml_file_name(
+            service_name)
         backend_utils.fill_template(serve.CONTROLLER_TEMPLATE,
                                     vars_to_fill,
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
+        ports = [app_port]
+        # TODO(tian): We might need a thorough design on this.
+        if controller_best_resources.ports is not None:
+            ports.extend(controller_best_resources.ports)
         controller_task.best_resources = (controller_best_resources.copy(
-            ports=[app_port]))
+            ports=ports))
 
         controller_envs = {
             'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,
@@ -1054,6 +1058,8 @@ def serve_up(
         handle = cluster_record['handle']
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         endpoint = f'{handle.head_ip}:{task.service.app_port}'
+        service_handle.endpoint = endpoint
+        global_user_state.set_service_handle(service_name, service_handle)
 
         console = rich_console.Console()
 
@@ -1070,46 +1076,44 @@ def serve_up(
             return False
 
         # NOTICE: The job submission order cannot be changed since the
-        # `sky serve logs` CLI will identify the control plane job with
+        # `sky serve logs` CLI will identify the controller job with
         # the first job submitted and the redirector job with the second
         # job submitted.
-        with console.status('[yellow]Launching control plane process on '
-                            'controller...[/yellow]'):
+        with console.status('[yellow]Launching controller process...[/yellow]'):
             _execute(
                 entrypoint=sky.Task(
-                    name='run-control-plane',
+                    name='run-controller',
                     envs=controller_envs,
-                    run='python -m sky.serve.control_plane --service-name '
+                    run='python -m sky.serve.controller --service-name '
                     f'{service_name} --task-yaml {remote_task_yaml_path} '
-                    f'--port {serve.CONTROL_PLANE_PORT}'),
+                    f'--port {serve.CONTROLLER_PORT}'),
                 stream_logs=False,
                 handle=handle,
                 stages=[Stage.EXEC],
                 cluster_name=controller_cluster_name,
                 detach_run=True,
             )
-            control_plane_job_is_running = _wait_until_job_is_running(
+            controller_job_is_running = _wait_until_job_is_running(
                 controller_cluster_name, 1)
-        if not control_plane_job_is_running:
+        if not controller_job_is_running:
             global_user_state.set_service_status(
                 service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
-            print(f'{colorama.Fore.RED}Control plane failed to launch. '
+            print(f'{colorama.Fore.RED}Controller failed to launch. '
                   f'Please check the logs with sky serve logs {service_name} '
-                  f'--control-plane{colorama.Style.RESET_ALL}')
+                  f'--controller{colorama.Style.RESET_ALL}')
             return
-        print(f'{colorama.Fore.GREEN}Control plane process is running.'
+        print(f'{colorama.Fore.GREEN}Launching controller process...done.'
               f'{colorama.Style.RESET_ALL}')
 
-        with console.status('[yellow]Launching redirector process on '
-                            'controller...[/yellow]'):
-            control_plane_addr = f'http://localhost:{serve.CONTROL_PLANE_PORT}'
+        with console.status('[yellow]Launching redirector process...[/yellow]'):
+            controller_addr = f'http://localhost:{serve.CONTROLLER_PORT}'
             _execute(
                 entrypoint=sky.Task(
                     name='run-redirector',
                     envs=controller_envs,
                     run='python -m sky.serve.redirector --task-yaml '
                     f'{remote_task_yaml_path} --port {app_port} '
-                    f'--control-plane-addr {control_plane_addr}'),
+                    f'--controller-addr {controller_addr}'),
                 stream_logs=False,
                 handle=handle,
                 stages=[Stage.EXEC],
@@ -1125,12 +1129,11 @@ def serve_up(
                   f'Please check the logs with sky serve logs {service_name} '
                   f'--redirector{colorama.Style.RESET_ALL}')
             return
-        print(f'{colorama.Fore.GREEN}Redirector process is running.'
+        print(f'{colorama.Fore.GREEN}Launching redirector process...done.'
               f'{colorama.Style.RESET_ALL}')
 
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.REPLICA_INIT)
-        global_user_state.set_service_endpoint(service_name, endpoint)
 
         print(f'\n{colorama.Fore.CYAN}Service name: '
               f'{colorama.Style.BRIGHT}{service_name}{colorama.Style.RESET_ALL}'
@@ -1138,7 +1141,7 @@ def serve_up(
               f'\t\t{backend_utils.BOLD}sky serve status {service_name} (-a)'
               f'{backend_utils.RESET_BOLD}'
               '\nTo see logs of controller:'
-              f'\t{backend_utils.BOLD}sky serve logs --control-plane '
+              f'\t{backend_utils.BOLD}sky serve logs --controller '
               f'{service_name}{backend_utils.RESET_BOLD}'
               '\nTo see logs of redirector:'
               f'\t{backend_utils.BOLD}sky serve logs --redirector '
@@ -1171,13 +1174,12 @@ def serve_down(
 
     Args:
         service_name: Name of the service.
-
         purge: If true, ignore errors when cleaning up the controller.
     """
     service_record = global_user_state.get_service_from_name(service_name)
     # Already filered all inexist service in cli.py
     assert service_record is not None, service_name
-    controller_cluster_name = service_record['controller_cluster_name']
+    controller_cluster_name = service_record['handle'].controller_cluster_name
     global_user_state.set_service_status(service_name,
                                          status_lib.ServiceStatus.SHUTTING_DOWN)
     handle = global_user_state.get_handle_from_cluster_name(
@@ -1197,8 +1199,8 @@ def serve_down(
             try:
                 subprocess_utils.handle_returncode(
                     returncode,
-                    code,
-                    f'Failed to terminate service {service_name}',
+                    code, ('Failed when submit terminate request to controller '
+                           f'of service {service_name}'),
                     stderr,
                     stream_logs=False)
             except exceptions.CommandError as e:
@@ -1233,7 +1235,7 @@ def serve_down(
         core.cancel(controller_cluster_name, all=True, _from_serve_core=True)
     except (ValueError, sky.exceptions.ClusterNotUpError) as e:
         if purge:
-            logger.warning('Ignoring error when stopping control plane and '
+            logger.warning('Ignoring error when stopping controller and '
                            f'redirector jobs of service {service_name}: {e}')
         else:
             raise RuntimeError() from e
@@ -1248,8 +1250,11 @@ def serve_down(
             raise RuntimeError() from e
 
     # TODO(tian): Maybe add a post_cleanup function?
-    controller_yaml_path = os.path.join(serve.CONTROLLER_YAML_PREFIX,
-                                        f'{service_name}.yaml')
+    controller_yaml_path = serve.generate_controller_yaml_file_name(
+        service_name)
     if os.path.exists(controller_yaml_path):
         os.remove(controller_yaml_path)
+    handle = global_user_state.get_handle_from_service_name(service_name)
+    assert handle is not None
+    handle.cleanup_ephemeral_storage()
     global_user_state.remove_service(service_name)

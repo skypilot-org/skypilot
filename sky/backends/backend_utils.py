@@ -36,10 +36,10 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import provision as provision_lib
+from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky import spot as spot_lib
-from sky import serve as serve_lib
 from sky import status_lib
 from sky.backends import onprem_utils
 from sky.skylet import constants
@@ -2612,42 +2612,48 @@ def _service_status_from_replica_info(
     # If one replica is READY, the service is READY.
     if status2num[status_lib.ReplicaStatus.READY] > 0:
         return status_lib.ServiceStatus.READY
-    if (status2num[status_lib.ReplicaStatus.FAILED] +
-            status2num[status_lib.ReplicaStatus.FAILED_CLEANUP] > 0):
+    if sum(status2num[status]
+           for status in status_lib.ReplicaStatus.failed_statuses()) > 0:
         return status_lib.ServiceStatus.FAILED
     return status_lib.ServiceStatus.REPLICA_INIT
 
 
-def _check_controller_status_and_set_service_status(
-        service_name: str, cluster_name: str) -> Optional[str]:
-    cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-    if (cluster_record is None or
-            cluster_record['status'] != status_lib.ClusterStatus.UP):
-        global_user_state.set_service_status(
-            service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
-        return f'Controller cluster {cluster_name!r} is not found or UP.'
-    return None
-
-
 def _refresh_service_record_no_lock(
         service_name: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Refresh the service, and return the possibly updated record.
+
+    Args:
+        service_name: The name of the service.
+
+    Returns:
+        A tuple of a possibly updated record and an error message if any error
+        occurred when refreshing the service.
+    """
     record = global_user_state.get_service_from_name(service_name)
     if record is None:
         return None, None
+    service_handle: serve_lib.ServiceHandle = record['handle']
 
     try:
         check_network_connection()
     except exceptions.NetworkError:
         return record, 'Failed to refresh replica info due to network error.'
 
-    if not record['endpoint']:
+    if not service_handle.endpoint:
         # Service controller is still initializing. Skipped refresh status.
         return record, None
 
-    controller_cluster_name = record['controller_cluster_name']
-    handle = global_user_state.get_handle_from_cluster_name(
+    controller_cluster_name = service_handle.controller_cluster_name
+    cluster_record = global_user_state.get_cluster_from_name(
         controller_cluster_name)
-    assert handle is not None
+    if (cluster_record is None or
+            cluster_record['status'] != status_lib.ClusterStatus.UP):
+        global_user_state.set_service_status(
+            service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+        return record, (f'Controller cluster {controller_cluster_name!r} '
+                        'is not found or UP.')
+
+    handle = cluster_record['handle']
     backend = get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
@@ -2659,37 +2665,23 @@ def _refresh_service_record_no_lock(
         stream_logs=False,
         separate_stderr=True)
     if returncode != 0:
-        # If we cannot get the latest info, there are two possibilities:
-        #   1. The controller is not in a healthy state;
-        #   2. The control plane process somehow not respond to the request.
-        # For the first case, we want to catch the error and set the service
-        # status to CONTROLLER_FAILED.
-        # TODO(tian): Since we disabled sky down the controller, we might could
-        # assert cluster status is UP here and remove this function.
-        msg = _check_controller_status_and_set_service_status(
-            record['name'], controller_cluster_name)
-        if msg is None:
-            msg = ('Failed to refresh replica info from the controller. '
-                   f'Using the cached record. Reason: {stderr}')
-        return record, msg
+        return record, ('Failed to refresh replica info from the controller. '
+                        f'Using the cached record. Reason: {stderr}')
 
     latest_info = serve_lib.load_latest_info(latest_info_payload)
-    record['replica_info'] = latest_info['replica_info']
-    record['uptime'] = latest_info['uptime']
+    service_handle.replica_info = latest_info['replica_info']
+    service_handle.uptime = latest_info['uptime']
 
-    msg = None
     # When the service is shutting down, there is a period of time which the
-    # control plane still responds to the request, and the replica is not
+    # controller still responds to the request, and the replica is not
     # terminated, so the return value for _service_status_from_replica_info
     # will still be READY, but we don't want change service status to READY.
     if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
-        new_status = _service_status_from_replica_info(
+        record['status'] = _service_status_from_replica_info(
             latest_info['replica_info'])
-        record['status'] = new_status
 
     global_user_state.add_or_update_service(**record)
-
-    return record, msg
+    return record, None
 
 
 def _refresh_service_record(
@@ -2731,6 +2723,7 @@ def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
             print(
                 f'{colorama.Fore.YELLOW}Error occurred when refreshing service '
                 f'{service_name}: {msg}{colorama.Style.RESET_ALL}')
+            progress.start()
         progress.update(task, advance=1)
         return record
 

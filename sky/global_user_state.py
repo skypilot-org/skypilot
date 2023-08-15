@@ -25,8 +25,8 @@ from sky.utils import db_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
+    from sky import serve
     from sky.data import Storage
-    from sky import resources as resources_lib
 
 _ENABLED_CLOUDS_KEY = 'enabled_clouds'
 
@@ -97,13 +97,9 @@ def create_table(cursor, conn):
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS services (
         name TEXT PRIMARY KEY,
-        uptime INTEGER,
-        controller_cluster_name TEXT,
-        endpoint TEXT,
-        status TEXT,
-        policy TEXT,
-        requested_resources BLOB,
-        replica_info BLOB)""")
+        launched_at INTEGER,
+        handle BLOB,
+        status TEXT)""")
     # For backward compatibility.
     # TODO(zhwu): Remove this function after all users have migrated to
     # the latest version of SkyPilot.
@@ -284,49 +280,33 @@ def add_or_update_cluster(cluster_name: str,
     _DB.conn.commit()
 
 
-def add_or_update_service(
-        name: str, uptime: Optional[int], controller_cluster_name: str,
-        endpoint: str, status: status_lib.ServiceStatus, policy: str,
-        requested_resources: Optional['resources_lib.Resources'],
-        replica_info: List[Dict[str, Any]]) -> None:
+def add_or_update_service(name: str, launched_at: Optional[int],
+                          handle: 'serve.ServiceHandle',
+                          status: status_lib.ServiceStatus) -> None:
+    if launched_at is None:
+        launched_at = int(time.time())
     _DB.cursor.execute(
         'INSERT or REPLACE INTO services'
-        '(name, uptime, controller_cluster_name, endpoint, '
-        'status, policy, requested_resources, replica_info) '
+        '(name, launched_at, handle, status) '
         'VALUES ('
         # name
         '?, '
-        # uptime
+        # launched_at
         '?, '
-        # controller_cluster_name
-        '?, '
-        # endpoint
+        # handle
         '?, '
         # status
-        '?, '
-        # policy
-        '?, '
-        # requested_resources
-        '?, '
-        # replica_info
         '?'
         ')',
         (
             # name
             name,
-            # uptime
-            uptime,
-            # controller_cluster_name
-            controller_cluster_name,
-            # endpoint
-            endpoint,
+            # launched_at
+            launched_at,
+            # handle
+            pickle.dumps(handle),
             # status
             status.value,
-            # policy
-            policy,
-            # requested_resources
-            pickle.dumps(requested_resources),
-            pickle.dumps(replica_info),
         ))
 
     _DB.conn.commit()
@@ -388,9 +368,9 @@ def set_service_status(service_name: str, status: status_lib.ServiceStatus):
         raise ValueError(f'Service {service_name} not found.')
 
 
-def set_service_endpoint(service_name: str, endpoint: str):
-    _DB.cursor.execute('UPDATE services SET endpoint=(?) '
-                       'WHERE name=(?)', (endpoint, service_name))
+def set_service_handle(service_name: str, handle: 'serve.ServiceHandle'):
+    _DB.cursor.execute('UPDATE services SET handle=(?) '
+                       'WHERE name=(?)', (pickle.dumps(handle), service_name))
     count = _DB.cursor.rowcount
     _DB.conn.commit()
     assert count <= 1, count
@@ -626,28 +606,35 @@ def get_cluster_from_name(
     return None
 
 
+def _get_service_from_row(row) -> Dict[str, Any]:
+    # Explicitly specify the number of fields to unpack, so that
+    # we can add new fields to the database in the future without
+    # breaking the previous code.
+    name, launched_at, handle, status = row[:4]
+    # TODO: use namedtuple instead of dict
+    return {
+        'name': name,
+        'launched_at': launched_at,
+        'handle': pickle.loads(handle),
+        'status': status_lib.ServiceStatus[status],
+    }
+
+
 def get_service_from_name(
         service_name: Optional[str]) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * FROM services WHERE name=(?)',
                               (service_name,)).fetchall()
     for row in rows:
-        # Explicitly specify the number of fields to unpack, so that
-        # we can add new fields to the database in the future without
-        # breaking the previous code.
-        (name, uptime, controller_cluster_name, endpoint, status, policy,
-         requested_resources, replica_info) = row[:8]
-        # TODO: use namedtuple instead of dict
-        record = {
-            'name': name,
-            'uptime': uptime,
-            'controller_cluster_name': controller_cluster_name,
-            'endpoint': endpoint,
-            'status': status_lib.ServiceStatus[status],
-            'policy': policy,
-            'requested_resources': pickle.loads(requested_resources),
-            'replica_info': pickle.loads(replica_info),
-        }
-        return record
+        return _get_service_from_row(row)
+    return None
+
+
+def get_handle_from_service_name(
+        service_name: Optional[str]) -> Optional['serve.ServiceHandle']:
+    rows = _DB.cursor.execute('SELECT handle FROM services WHERE name=(?)',
+                              (service_name,)).fetchall()
+    for (handle,) in rows:
+        return pickle.loads(handle)
     return None
 
 
@@ -678,24 +665,11 @@ def get_clusters() -> List[Dict[str, Any]]:
 
 
 def get_services() -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute('select * from services').fetchall()
+    rows = _DB.cursor.execute(
+        'select * from services order by launched_at desc').fetchall()
     records = []
     for row in rows:
-        (name, uptime, controller_cluster_name, endpoint, status, policy,
-         requested_resources, replica_info) = row[:8]
-        # TODO: use namedtuple instead of dict
-
-        record = {
-            'name': name,
-            'uptime': uptime,
-            'controller_cluster_name': controller_cluster_name,
-            'endpoint': endpoint,
-            'status': status_lib.ServiceStatus[status],
-            'policy': policy,
-            'requested_resources': pickle.loads(requested_resources),
-            'replica_info': pickle.loads(replica_info),
-        }
-
+        record = _get_service_from_row(row)
         records.append(record)
     return records
 
