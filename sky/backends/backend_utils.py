@@ -1368,6 +1368,7 @@ def parallel_data_transfer_to_nodes(
     # Advanced options.
     log_path: str = os.devnull,
     stream_logs: bool = False,
+    run_on_k8s: Optional[bool] = False,
 ):
     """Runs a command on all nodes and optionally runs rsync from src->dst.
 
@@ -1390,7 +1391,8 @@ def parallel_data_transfer_to_nodes(
             rc, stdout, stderr = runner.run(cmd,
                                             log_path=log_path,
                                             stream_logs=stream_logs,
-                                            require_outputs=True)
+                                            require_outputs=True,
+                                            run_on_k8s=run_on_k8s)
             err_msg = ('Failed to run command before rsync '
                        f'{origin_source} -> {target}. '
                        'Ensure that the network is stable, then retry.')
@@ -1411,6 +1413,7 @@ def parallel_data_transfer_to_nodes(
                 up=True,
                 log_path=log_path,
                 stream_logs=stream_logs,
+                run_on_k8s=run_on_k8s
             )
 
     num_nodes = len(runners)

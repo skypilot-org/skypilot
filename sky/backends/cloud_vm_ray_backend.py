@@ -2823,7 +2823,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f'down rsync.{style.RESET_ALL}')
 
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
-
+        run_on_k8s = isinstance(handle.launched_resources.cloud,
+                                clouds.Kubernetes)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user)
 
@@ -2838,6 +2839,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 up=True,
                 log_path=log_path,
                 stream_logs=False,
+                run_on_k8s=run_on_k8s,
             )
 
         num_nodes = handle.launched_nodes
@@ -2987,6 +2989,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Executes generated code on the head node."""
         style = colorama.Style
         fore = colorama.Fore
+        run_on_k8s = isinstance(handle.launched_resources.cloud,
+                                clouds.Kubernetes)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user)
         head_ssh_port = backend_utils.get_head_ssh_port(handle)
@@ -3003,7 +3007,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             runner.rsync(source=fp.name,
                          target=script_path,
                          up=True,
-                         stream_logs=False)
+                         stream_logs=False,
+                         run_on_k8s=run_on_k8s)
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
@@ -4095,6 +4100,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         ip_list = handle.external_ips()
         port_list = handle.external_ssh_ports()
         assert ip_list is not None, 'external_ips is not cached in handle'
+        run_on_k8s = isinstance(handle.launched_resources.cloud,
+                                clouds.Kubernetes)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -4161,6 +4168,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     action_message='Syncing',
                     log_path=log_path,
                     stream_logs=False,
+                    run_on_k8s=run_on_k8s,
                 )
                 continue
 
@@ -4194,13 +4202,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 action_message='Syncing',
                 log_path=log_path,
                 stream_logs=False,
+                run_on_k8s=run_on_k8s,
             )
         # (2) Run the commands to create symlinks on all the nodes.
         symlink_command = ' && '.join(symlink_commands)
         if symlink_command:
 
             def _symlink_node(runner: command_runner.SSHCommandRunner):
-                returncode = runner.run(symlink_command, log_path=log_path)
+                returncode = runner.run(symlink_command, log_path=log_path, run_on_k8s=run_on_k8s)
                 subprocess_utils.handle_returncode(
                     returncode, symlink_command,
                     'Failed to create symlinks. The target destination '
@@ -4243,6 +4252,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         ip_list = handle.external_ips()
         port_list = handle.external_ssh_ports()
         assert ip_list is not None, 'external_ips is not cached in handle'
+        run_on_k8s = isinstance(handle.launched_resources.cloud,
+                        clouds.Kubernetes)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -4268,6 +4279,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     run_rsync=False,
                     action_message='Mounting',
                     log_path=log_path,
+                    run_on_k8s=run_on_k8s,
                 )
             except exceptions.CommandError as e:
                 if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:
