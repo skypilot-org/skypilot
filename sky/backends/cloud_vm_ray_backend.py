@@ -2237,7 +2237,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             cluster_config = config['cluster']
             auth_config = config['auth']
             ips = cluster_config['ips']
-            local_region = clouds.Local.regions()[0].name
+            local_region = clouds.Local.LOCAL_REGION.name
             # Convert existing ResourceHandle fields to specify local
             # cluster resources.
             self.launched_resources = resources_lib.Resources(
@@ -2267,8 +2267,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             region = provider['region']
         elif cloud.is_same_cloud(clouds.Local()):
             # There is only 1 region for Local cluster, 'Local'.
-            local_regions = clouds.Local.regions()
-            region = local_regions[0].name
+            region = clouds.Local.LOCAL_REGION.name
 
         self.launched_resources = self.launched_resources.copy(region=region)
 
