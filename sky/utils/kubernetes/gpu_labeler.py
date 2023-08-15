@@ -102,6 +102,12 @@ def label():
             # Create the job for this node`
             batch_v1.create_namespaced_job(namespace, job_manifest)
             print(f'Created GPU labeler job for node {node_name}')
+    print('GPU labeling started - this may take a few minutes to complete.'
+          '\nTo check the status of GPU labeling jobs, run '
+          '`kubectl get jobs --namespace=kube-system -l job=sky-gpu-labeler`'
+          '\nYou can check if nodes have been labeled by running '
+          '`kubectl describe nodes` and looking for labels of the format '
+          '`skypilot.co/accelerators: <gpu_name>`. ')
 
 
 def main():
