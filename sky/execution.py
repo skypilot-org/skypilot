@@ -1223,7 +1223,7 @@ def serve_down(
                 logger.warning('Ignoring error when cleaning replicas of '
                                f'{service_name}: {e}')
             else:
-                raise RuntimeError(str(e)) from e
+                raise RuntimeError(e) from e
     else:
         if not purge:
             with ux_utils.print_exception_no_traceback():
