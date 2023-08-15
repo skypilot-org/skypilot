@@ -1520,6 +1520,7 @@ class RetryingVmProvisioner(object):
             if zones and len(zones) == 1:
                 launched_resources = launched_resources.copy(zone=zones[0].name)
 
+            prev_cluster_ips = None
             if prev_handle is not None:
                 prev_cluster_ips = prev_handle.stable_internal_external_ips
             # Record early, so if anything goes wrong, 'sky status' will show
