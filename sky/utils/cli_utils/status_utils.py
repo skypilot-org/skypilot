@@ -156,9 +156,10 @@ def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
         StatusColumn('SERVICE_NAME', _get_service_name),
         StatusColumn('ID', _get_replica_id),
         StatusColumn('IP', _get_head_ip),
-        StatusColumn('RESOURCES',
-                     _get_replica_resources,
-                     trunc_length=70 if not show_all else 0),
+        StatusColumn(
+            'RESOURCES',
+            _get_full_replica_resources if show_all else _get_replica_resources,
+            trunc_length=70 if not show_all else 0),
         StatusColumn('REGION', _get_replica_region),
         StatusColumn('ZONE', _get_replica_zone, show_by_default=False),
         StatusColumn('STATUS', _get_status_colored),
@@ -484,6 +485,13 @@ def _get_zone(cluster_record: _ClusterRecord) -> str:
     if zone_str is None:
         zone_str = '-'
     return zone_str
+
+
+def _get_full_replica_resources(replica_record: _ReplicaRecord) -> str:
+    handle = replica_record['handle']
+    if handle is None:
+        return '-'
+    return _get_resources(replica_record)
 
 
 def _get_replica_resources(replica_record: _ReplicaRecord) -> str:

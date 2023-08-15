@@ -1197,9 +1197,8 @@ def serve_down(
             try:
                 subprocess_utils.handle_returncode(
                     returncode,
-                    code,
-                    ('Failed when submit terminate request to controller '
-                    f'of service {service_name}'),
+                    code, ('Failed when submit terminate request to controller '
+                           f'of service {service_name}'),
                     stderr,
                     stream_logs=False)
             except exceptions.CommandError as e:
