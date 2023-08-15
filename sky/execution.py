@@ -964,15 +964,14 @@ def serve_up(
     service_name: str,
     controller_best_resources: 'sky.Resources',
 ):
-    """Serve up a service.
+    """Spin up a service.
 
     Please refer to the sky.cli.serve_up for the document.
 
     Args:
         task: sky.Task to serve up.
-        name: Name of the RESTful API.
-
-    Raises:
+        service_name: Name of the service.
+        controller_best_resources: The optimized resources for the controller.
     """
     controller_cluster_name = serve.generate_controller_cluster_name(
         service_name)
@@ -1171,7 +1170,6 @@ def serve_down(
 
     Args:
         service_name: Name of the service.
-
         purge: If true, ignore errors when cleaning up the controller.
     """
     service_record = global_user_state.get_service_from_name(service_name)

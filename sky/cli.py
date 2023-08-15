@@ -4060,7 +4060,7 @@ def serve_up(
     click.echo(task.service)
 
     dummy_controller_task = sky.Task().set_resources(controller_resources)
-    click.secho('The controller will use the following resources:', fg='cyan')
+    click.secho('The controller will use the following resource:', fg='cyan')
     with sky.Dag() as dag:
         dag.add(dummy_controller_task)
     sky.optimize(dag)
@@ -4217,7 +4217,7 @@ def serve_down(
     yes: bool,
     purge: bool,
 ):
-    """Tear down service(s).
+    """Teardown service(s).
 
     SERVICE_NAMES is the name of the service (or glob pattern) to tear down. If
     both SERVICE_NAMES and ``--all`` are supplied, the latter takes precedence.
