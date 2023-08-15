@@ -2000,16 +2000,16 @@ def _update_cluster_status_no_lock(
             # in the worst case we time out in the `ray status` SSH command
             # below.
             external_ips = handle.cached_external_ips
-            # This happens to a stopped TPU VM as we use gcloud to query the IP.	
-            # Or user interrupt the `sky launch` process before the first time	
-            # resources handle is written back to local database.	
-            # This is helpful when user interrupt after the provision is done	
-            # and before the skylet is restarted. After #2304 is merged, this	
-            # helps keep the cluster status to INIT after `sky status -r`, so	
-            # user will be notified that any auto stop/down might not be	
-            # triggered.	
-            if external_ips is None or len(external_ips) == 0:	
-                raise exceptions.FetchIPError(	
+            # This happens to a stopped TPU VM as we use gcloud to query the IP.
+            # Or user interrupt the `sky launch` process before the first time
+            # resources handle is written back to local database.
+            # This is helpful when user interrupt after the provision is done
+            # and before the skylet is restarted. After #2304 is merged, this
+            # helps keep the cluster status to INIT after `sky status -r`, so
+            # user will be notified that any auto stop/down might not be
+            # triggered.
+            if external_ips is None or len(external_ips) == 0:
+                raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
 
             # Check if ray cluster status is healthy.
