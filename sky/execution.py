@@ -1223,7 +1223,7 @@ def serve_down(
                 logger.warning('Ignoring error when cleaning replicas of '
                                f'{service_name}: {e}')
             else:
-                raise RuntimeError() from e
+                raise RuntimeError(e) from e
     else:
         if not purge:
             with ux_utils.print_exception_no_traceback():
@@ -1238,7 +1238,7 @@ def serve_down(
             logger.warning('Ignoring error when stopping controller and '
                            f'redirector jobs of service {service_name}: {e}')
         else:
-            raise RuntimeError() from e
+            raise RuntimeError(e) from e
 
     try:
         core.down(controller_cluster_name, purge=purge)
@@ -1247,7 +1247,7 @@ def serve_down(
             logger.warning('Ignoring error when terminating controller VM of '
                            f'service {service_name}: {e}')
         else:
-            raise RuntimeError() from e
+            raise RuntimeError(e) from e
 
     # TODO(tian): Maybe add a post_cleanup function?
     controller_yaml_path = serve.generate_controller_yaml_file_name(
