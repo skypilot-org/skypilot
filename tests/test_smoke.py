@@ -2603,6 +2603,26 @@ def test_gcp_zero_quota_failover():
     run_one_test(test)
 
 
+# ---------- Testing skyserve ----------
+@pytest.mark.gcp
+def test_skyserve_gcp():
+    """Test skyserve on GCP"""
+    name = _get_cluster_name()
+    ip_with_ports_regex = r'([0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}'
+    test = Test(
+        'test-skyserve-gcp',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/http_gcp.yaml',
+            f'while !(sky serve status {name} | grep -q 2/2); do sleep 10; done',
+            f'ip=$(sky serve status {name} | grep -Eo "{ip_with_ports_regex}"); '
+            'curl -L http://$ip | grep "Hi, SkyPilot here!"',
+        ],
+        f'sky serve down -y {name}',
+        timeout=20 * 60
+    )
+    run_one_test(test)
+
+
 # ------- Testing user ray cluster --------
 @pytest.mark.no_kubernetes  # Kubernetes does not support sky status -r yet.
 def test_user_ray_cluster(generic_cloud: str):
