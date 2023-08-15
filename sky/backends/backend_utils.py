@@ -2620,6 +2620,15 @@ def _service_status_from_replica_info(
 
 def _refresh_service_record_no_lock(
         service_name: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Refresh the service, and return the possibly updated record.
+
+    Args:
+        service_name: The name of the service.
+
+    Returns:
+        A tuple of a possibly updated record and an error message if any error
+        occurred when refreshing the service.
+    """
     record = global_user_state.get_service_from_name(service_name)
     if record is None:
         return None, None
