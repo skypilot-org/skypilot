@@ -1696,8 +1696,8 @@ class RetryingVmProvisioner(object):
                 f'match number of TPU devices: {num_tpu_devices}.')
 
         # Get the private IP of head node for connecting Ray cluster.
-        head_runner = command_runner.SSHCommandRunner(all_ips[0],
-                                                      **ssh_credentials)
+        head_runner = command_runner.SSHCommandRunner(
+            all_ips[0], port=cluster_handle.head_ssh_port, **ssh_credentials)
         cmd_str = 'python3 -c \"import ray; print(ray._private.services.get_node_ip_address())\"'  # pylint: disable=line-too-long
         rc, stdout, stderr = head_runner.run(cmd_str,
                                              require_outputs=True,
@@ -1918,7 +1918,7 @@ class RetryingVmProvisioner(object):
             # Optimization: Try parse internal head ip from 'ray start' stdout.
             # The line looks like: 'Local node IP: <internal head_ip>\n'
             position = stdout.rfind('Local node IP')
-            line = stdout[position + 1:].partition('\n')[0]
+            line = stdout[position:].partition('\n')[0]
             internal_ip_list = re.findall(backend_utils.IP_ADDR_REGEX,
                                           common_utils.remove_color(line))
             if len(internal_ip_list) == 1:
@@ -2274,16 +2274,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
     def update_ssh_ports(self, max_attempts: int = 1) -> None:
         # TODO(romilb): Replace this with a call to the cloud class to get ports
-        if isinstance(self.launched_resources.cloud, clouds.Kubernetes):
-            head_port = backend_utils.get_head_ssh_port(
-                self, use_cache=False, max_attempts=max_attempts)
-            # TODO(romilb): Multinode doesn't work with Kubernetes yet.
-            worker_ports = [22] * (self.launched_nodes - 1)
-            ports = [head_port] + worker_ports
+        # Use port 22 for everything except Kubernetes
+        if not isinstance(self.launched_resources.cloud, clouds.Kubernetes):
+            head_ssh_port = 22
         else:
-            # Use port 22 for other clouds
-            ports = [22] * self.num_node_ips
-        self.stable_ssh_ports = ports
+            svc_name = f'{self.cluster_name}-ray-head-ssh'
+            head_ssh_port = clouds.Kubernetes.get_port(svc_name)
+        self.stable_ssh_ports = [head_ssh_port
+                                ] + [22] * (self.launched_nodes - 1)
 
     def update_cluster_ips(
             self,
@@ -2400,15 +2398,22 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         assert external_ips is not None, 'update_cluster_ips failed.'
         return external_ips
 
-    def external_ssh_ports(
-            self,
-            max_attempts: int = _FETCH_IP_MAX_ATTEMPTS) -> Optional[List[int]]:
-        if self.stable_ssh_ports is not None:
-            return self.stable_ssh_ports
-        self.update_ssh_ports(max_attempts=max_attempts)
+    @property
+    def cached_external_ssh_ports(self) -> Optional[List[int]]:
         if self.stable_ssh_ports is not None:
             return self.stable_ssh_ports
         return None
+
+    def external_ssh_ports(self,
+                           max_attempts: int = _FETCH_IP_MAX_ATTEMPTS
+                          ) -> List[int]:
+        cached_ssh_ports = self.cached_external_ssh_ports
+        if cached_ssh_ports is not None:
+            return cached_ssh_ports
+        self.update_ssh_ports(max_attempts=max_attempts)
+        cached_ssh_ports = self.cached_external_ssh_ports
+        assert cached_ssh_ports is not None, 'update_ssh_ports failed.'
+        return cached_ssh_ports
 
     def get_hourly_price(self) -> float:
         hourly_cost = (self.launched_resources.get_cost(3600) *
@@ -2435,7 +2440,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
     @property
     def head_ssh_port(self):
-        external_ssh_ports = self.external_ssh_ports()
+        external_ssh_ports = self.cached_external_ssh_ports
         if external_ssh_ports:
             return external_ssh_ports[0]
         return None
@@ -3037,7 +3042,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         fore = colorama.Fore
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user)
-        head_ssh_port = backend_utils.get_head_ssh_port(handle)
+        head_ssh_port = handle.head_ssh_port
         runner = command_runner.SSHCommandRunner(handle.head_ip,
                                                  port=head_ssh_port,
                                                  **ssh_credentials)
@@ -3177,6 +3182,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle.cluster_yaml, handle.docker_user)
         ssh_user = ssh_credentials['ssh_user']
         runner = command_runner.SSHCommandRunner(handle.head_ip,
+                                                 port=handle.head_ssh_port,
                                                  **ssh_credentials)
         remote_log_dir = self.log_dir
         with tempfile.NamedTemporaryFile('w', prefix='sky_local_app_') as fp:
@@ -3973,8 +3979,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # This will try to fetch the head node IP if it is not cached.
         external_ips = handle.external_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
         head_ip = external_ips[0]
-        head_ssh_port = backend_utils.get_head_ssh_port(handle,
-                                                        _FETCH_IP_MAX_ATTEMPTS)
+        external_ssh_ports = handle.external_ssh_ports(
+            max_attempts=_FETCH_IP_MAX_ATTEMPTS)
+        head_ssh_port = external_ssh_ports[0]
+
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user)
         runner = command_runner.SSHCommandRunner(head_ip,
