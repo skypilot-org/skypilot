@@ -1924,8 +1924,8 @@ class RetryingVmProvisioner(object):
             if len(internal_ip_list) == 1:
                 head_internal_ip = internal_ip_list[0]
 
-            print('Get head ips from ray up stdout: ', head_internal_ip,
-                  head_external_ip)
+            logger.debug(f'Get head ips from ray up stdout: {head_internal_ip} '
+                         f'{head_external_ip}')
             return (GangSchedulingStatus.CLUSTER_READY, stdout, stderr,
                     head_internal_ip, head_external_ip)
 
@@ -2320,6 +2320,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         """
         if (external_ips is not None and
                 all(ip is not None for ip in external_ips)):
+            logger.debug(f'Using provided external IPs: {external_ips}')
             cluster_external_ips = typing.cast(List[str], external_ips)
         else:
             cluster_external_ips = backend_utils.get_node_ips(
@@ -2331,6 +2332,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 get_internal_ips=False)
 
         if self.cached_external_ips == cluster_external_ips:
+            logger.debug(f'Skipping the fetching of internal IPs as the cached '
+                         'external IPs matches the newly fetched ones.')
             # Optimization: If the cached external IPs are the same as the
             # retrieved external IPs, then we can skip retrieving internal
             # IPs since the cached IPs are up-to-date.
