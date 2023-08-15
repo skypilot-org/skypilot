@@ -1729,7 +1729,7 @@ class RetryingVmProvisioner(object):
 
         Returns:
             (GangSchedulingStatus; stdout; stderr;
-                optional head_internal_external_ip).
+                optional head_internal_ip; optional head_external_ip).
         """
         # FIXME(zhwu,zongheng): ray up on multiple nodes ups the head node then
         # waits for all workers; turn it into real gang scheduling.
