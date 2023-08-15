@@ -112,7 +112,6 @@ def label():
 
 def main():
     parser = argparse.ArgumentParser(
-        prog='sky-gpu-labeler',
         description='Labels GPU nodes in a Kubernetes cluster for use with '
         'SkyPilot. Operates by running a job on each node that '
         'parses nvidia-smi and patches the node with new labels. '
