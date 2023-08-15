@@ -351,6 +351,7 @@ class SSHCommandRunner:
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
+        run_on_k8s: Optional[bool] = False,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -398,6 +399,7 @@ class SSHCommandRunner:
                 ssh_proxy_command=self._ssh_proxy_command,
                 docker_ssh_proxy_command=docker_ssh_proxy_command,
                 port=self.port,
+                run_on_k8s=run_on_k8s
             ))
         rsync_command.append(f'-e "ssh {ssh_options}"')
         # To support spaces in the path, we need to quote source and target.
