@@ -1018,8 +1018,12 @@ def serve_up(
                                     vars_to_fill,
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
+        ports = [app_port]
+        # TODO(tian): We might need a thorough design on this.
+        if controller_best_resources.ports is not None:
+            ports.extend(controller_best_resources.ports)
         controller_task.best_resources = (controller_best_resources.copy(
-            ports=[app_port]))
+            ports=ports))
 
         controller_envs = {
             'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,

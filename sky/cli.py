@@ -4050,11 +4050,6 @@ def serve_up(
     except ValueError as e:
         raise ValueError(
             'Encountered error when parsing controller resources') from e
-    if controller_resources.ports is not None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Cannot specify ports in controller resources. SkyServe '
-                'will use the port specified in the service section.')
 
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
