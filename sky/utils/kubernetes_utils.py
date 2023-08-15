@@ -50,8 +50,9 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
-        # For SkyPilot formatter, we adopt GKE accelerator format.
-        return get_gke_accelerator_name(accelerator)
+        # For SkyPilot formatter, we use the accelerator str directly.
+        # See sky.utils.kubernetes.gpu_labeler.
+        return accelerator.lower()
 
 
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
