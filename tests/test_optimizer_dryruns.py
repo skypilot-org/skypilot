@@ -7,6 +7,7 @@ import pytest
 import sky
 from sky import clouds
 from sky import exceptions
+from sky.utils import kubernetes_utils
 
 
 def _test_parse_task_yaml(spec: str, test_fn: Optional[Callable] = None):
@@ -79,6 +80,12 @@ def _make_resources(
     monkeypatch.setattr(
         'sky.clouds.gcp.GCP._list_reservations_for_instance_type',
         lambda *_args, **_kwargs: [])
+
+    # Monkey patch detect_gpu_label_formatter for k8s since it queries
+    # the cluster to detect available GPU labels.
+    monkeypatch.setattr(
+        'sky.utils.kubernetes_utils.detect_gpu_label_formatter',
+        lambda *_args, **_kwargs: [kubernetes_utils.SkyPilotLabelFormatter, []])
 
     # Should create Resources here, since it uses the enabled clouds.
     return sky.Resources(*resources_args, **resources_kwargs)
