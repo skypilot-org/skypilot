@@ -621,10 +621,12 @@ class RetryingVmProvisioner(object):
         """Resources to be provisioned."""
 
         def __init__(
-                self, cluster_name: str, resources: resources_lib.Resources,
-                num_nodes: int,
-                prev_cluster_status: Optional[status_lib.ClusterStatus],
-                prev_handle: Optional['CloudVmRayResourceHandle'],
+            self,
+            cluster_name: str,
+            resources: resources_lib.Resources,
+            num_nodes: int,
+            prev_cluster_status: Optional[status_lib.ClusterStatus],
+            prev_handle: Optional['CloudVmRayResourceHandle'],
         ) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
             self.cluster_name = cluster_name
@@ -2353,8 +2355,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             return
         logger.debug(
             'Cached external IPs do not match with the newly fetched ones: '
-            f'cached ({self.cached_external_ips}), new ({cluster_external_ips}'
-        )
+            f'cached ({self.cached_external_ips}), new ({cluster_external_ips}')
 
         is_cluster_aws = (self.launched_resources is not None and
                           isinstance(self.launched_resources.cloud, clouds.AWS))
