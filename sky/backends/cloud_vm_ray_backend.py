@@ -623,13 +623,15 @@ class RetryingVmProvisioner(object):
         def __init__(
                 self, cluster_name: str, resources: resources_lib.Resources,
                 num_nodes: int,
-                prev_cluster_status: Optional[status_lib.ClusterStatus]
+                prev_cluster_status: Optional[status_lib.ClusterStatus],
+                prev_handle: Optional['CloudVmRayResourceHandle'],
         ) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
             self.cluster_name = cluster_name
             self.resources = resources
             self.num_nodes = num_nodes
             self.prev_cluster_status = prev_cluster_status
+            self.prev_handle = prev_handle
 
     def __init__(self,
                  log_dir: str,
@@ -1405,6 +1407,7 @@ class RetryingVmProvisioner(object):
         cluster_name: str,
         cloud_user_identity: Optional[List[str]],
         prev_cluster_status: Optional[status_lib.ClusterStatus],
+        prev_handle: Optional['CloudVmRayResourceHandle'],
     ):
         """The provision retry loop."""
         style = colorama.Style
@@ -1517,6 +1520,8 @@ class RetryingVmProvisioner(object):
             if zones and len(zones) == 1:
                 launched_resources = launched_resources.copy(zone=zones[0].name)
 
+            if prev_handle is not None:
+                prev_cluster_ips = prev_handle.stable_internal_external_ips
             # Record early, so if anything goes wrong, 'sky status' will show
             # the cluster name and users can appropriately 'sky down'.  It also
             # means a second 'sky launch -c <name>' will attempt to reuse.
@@ -1527,7 +1532,11 @@ class RetryingVmProvisioner(object):
                 # OK for this to be shown in CLI as status == INIT.
                 launched_resources=launched_resources,
                 tpu_create_script=config_dict.get('tpu-create-script'),
-                tpu_delete_script=config_dict.get('tpu-delete-script'))
+                tpu_delete_script=config_dict.get('tpu-delete-script'),
+                # Use the previous cluster's IPs if available to optimize
+                # the case where the cluster is restarted, i.e., no need to
+                # query the IPs from the cloud provider.
+                stable_internal_external_ips=prev_cluster_ips)
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.INIT)
 
@@ -2038,6 +2047,7 @@ class RetryingVmProvisioner(object):
         to_provision = to_provision_config.resources
         num_nodes = to_provision_config.num_nodes
         prev_cluster_status = to_provision_config.prev_cluster_status
+        prev_handle = to_provision_config.prev_handle
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
 
@@ -2066,7 +2076,8 @@ class RetryingVmProvisioner(object):
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
                     cloud_user_identity=cloud_user,
-                    prev_cluster_status=prev_cluster_status)
+                    prev_cluster_status=prev_cluster_status,
+                    prev_handle=prev_handle)
                 if dryrun:
                     return
             except (exceptions.InvalidClusterNameError,
@@ -2128,6 +2139,7 @@ class RetryingVmProvisioner(object):
                 # separately.
                 num_nodes = task.num_nodes
                 prev_cluster_status = None
+                prev_handle = None
 
             # Set to None so that sky.optimize() will assign a new one
             # (otherwise will skip re-optimizing this task).
@@ -2332,12 +2344,16 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 get_internal_ips=False)
 
         if self.cached_external_ips == cluster_external_ips:
-            logger.debug(f'Skipping the fetching of internal IPs as the cached '
+            logger.debug('Skipping the fetching of internal IPs as the cached '
                          'external IPs matches the newly fetched ones.')
             # Optimization: If the cached external IPs are the same as the
             # retrieved external IPs, then we can skip retrieving internal
             # IPs since the cached IPs are up-to-date.
             return
+        logger.debug(
+            'Cached external IPs do not match with the newly fetched ones: '
+            f'cached ({self.cached_external_ips}), new ({cluster_external_ips}'
+        )
 
         is_cluster_aws = (self.launched_resources is not None and
                           isinstance(self.launched_resources.cloud, clouds.AWS))
@@ -2351,6 +2367,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             cluster_internal_ips = list(cluster_external_ips)
         elif (internal_ips is not None and
               all(ip is not None for ip in internal_ips)):
+            logger.debug(f'Using provided internal IPs: {internal_ips}')
             cluster_internal_ips = typing.cast(List[str], internal_ips)
         else:
             cluster_internal_ips = backend_utils.get_node_ips(
@@ -2651,7 +2668,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 cluster_name,
                 to_provision,
                 task.num_nodes,
-                prev_cluster_status=None)
+                prev_cluster_status=None,
+                prev_handle=None)
             # Try to launch the exiting cluster first
             to_provision_config = self._check_existing_cluster(
                 task, to_provision, cluster_name, dryrun)
@@ -4067,7 +4085,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 cluster_name,
                 handle.launched_resources,
                 handle.launched_nodes,
-                prev_cluster_status=prev_cluster_status)
+                prev_cluster_status=prev_cluster_status,
+                prev_handle=handle)
         usage_lib.messages.usage.set_new_cluster()
         assert len(task.resources) == 1, task.resources
         # Use the task_cloud, because the cloud in `to_provision` can be changed
@@ -4119,7 +4138,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         return RetryingVmProvisioner.ToProvisionConfig(cluster_name,
                                                        to_provision,
                                                        task.num_nodes,
-                                                       prev_cluster_status=None)
+                                                       prev_cluster_status=None,
+                                                       prev_handle=None)
 
     def _set_tpu_name(self, handle: CloudVmRayResourceHandle,
                       tpu_name: str) -> None:
