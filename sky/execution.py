@@ -1006,9 +1006,6 @@ def serve_up(
         if 'resources' in task_config and 'spot_recovery' in task_config[
                 'resources']:
             del task_config['resources']['spot_recovery']
-        # Remove service section to get rid of warning when launching task
-        # on the controller.
-        del task_config['service']
         common_utils.dump_yaml(f.name, task_config)
         remote_task_yaml_path = serve.generate_remote_task_yaml_file_name(
             service_name)
@@ -1201,7 +1198,8 @@ def serve_down(
                 subprocess_utils.handle_returncode(
                     returncode,
                     code,
-                    f'Failed to terminate service {service_name}',
+                    ('Failed when submit terminate request to controller '
+                    f'of service {service_name}'),
                     stderr,
                     stream_logs=False)
             except exceptions.CommandError as e:
