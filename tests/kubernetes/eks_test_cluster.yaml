@@ -1,0 +1,18 @@
+# Usage:
+# eksctl create cluster -f eks_test_cluster.yaml
+# eksctl delete cluster -f eks_test_cluster.yaml
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: my-cluster
+  region: us-west-2
+
+managedNodeGroups:
+  - name: v100-nodes
+    instanceType: p3.2xlarge  # This instance type provides 1 NVIDIA V100 GPU.
+    desiredCapacity: 1
+
+  - name: k80-nodes
+    instanceType: p2.xlarge  # This instance type provides 1 NVIDIA K80 GPU.
+    desiredCapacity: 1
