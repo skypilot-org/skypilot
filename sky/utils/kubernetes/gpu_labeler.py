@@ -4,7 +4,6 @@ import os
 import subprocess
 from typing import Tuple
 
-import click
 from kubernetes import client
 from kubernetes import config
 import yaml
@@ -18,7 +17,7 @@ def prerequisite_check() -> Tuple[bool, str]:
     reason = ''
     prereq_ok = False
     try:
-        subprocess.check_output(['kubectl', 'get', 'pods'])
+        subprocess.run(['kubectl', 'get', 'pods'], capture_output=True)
         prereq_ok = True
     except FileNotFoundError:
         reason = 'kubectl not found. Please install kubectl and try again.'
@@ -42,25 +41,23 @@ def cleanup() -> Tuple[bool, str]:
 
     success = False
     reason = ''
-    try:
-        subprocess.check_output(del_command.split())
-        success = True
-    except subprocess.CalledProcessError as e:
-        output = e.output.decode('utf-8')
-        reason = 'Error deleting existing GPU labeler resources: ' + output
-    return success, reason
+    with log_utils.safe_rich_status('Cleaning up existing GPU labeling '
+                                    'resources'):
+        try:
+            subprocess.run(del_command.split(),
+                           capture_output=True,
+                           text=True)
+            success = True
+        except subprocess.CalledProcessError as e:
+            output = e.output.decode('utf-8')
+            reason = 'Error deleting existing GPU labeler resources: ' + output
+        return success, reason
 
 
 def label():
-    # Check if kubectl is installed and kubeconfig is set up
-    prereq_ok, reason = prerequisite_check()
-    if not prereq_ok:
-        click.echo(reason)
-        return
-
     deletion_success, reason = cleanup()
     if not deletion_success:
-        click.echo(reason)
+        print(reason)
         return
 
     sky_dir = os.path.dirname(sky.__file__)
@@ -75,7 +72,7 @@ def label():
                 ['kubectl', 'apply', '-f', rbac_manifest_path])
         except subprocess.CalledProcessError as e:
             output = e.output.decode('utf-8')
-            click.echo('Error setting up GPU labeling: ' + output)
+            print('Error setting up GPU labeling: ' + output)
             return
 
     with log_utils.safe_rich_status('Creating GPU labeler jobs'):
@@ -106,23 +103,33 @@ def label():
             batch_v1.create_namespaced_job(namespace, job_manifest)
             print(f'Created GPU labeler job for node {node_name}')
 
-
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser(
         prog='sky-gpu-labeler',
         description='Labels GPU nodes in a Kubernetes cluster for use with '
-        'SkyPilot. Operates by running a job on each node that '
-        'parses nvidia-smi and patches the node with new labels. '
-        'Labels created are of the format '
-        'skypilot.co/accelerators: <gpu_name>. Automatically '
-        'creates a service account and cluster role binding with '
-        'permissions to list nodes and create labels.')
+                    'SkyPilot. Operates by running a job on each node that '
+                    'parses nvidia-smi and patches the node with new labels. '
+                    'Labels created are of the format '
+                    'skypilot.co/accelerators: <gpu_name>. Automatically '
+                    'creates a service account and cluster role binding with '
+                    'permissions to list nodes and create labels.')
     parser.add_argument('--cleanup',
                         action='store_true',
-                        help='Delete all GPU labeler resources in the '
-                        'Kubernetes cluster.')
+                        help='delete all GPU labeler resources in the '
+                             'Kubernetes cluster.')
     args = parser.parse_args()
+
+    # Check if kubectl is installed and kubeconfig is set up
+    prereq_ok, reason = prerequisite_check()
+    if not prereq_ok:
+        print(reason)
+        return
+
     if args.cleanup:
         cleanup()
     else:
         label()
+
+
+if __name__ == '__main__':
+    main()
