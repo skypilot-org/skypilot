@@ -2279,9 +2279,16 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             head_ssh_port = 22
         else:
             svc_name = f'{self.cluster_name}-ray-head-ssh'
-            head_ssh_port = clouds.Kubernetes.get_port(svc_name)
-        self.stable_ssh_ports = [head_ssh_port
-                                ] + [22] * (self.launched_nodes - 1)
+            retry_cnt = 0
+            while True:
+                try:
+                    head_ssh_port = clouds.Kubernetes.get_port(svc_name)
+                except:
+                    retry_cnt += 1
+                    if retry_cnt >= max_attempts:
+                        raise
+        self.stable_ssh_ports = ([head_ssh_port] + [22] *
+                                 (self.launched_nodes - 1))
 
     def update_cluster_ips(
             self,
