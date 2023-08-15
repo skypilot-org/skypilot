@@ -389,7 +389,7 @@ _get_command = (lambda cluster_record: cluster_record['last_use'])
 _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
 _get_replica_id = lambda replica_record: replica_record['replica_id']
-_get_service_name = (lambda service_record: service_record['service_name'])
+_get_service_name = (lambda replica_record: replica_record['service_name'])
 
 
 def _get_service_handle(
@@ -486,8 +486,8 @@ def _get_zone(cluster_record: _ClusterRecord) -> str:
     return zone_str
 
 
-def _get_replica_resources(service_record: _ServiceRecord) -> str:
-    handle = service_record['handle']
+def _get_replica_resources(replica_record: _ReplicaRecord) -> str:
+    handle = replica_record['handle']
     if handle is None:
         return '-'
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
@@ -500,18 +500,18 @@ def _get_replica_resources(service_record: _ServiceRecord) -> str:
     return resources_str
 
 
-def _get_replica_region(service_record: _ServiceRecord) -> str:
-    handle = service_record['handle']
+def _get_replica_region(replica_record: _ReplicaRecord) -> str:
+    handle = replica_record['handle']
     if handle is None:
         return '-'
-    return _get_region(service_record)
+    return _get_region(replica_record)
 
 
-def _get_replica_zone(service_record: _ServiceRecord) -> str:
-    handle = service_record['handle']
+def _get_replica_zone(replica_record: _ReplicaRecord) -> str:
+    handle = replica_record['handle']
     if handle is None:
         return '-'
-    return _get_zone(service_record)
+    return _get_zone(replica_record)
 
 
 def _get_autostop(cluster_record: _ClusterRecord) -> str:
