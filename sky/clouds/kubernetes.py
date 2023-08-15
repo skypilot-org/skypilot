@@ -438,7 +438,7 @@ class Kubernetes(clouds.Cloud):
                                       acc_count: int,
                                       region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
-        # TODO(romilb): All accelerators are marked as not available for now.
+        # TODO(romilb): All accelerators are marked as available for now.
         #  In the future, we should return false for accelerators that we know
         #  are not supported by the cluster.
         return True
