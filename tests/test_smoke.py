@@ -1024,6 +1024,7 @@ def test_job_queue(generic_cloud: str):
 @pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
+@pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
 def test_job_queue_with_docker(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1267,6 +1268,7 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
+@pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
 def test_docker_preinstalled_package(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
