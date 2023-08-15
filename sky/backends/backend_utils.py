@@ -2612,8 +2612,8 @@ def _service_status_from_replica_info(
     # If one replica is READY, the service is READY.
     if status2num[status_lib.ReplicaStatus.READY] > 0:
         return status_lib.ServiceStatus.READY
-    if (status2num[status_lib.ReplicaStatus.FAILED] +
-            status2num[status_lib.ReplicaStatus.FAILED_CLEANUP] > 0):
+    if sum(status2num[status]
+           for status in status_lib.ReplicaStatus.failed_statuses()) > 0:
         return status_lib.ServiceStatus.FAILED
     return status_lib.ServiceStatus.REPLICA_INIT
 

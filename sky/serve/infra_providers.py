@@ -112,15 +112,18 @@ class ReplicaStatusProperty:
             return status_lib.ReplicaStatus.UNKNOWN
         if self.sky_launch_status == ProcessStatus.FAILED:
             # sky.launch failed
-            # down process should have been started
-            return status_lib.ReplicaStatus.UNKNOWN
+            # Down process should have been started.
+            # If not started, this means some bug prevent sky.down from
+            # executing. It is also a potential resource leak, so we mark
+            # it as FAILED_CLEANUP.
+            return status_lib.ReplicaStatus.FAILED_CLEANUP
         if self.service_ready_now:
             # Service is ready
             return status_lib.ReplicaStatus.READY
         if self.user_app_failed:
             # Failed on user setup/run
-            # down process should have been started
-            return status_lib.ReplicaStatus.UNKNOWN
+            # Same as above
+            return status_lib.ReplicaStatus.FAILED_CLEANUP
         if self.service_once_ready:
             # Service was ready before but not now
             return status_lib.ReplicaStatus.NOT_READY
@@ -261,7 +264,7 @@ class SkyPilotInfraProvider(InfraProvider):
                                    'Terminating...')
                     info.status_property.sky_launch_status = (
                         ProcessStatus.FAILED)
-                    self._teardown_cluster(cluster_name)
+                    self._teardown_cluster(cluster_name, sync_down_logs=True)
                 else:
                     info.status_property.sky_launch_status = (
                         ProcessStatus.SUCCESS)
@@ -330,9 +333,13 @@ class SkyPilotInfraProvider(InfraProvider):
                 assert handle is not None, info
                 # Always tail the logs of the first job, which represent user
                 # setup & run.
-                backend.tail_logs(handle, job_id=1, follow=False)
+                try:
+                    backend.tail_logs(handle, job_id=1, follow=False)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.error(f'Error in streaming logs for cluster '
+                                 f'{cluster_name}: {e}')
                 logger.info('Terminating...')
-                self._teardown_cluster(cluster_name)
+                self._teardown_cluster(cluster_name, sync_down_logs=True)
 
     def _job_status_fetcher(self) -> None:
         while not self.job_status_fetcher_stop_event.is_set():
@@ -426,7 +433,15 @@ class SkyPilotInfraProvider(InfraProvider):
             local_log_file_name = (
                 serve_utils.generate_replica_local_log_file_name(cluster_name))
             with open(local_log_file_name, 'w') as f:
-                subprocess.run(code, shell=True, check=True, stdout=f)
+                try:
+                    subprocess.run(code, shell=True, check=True, stdout=f)
+                except Exception as e:  # pylint: disable=broad-except
+                    # No matter what error happens, we should teardown the
+                    # cluster.
+                    msg = ('Error in syncing down logs for cluster '
+                           f'{cluster_name}: {e}')
+                    logger.error(msg)
+                    print(msg, file=f)
 
         logger.info(f'Deleting SkyPilot cluster {cluster_name}')
         cmd = ['sky', 'down', cluster_name, '-y']

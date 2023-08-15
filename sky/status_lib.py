@@ -121,6 +121,10 @@ class ReplicaStatus(enum.Enum):
     # Unknown status. This should never happen.
     UNKNOWN = 'UNKNOWN'
 
+    @classmethod
+    def failed_statuses(cls):
+        return [cls.FAILED, cls.FAILED_CLEANUP, cls.UNKNOWN]
+
     def colored_str(self):
         color = _REPLICA_STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
