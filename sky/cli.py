@@ -4275,6 +4275,8 @@ def serve_down(
             sky.serve_down(name, purge)
         except RuntimeError as e:
             message = (f'{colorama.Fore.RED}Teardown service {name}...failed. '
+                       'Please manually clean up the replicas and then use '
+                       '--purge to clean up the controller.'
                        f'{colorama.Style.RESET_ALL}'
                        f'\nReason: {common_utils.format_exception(e)}.')
         except (exceptions.NotSupportedError,
