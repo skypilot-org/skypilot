@@ -2004,6 +2004,9 @@ def _update_cluster_status_no_lock(
                 require_outputs=True,
                 separate_stderr=True)
             if rc:
+                logger.debug(
+                    'Refreshing status: Failed to use `ray` to get IPs from cluster'
+                    f' {cluster_name!r}. stderr: {stderr}')
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
 
