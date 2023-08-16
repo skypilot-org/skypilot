@@ -1229,7 +1229,7 @@ def serve_down(
 
     try:
         core.cancel(controller_cluster_name, all=True, _from_serve_core=True)
-    except (ValueError, sky.exceptions.ClusterNotUpError) as e:
+    except (ValueError, exceptions.ClusterNotUpError, exceptions.CommandError) as e:
         if purge:
             logger.warning('Ignoring error when stopping controller and '
                            f'redirector jobs of service {service_name}: {e}')

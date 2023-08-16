@@ -4,7 +4,9 @@ resources:
 
 workdir: sky/serve/examples/http_server
 
-run: python3 server.py
+run: |
+  sudo systemctl stop jupyterhub > /dev/null 2>&1 || true
+  python3 server.py
 
 service:
   port: 8081
