@@ -1010,6 +1010,8 @@ def serve_up(
         vars_to_fill = {
             'remote_task_yaml_path': remote_task_yaml_path,
             'local_task_yaml_path': f.name,
+            'google_sdk_installation_commands':
+                gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
         }
         controller_yaml_path = serve.generate_controller_yaml_file_name(
             service_name)

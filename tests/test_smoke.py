@@ -2613,9 +2613,8 @@ def test_skyserve_gcp():
         'test-skyserve-gcp',
         [
             f'sky serve up -n {name} -y tests/skyserve/http_gcp.yaml',
-            f'while !(sky serve status {name} | grep -q 2/2); do sleep 10; done',
-            f'ip=$(sky serve status {name} | grep -Eo "{ip_with_ports_regex}"); '
-            'curl -L http://$ip | grep "Hi, SkyPilot here!"',
+            f'(while true; do output=$(sky serve status {name}); echo "$output" | grep -q "2/2" && break; echo "$output" | grep -q "FAILED" && exit 1; sleep 10; done)',
+            f'ip=$(sky serve status {name} | grep -Eo "{ip_with_ports_regex}"); curl -L http://$ip | grep "Hi, SkyPilot here!"',
         ],
         f'sky serve down -y {name}',
         timeout=20 * 60
@@ -2632,9 +2631,8 @@ def test_skyserve_aws():
         'test-skyserve-aws',
         [
             f'sky serve up -n {name} -y tests/skyserve/http_aws.yaml',
-            f'while !(sky serve status {name} | grep -q 2/2); do sleep 10; done',
-            f'ip=$(sky serve status {name} | grep -Eo "{ip_with_ports_regex}"); '
-            'curl -L http://$ip | grep "Hi, SkyPilot here!"',
+            f'(while true; do output=$(sky serve status {name}); echo "$output" | grep -q "2/2" && break; echo "$output" | grep -q "FAILED" && exit 1; sleep 10; done)',
+            f'ip=$(sky serve status {name} | grep -Eo "{ip_with_ports_regex}"); curl -L http://$ip | grep "Hi, SkyPilot here!"',
         ],
         f'sky serve down -y {name}',
         timeout=20 * 60
@@ -2651,9 +2649,8 @@ def test_skyserve_azure():
         'test-skyserve-azure',
         [
             f'sky serve up -n {name} -y tests/skyserve/http_azure.yaml',
-            f'while !(sky serve status {name} | grep -q 2/2); do sleep 10; done',
-            f'ip=$(sky serve status {name} | grep -Eo "{ip_with_ports_regex}"); '
-            'curl -L http://$ip | grep "Hi, SkyPilot here!"',
+            f'(while true; do output=$(sky serve status {name}); echo "$output" | grep -q "2/2" && break; echo "$output" | grep -q "FAILED" && exit 1; sleep 10; done)',
+            f'ip=$(sky serve status {name} | grep -Eo "{ip_with_ports_regex}"); curl -L http://$ip | grep "Hi, SkyPilot here!"',
         ],
         f'sky serve down -y {name}',
         timeout=20 * 60
@@ -2661,7 +2658,23 @@ def test_skyserve_azure():
     run_one_test(test)
 
 
-# TODO(tian): Add mixed cloud test for skyserve.
+@pytest.mark.gcp
+@pytest.mark.aws
+def test_skyserve_aws():
+    """Test skyserve on mixed cloud"""
+    name = _get_cluster_name()
+    ip_with_ports_regex = r'([0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}'
+    test = Test(
+        'test-skyserve-mixed-cloud',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/http_mixed_cloud.yaml',
+            f'(while true; do output=$(sky serve status {name}); echo "$output" | grep -q "2/2" && break; echo "$output" | grep -q "FAILED" && exit 1; sleep 10; done)',
+            f'ip=$(sky serve status {name} | grep -Eo "{ip_with_ports_regex}"); curl -L http://$ip | grep "Hi, SkyPilot here!"',
+        ],
+        f'sky serve down -y {name}',
+        timeout=20 * 60
+    )
+    run_one_test(test)
 
 
 # ------- Testing user ray cluster --------
