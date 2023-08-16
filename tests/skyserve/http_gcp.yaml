@@ -4,10 +4,11 @@ resources:
 
 workdir: sky/serve/examples/http_server
 
-run: python3 server.py
+# Use 8080 to test our prehook commands normally execute
+run: python3 server.py --port 8080
 
 service:
-  port: 8081
+  port: 8080
   readiness_probe:
     path: /health
     initial_delay_seconds: 20

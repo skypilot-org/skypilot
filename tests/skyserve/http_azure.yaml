@@ -4,9 +4,10 @@ resources:
 
 workdir: sky/serve/examples/http_server
 
-run: |
-  sudo systemctl stop jupyterhub > /dev/null 2>&1 || true
-  python3 server.py
+# Default Azure image have a jupyterhub running on 8081, which will be
+# terminated by skyserve prehook command. Here we still use 8081 to test
+# our prehook commands normally execute
+run: python3 server.py
 
 service:
   port: 8081

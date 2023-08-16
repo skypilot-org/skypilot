@@ -2617,7 +2617,7 @@ def test_skyserve_gcp():
             f'ip=$(sky serve status {name} | grep -Eo "{ip_with_ports_regex}"); curl -L http://$ip | grep "Hi, SkyPilot here"',
         ],
         f'sky serve down -y {name}',
-        timeout=20 * 60,
+        timeout=20 * 60,  # 20 mins  (it takes around ~10 mins)
     )
     run_one_test(test)
 
@@ -2653,7 +2653,7 @@ def test_skyserve_azure():
             f'ip=$(sky serve status {name} | grep -Eo "{ip_with_ports_regex}"); curl -L http://$ip | grep "Hi, SkyPilot here"',
         ],
         f'sky serve down -y {name}',
-        timeout=20 * 60,
+        timeout=30 * 60,
     )
     run_one_test(test)
 

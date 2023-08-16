@@ -998,6 +998,8 @@ def serve_up(
     service_handle.ephemeral_storage = ephemeral_storage
     global_user_state.set_service_handle(service_name, service_handle)
 
+    task.add_skyserve_prehook()
+
     with tempfile.NamedTemporaryFile(prefix=f'serve-task-{service_name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
@@ -1019,6 +1021,7 @@ def serve_up(
                                     vars_to_fill,
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
+        controller_task.add_skyserve_prehook()
         controller_task.best_resources = controller_best_resources
 
         controller_envs = {
@@ -1229,7 +1232,8 @@ def serve_down(
 
     try:
         core.cancel(controller_cluster_name, all=True, _from_serve_core=True)
-    except (ValueError, exceptions.ClusterNotUpError, exceptions.CommandError) as e:
+    except (ValueError, exceptions.ClusterNotUpError,
+            exceptions.CommandError) as e:
         if purge:
             logger.warning('Ignoring error when stopping controller and '
                            f'redirector jobs of service {service_name}: {e}')

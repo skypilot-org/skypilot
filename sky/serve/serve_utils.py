@@ -21,6 +21,17 @@ from sky.utils import common_utils
 if typing.TYPE_CHECKING:
     import sky
 
+# A series of pre-hook commands that will be insert to the beginning of each
+# serve-related task, Including controller and replcias.
+SERVE_PREHOOK_COMMANDS = """\
+# Shutdown jupyter service that is default enabled on our GCP Deep
+# Learning Image. This is to avoid port conflict on 8080.
+sudo systemctl stop jupyter > /dev/null 2>&1 || true
+# Shutdown jupyterhub service that is default enabled on our Azure Deep
+# Learning Image. This is to avoid port conflict on 8081.
+sudo systemctl stop jupyterhub > /dev/null 2>&1 || true
+"""
+
 _CONTROLLER_URL = f'http://localhost:{constants.CONTROLLER_PORT}'
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
 _SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'

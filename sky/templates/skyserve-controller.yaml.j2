@@ -10,12 +10,5 @@ setup: |
   # Install gcloud CLI.
   {{google_sdk_installation_commands}}
 
-  # Shutdown jupyter service that is default enabled on our GCP Deep
-  # Learning Image. This is to avoid port conflict on 8080.
-  sudo systemctl stop jupyter > /dev/null 2>&1 || true
-  # Shutdown jupyterhub service that is default enabled on our Azure Deep
-  # Learning Image. This is to avoid port conflict on 8081.
-  sudo systemctl stop jupyterhub > /dev/null 2>&1 || true
-
 file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}
