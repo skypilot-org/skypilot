@@ -420,8 +420,8 @@ class Kubernetes(clouds.Cloud):
             # Test using python API
             return kubernetes_utils.check_credentials()
         else:
-            return False, ('Credentials not found - ',
-                           'check if {_CREDENTIAL_PATH} exists.')
+            return (False, 'Credentials not found - '
+                    'check if {_CREDENTIAL_PATH} exists.')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {_CREDENTIAL_PATH: _CREDENTIAL_PATH}
