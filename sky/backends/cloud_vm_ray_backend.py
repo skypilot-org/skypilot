@@ -728,7 +728,10 @@ class RetryingVmProvisioner(object):
                     # This code is returned when the VM is still STOPPING.
                     self._blocked_resources.add(
                         launchable_resources.copy(zone=zone.name))
-                elif code in [8, 9]:
+                elif code in [3, 8, 9]:
+                    # Error code 3 means TPU is preempted during creation.
+                    # Example:
+                    # {'code': 3, 'message': 'Cloud TPU received a bad request. update is not supported while in state PREEMPTED [EID: 0x73013519f5b7feb2]'} # pylint: disable=line-too-long
                     # Error code 8 means TPU resources is out of
                     # capacity. Example:
                     # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # pylint: disable=line-too-long
