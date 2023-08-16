@@ -663,7 +663,8 @@ def _test_optimize_speed(resources: sky.Resources):
     start = time.time()
     sky.optimize(dag)
     end = time.time()
-    assert end - start < 7.0, f'optimize took too long, {end - start} seconds'
+    assert end - start < 5.0, (f'optimize took too long for {resources}, '
+                               f'{end - start} seconds')
 
 
 def test_optimize_speed(enable_all_clouds, monkeypatch):
