@@ -2009,6 +2009,7 @@ def _update_cluster_status_no_lock(
             ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
             if ready_head + ready_workers == handle.launched_nodes:
                 return True
+            logger.debug(output)
         except exceptions.FetchIPError:
             logger.debug(
                 'Refreshing status: Failed to use `ray` to get IPs from cluster'
