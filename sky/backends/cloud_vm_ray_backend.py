@@ -1585,7 +1585,8 @@ class RetryingVmProvisioner(object):
                 # Optimize the case where the cluster's head IPs can be parsed
                 # from the output of 'ray up'.
                 kwargs = {}
-                if handle.launched_nodes == 1:
+                if (handle.launched_nodes == 1 and
+                        not tpu_utils.is_tpu_vm_pod(to_provision)):
                     kwargs = {
                         'internal_ips': [head_internal_ip],
                         'external_ips': [head_external_ip]
@@ -1697,8 +1698,6 @@ class RetryingVmProvisioner(object):
         """
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             cluster_yaml, cluster_handle.docker_user)
-        # TODO: This will cause the cluster which is rebooted in the console
-        # having the wrong IP
         all_ips = cluster_handle.external_ips()
         num_tpu_devices = tpu_utils.get_num_tpu_devices(
             cluster_handle.launched_resources)
@@ -2010,7 +2009,8 @@ class RetryingVmProvisioner(object):
             backend_utils.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
             require_outputs=True)
         while returncode == 0 and 'No cluster status' in output:
-            # Retry until ray status is ready.
+            # Retry until ray status is ready. This is to avoid the case where
+            # ray cluster is just started but the ray status is not ready yet.
             logger.info('Waiting for ray cluster to be ready remotely.')
             time.sleep(1)
             returncode, output, _ = backend.run_on_head(
