@@ -2005,8 +2005,18 @@ class RetryingVmProvisioner(object):
             return
         backend = CloudVmRayBackend()
 
-        returncode = backend.run_on_head(
-            handle, backend_utils.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND)
+        returncode, output, _ = backend.run_on_head(
+            handle,
+            backend_utils.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+            require_outputs=True)
+        while returncode == 0 and 'No cluster status' in output:
+            # Retry until ray status is ready.
+            logger.info('Waiting for ray cluster to be ready remotely.')
+            time.sleep(1)
+            returncode, output, _ = backend.run_on_head(
+                handle,
+                backend_utils.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                require_outputs=True)
         if returncode == 0:
             return
         launched_resources = handle.launched_resources
