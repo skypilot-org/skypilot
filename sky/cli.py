@@ -4035,15 +4035,22 @@ def serve_up(
         click.secho('Service section not found in the YAML file.', fg='red')
         return
     assert len(task.resources) == 1
-    if list(task.resources)[0].ports is not None:
+    requested_resources = list(task.resources)[0]
+    if requested_resources.ports is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 'Specifying ports in resources is not allowed. SkyServe will '
                 'use the port specified in the service section.')
+    app_port = int(task.service.app_port)
+    task.set_resources(requested_resources.copy(ports=[app_port]))
 
     controller_resources_config = copy.copy(serve_lib.CONTROLLER_RESOURCES)
     if task.service.controller_resources is not None:
         controller_resources_config.update(task.service.controller_resources)
+    # TODO(tian): We might need a thorough design on this.
+    if 'ports' not in controller_resources_config:
+        controller_resources_config['ports'] = []
+    controller_resources_config['ports'].append(app_port)
     try:
         controller_resources = sky.Resources.from_yaml_config(
             controller_resources_config)
