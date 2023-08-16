@@ -42,15 +42,16 @@ from sky.status_lib import ClusterStatus
 from sky.task import Task
 
 # Aliases.
-IBM = clouds.IBM
 AWS = clouds.AWS
 Azure = clouds.Azure
 GCP = clouds.GCP
+IBM = clouds.IBM
 Lambda = clouds.Lambda
 SCP = clouds.SCP
 Local = clouds.Local
 Kubernetes = clouds.Kubernetes
 OCI = clouds.OCI
+RunPod = clouds.RunPod
 optimize = Optimizer.optimize
 
 __all__ = [
@@ -63,6 +64,7 @@ __all__ = [
     'Lambda',
     'Local',
     'OCI',
+    'RunPod',
     'SCP',
     'Optimizer',
     'OptimizeTarget',
