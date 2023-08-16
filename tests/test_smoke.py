@@ -2623,6 +2623,47 @@ def test_skyserve_gcp():
     run_one_test(test)
 
 
+@pytest.mark.aws
+def test_skyserve_aws():
+    """Test skyserve on AWS"""
+    name = _get_cluster_name()
+    ip_with_ports_regex = r'([0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}'
+    test = Test(
+        'test-skyserve-aws',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/http_aws.yaml',
+            f'while !(sky serve status {name} | grep -q 2/2); do sleep 10; done',
+            f'ip=$(sky serve status {name} | grep -Eo "{ip_with_ports_regex}"); '
+            'curl -L http://$ip | grep "Hi, SkyPilot here!"',
+        ],
+        f'sky serve down -y {name}',
+        timeout=20 * 60
+    )
+    run_one_test(test)
+
+
+@pytest.mark.azure
+def test_skyserve_azure():
+    """Test skyserve on Azure"""
+    name = _get_cluster_name()
+    ip_with_ports_regex = r'([0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}'
+    test = Test(
+        'test-skyserve-azure',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/http_azure.yaml',
+            f'while !(sky serve status {name} | grep -q 2/2); do sleep 10; done',
+            f'ip=$(sky serve status {name} | grep -Eo "{ip_with_ports_regex}"); '
+            'curl -L http://$ip | grep "Hi, SkyPilot here!"',
+        ],
+        f'sky serve down -y {name}',
+        timeout=20 * 60
+    )
+    run_one_test(test)
+
+
+# TODO(tian): Add mixed cloud test for skyserve.
+
+
 # ------- Testing user ray cluster --------
 @pytest.mark.no_kubernetes  # Kubernetes does not support sky status -r yet.
 def test_user_ray_cluster(generic_cloud: str):
