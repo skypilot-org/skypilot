@@ -987,7 +987,6 @@ def serve_up(
         service_name, None, service_handle,
         status_lib.ServiceStatus.CONTROLLER_INIT)
     app_port = int(task.service.app_port)
-    task.set_resources(requested_resources.copy(ports=[app_port]))
 
     # TODO(tian): Use skyserve constants.
     _maybe_translate_local_file_mounts_and_sync_up(task)
@@ -1018,12 +1017,7 @@ def serve_up(
                                     vars_to_fill,
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
-        ports = [app_port]
-        # TODO(tian): We might need a thorough design on this.
-        if controller_best_resources.ports is not None:
-            ports.extend(controller_best_resources.ports)
-        controller_task.best_resources = (controller_best_resources.copy(
-            ports=ports))
+        controller_task.best_resources = controller_best_resources
 
         controller_envs = {
             'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,
@@ -1057,7 +1051,7 @@ def serve_up(
 
         handle = cluster_record['handle']
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
-        endpoint = f'{handle.head_ip}:{task.service.app_port}'
+        endpoint = f'{handle.head_ip}:{app_port}'
         service_handle.endpoint = endpoint
         global_user_state.set_service_handle(service_name, service_handle)
 
