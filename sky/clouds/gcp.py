@@ -347,8 +347,9 @@ class GCP(clouds.Cloud):
         find_machine = re.match(r'projects/.*/.*/machineImages/.*', image_id)
         return find_machine is not None
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
-        del region  # Unused.
+    @classmethod
+    @functools.lru_cache(maxsize=1)
+    def _get_image_size(cls, image_id: str) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_GCP_IMAGE_GB
         try:
@@ -356,7 +357,7 @@ class GCP(clouds.Cloud):
                                 'v1',
                                 credentials=None,
                                 cache_discovery=False)
-        except gcp.credential_error_exception() as e:
+        except gcp.credential_error_exception():
             return DEFAULT_GCP_IMAGE_GB
         try:
             image_attrs = image_id.split('/')
@@ -368,7 +369,7 @@ class GCP(clouds.Cloud):
             # of which are specified with the image_id field. We will
             # distinguish them by checking if the image_id contains
             # 'machineImages'.
-            if self._is_machine_image(image_id):
+            if cls._is_machine_image(image_id):
                 image_infos = compute.machineImages().get(
                     project=project, machineImage=image_name).execute()
                 # The VM launching in a different region than the machine
@@ -377,8 +378,10 @@ class GCP(clouds.Cloud):
                 return float(
                     image_infos['instanceProperties']['disks'][0]['diskSizeGb'])
             else:
+                start = time.time()
                 image_infos = compute.images().get(project=project,
                                                    image=image_name).execute()
+                logger.debug(f'GCP image get took {time.time() - start:.2f}s')
                 return float(image_infos['diskSizeGb'])
         except gcp.http_error_exception() as e:
             if e.resp.status == 403:
@@ -390,6 +393,11 @@ class GCP(clouds.Cloud):
                     raise ValueError(f'Image {image_id!r} not found in '
                                      'GCP.') from None
             raise
+
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        del region  # Unused.
+        return cls._get_image_size(image_id)
 
     @classmethod
     def get_default_instance_type(
