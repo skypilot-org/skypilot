@@ -398,7 +398,6 @@ class GCP(clouds.Cloud):
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         del region  # Unused.
         return cls._get_image_size(image_id)
-        
 
     @classmethod
     def get_default_instance_type(
