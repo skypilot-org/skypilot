@@ -9,7 +9,9 @@ SERVE_PREFIX = '~/.sky/serve'
 CONTROLLER_PORT = 31001
 CONTROLLER_SYNC_INTERVAL = 20
 
-CONTROLLER_RESOURCES = {'disk_size': 100, 'cpus': '4+'}
+# We need 200GB disk space to enable using Azure as controller, since its image
+# size is 150GB.
+CONTROLLER_RESOURCES = {'disk_size': 200, 'cpus': '4+'}
 
 # A period of time to initialize your service. Any readiness probe failures
 # during this period will be ignored.
