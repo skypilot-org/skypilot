@@ -301,9 +301,8 @@ class Fluidstack(clouds.Cloud):
             "Provisioning": status_lib.ClusterStatus.INIT,
             "Starting Up": status_lib.ClusterStatus.INIT,
             "Running": status_lib.ClusterStatus.UP,
-            #"Error Creating": status_lib.ClusterStatus.INIT,
+            "Error Creating": status_lib.ClusterStatus.INIT,#should be error
         }
-        # TODO(ewzeng): filter by hash_filter_string to be safe
         status_list = []
         vms = FluidstackClient().list_instances()
 
