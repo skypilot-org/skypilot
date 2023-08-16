@@ -2012,7 +2012,7 @@ def _update_cluster_status_no_lock(
             logger.debug(
                 'Refreshing status: ray status not showing all nodes '
                 f'({ready_head + ready_workers}/{handle.launched_nodes}); '
-                f'stderr: {stderr}')
+                f'output: {output}; stderr: {stderr}')
         except exceptions.FetchIPError:
             logger.debug(
                 'Refreshing status: Failed to use `ray` to get IPs from cluster'
