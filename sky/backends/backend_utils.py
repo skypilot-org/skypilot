@@ -1998,7 +1998,7 @@ def _update_cluster_status_no_lock(
             runner = command_runner.SSHCommandRunner(external_ips[0],
                                                      **ssh_credentials,
                                                      port=handle.head_ssh_port)
-            rc, output, _ = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+            rc, output, stderr = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                                        stream_logs=False,
                                        require_outputs=True,
                                        separate_stderr=True)
@@ -2009,6 +2009,10 @@ def _update_cluster_status_no_lock(
             ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
             if ready_head + ready_workers == handle.launched_nodes:
                 return True
+            logger.debug(
+                'Refreshing status: ray status not showing all nodes '
+                f'({ready_head + ready_workers}/{handle.launched_nodes}); '
+                f'stderr: {stderr}')
         except exceptions.FetchIPError:
             logger.debug(
                 'Refreshing status: Failed to use `ray` to get IPs from cluster'
