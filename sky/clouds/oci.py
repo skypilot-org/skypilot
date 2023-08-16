@@ -442,7 +442,8 @@ class OCI(clouds.Cloud):
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'oci')
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         # We ignore checking the image size because most of situations the
         # boot volume size is larger than the image size. For specific rare
         # situations, the configuration/setup commands should make sure the
