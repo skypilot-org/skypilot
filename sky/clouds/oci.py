@@ -1,5 +1,4 @@
-"""
-Oracle Cloud Infrastructure (OCI)
+"""Oracle Cloud Infrastructure (OCI)
 
 History:
  - Hysun He (hysun.he@oracle.com) @ Apr, 2023: Initial implementation
@@ -32,7 +31,7 @@ _tenancy_prefix = None
 
 @clouds.CLOUD_REGISTRY.register
 class OCI(clouds.Cloud):
-    """ OCI: Oracle Cloud Infrastructure """
+    """OCI: Oracle Cloud Infrastructure """
 
     _REPR = 'OCI'
 
@@ -128,8 +127,9 @@ class OCI(clouds.Cloud):
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
-        """
-        https://www.oracle.com/cis/cloud/networking/pricing/
+        """Get the egress cost for the given number of gigabytes.
+
+        Reference: https://www.oracle.com/cis/cloud/networking/pricing/
         """
         # Free for first 10T (per month)
         if num_gigabytes <= 10 * 1024:

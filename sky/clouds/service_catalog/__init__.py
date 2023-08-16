@@ -211,7 +211,8 @@ def get_instance_type_for_accelerator(
     zone: Optional[str] = None,
     clouds: CloudFilter = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
-    """
+    """Filter the instance types based on resource requirements.
+
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
