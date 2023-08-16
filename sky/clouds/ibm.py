@@ -315,8 +315,8 @@ class IBM(clouds.Cloud):
 
     @classmethod
     def get_default_image(cls, region) -> str:
-        """
-        Returns default image id, currently stock ubuntu 22-04.
+        """Returns default image id, currently stock ubuntu 22-04.
+
         if user specified 'image_id' in ~/.ibm/credentials.yaml
             matching this 'region', returns it instead.
         """
